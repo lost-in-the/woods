@@ -88,11 +88,9 @@ flowchart TD
   Woods -->|construction: new| Node
   Woods -->|construction: new| Node
   Woods -->|construction: new| Node
-  Woods -->|construction: new| Node
   Woods__Ast -->|deserialization: parse| Prism
   Woods__Ast -->|construction: new| Parser__Source__Buffer
   Woods__Ast -->|deserialization: parse| Parser__CurrentRuby
-  Woods__Ast -->|construction: new| Node
   Woods__Ast -->|construction: new| Node
   Woods__Ast -->|construction: new| Node
   Woods__Ast -->|construction: new| Node
@@ -191,7 +189,6 @@ flowchart TD
   Woods__Ast__Parser -->|construction: new| Node
   Woods__Ast__Parser -->|construction: new| Node
   Woods__Ast__Parser -->|construction: new| Node
-  Woods__Ast__Parser -->|construction: new| Node
   Woods__Ast__Parser_parse_with_prism[\"deserialization"\]
   Woods__Ast__Parser_parse_with_prism -->|deserialization: parse| Prism
   Woods__Ast__Parser_parse_with_parser_gem(["new"])
@@ -236,8 +233,6 @@ flowchart TD
   Woods__Ast__Parser_convert_prism_if(["new"])
   Woods__Ast__Parser_convert_prism_if -->|construction: new| Node
   Woods__Ast__Parser_convert_prism_if -->|construction: new| Node
-  Woods__Ast__Parser_convert_prism_unless(["new"])
-  Woods__Ast__Parser_convert_prism_unless -->|construction: new| Node
   Woods__Ast__Parser_convert_prism_case(["new"])
   Woods__Ast__Parser_convert_prism_case -->|construction: new| Node
   Woods__Ast__Parser_convert_parser_node(["new"])
@@ -255,131 +250,439 @@ flowchart TD
   Woods__Ast__Parser_convert_parser_node -->|construction: new| Node
   Woods__Ast__Parser_convert_parser_node -->|construction: new| Node
   Woods__Ast__Parser_convert_parser_node -->|construction: new| Node
+  Tempfile["Tempfile"]
+  Woods -->|construction: new| Tempfile
+  Woods__AtomicFile(["new"])
+  Woods__AtomicFile -->|construction: new| Tempfile
+  Woods__AtomicFile_write(["new"])
+  Woods__AtomicFile_write -->|construction: new| Tempfile
   Configuration["Configuration"]
   Woods -->|construction: new| Configuration
   Retriever["Retriever"]
   Woods -->|construction: new| Retriever
   Storage__VectorStore__InMemory["Storage::VectorStore::InMemory"]
   Woods -->|construction: new| Storage__VectorStore__InMemory
-  Storage__VectorStore__Pgvector["Storage::VectorStore::Pgvector"]
-  Woods -->|construction: new| Storage__VectorStore__Pgvector
-  Storage__VectorStore__Qdrant["Storage::VectorStore::Qdrant"]
-  Woods -->|construction: new| Storage__VectorStore__Qdrant
   Embedding__Provider__OpenAI["Embedding::Provider::OpenAI"]
   Woods -->|construction: new| Embedding__Provider__OpenAI
   Embedding__Provider__Ollama["Embedding::Provider::Ollama"]
   Woods -->|construction: new| Embedding__Provider__Ollama
+  Resilience__RetryableProvider["Resilience::RetryableProvider"]
+  Woods -->|construction: new| Resilience__RetryableProvider
+  Embedding__Provider__Fake["Embedding::Provider::Fake"]
+  Woods -->|construction: new| Embedding__Provider__Fake
+  Embedding__TextPreparer["Embedding::TextPreparer"]
+  Woods -->|construction: new| Embedding__TextPreparer
+  Chunking__SemanticChunker["Chunking::SemanticChunker"]
+  Woods -->|construction: new| Chunking__SemanticChunker
+  Embedding__TokenCounter["Embedding::TokenCounter"]
+  Woods -->|construction: new| Embedding__TokenCounter
   Storage__MetadataStore__InMemory["Storage::MetadataStore::InMemory"]
   Woods -->|construction: new| Storage__MetadataStore__InMemory
   Storage__MetadataStore__SQLite["Storage::MetadataStore::SQLite"]
   Woods -->|construction: new| Storage__MetadataStore__SQLite
   Storage__GraphStore__Memory["Storage::GraphStore::Memory"]
   Woods -->|construction: new| Storage__GraphStore__Memory
+  Storage__VectorStore__Pgvector["Storage::VectorStore::Pgvector"]
+  Woods -->|construction: new| Storage__VectorStore__Pgvector
+  Storage__VectorStore__Qdrant["Storage::VectorStore::Qdrant"]
+  Woods -->|construction: new| Storage__VectorStore__Qdrant
+  Cache__InMemory["Cache::InMemory"]
+  Woods -->|construction: new| Cache__InMemory
+  Cache__RedisCacheStore["Cache::RedisCacheStore"]
+  Woods -->|construction: new| Cache__RedisCacheStore
+  Cache__SolidCacheStore["Cache::SolidCacheStore"]
+  Woods -->|construction: new| Cache__SolidCacheStore
+  Cache__CachedEmbeddingProvider["Cache::CachedEmbeddingProvider"]
+  Woods -->|construction: new| Cache__CachedEmbeddingProvider
+  Cache__CachedRetriever["Cache::CachedRetriever"]
+  Woods -->|construction: new| Cache__CachedRetriever
   Woods__Builder(["new"])
   Woods__Builder -->|construction: new| Configuration
   Woods__Builder -->|construction: new| Retriever
   Woods__Builder -->|construction: new| Storage__VectorStore__InMemory
-  Woods__Builder -->|construction: new| Storage__VectorStore__Pgvector
-  Woods__Builder -->|construction: new| Storage__VectorStore__Qdrant
   Woods__Builder -->|construction: new| Embedding__Provider__OpenAI
   Woods__Builder -->|construction: new| Embedding__Provider__Ollama
+  Woods__Builder -->|construction: new| Resilience__RetryableProvider
+  Woods__Builder -->|construction: new| Embedding__Provider__Fake
+  Woods__Builder -->|construction: new| Embedding__TextPreparer
+  Woods__Builder -->|construction: new| Chunking__SemanticChunker
+  Woods__Builder -->|construction: new| Embedding__TokenCounter
   Woods__Builder -->|construction: new| Storage__MetadataStore__InMemory
   Woods__Builder -->|construction: new| Storage__MetadataStore__SQLite
   Woods__Builder -->|construction: new| Storage__GraphStore__Memory
+  Woods__Builder -->|construction: new| Storage__VectorStore__Pgvector
+  Woods__Builder -->|construction: new| Storage__VectorStore__Qdrant
+  Woods__Builder -->|construction: new| Cache__InMemory
+  Woods__Builder -->|construction: new| Cache__RedisCacheStore
+  Woods__Builder -->|construction: new| Cache__SolidCacheStore
+  Woods__Builder -->|construction: new| Cache__CachedEmbeddingProvider
+  Woods__Builder -->|construction: new| Cache__CachedRetriever
   Woods__Builder_preset_config(["new"])
   Woods__Builder_preset_config -->|construction: new| Configuration
   Woods__Builder_build_retriever(["new"])
   Woods__Builder_build_retriever -->|construction: new| Retriever
   Woods__Builder_build_vector_store(["new"])
   Woods__Builder_build_vector_store -->|construction: new| Storage__VectorStore__InMemory
-  Woods__Builder_build_vector_store -->|construction: new| Storage__VectorStore__Pgvector
-  Woods__Builder_build_vector_store -->|construction: new| Storage__VectorStore__Qdrant
   Woods__Builder_build_embedding_provider(["new"])
   Woods__Builder_build_embedding_provider -->|construction: new| Embedding__Provider__OpenAI
   Woods__Builder_build_embedding_provider -->|construction: new| Embedding__Provider__Ollama
+  Woods__Builder_build_resilient_embedding_provider(["new"])
+  Woods__Builder_build_resilient_embedding_provider -->|construction: new| Resilience__RetryableProvider
+  Woods__Builder_build_fake_provider(["new"])
+  Woods__Builder_build_fake_provider -->|construction: new| Embedding__Provider__Fake
+  Woods__Builder_build_text_preparer(["new"])
+  Woods__Builder_build_text_preparer -->|construction: new| Embedding__TextPreparer
+  Woods__Builder_build_chunker(["new"])
+  Woods__Builder_build_chunker -->|construction: new| Chunking__SemanticChunker
+  Woods__Builder_token_counter_for(["new"])
+  Woods__Builder_token_counter_for -->|construction: new| Embedding__TokenCounter
   Woods__Builder_build_metadata_store(["new"])
   Woods__Builder_build_metadata_store -->|construction: new| Storage__MetadataStore__InMemory
   Woods__Builder_build_metadata_store -->|construction: new| Storage__MetadataStore__SQLite
   Woods__Builder_build_graph_store(["new"])
   Woods__Builder_build_graph_store -->|construction: new| Storage__GraphStore__Memory
+  Woods__Builder_build_pgvector_store(["new"])
+  Woods__Builder_build_pgvector_store -->|construction: new| Storage__VectorStore__Pgvector
+  Woods__Builder_build_qdrant_store(["new"])
+  Woods__Builder_build_qdrant_store -->|construction: new| Storage__VectorStore__Qdrant
+  Woods__Builder_build_cache_store(["new"])
+  Woods__Builder_build_cache_store -->|construction: new| Cache__InMemory
+  Woods__Builder_build_cache_store -->|construction: new| Cache__RedisCacheStore
+  Woods__Builder_build_cache_store -->|construction: new| Cache__SolidCacheStore
+  Woods__Builder_wrap_with_embedding_cache(["new"])
+  Woods__Builder_wrap_with_embedding_cache -->|construction: new| Cache__CachedEmbeddingProvider
+  Woods__Builder_wrap_with_retriever_cache(["new"])
+  Woods__Builder_wrap_with_retriever_cache -->|construction: new| Cache__CachedRetriever
+  Mutex["Mutex"]
+  Woods -->|construction: new| Mutex
+  ConditionVariable["ConditionVariable"]
+  Woods -->|construction: new| ConditionVariable
+  Woods -->|construction: new| Mutex
+  InflightEntry["InflightEntry"]
+  Woods -->|construction: new| InflightEntry
+  Woods -->|construction: new| InflightEntry
+  Array["Array"]
+  Woods -->|construction: new| Array
+  Retriever__RetrievalResult["Retriever::RetrievalResult"]
+  Woods -->|construction: new| Retriever__RetrievalResult
+  Woods__Cache(["new"])
+  Woods__Cache -->|construction: new| Mutex
+  Woods__Cache -->|construction: new| ConditionVariable
+  Woods__Cache -->|construction: new| Mutex
+  Woods__Cache -->|construction: new| InflightEntry
+  Woods__Cache -->|construction: new| InflightEntry
+  Woods__Cache -->|construction: new| Array
+  Woods__Cache -->|construction: new| Retriever__RetrievalResult
+  Woods__Cache__InflightEntry(["new"])
+  Woods__Cache__InflightEntry -->|construction: new| Mutex
+  Woods__Cache__InflightEntry -->|construction: new| ConditionVariable
+  Woods__Cache__CachedEmbeddingProvider(["new"])
+  Woods__Cache__CachedEmbeddingProvider -->|construction: new| Mutex
+  Woods__Cache__CachedEmbeddingProvider -->|construction: new| InflightEntry
+  Woods__Cache__CachedEmbeddingProvider -->|construction: new| InflightEntry
+  Woods__Cache__CachedEmbeddingProvider -->|construction: new| Array
+  Woods__Cache__CachedRetriever(["new"])
+  Woods__Cache__CachedRetriever -->|construction: new| Retriever__RetrievalResult
+  Woods__Cache__InflightEntry_initialize(["new"])
+  Woods__Cache__InflightEntry_initialize -->|construction: new| Mutex
+  Woods__Cache__InflightEntry_initialize -->|construction: new| ConditionVariable
+  Woods__Cache__CachedEmbeddingProvider_initialize(["new"])
+  Woods__Cache__CachedEmbeddingProvider_initialize -->|construction: new| Mutex
+  Woods__Cache__CachedEmbeddingProvider_claim_single(["new"])
+  Woods__Cache__CachedEmbeddingProvider_claim_single -->|construction: new| InflightEntry
+  Woods__Cache__CachedEmbeddingProvider_claim_inflight(["new"])
+  Woods__Cache__CachedEmbeddingProvider_claim_inflight -->|construction: new| InflightEntry
+  Woods__Cache__CachedEmbeddingProvider_partition_cached(["new"])
+  Woods__Cache__CachedEmbeddingProvider_partition_cached -->|construction: new| Array
+  Woods__Cache__CachedRetriever_rehydrate_cached(["new"])
+  Woods__Cache__CachedRetriever_rehydrate_cached -->|construction: new| Retriever__RetrievalResult
+  Logger["Logger"]
+  Woods -->|construction: new| Logger
+  Woods -->|construction: new| Mutex
+  Woods__Cache -->|construction: new| Logger
+  Woods__Cache -->|construction: new| Mutex
+  Woods__Cache__CacheStore(["new"])
+  Woods__Cache__CacheStore -->|construction: new| Logger
+  Woods__Cache__InMemory(["new"])
+  Woods__Cache__InMemory -->|construction: new| Mutex
+  Woods__Cache__CacheStore_logger(["new"])
+  Woods__Cache__CacheStore_logger -->|construction: new| Logger
+  Woods__Cache__InMemory_initialize(["new"])
+  Woods__Cache__InMemory_initialize -->|construction: new| Mutex
+  JSON["JSON"]
+  Woods -->|deserialization: parse| JSON
+  Woods__Cache -->|deserialization: parse| JSON
+  Woods__Cache__RedisCacheStore[\"deserialization"\]
+  Woods__Cache__RedisCacheStore -->|deserialization: parse| JSON
+  Woods__Cache__RedisCacheStore_read[\"deserialization"\]
+  Woods__Cache__RedisCacheStore_read -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods__Cache -->|deserialization: parse| JSON
+  Woods__Cache__SolidCacheStore[\"deserialization"\]
+  Woods__Cache__SolidCacheStore -->|deserialization: parse| JSON
+  Woods__Cache__SolidCacheStore_read[\"deserialization"\]
+  Woods__Cache__SolidCacheStore_read -->|deserialization: parse| JSON
+  Pathname["Pathname"]
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  Woods__ChangeSet(["new"])
+  Woods__ChangeSet -->|construction: new| Pathname
+  Woods__ChangeSet -->|construction: new| Pathname
+  Woods__ChangeSet_initialize(["new"])
+  Woods__ChangeSet_initialize -->|construction: new| Pathname
+  Woods__ChangeSet_absolutize(["new"])
+  Woods__ChangeSet_absolutize -->|construction: new| Pathname
+  Chunk["Chunk"]
+  Woods -->|construction: new| Chunk
   ModelChunker["ModelChunker"]
   Woods -->|construction: new| ModelChunker
   ControllerChunker["ControllerChunker"]
   Woods -->|construction: new| ControllerChunker
-  Chunk["Chunk"]
+  MethodChunker["MethodChunker"]
+  Woods -->|construction: new| MethodChunker
   Woods -->|construction: new| Chunk
   Woods -->|construction: new| Chunk
-  Woods -->|construction: new| Chunk
+  String["String"]
+  Woods -->|construction: new| String
+  Woods -->|construction: new| String
   Woods__Chunking(["new"])
+  Woods__Chunking -->|construction: new| Chunk
   Woods__Chunking -->|construction: new| ModelChunker
   Woods__Chunking -->|construction: new| ControllerChunker
+  Woods__Chunking -->|construction: new| MethodChunker
   Woods__Chunking -->|construction: new| Chunk
   Woods__Chunking -->|construction: new| Chunk
-  Woods__Chunking -->|construction: new| Chunk
+  Woods__Chunking -->|construction: new| String
+  Woods__Chunking -->|construction: new| String
+  Woods__Chunking__ChunkBuilder(["new"])
+  Woods__Chunking__ChunkBuilder -->|construction: new| Chunk
   Woods__Chunking__SemanticChunker(["new"])
   Woods__Chunking__SemanticChunker -->|construction: new| ModelChunker
   Woods__Chunking__SemanticChunker -->|construction: new| ControllerChunker
+  Woods__Chunking__SemanticChunker -->|construction: new| MethodChunker
   Woods__Chunking__SemanticChunker -->|construction: new| Chunk
-  Woods__Chunking__ModelChunker(["new"])
-  Woods__Chunking__ModelChunker -->|construction: new| Chunk
-  Woods__Chunking__ControllerChunker(["new"])
-  Woods__Chunking__ControllerChunker -->|construction: new| Chunk
-  Woods__Chunking__SemanticChunker_chunk(["new"])
-  Woods__Chunking__SemanticChunker_chunk -->|construction: new| ModelChunker
-  Woods__Chunking__SemanticChunker_chunk -->|construction: new| ControllerChunker
+  Woods__Chunking__SemanticChunker -->|construction: new| Chunk
+  Woods__Chunking__SemanticChunker -->|construction: new| String
+  Woods__Chunking__SemanticChunker -->|construction: new| String
+  Woods__Chunking__ChunkBuilder_build_chunk(["new"])
+  Woods__Chunking__ChunkBuilder_build_chunk -->|construction: new| Chunk
+  Woods__Chunking__SemanticChunker_chunks_for(["new"])
+  Woods__Chunking__SemanticChunker_chunks_for -->|construction: new| ModelChunker
+  Woods__Chunking__SemanticChunker_chunks_for -->|construction: new| ControllerChunker
+  Woods__Chunking__SemanticChunker_chunks_for -->|construction: new| MethodChunker
   Woods__Chunking__SemanticChunker_build_whole_chunk(["new"])
   Woods__Chunking__SemanticChunker_build_whole_chunk -->|construction: new| Chunk
-  Woods__Chunking__ModelChunker_build_chunk(["new"])
-  Woods__Chunking__ModelChunker_build_chunk -->|construction: new| Chunk
-  Woods__Chunking__ControllerChunker_build_chunk(["new"])
-  Woods__Chunking__ControllerChunker_build_chunk -->|construction: new| Chunk
-  JSON["JSON"]
+  Woods__Chunking__SemanticChunker_split_oversize_chunk(["new"])
+  Woods__Chunking__SemanticChunker_split_oversize_chunk -->|construction: new| Chunk
+  Woods__Chunking__SemanticChunker_slice_by_lines(["new"])
+  Woods__Chunking__SemanticChunker_slice_by_lines -->|construction: new| String
+  Woods__Chunking__SemanticChunker_slice_by_lines -->|construction: new| String
+  CredentialScanner["CredentialScanner"]
+  Woods -->|construction: new| CredentialScanner
   Woods -->|deserialization: parse| JSON
-  Woods__Console[\"deserialization"\]
+  Woods__Console(["new"])
+  Woods__Console -->|construction: new| CredentialScanner
   Woods__Console -->|deserialization: parse| JSON
-  Woods__Console__AuditLogger[\"deserialization"\]
+  Woods__Console__AuditLogger(["new"])
+  Woods__Console__AuditLogger -->|construction: new| CredentialScanner
   Woods__Console__AuditLogger -->|deserialization: parse| JSON
+  Woods__Console__AuditLogger_initialize(["new"])
+  Woods__Console__AuditLogger_initialize -->|construction: new| CredentialScanner
   Woods__Console__AuditLogger_entries[\"deserialization"\]
   Woods__Console__AuditLogger_entries -->|deserialization: parse| JSON
-  Woods -->|deserialization: parse| JSON
-  Woods__Console -->|deserialization: parse| JSON
-  Woods__Console__Bridge[\"deserialization"\]
-  Woods__Console__Bridge -->|deserialization: parse| JSON
-  Woods__Console__Bridge_parse_request[\"deserialization"\]
-  Woods__Console__Bridge_parse_request -->|deserialization: parse| JSON
-  Woods -->|deserialization: parse| JSON
-  Woods__Console -->|deserialization: parse| JSON
-  Woods__Console__ConnectionManager[\"deserialization"\]
-  Woods__Console__ConnectionManager -->|deserialization: parse| JSON
-  Woods__Console__ConnectionManager_send_request[\"deserialization"\]
-  Woods__Console__ConnectionManager_send_request -->|deserialization: parse| JSON
-  ConnectionManager["ConnectionManager"]
-  Woods -->|construction: new| ConnectionManager
-  SafeContext["SafeContext"]
-  Woods -->|construction: new| SafeContext
-  MCP__Server["MCP::Server"]
-  Woods -->|construction: new| MCP__Server
+  SUPPORTED_TOOLS["SUPPORTED_TOOLS"]
+  Woods -->|serialization: to_h| SUPPORTED_TOOLS
+  Woods__Console -->|serialization: to_h| SUPPORTED_TOOLS
+  Woods__Console__BridgeProtocol[/"serialization"/]
+  Woods__Console__BridgeProtocol -->|serialization: to_h| SUPPORTED_TOOLS
+  Woods__Console__CredentialIndex(["new"])
   MCP__Tool__Response["MCP::Tool::Response"]
   Woods -->|construction: new| MCP__Tool__Response
   Woods -->|construction: new| MCP__Tool__Response
-  Woods -->|construction: new| MCP__Tool__Response
+  Woods__Console -->|construction: new| MCP__Tool__Response
+  Woods__Console -->|construction: new| MCP__Tool__Response
+  Woods__Console__DispatchPipeline(["new"])
+  Woods__Console__DispatchPipeline -->|construction: new| MCP__Tool__Response
+  Woods__Console__DispatchPipeline -->|construction: new| MCP__Tool__Response
+  Woods__Console__DispatchPipeline_success_response(["new"])
+  Woods__Console__DispatchPipeline_success_response -->|construction: new| MCP__Tool__Response
+  Woods__Console__DispatchPipeline_error_response(["new"])
+  Woods__Console__DispatchPipeline_error_response -->|construction: new| MCP__Tool__Response
+  Object["Object"]
+  Woods -->|construction: new| Object
   SqlValidator["SqlValidator"]
   Woods -->|construction: new| SqlValidator
-  Woods__Console -->|construction: new| ConnectionManager
-  Woods__Console -->|construction: new| SafeContext
-  Woods__Console -->|construction: new| MCP__Server
-  Woods__Console -->|construction: new| MCP__Tool__Response
-  Woods__Console -->|construction: new| MCP__Tool__Response
-  Woods__Console -->|construction: new| MCP__Tool__Response
+  ScopePredicateParser["ScopePredicateParser"]
+  Woods -->|construction: new| ScopePredicateParser
+  parser["parser"]
+  Woods -->|deserialization: parse| parser
+  Woods__Console -->|construction: new| Object
   Woods__Console -->|construction: new| SqlValidator
+  Woods__Console -->|construction: new| ScopePredicateParser
+  Woods__Console -->|deserialization: parse| parser
+  Woods__Console__EmbeddedExecutor(["new"])
+  Woods__Console__EmbeddedExecutor -->|construction: new| Object
+  Woods__Console__EmbeddedExecutor -->|construction: new| SqlValidator
+  Woods__Console__EmbeddedExecutor -->|construction: new| ScopePredicateParser
+  Woods__Console__EmbeddedExecutor -->|deserialization: parse| parser
+  Woods__Console__EmbeddedExecutor_eval_in_sandbox(["new"])
+  Woods__Console__EmbeddedExecutor_eval_in_sandbox -->|construction: new| Object
+  Woods__Console__EmbeddedExecutor_handle_sql(["new"])
+  Woods__Console__EmbeddedExecutor_handle_sql -->|construction: new| SqlValidator
+  Woods__Console__EmbeddedExecutor_apply_scope(["new"])
+  Woods__Console__EmbeddedExecutor_apply_scope -->|construction: new| ScopePredicateParser
+  Woods__Console__EmbeddedExecutor_apply_scope -->|deserialization: parse| parser
+  Woods -->|deserialization: parse| _parser
+  Woods__Console -->|deserialization: parse| _parser
+  Woods__Console__EvalGuard(["new"])
+  Woods__Console__EvalGuard -->|deserialization: parse| _parser
+  Woods__Console__EvalGuard_parse_or_refuse[\"deserialization"\]
+  Woods__Console__EvalGuard_parse_or_refuse -->|deserialization: parse| _parser
+  Woods -->|construction: new| Mutex
+  MCP__Server__Transports__StreamableHTTPTransport["MCP::Server::Transports::StreamableHTTPTransport"]
+  Woods -->|construction: new| MCP__Server__Transports__StreamableHTTPTransport
+  Woods__Observability__StructuredLogger["Woods::Observability::StructuredLogger"]
+  Woods -->|construction: new| Woods__Observability__StructuredLogger
+  Woods__Console -->|construction: new| Mutex
+  Woods__Console -->|construction: new| MCP__Server__Transports__StreamableHTTPTransport
+  Woods__Console -->|construction: new| Woods__Observability__StructuredLogger
+  Woods__Console__RackMiddleware(["new"])
+  Woods__Console__RackMiddleware -->|construction: new| Mutex
+  Woods__Console__RackMiddleware -->|construction: new| MCP__Server__Transports__StreamableHTTPTransport
+  Woods__Console__RackMiddleware -->|construction: new| Woods__Observability__StructuredLogger
+  Woods__Console__RackMiddleware_initialize(["new"])
+  Woods__Console__RackMiddleware_initialize -->|construction: new| Mutex
+  Woods__Console__RackMiddleware_ensure_transport(["new"])
+  Woods__Console__RackMiddleware_ensure_transport -->|construction: new| MCP__Server__Transports__StreamableHTTPTransport
+  Woods__Console__RackMiddleware_structured_logger(["new"])
+  Woods__Console__RackMiddleware_structured_logger -->|construction: new| Woods__Observability__StructuredLogger
+  columns_each_with_index["columns.each_with_index"]
+  Woods -->|serialization: to_h| columns_each_with_index
+  Woods__Console -->|serialization: to_h| columns_each_with_index
+  Woods__Console__Redactor[/"serialization"/]
+  Woods__Console__Redactor -->|serialization: to_h| columns_each_with_index
+  Woods__Console__Redactor_positional_kv_rules[/"serialization"/]
+  Woods__Console__Redactor_positional_kv_rules -->|serialization: to_h| columns_each_with_index
+  Woods__Console__ResponseContext(["new"])
+  Woods__Console__ResponseContext_build(["new"])
+  Woods -->|construction: new| Struct
+  SingleConnectionPool["SingleConnectionPool"]
+  Woods -->|construction: new| SingleConnectionPool
+  Woods__Console -->|construction: new| Struct
+  Woods__Console -->|construction: new| SingleConnectionPool
+  Woods__Console__SafeContext(["new"])
+  Woods__Console__SafeContext -->|construction: new| Struct
+  Woods__Console__SafeContext -->|construction: new| SingleConnectionPool
+  Woods__Console__SafeContext_initialize(["new"])
+  Woods__Console__SafeContext_initialize -->|construction: new| SingleConnectionPool
+  EmbeddedExecutor["EmbeddedExecutor"]
+  Woods -->|construction: new| EmbeddedExecutor
+  DispatchPipeline["DispatchPipeline"]
+  Woods -->|construction: new| DispatchPipeline
+  SafeContext["SafeContext"]
+  Woods -->|construction: new| SafeContext
+  TableGate["TableGate"]
+  Woods -->|construction: new| TableGate
+  Woods -->|construction: new| CredentialScanner
+  MCP__Server["MCP::Server"]
+  Woods -->|construction: new| MCP__Server
+  Woods -->|construction: new| Woods__Observability__StructuredLogger
+  JsonConsoleRenderer["JsonConsoleRenderer"]
+  Woods -->|construction: new| JsonConsoleRenderer
+  ConsoleResponseRenderer["ConsoleResponseRenderer"]
+  Woods -->|construction: new| ConsoleResponseRenderer
+  Woods__Console -->|construction: new| EmbeddedExecutor
+  Woods__Console -->|construction: new| DispatchPipeline
+  Woods__Console -->|construction: new| SafeContext
+  Woods__Console -->|construction: new| TableGate
+  Woods__Console -->|construction: new| CredentialScanner
+  Woods__Console -->|construction: new| MCP__Server
+  Woods__Console -->|construction: new| Woods__Observability__StructuredLogger
+  Woods__Console -->|construction: new| JsonConsoleRenderer
+  Woods__Console -->|construction: new| ConsoleResponseRenderer
   Woods__Console__Server(["new"])
-  Woods__Console__Server -->|construction: new| ConnectionManager
+  Woods__Console__Server -->|construction: new| EmbeddedExecutor
+  Woods__Console__Server -->|construction: new| DispatchPipeline
   Woods__Console__Server -->|construction: new| SafeContext
+  Woods__Console__Server -->|construction: new| TableGate
+  Woods__Console__Server -->|construction: new| CredentialScanner
   Woods__Console__Server -->|construction: new| MCP__Server
-  Woods__Console__Server -->|construction: new| MCP__Tool__Response
-  Woods__Console__Server -->|construction: new| MCP__Tool__Response
-  Woods__Console__Server -->|construction: new| MCP__Tool__Response
-  Woods__Console__Server -->|construction: new| SqlValidator
+  Woods__Console__Server -->|construction: new| Woods__Observability__StructuredLogger
+  Woods__Console__Server -->|construction: new| JsonConsoleRenderer
+  Woods__Console__Server -->|construction: new| ConsoleResponseRenderer
+  FORBIDDEN_KEYWORDS["FORBIDDEN_KEYWORDS"]
+  Woods -->|serialization: to_h| FORBIDDEN_KEYWORDS
+  BODY_FORBIDDEN_KEYWORDS["BODY_FORBIDDEN_KEYWORDS"]
+  Woods -->|serialization: to_h| BODY_FORBIDDEN_KEYWORDS
+  Woods -->|serialization: to_h| FORBIDDEN_KEYWORDS
+  DANGEROUS_FUNCTIONS["DANGEROUS_FUNCTIONS"]
+  Woods -->|serialization: to_h| DANGEROUS_FUNCTIONS
+  Woods__Console -->|serialization: to_h| FORBIDDEN_KEYWORDS
+  Woods__Console -->|serialization: to_h| BODY_FORBIDDEN_KEYWORDS
+  Woods__Console -->|serialization: to_h| FORBIDDEN_KEYWORDS
+  Woods__Console -->|serialization: to_h| DANGEROUS_FUNCTIONS
+  Woods__Console__SqlValidator[/"serialization"/]
+  Woods__Console__SqlValidator -->|serialization: to_h| FORBIDDEN_KEYWORDS
+  Woods__Console__SqlValidator -->|serialization: to_h| BODY_FORBIDDEN_KEYWORDS
+  Woods__Console__SqlValidator -->|serialization: to_h| FORBIDDEN_KEYWORDS
+  Woods__Console__SqlValidator -->|serialization: to_h| DANGEROUS_FUNCTIONS
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods__Console -->|construction: new| Set
+  Woods__Console -->|construction: new| Set
+  Woods__Console__TableGate(["new"])
+  Woods__Console__TableGate -->|construction: new| Set
+  Woods__Console__TableGate -->|construction: new| Set
+  Woods__Console__TableGate_initialize(["new"])
+  Woods__Console__TableGate_initialize -->|construction: new| Set
+  Woods__Console__TableGate_initialize -->|construction: new| Set
+  Regexp["Regexp"]
+  Woods -->|construction: new| Regexp
+  Woods -->|construction: new| Regexp
+  Woods -->|construction: new| Regexp
+  Woods -->|construction: new| Regexp
+  Woods -->|construction: new| Regexp
+  Woods -->|construction: new| Struct
+  MCP__Tool__InputSchema["MCP::Tool::InputSchema"]
+  Woods -->|construction: new| MCP__Tool__InputSchema
+  required["required"]
+  Woods -->|serialization: to_h| required
+  Woods__Console -->|construction: new| Regexp
+  Woods__Console -->|construction: new| Regexp
+  Woods__Console -->|construction: new| Regexp
+  Woods__Console -->|construction: new| Regexp
+  Woods__Console -->|construction: new| Regexp
+  Woods__Console -->|construction: new| Struct
+  Woods__Console -->|construction: new| MCP__Tool__InputSchema
+  Woods__Console -->|serialization: to_h| required
+  Woods__Console__Server -->|construction: new| Regexp
+  Woods__Console__Server -->|construction: new| Regexp
+  Woods__Console__Server -->|construction: new| Regexp
+  Woods__Console__Server -->|construction: new| Regexp
+  Woods__Console__Server -->|construction: new| Regexp
+  Woods__Console__Server -->|construction: new| Struct
+  Woods__Console__Server -->|construction: new| MCP__Tool__InputSchema
+  Woods__Console__Server -->|serialization: to_h| required
+  Thread["Thread"]
+  Woods -->|construction: new| Thread
+  Woods__Coordination(["new"])
+  Woods__Coordination -->|construction: new| Thread
+  Woods__Coordination__LockHeartbeat(["new"])
+  Woods__Coordination__LockHeartbeat -->|construction: new| Thread
+  Woods__Coordination__LockHeartbeat_run(["new"])
+  Woods__Coordination__LockHeartbeat_start_thread(["new"])
+  Woods__Coordination__LockHeartbeat_start_thread -->|construction: new| Thread
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods__Coordination -->|deserialization: parse| JSON
+  Woods__Coordination -->|deserialization: parse| JSON
+  Woods__Coordination__PipelineLock[\"deserialization"\]
+  Woods__Coordination__PipelineLock -->|deserialization: parse| JSON
+  Woods__Coordination__PipelineLock -->|deserialization: parse| JSON
+  Woods__Coordination__PipelineLock_lock_ownership[\"deserialization"\]
+  Woods__Coordination__PipelineLock_lock_ownership -->|deserialization: parse| JSON
+  Woods__Coordination__PipelineLock_own_lock_[\"deserialization"\]
+  Woods__Coordination__PipelineLock_own_lock_ -->|deserialization: parse| JSON
   EmbeddingCost["EmbeddingCost"]
   Woods -->|construction: new| EmbeddingCost
   StorageCost["StorageCost"]
@@ -402,90 +705,266 @@ flowchart TD
   Woods__Db__Migrator_initialize(["new"])
   Woods__Db__Migrator_initialize -->|construction: new| SchemaVersion
   Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  __file_map_file_path________["(@file_map[file_path] || [])"]
+  Woods -->|serialization: to_a| __file_map_file_path________
+  __file_map_f________["(@file_map[f] || [])"]
+  Woods -->|serialization: to_a| __file_map_f________
+  Woods -->|construction: new| Set
   affected["affected"]
   Woods -->|serialization: to_a| affected
+  _reverse_fetch["@reverse.fetch"]
+  Woods -->|serialization: to_a| _reverse_fetch
+  Array_each_with_object["Array.each_with_object"]
+  Woods -->|serialization: to_a| Array_each_with_object
+  Woods -->|construction: new| Array
+  _type_index_fetch["@type_index.fetch"]
+  Woods -->|serialization: to_a| _type_index_fetch
+  node_ids["node_ids"]
+  Woods -->|serialization: to_h| node_ids
+  Woods -->|serialization: to_h| node_ids
+  Hash["Hash"]
+  Woods -->|construction: new| Hash
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
   Woods__DependencyGraph(["new"])
   Woods__DependencyGraph -->|construction: new| Set
+  Woods__DependencyGraph -->|construction: new| Set
+  Woods__DependencyGraph -->|construction: new| Set
+  Woods__DependencyGraph -->|construction: new| Set
+  Woods__DependencyGraph -->|serialization: to_a| __file_map_file_path________
+  Woods__DependencyGraph -->|serialization: to_a| __file_map_f________
+  Woods__DependencyGraph -->|construction: new| Set
   Woods__DependencyGraph -->|serialization: to_a| affected
-  Woods__DependencyGraph_affected_by(["new"])
+  Woods__DependencyGraph -->|serialization: to_a| _reverse_fetch
+  Woods__DependencyGraph -->|serialization: to_a| Array_each_with_object
+  Woods__DependencyGraph -->|construction: new| Array
+  Woods__DependencyGraph -->|serialization: to_a| _type_index_fetch
+  Woods__DependencyGraph -->|serialization: to_h| node_ids
+  Woods__DependencyGraph -->|serialization: to_h| node_ids
+  Woods__DependencyGraph -->|construction: new| Hash
+  Woods__DependencyGraph -->|construction: new| Set
+  Woods__DependencyGraph -->|construction: new| Set
+  Woods__DependencyGraph_register(["new"])
+  Woods__DependencyGraph_register -->|construction: new| Set
+  Woods__DependencyGraph_register -->|construction: new| Set
+  Woods__DependencyGraph_register -->|construction: new| Set
+  Woods__DependencyGraph_register -->|construction: new| Set
+  Woods__DependencyGraph_identifiers_for_path[/"serialization"/]
+  Woods__DependencyGraph_identifiers_for_path -->|serialization: to_a| __file_map_file_path________
+  Woods__DependencyGraph_affected_by(["to_a"])
+  Woods__DependencyGraph_affected_by -->|serialization: to_a| __file_map_f________
   Woods__DependencyGraph_affected_by -->|construction: new| Set
   Woods__DependencyGraph_affected_by -->|serialization: to_a| affected
+  Woods__DependencyGraph_dependents_of[/"serialization"/]
+  Woods__DependencyGraph_dependents_of -->|serialization: to_a| _reverse_fetch
+  Woods__DependencyGraph_dependents_of -->|serialization: to_a| Array_each_with_object
+  Woods__DependencyGraph_dependents_detail(["new"])
+  Woods__DependencyGraph_dependents_detail -->|construction: new| Array
+  Woods__DependencyGraph_units_of_type[/"serialization"/]
+  Woods__DependencyGraph_units_of_type -->|serialization: to_a| _type_index_fetch
+  Woods__DependencyGraph_pagerank[/"serialization"/]
+  Woods__DependencyGraph_pagerank -->|serialization: to_h| node_ids
+  Woods__DependencyGraph_pagerank_step[/"serialization"/]
+  Woods__DependencyGraph_pagerank_step -->|serialization: to_h| node_ids
+  Woods__DependencyGraph_resolvable_edge_weights(["new"])
+  Woods__DependencyGraph_resolvable_edge_weights -->|construction: new| Hash
+  Woods__DependencyGraph_relocate_file_map(["new"])
+  Woods__DependencyGraph_relocate_file_map -->|construction: new| Set
   Woods__DependencyGraph_from_h(["new"])
+  Woods__DependencyGraph_from_h -->|construction: new| Set
+  Woods -->|construction: new| Array
+  Woods__Embedding(["new"])
+  Woods__Embedding -->|construction: new| Array
+  Woods__Embedding__Provider(["new"])
+  Woods__Embedding__Provider -->|construction: new| Array
+  Woods__Embedding__Provider__Fake(["new"])
+  Woods__Embedding__Provider__Fake -->|construction: new| Array
+  Woods__Embedding__Provider__Fake_text_to_vector(["new"])
+  Woods__Embedding__Provider__Fake_text_to_vector -->|construction: new| Array
+  Woods__Generation["Woods::Generation"]
+  Woods -->|construction: new| Woods__Generation
   Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Hash
   ExtractedUnit["ExtractedUnit"]
   Woods -->|construction: new| ExtractedUnit
-  Woods -->|deserialization: parse| JSON
-  Woods__Embedding(["parse"])
+  IndexArtifact["IndexArtifact"]
+  Woods -->|construction: new| IndexArtifact
+  Woods__Embedding -->|construction: new| Woods__Generation
   Woods__Embedding -->|deserialization: parse| JSON
+  Woods__Embedding -->|construction: new| Set
+  Woods__Embedding -->|construction: new| Hash
   Woods__Embedding -->|construction: new| ExtractedUnit
-  Woods__Embedding -->|deserialization: parse| JSON
-  Woods__Embedding__Indexer(["parse"])
+  Woods__Embedding -->|construction: new| IndexArtifact
+  Woods__Embedding__Indexer(["new"])
+  Woods__Embedding__Indexer -->|construction: new| Woods__Generation
   Woods__Embedding__Indexer -->|deserialization: parse| JSON
+  Woods__Embedding__Indexer -->|construction: new| Set
+  Woods__Embedding__Indexer -->|construction: new| Hash
   Woods__Embedding__Indexer -->|construction: new| ExtractedUnit
-  Woods__Embedding__Indexer -->|deserialization: parse| JSON
+  Woods__Embedding__Indexer -->|construction: new| IndexArtifact
+  Woods__Embedding__Indexer_units_dir(["new"])
+  Woods__Embedding__Indexer_units_dir -->|construction: new| Woods__Generation
   Woods__Embedding__Indexer_load_units[\"deserialization"\]
   Woods__Embedding__Indexer_load_units -->|deserialization: parse| JSON
+  Woods__Embedding__Indexer_prepare_run(["new"])
+  Woods__Embedding__Indexer_prepare_run -->|construction: new| Set
+  Woods__Embedding__Indexer_load_durable_store_ids(["new"])
+  Woods__Embedding__Indexer_load_durable_store_ids -->|construction: new| Hash
   Woods__Embedding__Indexer_build_unit(["new"])
   Woods__Embedding__Indexer_build_unit -->|construction: new| ExtractedUnit
-  Woods__Embedding__Indexer_load_checkpoint[\"deserialization"\]
-  Woods__Embedding__Indexer_load_checkpoint -->|deserialization: parse| JSON
-  Net__HTTP["Net::HTTP"]
-  Woods -->|construction: new| Net__HTTP
+  Woods__Embedding__Indexer_persist_snapshot(["new"])
+  Woods__Embedding__Indexer_persist_snapshot -->|construction: new| IndexArtifact
   Net__HTTP__Post["Net::HTTP::Post"]
   Woods -->|construction: new| Net__HTTP__Post
   Woods -->|deserialization: parse| JSON
-  Woods__Embedding -->|construction: new| Net__HTTP
+  Woods -->|deserialization: parse| JSON
+  RequestError["RequestError"]
+  Woods -->|construction: new| RequestError
+  Net__HTTP["Net::HTTP"]
+  Woods -->|construction: new| Net__HTTP
   Woods__Embedding -->|construction: new| Net__HTTP__Post
   Woods__Embedding -->|deserialization: parse| JSON
-  Woods__Embedding__Provider(["new"])
-  Woods__Embedding__Provider -->|construction: new| Net__HTTP
+  Woods__Embedding -->|deserialization: parse| JSON
+  Woods__Embedding -->|construction: new| RequestError
+  Woods__Embedding -->|construction: new| Net__HTTP
   Woods__Embedding__Provider -->|construction: new| Net__HTTP__Post
   Woods__Embedding__Provider -->|deserialization: parse| JSON
+  Woods__Embedding__Provider -->|deserialization: parse| JSON
+  Woods__Embedding__Provider -->|construction: new| RequestError
+  Woods__Embedding__Provider -->|construction: new| Net__HTTP
   Woods__Embedding__Provider__OpenAI(["new"])
-  Woods__Embedding__Provider__OpenAI -->|construction: new| Net__HTTP
   Woods__Embedding__Provider__OpenAI -->|construction: new| Net__HTTP__Post
   Woods__Embedding__Provider__OpenAI -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__OpenAI -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__OpenAI -->|construction: new| RequestError
+  Woods__Embedding__Provider__OpenAI -->|construction: new| Net__HTTP
   Woods__Embedding__Provider__OpenAI_post_request(["new"])
-  Woods__Embedding__Provider__OpenAI_post_request -->|construction: new| Net__HTTP
   Woods__Embedding__Provider__OpenAI_post_request -->|construction: new| Net__HTTP__Post
   Woods__Embedding__Provider__OpenAI_post_request -->|deserialization: parse| JSON
-  Woods -->|construction: new| Net__HTTP
+  Woods__Embedding__Provider__OpenAI_post_request -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__OpenAI_request_error(["new"])
+  Woods__Embedding__Provider__OpenAI_request_error -->|construction: new| RequestError
+  Woods__Embedding__Provider__OpenAI_http_client(["new"])
+  Woods__Embedding__Provider__OpenAI_http_client -->|construction: new| Net__HTTP
+  _0___expected_count_["(0...expected_count)"]
+  Woods -->|serialization: to_a| _0___expected_count_
   Woods -->|construction: new| Net__HTTP__Post
   Woods -->|deserialization: parse| JSON
-  Woods__Embedding -->|construction: new| Net__HTTP
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| RequestError
+  Woods -->|construction: new| Net__HTTP
+  Woods__Embedding -->|serialization: to_a| _0___expected_count_
   Woods__Embedding -->|construction: new| Net__HTTP__Post
   Woods__Embedding -->|deserialization: parse| JSON
-  Woods__Embedding__Provider -->|construction: new| Net__HTTP
+  Woods__Embedding -->|deserialization: parse| JSON
+  Woods__Embedding -->|construction: new| RequestError
+  Woods__Embedding -->|construction: new| Net__HTTP
+  Woods__Embedding__Provider -->|serialization: to_a| _0___expected_count_
   Woods__Embedding__Provider -->|construction: new| Net__HTTP__Post
   Woods__Embedding__Provider -->|deserialization: parse| JSON
+  Woods__Embedding__Provider -->|deserialization: parse| JSON
+  Woods__Embedding__Provider -->|construction: new| RequestError
+  Woods__Embedding__Provider -->|construction: new| Net__HTTP
+  Woods__Embedding__Provider__VectorValidation[/"serialization"/]
+  Woods__Embedding__Provider__VectorValidation -->|serialization: to_a| _0___expected_count_
   Woods__Embedding__Provider__Ollama(["new"])
-  Woods__Embedding__Provider__Ollama -->|construction: new| Net__HTTP
   Woods__Embedding__Provider__Ollama -->|construction: new| Net__HTTP__Post
   Woods__Embedding__Provider__Ollama -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__Ollama -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__Ollama -->|construction: new| RequestError
+  Woods__Embedding__Provider__Ollama -->|construction: new| Net__HTTP
+  Woods__Embedding__Provider__VectorValidation_validate_indexes_[/"serialization"/]
+  Woods__Embedding__Provider__VectorValidation_validate_indexes_ -->|serialization: to_a| _0___expected_count_
   Woods__Embedding__Provider__Ollama_post_request(["new"])
-  Woods__Embedding__Provider__Ollama_post_request -->|construction: new| Net__HTTP
   Woods__Embedding__Provider__Ollama_post_request -->|construction: new| Net__HTTP__Post
   Woods__Embedding__Provider__Ollama_post_request -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__Ollama_post_request -->|deserialization: parse| JSON
+  Woods__Embedding__Provider__Ollama_request_error(["new"])
+  Woods__Embedding__Provider__Ollama_request_error -->|construction: new| RequestError
+  Woods__Embedding__Provider__Ollama_http_client(["new"])
+  Woods__Embedding__Provider__Ollama_http_client -->|construction: new| Net__HTTP
+  Woods -->|construction: new| Mutex
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Mutex
+  Woods__Embedding -->|construction: new| Mutex
+  Woods__Embedding -->|construction: new| Set
+  Woods__Embedding -->|construction: new| Mutex
+  Woods__Embedding__TokenCounter(["new"])
+  Woods__Embedding__TokenCounter -->|construction: new| Mutex
+  Woods__Embedding__TokenCounter -->|construction: new| Set
+  Woods__Embedding__TokenCounter -->|construction: new| Mutex
+  Woods__Embedding__TokenCounter_initialize(["new"])
+  Woods__Embedding__TokenCounter_initialize -->|construction: new| Mutex
+  Woods -->|construction: new| Struct
+  Woods -->|deserialization: parse| JSON
+  Data["Data"]
+  Woods -->|construction: new| Data
+  Woods__Evaluation(["new"])
+  Woods__Evaluation -->|construction: new| Struct
+  Woods__Evaluation -->|deserialization: parse| JSON
+  Woods__Evaluation -->|construction: new| Data
+  Woods__Evaluation__Baseline(["new"])
+  Woods__Evaluation__Baseline -->|construction: new| Struct
+  Woods__Evaluation__Baseline -->|deserialization: parse| JSON
+  Woods__Evaluation__Baseline -->|construction: new| Data
+  Random["Random"]
+  Woods -->|construction: new| Random
+  Woods -->|construction: new| Random
+  Woods -->|construction: new| Mutex
+  Woods__Evaluation -->|construction: new| Random
+  Woods__Evaluation -->|construction: new| Random
+  Woods__Evaluation -->|construction: new| Mutex
+  Woods__Evaluation__BaselineRunner(["new"])
+  Woods__Evaluation__BaselineRunner -->|construction: new| Random
+  Woods__Evaluation__BaselineRunner -->|construction: new| Random
+  Woods__Evaluation__BaselineRunner -->|construction: new| Mutex
+  Woods__Evaluation__BaselineRunner_initialize(["new"])
+  Woods__Evaluation__BaselineRunner_initialize -->|construction: new| Random
+  Woods__Evaluation__BaselineRunner_initialize -->|construction: new| Random
+  Woods__Evaluation__BaselineRunner_initialize -->|construction: new| Mutex
+  Woods -->|construction: new| Struct
   Woods -->|construction: new| Struct
   Woods -->|construction: new| Struct
   EvaluationReport["EvaluationReport"]
   Woods -->|construction: new| EvaluationReport
+  _thresholds["@thresholds"]
+  Woods -->|serialization: to_h| _thresholds
+  ThresholdReport["ThresholdReport"]
+  Woods -->|construction: new| ThresholdReport
   QueryResult["QueryResult"]
   Woods -->|construction: new| QueryResult
-  Woods__Evaluation(["new"])
+  METRIC_KEYS["METRIC_KEYS"]
+  Woods -->|serialization: to_h| METRIC_KEYS
+  Woods__Evaluation -->|construction: new| Struct
   Woods__Evaluation -->|construction: new| Struct
   Woods__Evaluation -->|construction: new| Struct
   Woods__Evaluation -->|construction: new| EvaluationReport
+  Woods__Evaluation -->|serialization: to_h| _thresholds
+  Woods__Evaluation -->|construction: new| ThresholdReport
   Woods__Evaluation -->|construction: new| QueryResult
+  Woods__Evaluation -->|serialization: to_h| METRIC_KEYS
   Woods__Evaluation__Evaluator(["new"])
   Woods__Evaluation__Evaluator -->|construction: new| Struct
   Woods__Evaluation__Evaluator -->|construction: new| Struct
+  Woods__Evaluation__Evaluator -->|construction: new| Struct
   Woods__Evaluation__Evaluator -->|construction: new| EvaluationReport
+  Woods__Evaluation__Evaluator -->|serialization: to_h| _thresholds
+  Woods__Evaluation__Evaluator -->|construction: new| ThresholdReport
   Woods__Evaluation__Evaluator -->|construction: new| QueryResult
+  Woods__Evaluation__Evaluator -->|serialization: to_h| METRIC_KEYS
   Woods__Evaluation__Evaluator_evaluate(["new"])
   Woods__Evaluation__Evaluator_evaluate -->|construction: new| EvaluationReport
+  Woods__Evaluation__Evaluator_evaluate_thresholds(["to_h"])
+  Woods__Evaluation__Evaluator_evaluate_thresholds -->|serialization: to_h| _thresholds
+  Woods__Evaluation__Evaluator_evaluate_thresholds -->|construction: new| ThresholdReport
   Woods__Evaluation__Evaluator_evaluate_query(["new"])
   Woods__Evaluation__Evaluator_evaluate_query -->|construction: new| QueryResult
+  Woods__Evaluation__Evaluator_empty_aggregates[/"serialization"/]
+  Woods__Evaluation__Evaluator_empty_aggregates -->|serialization: to_h| METRIC_KEYS
   Woods -->|construction: new| Struct
   Woods -->|deserialization: parse| JSON
   Query["Query"]
@@ -505,40 +984,87 @@ flowchart TD
   Woods -->|serialization: to_json| metadata
   Woods__ExtractedUnit[/"serialization"/]
   Woods__ExtractedUnit -->|serialization: to_json| metadata
-  Woods__ExtractedUnit_estimated_tokens[/"serialization"/]
-  Woods__ExtractedUnit_estimated_tokens -->|serialization: to_json| metadata
-  Pathname["Pathname"]
+  Woods__ExtractedUnit_serialized_metadata[/"serialization"/]
+  Woods__ExtractedUnit_serialized_metadata -->|serialization: to_json| metadata
   Woods -->|construction: new| Pathname
+  PayloadStore["PayloadStore"]
+  Woods -->|construction: new| PayloadStore
   DependencyGraph["DependencyGraph"]
+  Woods -->|construction: new| DependencyGraph
   Woods -->|construction: new| DependencyGraph
   GraphAnalyzer["GraphAnalyzer"]
   Woods -->|construction: new| GraphAnalyzer
-  Woods -->|construction: new| Pathname
+  ChangeSet["ChangeSet"]
+  Woods -->|construction: new| ChangeSet
   Woods -->|construction: new| Set
+  touched["touched"]
+  Woods -->|serialization: to_a| touched
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Generation["Generation"]
+  Woods -->|construction: new| Generation
+  Woods -->|construction: new| Generation
+  Woods -->|construction: new| GraphAnalyzer
   extractor_class["extractor_class"]
   Woods -->|construction: new| extractor_class
-  Mutex["Mutex"]
   Woods -->|construction: new| Mutex
-  Thread["Thread"]
   Woods -->|construction: new| Thread
   Woods -->|construction: new| extractor_class
   FlowPrecomputer["FlowPrecomputer"]
   Woods -->|construction: new| FlowPrecomputer
-  Hash["Hash"]
   Woods -->|construction: new| Hash
   _dependency_graph["@dependency_graph"]
   Woods -->|serialization: to_h| _dependency_graph
+  GitProvenance_new["GitProvenance.new"]
+  Woods -->|serialization: to_h| GitProvenance_new
+  GitProvenance["GitProvenance"]
+  Woods -->|construction: new| GitProvenance
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  SQLite3__Database["SQLite3::Database"]
+  Woods -->|construction: new| SQLite3__Database
+  Db__Migrator["Db::Migrator"]
+  Woods -->|construction: new| Db__Migrator
+  Temporal__SnapshotStore["Temporal::SnapshotStore"]
+  Woods -->|construction: new| Temporal__SnapshotStore
+  Temporal__JsonSnapshotStore["Temporal::JsonSnapshotStore"]
+  Woods -->|construction: new| Temporal__JsonSnapshotStore
   Woods -->|serialization: to_h| _dependency_graph
   Woods -->|deserialization: parse| JSON
-  Woods -->|serialization: to_h| _dependency_graph
-  EXTRACTORS___["EXTRACTORS.[]"]
-  Woods -->|construction: new| EXTRACTORS___
+  Woods -->|construction: new| Set
+  PathDispatcher["PathDispatcher"]
+  Woods -->|construction: new| PathDispatcher
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| PathDispatcher
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| PathDispatcher
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|deserialization: parse| JSON
   Woods__Extractor(["new"])
   Woods__Extractor -->|construction: new| Pathname
+  Woods__Extractor -->|construction: new| PayloadStore
+  Woods__Extractor -->|construction: new| DependencyGraph
   Woods__Extractor -->|construction: new| DependencyGraph
   Woods__Extractor -->|construction: new| GraphAnalyzer
-  Woods__Extractor -->|construction: new| Pathname
+  Woods__Extractor -->|construction: new| ChangeSet
   Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|serialization: to_a| touched
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Generation
+  Woods__Extractor -->|construction: new| Generation
+  Woods__Extractor -->|construction: new| GraphAnalyzer
   Woods__Extractor -->|construction: new| extractor_class
   Woods__Extractor -->|construction: new| Mutex
   Woods__Extractor -->|construction: new| Thread
@@ -546,18 +1072,56 @@ flowchart TD
   Woods__Extractor -->|construction: new| FlowPrecomputer
   Woods__Extractor -->|construction: new| Hash
   Woods__Extractor -->|serialization: to_h| _dependency_graph
+  Woods__Extractor -->|serialization: to_h| GitProvenance_new
+  Woods__Extractor -->|construction: new| GitProvenance
+  Woods__Extractor -->|deserialization: parse| JSON
+  Woods__Extractor -->|deserialization: parse| JSON
+  Woods__Extractor -->|construction: new| SQLite3__Database
+  Woods__Extractor -->|construction: new| Db__Migrator
+  Woods__Extractor -->|construction: new| Temporal__SnapshotStore
+  Woods__Extractor -->|construction: new| Temporal__JsonSnapshotStore
   Woods__Extractor -->|serialization: to_h| _dependency_graph
   Woods__Extractor -->|deserialization: parse| JSON
-  Woods__Extractor -->|serialization: to_h| _dependency_graph
-  Woods__Extractor -->|construction: new| EXTRACTORS___
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| PathDispatcher
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| PathDispatcher
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| PathDispatcher
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|construction: new| Set
+  Woods__Extractor -->|deserialization: parse| JSON
   Woods__Extractor_initialize(["new"])
   Woods__Extractor_initialize -->|construction: new| Pathname
+  Woods__Extractor_initialize -->|construction: new| PayloadStore
   Woods__Extractor_initialize -->|construction: new| DependencyGraph
   Woods__Extractor_extract_all(["new"])
+  Woods__Extractor_extract_all -->|construction: new| DependencyGraph
   Woods__Extractor_extract_all -->|construction: new| GraphAnalyzer
   Woods__Extractor_extract_changed(["new"])
-  Woods__Extractor_extract_changed -->|construction: new| Pathname
+  Woods__Extractor_extract_changed -->|construction: new| ChangeSet
   Woods__Extractor_extract_changed -->|construction: new| Set
+  Woods__Extractor_extract_changed -->|serialization: to_a| touched
+  Woods__Extractor_refresh(["new"])
+  Woods__Extractor_refresh -->|construction: new| Set
+  Woods__Extractor_prepare_incremental_run(["new"])
+  Woods__Extractor_prepare_incremental_run -->|construction: new| Set
+  Woods__Extractor_publish_generation(["new"])
+  Woods__Extractor_publish_generation -->|construction: new| Generation
+  Woods__Extractor_begin_payload_(["new"])
+  Woods__Extractor_begin_payload_ -->|construction: new| Generation
+  Woods__Extractor_write_incremental_graph_analysis(["new"])
+  Woods__Extractor_write_incremental_graph_analysis -->|construction: new| GraphAnalyzer
   Woods__Extractor_extract_all_sequential(["new"])
   Woods__Extractor_extract_all_sequential -->|construction: new| extractor_class
   Woods__Extractor_extract_all_concurrent(["new"])
@@ -570,13 +1134,55 @@ flowchart TD
   Woods__Extractor_parse_git_log_output -->|construction: new| Hash
   Woods__Extractor_write_dependency_graph[/"serialization"/]
   Woods__Extractor_write_dependency_graph -->|serialization: to_h| _dependency_graph
+  Woods__Extractor_write_manifest(["to_h"])
+  Woods__Extractor_write_manifest -->|serialization: to_h| GitProvenance_new
+  Woods__Extractor_write_manifest -->|construction: new| GitProvenance
+  Woods__Extractor_persisted_counts[\"deserialization"\]
+  Woods__Extractor_persisted_counts -->|deserialization: parse| JSON
+  Woods__Extractor_capture_snapshot[\"deserialization"\]
+  Woods__Extractor_capture_snapshot -->|deserialization: parse| JSON
+  Woods__Extractor_build_snapshot_store(["new"])
+  Woods__Extractor_build_snapshot_store -->|construction: new| SQLite3__Database
+  Woods__Extractor_build_snapshot_store -->|construction: new| Db__Migrator
+  Woods__Extractor_build_snapshot_store -->|construction: new| Temporal__SnapshotStore
+  Woods__Extractor_build_snapshot_store -->|construction: new| Temporal__JsonSnapshotStore
   Woods__Extractor_write_structural_summary[/"serialization"/]
   Woods__Extractor_write_structural_summary -->|serialization: to_h| _dependency_graph
   Woods__Extractor_regenerate_type_index[\"deserialization"\]
   Woods__Extractor_regenerate_type_index -->|deserialization: parse| JSON
-  Woods__Extractor_re_extract_unit(["to_h"])
-  Woods__Extractor_re_extract_unit -->|serialization: to_h| _dependency_graph
-  Woods__Extractor_re_extract_unit -->|construction: new| EXTRACTORS___
+  Woods__Extractor_active_record_names(["new"])
+  Woods__Extractor_active_record_names -->|construction: new| Set
+  Woods__Extractor_reconcile_changed_paths(["new"])
+  Woods__Extractor_reconcile_changed_paths -->|construction: new| PathDispatcher
+  Woods__Extractor_reconcile_changed_paths -->|construction: new| Set
+  Woods__Extractor_reconcile_changed_paths -->|construction: new| Set
+  Woods__Extractor_prune_path_leftovers(["new"])
+  Woods__Extractor_prune_path_leftovers -->|construction: new| Set
+  Woods__Extractor_reconcile_class_based_types(["new"])
+  Woods__Extractor_reconcile_class_based_types -->|construction: new| Set
+  Woods__Extractor_reconcile_class_based_types -->|construction: new| Set
+  Woods__Extractor_add_discovered_classes(["new"])
+  Woods__Extractor_add_discovered_classes -->|construction: new| Set
+  Woods__Extractor_remove_stale_classes(["new"])
+  Woods__Extractor_remove_stale_classes -->|construction: new| Set
+  Woods__Extractor_rerun_whole_app_extractors(["new"])
+  Woods__Extractor_rerun_whole_app_extractors -->|construction: new| PathDispatcher
+  Woods__Extractor_rerun_whole_app_extractors -->|construction: new| Set
+  Woods__Extractor_replace_type_wholesale(["new"])
+  Woods__Extractor_replace_type_wholesale -->|construction: new| Set
+  Woods__Extractor_replace_type_wholesale -->|construction: new| Set
+  Woods__Extractor_remove_replaced_units(["new"])
+  Woods__Extractor_remove_replaced_units -->|construction: new| Set
+  Woods__Extractor_sweep_candidates(["new"])
+  Woods__Extractor_sweep_candidates -->|construction: new| PathDispatcher
+  Woods__Extractor_register_and_write(["new"])
+  Woods__Extractor_register_and_write -->|construction: new| Set
+  Woods__Extractor_mark_dependents_dirty(["new"])
+  Woods__Extractor_mark_dependents_dirty -->|construction: new| Set
+  Woods__Extractor_finalize_incremental_unit_json(["new"])
+  Woods__Extractor_finalize_incremental_unit_json -->|construction: new| Set
+  Woods__Extractor_rewrite_unit_json_of_type[\"deserialization"\]
+  Woods__Extractor_rewrite_unit_json_of_type -->|deserialization: parse| JSON
   Woods -->|construction: new| ExtractedUnit
   Woods__Extractors(["new"])
   Woods__Extractors -->|construction: new| ExtractedUnit
@@ -603,6 +1209,12 @@ flowchart TD
   Woods__Extractors__CachingExtractor -->|construction: new| ExtractedUnit
   Woods__Extractors__CachingExtractor_extract_caching_file(["new"])
   Woods__Extractors__CachingExtractor_extract_caching_file -->|construction: new| ExtractedUnit
+  SINGLE_COLUMN_WRITERS["SINGLE_COLUMN_WRITERS"]
+  Woods -->|serialization: to_h| SINGLE_COLUMN_WRITERS
+  MULTI_COLUMN_WRITERS["MULTI_COLUMN_WRITERS"]
+  Woods -->|serialization: to_h| MULTI_COLUMN_WRITERS
+  DB_READ_METHODS["DB_READ_METHODS"]
+  Woods -->|serialization: to_h| DB_READ_METHODS
   Ast__Parser["Ast::Parser"]
   Woods -->|construction: new| Ast__Parser
   FlowAnalysis__OperationExtractor["FlowAnalysis::OperationExtractor"]
@@ -611,12 +1223,18 @@ flowchart TD
   Woods -->|construction: new| Set
   columns["columns"]
   Woods -->|serialization: to_a| columns
+  Woods__Extractors -->|serialization: to_h| SINGLE_COLUMN_WRITERS
+  Woods__Extractors -->|serialization: to_h| MULTI_COLUMN_WRITERS
+  Woods__Extractors -->|serialization: to_h| DB_READ_METHODS
   Woods__Extractors -->|construction: new| Ast__Parser
   Woods__Extractors -->|construction: new| FlowAnalysis__OperationExtractor
   Woods__Extractors -->|deserialization: parse| _parser
   Woods__Extractors -->|construction: new| Set
   Woods__Extractors -->|serialization: to_a| columns
-  Woods__Extractors__CallbackAnalyzer(["new"])
+  Woods__Extractors__CallbackAnalyzer(["to_h"])
+  Woods__Extractors__CallbackAnalyzer -->|serialization: to_h| SINGLE_COLUMN_WRITERS
+  Woods__Extractors__CallbackAnalyzer -->|serialization: to_h| MULTI_COLUMN_WRITERS
+  Woods__Extractors__CallbackAnalyzer -->|serialization: to_h| DB_READ_METHODS
   Woods__Extractors__CallbackAnalyzer -->|construction: new| Ast__Parser
   Woods__Extractors__CallbackAnalyzer -->|construction: new| FlowAnalysis__OperationExtractor
   Woods__Extractors__CallbackAnalyzer -->|deserialization: parse| _parser
@@ -630,10 +1248,15 @@ flowchart TD
   Woods__Extractors__CallbackAnalyzer_detect_columns_written(["new"])
   Woods__Extractors__CallbackAnalyzer_detect_columns_written -->|construction: new| Set
   Woods__Extractors__CallbackAnalyzer_detect_columns_written -->|serialization: to_a| columns
+  Woods -->|construction: new| Pathname
   Woods -->|construction: new| ExtractedUnit
+  Woods__Extractors -->|construction: new| Pathname
   Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors__ConcernExtractor(["new"])
+  Woods__Extractors__ConcernExtractor -->|construction: new| Pathname
   Woods__Extractors__ConcernExtractor -->|construction: new| ExtractedUnit
+  Woods__Extractors__ConcernExtractor_initialize(["new"])
+  Woods__Extractors__ConcernExtractor_initialize -->|construction: new| Pathname
   Woods__Extractors__ConcernExtractor_extract_concern_file(["new"])
   Woods__Extractors__ConcernExtractor_extract_concern_file -->|construction: new| ExtractedUnit
   BehavioralProfile["BehavioralProfile"]
@@ -649,23 +1272,17 @@ flowchart TD
   Woods__Extractors__ConfigurationExtractor_extract_configuration_file(["new"])
   Woods__Extractors__ConfigurationExtractor_extract_configuration_file -->|construction: new| ExtractedUnit
   Woods -->|construction: new| ExtractedUnit
-  actions["actions"]
-  Woods -->|serialization: to_a| actions
-  controller_action_methods["controller.action_methods"]
-  Woods -->|serialization: to_a| controller_action_methods
+  controller_action_methods_select["controller.action_methods.select"]
+  Woods -->|serialization: to_a| controller_action_methods_select
   Woods__Extractors -->|construction: new| ExtractedUnit
-  Woods__Extractors -->|serialization: to_a| actions
-  Woods__Extractors -->|serialization: to_a| controller_action_methods
+  Woods__Extractors -->|serialization: to_a| controller_action_methods_select
   Woods__Extractors__ControllerExtractor(["new"])
   Woods__Extractors__ControllerExtractor -->|construction: new| ExtractedUnit
-  Woods__Extractors__ControllerExtractor -->|serialization: to_a| actions
-  Woods__Extractors__ControllerExtractor -->|serialization: to_a| controller_action_methods
+  Woods__Extractors__ControllerExtractor -->|serialization: to_a| controller_action_methods_select
   Woods__Extractors__ControllerExtractor_extract_controller(["new"])
   Woods__Extractors__ControllerExtractor_extract_controller -->|construction: new| ExtractedUnit
-  Woods__Extractors__ControllerExtractor_extract_action_filter_actions[/"serialization"/]
-  Woods__Extractors__ControllerExtractor_extract_action_filter_actions -->|serialization: to_a| actions
   Woods__Extractors__ControllerExtractor_extract_metadata[/"serialization"/]
-  Woods__Extractors__ControllerExtractor_extract_metadata -->|serialization: to_a| controller_action_methods
+  Woods__Extractors__ControllerExtractor_extract_metadata -->|serialization: to_a| controller_action_methods_select
   Woods -->|construction: new| ExtractedUnit
   Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors__DatabaseViewExtractor(["new"])
@@ -740,27 +1357,28 @@ flowchart TD
   Woods__Extractors__JobExtractor_extract_job_class(["new"])
   Woods__Extractors__JobExtractor_extract_job_class -->|construction: new| ExtractedUnit
   Woods -->|construction: new| ExtractedUnit
+  Woods__Extractors -->|construction: new| ExtractedUnit
+  Woods__Extractors__LibExtractor(["new"])
+  Woods__Extractors__LibExtractor -->|construction: new| ExtractedUnit
+  Woods__Extractors__LibExtractor_extract_lib_file(["new"])
+  Woods__Extractors__LibExtractor_extract_lib_file -->|construction: new| ExtractedUnit
+  Woods -->|construction: new| ExtractedUnit
   mailer_action_methods["mailer.action_methods"]
   Woods -->|serialization: to_a| mailer_action_methods
   Woods -->|serialization: to_a| mailer_action_methods
-  Woods -->|serialization: to_a| actions
   Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors -->|serialization: to_a| mailer_action_methods
   Woods__Extractors -->|serialization: to_a| mailer_action_methods
-  Woods__Extractors -->|serialization: to_a| actions
   Woods__Extractors__MailerExtractor(["new"])
   Woods__Extractors__MailerExtractor -->|construction: new| ExtractedUnit
   Woods__Extractors__MailerExtractor -->|serialization: to_a| mailer_action_methods
   Woods__Extractors__MailerExtractor -->|serialization: to_a| mailer_action_methods
-  Woods__Extractors__MailerExtractor -->|serialization: to_a| actions
   Woods__Extractors__MailerExtractor_extract_mailer(["new"])
   Woods__Extractors__MailerExtractor_extract_mailer -->|construction: new| ExtractedUnit
   Woods__Extractors__MailerExtractor_annotate_source[/"serialization"/]
   Woods__Extractors__MailerExtractor_annotate_source -->|serialization: to_a| mailer_action_methods
   Woods__Extractors__MailerExtractor_extract_metadata[/"serialization"/]
   Woods__Extractors__MailerExtractor_extract_metadata -->|serialization: to_a| mailer_action_methods
-  Woods__Extractors__MailerExtractor_extract_action_filter_actions[/"serialization"/]
-  Woods__Extractors__MailerExtractor_extract_action_filter_actions -->|serialization: to_a| actions
   Woods -->|construction: new| ExtractedUnit
   Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors__ManagerExtractor(["new"])
@@ -786,7 +1404,6 @@ flowchart TD
   Woods__Extractors__MigrationExtractor_extract_operations -->|construction: new| Hash
   Woods -->|construction: new| ExtractedUnit
   Woods -->|construction: new| Ast__Parser
-  parser["parser"]
   Woods -->|deserialization: parse| parser
   CallbackAnalyzer["CallbackAnalyzer"]
   Woods -->|construction: new| CallbackAnalyzer
@@ -818,6 +1435,12 @@ flowchart TD
   Woods__Extractors__PolicyExtractor -->|construction: new| ExtractedUnit
   Woods__Extractors__PolicyExtractor_extract_policy_file(["new"])
   Woods__Extractors__PolicyExtractor_extract_policy_file -->|construction: new| ExtractedUnit
+  Woods -->|construction: new| ExtractedUnit
+  Woods__Extractors -->|construction: new| ExtractedUnit
+  Woods__Extractors__PoroExtractor(["new"])
+  Woods__Extractors__PoroExtractor -->|construction: new| ExtractedUnit
+  Woods__Extractors__PoroExtractor_extract_poro_file(["new"])
+  Woods__Extractors__PoroExtractor_extract_poro_file -->|construction: new| ExtractedUnit
   Woods -->|construction: new| ExtractedUnit
   Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors__PunditExtractor(["new"])
@@ -880,6 +1503,33 @@ flowchart TD
   Woods__Extractors__ServiceExtractor -->|construction: new| ExtractedUnit
   Woods__Extractors__ServiceExtractor_extract_service_file(["new"])
   Woods__Extractors__ServiceExtractor_extract_service_file -->|construction: new| ExtractedUnit
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods__Extractors -->|construction: new| Set
+  Woods__Extractors -->|construction: new| Set
+  Woods__Extractors -->|construction: new| Set
+  Woods__Extractors -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner(["new"])
+  Woods__Extractors__SharedDependencyScanner -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner_scan_model_dependencies(["new"])
+  Woods__Extractors__SharedDependencyScanner_scan_model_dependencies -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner_scan_navigation_dependencies(["new"])
+  Woods__Extractors__SharedDependencyScanner_scan_navigation_dependencies -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner_scan_navigation_dependencies -->|construction: new| Set
+  Woods__Extractors__SharedDependencyScanner_scan_form_dependencies(["new"])
+  Woods__Extractors__SharedDependencyScanner_scan_form_dependencies -->|construction: new| Set
+  actions["actions"]
+  Woods -->|serialization: to_a| actions
+  Woods__Extractors -->|serialization: to_a| actions
+  Woods__Extractors__SharedUtilityMethods[/"serialization"/]
+  Woods__Extractors__SharedUtilityMethods -->|serialization: to_a| actions
+  Woods__Extractors__SharedUtilityMethods_extract_action_filter_actions[/"serialization"/]
+  Woods__Extractors__SharedUtilityMethods_extract_action_filter_actions -->|serialization: to_a| actions
   Woods -->|construction: new| ExtractedUnit
   Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors__StateMachineExtractor(["new"])
@@ -904,32 +1554,49 @@ flowchart TD
   Woods__Extractors__ViewComponentExtractor -->|construction: new| ExtractedUnit
   Woods__Extractors__ViewComponentExtractor_extract_component(["new"])
   Woods__Extractors__ViewComponentExtractor_extract_component -->|construction: new| ExtractedUnit
-  Woods -->|construction: new| ExtractedUnit
   Woods -->|construction: new| Set
   partials["partials"]
   Woods -->|serialization: to_a| partials
   Woods -->|construction: new| Set
   found["found"]
   Woods -->|serialization: to_a| found
-  Woods__Extractors -->|construction: new| ExtractedUnit
   Woods__Extractors -->|construction: new| Set
   Woods__Extractors -->|serialization: to_a| partials
   Woods__Extractors -->|construction: new| Set
   Woods__Extractors -->|serialization: to_a| found
+  Woods__Extractors__ViewEngines(["new"])
+  Woods__Extractors__ViewEngines -->|construction: new| Set
+  Woods__Extractors__ViewEngines -->|serialization: to_a| partials
+  Woods__Extractors__ViewEngines -->|construction: new| Set
+  Woods__Extractors__ViewEngines -->|serialization: to_a| found
+  Woods__Extractors__ViewEngines__Erb(["new"])
+  Woods__Extractors__ViewEngines__Erb -->|construction: new| Set
+  Woods__Extractors__ViewEngines__Erb -->|serialization: to_a| partials
+  Woods__Extractors__ViewEngines__Erb -->|construction: new| Set
+  Woods__Extractors__ViewEngines__Erb -->|serialization: to_a| found
+  Woods__Extractors__ViewEngines__Erb_scan_partials(["new"])
+  Woods__Extractors__ViewEngines__Erb_scan_partials -->|construction: new| Set
+  Woods__Extractors__ViewEngines__Erb_scan_partials -->|serialization: to_a| partials
+  Woods__Extractors__ViewEngines__Erb_scan_helpers(["new"])
+  Woods__Extractors__ViewEngines__Erb_scan_helpers -->|construction: new| Set
+  Woods__Extractors__ViewEngines__Erb_scan_helpers -->|serialization: to_a| found
+  klass["klass"]
+  Woods -->|construction: new| klass
+  Woods -->|construction: new| ExtractedUnit
+  Woods -->|construction: new| Set
+  Woods__Extractors -->|construction: new| klass
+  Woods__Extractors -->|construction: new| ExtractedUnit
+  Woods__Extractors -->|construction: new| Set
   Woods__Extractors__ViewTemplateExtractor(["new"])
+  Woods__Extractors__ViewTemplateExtractor -->|construction: new| klass
   Woods__Extractors__ViewTemplateExtractor -->|construction: new| ExtractedUnit
   Woods__Extractors__ViewTemplateExtractor -->|construction: new| Set
-  Woods__Extractors__ViewTemplateExtractor -->|serialization: to_a| partials
-  Woods__Extractors__ViewTemplateExtractor -->|construction: new| Set
-  Woods__Extractors__ViewTemplateExtractor -->|serialization: to_a| found
+  Woods__Extractors__ViewTemplateExtractor_supported_template_engines(["new"])
+  Woods__Extractors__ViewTemplateExtractor_supported_template_engines -->|construction: new| klass
   Woods__Extractors__ViewTemplateExtractor_extract_view_template_file(["new"])
   Woods__Extractors__ViewTemplateExtractor_extract_view_template_file -->|construction: new| ExtractedUnit
-  Woods__Extractors__ViewTemplateExtractor_extract_rendered_partials(["new"])
-  Woods__Extractors__ViewTemplateExtractor_extract_rendered_partials -->|construction: new| Set
-  Woods__Extractors__ViewTemplateExtractor_extract_rendered_partials -->|serialization: to_a| partials
-  Woods__Extractors__ViewTemplateExtractor_extract_helpers(["new"])
-  Woods__Extractors__ViewTemplateExtractor_extract_helpers -->|construction: new| Set
-  Woods__Extractors__ViewTemplateExtractor_extract_helpers -->|serialization: to_a| found
+  Woods__Extractors__ViewTemplateExtractor_resolve_navigation_candidates(["new"])
+  Woods__Extractors__ViewTemplateExtractor_resolve_navigation_candidates -->|construction: new| Set
   Woods -->|construction: new| Hash
   Woods -->|construction: new| Hash
   Woods__Feedback(["new"])
@@ -979,13 +1646,40 @@ flowchart TD
   Woods__FlowDocument_from_h(["new"])
   FlowAssembler["FlowAssembler"]
   Woods -->|construction: new| FlowAssembler
+  value_keys_sort_by["value.keys.sort_by"]
+  Woods -->|serialization: to_h| value_keys_sort_by
   Woods__FlowPrecomputer(["new"])
   Woods__FlowPrecomputer -->|construction: new| FlowAssembler
+  Woods__FlowPrecomputer -->|serialization: to_h| value_keys_sort_by
   Woods__FlowPrecomputer_precompute(["new"])
   Woods__FlowPrecomputer_precompute -->|construction: new| FlowAssembler
+  Woods__FlowPrecomputer_sort_keys_deep[/"serialization"/]
+  Woods__FlowPrecomputer_sort_keys_deep -->|serialization: to_h| value_keys_sort_by
+  Woods -->|construction: new| Struct
+  Marker["Marker"]
+  Woods -->|construction: new| Marker
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Marker
+  Woods -->|construction: new| Marker
+  Woods -->|construction: new| Pathname
+  Woods__Generation -->|construction: new| Struct
+  Woods__Generation -->|construction: new| Marker
+  Woods__Generation -->|deserialization: parse| JSON
+  Woods__Generation -->|construction: new| Marker
+  Woods__Generation -->|construction: new| Marker
+  Woods__Generation -->|construction: new| Pathname
+  Woods__Generation_current(["parse"])
+  Woods__Generation_current -->|deserialization: parse| JSON
+  Woods__Generation_current -->|construction: new| Marker
+  Woods__Generation_bump_(["new"])
+  Woods__Generation_bump_ -->|construction: new| Marker
+  Woods__Generation_root(["new"])
+  Woods__Generation_root -->|construction: new| Pathname
   Woods -->|construction: new| Hash
-  Random["Random"]
   Woods -->|construction: new| Random
+  Woods -->|construction: new| Hash
+  Woods -->|construction: new| Hash
+  Woods -->|construction: new| Set
   _graph["@graph"]
   Woods -->|serialization: to_h| _graph
   Woods -->|construction: new| Hash
@@ -997,6 +1691,9 @@ flowchart TD
   Woods__GraphAnalyzer(["new"])
   Woods__GraphAnalyzer -->|construction: new| Hash
   Woods__GraphAnalyzer -->|construction: new| Random
+  Woods__GraphAnalyzer -->|construction: new| Hash
+  Woods__GraphAnalyzer -->|construction: new| Hash
+  Woods__GraphAnalyzer -->|construction: new| Set
   Woods__GraphAnalyzer -->|serialization: to_h| _graph
   Woods__GraphAnalyzer -->|construction: new| Hash
   Woods__GraphAnalyzer -->|construction: new| Set
@@ -1006,6 +1703,12 @@ flowchart TD
   Woods__GraphAnalyzer_bridges(["new"])
   Woods__GraphAnalyzer_bridges -->|construction: new| Hash
   Woods__GraphAnalyzer_bridges -->|construction: new| Random
+  Woods__GraphAnalyzer_find_most_connected_cluster(["new"])
+  Woods__GraphAnalyzer_find_most_connected_cluster -->|construction: new| Hash
+  Woods__GraphAnalyzer_find_merge_target(["new"])
+  Woods__GraphAnalyzer_find_merge_target -->|construction: new| Hash
+  Woods__GraphAnalyzer_enrich_clusters(["new"])
+  Woods__GraphAnalyzer_enrich_clusters -->|construction: new| Set
   Woods__GraphAnalyzer_graph_data[/"serialization"/]
   Woods__GraphAnalyzer_graph_data -->|serialization: to_h| _graph
   Woods__GraphAnalyzer_detect_cycles(["new"])
@@ -1017,23 +1720,166 @@ flowchart TD
   Woods__GraphAnalyzer_bfs_shortest_path(["new"])
   Woods__GraphAnalyzer_bfs_shortest_path -->|construction: new| Set
   Woods -->|construction: new| Pathname
-  Regexp["Regexp"]
+  Woods -->|construction: new| Pathname
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Tempfile
+  Woods__IndexArtifact(["new"])
+  Woods__IndexArtifact -->|construction: new| Pathname
+  Woods__IndexArtifact -->|construction: new| Pathname
+  Woods__IndexArtifact -->|deserialization: parse| JSON
+  Woods__IndexArtifact -->|deserialization: parse| JSON
+  Woods__IndexArtifact -->|construction: new| Pathname
+  Woods__IndexArtifact -->|construction: new| Pathname
+  Woods__IndexArtifact -->|construction: new| Pathname
+  Woods__IndexArtifact -->|construction: new| Tempfile
+  Woods__IndexArtifact_initialize(["new"])
+  Woods__IndexArtifact_initialize -->|construction: new| Pathname
+  Woods__IndexArtifact_dump_config_path(["new"])
+  Woods__IndexArtifact_dump_config_path -->|construction: new| Pathname
+  Woods__IndexArtifact_read_config[\"deserialization"\]
+  Woods__IndexArtifact_read_config -->|deserialization: parse| JSON
+  Woods__IndexArtifact_read_config -->|deserialization: parse| JSON
+  Woods__IndexArtifact_promote(["new"])
+  Woods__IndexArtifact_promote -->|construction: new| Pathname
+  Woods__IndexArtifact_promote -->|construction: new| Pathname
+  Woods__IndexArtifact_promote -->|construction: new| Pathname
+  Woods__IndexArtifact_atomic_write(["new"])
+  Woods__IndexArtifact_atomic_write -->|construction: new| Tempfile
+  __jsonrpc___2_0___error____code___32_001__message___Unauthorized_____id__nil__["{ jsonrpc: '2.0', error: { code: -32_001, message: 'Unauthorized' }, id: nil }"]
+  Woods -->|serialization: to_json| __jsonrpc___2_0___error____code___32_001__message___Unauthorized_____id__nil__
+  Woods__MCP[/"serialization"/]
+  Woods__MCP -->|serialization: to_json| __jsonrpc___2_0___error____code___32_001__message___Unauthorized_____id__nil__
+  Woods__MCP__BearerAuth[/"serialization"/]
+  Woods__MCP__BearerAuth -->|serialization: to_json| __jsonrpc___2_0___error____code___32_001__message___Unauthorized_____id__nil__
+  Woods -->|construction: new| Woods__Generation
+  Woods -->|construction: new| SQLite3__Database
+  Woods -->|construction: new| Woods__Db__Migrator
+  Woods__Temporal__SnapshotStore["Woods::Temporal::SnapshotStore"]
+  Woods -->|construction: new| Woods__Temporal__SnapshotStore
+  Woods__Temporal__JsonSnapshotStore["Woods::Temporal::JsonSnapshotStore"]
+  Woods -->|construction: new| Woods__Temporal__JsonSnapshotStore
+  BootstrapState["BootstrapState"]
+  Woods -->|construction: new| BootstrapState
+  Woods -->|construction: new| Woods__Builder
+  Woods -->|construction: new| IndexArtifact
+  Woods -->|construction: new| Woods__Builder
+  Woods -->|construction: new| Woods__Generation
+  Woods -->|construction: new| Woods__Builder
+  Woods__Storage__GraphStore__Memory["Woods::Storage::GraphStore::Memory"]
+  Woods -->|construction: new| Woods__Storage__GraphStore__Memory
+  Woods -->|construction: new| Woods__Builder
+  Woods__MCP -->|construction: new| Woods__Generation
+  Woods__MCP -->|construction: new| SQLite3__Database
+  Woods__MCP -->|construction: new| Woods__Db__Migrator
+  Woods__MCP -->|construction: new| Woods__Temporal__SnapshotStore
+  Woods__MCP -->|construction: new| Woods__Temporal__JsonSnapshotStore
+  Woods__MCP -->|construction: new| BootstrapState
+  Woods__MCP -->|construction: new| Woods__Builder
+  Woods__MCP -->|construction: new| IndexArtifact
+  Woods__MCP -->|construction: new| Woods__Builder
+  Woods__MCP -->|construction: new| Woods__Generation
+  Woods__MCP -->|construction: new| Woods__Builder
+  Woods__MCP -->|construction: new| Woods__Storage__GraphStore__Memory
+  Woods__MCP -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper(["new"])
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Generation
+  Woods__MCP__Bootstrapper -->|construction: new| SQLite3__Database
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Db__Migrator
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Temporal__SnapshotStore
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Temporal__JsonSnapshotStore
+  Woods__MCP__Bootstrapper -->|construction: new| BootstrapState
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper -->|construction: new| IndexArtifact
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Generation
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Storage__GraphStore__Memory
+  Woods__MCP__Bootstrapper -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper_manifest_present_(["new"])
+  Woods__MCP__Bootstrapper_manifest_present_ -->|construction: new| Woods__Generation
+  Woods__MCP__Bootstrapper_build_snapshot_store(["new"])
+  Woods__MCP__Bootstrapper_build_snapshot_store -->|construction: new| SQLite3__Database
+  Woods__MCP__Bootstrapper_build_snapshot_store -->|construction: new| Woods__Db__Migrator
+  Woods__MCP__Bootstrapper_build_snapshot_store -->|construction: new| Woods__Temporal__SnapshotStore
+  Woods__MCP__Bootstrapper_build_snapshot_store -->|construction: new| Woods__Temporal__JsonSnapshotStore
+  Woods__MCP__Bootstrapper_build_retriever(["new"])
+  Woods__MCP__Bootstrapper_build_retriever -->|construction: new| BootstrapState
+  Woods__MCP__Bootstrapper_build_resolved_config(["new"])
+  Woods__MCP__Bootstrapper_build_resolved_config -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper_build_artifact(["new"])
+  Woods__MCP__Bootstrapper_build_artifact -->|construction: new| IndexArtifact
+  Woods__MCP__Bootstrapper_build_retriever_from_config(["new"])
+  Woods__MCP__Bootstrapper_build_retriever_from_config -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper_hydrated_graph_store(["new"])
+  Woods__MCP__Bootstrapper_hydrated_graph_store -->|construction: new| Woods__Generation
+  Woods__MCP__Bootstrapper_hydrated_graph_store -->|construction: new| Woods__Builder
+  Woods__MCP__Bootstrapper_hydrated_graph_store -->|construction: new| Woods__Storage__GraphStore__Memory
+  Woods__MCP__Bootstrapper_probe_and_mark_state(["new"])
+  Woods__MCP__Bootstrapper_probe_and_mark_state -->|construction: new| Woods__Builder
+  Woods -->|construction: new| Woods__Builder
+  URI["URI"]
+  Woods -->|deserialization: parse| URI
+  Woods__MCP -->|construction: new| Woods__Builder
+  Woods__MCP -->|deserialization: parse| URI
+  Woods__MCP__ConfigResolver(["new"])
+  Woods__MCP__ConfigResolver -->|construction: new| Woods__Builder
+  Woods__MCP__ConfigResolver -->|deserialization: parse| URI
+  Woods__MCP__ConfigResolver_live_resolved_config(["new"])
+  Woods__MCP__ConfigResolver_live_resolved_config -->|construction: new| Woods__Builder
+  Woods__MCP__ConfigResolver_ollama_reachable_[\"deserialization"\]
+  Woods__MCP__ConfigResolver_ollama_reachable_ -->|deserialization: parse| URI
+  TYPE_DIRS["TYPE_DIRS"]
+  Woods -->|serialization: to_h| TYPE_DIRS
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Hash
+  Woods -->|construction: new| Mutex
+  Woods -->|construction: new| ConditionVariable
+  Woods -->|construction: new| Mutex
+  Woods -->|construction: new| Woods__Generation
+  Woods -->|construction: new| Regexp
+  unit___["unit.[]"]
+  Woods -->|serialization: to_json| unit___
+  Woods -->|construction: new| Woods__Generation
+  Woods -->|construction: new| Woods__Generation
   Woods -->|construction: new| Regexp
   Woods -->|construction: new| Regexp
   Woods -->|deserialization: parse| JSON
   Woods -->|deserialization: parse| JSON
   Woods -->|deserialization: parse| JSON
   Woods -->|construction: new| Set
-  Woods__MCP(["new"])
+  Woods__MCP -->|serialization: to_h| TYPE_DIRS
   Woods__MCP -->|construction: new| Pathname
+  Woods__MCP -->|construction: new| Hash
+  Woods__MCP -->|construction: new| Mutex
+  Woods__MCP -->|construction: new| ConditionVariable
+  Woods__MCP -->|construction: new| Mutex
+  Woods__MCP -->|construction: new| Woods__Generation
+  Woods__MCP -->|construction: new| Regexp
+  Woods__MCP -->|serialization: to_json| unit___
+  Woods__MCP -->|construction: new| Woods__Generation
+  Woods__MCP -->|construction: new| Woods__Generation
   Woods__MCP -->|construction: new| Regexp
   Woods__MCP -->|construction: new| Regexp
   Woods__MCP -->|deserialization: parse| JSON
   Woods__MCP -->|deserialization: parse| JSON
   Woods__MCP -->|deserialization: parse| JSON
   Woods__MCP -->|construction: new| Set
-  Woods__MCP__IndexReader(["new"])
+  Woods__MCP__IndexReader(["to_h"])
+  Woods__MCP__IndexReader -->|serialization: to_h| TYPE_DIRS
   Woods__MCP__IndexReader -->|construction: new| Pathname
+  Woods__MCP__IndexReader -->|construction: new| Hash
+  Woods__MCP__IndexReader -->|construction: new| Mutex
+  Woods__MCP__IndexReader -->|construction: new| ConditionVariable
+  Woods__MCP__IndexReader -->|construction: new| Mutex
+  Woods__MCP__IndexReader -->|construction: new| Woods__Generation
+  Woods__MCP__IndexReader -->|construction: new| Regexp
+  Woods__MCP__IndexReader -->|serialization: to_json| unit___
+  Woods__MCP__IndexReader -->|construction: new| Woods__Generation
+  Woods__MCP__IndexReader -->|construction: new| Woods__Generation
   Woods__MCP__IndexReader -->|construction: new| Regexp
   Woods__MCP__IndexReader -->|construction: new| Regexp
   Woods__MCP__IndexReader -->|deserialization: parse| JSON
@@ -1042,10 +1888,21 @@ flowchart TD
   Woods__MCP__IndexReader -->|construction: new| Set
   Woods__MCP__IndexReader_initialize(["new"])
   Woods__MCP__IndexReader_initialize -->|construction: new| Pathname
-  Woods__MCP__IndexReader_search(["new"])
-  Woods__MCP__IndexReader_search -->|construction: new| Regexp
-  Woods__MCP__IndexReader_framework_sources(["new"])
-  Woods__MCP__IndexReader_framework_sources -->|construction: new| Regexp
+  Woods__MCP__IndexReader_initialize -->|construction: new| Hash
+  Woods__MCP__IndexReader_initialize -->|construction: new| Mutex
+  Woods__MCP__IndexReader_initialize -->|construction: new| ConditionVariable
+  Woods__MCP__IndexReader_initialize -->|construction: new| Mutex
+  Woods__MCP__IndexReader_initialize -->|construction: new| Woods__Generation
+  Woods__MCP__IndexReader_framework_sources_within_pin(["new"])
+  Woods__MCP__IndexReader_framework_sources_within_pin -->|construction: new| Regexp
+  Woods__MCP__IndexReader_framework_sources_within_pin -->|serialization: to_json| unit___
+  Woods__MCP__IndexReader_manifest_present_(["new"])
+  Woods__MCP__IndexReader_manifest_present_ -->|construction: new| Woods__Generation
+  Woods__MCP__IndexReader_resolve_payload_dir(["new"])
+  Woods__MCP__IndexReader_resolve_payload_dir -->|construction: new| Woods__Generation
+  Woods__MCP__IndexReader_compile_search_pattern(["new"])
+  Woods__MCP__IndexReader_compile_search_pattern -->|construction: new| Regexp
+  Woods__MCP__IndexReader_compile_search_pattern -->|construction: new| Regexp
   Woods__MCP__IndexReader_read_index[\"deserialization"\]
   Woods__MCP__IndexReader_read_index -->|deserialization: parse| JSON
   Woods__MCP__IndexReader_load_unit[\"deserialization"\]
@@ -1054,71 +1911,309 @@ flowchart TD
   Woods__MCP__IndexReader_parse_json -->|deserialization: parse| JSON
   Woods__MCP__IndexReader_traverse(["new"])
   Woods__MCP__IndexReader_traverse -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods__MCP -->|construction: new| Set
+  Woods__MCP__IndexReaderPinning(["new"])
+  Woods__MCP__IndexReaderPinning -->|construction: new| Set
+  __jsonrpc___2_0___error____code___32_002__message___Origin_not_allowed_____id__nil__["{ jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' }, id: nil }"]
+  Woods -->|serialization: to_json| __jsonrpc___2_0___error____code___32_002__message___Origin_not_allowed_____id__nil__
+  __jsonrpc___2_0___error____code___32_002__message___Host_not_allowed_____id__nil__["{ jsonrpc: '2.0', error: { code: -32_002, message: 'Host not allowed' }, id: nil }"]
+  Woods -->|serialization: to_json| __jsonrpc___2_0___error____code___32_002__message___Host_not_allowed_____id__nil__
+  Woods__MCP -->|serialization: to_json| __jsonrpc___2_0___error____code___32_002__message___Origin_not_allowed_____id__nil__
+  Woods__MCP -->|serialization: to_json| __jsonrpc___2_0___error____code___32_002__message___Host_not_allowed_____id__nil__
+  Woods__MCP__OriginGuard[/"serialization"/]
+  Woods__MCP__OriginGuard -->|serialization: to_json| __jsonrpc___2_0___error____code___32_002__message___Origin_not_allowed_____id__nil__
+  Woods__MCP__OriginGuard -->|serialization: to_json| __jsonrpc___2_0___error____code___32_002__message___Host_not_allowed_____id__nil__
+  Woods -->|deserialization: parse| URI
+  Woods -->|construction: new| Net__HTTP
+  Woods__MCP -->|deserialization: parse| URI
+  Woods__MCP -->|construction: new| Net__HTTP
+  Woods__MCP__ProviderProbe(["parse"])
+  Woods__MCP__ProviderProbe -->|deserialization: parse| URI
+  Woods__MCP__ProviderProbe -->|construction: new| Net__HTTP
+  Woods__MCP__ProviderProbe_http_get_(["parse"])
+  Woods__MCP__ProviderProbe_http_get_ -->|deserialization: parse| URI
+  Woods__MCP__ProviderProbe_http_get_ -->|construction: new| Net__HTTP
+  Woods -->|construction: new| Mutex
   IndexReader["IndexReader"]
   Woods -->|construction: new| IndexReader
   Woods -->|construction: new| MCP__Server
+  Tasks__Store["Tasks::Store"]
+  Woods -->|construction: new| Tasks__Store
   Woods -->|construction: new| MCP__Tool__Response
+  Woods -->|construction: new| MCP__Tool__Response
+  Woods -->|construction: new| MCP__Tool__Response
+  Woods -->|construction: new| Woods__GraphAnalyzer
   Woods -->|construction: new| Woods__FlowAssembler
   Woods__SessionTracer__SessionFlowAssembler["Woods::SessionTracer::SessionFlowAssembler"]
   Woods -->|construction: new| Woods__SessionTracer__SessionFlowAssembler
-  Woods -->|construction: new| Thread
   Woods -->|construction: new| Woods__Extractor
-  Logger["Logger"]
-  Woods -->|construction: new| Logger
+  Woods -->|construction: new| Woods__Coordination__PipelineLock
   Woods -->|construction: new| Thread
-  Woods -->|construction: new| Woods__Builder
-  Woods__Embedding__TextPreparer["Woods::Embedding::TextPreparer"]
-  Woods -->|construction: new| Woods__Embedding__TextPreparer
-  Woods -->|construction: new| Woods__Embedding__Indexer
   Woods -->|construction: new| Logger
   StandardError["StandardError"]
   Woods -->|construction: new| StandardError
   Woods -->|construction: new| Woods__Feedback__GapDetector
+  Woods__Notion__Exporter["Woods::Notion::Exporter"]
+  Woods -->|construction: new| Woods__Notion__Exporter
   MCP__ResourceTemplate["MCP::ResourceTemplate"]
   Woods -->|construction: new| MCP__ResourceTemplate
   Woods -->|construction: new| MCP__ResourceTemplate
   MCP__Resource["MCP::Resource"]
   Woods -->|construction: new| MCP__Resource
   Woods -->|construction: new| MCP__Resource
+  Woods__Configuration["Woods::Configuration"]
+  Woods -->|construction: new| Woods__Configuration
+  Woods -->|construction: new| Woods__Generation
+  Woods -->|deserialization: parse| JSON
+  Woods__Watch__Status["Woods::Watch::Status"]
+  Woods -->|construction: new| Woods__Watch__Status
+  Woods -->|deserialization: parse| URI
+  MCP__Server__RequestHandlerError["MCP::Server::RequestHandlerError"]
+  Woods -->|construction: new| MCP__Server__RequestHandlerError
+  Woods__MCP -->|construction: new| Mutex
   Woods__MCP -->|construction: new| IndexReader
   Woods__MCP -->|construction: new| MCP__Server
+  Woods__MCP -->|construction: new| Tasks__Store
   Woods__MCP -->|construction: new| MCP__Tool__Response
+  Woods__MCP -->|construction: new| MCP__Tool__Response
+  Woods__MCP -->|construction: new| MCP__Tool__Response
+  Woods__MCP -->|construction: new| Woods__GraphAnalyzer
   Woods__MCP -->|construction: new| Woods__FlowAssembler
   Woods__MCP -->|construction: new| Woods__SessionTracer__SessionFlowAssembler
-  Woods__MCP -->|construction: new| Thread
   Woods__MCP -->|construction: new| Woods__Extractor
-  Woods__MCP -->|construction: new| Logger
+  Woods__MCP -->|construction: new| Woods__Coordination__PipelineLock
   Woods__MCP -->|construction: new| Thread
-  Woods__MCP -->|construction: new| Woods__Builder
-  Woods__MCP -->|construction: new| Woods__Embedding__TextPreparer
-  Woods__MCP -->|construction: new| Woods__Embedding__Indexer
   Woods__MCP -->|construction: new| Logger
   Woods__MCP -->|construction: new| StandardError
   Woods__MCP -->|construction: new| Woods__Feedback__GapDetector
+  Woods__MCP -->|construction: new| Woods__Notion__Exporter
   Woods__MCP -->|construction: new| MCP__ResourceTemplate
   Woods__MCP -->|construction: new| MCP__ResourceTemplate
   Woods__MCP -->|construction: new| MCP__Resource
   Woods__MCP -->|construction: new| MCP__Resource
+  Woods__MCP -->|construction: new| Woods__Configuration
+  Woods__MCP -->|construction: new| Woods__Generation
+  Woods__MCP -->|deserialization: parse| JSON
+  Woods__MCP -->|construction: new| Woods__Watch__Status
+  Woods__MCP -->|deserialization: parse| URI
+  Woods__MCP -->|construction: new| MCP__Server__RequestHandlerError
   Woods__MCP__Server(["new"])
+  Woods__MCP__Server -->|construction: new| Mutex
   Woods__MCP__Server -->|construction: new| IndexReader
   Woods__MCP__Server -->|construction: new| MCP__Server
+  Woods__MCP__Server -->|construction: new| Tasks__Store
   Woods__MCP__Server -->|construction: new| MCP__Tool__Response
+  Woods__MCP__Server -->|construction: new| MCP__Tool__Response
+  Woods__MCP__Server -->|construction: new| MCP__Tool__Response
+  Woods__MCP__Server -->|construction: new| Woods__GraphAnalyzer
   Woods__MCP__Server -->|construction: new| Woods__FlowAssembler
   Woods__MCP__Server -->|construction: new| Woods__SessionTracer__SessionFlowAssembler
-  Woods__MCP__Server -->|construction: new| Thread
   Woods__MCP__Server -->|construction: new| Woods__Extractor
-  Woods__MCP__Server -->|construction: new| Logger
+  Woods__MCP__Server -->|construction: new| Woods__Coordination__PipelineLock
   Woods__MCP__Server -->|construction: new| Thread
-  Woods__MCP__Server -->|construction: new| Woods__Builder
-  Woods__MCP__Server -->|construction: new| Woods__Embedding__TextPreparer
-  Woods__MCP__Server -->|construction: new| Woods__Embedding__Indexer
   Woods__MCP__Server -->|construction: new| Logger
   Woods__MCP__Server -->|construction: new| StandardError
   Woods__MCP__Server -->|construction: new| Woods__Feedback__GapDetector
+  Woods__MCP__Server -->|construction: new| Woods__Notion__Exporter
   Woods__MCP__Server -->|construction: new| MCP__ResourceTemplate
   Woods__MCP__Server -->|construction: new| MCP__ResourceTemplate
   Woods__MCP__Server -->|construction: new| MCP__Resource
   Woods__MCP__Server -->|construction: new| MCP__Resource
+  Woods__MCP__Server -->|construction: new| Woods__Configuration
+  Woods__MCP__Server -->|construction: new| Woods__Generation
+  Woods__MCP__Server -->|deserialization: parse| JSON
+  Woods__MCP__Server -->|construction: new| Woods__Watch__Status
+  Woods__MCP__Server -->|deserialization: parse| URI
+  Woods__MCP__Server -->|construction: new| MCP__Server__RequestHandlerError
+  task["task"]
+  Woods -->|serialization: to_h| task
+  Woods -->|serialization: to_h| task
+  Woods__MCP -->|serialization: to_h| task
+  Woods__MCP -->|serialization: to_h| task
+  Woods__MCP__Tasks[/"serialization"/]
+  Woods__MCP__Tasks -->|serialization: to_h| task
+  Woods__MCP__Tasks -->|serialization: to_h| task
+  Woods__MCP__Tasks__Extension[/"serialization"/]
+  Woods__MCP__Tasks__Extension -->|serialization: to_h| task
+  Woods__MCP__Tasks__Extension -->|serialization: to_h| task
+  Woods -->|construction: new| Struct
+  each_pair["each_pair"]
+  Woods -->|serialization: to_h| each_pair
+  Task["Task"]
+  Woods -->|construction: new| Task
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Task
+  Woods__MCP -->|construction: new| Struct
+  Woods__MCP -->|serialization: to_h| each_pair
+  Woods__MCP -->|construction: new| Task
+  Woods__MCP -->|deserialization: parse| JSON
+  Woods__MCP -->|construction: new| Task
+  Woods__MCP__Tasks -->|construction: new| Struct
+  Woods__MCP__Tasks -->|serialization: to_h| each_pair
+  Woods__MCP__Tasks -->|construction: new| Task
+  Woods__MCP__Tasks -->|deserialization: parse| JSON
+  Woods__MCP__Tasks -->|construction: new| Task
+  Woods__MCP__Tasks__Store(["new"])
+  Woods__MCP__Tasks__Store -->|construction: new| Struct
+  Woods__MCP__Tasks__Store -->|serialization: to_h| each_pair
+  Woods__MCP__Tasks__Store -->|construction: new| Task
+  Woods__MCP__Tasks__Store -->|deserialization: parse| JSON
+  Woods__MCP__Tasks__Store -->|construction: new| Task
+  Woods__MCP__Tasks__Store_create_(["new"])
+  Woods__MCP__Tasks__Store_create_ -->|construction: new| Task
+  Woods__MCP__Tasks__Store_read(["parse"])
+  Woods__MCP__Tasks__Store_read -->|deserialization: parse| JSON
+  Woods__MCP__Tasks__Store_read -->|construction: new| Task
+  Woods -->|deserialization: parse| JSON
+  MCP__Tool__Response_new["MCP::Tool::Response.new"]
+  Woods -->|serialization: to_h| MCP__Tool__Response_new
+  Woods -->|construction: new| MCP__Tool__Response
+  Woods__MCP -->|deserialization: parse| JSON
+  Woods__MCP -->|serialization: to_h| MCP__Tool__Response_new
+  Woods__MCP -->|construction: new| MCP__Tool__Response
+  Woods__MCP__ToolContract(["parse"])
+  Woods__MCP__ToolContract -->|deserialization: parse| JSON
+  Woods__MCP__ToolContract -->|serialization: to_h| MCP__Tool__Response_new
+  Woods__MCP__ToolContract -->|construction: new| MCP__Tool__Response
+  Woods__MCP__ToolContract__Dispatch(["to_h"])
+  Woods__MCP__ToolContract__Dispatch -->|serialization: to_h| MCP__Tool__Response_new
+  Woods__MCP__ToolContract__Dispatch -->|construction: new| MCP__Tool__Response
+  Woods__MCP__ToolContract__Dispatch_contract_error(["to_h"])
+  Woods__MCP__ToolContract__Dispatch_contract_error -->|serialization: to_h| MCP__Tool__Response_new
+  Woods__MCP__ToolContract__Dispatch_contract_error -->|construction: new| MCP__Tool__Response
+  Renderers__ClaudeRenderer["Renderers::ClaudeRenderer"]
+  Woods -->|construction: new| Renderers__ClaudeRenderer
+  Renderers__MarkdownRenderer["Renderers::MarkdownRenderer"]
+  Woods -->|construction: new| Renderers__MarkdownRenderer
+  Renderers__PlainRenderer["Renderers::PlainRenderer"]
+  Woods -->|construction: new| Renderers__PlainRenderer
+  Renderers__JsonRenderer["Renderers::JsonRenderer"]
+  Woods -->|construction: new| Renderers__JsonRenderer
+  Woods__MCP -->|construction: new| Renderers__ClaudeRenderer
+  Woods__MCP -->|construction: new| Renderers__MarkdownRenderer
+  Woods__MCP -->|construction: new| Renderers__PlainRenderer
+  Woods__MCP -->|construction: new| Renderers__JsonRenderer
+  Woods__MCP__ToolResponseRenderer(["new"])
+  Woods__MCP__ToolResponseRenderer -->|construction: new| Renderers__ClaudeRenderer
+  Woods__MCP__ToolResponseRenderer -->|construction: new| Renderers__MarkdownRenderer
+  Woods__MCP__ToolResponseRenderer -->|construction: new| Renderers__PlainRenderer
+  Woods__MCP__ToolResponseRenderer -->|construction: new| Renderers__JsonRenderer
+  Woods__MCP__ToolResponseRenderer_for(["new"])
+  Woods__MCP__ToolResponseRenderer_for -->|construction: new| Renderers__ClaudeRenderer
+  Woods__MCP__ToolResponseRenderer_for -->|construction: new| Renderers__MarkdownRenderer
+  Woods__MCP__ToolResponseRenderer_for -->|construction: new| Renderers__PlainRenderer
+  Woods__MCP__ToolResponseRenderer_for -->|construction: new| Renderers__JsonRenderer
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Net__HTTP
+  Woods -->|construction: new| Net__HTTP__Post
+  Net__HTTP__Patch["Net::HTTP::Patch"]
+  Woods -->|construction: new| Net__HTTP__Patch
+  Net__HTTP__Get["Net::HTTP::Get"]
+  Woods -->|construction: new| Net__HTTP__Get
+  Woods__Notion(["parse"])
+  Woods__Notion -->|deserialization: parse| JSON
+  Woods__Notion -->|deserialization: parse| JSON
+  Woods__Notion -->|deserialization: parse| JSON
+  Woods__Notion -->|construction: new| Net__HTTP
+  Woods__Notion -->|construction: new| Net__HTTP__Post
+  Woods__Notion -->|construction: new| Net__HTTP__Patch
+  Woods__Notion -->|construction: new| Net__HTTP__Get
+  Woods__Notion__Client(["parse"])
+  Woods__Notion__Client -->|deserialization: parse| JSON
+  Woods__Notion__Client -->|deserialization: parse| JSON
+  Woods__Notion__Client -->|deserialization: parse| JSON
+  Woods__Notion__Client -->|construction: new| Net__HTTP
+  Woods__Notion__Client -->|construction: new| Net__HTTP__Post
+  Woods__Notion__Client -->|construction: new| Net__HTTP__Patch
+  Woods__Notion__Client -->|construction: new| Net__HTTP__Get
+  Woods__Notion__Client_request[\"deserialization"\]
+  Woods__Notion__Client_request -->|deserialization: parse| JSON
+  Woods__Notion__Client_raise_ambiguous_response_error[\"deserialization"\]
+  Woods__Notion__Client_raise_ambiguous_response_error -->|deserialization: parse| JSON
+  Woods__Notion__Client_raise_api_error[\"deserialization"\]
+  Woods__Notion__Client_raise_api_error -->|deserialization: parse| JSON
+  Woods__Notion__Client_execute_http(["new"])
+  Woods__Notion__Client_execute_http -->|construction: new| Net__HTTP
+  Woods__Notion__Client_build_request(["new"])
+  Woods__Notion__Client_build_request -->|construction: new| Net__HTTP__Post
+  Woods__Notion__Client_build_request -->|construction: new| Net__HTTP__Patch
+  Woods__Notion__Client_build_request -->|construction: new| Net__HTTP__Get
+  Client["Client"]
+  Woods -->|construction: new| Client
+  Mappers__ModelMapper["Mappers::ModelMapper"]
+  Woods -->|construction: new| Mappers__ModelMapper
+  Mappers__ColumnMapper["Mappers::ColumnMapper"]
+  Woods -->|construction: new| Mappers__ColumnMapper
+  Mappers__MigrationMapper["Mappers::MigrationMapper"]
+  Woods -->|construction: new| Mappers__MigrationMapper
+  Woods -->|construction: new| Hash
+  SyncManifest["SyncManifest"]
+  Woods -->|construction: new| SyncManifest
+  Woods -->|construction: new| Woods__MCP__IndexReader
+  Woods__Notion -->|construction: new| Client
+  Woods__Notion -->|construction: new| Mappers__ModelMapper
+  Woods__Notion -->|construction: new| Mappers__ColumnMapper
+  Woods__Notion -->|construction: new| Mappers__MigrationMapper
+  Woods__Notion -->|construction: new| Hash
+  Woods__Notion -->|construction: new| SyncManifest
+  Woods__Notion -->|construction: new| Woods__MCP__IndexReader
+  Woods__Notion__Exporter -->|construction: new| Client
+  Woods__Notion__Exporter -->|construction: new| Mappers__ModelMapper
+  Woods__Notion__Exporter -->|construction: new| Mappers__ColumnMapper
+  Woods__Notion__Exporter -->|construction: new| Mappers__MigrationMapper
+  Woods__Notion__Exporter -->|construction: new| Hash
+  Woods__Notion__Exporter -->|construction: new| SyncManifest
+  Woods__Notion__Exporter -->|construction: new| Woods__MCP__IndexReader
+  Woods__Notion__Exporter_initialize(["new"])
+  Woods__Notion__Exporter_initialize -->|construction: new| Client
+  Woods__Notion__Exporter_sync_data_models(["new"])
+  Woods__Notion__Exporter_sync_data_models -->|construction: new| Mappers__ModelMapper
+  Woods__Notion__Exporter_sync_model_columns(["new"])
+  Woods__Notion__Exporter_sync_model_columns -->|construction: new| Mappers__ColumnMapper
+  Woods__Notion__Exporter_load_migration_dates(["new"])
+  Woods__Notion__Exporter_load_migration_dates -->|construction: new| Mappers__MigrationMapper
+  Woods__Notion__Exporter_shared_table_names(["new"])
+  Woods__Notion__Exporter_shared_table_names -->|construction: new| Hash
+  Woods__Notion__Exporter_build_manifest(["new"])
+  Woods__Notion__Exporter_build_manifest -->|construction: new| SyncManifest
+  Woods__Notion__Exporter_build_reader(["new"])
+  Woods__Notion__Exporter_build_reader -->|construction: new| Woods__MCP__IndexReader
+  Woods -->|construction: new| klass
+  Woods__Notion -->|construction: new| klass
+  Woods__Notion__Mapper(["new"])
+  Woods__Notion__Mapper -->|construction: new| klass
+  Woods__Notion__Mapper_for(["new"])
+  Woods__Notion__Mapper_for -->|construction: new| klass
+  Woods__Console__CredentialScanner["Woods::Console::CredentialScanner"]
+  Woods -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Notion -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Notion__Mappers(["new"])
+  Woods__Notion__Mappers -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Notion__Mappers__ModelMapper(["new"])
+  Woods__Notion__Mappers__ModelMapper -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Notion__Mappers__ModelMapper_scanner(["new"])
+  Woods__Notion__Mappers__ModelMapper_scanner -->|construction: new| Woods__Console__CredentialScanner
+  Woods -->|construction: new| Mutex
+  Woods__Notion -->|construction: new| Mutex
+  Woods__Notion__RateLimiter(["new"])
+  Woods__Notion__RateLimiter -->|construction: new| Mutex
+  Woods__Notion__RateLimiter_initialize(["new"])
+  Woods__Notion__RateLimiter_initialize -->|construction: new| Mutex
+  value_map_sort_by["value.map.sort_by"]
+  Woods -->|serialization: to_h| value_map_sort_by
+  Woods -->|deserialization: parse| JSON
+  Woods__Notion -->|serialization: to_h| value_map_sort_by
+  Woods__Notion -->|deserialization: parse| JSON
+  Woods__Notion__SyncManifest[/"serialization"/]
+  Woods__Notion__SyncManifest -->|serialization: to_h| value_map_sort_by
+  Woods__Notion__SyncManifest -->|deserialization: parse| JSON
+  Woods__Notion__SyncManifest_canonicalize[/"serialization"/]
+  Woods__Notion__SyncManifest_canonicalize -->|serialization: to_h| value_map_sort_by
+  Woods__Notion__SyncManifest_load[\"deserialization"\]
+  Woods__Notion__SyncManifest_load -->|deserialization: parse| JSON
   Woods -->|construction: new| Struct
   HealthStatus["HealthStatus"]
   Woods -->|construction: new| HealthStatus
@@ -1130,6 +2225,95 @@ flowchart TD
   Woods__Observability__HealthCheck -->|construction: new| HealthStatus
   Woods__Observability__HealthCheck_run(["new"])
   Woods__Observability__HealthCheck_run -->|construction: new| HealthStatus
+  Woods -->|construction: new| Hash
+  Woods__Obsidian(["new"])
+  Woods__Obsidian -->|construction: new| Hash
+  Woods__Obsidian__NameMapper(["new"])
+  Woods__Obsidian__NameMapper -->|construction: new| Hash
+  Woods__Obsidian__NameMapper_build(["new"])
+  Woods__Obsidian__NameMapper_build -->|construction: new| Hash
+  Woods__Export__UnitFacts["Woods::Export::UnitFacts"]
+  Woods -->|construction: new| Woods__Export__UnitFacts
+  Woods -->|construction: new| Woods__Export__UnitFacts
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods__Obsidian -->|construction: new| Woods__Export__UnitFacts
+  Woods__Obsidian -->|construction: new| Woods__Export__UnitFacts
+  Woods__Obsidian -->|construction: new| Set
+  Woods__Obsidian -->|construction: new| Set
+  Woods__Obsidian -->|construction: new| Set
+  Woods__Obsidian__NoteBuilder(["new"])
+  Woods__Obsidian__NoteBuilder -->|construction: new| Woods__Export__UnitFacts
+  Woods__Obsidian__NoteBuilder -->|construction: new| Woods__Export__UnitFacts
+  Woods__Obsidian__NoteBuilder -->|construction: new| Set
+  Woods__Obsidian__NoteBuilder -->|construction: new| Set
+  Woods__Obsidian__NoteBuilder -->|construction: new| Set
+  Woods__Obsidian__NoteBuilder_associations_section(["new"])
+  Woods__Obsidian__NoteBuilder_associations_section -->|construction: new| Woods__Export__UnitFacts
+  Woods__Obsidian__NoteBuilder_schema_section(["new"])
+  Woods__Obsidian__NoteBuilder_schema_section -->|construction: new| Woods__Export__UnitFacts
+  Woods__Obsidian__NoteBuilder_identifier_set(["new"])
+  Woods__Obsidian__NoteBuilder_identifier_set -->|construction: new| Set
+  Woods__Obsidian__NoteBuilder_plain_set(["new"])
+  Woods__Obsidian__NoteBuilder_plain_set -->|construction: new| Set
+  Woods__Obsidian__NoteBuilder_cycle_member_set(["new"])
+  Woods__Obsidian__NoteBuilder_cycle_member_set -->|construction: new| Set
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Set
+  NameMapper["NameMapper"]
+  Woods -->|construction: new| NameMapper
+  NoteBuilder["NoteBuilder"]
+  Woods -->|construction: new| NoteBuilder
+  emitted["emitted"]
+  Woods -->|serialization: to_h| emitted
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  hash_sort["hash.sort"]
+  Woods -->|serialization: to_h| hash_sort
+  Woods -->|construction: new| Woods__Console__CredentialScanner
+  Woods -->|construction: new| Woods__MCP__IndexReader
+  Woods__Obsidian -->|construction: new| Pathname
+  Woods__Obsidian -->|construction: new| Set
+  Woods__Obsidian -->|construction: new| NameMapper
+  Woods__Obsidian -->|construction: new| NoteBuilder
+  Woods__Obsidian -->|serialization: to_h| emitted
+  Woods__Obsidian -->|construction: new| Pathname
+  Woods__Obsidian -->|construction: new| Pathname
+  Woods__Obsidian -->|serialization: to_h| hash_sort
+  Woods__Obsidian -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Obsidian -->|construction: new| Woods__MCP__IndexReader
+  Woods__Obsidian__VaultExporter(["new"])
+  Woods__Obsidian__VaultExporter -->|construction: new| Pathname
+  Woods__Obsidian__VaultExporter -->|construction: new| Set
+  Woods__Obsidian__VaultExporter -->|construction: new| NameMapper
+  Woods__Obsidian__VaultExporter -->|construction: new| NoteBuilder
+  Woods__Obsidian__VaultExporter -->|serialization: to_h| emitted
+  Woods__Obsidian__VaultExporter -->|construction: new| Pathname
+  Woods__Obsidian__VaultExporter -->|construction: new| Pathname
+  Woods__Obsidian__VaultExporter -->|serialization: to_h| hash_sort
+  Woods__Obsidian__VaultExporter -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Obsidian__VaultExporter -->|construction: new| Woods__MCP__IndexReader
+  Woods__Obsidian__VaultExporter_initialize(["new"])
+  Woods__Obsidian__VaultExporter_initialize -->|construction: new| Pathname
+  Woods__Obsidian__VaultExporter_export_all(["new"])
+  Woods__Obsidian__VaultExporter_export_all -->|construction: new| Set
+  Woods__Obsidian__VaultExporter_build_mapper(["new"])
+  Woods__Obsidian__VaultExporter_build_mapper -->|construction: new| NameMapper
+  Woods__Obsidian__VaultExporter_build_note_builder(["new"])
+  Woods__Obsidian__VaultExporter_build_note_builder -->|construction: new| NoteBuilder
+  Woods__Obsidian__VaultExporter_write_sidecar[/"serialization"/]
+  Woods__Obsidian__VaultExporter_write_sidecar -->|serialization: to_h| emitted
+  Woods__Obsidian__VaultExporter_managed_notes(["new"])
+  Woods__Obsidian__VaultExporter_managed_notes -->|construction: new| Pathname
+  Woods__Obsidian__VaultExporter_canonical(["new"])
+  Woods__Obsidian__VaultExporter_canonical -->|construction: new| Pathname
+  Woods__Obsidian__VaultExporter_sort_hash[/"serialization"/]
+  Woods__Obsidian__VaultExporter_sort_hash -->|serialization: to_h| hash_sort
+  Woods__Obsidian__VaultExporter_scanner(["new"])
+  Woods__Obsidian__VaultExporter_scanner -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Obsidian__VaultExporter_build_reader(["new"])
+  Woods__Obsidian__VaultExporter_build_reader -->|construction: new| Woods__MCP__IndexReader
   Woods -->|deserialization: parse| JSON
   Time["Time"]
   Woods -->|deserialization: parse| Time
@@ -1142,18 +2326,76 @@ flowchart TD
   Woods__Operator__PipelineGuard -->|deserialization: parse| JSON
   Woods__Operator__PipelineGuard -->|deserialization: parse| Time
   Woods__Operator__PipelineGuard -->|deserialization: parse| JSON
-  Woods__Operator__PipelineGuard_record_[\"deserialization"\]
-  Woods__Operator__PipelineGuard_record_ -->|deserialization: parse| JSON
+  Woods__Operator__PipelineGuard_state_status[\"deserialization"\]
+  Woods__Operator__PipelineGuard_state_status -->|deserialization: parse| JSON
   Woods__Operator__PipelineGuard_last_run[\"deserialization"\]
   Woods__Operator__PipelineGuard_last_run -->|deserialization: parse| Time
-  Woods__Operator__PipelineGuard_read_state[\"deserialization"\]
-  Woods__Operator__PipelineGuard_read_state -->|deserialization: parse| JSON
+  Woods__Operator__PipelineGuard_parse_state[\"deserialization"\]
+  Woods__Operator__PipelineGuard_parse_state -->|deserialization: parse| JSON
+  Woods -->|construction: new| Woods__Generation
   Woods -->|deserialization: parse| JSON
+  Woods__Operator -->|construction: new| Woods__Generation
   Woods__Operator -->|deserialization: parse| JSON
-  Woods__Operator__StatusReporter[\"deserialization"\]
+  Woods__Operator__StatusReporter(["new"])
+  Woods__Operator__StatusReporter -->|construction: new| Woods__Generation
   Woods__Operator__StatusReporter -->|deserialization: parse| JSON
-  Woods__Operator__StatusReporter_read_manifest[\"deserialization"\]
+  Woods__Operator__StatusReporter_read_manifest(["new"])
+  Woods__Operator__StatusReporter_read_manifest -->|construction: new| Woods__Generation
   Woods__Operator__StatusReporter_read_manifest -->|deserialization: parse| JSON
+  Woods -->|construction: new| Struct
+  k["k"]
+  Woods -->|construction: new| k
+  Rule["Rule"]
+  Woods -->|construction: new| Rule
+  Woods -->|construction: new| Rule
+  Woods__PathDispatcher(["new"])
+  Woods__PathDispatcher -->|construction: new| Struct
+  Woods__PathDispatcher -->|construction: new| k
+  Woods__PathDispatcher -->|construction: new| Rule
+  Woods__PathDispatcher -->|construction: new| Rule
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  Woods__PayloadStore(["new"])
+  Woods__PayloadStore -->|construction: new| Pathname
+  Woods__PayloadStore -->|construction: new| Pathname
+  Woods__PayloadStore -->|construction: new| Pathname
+  Woods__PayloadStore_initialize(["new"])
+  Woods__PayloadStore_initialize -->|construction: new| Pathname
+  Woods__PayloadStore_clone(["new"])
+  Woods__PayloadStore_clone -->|construction: new| Pathname
+  Woods__PayloadStore_clone -->|construction: new| Pathname
+  Woods -->|construction: new| Pathname
+  Woods -->|deserialization: parse| JSON
+  Woods__Builder__PRESETS_keys_sort["Woods::Builder::PRESETS.keys.sort"]
+  Woods -->|serialization: to_h| Woods__Builder__PRESETS_keys_sort
+  predicate_names["predicate_names"]
+  Woods -->|serialization: to_h| predicate_names
+  Woods__Console__Server__EXECUTABLE_MODES_keys_sort["Woods::Console::Server::EXECUTABLE_MODES.keys.sort"]
+  Woods -->|serialization: to_h| Woods__Console__Server__EXECUTABLE_MODES_keys_sort
+  current_sort["current.sort"]
+  Woods -->|serialization: to_h| current_sort
+  current_public_documentation_paths["current_public_documentation_paths"]
+  Woods -->|serialization: to_h| current_public_documentation_paths
+  Woods -->|serialization: to_h| value_keys_sort_by
+  Woods__ReleaseV2(["new"])
+  Woods__ReleaseV2 -->|construction: new| Pathname
+  Woods__ReleaseV2 -->|deserialization: parse| JSON
+  Woods__ReleaseV2 -->|serialization: to_h| Woods__Builder__PRESETS_keys_sort
+  Woods__ReleaseV2 -->|serialization: to_h| predicate_names
+  Woods__ReleaseV2 -->|serialization: to_h| Woods__Console__Server__EXECUTABLE_MODES_keys_sort
+  Woods__ReleaseV2 -->|serialization: to_h| current_sort
+  Woods__ReleaseV2 -->|serialization: to_h| current_public_documentation_paths
+  Woods__ReleaseV2 -->|serialization: to_h| value_keys_sort_by
+  Woods__ReleaseV2__SurfaceInventory(["new"])
+  Woods__ReleaseV2__SurfaceInventory -->|construction: new| Pathname
+  Woods__ReleaseV2__SurfaceInventory -->|deserialization: parse| JSON
+  Woods__ReleaseV2__SurfaceInventory -->|serialization: to_h| Woods__Builder__PRESETS_keys_sort
+  Woods__ReleaseV2__SurfaceInventory -->|serialization: to_h| predicate_names
+  Woods__ReleaseV2__SurfaceInventory -->|serialization: to_h| Woods__Console__Server__EXECUTABLE_MODES_keys_sort
+  Woods__ReleaseV2__SurfaceInventory -->|serialization: to_h| current_sort
+  Woods__ReleaseV2__SurfaceInventory -->|serialization: to_h| current_public_documentation_paths
+  Woods__ReleaseV2__SurfaceInventory -->|serialization: to_h| value_keys_sort_by
   Woods -->|construction: new| Mutex
   Woods__Resilience(["new"])
   Woods__Resilience -->|construction: new| Mutex
@@ -1165,38 +2407,59 @@ flowchart TD
   ValidationReport["ValidationReport"]
   Woods -->|construction: new| ValidationReport
   Woods -->|construction: new| ValidationReport
+  Woods -->|construction: new| Woods__Generation
   Woods -->|deserialization: parse| JSON
   Woods -->|construction: new| Set
   Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Set
   Woods__Resilience -->|construction: new| Struct
   Woods__Resilience -->|construction: new| ValidationReport
   Woods__Resilience -->|construction: new| ValidationReport
+  Woods__Resilience -->|construction: new| Woods__Generation
   Woods__Resilience -->|deserialization: parse| JSON
   Woods__Resilience -->|construction: new| Set
   Woods__Resilience -->|deserialization: parse| JSON
+  Woods__Resilience -->|construction: new| Set
   Woods__Resilience__IndexValidator(["new"])
   Woods__Resilience__IndexValidator -->|construction: new| Struct
   Woods__Resilience__IndexValidator -->|construction: new| ValidationReport
   Woods__Resilience__IndexValidator -->|construction: new| ValidationReport
+  Woods__Resilience__IndexValidator -->|construction: new| Woods__Generation
   Woods__Resilience__IndexValidator -->|deserialization: parse| JSON
   Woods__Resilience__IndexValidator -->|construction: new| Set
   Woods__Resilience__IndexValidator -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator -->|construction: new| Set
   Woods__Resilience__IndexValidator_validate(["new"])
   Woods__Resilience__IndexValidator_validate -->|construction: new| ValidationReport
   Woods__Resilience__IndexValidator_validate -->|construction: new| ValidationReport
+  Woods__Resilience__IndexValidator_payload_type_dirs(["new"])
+  Woods__Resilience__IndexValidator_payload_type_dirs -->|construction: new| Woods__Generation
   Woods__Resilience__IndexValidator_validate_type_directory(["parse"])
   Woods__Resilience__IndexValidator_validate_type_directory -->|deserialization: parse| JSON
   Woods__Resilience__IndexValidator_validate_type_directory -->|construction: new| Set
   Woods__Resilience__IndexValidator_validate_content_hash[\"deserialization"\]
   Woods__Resilience__IndexValidator_validate_content_hash -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator_check_stale_files(["new"])
+  Woods__Resilience__IndexValidator_check_stale_files -->|construction: new| Set
+  Woods -->|deserialization: parse| Time
+  Woods__ResolvedConfig(["new"])
+  Woods__ResolvedConfig -->|deserialization: parse| Time
+  Woods__ResolvedConfig_from_hash(["new"])
+  Woods__ResolvedConfig_from_configuration(["new"])
+  SearchExecutor__Candidate["SearchExecutor::Candidate"]
+  Woods -->|construction: new| SearchExecutor__Candidate
   AssembledContext["AssembledContext"]
   Woods -->|construction: new| AssembledContext
   Woods -->|construction: new| Struct
   Woods__Retrieval(["new"])
+  Woods__Retrieval -->|construction: new| SearchExecutor__Candidate
   Woods__Retrieval -->|construction: new| AssembledContext
   Woods__Retrieval -->|construction: new| Struct
   Woods__Retrieval__ContextAssembler(["new"])
+  Woods__Retrieval__ContextAssembler -->|construction: new| SearchExecutor__Candidate
   Woods__Retrieval__ContextAssembler -->|construction: new| AssembledContext
+  Woods__Retrieval__ContextAssembler_rewrite_identifier(["new"])
+  Woods__Retrieval__ContextAssembler_rewrite_identifier -->|construction: new| SearchExecutor__Candidate
   Woods__Retrieval__ContextAssembler_build_result(["new"])
   Woods__Retrieval__ContextAssembler_build_result -->|construction: new| AssembledContext
   Woods -->|construction: new| Struct
@@ -1213,21 +2476,32 @@ flowchart TD
   Woods__Retrieval__QueryClassifier_classify(["new"])
   Woods__Retrieval__QueryClassifier_classify -->|construction: new| Classification
   Woods -->|construction: new| Hash
+  candidates["candidates"]
+  Woods -->|serialization: to_h| candidates
+  ranked_each_with_index["ranked.each_with_index"]
+  Woods -->|serialization: to_h| ranked_each_with_index
   Woods -->|construction: new| Hash
   Woods -->|construction: new| Hash
-  SearchExecutor__Candidate["SearchExecutor::Candidate"]
   Woods -->|construction: new| SearchExecutor__Candidate
   Woods__Retrieval -->|construction: new| Hash
+  Woods__Retrieval -->|serialization: to_h| candidates
+  Woods__Retrieval -->|serialization: to_h| ranked_each_with_index
   Woods__Retrieval -->|construction: new| Hash
   Woods__Retrieval -->|construction: new| Hash
   Woods__Retrieval -->|construction: new| SearchExecutor__Candidate
   Woods__Retrieval__Ranker(["new"])
   Woods__Retrieval__Ranker -->|construction: new| Hash
+  Woods__Retrieval__Ranker -->|serialization: to_h| candidates
+  Woods__Retrieval__Ranker -->|serialization: to_h| ranked_each_with_index
   Woods__Retrieval__Ranker -->|construction: new| Hash
   Woods__Retrieval__Ranker -->|construction: new| Hash
   Woods__Retrieval__Ranker -->|construction: new| SearchExecutor__Candidate
   Woods__Retrieval__Ranker_compute_rrf_scores(["new"])
   Woods__Retrieval__Ranker_compute_rrf_scores -->|construction: new| Hash
+  Woods__Retrieval__Ranker_score_candidates[/"serialization"/]
+  Woods__Retrieval__Ranker_score_candidates -->|serialization: to_h| candidates
+  Woods__Retrieval__Ranker_compute_pagerank_importance_map[/"serialization"/]
+  Woods__Retrieval__Ranker_compute_pagerank_importance_map -->|serialization: to_h| ranked_each_with_index
   Woods__Retrieval__Ranker_apply_diversity_penalty(["new"])
   Woods__Retrieval__Ranker_apply_diversity_penalty -->|construction: new| Hash
   Woods__Retrieval__Ranker_apply_diversity_penalty -->|construction: new| Hash
@@ -1267,10 +2541,15 @@ flowchart TD
   Woods -->|construction: new| Retrieval__Ranker
   Retrieval__ContextAssembler["Retrieval::ContextAssembler"]
   Woods -->|construction: new| Retrieval__ContextAssembler
-  RetrievalTrace["RetrievalTrace"]
-  Woods -->|construction: new| RetrievalTrace
+  Woods -->|construction: new| Embedding__TokenCounter
+  Woods -->|construction: new| Set
   RetrievalResult["RetrievalResult"]
   Woods -->|construction: new| RetrievalResult
+  type_list["type_list"]
+  Woods -->|serialization: to_a| type_list
+  RetrievalTrace["RetrievalTrace"]
+  Woods -->|construction: new| RetrievalTrace
+  Woods -->|serialization: to_h| type_list
   Woods__Retriever(["new"])
   Woods__Retriever -->|construction: new| Struct
   Woods__Retriever -->|construction: new| Struct
@@ -1278,17 +2557,29 @@ flowchart TD
   Woods__Retriever -->|construction: new| Retrieval__SearchExecutor
   Woods__Retriever -->|construction: new| Retrieval__Ranker
   Woods__Retriever -->|construction: new| Retrieval__ContextAssembler
-  Woods__Retriever -->|construction: new| RetrievalTrace
+  Woods__Retriever -->|construction: new| Embedding__TokenCounter
+  Woods__Retriever -->|construction: new| Set
   Woods__Retriever -->|construction: new| RetrievalResult
+  Woods__Retriever -->|serialization: to_a| type_list
+  Woods__Retriever -->|construction: new| RetrievalTrace
+  Woods__Retriever -->|serialization: to_h| type_list
   Woods__Retriever_initialize(["new"])
   Woods__Retriever_initialize -->|construction: new| Retrieval__QueryClassifier
   Woods__Retriever_initialize -->|construction: new| Retrieval__SearchExecutor
   Woods__Retriever_initialize -->|construction: new| Retrieval__Ranker
   Woods__Retriever_initialize -->|construction: new| Retrieval__ContextAssembler
-  Woods__Retriever_retrieve(["new"])
-  Woods__Retriever_retrieve -->|construction: new| RetrievalTrace
+  Woods__Retriever_infer_token_counter(["new"])
+  Woods__Retriever_infer_token_counter -->|construction: new| Embedding__TokenCounter
+  Woods__Retriever_filter_by_type(["new"])
+  Woods__Retriever_filter_by_type -->|construction: new| Set
   Woods__Retriever_build_result(["new"])
   Woods__Retriever_build_result -->|construction: new| RetrievalResult
+  Woods__Retriever_within_type_fallback[/"serialization"/]
+  Woods__Retriever_within_type_fallback -->|serialization: to_a| type_list
+  Woods__Retriever_build_trace(["new"])
+  Woods__Retriever_build_trace -->|construction: new| RetrievalTrace
+  Woods__Retriever_build_type_rank_context[/"serialization"/]
+  Woods__Retriever_build_type_rank_context -->|serialization: to_h| type_list
   Woods -->|construction: new| Ast__Parser
   Woods -->|deserialization: parse| _parser
   Woods -->|construction: new| ExtractedUnit
@@ -1306,14 +2597,22 @@ flowchart TD
   Woods__RubyAnalyzer__ClassAnalyzer_analyze -->|deserialization: parse| _parser
   Woods__RubyAnalyzer__ClassAnalyzer_process_definition(["new"])
   Woods__RubyAnalyzer__ClassAnalyzer_process_definition -->|construction: new| ExtractedUnit
+  ___________CONSTRUCTION_METHODS_map____m___m___construction______________SERIALIZATION_METHODS_map____m___m___serialization______________DESERIALIZATION_METHODS_map____m___m___deserialization___________["[
+        *CONSTRUCTION_METHODS.map { |m| [m, :construction] },
+        *SERIALIZATION_METHODS.map { |m| [m, :serialization] },
+        *DESERIALIZATION_METHODS.map { |m| [m, :deserialization] }
+      ]"]
+  Woods -->|serialization: to_h| ___________CONSTRUCTION_METHODS_map____m___m___construction______________SERIALIZATION_METHODS_map____m___m___serialization______________DESERIALIZATION_METHODS_map____m___m___deserialization___________
   Woods -->|construction: new| Ast__Parser
   Ast__CallSiteExtractor["Ast::CallSiteExtractor"]
   Woods -->|construction: new| Ast__CallSiteExtractor
   Woods -->|deserialization: parse| _parser
+  Woods__RubyAnalyzer -->|serialization: to_h| ___________CONSTRUCTION_METHODS_map____m___m___construction______________SERIALIZATION_METHODS_map____m___m___serialization______________DESERIALIZATION_METHODS_map____m___m___deserialization___________
   Woods__RubyAnalyzer -->|construction: new| Ast__Parser
   Woods__RubyAnalyzer -->|construction: new| Ast__CallSiteExtractor
   Woods__RubyAnalyzer -->|deserialization: parse| _parser
-  Woods__RubyAnalyzer__DataFlowAnalyzer(["new"])
+  Woods__RubyAnalyzer__DataFlowAnalyzer(["to_h"])
+  Woods__RubyAnalyzer__DataFlowAnalyzer -->|serialization: to_h| ___________CONSTRUCTION_METHODS_map____m___m___construction______________SERIALIZATION_METHODS_map____m___m___serialization______________DESERIALIZATION_METHODS_map____m___m___deserialization___________
   Woods__RubyAnalyzer__DataFlowAnalyzer -->|construction: new| Ast__Parser
   Woods__RubyAnalyzer__DataFlowAnalyzer -->|construction: new| Ast__CallSiteExtractor
   Woods__RubyAnalyzer__DataFlowAnalyzer -->|deserialization: parse| _parser
@@ -1322,6 +2621,26 @@ flowchart TD
   Woods__RubyAnalyzer__DataFlowAnalyzer_initialize -->|construction: new| Ast__CallSiteExtractor
   Woods__RubyAnalyzer__DataFlowAnalyzer_detect_transformations[\"deserialization"\]
   Woods__RubyAnalyzer__DataFlowAnalyzer_detect_transformations -->|deserialization: parse| _parser
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  Woods__RubyAnalyzer -->|construction: new| Set
+  Woods__RubyAnalyzer -->|construction: new| Set
+  Woods__RubyAnalyzer -->|construction: new| Set
+  Woods__RubyAnalyzer -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer(["new"])
+  Woods__RubyAnalyzer__MermaidRenderer -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer_render_call_graph(["new"])
+  Woods__RubyAnalyzer__MermaidRenderer_render_call_graph -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer_render_call_graph -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer_render_dependency_map(["new"])
+  Woods__RubyAnalyzer__MermaidRenderer_render_dependency_map -->|construction: new| Set
+  Woods__RubyAnalyzer__MermaidRenderer_render_dataflow(["new"])
+  Woods__RubyAnalyzer__MermaidRenderer_render_dataflow -->|construction: new| Set
   Woods -->|construction: new| Ast__Parser
   Woods -->|construction: new| Ast__CallSiteExtractor
   Woods -->|deserialization: parse| _parser
@@ -1369,13 +2688,23 @@ flowchart TD
   Woods__RubyAnalyzer -->|construction: new| ClassAnalyzer
   Woods__RubyAnalyzer -->|construction: new| MethodAnalyzer
   Woods__RubyAnalyzer -->|construction: new| DataFlowAnalyzer
+  Woods -->|construction: new| Mutex
   Woods -->|deserialization: parse| JSON
-  Woods__SessionTracer[\"deserialization"\]
+  Woods -->|construction: new| Tempfile
+  Woods__SessionTracer(["new"])
+  Woods__SessionTracer -->|construction: new| Mutex
   Woods__SessionTracer -->|deserialization: parse| JSON
-  Woods__SessionTracer__FileStore[\"deserialization"\]
+  Woods__SessionTracer -->|construction: new| Tempfile
+  Woods__SessionTracer__FileStore(["new"])
+  Woods__SessionTracer__FileStore -->|construction: new| Mutex
   Woods__SessionTracer__FileStore -->|deserialization: parse| JSON
+  Woods__SessionTracer__FileStore -->|construction: new| Tempfile
+  Woods__SessionTracer__FileStore_initialize(["new"])
+  Woods__SessionTracer__FileStore_initialize -->|construction: new| Mutex
   Woods__SessionTracer__FileStore_read[\"deserialization"\]
   Woods__SessionTracer__FileStore_read -->|deserialization: parse| JSON
+  Woods__SessionTracer__FileStore_atomic_replace(["new"])
+  Woods__SessionTracer__FileStore_atomic_replace -->|construction: new| Tempfile
   Woods -->|deserialization: parse| JSON
   Woods__SessionTracer -->|deserialization: parse| JSON
   Woods__SessionTracer__RedisStore[\"deserialization"\]
@@ -1386,71 +2715,127 @@ flowchart TD
   SessionFlowDocument["SessionFlowDocument"]
   Woods -->|construction: new| SessionFlowDocument
   Woods -->|construction: new| SessionFlowDocument
+  Woods -->|construction: new| SessionFlowDocument
   Woods__SessionTracer -->|construction: new| Set
+  Woods__SessionTracer -->|construction: new| SessionFlowDocument
   Woods__SessionTracer -->|construction: new| SessionFlowDocument
   Woods__SessionTracer -->|construction: new| SessionFlowDocument
   Woods__SessionTracer__SessionFlowAssembler -->|construction: new| Set
   Woods__SessionTracer__SessionFlowAssembler -->|construction: new| SessionFlowDocument
   Woods__SessionTracer__SessionFlowAssembler -->|construction: new| SessionFlowDocument
+  Woods__SessionTracer__SessionFlowAssembler -->|construction: new| SessionFlowDocument
   Woods__SessionTracer__SessionFlowAssembler_assemble(["new"])
   Woods__SessionTracer__SessionFlowAssembler_assemble -->|construction: new| Set
-  Woods__SessionTracer__SessionFlowAssembler_assemble -->|construction: new| SessionFlowDocument
+  Woods__SessionTracer__SessionFlowAssembler_budgeted_document(["new"])
+  Woods__SessionTracer__SessionFlowAssembler_budgeted_document -->|construction: new| SessionFlowDocument
+  Woods__SessionTracer__SessionFlowAssembler_rendered_tokens(["new"])
+  Woods__SessionTracer__SessionFlowAssembler_rendered_tokens -->|construction: new| SessionFlowDocument
   Woods__SessionTracer__SessionFlowAssembler_empty_document(["new"])
   Woods__SessionTracer__SessionFlowAssembler_empty_document -->|construction: new| SessionFlowDocument
   Woods__SessionTracer__SessionFlowDocument(["new"])
   Woods__SessionTracer__SessionFlowDocument_from_h(["new"])
+  Woods -->|construction: new| Object
+  ActiveSupport__Cache__Entry["ActiveSupport::Cache::Entry"]
+  Woods -->|construction: new| ActiveSupport__Cache__Entry
+  Woods__SessionTracer -->|construction: new| Object
+  Woods__SessionTracer -->|construction: new| ActiveSupport__Cache__Entry
+  Woods__SessionTracer__SolidCacheCoordination(["new"])
+  Woods__SessionTracer__SolidCacheCoordination -->|construction: new| Object
+  Woods__SessionTracer__SolidCacheCoordination -->|construction: new| ActiveSupport__Cache__Entry
+  Woods__SessionTracer__SolidCacheCoordination_cache_entry(["new"])
+  Woods__SessionTracer__SolidCacheCoordination_cache_entry -->|construction: new| ActiveSupport__Cache__Entry
+  Woods -->|construction: new| Struct
+  SolidCacheCoordination["SolidCacheCoordination"]
+  Woods -->|construction: new| SolidCacheCoordination
   Woods -->|deserialization: parse| JSON
   Woods -->|deserialization: parse| JSON
   Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  DirectorySlot["DirectorySlot"]
+  Woods -->|construction: new| DirectorySlot
+  Woods -->|deserialization: parse| JSON
+  Woods__SessionTracer -->|construction: new| Struct
+  Woods__SessionTracer -->|construction: new| SolidCacheCoordination
   Woods__SessionTracer -->|deserialization: parse| JSON
   Woods__SessionTracer -->|deserialization: parse| JSON
   Woods__SessionTracer -->|deserialization: parse| JSON
-  Woods__SessionTracer__SolidCacheStore[\"deserialization"\]
+  Woods__SessionTracer -->|deserialization: parse| JSON
+  Woods__SessionTracer -->|construction: new| DirectorySlot
+  Woods__SessionTracer -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore(["new"])
+  Woods__SessionTracer__SolidCacheStore -->|construction: new| Struct
+  Woods__SessionTracer__SolidCacheStore -->|construction: new| SolidCacheCoordination
   Woods__SessionTracer__SolidCacheStore -->|deserialization: parse| JSON
   Woods__SessionTracer__SolidCacheStore -->|deserialization: parse| JSON
   Woods__SessionTracer__SolidCacheStore -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore -->|construction: new| DirectorySlot
+  Woods__SessionTracer__SolidCacheStore -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore_initialize(["new"])
+  Woods__SessionTracer__SolidCacheStore_initialize -->|construction: new| SolidCacheCoordination
   Woods__SessionTracer__SolidCacheStore_record[\"deserialization"\]
   Woods__SessionTracer__SolidCacheStore_record -->|deserialization: parse| JSON
-  Woods__SessionTracer__SolidCacheStore_read[\"deserialization"\]
-  Woods__SessionTracer__SolidCacheStore_read -->|deserialization: parse| JSON
-  Woods__SessionTracer__SolidCacheStore_read_index[\"deserialization"\]
-  Woods__SessionTracer__SolidCacheStore_read_index -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore_parse_record[\"deserialization"\]
+  Woods__SessionTracer__SolidCacheStore_parse_record -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore_payload_sequence[\"deserialization"\]
+  Woods__SessionTracer__SolidCacheStore_payload_sequence -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore_payload_token[\"deserialization"\]
+  Woods__SessionTracer__SolidCacheStore_payload_token -->|deserialization: parse| JSON
+  Woods__SessionTracer__SolidCacheStore_directory_slots(["new"])
+  Woods__SessionTracer__SolidCacheStore_directory_slots -->|construction: new| DirectorySlot
+  Woods__SessionTracer__SolidCacheStore_parse_membership[\"deserialization"\]
+  Woods__SessionTracer__SolidCacheStore_parse_membership -->|deserialization: parse| JSON
   Woods -->|construction: new| DependencyGraph
   Woods__Storage(["new"])
   Woods__Storage -->|construction: new| DependencyGraph
   Woods__Storage__GraphStore(["new"])
   Woods__Storage__GraphStore -->|construction: new| DependencyGraph
-  Woods__Storage__GraphStore__Memory(["new"])
   Woods__Storage__GraphStore__Memory -->|construction: new| DependencyGraph
   Woods__Storage__GraphStore__Memory_initialize(["new"])
   Woods__Storage__GraphStore__Memory_initialize -->|construction: new| DependencyGraph
-  SQLite3__Database["SQLite3::Database"]
   Woods -->|construction: new| SQLite3__Database
   Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Array
+  rows["rows"]
+  Woods -->|serialization: to_h| rows
   Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Array
   Woods -->|deserialization: parse| JSON
   Woods__Storage -->|construction: new| SQLite3__Database
   Woods__Storage -->|deserialization: parse| JSON
+  Woods__Storage -->|construction: new| Array
+  Woods__Storage -->|serialization: to_h| rows
   Woods__Storage -->|deserialization: parse| JSON
+  Woods__Storage -->|construction: new| Array
   Woods__Storage -->|deserialization: parse| JSON
   Woods__Storage__MetadataStore(["new"])
   Woods__Storage__MetadataStore -->|construction: new| SQLite3__Database
   Woods__Storage__MetadataStore -->|deserialization: parse| JSON
+  Woods__Storage__MetadataStore -->|construction: new| Array
+  Woods__Storage__MetadataStore -->|serialization: to_h| rows
   Woods__Storage__MetadataStore -->|deserialization: parse| JSON
+  Woods__Storage__MetadataStore -->|construction: new| Array
   Woods__Storage__MetadataStore -->|deserialization: parse| JSON
   Woods__Storage__MetadataStore__SQLite(["new"])
   Woods__Storage__MetadataStore__SQLite -->|construction: new| SQLite3__Database
   Woods__Storage__MetadataStore__SQLite -->|deserialization: parse| JSON
+  Woods__Storage__MetadataStore__SQLite -->|construction: new| Array
+  Woods__Storage__MetadataStore__SQLite -->|serialization: to_h| rows
   Woods__Storage__MetadataStore__SQLite -->|deserialization: parse| JSON
+  Woods__Storage__MetadataStore__SQLite -->|construction: new| Array
   Woods__Storage__MetadataStore__SQLite -->|deserialization: parse| JSON
   Woods__Storage__MetadataStore__SQLite_initialize(["new"])
   Woods__Storage__MetadataStore__SQLite_initialize -->|construction: new| SQLite3__Database
   Woods__Storage__MetadataStore__SQLite_find[\"deserialization"\]
   Woods__Storage__MetadataStore__SQLite_find -->|deserialization: parse| JSON
-  Woods__Storage__MetadataStore__SQLite_find_by_type[\"deserialization"\]
-  Woods__Storage__MetadataStore__SQLite_find_by_type -->|deserialization: parse| JSON
-  Woods__Storage__MetadataStore__SQLite_search[\"deserialization"\]
-  Woods__Storage__MetadataStore__SQLite_search -->|deserialization: parse| JSON
+  Woods__Storage__MetadataStore__SQLite_find_batch(["new"])
+  Woods__Storage__MetadataStore__SQLite_find_batch -->|construction: new| Array
+  Woods__Storage__MetadataStore__SQLite_find_batch -->|serialization: to_h| rows
+  Woods__Storage__MetadataStore__SQLite_find_batch -->|deserialization: parse| JSON
+  Woods__Storage__MetadataStore__SQLite_search(["new"])
+  Woods__Storage__MetadataStore__SQLite_search -->|construction: new| Array
+  Woods__Storage__MetadataStore__SQLite_parse_row[\"deserialization"\]
+  Woods__Storage__MetadataStore__SQLite_parse_row -->|deserialization: parse| JSON
   Woods -->|deserialization: parse| JSON
   SearchResult["SearchResult"]
   Woods -->|construction: new| SearchResult
@@ -1465,40 +2850,439 @@ flowchart TD
   Woods__Storage__VectorStore__Pgvector_row_to_result(["parse"])
   Woods__Storage__VectorStore__Pgvector_row_to_result -->|deserialization: parse| JSON
   Woods__Storage__VectorStore__Pgvector_row_to_result -->|construction: new| SearchResult
+  IPAddr["IPAddr"]
+  Woods -->|construction: new| IPAddr
+  Woods -->|construction: new| IPAddr
   Woods -->|construction: new| SearchResult
   Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| RequestError
+  Woods -->|construction: new| RequestError
   Woods -->|construction: new| Net__HTTP
   request_class["request_class"]
   Woods -->|construction: new| request_class
+  Woods__Storage -->|construction: new| IPAddr
+  Woods__Storage -->|construction: new| IPAddr
   Woods__Storage -->|construction: new| SearchResult
   Woods__Storage -->|deserialization: parse| JSON
+  Woods__Storage -->|construction: new| RequestError
+  Woods__Storage -->|construction: new| RequestError
   Woods__Storage -->|construction: new| Net__HTTP
   Woods__Storage -->|construction: new| request_class
+  Woods__Storage__VectorStore -->|construction: new| IPAddr
+  Woods__Storage__VectorStore -->|construction: new| IPAddr
   Woods__Storage__VectorStore -->|construction: new| SearchResult
   Woods__Storage__VectorStore -->|deserialization: parse| JSON
+  Woods__Storage__VectorStore -->|construction: new| RequestError
+  Woods__Storage__VectorStore -->|construction: new| RequestError
   Woods__Storage__VectorStore -->|construction: new| Net__HTTP
   Woods__Storage__VectorStore -->|construction: new| request_class
   Woods__Storage__VectorStore__Qdrant(["new"])
+  Woods__Storage__VectorStore__Qdrant -->|construction: new| IPAddr
+  Woods__Storage__VectorStore__Qdrant -->|construction: new| IPAddr
   Woods__Storage__VectorStore__Qdrant -->|construction: new| SearchResult
   Woods__Storage__VectorStore__Qdrant -->|deserialization: parse| JSON
+  Woods__Storage__VectorStore__Qdrant -->|construction: new| RequestError
+  Woods__Storage__VectorStore__Qdrant -->|construction: new| RequestError
   Woods__Storage__VectorStore__Qdrant -->|construction: new| Net__HTTP
   Woods__Storage__VectorStore__Qdrant -->|construction: new| request_class
+  Woods__Storage__VectorStore__Qdrant_unmap_ipv4(["new"])
+  Woods__Storage__VectorStore__Qdrant_unmap_ipv4 -->|construction: new| IPAddr
   Woods__Storage__VectorStore__Qdrant_search(["new"])
   Woods__Storage__VectorStore__Qdrant_search -->|construction: new| SearchResult
-  Woods__Storage__VectorStore__Qdrant_request[\"deserialization"\]
-  Woods__Storage__VectorStore__Qdrant_request -->|deserialization: parse| JSON
-  Woods__Storage__VectorStore__Qdrant_build_http(["new"])
-  Woods__Storage__VectorStore__Qdrant_build_http -->|construction: new| Net__HTTP
+  Woods__Storage__VectorStore__Qdrant_parse_response[\"deserialization"\]
+  Woods__Storage__VectorStore__Qdrant_parse_response -->|deserialization: parse| JSON
+  Woods__Storage__VectorStore__Qdrant_response_error(["new"])
+  Woods__Storage__VectorStore__Qdrant_response_error -->|construction: new| RequestError
+  Woods__Storage__VectorStore__Qdrant_transport_error(["new"])
+  Woods__Storage__VectorStore__Qdrant_transport_error -->|construction: new| RequestError
+  Woods__Storage__VectorStore__Qdrant_http_client(["new"])
+  Woods__Storage__VectorStore__Qdrant_http_client -->|construction: new| Net__HTTP
   Woods__Storage__VectorStore__Qdrant_build_request(["new"])
   Woods__Storage__VectorStore__Qdrant_build_request -->|construction: new| request_class
+  MetadataStore__InMemory["MetadataStore::InMemory"]
+  Woods -->|construction: new| MetadataStore__InMemory
+  Woods -->|construction: new| MetadataStore__InMemory
+  MessagePack__Unpacker["MessagePack::Unpacker"]
+  Woods -->|construction: new| MessagePack__Unpacker
+  Woods -->|construction: new| Pathname
+  Woods -->|construction: new| Tempfile
+  MessagePack__Packer["MessagePack::Packer"]
+  Woods -->|construction: new| MessagePack__Packer
+  Woods -->|construction: new| Pathname
+  Woods__Storage -->|construction: new| MetadataStore__InMemory
+  Woods__Storage -->|construction: new| MetadataStore__InMemory
+  Woods__Storage -->|construction: new| MessagePack__Unpacker
+  Woods__Storage -->|construction: new| Pathname
+  Woods__Storage -->|construction: new| Tempfile
+  Woods__Storage -->|construction: new| MessagePack__Packer
+  Woods__Storage -->|construction: new| Pathname
+  Woods__Storage__Snapshotter(["new"])
+  Woods__Storage__Snapshotter -->|construction: new| MetadataStore__InMemory
+  Woods__Storage__Snapshotter -->|construction: new| MetadataStore__InMemory
+  Woods__Storage__Snapshotter -->|construction: new| MessagePack__Unpacker
+  Woods__Storage__Snapshotter -->|construction: new| Pathname
+  Woods__Storage__Snapshotter -->|construction: new| Tempfile
+  Woods__Storage__Snapshotter -->|construction: new| MessagePack__Packer
+  Woods__Storage__Snapshotter -->|construction: new| Pathname
+  Woods__Storage__Snapshotter__Metadata(["new"])
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| MetadataStore__InMemory
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| MetadataStore__InMemory
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| MessagePack__Unpacker
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| Pathname
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| Tempfile
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| MessagePack__Packer
+  Woods__Storage__Snapshotter__Metadata -->|construction: new| Pathname
+  Woods__Storage__Snapshotter__Metadata_load_or_empty(["new"])
+  Woods__Storage__Snapshotter__Metadata_load_or_empty -->|construction: new| MetadataStore__InMemory
+  Woods__Storage__Snapshotter__Metadata_load_or_empty -->|construction: new| MetadataStore__InMemory
+  Woods__Storage__Snapshotter__Metadata_load_or_empty -->|construction: new| MessagePack__Unpacker
+  Woods__Storage__Snapshotter__Metadata_dump(["new"])
+  Woods__Storage__Snapshotter__Metadata_dump -->|construction: new| Pathname
+  VectorStore__InMemory["VectorStore::InMemory"]
+  Woods -->|construction: new| VectorStore__InMemory
+  Woods -->|construction: new| VectorStore__InMemory
+  store_each_entry["store.each_entry"]
+  Woods -->|serialization: to_a| store_each_entry
+  Woods -->|construction: new| VectorStore__InMemory
+  Woods -->|construction: new| String
+  Woods -->|construction: new| String
+  Woods -->|construction: new| Tempfile
+  Woods__Storage -->|construction: new| VectorStore__InMemory
+  Woods__Storage -->|construction: new| VectorStore__InMemory
+  Woods__Storage -->|serialization: to_a| store_each_entry
+  Woods__Storage -->|construction: new| VectorStore__InMemory
+  Woods__Storage -->|construction: new| String
+  Woods__Storage -->|construction: new| String
+  Woods__Storage -->|construction: new| Tempfile
+  Woods__Storage__Snapshotter -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter -->|serialization: to_a| store_each_entry
+  Woods__Storage__Snapshotter -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter -->|construction: new| String
+  Woods__Storage__Snapshotter -->|construction: new| String
+  Woods__Storage__Snapshotter -->|construction: new| Tempfile
+  Woods__Storage__Snapshotter__Vector(["new"])
+  Woods__Storage__Snapshotter__Vector -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter__Vector -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter__Vector -->|serialization: to_a| store_each_entry
+  Woods__Storage__Snapshotter__Vector -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter__Vector -->|construction: new| String
+  Woods__Storage__Snapshotter__Vector -->|construction: new| String
+  Woods__Storage__Snapshotter__Vector -->|construction: new| Tempfile
+  Woods__Storage__Snapshotter__Vector_load_or_empty(["new"])
+  Woods__Storage__Snapshotter__Vector_load_or_empty -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter__Vector_load_or_empty -->|construction: new| VectorStore__InMemory
+  Woods__Storage__Snapshotter__Vector_dump[/"serialization"/]
+  Woods__Storage__Snapshotter__Vector_dump -->|serialization: to_a| store_each_entry
   Woods -->|construction: new| Struct
-  Woods -->|construction: new| SearchResult
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
   Woods__Storage -->|construction: new| Struct
-  Woods__Storage -->|construction: new| SearchResult
+  Woods__Storage -->|construction: new| Set
+  Woods__Storage -->|construction: new| Set
   Woods__Storage__VectorStore -->|construction: new| Struct
-  Woods__Storage__VectorStore -->|construction: new| SearchResult
+  Woods__Storage__VectorStore -->|construction: new| Set
+  Woods__Storage__VectorStore -->|construction: new| Set
   Woods__Storage__VectorStore__InMemory(["new"])
-  Woods__Storage__VectorStore__InMemory -->|construction: new| SearchResult
-  Woods__Storage__VectorStore__InMemory_search(["new"])
-  Woods__Storage__VectorStore__InMemory_search -->|construction: new| SearchResult
+  Woods__Storage__VectorStore__InMemory -->|construction: new| Set
+  Woods__Storage__VectorStore__InMemory -->|construction: new| Set
+  Woods__Storage__VectorStore__InMemory_initialize(["new"])
+  Woods__Storage__VectorStore__InMemory_initialize -->|construction: new| Set
+  Woods__Storage__VectorStore__InMemory_clear_(["new"])
+  Woods__Storage__VectorStore__InMemory_clear_ -->|construction: new| Set
+  Builder["Builder"]
+  Woods -->|construction: new| Builder
+  Embedding__Indexer["Embedding::Indexer"]
+  Woods -->|construction: new| Embedding__Indexer
+  Woods__Tasks(["new"])
+  Woods__Tasks -->|construction: new| Builder
+  Woods__Tasks -->|construction: new| Embedding__Indexer
+  Woods__Tasks_build_embed_indexer(["new"])
+  Woods__Tasks_build_embed_indexer -->|construction: new| Builder
+  Woods__Tasks_build_embed_indexer -->|construction: new| Embedding__Indexer
+  Woods -->|deserialization: parse| JSON
+  unit_hashes_filter_map["unit_hashes.filter_map"]
+  Woods -->|serialization: to_h| unit_hashes_filter_map
+  Woods -->|deserialization: parse| JSON
+  Woods__Temporal[/"serialization"/]
+  Woods__Temporal -->|deserialization: parse| JSON
+  Woods__Temporal -->|serialization: to_h| unit_hashes_filter_map
+  Woods__Temporal -->|deserialization: parse| JSON
+  Woods__Temporal__JsonSnapshotStore -->|deserialization: parse| JSON
+  Woods__Temporal__JsonSnapshotStore -->|serialization: to_h| unit_hashes_filter_map
+  Woods__Temporal__JsonSnapshotStore -->|deserialization: parse| JSON
+  Woods__Temporal__JsonSnapshotStore_find[\"deserialization"\]
+  Woods__Temporal__JsonSnapshotStore_find -->|deserialization: parse| JSON
+  Woods__Temporal__JsonSnapshotStore_index_units[/"serialization"/]
+  Woods__Temporal__JsonSnapshotStore_index_units -->|serialization: to_h| unit_hashes_filter_map
+  Woods__Temporal__JsonSnapshotStore_load_all_summaries[\"deserialization"\]
+  Woods__Temporal__JsonSnapshotStore_load_all_summaries -->|deserialization: parse| JSON
+  Woods -->|serialization: to_h| rows
+  Woods__Temporal -->|serialization: to_h| rows
+  Woods__Temporal__SnapshotStore -->|serialization: to_h| rows
+  Woods__Temporal__SnapshotStore_load_snapshot_units[/"serialization"/]
+  Woods__Temporal__SnapshotStore_load_snapshot_units -->|serialization: to_h| rows
+  Woods -->|construction: new| Net__HTTP
+  Woods -->|deserialization: parse| JSON
+  Net__HTTP__Put["Net::HTTP::Put"]
+  Woods -->|construction: new| Net__HTTP__Put
+  Woods -->|construction: new| Net__HTTP__Post
+  Woods -->|construction: new| Net__HTTP__Get
+  Net__HTTP__Delete["Net::HTTP::Delete"]
+  Woods -->|construction: new| Net__HTTP__Delete
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods__Unblocked(["new"])
+  Woods__Unblocked -->|construction: new| Net__HTTP
+  Woods__Unblocked -->|deserialization: parse| JSON
+  Woods__Unblocked -->|construction: new| Net__HTTP__Put
+  Woods__Unblocked -->|construction: new| Net__HTTP__Post
+  Woods__Unblocked -->|construction: new| Net__HTTP__Get
+  Woods__Unblocked -->|construction: new| Net__HTTP__Delete
+  Woods__Unblocked -->|deserialization: parse| JSON
+  Woods__Unblocked -->|deserialization: parse| JSON
+  Woods__Unblocked__Client(["new"])
+  Woods__Unblocked__Client -->|construction: new| Net__HTTP
+  Woods__Unblocked__Client -->|deserialization: parse| JSON
+  Woods__Unblocked__Client -->|construction: new| Net__HTTP__Put
+  Woods__Unblocked__Client -->|construction: new| Net__HTTP__Post
+  Woods__Unblocked__Client -->|construction: new| Net__HTTP__Get
+  Woods__Unblocked__Client -->|construction: new| Net__HTTP__Delete
+  Woods__Unblocked__Client -->|deserialization: parse| JSON
+  Woods__Unblocked__Client -->|deserialization: parse| JSON
+  Woods__Unblocked__Client_execute_http(["new"])
+  Woods__Unblocked__Client_execute_http -->|construction: new| Net__HTTP
+  Woods__Unblocked__Client_raise_ambiguous_response_error[\"deserialization"\]
+  Woods__Unblocked__Client_raise_ambiguous_response_error -->|deserialization: parse| JSON
+  Woods__Unblocked__Client_build_request(["new"])
+  Woods__Unblocked__Client_build_request -->|construction: new| Net__HTTP__Put
+  Woods__Unblocked__Client_build_request -->|construction: new| Net__HTTP__Post
+  Woods__Unblocked__Client_build_request -->|construction: new| Net__HTTP__Get
+  Woods__Unblocked__Client_build_request -->|construction: new| Net__HTTP__Delete
+  Woods__Unblocked__Client_parse_response[\"deserialization"\]
+  Woods__Unblocked__Client_parse_response -->|deserialization: parse| JSON
+  Woods__Unblocked__Client_raise_api_error[\"deserialization"\]
+  Woods__Unblocked__Client_raise_api_error -->|deserialization: parse| JSON
+  Woods -->|construction: new| Woods__Console__CredentialScanner
+  Woods -->|construction: new| Woods__Export__UnitFacts
+  Woods -->|construction: new| Woods__Export__UnitFacts
+  Woods__Unblocked -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Unblocked -->|construction: new| Woods__Export__UnitFacts
+  Woods__Unblocked -->|construction: new| Woods__Export__UnitFacts
+  Woods__Unblocked__DocumentBuilder(["new"])
+  Woods__Unblocked__DocumentBuilder -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Unblocked__DocumentBuilder -->|construction: new| Woods__Export__UnitFacts
+  Woods__Unblocked__DocumentBuilder -->|construction: new| Woods__Export__UnitFacts
+  Woods__Unblocked__DocumentBuilder_credential_scanner(["new"])
+  Woods__Unblocked__DocumentBuilder_credential_scanner -->|construction: new| Woods__Console__CredentialScanner
+  Woods__Unblocked__DocumentBuilder_model_associations(["new"])
+  Woods__Unblocked__DocumentBuilder_model_associations -->|construction: new| Woods__Export__UnitFacts
+  Woods__Unblocked__DocumentBuilder_model_schema_highlights(["new"])
+  Woods__Unblocked__DocumentBuilder_model_schema_highlights -->|construction: new| Woods__Export__UnitFacts
+  RateLimiter["RateLimiter"]
+  Woods -->|construction: new| RateLimiter
+  Woods -->|construction: new| Client
+  DocumentBuilder["DocumentBuilder"]
+  Woods -->|construction: new| DocumentBuilder
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Set
+  _client_all_documents["@client.all_documents"]
+  Woods -->|serialization: to_h| _client_all_documents
+  Woods -->|construction: new| Hash
+  Woods -->|construction: new| Woods__MCP__IndexReader
+  Woods -->|construction: new| SyncManifest
+  Woods__Unblocked -->|construction: new| RateLimiter
+  Woods__Unblocked -->|construction: new| Client
+  Woods__Unblocked -->|construction: new| DocumentBuilder
+  Woods__Unblocked -->|construction: new| Set
+  Woods__Unblocked -->|construction: new| Set
+  Woods__Unblocked -->|serialization: to_h| _client_all_documents
+  Woods__Unblocked -->|construction: new| Hash
+  Woods__Unblocked -->|construction: new| Woods__MCP__IndexReader
+  Woods__Unblocked -->|construction: new| SyncManifest
+  Woods__Unblocked__Exporter(["new"])
+  Woods__Unblocked__Exporter -->|construction: new| RateLimiter
+  Woods__Unblocked__Exporter -->|construction: new| Client
+  Woods__Unblocked__Exporter -->|construction: new| DocumentBuilder
+  Woods__Unblocked__Exporter -->|construction: new| Set
+  Woods__Unblocked__Exporter -->|construction: new| Set
+  Woods__Unblocked__Exporter -->|serialization: to_h| _client_all_documents
+  Woods__Unblocked__Exporter -->|construction: new| Hash
+  Woods__Unblocked__Exporter -->|construction: new| Woods__MCP__IndexReader
+  Woods__Unblocked__Exporter -->|construction: new| SyncManifest
+  Woods__Unblocked__Exporter_initialize(["new"])
+  Woods__Unblocked__Exporter_initialize -->|construction: new| RateLimiter
+  Woods__Unblocked__Exporter_initialize -->|construction: new| Client
+  Woods__Unblocked__Exporter_initialize -->|construction: new| DocumentBuilder
+  Woods__Unblocked__Exporter_initialize -->|construction: new| Set
+  Woods__Unblocked__Exporter_sync_all(["new"])
+  Woods__Unblocked__Exporter_sync_all -->|construction: new| Set
+  Woods__Unblocked__Exporter_resolve_missing_document_ids[/"serialization"/]
+  Woods__Unblocked__Exporter_resolve_missing_document_ids -->|serialization: to_h| _client_all_documents
+  Woods__Unblocked__Exporter_build_uri_index(["new"])
+  Woods__Unblocked__Exporter_build_uri_index -->|construction: new| Hash
+  Woods__Unblocked__Exporter_build_reader(["new"])
+  Woods__Unblocked__Exporter_build_reader -->|construction: new| Woods__MCP__IndexReader
+  Woods__Unblocked__Exporter_build_manifest(["new"])
+  Woods__Unblocked__Exporter_build_manifest -->|construction: new| SyncManifest
+  Woods -->|construction: new| Mutex
+  Woods__Unblocked -->|construction: new| Mutex
+  Woods__Unblocked__RateLimiter(["new"])
+  Woods__Unblocked__RateLimiter -->|construction: new| Mutex
+  Woods__Unblocked__RateLimiter_initialize(["new"])
+  Woods__Unblocked__RateLimiter_initialize -->|construction: new| Mutex
+  current_uris["current_uris"]
+  Woods -->|serialization: to_a| current_uris
+  Woods -->|deserialization: parse| JSON
+  Woods__Unblocked -->|serialization: to_a| current_uris
+  Woods__Unblocked -->|deserialization: parse| JSON
+  Woods__Unblocked__SyncManifest[/"serialization"/]
+  Woods__Unblocked__SyncManifest -->|serialization: to_a| current_uris
+  Woods__Unblocked__SyncManifest -->|deserialization: parse| JSON
+  Woods__Unblocked__SyncManifest_stale_uris[/"serialization"/]
+  Woods__Unblocked__SyncManifest_stale_uris -->|serialization: to_a| current_uris
+  Woods__Unblocked__SyncManifest_load[\"deserialization"\]
+  Woods__Unblocked__SyncManifest_load -->|deserialization: parse| JSON
+  Gem__Version["Gem::Version"]
+  Woods -->|construction: new| Gem__Version
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
+  Woods__UpdateCheck(["new"])
+  Woods__UpdateCheck -->|construction: new| Gem__Version
+  Woods__UpdateCheck -->|deserialization: parse| JSON
+  Woods__UpdateCheck -->|deserialization: parse| JSON
+  Woods__UpdateCheck_newer_(["new"])
+  Woods__UpdateCheck_newer_ -->|construction: new| Gem__Version
+  Woods__UpdateCheck_read_cache[\"deserialization"\]
+  Woods__UpdateCheck_read_cache -->|deserialization: parse| JSON
+  Woods__UpdateCheck_fetch_latest_version[\"deserialization"\]
+  Woods__UpdateCheck_fetch_latest_version -->|deserialization: parse| JSON
+  Woods -->|construction: new| Woods__Extractor
+  RailsReloader["RailsReloader"]
+  Woods -->|construction: new| RailsReloader
+  Woods -->|construction: new| Generation
+  Status["Status"]
+  Woods -->|construction: new| Status
+  Woods -->|construction: new| ChangeSet
+  Woods -->|construction: new| Thread
+  Coordination__PipelineLock["Coordination::PipelineLock"]
+  Woods -->|construction: new| Coordination__PipelineLock
+  Woods -->|construction: new| Set
+  Woods -->|construction: new| Mutex
+  Woods -->|construction: new| Mutex
+  Woods -->|construction: new| ChangeSet
+  _pending["@pending"]
+  Woods -->|serialization: to_a| _pending
+  Woods -->|construction: new| Set
+  Woods -->|serialization: to_a| _pending
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Woods__Generation
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Thread
+  Woods -->|deserialization: parse| JSON
+  NullLogger["NullLogger"]
+  Woods -->|construction: new| NullLogger
+  Woods__Watch(["new"])
+  Woods__Watch -->|construction: new| Woods__Extractor
+  Woods__Watch -->|construction: new| RailsReloader
+  Woods__Watch -->|construction: new| Generation
+  Woods__Watch -->|construction: new| Status
+  Woods__Watch -->|construction: new| ChangeSet
+  Woods__Watch -->|construction: new| Thread
+  Woods__Watch -->|construction: new| Coordination__PipelineLock
+  Woods__Watch -->|construction: new| Set
+  Woods__Watch -->|construction: new| Mutex
+  Woods__Watch -->|construction: new| Mutex
+  Woods__Watch -->|construction: new| ChangeSet
+  Woods__Watch -->|serialization: to_a| _pending
+  Woods__Watch -->|construction: new| Set
+  Woods__Watch -->|serialization: to_a| _pending
+  Woods__Watch -->|deserialization: parse| JSON
+  Woods__Watch -->|construction: new| Woods__Generation
+  Woods__Watch -->|deserialization: parse| JSON
+  Woods__Watch -->|construction: new| Thread
+  Woods__Watch -->|deserialization: parse| JSON
+  Woods__Watch -->|construction: new| NullLogger
+  Woods__Watch__Daemon(["new"])
+  Woods__Watch__Daemon -->|construction: new| Woods__Extractor
+  Woods__Watch__Daemon -->|construction: new| RailsReloader
+  Woods__Watch__Daemon -->|construction: new| Generation
+  Woods__Watch__Daemon -->|construction: new| Status
+  Woods__Watch__Daemon -->|construction: new| ChangeSet
+  Woods__Watch__Daemon -->|construction: new| Thread
+  Woods__Watch__Daemon -->|construction: new| Coordination__PipelineLock
+  Woods__Watch__Daemon -->|construction: new| Set
+  Woods__Watch__Daemon -->|construction: new| Mutex
+  Woods__Watch__Daemon -->|construction: new| Mutex
+  Woods__Watch__Daemon -->|construction: new| ChangeSet
+  Woods__Watch__Daemon -->|serialization: to_a| _pending
+  Woods__Watch__Daemon -->|construction: new| Set
+  Woods__Watch__Daemon -->|serialization: to_a| _pending
+  Woods__Watch__Daemon -->|deserialization: parse| JSON
+  Woods__Watch__Daemon -->|construction: new| Woods__Generation
+  Woods__Watch__Daemon -->|deserialization: parse| JSON
+  Woods__Watch__Daemon -->|construction: new| Thread
+  Woods__Watch__Daemon -->|deserialization: parse| JSON
+  Woods__Watch__Daemon -->|construction: new| NullLogger
+  Woods__Watch__Daemon_initialize(["new"])
+  Woods__Watch__Daemon_initialize -->|construction: new| Woods__Extractor
+  Woods__Watch__Daemon_initialize -->|construction: new| RailsReloader
+  Woods__Watch__Daemon_initialize -->|construction: new| Generation
+  Woods__Watch__Daemon_initialize -->|construction: new| Status
+  Woods__Watch__Daemon_process(["new"])
+  Woods__Watch__Daemon_process -->|construction: new| ChangeSet
+  Woods__Watch__Daemon_launch_watcher(["new"])
+  Woods__Watch__Daemon_launch_watcher -->|construction: new| Thread
+  Woods__Watch__Daemon_default_lock(["new"])
+  Woods__Watch__Daemon_default_lock -->|construction: new| Coordination__PipelineLock
+  Woods__Watch__Daemon_reset_cycle_state(["new"])
+  Woods__Watch__Daemon_reset_cycle_state -->|construction: new| Set
+  Woods__Watch__Daemon_reset_cycle_state -->|construction: new| Mutex
+  Woods__Watch__Daemon_reset_cycle_state -->|construction: new| Mutex
+  Woods__Watch__Daemon_enqueue(["new"])
+  Woods__Watch__Daemon_enqueue -->|construction: new| ChangeSet
+  Woods__Watch__Daemon_drain_with(["to_a"])
+  Woods__Watch__Daemon_drain_with -->|serialization: to_a| _pending
+  Woods__Watch__Daemon_drain_with -->|construction: new| Set
+  Woods__Watch__Daemon_persist_pending[/"serialization"/]
+  Woods__Watch__Daemon_persist_pending -->|serialization: to_a| _pending
+  Woods__Watch__Daemon_restore_pending[\"deserialization"\]
+  Woods__Watch__Daemon_restore_pending -->|deserialization: parse| JSON
+  Woods__Watch__Daemon_persisted_registered_paths(["new"])
+  Woods__Watch__Daemon_persisted_registered_paths -->|construction: new| Woods__Generation
+  Woods__Watch__Daemon_persisted_registered_paths -->|deserialization: parse| JSON
+  Woods__Watch__Daemon_start_heartbeat(["new"])
+  Woods__Watch__Daemon_start_heartbeat -->|construction: new| Thread
+  Woods__Watch__Daemon_stale_claim_[\"deserialization"\]
+  Woods__Watch__Daemon_stale_claim_ -->|deserialization: parse| JSON
+  Woods__Watch__Daemon_default_logger(["new"])
+  Woods__Watch__Daemon_default_logger -->|construction: new| NullLogger
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| Time
+  Woods__Watch -->|deserialization: parse| JSON
+  Woods__Watch -->|deserialization: parse| Time
+  Woods__Watch__Status -->|deserialization: parse| JSON
+  Woods__Watch__Status -->|deserialization: parse| Time
+  Woods__Watch__Status_read[\"deserialization"\]
+  Woods__Watch__Status_read -->|deserialization: parse| JSON
+  Woods__Watch__Status_recent_[\"deserialization"\]
+  Woods__Watch__Status_recent_ -->|deserialization: parse| Time
+  Woods -->|construction: new| Set
+  Woods__Watch -->|construction: new| Set
+  Woods__Watch__TreeScan(["new"])
+  Woods__Watch__TreeScan -->|construction: new| Set
+  Woods__Watch__TreeScan_each_file(["new"])
+  Woods__Watch__TreeScan_each_file -->|construction: new| Set
+  ListenWatcher["ListenWatcher"]
+  Woods -->|construction: new| ListenWatcher
+  PollingWatcher["PollingWatcher"]
+  Woods -->|construction: new| PollingWatcher
+  Woods__Watch -->|construction: new| ListenWatcher
+  Woods__Watch -->|construction: new| PollingWatcher
+  Woods__Watch__Watcher(["new"])
+  Woods__Watch__Watcher -->|construction: new| ListenWatcher
+  Woods__Watch__Watcher -->|construction: new| PollingWatcher
+  Woods__Watch__Watcher_build(["new"])
+  Woods__Watch__Watcher_build -->|construction: new| ListenWatcher
+  Woods__Watch__Watcher_build -->|construction: new| PollingWatcher
 ```
