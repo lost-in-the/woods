@@ -368,7 +368,7 @@ Woods.extract!
 
 ## Recommended Stack Combinations
 
-### Starter (Zero Dependencies)
+### Starter (Local Dependencies)
 
 ```ruby
 Woods.configure_with_preset(:local)
@@ -379,7 +379,8 @@ Woods.configure_with_preset(:local)
 # Jobs: Inline
 ```
 
-**Setup:** `brew install ollama && ollama pull nomic-embed-text`
+**Setup:** add the `sqlite3` gem, then install/start Ollama and run
+`ollama pull nomic-embed-text`.
 **Tradeoff:** Lower retrieval quality, CPU-bound embedding, single-user.
 
 ### Rails 8 Standard

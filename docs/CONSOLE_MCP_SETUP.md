@@ -1,6 +1,6 @@
 # Console MCP Server Setup
 
-The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: real database counts, record lookups, schema inspection, and job monitoring, all inside rolled-back transactions.
+The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: database counts, record lookups, and schema inspection. It does not expose job-monitoring tools in supported modes. Database work on the request's current connection is rolled back, subject to the side-effect limits documented below.
 
 ## Transport Options at a Glance
 
@@ -8,7 +8,7 @@ The Console MCP Server gives MCP-capable coding tools and agents live access to 
 |--------|-------------|-------------|
 | [Stdio via rake](#option-a-stdio-via-rake-recommended) | Rake task boots Rails, runs MCP in-process | Local dev, simplest setup |
 | [Docker](#option-b-docker) | Same rake task, piped through `docker exec -i` | Docker/Compose environments |
-| [HTTP/Rack middleware](#option-c-http-rack-middleware) | Middleware mounts `/mcp/console` endpoint | Shared access, multiple clients |
+| [HTTP Rack middleware](#option-c-http-rack-middleware) | Middleware mounts `/mcp/console` endpoint | Shared access, multiple clients |
 | [Launcher wrapper](#option-d-launcher-wrapper) | Execs the embedded server directly, through Docker, or through SSH | Centralized process-launch config |
 
 ---
@@ -146,7 +146,7 @@ If your Rails app requires environment variables at boot (credentials, database 
 
 ---
 
-## Option C: HTTP/Rack Middleware
+## Option C: HTTP Rack Middleware
 
 Mount the console as a Rack middleware endpoint. The MCP client connects over HTTP using the streamable-http transport instead of spawning a subprocess. Useful when multiple clients need shared access, or when stdio subprocess spawning is not practical.
 

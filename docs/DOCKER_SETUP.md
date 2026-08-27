@@ -37,7 +37,7 @@ The Index Server reads static files and does not boot Rails, even when its proce
 ```ruby
 # Gemfile
 group :development do
-  gem 'woods'
+  gem 'woods', '~> 2.0'
 end
 ```
 

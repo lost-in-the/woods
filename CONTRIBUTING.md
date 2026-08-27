@@ -1,6 +1,6 @@
 # Contributing to Woods
 
-Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents should also read [AGENTS.md](AGENTS.md).
+Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents working from a source checkout should also read the repository's [AGENTS.md](https://github.com/lost-in-the/woods/blob/v2.0.0/AGENTS.md).
 
 ## Choose the right channel
 
@@ -39,7 +39,7 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 | `docs/` | User, agent, operational, and reference documentation |
 | `plugin/skills/` | Distributed Woods setup/configuration/diagnosis skills |
 
-Read [CLAUDE.md](CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
+Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/v2.0.0/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
 
 ## Make the change
 

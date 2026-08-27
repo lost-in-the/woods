@@ -48,16 +48,23 @@ Retrieval requires an embedding provider and a vector store. Set these in `confi
 
 ### Presets (recommended)
 
-Three named presets cover the most common deployment scenarios:
+Four named presets cover the supported deployment scenarios:
 
 ```ruby
-# Local development: Ollama (local) + in-memory vector store. No external services.
+# Local development: in-memory vectors + SQLite metadata + Ollama.
+# Requires sqlite3, a running Ollama service, and a pulled embedding model.
 Woods.configure_with_preset(:local)
 
-# PostgreSQL: pgvector + OpenAI. Requires PostgreSQL with the vector extension.
+# Separate embed/query processes sharing output_dir. No sqlite3 gem.
+# Requires a running Ollama service and a filesystem visible to both processes.
+Woods.configure_with_preset(:shared_filesystem)
+
+# PostgreSQL: pgvector + SQLite metadata + OpenAI.
+# Requires pgvector, sqlite3, and an OpenAI API key.
 Woods.configure_with_preset(:postgresql)
 
-# Production: Qdrant + OpenAI. Dedicated vector database.
+# Production: Qdrant + SQLite metadata + OpenAI.
+# Requires Qdrant, sqlite3, and an OpenAI API key.
 Woods.configure_with_preset(:production)
 ```
 

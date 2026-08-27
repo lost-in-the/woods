@@ -61,12 +61,15 @@ a run that failed leaves the number alone, so staleness stays honest.
 
 Rails' reloader replaces autoloaded constants and nothing else. It does not
 re-run initializers, re-resolve `Rails.application.config`, or rebuild the
-schema cache, all of which Woods captures. So on a change to `Gemfile`,
-`Gemfile.lock`, `config/application.rb`, `config/boot.rb`,
-`config/environment.rb`, `config/initializers/**`, `config/environments/**`,
-`config/database.yml`, credentials, `db/schema.rb` or `db/structure.sql`, the
-daemon writes a degraded status, stops, and exits `75` for a supervisor to
-restart it.
+schema cache, all of which Woods captures. Changes to dependency/Ruby selection
+files (`Gemfile`, `Gemfile.lock`, `.ruby-version`), `.env*`, Rails
+application/boot/environment files, initializers, environments, credentials,
+database/schema files, `config/settings.yml`, `config/settings/*.yml`, or
+boot-captured service config
+(`config/{cable,storage,sidekiq,puma,cache,queue}.yml`, including `.yaml`)
+make the daemon write a degraded status, stop, and exit `75` for a supervisor
+to restart it. Scheduled-job YAML remains an in-process re-extraction input.
+The exact matchers live in `lib/woods/reload_policy.rb`.
 
 This is `rails/spring`'s contract, copied deliberately: Spring's staleness bugs
 came from under-scoping exactly this set, so the boundary here is drawn on the

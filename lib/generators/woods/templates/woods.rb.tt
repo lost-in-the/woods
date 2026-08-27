@@ -96,8 +96,9 @@ Woods.configure do |config|
   # Extract link_to / redirect_to / form_action navigation edges.
   # config.extract_navigation_edges = true
 
-  # Temporal snapshots use Woods' output-directory SQLite database. Internal
-  # migrations run automatically; this does not require `rails db:migrate`.
+  # Temporal snapshots prefer Woods' output-directory SQLite database and fall
+  # back to JSON when SQLite is unavailable. Internal migrations run
+  # automatically; this does not require `rails db:migrate`.
   # config.enable_snapshots = false
 
   # ── Console MCP ─────────────────────────────────────────────────────────

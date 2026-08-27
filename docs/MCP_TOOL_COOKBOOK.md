@@ -12,7 +12,7 @@ The Index Server defines **29 schemas**: the packaged executable registers **14*
 | `session_trace` | 1 | `Woods.configuration.session_store` set and session tracer enabled |
 | Operator (5) | 5 | Custom embedded server wires an operator: `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
 | Feedback (4) | 4 | Custom embedded server wires a feedback store: `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
-| Snapshot (4) | 4 | `Woods.configuration.snapshot_store` wired (requires migrations 004 + 005), `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
+| Snapshot (4) | 4 | `enable_snapshots = true` (or `WOODS_SNAPSHOTS=true`) lets packaged servers build the output-directory store automatically; custom embedded servers pass `snapshot_store:`. SQLite internal migrations are automatic, with JSON fallback. Tools: `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
 | `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
 
 `codebase_retrieve` is always registered (no `retrieve` alias exists), but only returns results once an embedding provider is configured and `rake woods:embed` has run.

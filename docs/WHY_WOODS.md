@@ -172,7 +172,7 @@ Install, extract, validate, and connect:
 
 ```bash
 # 1. Add to your Rails app's Gemfile
-gem 'woods', group: :development
+gem 'woods', '~> 2.0', group: :development
 
 # 2. Install
 bundle install

@@ -44,7 +44,7 @@ Prefer extraction in development or CI and publish the generated index as a cont
 
 ### How do I install Woods?
 
-Add `gem "woods", "~> 2.0"` to your development group, install it, run the install generator, review its initializer and migration, migrate, then extract and validate. Follow [Getting started](GETTING_STARTED.md) for the canonical commands and expected result. If an agent is doing the work, use [Agent setup](AGENT_SETUP.md).
+Add `gem "woods", "~> 2.0"` to your development group, install it, and run the install generator. Review the initializer. For a new default v2 install, remove the generated legacy application migration instead of running it; shipped v2 extraction and retrieval do not use those tables. Keep it only for a known older/custom integration. Then extract and validate. Follow [Getting started](GETTING_STARTED.md) for the canonical commands and expected result. If an agent is doing the work, use [Agent setup](AGENT_SETUP.md).
 
 ---
 
@@ -294,8 +294,13 @@ See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the Ollama model comparison a
 Presets configure storage and embedding together with a single call:
 
 ```ruby
-# No external services: in-memory vectors, SQLite metadata, Ollama embeddings
+# Local services: in-memory vectors, SQLite metadata, Ollama embeddings
+# Requires the sqlite3 gem, a running Ollama service, and the pulled model.
 Woods.configure_with_preset(:local)
+
+# Shared filesystem: in-memory stores persisted under output_dir.
+# Requires a running Ollama service and shared output_dir; no sqlite3 gem.
+Woods.configure_with_preset(:shared_filesystem)
 
 # PostgreSQL + OpenAI: pgvector vectors, SQLite metadata, OpenAI embeddings
 Woods.configure_with_preset(:postgresql)
@@ -365,7 +370,7 @@ Enable them in your initializer:
 config.enable_snapshots = true
 ```
 
-Snapshots use their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database, `bundle exec rails db:migrate` does not touch it. `Woods::Db::Migrator` runs migrations 004 and 005 against that database automatically, both when a full extraction runs and when `woods-mcp` boots with snapshots enabled. No manual migration step is needed. The `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail` MCP tools become available after enabling.
+Snapshots prefer their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database. When `sqlite3` is unavailable or the store cannot open, Woods falls back to JSON files in the output directory. `Woods::Db::Migrator` runs the internal SQLite migrations automatically during extraction and MCP boot; `bundle exec rails db:migrate` does not touch this store and no manual migration step is needed. The packaged MCP server wires `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail` after snapshots are enabled and captured.
 
 ---
 

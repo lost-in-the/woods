@@ -350,7 +350,7 @@ Woods.configure do |config|
 end
 ```
 
-For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)`, in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in, it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
+For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)`, in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in. It requires the `sqlite3` gem plus a running Ollama service, but does not exercise the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
 
 See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL + Qdrant section](BACKEND_MATRIX.md#mysql--qdrant-classic-rails) for graph-traversal details (recursive CTEs on 8.0+).
 
@@ -424,11 +424,11 @@ config.embedding_options = { host: 'http://localhost:11434' }
 
 **Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source, so chunks that look safe by char count still trip the 2048-token ceiling.
 
-**Fix:** Upgrade to Woods 1.3+ and install the `tokenizers` gem:
+**Fix:** Use Woods 2.0 and install the `tokenizers` gem:
 
 ```ruby
 # Gemfile
-gem 'woods', '~> 1.3'
+gem 'woods', '~> 2.0'
 gem 'tokenizers', '~> 0.5'   # exact BERT WordPiece token counting
 ```
 
