@@ -8,7 +8,7 @@
 
 Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
 
-Woods 2.0 supports Ruby 3.0 or later and Rails 6.0 through 8.x. It works with Claude Code, Cursor, Windsurf, and other MCP clients.
+Woods 2.0 supports Ruby 3.0 or later and Rails 6.0 through 8.x. It connects AI coding tools and agents through MCP.
 
 ## What Woods adds
 
@@ -67,7 +67,7 @@ Extraction must run where Rails can boot. The default index lives at `tmp/woods/
 
 ### 3. Connect the Index Server
 
-Add this to your MCP client configuration. For Claude Code, place it in `.mcp.json` at the Rails app root:
+Add this to your MCP client's project configuration. The configuration location varies by client:
 
 ```json
 {
@@ -95,7 +95,7 @@ The complete walkthrough, including expected output and first questions to ask, 
 |---|---|
 | Install Woods yourself | [Getting started](docs/GETTING_STARTED.md) |
 | Ask a coding agent to install Woods safely | [Agent setup runbook](docs/AGENT_SETUP.md) |
-| Configure Claude Code, Cursor, Windsurf, Docker, or HTTP | [MCP servers](docs/MCP_SERVERS.md) |
+| Configure an MCP client, Docker, or HTTP | [MCP servers](docs/MCP_SERVERS.md) |
 | Teach an agent how to query Woods effectively | [Agent guide](docs/AGENT_GUIDE.md) |
 | Add semantic search with OpenAI or local Ollama | [Retrieval guide](docs/RETRIEVAL_GUIDE.md) |
 | Query live Rails data through the optional Console Server | [Console MCP setup and security](docs/CONSOLE_MCP_SETUP.md) |
