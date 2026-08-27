@@ -2435,4 +2435,196 @@ RSpec.describe Woods::Extractor do
       expect(File.read(payload_dir.join('manifest.json'))).to eq('{"total_units":1}')
     end
   end
+
+  # ── remove_replaced_units typed identity (#225) ──────────────────────
+
+  # Two independent bugs in the same method: (1) the removal loop called
+  # `remove_unit` without `type:`, which fans over every type registered
+  # under an identifier — so a wholesale replacement of one extractor's
+  # output deleted a same-named unit belonging to a completely different
+  # extractor; (2) `fresh` was computed once per extractor KEY rather than
+  # once per unit TYPE, so a unit reclassified between two types the same
+  # key owns (GraphQL's four) never counted as stale under its old type.
+  describe '#remove_replaced_units typed identity (#225)' do
+    def register(type:, identifier:)
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: nil)
+      )
+    end
+
+    def write_json(extractor_key, identifier)
+      dir = File.join(tmpdir, 'output', extractor_key.to_s)
+      FileUtils.mkdir_p(dir)
+      File.write(
+        File.join(dir, extractor.send(:collision_safe_filename, identifier)),
+        JSON.generate(identifier: identifier)
+      )
+    end
+
+    # Reproduces the live incident: a `database_views` re-run's removal pass
+    # must not take a same-named `factories` unit with it. Both types are
+    # unconditional (file-derived) whole-app extractors, so neither is gated
+    # on `@eager_load_complete`.
+    it "removes only the replaced key's own type, sparing a same-identifier unit of another type" do
+      register(type: :database_view, identifier: 'reports')
+      write_json(:database_views, 'reports')
+      register(type: :factory, identifier: 'reports')
+      write_json(:factories, 'reports')
+
+      extractor.instance_variable_set(
+        :@incremental_extractors,
+        { database_views: double('DatabaseViewExtractor', extract_all: []) }
+      )
+
+      extractor.send(:replace_type_wholesale, :database_views, Set.new)
+
+      expect(extractor.dependency_graph.node_types('reports')).to eq([:factory])
+      expect(extractor.dependency_graph.units_of_type(:factory)).to include('reports')
+      database_view_json = File.join(tmpdir, 'output', 'database_views',
+                                     extractor.send(:collision_safe_filename, 'reports'))
+      factory_json = File.join(tmpdir, 'output', 'factories',
+                               extractor.send(:collision_safe_filename, 'reports'))
+      expect(File.exist?(database_view_json)).to be(false)
+      expect(File.exist?(factory_json)).to be(true)
+    end
+
+    # GraphQL owns four types (graphql_type/mutation/resolver/query) under
+    # one extractor key. Simulate a unit reclassified from graphql_type to
+    # graphql_query across a run: a key-wide `fresh` set would see the
+    # identifier as "still fresh" (present under the new type) and leave the
+    # stale graphql_type node behind.
+    it 'removes the stale old-type node when a unit is reclassified between two types of one key' do
+      register(type: :graphql_type, identifier: 'Schema::Widget')
+      fresh = Woods::ExtractedUnit.new(type: :graphql_query, identifier: 'Schema::Widget', file_path: nil)
+      extractor.instance_variable_set(
+        :@incremental_extractors,
+        { graphql: double('GraphQLExtractor', extract_all: [fresh]) }
+      )
+      extractor.instance_variable_set(:@eager_load_complete, true)
+
+      extractor.send(:replace_type_wholesale, :graphql, Set.new)
+
+      expect(extractor.dependency_graph.node_types('Schema::Widget')).to eq([:graphql_query])
+    end
+  end
+
+  # ── resolve_dependents typed identity (#225) ─────────────────────────
+
+  # unit_map used to be identifier => unit, so a colliding identifier's later
+  # registration overwrote the earlier one and every dependent landed on
+  # whichever unit happened to be indexed last — the other unit serialized
+  # `dependents: []` forever, disagreeing with the incremental path (which
+  # already treats dependents as a property of the identifier).
+  describe '#resolve_dependents typed identity (#225)' do
+    it 'attaches a dependent to every unit sharing a colliding identifier' do
+      view = Woods::ExtractedUnit.new(type: :database_view, identifier: 'reports', file_path: nil)
+      factory = Woods::ExtractedUnit.new(type: :factory, identifier: 'reports', file_path: nil)
+      dependent = Woods::ExtractedUnit.new(type: :model, identifier: 'Report', file_path: nil)
+      dependent.dependencies = [{ target: 'reports', via: :code_reference }]
+
+      extractor.instance_variable_set(:@results, {
+                                        database_views: [view],
+                                        factories: [factory],
+                                        models: [dependent]
+                                      })
+
+      extractor.send(:resolve_dependents)
+
+      expect(view.dependents).to eq([{ type: :model, identifier: 'Report' }])
+      expect(factory.dependents).to eq([{ type: :model, identifier: 'Report' }])
+    end
+  end
+
+  # ── finalize_incremental_unit_json per-type git metadata (#225) ──────
+
+  # `@incremental_written` is identifier => file_path, last-writer-wins, so a
+  # single pre-resolved git hash applied to every colliding type's JSON put
+  # one type's commit history into another type's `metadata.git`. Each type
+  # must resolve git data against its OWN file_path.
+  describe '#finalize_incremental_unit_json per-type git metadata (#225)' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    def register(type:, identifier:, relative_path:)
+      unit = Woods::ExtractedUnit.new(
+        type: type, identifier: identifier, file_path: File.join(tmpdir, relative_path)
+      )
+      extractor.dependency_graph.register(unit)
+      unit
+    end
+
+    def write_json(extractor_key, identifier)
+      dir = File.join(tmpdir, 'output', extractor_key.to_s)
+      FileUtils.mkdir_p(dir)
+      File.write(
+        File.join(dir, extractor.send(:collision_safe_filename, identifier)),
+        JSON.generate(identifier: identifier, metadata: {})
+      )
+    end
+
+    it "gives each colliding type its own file's git data, not the last-registered type's" do
+      register(type: :database_view, identifier: 'reports', relative_path: 'db/views/reports.sql')
+      write_json(:database_views, 'reports')
+      register(type: :factory, identifier: 'reports', relative_path: 'spec/factories/reports.rb')
+      write_json(:factories, 'reports')
+
+      # Both types were written through register_and_write in the same run,
+      # so @incremental_written is last-writer-wins per identifier — here,
+      # the factory's path, since it registered second.
+      extractor.instance_variable_set(:@incremental_written, { 'reports' => 'spec/factories/reports.rb' })
+      extractor.instance_variable_set(:@dependents_dirty, Set.new)
+
+      allow(extractor).to receive(:incremental_git_data).and_return(
+        'db/views/reports.sql' => { 'last_author' => 'Alice' },
+        'spec/factories/reports.rb' => { 'last_author' => 'Bob' }
+      )
+
+      extractor.send(:finalize_incremental_unit_json, Set.new)
+
+      view_json = JSON.parse(File.read(File.join(tmpdir, 'output', 'database_views',
+                                                 extractor.send(:collision_safe_filename, 'reports'))))
+      factory_json = JSON.parse(File.read(File.join(tmpdir, 'output', 'factories',
+                                                    extractor.send(:collision_safe_filename, 'reports'))))
+
+      expect(view_json['metadata']['git']).to eq('last_author' => 'Alice')
+      expect(factory_json['metadata']['git']).to eq('last_author' => 'Bob')
+    end
+  end
+
+  # ── AtomicFile.read on Woods' own JSON artifacts (#225) ──────────────
+
+  # A bare File.read tags what comes back with the process's default
+  # external encoding — US-ASCII under LANG=C, the documented daemon
+  # environment — so any multibyte byte in a unit's source raised
+  # Encoding::InvalidByteSequenceError on the first JSON.parse.
+  describe '#regenerate_type_index encoding (#225)' do
+    around do |example|
+      original = Encoding.default_external
+      Encoding.default_external = Encoding::US_ASCII
+      example.run
+    ensure
+      Encoding.default_external = original
+    end
+
+    it 'reads unit JSON via AtomicFile.read and does not raise under a US-ASCII default external encoding' do
+      type_dir = File.join(tmpdir, 'output', 'models')
+      FileUtils.mkdir_p(type_dir)
+      source_code = 'class Foo; end # em dash —'
+      payload = JSON.generate(
+        identifier: 'Foo', file_path: 'app/models/foo.rb', namespace: nil,
+        source_code: source_code, metadata: {}, chunks: []
+      )
+      # binwrite, not File.write: writing a UTF-8 string through a text-mode
+      # File.write under a US-ASCII default external encoding would raise on
+      # the write side, before the read path under test ever runs.
+      File.binwrite(File.join(type_dir, extractor.send(:collision_safe_filename, 'Foo')), payload)
+
+      expect { extractor.send(:regenerate_type_index, :models) }.not_to raise_error
+    end
+  end
 end

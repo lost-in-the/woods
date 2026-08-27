@@ -87,10 +87,11 @@ module Woods
     # conventionally ships `.env`, `.env.local`, `.env.development` and friends.
     # They also have to survive the watcher's dotfile filter to be seen at all.
     # Named rather than wildcarded, deliberately. `config/*.yml` also catches
-    # files Woods reads as *bytes* — `config/schedule.yml` is a scheduled-job
-    # source, and escalating it to `:restart` would stop the daemon for a change
-    # it could simply re-extract. The boot-captured set is small and knowable;
-    # guessing at it costs more than listing it.
+    # files Woods reads as *bytes* — `config/recurring.yml` and
+    # `config/sidekiq_cron.yml` are scheduled-job sources, and escalating
+    # either to `:restart` would stop the daemon for a change it could simply
+    # re-extract. The boot-captured set is small and knowable; guessing at it
+    # costs more than listing it.
     RESTART_PATH_PATTERNS = [
       %r{\Aconfig/settings\.ya?ml\z},
       %r{\Aconfig/settings/[^/]+\.ya?ml\z},
