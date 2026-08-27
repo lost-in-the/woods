@@ -550,7 +550,15 @@ Redaction replaces matching column values with `"[REDACTED]"` before the MCP res
 
 Redacted columns are also **refused as query inputs**: as the `column` of `console_aggregate`, as a scope or `by:` key (including `_matches` forms), and as `order_by`. Masking output alone would leave a comparison oracle over the secret.
 
-**Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, ~30 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.
+For `console_query`'s `select`, three expression shapes are additionally refused, because the redactor masks by output header name and these shapes rename or read the protected value:
+
+- **An `AS` alias over a redacted column** (`password_digest AS note`) — the value would return plaintext under a header no redaction rule matches.
+- **An aggregate over a redacted column, aliased or bare** (`SUM(salary)`, `SUM(salary) AS total`) — the aggregate itself is the secret's value.
+- **An `AS` alias over either column of a `console_redacted_key_values` pair** — the positional EAV rule resolves key/value columns by header name, so renaming either header disarms it.
+
+Direct, unaliased selection of a redacted column stays allowed: the output header keeps the column's real name, and the positional redactor masks the value as usual.
+
+**Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, 31 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `password_salt`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `consumed_timestep`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.
 
 Extend or override rather than reassigning blindly:
 
@@ -649,7 +657,7 @@ end
 With the flag on, every request through `console_sql` / `console_query` runs
 these controls, in order:
 
-1. `SqlValidator` rejects DML/DDL (`INSERT`/`UPDATE`/`DELETE`/`DROP`/`TRUNCATE`/`ALTER`/`CREATE`/`REPLACE`), `UNION`/`INTO`/`COPY`, multi-statement and comment-hidden injections, and most administrative keywords (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`, `PREPARE`, transaction control, `EXPLAIN ANALYZE`) at the string level. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`), anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass.
+1. `SqlValidator` rejects DML/DDL (`INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`TRUNCATE`/`ALTER`/`CREATE`/`REPLACE`), row-lock clauses (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`), writable CTEs (every `AS (...)` body, not just the first), `UNION`/`INTO`/`COPY`, multi-statement and comment-hidden injections, and most administrative keywords (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`, `PREPARE`, transaction control, `EXPLAIN ANALYZE`) at the string level. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`), anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass.
 2. `TableGate` refuses any SQL, model, or join that touches a `console_blocked_tables` entry.
 3. `SafeContext` wraps every request in a rolled-back transaction with a short statement timeout. **It does NOT cover async side effects**: ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP egress, `Thread.new`-spawned work, `after_rollback` callbacks, and writes through a different shard all execute as live. Treat the Console MCP as an admin-trust boundary, not a sandbox.
 4. `CredentialScanner` + column/EAV redaction scrub results.
@@ -718,10 +726,10 @@ Each transaction sets a statement timeout before any query runs. The default is 
 `SqlValidator` rejects non-read-only SQL at the string level, before any database interaction:
 
 - **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected, it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
-- **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`
-- **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`
+- **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`
+- **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`; row-lock clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `FOR UPDATE NOWAIT`/`SKIP LOCKED`, MySQL `LOCK IN SHARE MODE`) — these take live row locks even inside the rolled-back transaction
 - **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS`, a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
-- **Rejected patterns:** multiple statements (semicolons), writable CTEs (`WITH ... AS (DELETE/UPDATE/INSERT ...)`), comment-hidden injections
+- **Rejected patterns:** multiple statements (semicolons), writable CTEs (every `AS (...)` body is checked, so a writable CTE in any WITH position is refused — `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`), comment-hidden injections
 
 ### Model and Column Validation
 

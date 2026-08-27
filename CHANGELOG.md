@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Select aliasing no longer defeats console redaction.** `console_query` accepted
+  `select: ["password_digest AS note"]`; the positional redactor masks by output
+  header name, so the aliased column returned plaintext. Three select shapes are
+  now refused: an alias over a `console_redacted_columns` column, an aggregate over
+  one (aliased or bare), and an alias over either column of a
+  `console_redacted_key_values` pair. Direct, unaliased selection of a redacted
+  column is unchanged and stays masked.
+- **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
+  check anchored its match to the statement leader, so
+  `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
+  passed validation and PostgreSQL executed the DELETE. Every `AS (...)` body in
+  the statement is now inspected.
+- **Row-lock clauses are rejected.** `SELECT ... FOR UPDATE`, `FOR NO KEY UPDATE`,
+  `FOR SHARE`, `FOR KEY SHARE` (with `NOWAIT`/`SKIP LOCKED`), and MySQL
+  `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration
+  of the rolled-back transaction.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
