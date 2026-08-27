@@ -137,6 +137,14 @@ derive unit identifiers, which changes the index format's observable contract.
   reclaim checks the claim inode before removing it and falls back to an
   exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
   honours array filters like `#search`.
+- **Task orphan detection compares pid namespaces, not only boot ids.** Docker
+  on Linux shares the host kernel boot id, so a host reader could judge a
+  container's task by an unrelated host pid. The producer identity now carries
+  `/proc/<pid>/ns/pid`, and a task from another namespace is left alone.
+- **Daemon claim reclaim runs under an `flock`.** A byte comparison before the
+  delete still left a read-then-unlink window where two starters could both
+  end up as claim owners; the whole reclaim-and-create loop is now one
+  critical section on a sidecar lock file, released by the kernel on death.
 - **Snapshot capture retries a locked SQLite database.** SQLite skips the busy
   handler in its deadlock-avoidance case, so two concurrent captures could
   fail at `BEGIN IMMEDIATE` despite `busy_timeout`. Three bounded attempts.

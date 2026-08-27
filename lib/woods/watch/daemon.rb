@@ -948,12 +948,44 @@ module Woods
       def claim_startup?
         return true if ENV['WOODS_IGNORE_WATCH'] == '1'
 
-        3.times do
-          return true if create_claim
-          return false unless reclaim_if_stale
-        end
+        with_claim_lock do
+          3.times do
+            return true if create_claim
+            return false unless reclaim_if_stale
+          end
 
-        false
+          false
+        end
+      end
+
+      # Serializes reclaim-then-create across starters. Without it the
+      # sequence is read-then-unlink: starter A judges claim S stale and
+      # pauses, B deletes S and publishes its live claim, A resumes and
+      # unlinks B's claim, and both return as owners. An `flock` on a
+      # sidecar file makes the whole loop one critical section; the kernel
+      # releases it if the holder dies. Where the filesystem refuses the
+      # lock (some network mounts) the loop runs unserialized, as before.
+      def with_claim_lock
+        lock = open_claim_lock
+        yield
+      ensure
+        lock&.close
+      end
+
+      def open_claim_lock
+        FileUtils.mkdir_p(@output_dir)
+        # Held open on purpose: the descriptor is the lock; closed in
+        # with_claim_lock's ensure.
+        file = File.open(claim_lock_path, File::RDWR | File::CREAT, 0o644) # rubocop:disable Style/FileOpen
+        file.flock(File::LOCK_EX)
+        file
+      rescue SystemCallError
+        file&.close
+        nil
+      end
+
+      def claim_lock_path
+        "#{claim_path}.lock"
       end
 
       # @return [Boolean] true when the claim file was created by this call

@@ -322,16 +322,40 @@ module Woods
           # so `process_alive?` would be checking an unrelated, possibly
           # reused, host pid. Leave those tasks alone rather than risk failing
           # one that is still running.
-          return true if foreign_boot?(task.producer_identity)
+          return true if foreign_producer?(task.producer_identity)
 
           process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
         end
 
-        def foreign_boot?(producer_identity)
+        # A producer this reader cannot judge by its own pid table: minted
+        # under another kernel boot, or (ordinary Docker on Linux, which
+        # shares the host boot id) inside another pid namespace. `task.pid`
+        # then names a slot in a namespace this process does not share, so
+        # `process_alive?` would be checking an unrelated, possibly reused,
+        # host pid.
+        def foreign_producer?(producer_identity)
           boot = producer_identity[/\Aboot=([^;]+)/, 1]
           return false unless boot
+          return true if boot != current_boot_identity
 
-          boot != current_boot_identity
+          namespace = producer_identity[/;ns=([^;]+)/, 1]
+          return false if namespace.nil? || current_pid_namespace.nil?
+
+          namespace != current_pid_namespace
+        end
+
+        # @return [String, nil] this process's pid namespace token
+        #   (`pid:[4026531836]`), nil where /proc has none (Darwin)
+        def current_pid_namespace
+          return @current_pid_namespace if defined?(@current_pid_namespace)
+
+          @current_pid_namespace = pid_namespace_for('self')
+        end
+
+        def pid_namespace_for(pid)
+          File.readlink("/proc/#{pid}/ns/pid")
+        rescue SystemCallError
+          nil
         end
 
         def current_boot_identity
@@ -371,7 +395,8 @@ module Woods
           start_ticks = linux_start_ticks(File.read("/proc/#{pid}/stat"))
           return if boot_id.empty? || start_ticks.nil?
 
-          "boot=#{boot_id};start_ticks=#{start_ticks}"
+          namespace = pid_namespace_for(pid)
+          namespace ? "boot=#{boot_id};ns=#{namespace};start_ticks=#{start_ticks}" : "boot=#{boot_id};start_ticks=#{start_ticks}"
         rescue Errno::ENOENT
           nil
         end

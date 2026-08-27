@@ -373,6 +373,33 @@ RSpec.describe Woods::MCP::Tasks::Store do
       expect(store.get(live.id).status).to eq('working')
     end
 
+    it 'leaves a task alone when its producer identity records another pid namespace on this boot' do
+      allow(store).to receive_messages(producer_identity_for: 'boot=test-boot;ns=pid:[1];start_ticks=1',
+                                       current_boot_identity: 'test-boot',
+                                       current_pid_namespace: 'pid:[1]')
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['producer_identity'] = 'boot=test-boot;ns=pid:[4026532000];start_ticks=1'
+      raw['pid'] = 2**30
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('working')
+    end
+
+    it 'still judges a same-boot, same-namespace producer by its pid' do
+      allow(store).to receive_messages(producer_identity_for: 'boot=test-boot;ns=pid:[1];start_ticks=1',
+                                       current_boot_identity: 'test-boot',
+                                       current_pid_namespace: 'pid:[1]')
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['pid'] = 2**30
+      File.write(path, JSON.generate(raw))
+
+      expect(store.get(live.id).status).to eq('failed')
+    end
+
     it 'marks a task failed after its exact producer process dies' do
       child = Process.spawn('/bin/sleep', '30')
       identity = store.send(:producer_identity_for, child)

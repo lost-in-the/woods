@@ -815,6 +815,28 @@ RSpec.describe Woods::Watch::Daemon do
     # stale before either deletes it. Without a re-check immediately before
     # the delete, the second starter's `rm_f` can remove the claim the first
     # starter already replaced with its own live one.
+    # The reclaim-then-create loop runs under an exclusive flock on a
+    # sidecar file, so two starters cannot interleave a staleness check
+    # with each other's delete and create.
+    it 'holds the claim lock for the whole reclaim-and-create loop' do
+      daemon = build
+      lock_path = "#{File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)}.lock"
+      locked_during_create = nil
+      allow(daemon).to receive(:create_claim) do
+        File.open(lock_path, File::RDWR | File::CREAT) do |probe|
+          locked_during_create = (probe.flock(File::LOCK_EX | File::LOCK_NB) == false)
+        end
+        true
+      end
+
+      expect(daemon.send(:claim_startup?)).to be true
+      expect(locked_during_create).to be true
+
+      File.open(lock_path, File::RDWR) do |after|
+        expect(after.flock(File::LOCK_EX | File::LOCK_NB)).to eq(0)
+      end
+    end
+
     it 'does not delete a claim that was replaced between the staleness check and the delete' do
       FileUtils.mkdir_p(output_dir)
       dead_pid = Process.spawn('true')
