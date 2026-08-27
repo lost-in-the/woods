@@ -234,6 +234,35 @@ RSpec.describe Woods::Chunking::SemanticChunker do
         expect(create_chunk.content).to include('def create')
         expect(create_chunk.content).to include('post_params')
       end
+
+      it 'keeps two class methods in distinct chunks instead of clobbering under "self"' do
+        small_threshold_chunker = described_class.new(threshold: 10)
+        unit = Woods::ExtractedUnit.new(
+          type: :controller,
+          identifier: 'ReportsController',
+          file_path: 'app/controllers/reports_controller.rb'
+        )
+        unit.source_code = <<~RUBY
+          class ReportsController < ApplicationController
+            def self.default_format
+              :csv
+            end
+
+            def self.exportable?
+              true
+            end
+
+            def index
+              @reports = Report.all
+            end
+          end
+        RUBY
+
+        chunk_types = small_threshold_chunker.chunk(unit).map(&:chunk_type)
+        expect(chunk_types).to include(:'action_self.default_format')
+        expect(chunk_types).to include(:'action_self.exportable')
+        expect(chunk_types).not_to include(:action_self)
+      end
     end
 
     context 'with a service (generic unit)' do

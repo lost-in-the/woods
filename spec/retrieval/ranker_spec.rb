@@ -189,6 +189,25 @@ RSpec.describe Woods::Retrieval::Ranker do
         expect(fused.map(&:score)).to all(eq(1.0))
       end
 
+      # P3 — a graph-expansion candidate always carries metadata: {}, which
+      # is truthy. `metadata_map[base_id] ||= candidate.metadata` locked
+      # that empty hash in permanently, so real metadata arriving from a
+      # later-processed source (vector/keyword) never took effect.
+      it 'lets real metadata from a later source win over an earlier empty graph_expansion hash' do
+        allow(metadata_store).to receive(:find).with('Fused')
+                                               .and_return({ 'metadata' => { 'type' => 'model' } })
+
+        candidates = [
+          candidate(identifier: 'Fused', score: 0.5, source: :graph_expansion, metadata: {}),
+          candidate(identifier: 'Fused', score: 0.8, source: :vector, metadata: { 'type' => 'model' })
+        ]
+
+        result = ranker.rank(candidates, classification: classification(target_type: :model))
+
+        merged = result.find { |c| c.identifier == 'Fused' }
+        expect(merged.metadata).to eq({ 'type' => 'model' })
+      end
+
       # P1 fix: chunked units embed as `Identifier#chunk_N`, but the
       # metadata/graph stores (and keyword search) key on the bare
       # identifier. RRF used to key its accumulator on the raw candidate
@@ -224,6 +243,37 @@ RSpec.describe Woods::Retrieval::Ranker do
         # signal is the only discriminator.
         expect(result.first.identifier).to eq('WithFields')
         expect(result.first.matched_fields).to eq(%w[identifier description])
+      end
+    end
+
+    # P2 — a unit hit strongly by vector/keyword/direct AND reached by graph
+    # expansion must merge as the primary-eligible source, not the
+    # incidental :graph_expansion one. ContextAssembler#add_result_sections
+    # routes solely on candidate.source, so a wrong pick here silently
+    # demotes a real hit into supporting.
+    describe 'source precedence when merging duplicates (P2)' do
+      it 'keeps a primary-eligible source over a low-scored graph_expansion duplicate' do
+        candidates = [
+          candidate(identifier: 'Strong', score: 0.9, source: :vector),
+          candidate(identifier: 'Strong', score: 0.1, source: :graph_expansion)
+        ]
+
+        fused = ranker.send(:apply_rrf, candidates)
+        merged = fused.find { |c| c.identifier == 'Strong' }
+
+        expect(merged.source).not_to eq(:graph_expansion)
+      end
+
+      it 'keeps :graph_expansion for a unit reached only via expansion' do
+        candidates = [
+          candidate(identifier: 'PureExpansion', score: 0.5, source: :graph_expansion),
+          candidate(identifier: 'Other', score: 0.9, source: :vector)
+        ]
+
+        fused = ranker.send(:apply_rrf, candidates)
+        merged = fused.find { |c| c.identifier == 'PureExpansion' }
+
+        expect(merged.source).to eq(:graph_expansion)
       end
     end
   end

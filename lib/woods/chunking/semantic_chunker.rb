@@ -603,7 +603,10 @@ module Woods
       end
 
       def start_action(state, line)
-        action_name = line[/def\s+(\w+)/, 1]
+        # Capture an optional `self.` so a class method chunks under
+        # `self.<name>` instead of every one landing on the key "self"
+        # and clobbering the previous class method's collected lines.
+        action_name = line[/def\s+((?:self\.)?\w+)/, 1]
         state[:actions][action_name] = [line]
         # An endless def (`def show = head :ok`) is a complete action on
         # its own line — no body follows, so entering tracking state

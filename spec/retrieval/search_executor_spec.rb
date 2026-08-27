@@ -416,6 +416,49 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
         expect(result.candidates.map(&:matched_fields)).to all(be_nil)
       end
     end
+
+    # The metadata store's #search has no ORDER BY, so a score derived from
+    # result-row position tracked arbitrary row order instead of relevance.
+    # Insert the weaker match FIRST so it would land at row index 0 (the
+    # position-based score's highest slot) and prove the fix ranks on match
+    # quality regardless.
+    describe 'scoring by match quality, not row position' do
+      let(:keyword_classification) do
+        Woods::Retrieval::QueryClassifier::Classification.new(
+          intent: :locate, scope: :focused, target_type: nil,
+          framework_context: false, keywords: ['zzzneedle']
+        )
+      end
+
+      before do
+        metadata_store.store('AloneMatch', {
+                               type: 'model', identifier: 'zzzneedleAlone',
+                               file_path: 'app/models/other.rb', description: 'unrelated'
+                             })
+        metadata_store.store('FullMatch', {
+                               type: 'model', identifier: 'zzzneedleFull',
+                               file_path: 'app/models/zzzneedle_full.rb',
+                               description: 'zzzneedle everywhere'
+                             })
+      end
+
+      it 'ranks the candidate with more matched fields above one with fewer, despite insertion order' do
+        result = executor.execute(query: 'zzzneedle', classification: keyword_classification)
+
+        alone = result.candidates.find { |c| c.identifier == 'AloneMatch' }
+        full = result.candidates.find { |c| c.identifier == 'FullMatch' }
+
+        expect(alone.matched_fields.size).to be < full.matched_fields.size
+        expect(full.score).to be > alone.score
+      end
+
+      it 'keeps every keyword score within (0.0, 1.0]' do
+        result = executor.execute(query: 'zzzneedle', classification: keyword_classification)
+
+        expect(result.candidates.map(&:score)).to all(be_between(0.0, 1.0).inclusive)
+        expect(result.candidates.map(&:score)).to all(be > 0.0)
+      end
+    end
   end
 
   describe 'graph strategy execution' do

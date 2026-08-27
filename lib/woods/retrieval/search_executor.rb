@@ -162,8 +162,8 @@ module Woods
 
       # Keyword strategy: search metadata store by extracted keywords.
       #
-      # Searches each keyword individually and merges results, keeping the
-      # best score per identifier.
+      # Searches each keyword individually and merges results by identifier,
+      # scoring each merged hit by match quality (see {#keyword_match_score}).
       #
       # @return [Array<Candidate>]
       def execute_keyword(classification:, limit:)
@@ -174,11 +174,9 @@ module Woods
         rank_keyword_results(all_results, limit)
       end
 
-      # Search each keyword individually and merge, keeping best score per ID.
-      #
-      # Alongside the best score, accumulates +matched_fields+ — the union
-      # across keywords of the record fields that matched (see
-      # {#matched_fields_for}).
+      # Search each keyword individually and merge by identifier, unioning
+      # +matched_fields+ across keywords, then score each merged hit once
+      # from its complete matched-field set (see {#keyword_match_score}).
       #
       # @param keywords [Array<String>]
       # @return [Hash<String, Hash>] id => { score:, metadata:, matched_fields: }
@@ -186,33 +184,66 @@ module Woods
         results_by_id = {}
         keywords.each do |keyword|
           results = @metadata_store.search(keyword)
-          results.each_with_index do |r, index|
-            id = r['id']
-            score = 1.0 - (index.to_f / [results.size, 10].max)
-            merge_keyword_hit(results_by_id, id, score, r, matched_fields_for(r, keyword))
+          results.each do |r|
+            merge_keyword_hit(results_by_id, r['id'], r, matched_fields_for(r, keyword))
           end
         end
-        results_by_id
+        score_keyword_hits(results_by_id)
       end
 
-      # Fold a single keyword hit into the merged results: best score wins,
-      # matched fields union across keywords.
+      # Fold a single keyword hit into the merged results: matched fields
+      # union across keywords, metadata kept from the first hit seen.
       #
       # @param results_by_id [Hash<String, Hash>] Accumulator (mutated)
       # @param id [String] Candidate identifier
-      # @param score [Float] Rank-derived score for this hit
       # @param record [Hash] The metadata record returned by the store
       # @param matched [Array<String>] Fields that matched this keyword
       # @return [void]
-      def merge_keyword_hit(results_by_id, id, score, record, matched)
+      def merge_keyword_hit(results_by_id, id, record, matched)
         entry = results_by_id[id]
         if entry.nil?
-          results_by_id[id] = { score: score, metadata: record, matched_fields: matched }
+          results_by_id[id] = { metadata: record, matched_fields: matched }
         else
-          entry[:score] = score if score > entry[:score]
           entry[:matched_fields] |= matched
         end
       end
+
+      # Score each merged hit by match QUALITY (its final matched-field
+      # count) once every keyword has been folded in, rather than by the
+      # metadata store's result-row position.
+      #
+      # The store's +#search+ has no ORDER BY (SQLite runs a LIKE scan;
+      # InMemory iterates a Hash), so row order is arbitrary — scoring by
+      # index made that arbitrary order the dominant ranking signal once
+      # fed into the Ranker at semantic weight 0.40, ahead of the keyword
+      # evidence it was meant to represent.
+      #
+      # @param results_by_id [Hash<String, Hash>] id => { metadata:, matched_fields: }
+      # @return [Hash<String, Hash>] Same shape, each entry gaining +score+
+      def score_keyword_hits(results_by_id)
+        results_by_id.transform_values do |entry|
+          entry.merge(score: keyword_match_score(entry[:matched_fields]))
+        end
+      end
+
+      # Weight per matched field — mirrors {Ranker#keyword_score}'s own
+      # 0.25-per-field scale so the two stages agree on what "many fields
+      # matched" means. A hit with zero matched fields (shouldn't happen —
+      # the store only returned the record because something matched) still
+      # scores a positive floor rather than 0, keeping every keyword score
+      # in the documented (0.0, 1.0] range.
+      #
+      # @param matched_fields [Array<String>]
+      # @return [Float] Always in (0.0, 1.0]
+      def keyword_match_score(matched_fields)
+        return KEYWORD_FIELD_SCORE_WEIGHT if matched_fields.empty?
+
+        [matched_fields.size * KEYWORD_FIELD_SCORE_WEIGHT, 1.0].min
+      end
+
+      # @see #keyword_match_score
+      KEYWORD_FIELD_SCORE_WEIGHT = 0.25
+      private_constant :KEYWORD_FIELD_SCORE_WEIGHT
 
       # Metadata record fields never counted as keyword matches: +id+
       # duplicates +identifier+ (the store injects it), and +updated_at+
@@ -248,6 +279,10 @@ module Woods
 
       # Rank merged keyword results into Candidate objects.
       #
+      # Ties (equal matched-field counts) break on identifier, ascending —
+      # deterministic output instead of depending on the store's arbitrary
+      # row order for candidates {#keyword_match_score} can't distinguish.
+      #
       # @param results [Hash<String, Hash>]
       # @param limit [Integer]
       # @return [Array<Candidate>]
@@ -258,7 +293,7 @@ module Woods
                         metadata: data[:metadata],
                         matched_fields: matched && !matched.empty? ? matched : nil)
         end
-        scored.sort_by { |c| -c.score }.first(limit)
+        scored.sort_by { |c| [-c.score, c.identifier.to_s] }.first(limit)
       end
 
       # Graph strategy: find related units via dependency traversal.
