@@ -24,7 +24,7 @@ Yes. MySQL, PostgreSQL, and SQLite are all supported equally as application data
 
 ### How large a codebase can Woods handle?
 
-Woods has been tested on applications with 200+ models and 500+ extractable units. Extraction time scales roughly linearly with codebase size, a mid-size app (50-100 models) takes 10-30 seconds. Very large applications benefit from disabling `include_framework_sources` and using incremental mode for subsequent runs.
+Woods does not publish a supported size ceiling or a universal timing estimate. Extraction cost depends on application boot/eager-load time, enabled framework-source indexing, and codebase shape. Measure a full extraction in your application, then use incremental extraction or the watch daemon for ordinary changes.
 
 ---
 
@@ -36,7 +36,7 @@ No. Extraction is entirely read-only. It uses ActiveRecord reflection APIs (`col
 
 ### Can I run Woods in production?
 
-Extraction itself is designed for development and CI, it requires a fully booted Rails environment and takes 10-30 seconds. The MCP Index Server is read-only and can safely run in any environment as long as the HTTP transport is properly secured (bearer token required for non-loopback, origin allow-list via `OriginGuard`, TLS via reverse proxy, see [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md)). The Console Server should stay disabled in production regardless of its safety layers. The common production pattern is to extract in CI and publish the JSON output as a build artifact, then run the Index Server against the artifact.
+Prefer extraction in development or CI and publish the generated index as a controlled artifact. The Index Server is read-only but its index contains source and schema context; HTTP deployments still require authentication, origin controls, and TLS. Leave the live-data Console Server disabled in production unless a deliberate security review and access policy authorize it. See [MCP HTTP transport](MCP_HTTP_TRANSPORT.md) and [Console MCP setup](CONSOLE_MCP_SETUP.md).
 
 ---
 
@@ -44,92 +44,31 @@ Extraction itself is designed for development and CI, it requires a fully booted
 
 ### How do I install Woods?
 
-Add the gem to your Gemfile and run the install generator:
-
-```ruby
-# Gemfile
-group :development do
-  gem 'woods'
-end
-```
-
-```bash
-bundle install
-bundle exec rails generate woods:install
-```
-
-The generator creates `config/initializers/woods.rb` with default configuration. For Docker projects, run these commands through `docker compose exec app`. See [GETTING_STARTED.md](GETTING_STARTED.md) for the full setup walkthrough.
+Add `gem "woods", "~> 2.0"` to your development group, install it, run the install generator, review its initializer and migration, migrate, then extract and validate. Follow [Getting started](GETTING_STARTED.md) for the canonical commands and expected result. If an agent is doing the work, use [Agent setup](AGENT_SETUP.md).
 
 ---
 
 ### What is the minimum configuration?
 
-The only required option is `output_dir`, which has a sensible default:
-
-```ruby
-Woods.configure do |config|
-  config.output_dir = Rails.root.join('tmp/woods')  # default
-end
-```
-
-With just this, you can run `rake woods:extract` and get full extraction output. Embedding and vector storage require additional configuration, see [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md).
+The generated defaults are enough for structural extraction to `tmp/woods/`. Embeddings are optional. See [Getting started](GETTING_STARTED.md) for the minimal path and [Configuration reference](CONFIGURATION_REFERENCE.md) for supported settings.
 
 ---
 
 ### How do I set up the MCP server for Claude Code?
 
-Use the `woods-mcp-start` wrapper, which validates the index and restarts on failure:
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "command": "woods-mcp-start",
-      "args": ["/path/to/your-rails-app/tmp/woods"]
-    }
-  }
-}
-```
-
-Add this to `.mcp.json` in your Rails app root (for project-scoped config) or to `claude_desktop_config.json` (for global config). Run `rake woods:extract` first to generate the index. See [MCP_SERVERS.md](MCP_SERVERS.md) for the full setup guide.
+Extract first, then configure a project-scoped stdio server using the application's bundle and host-visible index path. Use the verified example in [MCP servers](MCP_SERVERS.md#configure-a-stdio-client).
 
 ---
 
 ### How do I set up the MCP server for Cursor?
 
-Use `woods-mcp` (without the `-start` wrapper, which is Claude Code-specific):
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "command": "woods-mcp",
-      "args": ["/path/to/your-rails-app/tmp/woods"]
-    }
-  }
-}
-```
-
-Add this to `.cursor/mcp.json` in your project. See [MCP_SERVERS.md](MCP_SERVERS.md) for details.
+Use the same project-scoped stdio command, adapted to Cursor's configuration location. See [MCP servers](MCP_SERVERS.md#client-locations).
 
 ---
 
 ### How do I set up the MCP server for Windsurf?
 
-The setup is the same as Cursor, use `woods-mcp` (not the `-start` wrapper):
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "command": "woods-mcp",
-      "args": ["/path/to/your-rails-app/tmp/woods"]
-    }
-  }
-}
-```
-
-Add this to your Windsurf MCP configuration file. The Index Server is transport-agnostic and works with any MCP-compliant client.
+Use the same project-scoped stdio command, adapted to Windsurf's configuration location. See [MCP servers](MCP_SERVERS.md#client-locations).
 
 ---
 
@@ -209,7 +148,7 @@ bundle exec rake woods:extract
 
 ### How long does extraction take?
 
-A mid-size Rails app (50-100 models, typical controller and service layer) takes 10-30 seconds for a full extraction. Larger apps (200+ models) may take 1-2 minutes. Framework source extraction (Rails, gem internals) adds overhead and can be disabled with `config.include_framework_sources = false` if you don't need it. Incremental extraction for changed files is much faster, typically under 5 seconds.
+There is no reliable application-independent estimate. Rails boot/eager load, framework-source indexing, and codebase shape dominate the result. Time `woods:extract` in your own environment and use `woods:incremental` or `woods:watch` for ordinary changes.
 
 ---
 
@@ -421,7 +360,7 @@ Several options for tuning retrieval:
 - **Increase `max_context_tokens`** to include more units per query (at the cost of larger LLM context).
 - **Lower `similarity_threshold`** (default 0.7) to include less similar results.
 - **Enable framework sources** (`include_framework_sources: true`) if Rails internals are relevant to your queries.
-- **Use the feedback tools** (`retrieval_rate`, `retrieval_report_gap`) to record quality ratings, `retrieval_suggest` analyzes feedback to recommend configuration changes.
+- **Use retrieval feedback only in a custom embedded server** that wires a feedback store. The normal packaged executable does not register feedback tools.
 
 ---
 
@@ -500,7 +439,7 @@ bundle exec rake woods:validate
 bundle exec rake woods:stats
 ```
 
-The `pipeline_status` MCP tool reports the last extraction time, unit counts, and whether the index is stale relative to the current git HEAD. The `woods_status` tool (Index Server) reports a single-call health snapshot covering extraction freshness, console-bridge reachability, embedding/Notion/session-tracer configuration state, and index version, useful for agents cold-connecting to a server.
+The packaged Index Server's `woods_status` tool reports a single-call health snapshot covering generation freshness, counts, retrieval readiness, and configured optional capabilities. `pipeline_status` requires an operator collaborator that the packaged executable does not wire.
 
 ---
 

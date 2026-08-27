@@ -138,7 +138,7 @@ woods-mcp-start ./tmp/woods
 }
 ```
 
-The `woods-mcp-start` wrapper validates the index directory, checks for `manifest.json`, ensures dependencies are installed, and restarts on failure. Use it instead of `woods-mcp` directly.
+The `woods-mcp-start` wrapper validates the index directory and published manifest, then replaces itself with `woods-mcp`. It does not install dependencies or restart a failed process.
 
 > **Common mistake:** Using the container path (`/app/tmp/woods`) in `.mcp.json`. The host-side Index Server needs the host-side path to the volume-mounted output. (The in-container variant below is the opposite, it takes the container path.)
 

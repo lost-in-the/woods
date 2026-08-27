@@ -53,7 +53,7 @@ Woods cannot extract from source files alone. It is not a static analysis tool.
 
 ### Extraction is very slow
 
-**Symptom:** A full extraction takes several minutes instead of 10-30 seconds.
+**Symptom:** A full extraction is much slower than this application's established baseline.
 
 **Cause:** Two common causes, a very large codebase (500+ models), or framework source extraction enabled on an app with many gems.
 
@@ -292,7 +292,7 @@ bundle exec rake woods:console 2>/dev/null
 **Fix:**
 
 1. Check server stderr for crash output.
-2. Use `woods-mcp-start` (the self-healing wrapper) instead of `woods-mcp` directly, it restarts the server on crash.
+2. Run the configured command manually from the same `cwd` and inspect stderr. `woods-mcp-start` validates the index before launch but does not restart a crashed server.
 3. For Docker setups, ensure the container stays running: `docker compose exec -d app tail -f /dev/null` keeps it alive.
 
 ---

@@ -1,324 +1,201 @@
-# MCP Servers
+# MCP servers
 
-Woods ships two MCP (Model Context Protocol) servers that integrate with AI development tools like Claude Code, Cursor, and Windsurf.
+Woods provides two MCP servers with different purposes and trust boundaries. Use the Index Server for codebase work. Enable the Console Server only when an agent must inspect live Rails data.
 
-## Overview
+## Choose a server
 
-| | Index Server | Console Server |
+| Question | Index Server | Console Server |
 |---|---|---|
-| **Purpose** | Query pre-extracted codebase data | Run live queries against a Rails app |
-| **Requires Rails?** | No, reads JSON from disk | Yes, boots in a Rails process |
-| **Tools** | 29 (14 always-on + 15 conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion) | 9 default, 11 with read tools; 31 schemas inventoried |
-| **Transport** | Stdio (default), HTTP | Stdio |
-| **Data source** | `tmp/woods/` output | Live database + application state |
-| **Safety** | Read-only (extraction output) | Rolled-back transactions, SQL validation |
+| What does it answer? | Code structure, resolved Rails behavior, dependencies, flows, and graph questions | Live model, schema, count, aggregate, sample, and optional read-only query questions |
+| What does it read? | A generated Woods index | A booted Rails app and its database |
+| Does it boot Rails? | No | Yes |
+| Packaged default | 14 tools | 9 tools |
+| Normal setup | Recommended | Disabled |
+| Main risk | Generated index may contain source and schema details | Responses may contain live application data |
 
-## Choosing the Right Tool
-
-| I want to... | Tool | Server |
-|---|---|---|
-| Look up a specific model or controller | `lookup` | Index |
-| Search for code patterns | `search` | Index |
-| Find what depends on a unit | `dependents` | Index |
-| Find what a unit depends on | `dependencies` | Index |
-| Trace an execution flow | `trace_flow` | Index |
-| Count database records | `console_count` | Console |
-| Sample records for debugging | `console_sample` | Console |
-| Check database schema | `console_schema` | Console |
-| Diagnose a model's data | `console_diagnose_model` | Console |
-| Monitor job queues | `console_job_queues` | Console |
-| Find dead code | `graph_analysis` | Index |
-| Check codebase health | `pipeline_status` | Index |
-
-For detailed examples with parameters and expected output, see [MCP Tool Cookbook](MCP_TOOL_COOKBOOK.md).
-
----
+Do not enable Console MCP to compensate for a stale or missing index. Extract or refresh the Index Server instead.
 
 ## Index Server
 
-The Index Server reads pre-extracted data from disk and serves it via MCP. No Rails boot required, it works with the JSON output from `rake woods:extract`.
+### Prepare the index
 
-### Setup
+Run these commands wherever the Rails application normally boots:
 
 ```bash
-# Start with stdio transport (default for MCP clients)
-woods-mcp /path/to/rails-app/tmp/woods
-
-# Or use the self-healing wrapper (installs deps, validates index)
-woods-mcp-start /path/to/rails-app/tmp/woods
-
-# HTTP transport (for shared/remote access)
-woods-mcp-http /path/to/rails-app/tmp/woods
+bin/rails woods:extract
+bin/rails woods:validate
+bin/rails woods:stats
 ```
 
-**Extract-only works out of the box.** If you've run `rake woods:extract` but not `rake woods:embed` (no embedding provider configured), the server still boots and serves all pattern/regex/structural tools, `lookup`, `search`, `dependencies`, `structure`, `graph_analysis`, `pagerank`, and the rest. Only `codebase_retrieve` (semantic search) needs embeddings, and it activates automatically once a provider is configured and `woods:embed` has run. No environment variable is required.
+The stdio server can then run outside Rails. Point it at the index root (`tmp/woods/` by default), not at an internal generation or payload directory.
 
-To fail closed instead, refuse to boot unless a real index (`woods.json`) is present, set `WOODS_REQUIRE_INDEX=1`. (The legacy `WOODS_ALLOW_AUTODETECT` flag is now a no-op; auto-detect is the default.)
+### Configure a stdio client
 
-### Claude Code Configuration
+Prefer the application's bundle and a project-scoped configuration:
 
 ```json
 {
   "mcpServers": {
     "woods": {
-      "command": "woods-mcp-start",
-      "args": ["/path/to/rails-app/tmp/woods"]
+      "command": "bundle",
+      "args": ["exec", "woods-mcp-start", "./tmp/woods"],
+      "cwd": "/absolute/path/to/your-rails-app"
     }
   }
 }
 ```
 
-### Cursor / Windsurf Configuration
+`woods-mcp-start` checks that the directory and published manifest exist, then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
 
-```json
-{
-  "mcpServers": {
-    "woods": {
-      "command": "woods-mcp",
-      "args": ["/path/to/rails-app/tmp/woods"]
-    }
-  }
-}
+You can launch the server directly when the client already handles preflight:
+
+```bash
+bundle exec woods-mcp ./tmp/woods
 ```
 
-### Docker Note
+Keep stdout reserved for MCP protocol messages. Diagnose startup failures from stderr or by running the same command in a terminal.
 
-The Index Server runs on the **host**, not inside Docker. It reads static JSON files and does not need Rails. Point it at the volume-mounted extraction output using the host-side path:
+### Client locations
 
-```json
-{
-  "mcpServers": {
-    "woods": {
-      "command": "woods-mcp-start",
-      "args": ["./tmp/woods"]
-    }
-  }
-}
-```
-
-Do **not** use the container path (e.g., `/app/tmp/woods`), the server cannot access it. The `woods-mcp-start` wrapper validates the directory and `manifest.json` before starting.
-
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker guide including Console Server configuration.
-
-### Tools (29 - 14 always-on + 15 conditional)
-
-Tool visibility depends on wiring. `tools/list` shows the current wiring, not the full theoretical surface. The unconditional core is 14 tools. The other 15 register only when their collaborator is present:
-
-| Group | Tools | Registers when |
+| Client | Typical project configuration | Notes |
 |---|---|---|
-| Pipeline | `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_repair`, `pipeline_health` | An operator host is wired |
-| Retrieval feedback | `retrieval_*` (4) | A feedback store is configured |
-| Snapshots | `list_snapshots`, `snapshot_detail`, `snapshot_diff`, `unit_history` | Snapshots are enabled |
-| Session trace | `session_trace` | A session tracer is wired |
-| Notion | `notion_sync` | Notion credentials are set |
+| Claude Code | `.mcp.json` | Use the JSON shape above |
+| Cursor | `.cursor/mcp.json` | Use the client's `mcpServers` format and the same command/cwd |
+| Windsurf | Windsurf MCP settings | Use the same command/cwd; location varies by client release |
+| Other stdio clients | Client-specific MCP settings | Preserve `command`, `args`, and absolute `cwd` semantics |
 
-The breakdown below lists every tool the index server can register.
+Client configuration formats can change independently of Woods. If a client rejects otherwise valid JSON, check that client's current MCP documentation.
 
-#### Core Query (6)
+### Docker path rule
 
-| Tool | Description |
-|------|-------------|
-| `lookup` | Look up a code unit by exact identifier. Options for including source and selecting metadata sections. |
-| `search` | Search units by regex pattern across identifiers, source code, or metadata fields. |
-| `dependencies` | Traverse forward dependencies (what a unit depends on) with BFS depth control. |
-| `dependents` | Traverse reverse dependencies (what depends on a unit) with BFS depth control. |
-| `structure` | Get codebase structure: manifest summary or full unit breakdown by type. |
-| `recent_changes` | List recently modified units sorted by git timestamp. |
+Extraction runs inside the Rails container. A desktop or coding client normally starts stdio processes on the host. Therefore the Index Server argument must be the host-visible side of the volume that contains the container's `tmp/woods/`.
 
-#### Graph Analysis (4)
-
-| Tool | Description |
-|------|-------------|
-| `graph_analysis` | Structural analysis: orphans, dead ends, hubs, cycles, bridges. |
-| `domain_clusters` | Group units into semantic domains by namespace and graph connectivity, clusters with hub nodes, entry points, boundary edges, and type breakdowns. |
-| `pagerank` | PageRank importance scores, higher means more structurally central. |
-| `framework` | Search Rails/gem framework source by concept keyword (e.g., "has_many", "before_action"). |
-
-#### Flow & Session (2)
-
-| Tool | Description |
-|------|-------------|
-| `trace_flow` | Trace execution flow from an entry point (e.g., `UsersController#create`) through the codebase. |
-| `session_trace` | Assemble context from browser session traces (requires session tracer middleware). |
-
-#### Semantic Search (1)
-
-| Tool | Description |
-|------|-------------|
-| `codebase_retrieve` | Natural language query with semantic search, ranked by relevance within a token budget. Requires embedding provider configuration. |
-
-#### Pipeline Management (5)
-
-| Tool | Description |
-|------|-------------|
-| `pipeline_extract` | Trigger extraction pipeline (full or incremental). Rate-limited to 5-minute cooldown. |
-| `pipeline_embed` | Trigger embedding generation for extracted units. |
-| `pipeline_status` | Current pipeline state: last extraction time, unit counts, staleness indicators. |
-| `pipeline_diagnose` | Classify a pipeline error and suggest remediation steps. |
-| `pipeline_repair` | Clear stale locks or reset rate limit cooldowns. |
-
-#### Feedback (4)
-
-| Tool | Description |
-|------|-------------|
-| `retrieval_rate` | Record quality rating (1-5) for a retrieval result. |
-| `retrieval_report_gap` | Report a missing unit that should have appeared in results. |
-| `retrieval_explain` | Get feedback statistics: average scores, gap counts, trends. |
-| `retrieval_suggest` | Analyze feedback to suggest retrieval improvements. |
-
-#### Temporal Snapshots (4)
-
-| Tool | Description |
-|------|-------------|
-| `list_snapshots` | List past extraction snapshots with timestamps and branch info. |
-| `snapshot_diff` | Compare two snapshots, added, modified, deleted units. |
-| `unit_history` | Track how a single unit changed across snapshots. |
-| `snapshot_detail` | Full metadata for a specific snapshot by git SHA. |
-
-#### Notion (1)
-
-| Tool | Description |
-|------|-------------|
-| `notion_sync` | Sync models and columns to a Notion database. Requires `notion_api_token` and `notion_database_ids` configuration. |
-
-#### Utility (2)
-
-| Tool | Description |
-|------|-------------|
-| `woods_status` | Health snapshot: extraction metadata (last run, unit counts, git SHA, staleness), retriever/embedding configuration, bootstrap state, feature flags, and a ready flag. Call first on cold connect. |
-| `reload` | Reload extraction data from disk without restarting the server. |
-
-### Resources
-
-| URI | Description |
-|-----|-------------|
-| `codebase://manifest` | Extraction manifest with version info, unit counts, git metadata |
-| `codebase://graph` | Full dependency graph with nodes, edges, type index |
-
-### Resource Templates
-
-| URI Template | Description |
-|--------------|-------------|
-| `codebase://unit/{identifier}` | Look up a single unit by identifier |
-| `codebase://type/{type}` | List all units of a given type |
-
-### Long-running tools and the Tasks extension
-
-`pipeline_extract` and `pipeline_embed` can take minutes on a large host, so they answer immediately and finish on a background thread. What that answer looks like depends on the client.
-
-**Clients that declare `io.modelcontextprotocol/tasks`** get a durable task handle:
-
-```jsonc
-{ "resultType": "task",
-  "taskId": "9f2c…",
-  "status": "working",
-  "createdAt": "2026-08-19T20:30:00Z",
-  "lastUpdatedAt": "2026-08-19T20:30:00Z",
-  "ttlMs": 3600000,
-  "pollIntervalMs": 2000 }
+```text
+Rails container: /app/tmp/woods
+Volume mapping:   ./tmp:/app/tmp
+MCP index path:   /absolute/host/project/tmp/woods
 ```
 
-Poll it with `tasks/get`; cancel with `tasks/cancel`. The record lives in `<index_dir>/tasks/`, on disk, not in the process, which is what makes three things work that did not before:
+If the client itself runs in a container, both `cwd` and index path must be visible in that container. See [Docker setup](DOCKER_SETUP.md).
 
-- **A real completion signal.** The task reaches `completed` or `failed`, and a failure carries its error. Previously the tool reported `started` and the error only reached a log the agent cannot read.
-- **Disconnect survival.** The handle outlives the connection *and* the process. A client that drops mid-run can reconnect, even to a restarted server, and still collect the result.
-- **Crash detection.** A record still marked `working` whose owning process is gone resolves to `failed` with an explanation, instead of leaving an agent polling a run that no longer exists.
+### Verify the connection
 
-**Clients that do not declare the extension** get exactly the previous behaviour, `{"status": "started"}` and nothing else. This is required, not a courtesy: a client that does not understand a task handle would read it as the final result and report a run that had not happened.
+Reconnect the client, then call:
 
-Both tools keep their existing rate limiting (`PipelineGuard`), in-process serialization, and cross-process `PipelineLock` acquisition regardless of which path is taken.
+1. `woods_status` to confirm the index and generation;
+2. `search` with a class name;
+3. `lookup` with an identifier returned by search.
 
-> The task store writes to the index directory. If that directory is read-only, a legitimate setup for a host-side reader on a mounted volume, task creation is skipped with a warning on stderr and the tool falls back to fire-and-forget rather than failing.
+Do not use raw JSON-RPC text as the first smoke test unless the client or script performs the MCP initialization handshake. A normal MCP client handles negotiation before listing or calling tools.
 
----
+### Tools (29 — 14 registered in the packaged default)
+
+The Index Server defines 29 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.
+
+| Tool | Use it for |
+|---|---|
+| `woods_status` | Index health, generation, counts, and retrieval readiness |
+| `search` | Discover identifiers by regex, prefix, suffix, source, or metadata |
+| `lookup` | Fetch one exact unit with source, metadata, and relationships |
+| `dependencies` | Traverse what a unit depends on |
+| `dependents` | Traverse what depends on a unit |
+| `structure` | Summarize structural relationships around a unit |
+| `trace_flow` | Follow a request, job, mail, or other execution flow |
+| `framework` | Inspect relevant Rails or installed gem source |
+| `recent_changes` | Find indexed units changed recently |
+| `graph_analysis` | Analyze paths and neighborhoods in the dependency graph |
+| `domain_clusters` | Discover connected domains in the graph |
+| `pagerank` | Find structurally central units |
+| `reload` | Reload a newly published generation without restarting the client |
+| `codebase_retrieve` | Natural-language retrieval; returns a configuration error until embeddings exist |
+
+The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
+
+### Conditional Index capabilities
+
+The Ruby server builder contains 15 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, and Notion sync. They register only when their required collaborators or configuration are wired.
+
+The normal packaged executable does not wire pipeline-operator or feedback-store collaborators. Do not tell users to call those tools after a standard `woods-mcp` launch. Snapshot, session, and Notion capabilities are specialized configurations; document and test the exact embedded server construction when enabling them.
+
+### HTTP transport
+
+Use HTTP only for a deliberate shared or remote deployment. It expands the network boundary and requires authentication, origin restrictions, and TLS termination. Follow [MCP HTTP transport](MCP_HTTP_TRANSPORT.md); do not translate the stdio example into an unauthenticated public listener.
 
 ## Console Server
 
-The Console Server connects to a live Rails application. It registers 9
-read-only model/schema tools by default and can register SQL/query explicitly.
+The Console Server launches a Rails process through direct, Docker, or SSH connection configuration. It reads live data and must be treated as a separate security decision.
 
-### Setup
+### Start with the default mode
 
-```bash
-woods-console-mcp
+Without a console connection file, the executable launches the Rails task directly from its `cwd`:
+
+```json
+{
+  "mcpServers": {
+    "woods-console": {
+      "command": "bundle",
+      "args": ["exec", "woods-console-mcp"],
+      "cwd": "/absolute/path/to/your-rails-app"
+    }
+  }
+}
 ```
 
-`woods-console-mcp` can launch the embedded server from `console.yml`:
-
-```yaml
-# console.yml
-mode: direct             # direct, docker, or ssh
-directory: /path/to/rails-app
-command: bundle exec rake woods:console
-```
+For Docker or SSH, create `~/.woods/console.yml` or set `WOODS_CONSOLE_CONFIG` to a specific YAML file. See [Console MCP setup](CONSOLE_MCP_SETUP.md) for connection examples and safeguards.
 
 ### Tool inventory (31 schemas; 9 registered by default)
 
-#### Tier 1: Read-Only (9 tools)
+The packaged default registers these nine tools:
 
-Safe, foundational queries against the live database.
+- `console_status`
+- `console_schema`
+- `console_find`
+- `console_count`
+- `console_aggregate`
+- `console_pluck`
+- `console_recent`
+- `console_sample`
+- `console_association_count`
 
-| Tool | Description |
-|------|-------------|
-| `console_count` | Count records matching scope conditions |
-| `console_sample` | Random sample of records (max 25) |
-| `console_find` | Find a single record by primary key or unique column |
-| `console_pluck` | Extract column values with optional distinct (max 1000 rows) |
-| `console_aggregate` | Run sum/average/minimum/maximum on a column (count needs no column) |
-| `console_association_count` | Count associated records for a specific record |
-| `console_schema` | Database schema for a model with optional index info |
-| `console_recent` | Recently created/updated records (max 50) |
-| `console_status` | System health: available models and connection status |
+These tools use structured, read-only operations with validation, limits, blocked-table checks, credential scanning, and response redaction.
 
-#### Tier 2: Domain-Aware (9 inventory schemas; not registered)
+### Optional embedded read tools (11 total)
 
-Higher-level operations: diagnostics, validation, settings, policies.
+There are 11 with read tools enabled.
 
-| Tool | Description |
-|------|-------------|
-| `console_diagnose_model` | Full model diagnostic: counts, recent records, aggregates |
-| `console_data_snapshot` | Record with associations for debugging (depth 1-3) |
-| `console_validate_record` | Run validations on an existing record with optional changes |
-| `console_check_setting` | Check a configuration setting value |
-| `console_update_setting` | Update a setting (requires confirmation) |
-| `console_check_policy` | Check authorization policy for a record and user |
-| `console_validate_with` | Validate attributes against a model without persisting |
-| `console_check_eligibility` | Check feature eligibility for a record |
-| `console_decorate` | Invoke a decorator and return computed attributes |
+Setting `console_embedded_read_tools` explicitly adds:
 
-#### Tier 3: Analytics (10 inventory schemas; not registered)
+- `console_sql`
+- `console_query`
 
-Performance metrics, job monitoring, cache stats.
+Both remain subject to Console security policy. SQL validation and rolled-back transactions reduce risk but do not make arbitrary production access a safe default.
 
-| Tool | Description |
-|------|-------------|
-| `console_slow_endpoints` | Slowest endpoints by response time |
-| `console_error_rates` | Error rates by controller or overall |
-| `console_throughput` | Request throughput over time |
-| `console_job_queues` | Job queue statistics |
-| `console_job_failures` | Recent job failures |
-| `console_job_find` | Find a job by ID, optionally retry |
-| `console_job_schedule` | Scheduled/upcoming jobs |
-| `console_redis_info` | Redis server information by section |
-| `console_cache_stats` | Cache store statistics |
-| `console_channel_status` | ActionCable channel status |
+### Inventory-only schemas
 
-#### Tier 4: Guarded (2 read opt-in; eval not registered)
+The source tree contains 31 Console schemas grouped into tiers. The packaged executable registers only the nine default tools or the eleven embedded-read tools above. Tier 2 domain helpers, Tier 3 operational analytics, and `console_eval` do not execute in a supported packaged mode.
 
-SQL and query require explicit read-tool configuration and strict validation.
+This distinction is intentional: schema inventory supports design and compatibility work, while registration defines what an MCP client can actually call.
 
-| Tool | Description |
-|------|-------------|
-| `console_eval` | Inventory schema only; unavailable in supported modes |
-| `console_sql` | Execute read-only SQL (SELECT only, validated) |
-| `console_query` | Enhanced query builder with joins and grouping |
+## Security checklist
 
-### Safety Layers
+Before enabling either server:
 
-The Console Server implements defense-in-depth:
+- treat the generated index as source code and schema metadata;
+- keep project-scoped executable paths pinned to the intended bundle;
+- avoid secrets in command arguments or committed client configuration;
+- require explicit authorization for Console access and optional read tools;
+- use development or purpose-built read-only credentials where possible;
+- verify the callable tool list from the connected server, not from source inventory;
+- apply authentication, origin controls, and TLS before any HTTP exposure.
 
-1. **SafeContext**: Every operation runs in a database transaction that is always rolled back. Writes are silently discarded.
-2. **SqlValidator**: Rejects DML (INSERT/UPDATE/DELETE) and DDL (CREATE/ALTER/DROP) at the string level before any database interaction.
-3. **CredentialScanner**: Redacts credential-shaped response values.
-4. **Column/EAV redaction**: Redacts configured sensitive fields and key/value rows.
-5. **ModelValidator**: Validates model names against `ActiveRecord::Base.descendants` to prevent arbitrary class instantiation.
+Report vulnerabilities privately through [SECURITY.md](../SECURITY.md).
+
+## Troubleshooting order
+
+1. Run `woods:validate` and `woods:stats` in the Rails environment.
+2. Run the configured executable manually from the configured `cwd`.
+3. Confirm the index path is visible to the process that starts MCP.
+4. Reconnect the client and call `woods_status`.
+5. Check [Troubleshooting](TROUBLESHOOTING.md) for the exact stderr message.
+
+For agent query behavior after connection, continue to [Agent guide](AGENT_GUIDE.md).

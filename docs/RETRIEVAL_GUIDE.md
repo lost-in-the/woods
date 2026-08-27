@@ -167,7 +167,7 @@ result    = retriever.retrieve("what validations does Order have?")
 
 Retrieval degrades gracefully when components are unavailable. The Retriever itself does not implement explicit fallback tiers, degradation happens naturally through how each component handles errors:
 
-- **Embedding provider unavailable**: `codebase_retrieve` returns no results. The MCP tool description notes this condition. Check `pipeline_status` to confirm embeddings exist.
+- **Embedding provider unavailable**: `codebase_retrieve` returns a structured configuration error. Check `woods_status` for retrieval readiness.
 - **Vector store unavailable**: vector and hybrid strategies fail at query time. Keyword and graph strategies remain available for direct calls to `SearchExecutor`.
 - **Metadata store error**: the structural context overview (unit counts by type) is silently omitted; `Retriever#build_structural_context` rescues `StandardError` and returns `nil`. The retrieval result is still returned without the overview.
 - **Graph store unavailable**: graph expansion in hybrid strategy produces no graph candidates; vector and keyword candidates are still ranked and returned.
@@ -241,5 +241,5 @@ bundle exec rake woods:embed
 | Dimension mismatch warning in logs | `embedding_model` changed after embedding was generated | Re-run `rake woods:extract && rake woods:embed` with the new model |
 | Empty results for a known class name | Keyword strategy not finding the identifier | Try a conceptual query with `codebase_retrieve`; or use `search` for exact name lookup |
 | Very slow retrieval | Large vector index without HNSW index, or Qdrant cold start | For pgvector: create an HNSW index (see `BACKEND_MATRIX.md`). For Qdrant: check collection status |
-| `codebase_retrieve` tool listed but disabled | Embedding provider not configured or API key missing | Set `embedding_provider` and check `pipeline_status` for embedding availability |
+| `codebase_retrieve` tool listed but disabled | Embedding provider not configured or API key missing | Set `embedding_provider`, run `woods:embed`, and check `woods_status` |
 | Results clustered around one type | Diversity penalty insufficient for codebase shape | Lower `similarity_threshold` slightly and widen the query scope |

@@ -1,110 +1,78 @@
-# Woods Documentation
+# Woods documentation
 
-Woods is a Ruby gem that extracts structured data from Rails applications for AI-assisted
-development. It uses **runtime introspection**, not file parsing: it boots the Rails app and
-queries `ActiveRecord::Base.descendants`, `Rails.application.routes`, and the reflection APIs.
-The output is version-accurate: inlined concerns, resolved callback chains, and schema-aware
-associations.
+Woods extracts runtime-accurate Rails context and serves it to coding agents through MCP. Start with the task you are trying to complete; you do not need to read the documentation in order.
 
-## Current State
+## What are you trying to do?
 
-All major layers are implemented:
+| Task | Start here | You will finish with |
+|---|---|---|
+| Install Woods in a Rails app | [Getting started](GETTING_STARTED.md) | A validated codebase index with the 14 packaged-default tools connected |
+| Ask an agent to install or configure Woods | [Agent setup runbook](AGENT_SETUP.md) | A safe, reviewable install with an agent handoff report |
+| Configure an MCP client or Docker path | [MCP servers](MCP_SERVERS.md) | A working Index Server and, if authorized, an optional Console Server |
+| Use Woods tools as an agent | [Agent guide](AGENT_GUIDE.md) | A repeatable query workflow for code context, flows, and blast radius |
+| Upgrade from Woods 1.x | [Upgrade to Woods 2.0](UPGRADING_TO_2.md) | A backed-up, re-indexed, verified v2 installation |
+| Diagnose an error | [Troubleshooting](TROUBLESHOOTING.md) | Symptom-to-cause checks for extraction, MCP, embeddings, storage, and Docker |
+| Contribute to Woods | [Contributing](../CONTRIBUTING.md) | A tested change with synchronized docs and plugin guidance |
 
-- **Extraction**: 34 extractors + 7 helpers, covering models, controllers, jobs, state machines,
-  events, decorators, database views, caching patterns, factories, test mappings, and more.
-- **Retrieval**: query classification, hybrid search, RRF ranking.
-- **Storage**: pgvector, Qdrant, and SQLite backends.
-- **Embedding**: OpenAI and Ollama providers.
-- **MCP servers**: an Index Server (29 tools: 14 always-on + 15 that register conditionally on
-  wiring) and a Console Server (31 tool schemas, 9 executable by default, 11 with
-  `console_embedded_read_tools` enabled).
-- **Analysis**: AST analysis, flow extraction, temporal snapshots.
-- **Export**: Notion and Obsidian sync, plus an evaluation harness for retrieval quality.
+## First-time setup
 
-Behavioral depth enrichment adds callback side-effect analysis, resolved Rails config
-introspection (`BehavioralProfile`), and optional pre-computed request flow maps
-(`FlowPrecomputer`).
+- [Getting started](GETTING_STARTED.md): install, generate configuration, migrate, extract, validate, and connect the Index Server.
+- [Agent setup runbook](AGENT_SETUP.md): the same result with version checks, repository safety, approval boundaries, and a copyable agent prompt.
+- [Docker setup](DOCKER_SETUP.md): extraction inside the container, Index Server on the host, and path translation.
+- [Configuration reference](CONFIGURATION_REFERENCE.md): every supported option, default, and environment variable.
+- [Backend matrix](BACKEND_MATRIX.md): choose structural-only, local Ollama, pgvector/OpenAI, Qdrant/OpenAI, or shared-filesystem deployment.
 
-## Getting Started
+## MCP and agents
 
-| Document | Purpose |
-|----------|---------|
-| [GETTING_STARTED.md](GETTING_STARTED.md) | Install, configure, extract, and inspect: end-to-end walkthrough |
-| [UPGRADING_TO_2.md](UPGRADING_TO_2.md) | Upgrading to Woods 2.0: breaking identifier changes, re-index steps, store/dimension migration, MCP client requirements |
-| [WHY_WOODS.md](WHY_WOODS.md) | What Woods is, why it exists, before/after examples |
-| [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) | All configuration options with defaults, types, and examples |
-| [FAQ.md](FAQ.md) | Frequently asked questions: setup, extraction, MCP servers, Docker, storage |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Symptom to cause to fix, for extraction, MCP, embedding, storage, Docker, and Notion |
+- [MCP servers](MCP_SERVERS.md): choose the pre-extracted Index Server or live-data Console Server; configure clients; understand the callable 14 and 9/11 tool surfaces.
+- [Agent guide](AGENT_GUIDE.md): start with `woods_status`, discover with `search`, inspect with `lookup`, and follow dependencies or flows.
+- [MCP tool cookbook](MCP_TOOL_COOKBOOK.md): scenario-based calls with parameters and expected response shapes.
+- [Console MCP setup](CONSOLE_MCP_SETUP.md): Console transports, blocked tables, credential scanning, redaction, SQL validation, and production safeguards.
+- [MCP HTTP transport](MCP_HTTP_TRANSPORT.md): shared/remote Index Server transport, authentication, origins, and protocol details.
+- [MCP worktree setup](MCP_WORKTREE_SETUP.md): register Woods correctly when agents work in linked git worktrees.
+
+## Index lifecycle
+
+- [Incremental extraction](INCREMENTAL_EXTRACTION.md): update changed paths while preserving full-extraction equivalence.
+- [Watch daemon](WATCH_DAEMON.md): keep an index current with a resident process.
+- [Retrieval guide](RETRIEVAL_GUIDE.md): configure embeddings and understand semantic retrieval, ranking, and token budgets.
+- [Embedding models](EMBEDDING_MODELS.md): choose and size local Ollama models.
+- [Upgrade to Woods 2.0](UPGRADING_TO_2.md): identifier changes, atomic payloads, durable-store reconciliation, and rollback.
 
 ## Reference
 
-| Document | Purpose |
-|----------|---------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline stages, ExtractedUnit, dependency graph, retrieval, storage backends, MCP servers |
-| [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) | Per-extractor documentation: what each of the 34 extractors captures, edge cases, example output |
-| [INCREMENTAL_EXTRACTION.md](INCREMENTAL_EXTRACTION.md) | The equivalence contract for `woods:incremental`, the path-to-extractor dispatch inventory, and the differential harness |
-| [WATCH_DAEMON.md](WATCH_DAEMON.md) | `woods:watch`, the resident daemon that keeps the index current: restart triggers, failure posture, placement trade-offs |
-| [RETRIEVAL_GUIDE.md](RETRIEVAL_GUIDE.md) | Query classification, search strategies, RRF ranking, token budget tuning |
-| [BACKEND_MATRIX.md](BACKEND_MATRIX.md) | Infrastructure selection guide: vector stores, embedding providers, metadata stores, cost modeling |
-| [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) | Picking an Ollama embedding model: context windows, dimensions, tradeoffs |
-| [TOKEN_BENCHMARK.md](TOKEN_BENCHMARK.md) | Token estimation benchmark: tiktoken comparison, divisor calibration |
+- [Why Woods](WHY_WOODS.md): the problems runtime introspection solves.
+- [Architecture](ARCHITECTURE.md): extraction, publication, graph, storage, retrieval, and MCP components.
+- [Extractor reference](EXTRACTOR_REFERENCE.md): what each extractor produces and the edge cases it handles.
+- [Backend matrix](BACKEND_MATRIX.md): implemented provider/store combinations and their operational requirements.
+- [Token benchmark](TOKEN_BENCHMARK.md): evidence behind Woods token-estimation defaults.
+- [FAQ](FAQ.md): short answers and links to the canonical guides.
 
-## Agents and MCP
+## Exports and integrations
 
-| Document | Purpose |
-|----------|---------|
-| [AGENT_GUIDE.md](AGENT_GUIDE.md) | Deep reference for AI agents: workflows, full tool table, relationship type catalog, gotchas |
-| [MCP_SERVERS.md](MCP_SERVERS.md) | Index server vs console server: full tool catalog, setup for Claude Code / Cursor / Windsurf |
-| [MCP_TOOL_COOKBOOK.md](MCP_TOOL_COOKBOOK.md) | Scenario-based MCP tool examples: question to tool to parameters to expected output |
-| [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) | Console MCP server setup: stdio, Docker, HTTP/Rack, SSH bridge, tool tiers, safety model |
-| [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md) | The HTTP/Rack MCP transport (`exe/woods-mcp-http`) |
-| [MCP_WORKTREE_SETUP.md](MCP_WORKTREE_SETUP.md) | MCP registration in git worktrees: why tools may be missing for subagents, how to fix it |
+- [Notion integration](NOTION_INTEGRATION.md)
+- [Obsidian integration](OBSIDIAN_INTEGRATION.md)
+- [Unblocked integration](UNBLOCKED_INTEGRATION.md)
 
-## Integrations
+## Maintainer material
 
-| Document | Purpose |
-|----------|---------|
-| [DOCKER_SETUP.md](DOCKER_SETUP.md) | Docker-specific guide: split architecture, volume mounts, path translation, MCP config |
-| [NOTION_INTEGRATION.md](NOTION_INTEGRATION.md) | Sync codebase data to Notion databases (Data Models + Columns schemas) |
-| [UNBLOCKED_INTEGRATION.md](UNBLOCKED_INTEGRATION.md) | Sync extraction data to an Unblocked collection: incremental sync, CI setup, API quirks |
-| [OBSIDIAN_INTEGRATION.md](OBSIDIAN_INTEGRATION.md) | Export to a self-contained Obsidian vault: graph view, Bases, agent sidecar, safe re-runs |
+Historical build-phase documents are not user guides. The live MCP protocol decision record is in [design/MCP_2026_STRATEGY.md](design/MCP_2026_STRATEGY.md). The repository also keeps generated self-analysis diagrams under [self-analysis/](self-analysis/) and the maintainer work ledger in `backlog.json`.
 
-## Design
+## Canonical owners
 
-Historical build-phase design documents were removed for the 2.0 release: see
-[design/README.md](design/README.md) for the one that remains live, and
-`git log --follow -- docs/design/` for the rest. `backlog.json` in this directory is the
-maintainers' bug and work ledger, not user documentation.
+Use this map when changing behavior or documentation. Update the owner first; other pages should summarize and link instead of copying full instructions.
 
-| Document | Purpose |
-|----------|---------|
-| [design/MCP_2026_STRATEGY.md](design/MCP_2026_STRATEGY.md) | MCP 2026-07-28 adoption: what changed in the protocol, what the SDK implements, compatibility matrix for legacy clients and old Ruby |
+| Fact or workflow | Canonical owner |
+|---|---|
+| Install and first successful run | [GETTING_STARTED.md](GETTING_STARTED.md) |
+| Agent-operated install/configuration | [AGENT_SETUP.md](AGENT_SETUP.md) |
+| Configuration keys and defaults | [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) |
+| MCP server setup and callable tool surface | [MCP_SERVERS.md](MCP_SERVERS.md) |
+| Agent tool-selection workflow | [AGENT_GUIDE.md](AGENT_GUIDE.md) |
+| Console security and transports | [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) |
+| v1-to-v2 migration | [UPGRADING_TO_2.md](UPGRADING_TO_2.md) |
+| Failure diagnosis | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
+| Contributor policy | [CONTRIBUTING.md](../CONTRIBUTING.md) |
+| Coding-agent repository instructions | [AGENTS.md](../AGENTS.md) |
 
-## Self-Analysis
-
-[self-analysis/](self-analysis/): Woods run against its own codebase: architecture overview,
-call graph, data flow, and dependency map, each as a Mermaid diagram.
-
-## Benchmarks
-
-The `bench/` directory contains opt-in benchmarks for console-layer components. Run any bench
-individually:
-
-```bash
-bundle exec ruby bench/credential_scanner_bench.rb
-bundle exec ruby bench/sql_validator_bench.rb
-bundle exec ruby bench/table_gate_bench.rb
-```
-
-These benchmarks are **not part of the test suite** and never run in CI. They exist so
-performance claims can be proven or disproven without scaffolding from scratch. Each file
-documents what it measures, how to run it, and rough IPS targets at the top.
-
-## Documentation Principles
-
-- **Audience-first**: each page targets a specific reader (gem user, contributor, agent).
-- **Code is the source of truth**: docs explain _why_ and _how to use_, not implementation
-  details that drift.
-- **Examples over explanations**: show configuration, show output, show usage.
-- **No duplicating CLAUDE.md**: `CLAUDE.md` is for agents working _on_ the gem; `docs/` is for
-  users of the gem.
+The current public surface is generated from 34 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.

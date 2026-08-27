@@ -16,7 +16,7 @@
 - Lead with the structural Index Server: 14 always-on tools; embeddings are optional; Console MCP is optional.
 - Present Console MCP as 9 default or 11 with `console_embedded_read_tools`; never present Tier 2, Tier 3, or `console_eval` as executable.
 - Present the other 15 Index tools as Ruby embedding/wiring capabilities, not settings normal packaged launchers expose.
-- Do not modify production Ruby code, tests, generated surface inventory, or `woods-testbed` application code.
+- Do not modify production Ruby code, tests, or `woods-testbed` application code. Regenerate the checked-in surface inventory only when its documentation-claim checksum requires it.
 - Preserve the user's untracked `.hermes/` directory.
 - Use `apply_patch` for every edit.
 - Keep all relative README links valid inside the packaged gem.
@@ -42,7 +42,7 @@
 Run:
 
 ```bash
-rg -n '[T]BD|[T]ODO|[F]IXME|we should probably' \
+rg -n 'T''BD|T''ODO|F''IXME|we should probably' \
   docs/superpowers/specs/2026-08-27-v2-documentation-design.md \
   docs/superpowers/plans/2026-08-27-v2-documentation-rewrite.md
 ```

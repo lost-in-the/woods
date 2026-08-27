@@ -236,7 +236,7 @@ Requirements:
 For quick setup, use named presets that configure storage + embedding together:
 
 ```ruby
-# Local development: no external services needed (requires sqlite3 gem)
+# Local development: no cloud key; requires sqlite3 and a running Ollama service
 Woods.configure_with_preset(:local)
 # → in_memory vectors, SQLite metadata, in_memory graph, Ollama embeddings
 

@@ -975,34 +975,9 @@
     "tasks_methods": 4
   },
   "documentation_claims": {
-    "README.md": [
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      },
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      },
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      },
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      },
-      {
-        "surface": "index_mcp_tools",
-        "count": 29
-      }
-    ],
-    "docs/AGENT_GUIDE.md": [
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      }
-    ],
+    "README.md": [],
+    "docs/AGENT_GUIDE.md": [],
+    "docs/AGENT_SETUP.md": [],
     "docs/ARCHITECTURE.md": [
       {
         "surface": "extractor_registrations",
@@ -1089,14 +1064,6 @@
       {
         "surface": "extractor_registrations",
         "count": 34
-      },
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      },
-      {
-        "surface": "index_mcp_tools",
-        "count": 29
       }
     ],
     "docs/RETRIEVAL_GUIDE.md": [],

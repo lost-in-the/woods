@@ -51,7 +51,7 @@ What changes in stateless mode:
 
 The last row is the one that matters in practice: a client holding a session id from *before* a restart is simply served, rather than getting a `404` and having to re-initialize.
 
-> **Notifications and long-running tools.** Stateless mode has no channel to push server-initiated notifications on at all (no `Last-Event-ID` resumability either, per SEP-2567). Woods' index tools are short reads, so this is near-free; the long-running `pipeline_extract` / `pipeline_embed` return a durable task handle instead (see [MCP_SERVERS.md](MCP_SERVERS.md#long-running-tools-and-the-tasks-extension)) rather than depending on a push.
+> **Notifications and long-running tools.** Stateless mode has no channel to push server-initiated notifications on at all (no `Last-Event-ID` resumability either, per SEP-2567). Woods' packaged Index tools are short reads. Custom embedded servers that wire pipeline tools use durable task polling rather than depending on a push; those tools are not registered by the normal packaged executable.
 
 ## Security
 
