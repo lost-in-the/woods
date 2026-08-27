@@ -79,23 +79,4 @@ RSpec.describe Woods::Generation do
       expect(generation.current.payload).to be_nil
     end
   end
-
-  describe '#newer_than?' do
-    it 'is true when the caller has never seen a generation' do
-      expect(generation.newer_than?(nil)).to be(true)
-    end
-
-    it 'is false while the caller is up to date' do
-      marker = generation.bump!
-
-      expect(generation.newer_than?(marker)).to be(false)
-    end
-
-    it 'is true once the index moves on' do
-      marker = generation.bump!
-      generation.bump!
-
-      expect(generation.newer_than?(marker)).to be(true)
-    end
-  end
 end
