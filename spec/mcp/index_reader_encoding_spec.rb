@@ -97,7 +97,7 @@ RSpec.describe Woods::MCP::IndexReader do
   end
 
   def write_manifest(dir)
-    File.write(File.join(dir, 'manifest.json'), JSON.pretty_generate(
+    manifest = JSON.pretty_generate(
       'extracted_at' => '2026-08-20T12:00:00Z',
       'rails_version' => '8.1.2',
       'ruby_version' => '4.0.1',
@@ -106,21 +106,27 @@ RSpec.describe Woods::MCP::IndexReader do
       'total_chunks' => 0,
       'git_sha' => 'abc1234',
       'git_branch' => branch
-    ))
+    )
+    File.write(File.join(dir, 'manifest.json'), manifest)
   end
 
   def write_model_index(dir)
     models_dir = File.join(dir, 'models')
     FileUtils.mkdir_p(models_dir)
-    File.write(File.join(models_dir, '_index.json'), JSON.generate([
-      { 'identifier' => 'Café', 'file_path' => 'app/models/café.rb',
-        'namespace' => nil, 'estimated_tokens' => 100, 'chunk_count' => 1 }
-    ]))
-    File.write(File.join(models_dir, unit_filename('Café')), JSON.generate(
+    index = JSON.generate([{
+                            'identifier' => 'Café',
+                            'file_path' => 'app/models/café.rb',
+                            'namespace' => nil,
+                            'estimated_tokens' => 100,
+                            'chunk_count' => 1
+                          }])
+    File.write(File.join(models_dir, '_index.json'), index)
+    unit = JSON.generate(
       'identifier' => 'Café',
       'type' => 'model',
       'file_path' => 'app/models/café.rb'
-    ))
+    )
+    File.write(File.join(models_dir, unit_filename('Café')), unit)
   end
 
   def write_summary(dir)
