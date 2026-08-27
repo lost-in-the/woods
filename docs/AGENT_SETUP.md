@@ -64,26 +64,22 @@ bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 
 Do not broadly update unrelated gems. Review the Gemfile and lockfile diff before continuing.
 
-## 4. Generate, inspect, and migrate
+## 4. Generate and inspect
 
 ```bash
 bin/rails generate woods:install
 git diff -- config/initializers/woods.rb db/migrate
 ```
 
-Before migrating, confirm that the generated migration creates only Woods-owned tables and that its names do not conflict with an earlier installation:
+The generator emits a legacy application migration for:
 
 - `woods_units`
 - `woods_edges`
 - `woods_embeddings`
 
-Run the migration only in an authorized development or test database:
+Woods 2's shipped structural index and storage backends do not use those application tables. For a new default installation, propose removing the generated migration from the working tree and get approval before doing so. Keep or run it only when repository history shows an older/custom integration uses the tables; confirm name conflicts and obtain explicit migration authorization first.
 
-```bash
-bin/rails db:migrate
-```
-
-Follow repository policy for containers and schema changes. Never run a production migration as an incidental setup step.
+Follow repository policy for generated files and schema changes. Never run a production migration as an incidental setup step.
 
 ## 5. Extract and validate
 

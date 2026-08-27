@@ -21,6 +21,15 @@ The simplest setup. The `woods:console` rake task boots Rails, then starts the e
 
 1. `gem 'woods'` in your Gemfile
 2. `bundle install`
+3. Deliberately enable Console MCP in `config/initializers/woods.rb` after reviewing the trust boundary:
+
+```ruby
+Woods.configure do |config|
+  config.console_mcp_enabled = true
+end
+```
+
+The stdio and Docker entry points exit with status 1 while this setting is false. Enabling it grants the MCP process live read access under the blocked-table, redaction, and credential-scanning controls described below.
 
 ### How It Works
 

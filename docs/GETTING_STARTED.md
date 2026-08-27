@@ -30,24 +30,20 @@ bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 
 If your application runs through Docker Compose, run Rails and Bundler commands inside its application service. See [Docker setup](DOCKER_SETUP.md) before configuring MCP paths.
 
-## 2. Generate configuration and migrate
+## 2. Generate and review configuration
 
 ```bash
 bin/rails generate woods:install
 ```
 
-Review the generated files before migrating:
+Review the generated files:
 
 - `config/initializers/woods.rb` documents supported configuration;
-- `db/migrate/*_create_woods_tables.rb` creates `woods_units`, `woods_edges`, and `woods_embeddings`.
+- `db/migrate/*_create_woods_tables.rb` is a legacy application migration for `woods_units`, `woods_edges`, and `woods_embeddings`.
 
-Check that those table names do not conflict with tables from an earlier or custom installation. Then run:
+**For a new default installation, do not run that migration.** Woods 2's shipped structural index and storage backends do not read or write those application tables. Remove it before the next Rails boot. Keep and run it only when deliberately preserving an older/custom integration that uses the tables; first check for name conflicts and obtain normal migration approval.
 
-```bash
-bin/rails db:migrate
-```
-
-The generated defaults are enough for structural extraction. Do not choose a storage preset or configure an embedding provider unless you want semantic search.
+The generated initializer defaults are enough for structural extraction. Do not choose a storage preset or configure an embedding provider unless you want semantic search.
 
 ## 3. Extract the application
 
@@ -127,9 +123,10 @@ The local preset uses SQLite metadata, persisted in-memory vectors, and a local 
 Woods.configure_with_preset(:local)
 ```
 
-Install and start Ollama, pull the configured model, then build embeddings:
+Install and start Ollama, then pull the default model and build embeddings:
 
 ```bash
+ollama pull nomic-embed-text
 bin/rails woods:embed
 ```
 

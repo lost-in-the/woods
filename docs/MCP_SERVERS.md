@@ -97,7 +97,7 @@ Reconnect the client, then call:
 2. `search` with a class name;
 3. `lookup` with an identifier returned by search.
 
-Do not use raw JSON-RPC text as the first smoke test unless the client or script performs the MCP initialization handshake. A normal MCP client handles negotiation before listing or calling tools.
+Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Modern MCP 2026-07-28 requests carry per-request protocol metadata and can use `server/discover` without an initialization handshake; older clients still use `initialize`. A valid raw smoke test must implement one complete flow rather than sending an isolated `tools/list` or `tools/call` request.
 
 ### Tools (29 — 14 registered in the packaged default)
 
@@ -138,7 +138,15 @@ The Console Server launches a Rails process through direct, Docker, or SSH conne
 
 ### Start with the default mode
 
-Without a console connection file, the executable launches the Rails task directly from its `cwd`:
+Console MCP is disabled by default because it reads live application data. Enable the master switch in the Rails initializer only after reviewing the [Console security controls](CONSOLE_MCP_SETUP.md#configuration-options):
+
+```ruby
+Woods.configure do |config|
+  config.console_mcp_enabled = true
+end
+```
+
+Without a console connection file, the executable then launches the Rails task directly from its `cwd`:
 
 ```json
 {

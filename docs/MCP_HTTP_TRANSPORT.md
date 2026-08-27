@@ -13,9 +13,9 @@ Reference for `exe/woods-mcp-http`, the Index Server's HTTP transport, for hosts
 ## Running it
 
 ```bash
-bundle exec woods-mcp-http                                      # loopback, stateless, no auth
+bundle exec woods-mcp-http ./tmp/woods                          # loopback, stateless, no auth
 HOST=0.0.0.0 PORT=9292 WOODS_MCP_HTTP_TOKEN=$(bundle exec rake woods:generate_token 2>/dev/null) \
-  bundle exec woods-mcp-http                                    # non-loopback requires a token
+  bundle exec woods-mcp-http ./tmp/woods                        # non-loopback requires a token
 ```
 
 | Env var | Default | Meaning |
@@ -79,7 +79,7 @@ Any cryptographically random string works; `openssl rand -hex 32` is equivalent.
 
 ```bash
 export WOODS_MCP_HTTP_TOKEN=$(bundle exec rake woods:generate_token 2>/dev/null)
-HOST=0.0.0.0 PORT=9292 bundle exec woods-mcp-http
+HOST=0.0.0.0 PORT=9292 bundle exec woods-mcp-http ./tmp/woods
 ```
 
 Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request. Missing or mismatched tokens get `HTTP 401` with a `WWW-Authenticate: Bearer` header; comparison is constant-time (`Rack::Utils.secure_compare`).

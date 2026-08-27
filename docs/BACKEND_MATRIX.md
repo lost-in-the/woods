@@ -225,7 +225,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 
 | Model | Native context | Dimensions | Weights | Notes |
 |---|---|---|---|---|
-| `nomic-embed-text` (default) | 2048 | 768 | 274 MB | General-purpose, ships with Ollama |
+| `nomic-embed-text` (default) | 2048 | 768 | 274 MB | General-purpose; pull from Ollama before first use |
 | `bge-m3` | **8192** | 1024 | 1.2 GB | Fewer chunks per unit, stronger code-search benchmarks |
 | `snowflake-arctic-embed2` | 8192 | 1024 | 1.2 GB | Multilingual variant of bge-m3 |
 | `mxbai-embed-large` | 512 | 1024 | 670 MB | Best for short text |

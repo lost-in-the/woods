@@ -50,10 +50,9 @@ end
 ```bash
 bundle install
 bin/rails generate woods:install
-bin/rails db:migrate
 ```
 
-The generator creates an annotated `config/initializers/woods.rb` and a migration for Woods-owned tables. Review both files before committing them.
+**Do not run the generated migration for a new default installation.** The generator creates an annotated `config/initializers/woods.rb` plus a legacy application migration for `woods_units`, `woods_edges`, and `woods_embeddings`. Woods 2's shipped structural index and storage backends do not use those application tables. Remove the migration before continuing; keep and run it only when deliberately preserving an older/custom integration that uses them.
 
 ### 2. Extract and verify the codebase
 
@@ -128,7 +127,13 @@ Exact search, lookup, graph traversal, and flow tools work after extraction alon
 Woods.configure_with_preset(:local)
 ```
 
-The `:local` preset uses SQLite metadata, in-memory vectors persisted under the index, and a local Ollama service. It needs the `sqlite3` gem in the application bundle plus an installed, running Ollama service, but no cloud API key. MySQL/PostgreSQL applications that do not bundle `sqlite3` can use `:shared_filesystem` for local persisted stores instead. PostgreSQL/OpenAI, Qdrant/OpenAI, and shared-filesystem configurations are documented in the [backend matrix](docs/BACKEND_MATRIX.md) and [configuration reference](docs/CONFIGURATION_REFERENCE.md).
+The `:local` preset uses SQLite metadata, in-memory vectors persisted under the index, and a local Ollama service. It needs the `sqlite3` gem in the application bundle plus an installed, running Ollama service, but no cloud API key. Pull the default model before the first embed:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+MySQL/PostgreSQL applications that do not bundle `sqlite3` can use `:shared_filesystem` for local persisted stores instead. PostgreSQL/OpenAI, Qdrant/OpenAI, and shared-filesystem configurations are documented in the [backend matrix](docs/BACKEND_MATRIX.md) and [configuration reference](docs/CONFIGURATION_REFERENCE.md).
 
 ```bash
 bin/rails woods:embed

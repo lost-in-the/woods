@@ -32,11 +32,7 @@ bin/rails generate woods:install
 git diff -- config/initializers/woods.rb db/migrate
 ```
 
-The generator creates an initializer and a migration for `woods_units`, `woods_edges`, and `woods_embeddings`. Check for conflicts before:
-
-```bash
-bin/rails db:migrate
-```
+The generator creates an initializer and a legacy application migration for `woods_units`, `woods_edges`, and `woods_embeddings`. Woods 2's shipped structural index and storage backends do not use those application tables. For a new default installation, propose removing the generated migration and obtain approval first. Keep or run it only when repository history proves an older/custom integration uses those tables, after normal migration authorization and conflict checks.
 
 Do not broadly update gems or overwrite existing configuration.
 

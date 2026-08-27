@@ -225,7 +225,7 @@ Verify the active v2 generation with `docker compose exec app bundle exec rake w
 
 ### How do I configure the Console Server with Docker?
 
-For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
+First set `config.console_mcp_enabled = true` in the Rails initializer after reviewing the live-data trust boundary. Then, for the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
 
 ```json
 {
@@ -240,9 +240,7 @@ For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose 
 }
 ```
 
-The `-i` flag is required to keep stdin attached for MCP protocol
-communication. Enable `console_embedded_read_tools` when SQL/query should also
-be registered. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete examples.
+Compose attaches stdin by default; `-T` disables the pseudo-TTY that would corrupt MCP framing. Plain `docker exec` uses `-i` instead. Enable `console_embedded_read_tools` when SQL/query should also be registered. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete examples.
 
 ---
 

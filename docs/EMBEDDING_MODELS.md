@@ -14,8 +14,9 @@ default is conservative, and how to add a new one.
 | `mxbai-embed-large` | 512 | 1024 | 670 MB | Short text (tweets, commit msgs) |
 | `all-minilm` | 512 | 384 | 46 MB | Tight-memory environments |
 
-The default is `nomic-embed-text` because it's small, fast, and ships with every
-fresh Ollama install. If you're indexing a large Rails codebase and don't mind
+The default is `nomic-embed-text` because it's small, fast, and widely available
+through Ollama. Pull it before the first embed with `ollama pull nomic-embed-text`.
+If you're indexing a large Rails codebase and don't mind
 pulling a bigger model, switching to `bge-m3` usually gives you:
 
 - **Fewer chunks per unit**: 4× the context means most concern-inlined models

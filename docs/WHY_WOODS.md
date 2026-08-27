@@ -168,7 +168,7 @@ Woods is not a universal fit. Skip it when:
 
 ## Quick Start
 
-Install, extract, and connect in six steps:
+Install, extract, validate, and connect:
 
 ```bash
 # 1. Add to your Rails app's Gemfile
@@ -176,21 +176,27 @@ gem 'woods', group: :development
 
 # 2. Install
 bundle install
-rails generate woods:install
+bin/rails generate woods:install
+
+# The generator also emits a legacy application migration. Woods 2's shipped
+# paths do not use those tables; remove it for a new default installation.
 
 # 3. Extract (requires a booted Rails environment)
-bundle exec rake woods:extract
+bin/rails woods:extract
 
 # 4. Verify
-bundle exec rake woods:stats
+bin/rails woods:validate
+bin/rails woods:stats
 
 # 5. Add to .mcp.json
-# { "mcpServers": { "codebase": { "command": "woods-mcp-start",
-#     "args": ["./tmp/woods"] } } }
+# { "mcpServers": { "woods": { "command": "bundle",
+#     "args": ["exec", "woods-mcp-start", "./tmp/woods"],
+#     "cwd": "/absolute/path/to/your-rails-app" } } }
 
 # 6. Ask your AI tool a question about your codebase
 ```
 
-For Docker, run extraction inside the container and point the MCP server at the
-volume-mounted output directory on the host. See [docs/GETTING_STARTED.md](GETTING_STARTED.md)
-for the complete walkthrough including Docker setup, storage presets, and incremental CI updates.
+For Docker, run extraction inside the application container. If Woods is installed
+only there, launch the Index Server through that container too. See
+[Getting started](GETTING_STARTED.md) for the complete walkthrough and
+[Docker setup](DOCKER_SETUP.md) for executable container and host alternatives.

@@ -53,11 +53,9 @@ docker compose exec app bundle exec rails generate woods:install
 
 This creates `config/initializers/woods.rb` with default configuration.
 
-### 3. Run migrations
+### 3. Decide whether to keep the legacy application migration
 
-```bash
-docker compose exec app bundle exec rails db:migrate
-```
+The generator emits `db/migrate/*_create_woods_tables.rb`, but Woods 2's shipped structural index and storage backends do not use those application tables. For a new default installation, remove that generated migration before the next Rails boot. Keep and run it only when deliberately preserving an older/custom integration that uses `woods_units`, `woods_edges`, and `woods_embeddings`, after normal schema-change review.
 
 ### 4. Configure
 
@@ -191,12 +189,22 @@ Use this only when the application bundle, a supported Ruby, and the Woods execu
 
 The Console Server queries live Rails state. There are two launch paths for the same embedded server.
 
+Before either path can start, deliberately enable live-data access in the Rails initializer:
+
+```ruby
+Woods.configure do |config|
+  config.console_mcp_enabled = true
+end
+```
+
+The process exits with status 1 while this master switch is false. Review [Console MCP setup and security](CONSOLE_MCP_SETUP.md) before enabling it.
+
 ### Comparison
 
 | | Direct Docker command | Configured launcher |
 |---|---|---|
 | **Where it runs** | Inside container via Docker stdio | `woods-console-mcp` execs `docker exec -i` |
-| **Config needed** | None (just `.mcp.json`) | `console.yml` + `.mcp.json` |
+| **Config needed** | Rails master switch + `.mcp.json` | Rails master switch + `console.yml` + `.mcp.json` |
 | **Tools available** | 9 by default; 11 with read tools enabled | Same 9 or 11 |
 | **Setup complexity** | Minimal | Moderate |
 | **Best for** | Quick setup | Reusable launcher config |
@@ -289,7 +297,7 @@ The launcher reads `~/.woods/console.yml` by default. To use a different path:
 
 ## Complete `.mcp.json` Example
 
-Both servers configured together for a Docker environment:
+Both servers configured together for a Docker environment, after `config.console_mcp_enabled = true` has been deliberately set:
 
 ```json
 {

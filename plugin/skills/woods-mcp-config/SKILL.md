@@ -51,7 +51,15 @@ Use a host-side bundle only after verifying Ruby, the application bundle, and th
 
 ## Shape 2: Index plus authorized Console
 
-Add a direct Console process:
+After explicit authorization, enable the live-data master switch in the Rails initializer. The process exits while it remains false:
+
+```ruby
+Woods.configure do |config|
+  config.console_mcp_enabled = true
+end
+```
+
+Then add a direct Console process:
 
 ```json
 "woods-console": {
@@ -81,8 +89,8 @@ Require `console_mcp_enabled`, a strong token, allowed origins, TLS, and the Con
 
 ## Verify
 
-Reconnect through the client so it performs MCP initialization. Call `woods_status`, `search`, and `lookup`. For Console, inspect the registered list and call `console_status` only in the authorized environment.
+Reconnect through the client so it performs its supported MCP negotiation. Modern MCP 2026-07-28 clients use per-request metadata/discovery; legacy clients initialize first. Call `woods_status`, `search`, and `lookup`. For Console, inspect the registered list and call `console_status` only in the authorized environment.
 
-Do not use initialize-less JSON-RPC pipes as proof of MCP health. Do not claim conditional Index or inventory-only Console schemas are callable.
+Do not use an isolated raw JSON-RPC request as proof of MCP health. Do not claim conditional Index or inventory-only Console schemas are callable.
 
 Canonical guide: [MCP_SERVERS.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md).

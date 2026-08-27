@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Woods configuration
-# Full reference: https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md
+# Full reference: https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/CONFIGURATION_REFERENCE.md
 #
 # Quick-start presets (uncomment one instead of the full block below):
 #   Woods.configure_with_preset(:local)       # SQLite metadata + local Ollama (sqlite3 gem required)
@@ -137,7 +137,8 @@ Woods.configure do |config|
   # Disable specific scanner patterns (rare — prefer blocked_tables).
   # config.console_disabled_scanner_patterns = []
 
-  # Allow the AI console to execute Ruby eval (off by default; very dangerous).
+  # Legacy unsafe-eval flag. `console_eval` is unavailable in supported modes;
+  # setting this to true fails closed at Console Server construction.
   # config.console_unsafe_eval_enabled = false
 
   # Expose SQL/query read tools inside embedded console (adds read-only DB
