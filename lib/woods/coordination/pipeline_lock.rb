@@ -218,6 +218,24 @@ module Woods
         File.expand_path(@lock_dir)
       end
 
+      # Atomically retire a stale lock file via rename. Rename is atomic on
+      # POSIX: of any processes racing to take over the same stale lock,
+      # exactly one rename succeeds; the losers get ENOENT and back off.
+      # Winning the rename does NOT guarantee winning the lock — another
+      # process may O_EXCL-create between our rename and our create, which
+      # the caller's EEXIST rescue handles.
+      #
+      # Rename alone is not enough, though: a competitor that already passed
+      # `stale?` on the SAME original file may have retired it and created a
+      # FRESH lock before we run. Our rename would then move that fresh lock
+      # aside — and both processes would "hold" the lock. So after winning
+      # the rename we re-check the retired file's age; if it turns out to be
+      # fresh (someone beat us to the takeover), we put it back and lose the
+      # race instead of clobbering a live holder.
+      #
+      # @return [Symbol] `:cleared` when genuinely stale, `:not_stale` when a
+      #   fresher successor was restored instead, `:missing` when the lock
+      #   was already gone
       def retire_stale_unlocked
         graveyard = "#{@lock_path}.stale.#{Process.pid}.#{SecureRandom.hex(4)}"
         File.rename(@lock_path, graveyard)
@@ -249,7 +267,8 @@ module Woods
           FileUtils.rm_f(graveyard)
         else
           # We were legitimately taken over — put the successor's lock back
-          # without clobbering a still-newer holder (see {#restore_lock}).
+          # without clobbering a still-newer holder (see
+          # {#restore_lock_unlocked}).
           restore_lock_unlocked(graveyard)
         end
       end
@@ -309,32 +328,6 @@ module Woods
         true
       end
 
-      # Atomically retire a stale lock file via rename. Rename is atomic on
-      # POSIX: of any processes racing to take over the same stale lock,
-      # exactly one rename succeeds; the losers get ENOENT and back off.
-      # Winning the rename does NOT guarantee winning the lock — another
-      # process may O_EXCL-create between our rename and our create, which
-      # the caller's EEXIST rescue handles.
-      #
-      # Rename alone is not enough, though: a competitor that already passed
-      # `stale?` on the SAME original file may have retired it and created a
-      # FRESH lock before we run. Our rename would then move that fresh lock
-      # aside — and both processes would "hold" the lock. So after winning
-      # the rename we re-check the retired file's age; if it turns out to be
-      # fresh (someone beat us to the takeover), we put it back and lose the
-      # race instead of clobbering a live holder.
-      #
-      # @return [Boolean] true when a genuinely stale lock was retired
-      def retire_stale_lock?
-        retire_stale == :cleared
-      end
-
-      # Whether the lock file at +path+ carries this instance's token.
-      #
-      # @param path [String]
-      # @return [Boolean] true when the token matches, or the file is corrupt
-      #   (an unparseable lock we already renamed aside is treated as ours to
-      #   discard rather than restore).
       # Three-state, deliberately — a boolean here conflates the two states
       # that need different handling.
       #
@@ -352,6 +345,12 @@ module Woods
         :unknown
       end
 
+      # Whether the lock file at +path+ carries this instance's token.
+      #
+      # @param path [String]
+      # @return [Boolean] true when the token matches, or the file is corrupt
+      #   (an unparseable lock we already renamed aside is treated as ours to
+      #   discard rather than restore).
       def own_lock?(path)
         JSON.parse(File.read(path))['token'] == @token
       rescue JSON::ParserError
@@ -367,10 +366,6 @@ module Woods
       #
       # @param graveyard [String] path of the renamed-aside lock file
       # @return [void]
-      def restore_lock(graveyard)
-        with_path_guard { restore_lock_unlocked(graveyard) }
-      end
-
       def restore_lock_unlocked(graveyard)
         File.link(graveyard, @lock_path)
       rescue Errno::EEXIST

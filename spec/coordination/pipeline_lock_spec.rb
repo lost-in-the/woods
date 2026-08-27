@@ -249,12 +249,12 @@ RSpec.describe Woods::Coordination::PipelineLock do
       File.write(lock_path, JSON.generate(token: 'competitor-fresh'))
       # mtime is now (fresh), i.e. not older than stale_timeout.
 
-      expect(lock.send(:retire_stale_lock?)).to be false
+      expect(lock.retire_stale).to eq(:not_stale)
       expect(File.exist?(lock_path)).to be true
       expect(JSON.parse(File.read(lock_path))['token']).to eq('competitor-fresh')
     end
 
-    it 'restore_lock does not clobber a lock created in the gap' do
+    it 'restore_lock_unlocked does not clobber a lock created in the gap' do
       # After we rename a captured lock aside, a newer holder may O_EXCL-create
       # at @lock_path. Restoring via rename would overwrite it (double-hold);
       # the link-based restore must leave the newer holder untouched and simply
@@ -263,7 +263,7 @@ RSpec.describe Woods::Coordination::PipelineLock do
       File.write(graveyard, JSON.generate(token: 'ours-captured'))
       File.write(lock_path, JSON.generate(token: 'newer-holder'))
 
-      lock.send(:restore_lock, graveyard)
+      lock.send(:restore_lock_unlocked, graveyard)
 
       expect(JSON.parse(File.read(lock_path))['token']).to eq('newer-holder')
       expect(File.exist?(graveyard)).to be false
