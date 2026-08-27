@@ -166,6 +166,11 @@ RSpec.describe Woods::Console::SqlValidator do
         expect { validator.validate!('WITH i AS (INSERT INTO log(msg) VALUES (1) RETURNING *) SELECT * FROM i') }
           .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
       end
+
+      it 'rejects WITH RECURSIVE...DELETE with the writable CTE message' do
+        sql = 'WITH RECURSIVE d AS (DELETE FROM users RETURNING *) SELECT * FROM d'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
     end
 
     context 'with INTO OUTFILE / INTO DUMPFILE' do
@@ -216,6 +221,28 @@ RSpec.describe Woods::Console::SqlValidator do
       end
     end
 
+    context 'with a keyword-shaped English word inside a string literal' do
+      it 'accepts a WHERE clause on a literal value containing UPDATE' do
+        sql = "SELECT * FROM notes WHERE body = 'please update the record'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a WHERE clause on a literal value containing INTO' do
+        sql = "SELECT * FROM notes WHERE body = 'insight into the problem'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a WHERE clause on a literal value that names a dangerous function' do
+        sql = "SELECT * FROM notes WHERE body = 'we discussed pg_sleep(10) in the meeting'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'still rejects DELETE hidden after a line comment (comment-hidden injection)' do
+        sql = "SELECT 1 --;\nDELETE FROM users"
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /DELETE/)
+      end
+    end
+
     context 'with empty or nil input' do
       it 'rejects nil' do
         expect { validator.validate!(nil) }
@@ -263,6 +290,11 @@ RSpec.describe Woods::Console::SqlValidator do
 
     it 'still accepts plain EXPLAIN SELECT' do
       expect { validator.validate!('EXPLAIN SELECT 1') }.not_to raise_error
+    end
+
+    it 'rejects MERGE by name (defense in depth beyond the allowed-prefix fallback)' do
+      sql = 'MERGE INTO target USING source ON (target.id = source.id) WHEN MATCHED THEN UPDATE SET x = 1'
+      expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /MERGE/)
     end
   end
 

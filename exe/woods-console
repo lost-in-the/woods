@@ -79,7 +79,7 @@ rescue StandardError
   next
 end
 
-validator = Woods::Console::ModelValidator.new(registry: registry)
+validator = Woods::Console::ModelValidator.new(registry: registry, table_names: model_tables)
 safe_context = Woods::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
 
 config = Woods.configuration
