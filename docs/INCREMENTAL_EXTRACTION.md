@@ -231,7 +231,7 @@ same question as "what has to happen before re-reading it is worth anything".
 |---|---|---|
 | `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
-| `:restart` | `Gemfile`, `Gemfile.lock`, `config/application.rb`, `config/boot.rb`, `config/environment.rb`, `config/initializers/**`, `config/environments/**`, `config/database.yml`, credentials, `db/schema.rb`, `db/structure.sql` | Captured at boot. Rails' reloader re-runs none of it. |
+| `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
 | `:ignore` | everything else | Not extraction input. |
 
 The `:restart` set is drawn generously on purpose. Rails' reloader replaces
@@ -240,6 +240,12 @@ re-resolve `Rails.application.config`, or rebuild the schema cache, all of
 which Woods captures (`BehavioralProfile`, `MiddlewareExtractor`, model column
 data). `rails/spring`'s staleness bugs came from under-scoping exactly this
 set.
+
+The exact additional boot-captured YAML set is `config/settings.yml`,
+`config/settings/*.yml`, and `config/{cable,storage,sidekiq,puma,cache,queue}.yml`
+(including `.yaml` spellings). Scheduled-job sources such as
+`config/recurring.yml` and `config/sidekiq_cron.yml` remain `:reextract` inputs,
+not restart triggers. `lib/woods/reload_policy.rb` is authoritative.
 
 Two version-sensitive behaviours sit *behind* the classification rather than in
 it, and belong to whoever implements the reload step:
@@ -283,18 +289,17 @@ owns the definition of "the two indexes agree" and documents every exclusion.
 
 **Run it before and after any change to the incremental path.**
 
-## Limits and open work
+## Boundaries and open work
 
-- **Class-based deletion needs a reload.** The harness compares two extractions
-  in the *same booted process*, which isolates incremental maintenance from
-  Rails reloading. Deleting a model file leaves the constant loaded, so a
-  full extraction in that process still emits it. Reload semantics are phase 2
-  of #164.
-- **Identifier collisions.** The graph keys nodes on the bare identifier, so two
-  units of different types sharing one collapse onto a single node (backlog
-  B-062), and two files defining the same constant tie-break differently in
-  full vs incremental extraction (B-063). Both pre-date this work; the harness
-  side-steps them by giving each generated artifact family its own name prefix.
+- **Reloaded deletion is supported.** The resident watcher reloads changed
+  constants before discovery-set reconciliation, so deleting a class-backed
+  file removes its unit. A caller using the lower-level incremental API without
+  the watcher must ensure the Rails runtime has been reloaded first.
+- **Identifier identity is typed.** Units of different types that share an
+  identifier remain separate graph nodes. Two source files that redefine the
+  same Ruby constant can still tie-break differently between full and
+  incremental extraction (B-063); that source tree is already ambiguous, and
+  the differential harness avoids it.
 - **Class-based units are never swept**: see [Deletion](#deletion) above for
   why (the `SchemaMigration`/`InternalMetadata` convention-path case).
   Deleting a class-based unit therefore requires either the caller naming the

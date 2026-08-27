@@ -57,8 +57,11 @@
 - RuboCop: `580 files inspected, no offenses detected`.
 - Full default suite: `6,478 examples, 9 failures, 5 pending` (seed `48427`). All nine failures are in `spec/integration/console_server_spec.rb`, reproduce in isolation (`34 examples, 9 failures`), and have no diff from the fix base. They were left unchanged under this round's no-Console constraint.
 
-### Unresolved Release State
+### Current Release State (supersedes the historical Round 5 result above)
 
 - No requested Round 5 concurrency defect remains unresolved in the exercised suites.
-- The full default suite is not green because of the nine pre-existing Console integration failures above.
-- The findings ledger still marks `V2-MCP-001` (task cancellation does not stop associated work) and `V2-CONFIG-001` (configuration/runtime disagreement) as confirmed, deferred, and release-blocking. This round did not change either finding.
+- The nine historical Console integration failures are no longer present in the current branch gates. Woods PR #245 commit `898e396` passed all 23 required checks, including unit suites on Ruby 3.0–4.0, booted extraction on Rails 6.0–8.1, official-client MCP transports, live backends, coverage, security, lint, build, and PII checks ([CI run 33108637107](https://github.com/lost-in-the/woods/actions/runs/33108637107)).
+- The most recent complete local default-suite run before the final documentation-only review rounds reported `6,896 examples, 0 failures, 3 pending`; the later focused release/config/reload/snapshot/graph suite reported `187 examples, 0 failures`.
+- `V2-MCP-001` is resolved as an explicit documented limitation: durable tasks support completion/reconnect polling, while `tasks/cancel` returns a stable unsupported-method response and no longer claims to stop work.
+- `V2-CONFIG-001` is resolved by the provider/store validation, resolved-config persistence, and preset-reopen work now covered by builder, config-resolver, and preset-persistence specs.
+- `findings.json` contains no confirmed release-blocking finding.

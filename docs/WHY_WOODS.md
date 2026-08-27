@@ -117,26 +117,29 @@ exactly which HTTP verbs and paths map to which actions. URL → code is always 
 **Dependency graph.** 34 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
-**Two MCP servers.** The Index Server (29 tools) reads pre-extracted JSON from disk, no
-Rails boot needed. The Console Server (31 tools) bridges to a live Rails process for
-database queries, job inspection, and model diagnostics.
+**Two MCP servers.** The Index Server defines 29 schemas and registers 14 in the normal
+packaged launch; it reads pre-extracted JSON without booting Rails. The Console Server
+has a 31-schema inventory but registers 9 tools by default, or 11 with explicit embedded
+read tools, and bridges to a live Rails process for bounded database queries.
 
 ```bash
 # What you get after extraction
 tmp/woods/
-├── manifest.json              # Extraction metadata and git SHA
-├── dependency_graph.json      # Full graph with PageRank scores
-├── models/User.json           # Schema + inlined concerns + resolved callbacks
-├── controllers/OrdersController.json  # Real routes + per-action filter chains
-└── services/CheckoutService.json      # Entry points + inferred dependencies
+├── generation.json            # Atomic pointer to the current complete payload
+└── payloads/gen-<N>/
+    ├── manifest.json          # Extraction metadata and git SHA
+    ├── dependency_graph.json  # Full graph with PageRank scores
+    └── models/User.json       # Schema + inlined concerns + resolved callbacks
 ```
 
 ---
 
 ## Who Is Woods For?
 
-**Teams using AI coding assistants**: Claude Code, Cursor, Windsurf, Copilot. If your
-team asks an AI to help with Rails code and gets wrong answers, Woods is the fix.
+**Teams using MCP-capable coding tools and agents.** Woods is model-independent; it
+supplies Rails context through MCP to tools backed by OpenAI, Anthropic, Google, xAI,
+or other model providers. If an agent helps with Rails code but lacks runtime context,
+Woods fills that gap.
 
 **Rails apps of any size.** Small apps benefit from accurate schema and route context.
 Large monoliths benefit most, hundreds of models with deep callback chains and concern
@@ -165,29 +168,35 @@ Woods is not a universal fit. Skip it when:
 
 ## Quick Start
 
-Install, extract, and connect in six steps:
+Install, extract, validate, and connect:
 
 ```bash
 # 1. Add to your Rails app's Gemfile
-gem 'woods', group: :development
+gem 'woods', '~> 2.0', group: :development
 
 # 2. Install
 bundle install
-rails generate woods:install
+bin/rails generate woods:install
+
+# The generator also emits a legacy application migration. Woods 2's shipped
+# paths do not use those tables; remove it for a new default installation.
 
 # 3. Extract (requires a booted Rails environment)
-bundle exec rake woods:extract
+bin/rails woods:extract
 
 # 4. Verify
-bundle exec rake woods:stats
+bin/rails woods:validate
+bin/rails woods:stats
 
 # 5. Add to .mcp.json
-# { "mcpServers": { "codebase": { "command": "woods-mcp-start",
-#     "args": ["./tmp/woods"] } } }
+# { "mcpServers": { "woods": { "command": "bundle",
+#     "args": ["exec", "woods-mcp-start", "./tmp/woods"],
+#     "cwd": "/absolute/path/to/your-rails-app" } } }
 
 # 6. Ask your AI tool a question about your codebase
 ```
 
-For Docker, run extraction inside the container and point the MCP server at the
-volume-mounted output directory on the host. See [docs/GETTING_STARTED.md](GETTING_STARTED.md)
-for the complete walkthrough including Docker setup, storage presets, and incremental CI updates.
+For Docker, run extraction inside the application container. If Woods is installed
+only there, launch the Index Server through that container too. See
+[Getting started](GETTING_STARTED.md) for the complete walkthrough and
+[Docker setup](DOCKER_SETUP.md) for executable container and host alternatives.

@@ -53,7 +53,7 @@ Woods cannot extract from source files alone. It is not a static analysis tool.
 
 ### Extraction is very slow
 
-**Symptom:** A full extraction takes several minutes instead of 10-30 seconds.
+**Symptom:** A full extraction is much slower than this application's established baseline.
 
 **Cause:** Two common causes, a very large codebase (500+ models), or framework source extraction enabled on an app with many gems.
 
@@ -118,7 +118,10 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.
 
-**Fix:** If you suspect drift outside these trigger paths (or just want certainty), run a full extraction:
+**Fix:** Route and event changes that match the triggers above need no manual
+full extraction; `woods:incremental` and `woods:watch` rerun their whole-app
+extractors. If `woods:validate` still reports drift outside the trigger
+contract, use a full extraction as the recovery step:
 
 ```bash
 bundle exec rake woods:extract
@@ -292,7 +295,7 @@ bundle exec rake woods:console 2>/dev/null
 **Fix:**
 
 1. Check server stderr for crash output.
-2. Use `woods-mcp-start` (the self-healing wrapper) instead of `woods-mcp` directly, it restarts the server on crash.
+2. Run the configured command manually from the same `cwd` and inspect stderr. `woods-mcp-start` validates the index before launch but does not restart a crashed server.
 3. For Docker setups, ensure the container stays running: `docker compose exec -d app tail -f /dev/null` keeps it alive.
 
 ---
@@ -331,8 +334,11 @@ Woods.configure do |config|
   config.vector_store = :qdrant
   config.vector_store_options = {
     url: ENV.fetch("QDRANT_URL", "http://localhost:6333"),
-    collection: "woods_units"
+    collection: "woods_units",
+    allow_private_hosts: true # explicit opt-in for trusted localhost/private URL
   }
+  config.embedding_provider = :openai
+  config.embedding_options = { api_key: ENV.fetch("OPENAI_API_KEY") }
 end
 ```
 
@@ -347,12 +353,14 @@ Woods.configure do |config|
     connection: your_pg_connection,   # a PG::Connection to a pgvector-enabled DB
     dimensions: 1536
   }
+  config.embedding_provider = :openai
+  config.embedding_options = { api_key: ENV.fetch("OPENAI_API_KEY") }
 end
 ```
 
-For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)`, in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in, it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
+For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)`, in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in. It requires the `sqlite3` gem plus a running Ollama service, but does not exercise the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
 
-See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL section](BACKEND_MATRIX.md#mysql) for graph-traversal details (recursive CTEs on 8.0+).
+See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL + Qdrant section](BACKEND_MATRIX.md#mysql--qdrant-classic-rails) for graph-traversal details (recursive CTEs on 8.0+).
 
 ---
 
@@ -424,11 +432,11 @@ config.embedding_options = { host: 'http://localhost:11434' }
 
 **Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source, so chunks that look safe by char count still trip the 2048-token ceiling.
 
-**Fix:** Upgrade to Woods 1.3+ and install the `tokenizers` gem:
+**Fix:** Use Woods 2.0 and install the `tokenizers` gem:
 
 ```ruby
 # Gemfile
-gem 'woods', '~> 1.3'
+gem 'woods', '~> 2.0'
 gem 'tokenizers', '~> 0.5'   # exact BERT WordPiece token counting
 ```
 
@@ -488,7 +496,11 @@ docker run -p 6333:6333 qdrant/qdrant
 Or update your `vector_store_options` to point at the correct host/port:
 
 ```ruby
-config.vector_store_options = { url: 'http://localhost:6333', collection: 'woods' }
+config.vector_store_options = {
+  url: 'http://localhost:6333',
+  collection: 'woods',
+  allow_private_hosts: true
+}
 ```
 
 ---
@@ -499,10 +511,15 @@ config.vector_store_options = { url: 'http://localhost:6333', collection: 'woods
 
 **Cause:** SQLite does not support concurrent writers. If multiple extraction processes run simultaneously, they contend on the metadata store.
 
-**Fix:** Use one extraction process at a time, or switch to a pgvector backend that supports concurrent access:
+**Fix:** Use one embedding publisher at a time. A pgvector backend can accept
+concurrent vector writes, but Woods' SQLite metadata/output artifact still
+needs a coordinated publisher. Configure the hosted preset completely:
 
 ```ruby
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 ```
 
 ---
@@ -524,7 +541,7 @@ services:
       - .:/app    # Full app mount, output lands at ./tmp/woods/
 ```
 
-Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`, or, if that's absent, `cat tmp/woods/generation.json` and check under the `payload` path it names (see [No manifest.json error](#no-manifestjson-error-when-starting-the-index-server) above).
+Then re-run extraction. Prefer `docker compose exec app bundle exec rake woods:validate` and `woods:stats`; these checks follow the active v2 generation. Host visibility is only required for an optional host-side Index Server.
 
 ---
 
@@ -532,17 +549,18 @@ Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`, or
 
 **Symptom:** The MCP client reports a broken pipe or immediate disconnection when using Docker.
 
-**Cause:** The `-i` flag is missing from `docker exec` or `docker compose exec`. Without `-i`, stdin is not attached and the MCP protocol cannot communicate.
+**Cause:** Plain `docker exec` lacks `-i`, or Docker Compose allocated its default pseudo-TTY. Either breaks stdio MCP communication.
 
-**Fix:** Add `-i` to your `.mcp.json`:
+**Fix:** Use `-T` with Compose (`stdin` remains attached), or `-i` with plain `docker exec`:
 
 ```json
 {
   "mcpServers": {
     "codebase-console": {
       "command": "docker",
-      "args": ["compose", "exec", "-i", "app",
-               "bundle", "exec", "rake", "woods:console"]
+      "args": ["compose", "exec", "-T", "app",
+               "bundle", "exec", "rake", "woods:console"],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
@@ -648,11 +666,12 @@ config.notion_database_ids = {
 
 | Error message | Cause | Fix |
 |---------------|-------|-----|
-| `No manifest.json found` | Wrong path in `.mcp.json` | Use host path, not container path |
+| `No manifest.json found` | Wrong index path or no published generation | Use the path visible to the server process; run `woods:validate` |
 | `uninitialized constant Rails` | Not running inside Rails app | Run via `bundle exec rake` in Rails root |
 | `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
 | `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
 | `Connection refused (localhost:6333)` | Qdrant not running | Start Qdrant container |
+| Qdrant private/loopback URL rejected | SSRF guard is working | Add `allow_private_hosts: true` only for a deliberately trusted endpoint |
 | Missing `console_sql` / `console_query` | Read tools disabled | Enable `console_embedded_read_tools` |
 | `database is locked` | SQLite concurrent access | Run one extraction at a time |
 | `Dimension mismatch` | Embedding model changed | Full re-index: extract + embed |

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Decision guidance for picking a vector store, metadata store, graph store, and embedding provider. Covers what's implemented today, what's still a design target, and how the three shipped presets map to `lib/woods/builder.rb`.
+Decision guidance for picking a vector store, metadata store, graph store, and embedding provider. Covers what's implemented today, what's still a design target, and how the four shipped presets map to `lib/woods/builder.rb`.
 
 ---
 
@@ -12,22 +12,22 @@ Every backend combination falls into one of three shapes based on how data survi
 
 | Shape | Vector store | Metadata store | Durability | Right preset |
 |---|---|---|---|---|
-| **Single-process** | `:in_memory` | `:in_memory` or `:sqlite` | Lives and dies with the Ruby VM | `:local` |
+| **Local artifact** | `:in_memory` + dump to `output_dir` | `:sqlite` under `output_dir` | Reopens from the published output artifact | `:local` |
 | **Shared filesystem** | `:in_memory` + `Snapshotter` dump to `output_dir` | `:in_memory` + `Snapshotter` dump to `output_dir` | Process-local, hydrated from disk on MCP boot; dumps retained per `dump_retention_count` (default 3) | `:shared_filesystem` |
-| **Distributed** | `:pgvector`, `:qdrant` | `:sqlite` | Fully external; multiple processes read/write concurrently | `:postgresql`, `:production` |
+| **Durable vector backend** | `:pgvector` or `:qdrant` | `:sqlite` under `output_dir` | Vectors are external; metadata/config remain a deployed output artifact | `:postgresql`, `:production` |
 
 The shape determines the capability matrix:
 
-| Capability | Single-process | Shared filesystem | Distributed |
+| Capability | Local artifact | Shared filesystem | Durable vector backend |
 |---|---|---|---|
-| Survives process restart | No | Yes (via dump) | Yes (backend) |
-| Multi-writer embedding | No | No (single writer assumed) | Yes (backend-dependent) |
-| Requires sqlite3 gem in host | With `:local` | No | With `:local`/`:postgresql`/`:production` |
-| Requires external service | No | No | Yes |
-| Cross-machine query | No | No | Yes |
-| `woods.json` schema-versioned config snapshot | n/a | Yes | Host config used directly |
+| Survives process restart | Yes (via output artifact) | Yes (via dump) | Yes (backend + output artifact) |
+| Multi-writer embedding | No | No (single writer assumed) | Do not assume it for the complete index; coordinate one publisher even if the vector backend supports concurrent writes |
+| Requires sqlite3 gem in host | Yes | No | With `:postgresql`/`:production` |
+| Requires embedding/vector service | Ollama | Ollama | OpenAI plus pgvector or Qdrant |
+| Cross-machine query | After deploying/copying `output_dir` | Yes, when the filesystem is shared | External vectors are shared; metadata/config still require a shared or deployed `output_dir` |
+| `woods.json` schema-versioned config snapshot | Yes | Yes | Yes |
 
-`Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:postgresql`, `:production`, no others exist.
+`Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:shared_filesystem`, `:postgresql`, and `:production`.
 
 ---
 
@@ -225,7 +225,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 
 | Model | Native context | Dimensions | Weights | Notes |
 |---|---|---|---|---|
-| `nomic-embed-text` (default) | 2048 | 768 | 274 MB | General-purpose, ships with Ollama |
+| `nomic-embed-text` (default) | 2048 | 768 | 274 MB | General-purpose; pull from Ollama before first use |
 | `bge-m3` | **8192** | 1024 | 1.2 GB | Fewer chunks per unit, stronger code-search benchmarks |
 | `snowflake-arctic-embed2` | 8192 | 1024 | 1.2 GB | Multilingual variant of bge-m3 |
 | `mxbai-embed-large` | 512 | 1024 | 670 MB | Best for short text |
@@ -241,9 +241,12 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 
 > Ollama's `/api/embed` enforces the model's native context length regardless of the `options.num_ctx` override ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). Woods advertises the native ceiling per model so the chunker sizes inputs correctly, see [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md).
 
-### Not implemented
+### Implemented provider boundary
 
-`Builder#build_embedding_provider` accepts exactly `:openai` and `:ollama`, anything else raises `ArgumentError`. Voyage Code 3/2 and Anthropic embeddings are not wired up:
+`Builder#build_embedding_provider` accepts `:openai`, `:ollama`, and `:fake`.
+The fake provider is deterministic and offline for specs, CI, and sandbox
+contract tests; it does not represent semantic quality. Other values raise
+`ArgumentError`. Voyage Code 3/2 and Anthropic embeddings are not wired up:
 
 - **Voyage Code 3 / Code 2**: code-specialized embeddings (1024/1536 dims, up to 32K token context). Would be the best-quality option for code retrieval if implemented; there is no `Woods::Embedding::Provider::Voyage` today.
 - **Anthropic**: Anthropic does not currently offer a standalone embedding API. Monitor for availability.
@@ -256,6 +259,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 | **Lowest cost / no external dependencies** | Ollama + `nomic-embed-text` |
 | **Self-hosted + large units** | Ollama + `bge-m3` (8192-token context vs. 2048) |
 | **Maximum quality** | OpenAI text-embedding-3-large |
+| **Offline deterministic tests** | `:fake` (contract testing only, not semantic ranking) |
 
 **Critical consideration:** Embedding dimensions must match across your entire index. Changing embedding providers or models requires a full re-index, `rake woods:embed` raises `Woods::MCP::DimensionMismatch` before embedding anything when the configured provider's dimension disagrees with the store's.
 
@@ -368,7 +372,7 @@ Woods.extract!
 
 ## Recommended Stack Combinations
 
-### Starter (Zero Dependencies)
+### Starter (Local Dependencies)
 
 ```ruby
 Woods.configure_with_preset(:local)
@@ -379,13 +383,17 @@ Woods.configure_with_preset(:local)
 # Jobs: Inline
 ```
 
-**Setup:** `brew install ollama && ollama pull nomic-embed-text`
+**Setup:** add the `sqlite3` gem, then install/start Ollama and run
+`ollama pull nomic-embed-text`.
 **Tradeoff:** Lower retrieval quality, CPU-bound embedding, single-user.
 
 ### Rails 8 Standard
 
 ```ruby
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 # Vector: pgvector
 # Metadata: SQLite
 # Graph: In-memory
@@ -401,7 +409,14 @@ Woods.configure_with_preset(:postgresql)
 ```ruby
 # No dedicated :mysql preset exists. Use :production and reuse your MySQL
 # connection for the app itself: Woods' own metadata store stays SQLite.
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only for a deliberately trusted private endpoint
+  }
+end
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory
@@ -417,8 +432,18 @@ Woods.configure_with_preset(:production)
 ```ruby
 # No dedicated :self_hosted preset exists. Use :production, then override
 # embedding_provider to :ollama.
-Woods.configure_with_preset(:production)
-Woods.configure { |c| c.embedding_provider = :ollama }
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_provider = :ollama
+  config.embedding_options = {
+    model: 'nomic-embed-text',
+    host: ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
+  }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # Qdrant is deliberately self-hosted/private here
+  }
+end
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory

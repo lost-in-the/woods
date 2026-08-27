@@ -173,7 +173,8 @@ config.vector_store = :qdrant
 config.vector_store_options = {
   url: 'http://localhost:6333',
   collection: 'woods',
-  dimensions: 1536
+  dimensions: 1536,
+  allow_private_hosts: true # explicit opt-in for trusted localhost/private URLs
 }
 ```
 
@@ -236,7 +237,7 @@ Requirements:
 For quick setup, use named presets that configure storage + embedding together:
 
 ```ruby
-# Local development: no external services needed (requires sqlite3 gem)
+# Local development: no cloud key; requires sqlite3 and a running Ollama service
 Woods.configure_with_preset(:local)
 # → in_memory vectors, SQLite metadata, in_memory graph, Ollama embeddings
 
@@ -245,12 +246,24 @@ Woods.configure_with_preset(:local)
 Woods.configure_with_preset(:shared_filesystem)
 # → in_memory everything + Snapshotter-based persistence via output_dir
 
-# PostgreSQL: requires pgvector extension and OpenAI API key
-Woods.configure_with_preset(:postgresql)
+# PostgreSQL: requires pgvector, sqlite3 gem, OpenAI key, and connection
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    connection: ActiveRecord::Base.connection
+  }
+end
 # → pgvector vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 
-# Production: requires Qdrant server and OpenAI API key
-Woods.configure_with_preset(:production)
+# Production: requires Qdrant, sqlite3 gem, and OpenAI API key
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only when QDRANT_URL is deliberately private
+  }
+end
 # → Qdrant vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 ```
 
@@ -269,7 +282,7 @@ end
 |--------|------|---------|-------------|
 | `precompute_flows` | Boolean | `false` | Pre-compute per-action request flow maps during extraction |
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
-| `enable_snapshots` | Boolean | `false` | Enable temporal snapshots (requires migrations 004+005) |
+| `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
 
 ## Session Tracer Options
 

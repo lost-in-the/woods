@@ -11,18 +11,19 @@ module Woods
     #   rails generate woods:install
     #
     # Creates:
-    #   config/initializers/woods.rb        — annotated configuration file
-    #   db/migrate/<ts>_create_woods_tables.rb — migration for Woods tables
+    #   config/initializers/woods.rb — annotated configuration file
+    #   db/migrate/<ts>_create_woods_tables.rb — legacy compatibility migration
     #
-    # The migration creates woods_units, woods_edges, and woods_embeddings
-    # tables. Works with PostgreSQL, MySQL, and SQLite.
+    # Shipped v2 paths do not use the migration's application tables. New
+    # default installs should remove it; retain it only for an older/custom
+    # integration that deliberately uses woods_units/edges/embeddings.
     #
     class InstallGenerator < Rails::Generators::Base
       include ActiveRecord::Generators::Migration
 
       source_root File.expand_path('templates', __dir__)
 
-      desc 'Creates a Woods initializer and migration for Woods tables'
+      desc 'Creates a Woods initializer and a legacy compatibility migration'
 
       # @return [void]
       def create_initializer_file

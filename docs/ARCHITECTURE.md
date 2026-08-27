@@ -45,7 +45,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                 Host / CI Environment                    │
 │  ┌──────────┐   ┌──────────┐   ┌──────────────────────┐ │
 │  │  Embed   │──▶│  Index   │   │   MCP Index Server   │ │
-│  │  OpenAI  │   │  pgvector│   │   29 tools, no Rails │ │
+│  │  OpenAI  │   │  pgvector│   │ 14 default, no Rails │ │
 │  │  Ollama  │   │  Qdrant  │   └──────────────────────┘ │
 │  └──────────┘   └──────────┘                            │
 └──────────────────────────────────────────────────────────┘
@@ -247,11 +247,21 @@ Woods.configure_with_preset(:local)
 # Shared filesystem (rake embed writes a dump; a separate MCP server reads it)
 Woods.configure_with_preset(:shared_filesystem)
 
-# PostgreSQL with pgvector
-Woods.configure_with_preset(:postgresql)
+# PostgreSQL with pgvector (complete credentials/connection are required)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 
 # Production (Qdrant for vectors, SQLite for metadata)
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only when QDRANT_URL is deliberately private
+  }
+end
 ```
 
 Or wire backends manually:
@@ -259,9 +269,14 @@ Or wire backends manually:
 ```ruby
 Woods.configure do |config|
   config.vector_store = :qdrant
-  config.vector_store_options = { url: "http://localhost:6333", collection: "woods" }
+  config.vector_store_options = {
+    url: "http://localhost:6333",
+    collection: "woods",
+    allow_private_hosts: true # explicit opt-in for trusted localhost
+  }
   config.metadata_store = :sqlite
   config.embedding_provider = :openai
+  config.embedding_options = { api_key: ENV.fetch("OPENAI_API_KEY") }
   config.embedding_model = "text-embedding-3-small"
 end
 ```
@@ -274,7 +289,7 @@ The two servers have fundamentally different runtime requirements:
 
 ### Index Server (`woods-mcp`)
 
-**29 tools, 2 resources, 2 templates. Reads pre-extracted JSON. No Rails boot required.**
+**29 schemas; 14 register in the packaged default. Two resources and two templates. Reads pre-extracted JSON without booting Rails.**
 
 Starts with a path to the extraction output directory and reads from it:
 

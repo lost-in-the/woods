@@ -48,26 +48,40 @@ Retrieval requires an embedding provider and a vector store. Set these in `confi
 
 ### Presets (recommended)
 
-Three named presets cover the most common deployment scenarios:
+Four named presets cover the supported deployment scenarios:
 
 ```ruby
-# Local development: Ollama (local) + in-memory vector store. No external services.
+# Local development: in-memory vectors + SQLite metadata + Ollama.
+# Requires sqlite3, a running Ollama service, and a pulled embedding model.
 Woods.configure_with_preset(:local)
 
-# PostgreSQL: pgvector + OpenAI. Requires PostgreSQL with the vector extension.
-Woods.configure_with_preset(:postgresql)
+# Separate embed/query processes sharing output_dir. No sqlite3 gem.
+# Requires a running Ollama service and a filesystem visible to both processes.
+Woods.configure_with_preset(:shared_filesystem)
 
-# Production: Qdrant + OpenAI. Dedicated vector database.
-Woods.configure_with_preset(:production)
+# PostgreSQL: pgvector + SQLite metadata + OpenAI.
+# Requires pgvector, sqlite3, and an OpenAI API key.
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
+
+# Production: Qdrant + SQLite metadata + OpenAI.
+# Requires Qdrant, sqlite3, and an OpenAI API key.
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only when QDRANT_URL is deliberately private
+  }
+end
 ```
 
 Presets accept a block for overrides:
 
 ```ruby
-Woods.configure_with_preset(:postgresql) do |config|
-  config.embedding_options  = { api_key: ENV['OPENAI_API_KEY'] }
-  config.max_context_tokens = 12_000
-end
+Woods.configure_with_preset(:local) { |config| config.max_context_tokens = 12_000 }
 ```
 
 ### Manual configuration
@@ -77,7 +91,11 @@ end
 ```ruby
 Woods.configure do |config|
   config.vector_store         = :qdrant
-  config.vector_store_options = { url: ENV['QDRANT_URL'], collection: 'myapp' }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: 'myapp',
+    allow_private_hosts: true # required for trusted localhost/RFC1918 URLs
+  }
   config.metadata_store       = :sqlite
   config.embedding_provider   = :openai
   config.embedding_options    = { api_key: ENV['OPENAI_API_KEY'] }
@@ -156,7 +174,10 @@ result = retriever.retrieve("explain the checkout flow", budget: 16_000)
 `Woods.build_retriever` instantiates a retriever from the current configuration:
 
 ```ruby
-Woods.configure_with_preset(:postgresql) { |c| c.embedding_options = { api_key: ENV['OPENAI_API_KEY'] } }
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 retriever = Woods.build_retriever
 result    = retriever.retrieve("what validations does Order have?")
 ```
@@ -167,7 +188,7 @@ result    = retriever.retrieve("what validations does Order have?")
 
 Retrieval degrades gracefully when components are unavailable. The Retriever itself does not implement explicit fallback tiers, degradation happens naturally through how each component handles errors:
 
-- **Embedding provider unavailable**: `codebase_retrieve` returns no results. The MCP tool description notes this condition. Check `pipeline_status` to confirm embeddings exist.
+- **Embedding provider unavailable**: `codebase_retrieve` returns a structured configuration error. Check `woods_status` for retrieval readiness.
 - **Vector store unavailable**: vector and hybrid strategies fail at query time. Keyword and graph strategies remain available for direct calls to `SearchExecutor`.
 - **Metadata store error**: the structural context overview (unit counts by type) is silently omitted; `Retriever#build_structural_context` rescues `StandardError` and returns `nil`. The retrieval result is still returned without the overview.
 - **Graph store unavailable**: graph expansion in hybrid strategy produces no graph candidates; vector and keyword candidates are still ranked and returned.
@@ -206,10 +227,11 @@ Separately, if the supporting section ends up with no candidates (it only ever h
 
 ### `context_format`
 
-Controls how assembled units are formatted. Default: `:markdown`. Valid values: `:markdown`, `:xml`, `:plain`.
+Controls how assembled units are formatted. Default: `:markdown`. Valid values: `:claude`, `:markdown`, `:plain`, `:json`.
 
 ```ruby
-config.context_format = :xml  # For GPT-family prompts that prefer XML structure
+config.context_format = :claude # XML-wrapped output for Claude-style context
+config.context_format = :json   # Machine-readable output
 ```
 
 ### Switching embedding models
@@ -241,5 +263,5 @@ bundle exec rake woods:embed
 | Dimension mismatch warning in logs | `embedding_model` changed after embedding was generated | Re-run `rake woods:extract && rake woods:embed` with the new model |
 | Empty results for a known class name | Keyword strategy not finding the identifier | Try a conceptual query with `codebase_retrieve`; or use `search` for exact name lookup |
 | Very slow retrieval | Large vector index without HNSW index, or Qdrant cold start | For pgvector: create an HNSW index (see `BACKEND_MATRIX.md`). For Qdrant: check collection status |
-| `codebase_retrieve` tool listed but disabled | Embedding provider not configured or API key missing | Set `embedding_provider` and check `pipeline_status` for embedding availability |
+| `codebase_retrieve` tool listed but disabled | Embedding provider not configured or API key missing | Set `embedding_provider`, run `woods:embed`, and check `woods_status` |
 | Results clustered around one type | Diversity penalty insufficient for codebase shape | Lower `similarity_threshold` slightly and widen the query scope |

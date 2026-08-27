@@ -157,7 +157,8 @@ quirk rather than overriding it.
 
 Clients that declare `io.modelcontextprotocol/tasks` now get a durable task
 handle for long-running pipeline tools. They poll with `tasks/get` and can send
-cooperative cancellation with `tasks/cancel`. Records live on disk under
+`tasks/cancel`, but Woods returns a stable unsupported-method response rather
+than claiming it can safely stop and unpublish in-flight work. Records live on disk under
 `<index_dir>/tasks/`, so completion/failure survives disconnects and can be
 read by a restarted server. Clients that do not declare the extension keep the
 old fire-and-forget response.
@@ -225,7 +226,8 @@ about to become Tasks, which survive disconnects *better* than resumable SSE did
 Advertise `io.modelcontextprotocol/tasks`. When a client declares support,
 `pipeline_extract` and `pipeline_embed` return a `CreateTaskResult` with a durable
 `taskId`, `ttlMs` and `pollIntervalMs` instead of `{status: "started"}`. Serve
-`tasks/get`, `tasks/update` and `tasks/cancel`. When the client does *not*
+`tasks/get` and `tasks/update`; `tasks/cancel` is present only to return the
+explicit unsupported-method response. When the client does *not*
 declare support, fall back to today's behaviour verbatim, the spec requires
 never returning a task to a client that did not opt in, and that fallback is our
 old-client compatibility story.
@@ -236,8 +238,8 @@ What this buys:
   failed, with the error, instead of polling `pipeline_status` and guessing.
 - **Disconnect survival.** A task ID is durable. Client restarts, resumes polling,
   gets the result. Today a dropped client plus a dead server loses the run silently.
-- **Cooperative cancellation**: `tasks/cancel` against a `LockHeartbeat`-guarded
-  extraction, which we cannot express at all right now.
+- **An honest cancellation boundary.** `tasks/cancel` returns unsupported;
+  stopping lock-owning work without allowing a later publish is not implemented.
 - **Deletion of bespoke machinery.** `@pipeline_in_flight`, `pipeline_start`/
   `pipeline_finish` and the `already_running` error path become the task registry's
   job. `pipeline_status` narrows to reporting *index* state rather than doubling

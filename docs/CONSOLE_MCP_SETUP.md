@@ -1,6 +1,6 @@
 # Console MCP Server Setup
 
-The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live access to your Rails application: real database counts, record lookups, schema inspection, and job monitoring, all inside rolled-back transactions.
+The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: database counts, record lookups, and schema inspection. It does not expose job-monitoring tools in supported modes. Database work on the request's current connection is rolled back, subject to the side-effect limits documented below.
 
 ## Transport Options at a Glance
 
@@ -8,7 +8,7 @@ The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live acces
 |--------|-------------|-------------|
 | [Stdio via rake](#option-a-stdio-via-rake-recommended) | Rake task boots Rails, runs MCP in-process | Local dev, simplest setup |
 | [Docker](#option-b-docker) | Same rake task, piped through `docker exec -i` | Docker/Compose environments |
-| [HTTP/Rack middleware](#option-c-http-rack-middleware) | Middleware mounts `/mcp/console` endpoint | Shared access, multiple clients |
+| [HTTP Rack middleware](#option-c-http-rack-middleware) | Middleware mounts `/mcp/console` endpoint | Shared access, multiple clients |
 | [Launcher wrapper](#option-d-launcher-wrapper) | Execs the embedded server directly, through Docker, or through SSH | Centralized process-launch config |
 
 ---
@@ -21,6 +21,15 @@ The simplest setup. The `woods:console` rake task boots Rails, then starts the e
 
 1. `gem 'woods'` in your Gemfile
 2. `bundle install`
+3. Deliberately enable Console MCP in `config/initializers/woods.rb` after reviewing the trust boundary:
+
+```ruby
+Woods.configure do |config|
+  config.console_mcp_enabled = true
+end
+```
+
+The stdio and Docker entry points exit with status 1 while this setting is false. Enabling it grants the MCP process live read access under the blocked-table, redaction, and credential-scanning controls described below.
 
 ### How It Works
 
@@ -31,21 +40,7 @@ The rake task does two things before starting the MCP server:
 
 ### MCP Client Configuration
 
-**Claude Code** (`.mcp.json` or `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "rails-console": {
-      "command": "bundle",
-      "args": ["exec", "rake", "woods:console"],
-      "cwd": "/path/to/your/rails-app"
-    }
-  }
-}
-```
-
-**Cursor / Windsurf** (`.cursor/mcp.json`):
+Add this server entry to your MCP client's project configuration:
 
 ```json
 {
@@ -62,7 +57,7 @@ The rake task does two things before starting the MCP server:
 ### What Happens Under the Hood
 
 ```
-MCP client (Claude Code)
+MCP client
   │
   │ spawns via stdio
   │
@@ -93,7 +88,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
 
 ### MCP Client Configuration
 
-**Claude Code:**
+**Plain Docker:**
 
 ```json
 {
@@ -118,16 +113,16 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
     "rails-console": {
       "command": "docker",
       "args": [
-        "exec", "-i",
-        "myapp-web-1",
+        "compose", "exec", "-T", "web",
         "bundle", "exec", "rake", "woods:console"
-      ]
+      ],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
 ```
 
-> **Note:** The container name in MCP config must match exactly what `docker ps` shows. Docker Compose generates names like `<project>-<service>-<index>`. Check with `docker ps --format '{{.Names}}'`.
+> **Note:** Compose uses the service name and `-T` to disable its pseudo-TTY. Plain `docker exec` uses the exact container name from `docker ps` and needs `-i` to keep stdin open.
 
 ### Environment Variables
 
@@ -151,7 +146,7 @@ If your Rails app requires environment variables at boot (credentials, database 
 
 ---
 
-## Option C: HTTP/Rack Middleware
+## Option C: HTTP Rack Middleware
 
 Mount the console as a Rack middleware endpoint. The MCP client connects over HTTP using the streamable-http transport instead of spawning a subprocess. Useful when multiple clients need shared access, or when stdio subprocess spawning is not practical.
 
@@ -169,7 +164,12 @@ In an initializer (`config/initializers/woods.rb`):
 Woods.configure do |config|
   config.console_mcp_enabled = true
   config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
-  config.console_redacted_columns = %w[password_digest api_key ssn]
+  config.console_mcp_allowed_origins = [
+    'https://rails.internal.example', # public Rails/MCP Host
+    'https://agent.example'           # browser client Origin, when applicable
+  ]
+  config.console_redacted_columns =
+    Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[ssn]
 end
 ```
 
@@ -177,6 +177,13 @@ Set `WOODS_CONSOLE_MCP_TOKEN` to a random value of at least 32 characters in
 the Rails server environment. The middleware stack registers automatically via
 the gem's Railtie and requires `Authorization: Bearer <token>` on every Console
 request. Missing or incorrect tokens receive `401 Unauthorized`.
+
+For non-loopback access, `console_mcp_allowed_origins` must include the public
+Rails/MCP host. If a browser-based client sends an `Origin` header from a
+different host, include that exact origin too. This allow-list controls both
+DNS-rebinding Host checks and browser CORS; keep Rails' own `config.hosts`, TLS,
+and proxy rules aligned with it. Server-to-server clients normally omit
+`Origin`, but their request `Host` must still be allowed.
 
 Do not mount `Woods::Console::RackMiddleware` by itself. The Railtie composes
 `OriginGuard`, `BearerAuth`, and the Console middleware in the supported order.
@@ -187,7 +194,7 @@ the default Railtie mount remains stateless.
 
 ### MCP Client Configuration
 
-**Claude Code** (streamable-http transport):
+For an MCP client that supports Streamable HTTP:
 
 ```json
 {
@@ -238,6 +245,20 @@ The HTTP endpoint grants read access to live database data. In production enviro
 `woods-console-mcp` is a process launcher. It replaces itself with the same
 embedded server used by Options A-C, either directly or through `docker exec`
 or `ssh`. It does not enable additional tool tiers.
+
+This option requires the Woods gem and `woods-console-mcp` executable on the
+host that runs the MCP client. If Woods exists only inside a container, use
+[Option B](#option-b-docker) instead. When Woods is in a host application
+bundle rather than installed as a standalone executable, launch it through
+that bundle and set the application directory as `cwd`:
+
+```json
+{
+  "command": "bundle",
+  "args": ["exec", "woods-console-mcp"],
+  "cwd": "/absolute/host/path/to/app"
+}
+```
 
 ### How It Works
 
@@ -387,6 +408,14 @@ Woods.configure do |config|
 
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
   config.console_mcp_path = '/mcp/console'
+
+  # HTTP Origin + Host allow-list. Defaults to loopback only. Non-loopback
+  # Rack deployments must include their public MCP host; browser clients from
+  # another origin need that exact origin listed too.
+  config.console_mcp_allowed_origins = [
+    'https://rails.internal.example',
+    'https://agent.example'
+  ]
 
   # Layer 1. Table names that must never appear in a response.
   # Default: Woods::DEFAULT_CONSOLE_BLOCKED_TABLES (8 tables, see below).
@@ -646,9 +675,10 @@ Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has 
 No currently executable tool claims a confirmation or privileged audit-log
 contract. Tier 2, Tier 3, and `console_eval` remain unregistered inventory.
 
-### Rolled-Back Transactions
+### Current-Connection Rollback
 
-Every tool invocation runs inside a database transaction that is **always rolled back**:
+Database work performed through the request's current Active Record connection
+runs inside a transaction that is **always rolled back**:
 
 ```ruby
 def with_rolled_back_transaction
@@ -660,10 +690,15 @@ def with_rolled_back_transaction
 end
 ```
 
-This means:
+This means direct mutations on that connection are discarded. It is a final
+guard for ordinary database work, not a sandbox or a universal side-effect
+guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,
+threaded work, `after_rollback` callbacks, or writes through another connection
+or shard. The validator, table gate, credential defenses, and operator trust
+boundary remain necessary.
 
-- Any accidental mutation from a validation or callback is rolled back
-- The database is left unchanged regardless of what the tool does
+- Direct accidental mutation on the wrapped connection is rolled back.
+- External, asynchronous, callback, and cross-connection effects may execute live.
 
 ### Statement Timeout
 
@@ -700,7 +735,7 @@ Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `
 ### MCP client shows no tools or "connection refused"
 
 - **Rake/Docker:** Check that `cwd` in MCP config points to the Rails app root (where `Rakefile` lives).
-- **HTTP:** Check that the Rails server is running and listening on the expected port. Try `curl http://localhost:3000/mcp/console`, a 200 or 405 means the middleware is mounted.
+- **HTTP:** Check that the Rails server is running and listening on the expected port. An unauthenticated `curl http://localhost:3000/mcp/console` should return `401` when the enabled middleware and bearer-auth guard are mounted. A request with the configured bearer token proceeds to MCP protocol handling.
 - **All modes:** Run `bundle exec rake woods:console` directly in a terminal. It should hang (waiting for MCP protocol input) rather than exit immediately. If it exits, check the error output.
 
 ### Rails boot noise breaks MCP protocol

@@ -24,7 +24,7 @@ Yes. MySQL, PostgreSQL, and SQLite are all supported equally as application data
 
 ### How large a codebase can Woods handle?
 
-Woods has been tested on applications with 200+ models and 500+ extractable units. Extraction time scales roughly linearly with codebase size, a mid-size app (50-100 models) takes 10-30 seconds. Very large applications benefit from disabling `include_framework_sources` and using incremental mode for subsequent runs.
+Woods does not publish a supported size ceiling or a universal timing estimate. Extraction cost depends on application boot/eager-load time, enabled framework-source indexing, and codebase shape. Measure a full extraction in your application, then use incremental extraction or the watch daemon for ordinary changes.
 
 ---
 
@@ -36,7 +36,7 @@ No. Extraction is entirely read-only. It uses ActiveRecord reflection APIs (`col
 
 ### Can I run Woods in production?
 
-Extraction itself is designed for development and CI, it requires a fully booted Rails environment and takes 10-30 seconds. The MCP Index Server is read-only and can safely run in any environment as long as the HTTP transport is properly secured (bearer token required for non-loopback, origin allow-list via `OriginGuard`, TLS via reverse proxy, see [MCP_HTTP_TRANSPORT.md](MCP_HTTP_TRANSPORT.md)). The Console Server should stay disabled in production regardless of its safety layers. The common production pattern is to extract in CI and publish the JSON output as a build artifact, then run the Index Server against the artifact.
+Prefer extraction in development or CI and publish the generated index as a controlled artifact. The Index Server is read-only but its index contains source and schema context; HTTP deployments still require authentication, origin controls, and TLS. Leave the live-data Console Server disabled in production unless a deliberate security review and access policy authorize it. See [MCP HTTP transport](MCP_HTTP_TRANSPORT.md) and [Console MCP setup](CONSOLE_MCP_SETUP.md).
 
 ---
 
@@ -44,92 +44,19 @@ Extraction itself is designed for development and CI, it requires a fully booted
 
 ### How do I install Woods?
 
-Add the gem to your Gemfile and run the install generator:
-
-```ruby
-# Gemfile
-group :development do
-  gem 'woods'
-end
-```
-
-```bash
-bundle install
-bundle exec rails generate woods:install
-```
-
-The generator creates `config/initializers/woods.rb` with default configuration. For Docker projects, run these commands through `docker compose exec app`. See [GETTING_STARTED.md](GETTING_STARTED.md) for the full setup walkthrough.
+Add `gem "woods", "~> 2.0"` to your development group, install it, and run the install generator. Review the initializer. For a new default v2 install, remove the generated legacy application migration instead of running it; shipped v2 extraction and retrieval do not use those tables. Keep it only for a known older/custom integration. Then extract and validate. Follow [Getting started](GETTING_STARTED.md) for the canonical commands and expected result. If an agent is doing the work, use [Agent setup](AGENT_SETUP.md).
 
 ---
 
 ### What is the minimum configuration?
 
-The only required option is `output_dir`, which has a sensible default:
-
-```ruby
-Woods.configure do |config|
-  config.output_dir = Rails.root.join('tmp/woods')  # default
-end
-```
-
-With just this, you can run `rake woods:extract` and get full extraction output. Embedding and vector storage require additional configuration, see [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md).
+The generated defaults are enough for structural extraction to `tmp/woods/`. Embeddings are optional. See [Getting started](GETTING_STARTED.md) for the minimal path and [Configuration reference](CONFIGURATION_REFERENCE.md) for supported settings.
 
 ---
 
-### How do I set up the MCP server for Claude Code?
+### How do I set up Woods in my MCP client?
 
-Use the `woods-mcp-start` wrapper, which validates the index and restarts on failure:
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "command": "woods-mcp-start",
-      "args": ["/path/to/your-rails-app/tmp/woods"]
-    }
-  }
-}
-```
-
-Add this to `.mcp.json` in your Rails app root (for project-scoped config) or to `claude_desktop_config.json` (for global config). Run `rake woods:extract` first to generate the index. See [MCP_SERVERS.md](MCP_SERVERS.md) for the full setup guide.
-
----
-
-### How do I set up the MCP server for Cursor?
-
-Use `woods-mcp` (without the `-start` wrapper, which is Claude Code-specific):
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "command": "woods-mcp",
-      "args": ["/path/to/your-rails-app/tmp/woods"]
-    }
-  }
-}
-```
-
-Add this to `.cursor/mcp.json` in your project. See [MCP_SERVERS.md](MCP_SERVERS.md) for details.
-
----
-
-### How do I set up the MCP server for Windsurf?
-
-The setup is the same as Cursor, use `woods-mcp` (not the `-start` wrapper):
-
-```json
-{
-  "mcpServers": {
-    "codebase": {
-      "command": "woods-mcp",
-      "args": ["/path/to/your-rails-app/tmp/woods"]
-    }
-  }
-}
-```
-
-Add this to your Windsurf MCP configuration file. The Index Server is transport-agnostic and works with any MCP-compliant client.
+Extract first, then configure a project-scoped stdio server using the application's bundle and an index path visible to the server process. Woods works with any model through a client that supports MCP stdio or Streamable HTTP. Use the verified examples in [MCP servers](MCP_SERVERS.md#configure-a-stdio-client), adapting them to the client's configuration location.
 
 ---
 
@@ -209,7 +136,7 @@ bundle exec rake woods:extract
 
 ### How long does extraction take?
 
-A mid-size Rails app (50-100 models, typical controller and service layer) takes 10-30 seconds for a full extraction. Larger apps (200+ models) may take 1-2 minutes. Framework source extraction (Rails, gem internals) adds overhead and can be disabled with `config.include_framework_sources = false` if you don't need it. Incremental extraction for changed files is much faster, typically under 5 seconds.
+There is no reliable application-independent estimate. Rails boot/eager load, framework-source indexing, and codebase shape dominate the result. Time `woods:extract` in your own environment and use `woods:incremental` or `woods:watch` for ordinary changes.
 
 ---
 
@@ -262,57 +189,58 @@ This is an MCP client behavior, not a server bug. Some clients batch parallel to
 
 ### Does extraction run inside or outside the container?
 
-Extraction runs **inside** the container, it requires Rails to be booted. The Index Server runs **outside** the container on the host, it only reads static JSON files. The Console Server connects to a process inside the container through `docker exec -i`. This split architecture means you only need Docker for operations that require Rails.
+Extraction runs **inside** the container because it requires Rails to be booted. By default, launch the Index Server through the same application container so it can use the installed bundle and container index path; it still reads only static files and does not boot Rails. A host-side Index Server is optional when the host has the application bundle and can read the index volume. The Console Server connects to a booted Rails process inside the container.
 
 ```
-HOST                           CONTAINER
-─────────────────              ──────────────────
-Index Server (reads JSON) ◀── volume mount ─── rake extract (writes JSON)
-woods-console-mcp      ──── docker exec ──▶  rake console (queries Rails)
+HOST                           APPLICATION CONTAINER
+─────────────────              ─────────────────────────
+MCP client ── compose exec ──▶ woods-mcp (reads JSON)
+Rails commands ──────────────▶ rake extract (writes JSON)
+Console client ──────────────▶ rake console (queries Rails)
 ```
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker architecture guide.
 
 ---
 
-### Why do I get a "No manifest.json" error when I know extraction succeeded?
+### Why does the Index Server say no published manifest exists after extraction?
 
-The Index Server is looking at the wrong path, specifically the container-internal path rather than the host-side path. The Index Server runs on the host and reads from the volume-mounted output directory.
+The server is usually running in a different filesystem context from the path you supplied. A Docker-launched server needs the container path; an optional host-launched server needs a host-visible path and the application bundle installed on the host.
 
 ```jsonc
 {
   "mcpServers": {
     "codebase": {
-      "command": "woods-mcp-start",
-      "args": ["./tmp/woods"]    // host path (NOT the container /app/tmp/woods)
+      "command": "docker",
+      "args": ["compose", "exec", "-T", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
 ```
 
-Do not use `/app/tmp/woods` (the container path), the host process cannot access it. Verify with `ls ./tmp/woods/manifest.json` on the host.
+Verify the active v2 generation with `docker compose exec app bundle exec rake woods:validate` and `woods:stats`. Do not require a root `manifest.json`: Woods 2 normally publishes root `generation.json`, which points to the active payload manifest.
 
 ---
 
 ### How do I configure the Console Server with Docker?
 
-For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -i`:
+First set `config.console_mcp_enabled = true` in the Rails initializer after reviewing the live-data trust boundary. Then, for the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
 
 ```json
 {
   "mcpServers": {
     "codebase-console": {
       "command": "docker",
-      "args": ["compose", "exec", "-i", "app",
-               "bundle", "exec", "rake", "woods:console"]
+      "args": ["compose", "exec", "-T", "app",
+               "bundle", "exec", "rake", "woods:console"],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
 ```
 
-The `-i` flag is required to keep stdin attached for MCP protocol
-communication. Enable `console_embedded_read_tools` when SQL/query should also
-be registered. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete examples.
+Compose attaches stdin by default; `-T` disables the pseudo-TTY that would corrupt MCP framing. Plain `docker exec` uses `-i` instead. Enable `console_embedded_read_tools` when SQL/query should also be registered. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for complete examples.
 
 ---
 
@@ -366,14 +294,29 @@ See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the Ollama model comparison a
 Presets configure storage and embedding together with a single call:
 
 ```ruby
-# No external services: in-memory vectors, SQLite metadata, Ollama embeddings
+# Local services: in-memory vectors, SQLite metadata, Ollama embeddings
+# Requires the sqlite3 gem, a running Ollama service, and the pulled model.
 Woods.configure_with_preset(:local)
 
+# Shared filesystem: in-memory stores persisted under output_dir.
+# Requires a running Ollama service and shared output_dir; no sqlite3 gem.
+Woods.configure_with_preset(:shared_filesystem)
+
 # PostgreSQL + OpenAI: pgvector vectors, SQLite metadata, OpenAI embeddings
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 
 # Production scale: Qdrant vectors, SQLite metadata, OpenAI embeddings
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only when QDRANT_URL is deliberately private
+  }
+end
 ```
 
 Presets can be overridden with a block:
@@ -421,7 +364,7 @@ Several options for tuning retrieval:
 - **Increase `max_context_tokens`** to include more units per query (at the cost of larger LLM context).
 - **Lower `similarity_threshold`** (default 0.7) to include less similar results.
 - **Enable framework sources** (`include_framework_sources: true`) if Rails internals are relevant to your queries.
-- **Use the feedback tools** (`retrieval_rate`, `retrieval_report_gap`) to record quality ratings, `retrieval_suggest` analyzes feedback to recommend configuration changes.
+- **Use retrieval feedback only in a custom embedded server** that wires a feedback store. The normal packaged executable does not register feedback tools.
 
 ---
 
@@ -437,7 +380,7 @@ Enable them in your initializer:
 config.enable_snapshots = true
 ```
 
-Snapshots use their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database, `bundle exec rails db:migrate` does not touch it. `Woods::Db::Migrator` runs migrations 004 and 005 against that database automatically, both when a full extraction runs and when `woods-mcp` boots with snapshots enabled. No manual migration step is needed. The `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail` MCP tools become available after enabling.
+Snapshots prefer their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database. Extraction falls back to JSON files when the `sqlite3` gem is unavailable; other SQLite open/migration failures are reported and do not capture a snapshot. `Woods::Db::Migrator` runs the internal SQLite migrations automatically during extraction and MCP boot; `bundle exec rails db:migrate` does not touch this store and no manual migration step is needed. The packaged MCP server discovers an existing `woods.sqlite3` automatically. When extraction used the JSON fallback, set `WOODS_SNAPSHOTS=true` on the server so it wires `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail`.
 
 ---
 
@@ -500,7 +443,7 @@ bundle exec rake woods:validate
 bundle exec rake woods:stats
 ```
 
-The `pipeline_status` MCP tool reports the last extraction time, unit counts, and whether the index is stale relative to the current git HEAD. The `woods_status` tool (Index Server) reports a single-call health snapshot covering extraction freshness, console-bridge reachability, embedding/Notion/session-tracer configuration state, and index version, useful for agents cold-connecting to a server.
+The packaged Index Server's `woods_status` tool reports a single-call health snapshot covering generation freshness, counts, retrieval readiness, and configured optional capabilities. `pipeline_status` requires an operator collaborator that the packaged executable does not wire.
 
 ---
 

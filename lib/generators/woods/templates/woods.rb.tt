@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
 # Woods configuration
-# Full reference: https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md
+# Full reference: https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/CONFIGURATION_REFERENCE.md
 #
 # Quick-start presets (uncomment one instead of the full block below):
-#   Woods.configure_with_preset(:local)       # in-memory + Ollama, no external services
-#   Woods.configure_with_preset(:postgresql)  # pgvector + OpenAI (PostgreSQL required)
-#   Woods.configure_with_preset(:production)  # Qdrant + OpenAI (production-scale)
+#   Woods.configure_with_preset(:local)       # SQLite metadata + local Ollama (sqlite3 gem required)
+#   Woods.configure_with_preset(:shared_filesystem) # persisted files + local Ollama; no sqlite3
+#   :postgresql  # pgvector + OpenAI; requires sqlite3, API key, and connection options
+#   :production  # Qdrant + OpenAI; requires sqlite3, API key, URL, and collection
+# Copy the complete hosted-preset blocks from CONFIGURATION_REFERENCE.md;
+# the preset name alone cannot supply credentials or backend connection details.
 #
 # Presets accept a block for overrides:
 #   Woods.configure_with_preset(:local) { |c| c.max_context_tokens = 16_000 }
@@ -32,13 +35,8 @@ Woods.configure do |config|
 
   # ── Extractors ──────────────────────────────────────────────────────────
 
-  # Enabled extractors. Default set covers the most common Rails layers.
-  # See CONFIGURATION_REFERENCE.md for the full list of available symbols.
-  # config.extractors = %i[
-  #   models controllers services components view_components
-  #   jobs mailers graphql serializers managers policies validators
-  #   rails_source
-  # ]
+  # All built-in extractors run. `config.extractors` is accepted for forward
+  # compatibility but does not select a subset; non-default values warn.
 
   # Include Rails / gem source in the index (increases extraction time).
   # config.include_framework_sources = true
@@ -48,7 +46,8 @@ Woods.configure do |config|
 
   # ── Embedding ───────────────────────────────────────────────────────────
 
-  # Embedding provider: :openai or :ollama
+  # Embedding provider: :openai, :ollama, or :fake. `:fake` is deterministic
+  # and offline for tests/CI; it does not provide meaningful semantic ranking.
   # config.embedding_provider = :openai
   # config.embedding_model    = 'text-embedding-3-small'
   # config.embedding_options  = { api_key: ENV['OPENAI_API_KEY'] }
@@ -56,7 +55,8 @@ Woods.configure do |config|
   # Ollama (local, no API key needed). `num_ctx` is auto-selected per model
   # (nomic-embed-text → 2048, bge-m3 → 8192). Install `gem "tokenizers"` for
   # exact BERT WordPiece token counting on dense Ruby source. See
-  # docs/EMBEDDING_MODELS.md for the full model comparison.
+  # https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/EMBEDDING_MODELS.md
+  # has the full model comparison.
   # config.embedding_provider = :ollama
   # config.embedding_options  = {
   #   model: 'nomic-embed-text',
@@ -82,7 +82,8 @@ Woods.configure do |config|
   # config.vector_store_options = {
   #   url:        ENV.fetch('QDRANT_URL', 'http://localhost:6333'),
   #   collection: 'woods',
-  #   dimensions: 1_536
+  #   dimensions: 1_536,
+  #   allow_private_hosts: true # required for trusted localhost/RFC1918 URLs
   # }
 
   # Metadata store: :in_memory, :sqlite
@@ -99,14 +100,17 @@ Woods.configure do |config|
   # Extract link_to / redirect_to / form_action navigation edges.
   # config.extract_navigation_edges = true
 
-  # Temporal snapshots — requires migrations 004+005.
+  # Temporal snapshots prefer Woods' output-directory SQLite database and fall
+  # back to JSON when the sqlite3 gem is unavailable. Internal migrations run
+  # automatically; this does not require `rails db:migrate`.
   # config.enable_snapshots = false
 
   # ── Console MCP ─────────────────────────────────────────────────────────
   #
   # The Console MCP server lets AI tools query your live Rails app.
   # It is DISABLED by default. Enable only after reviewing the security
-  # documentation in docs/CONSOLE_MCP_SETUP.md.
+  # documentation:
+  # https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/CONSOLE_MCP_SETUP.md
   #
   # Defense layers (all active by default when the server is on):
   #   Layer 1 — Table gate: rejects tool calls that touch a blocked table.
@@ -115,18 +119,24 @@ Woods.configure do |config|
   #   Layer 3 — Column + EAV redaction: named credential columns and
   #              key/value pairs are replaced with [REDACTED].
   #   Layer 4 — SqlValidator + SafeContext (always on, no config): rejects
-  #              DML/DDL before any DB interaction, and wraps every request
-  #              in a rolled-back transaction so a write is discarded even if
-  #              SqlValidator is bypassed.
+  #              DML/DDL before any DB interaction, and rolls back work on the
+  #              current database connection. It cannot contain jobs, mail,
+  #              HTTP calls, callbacks, threads, or other connections/shards.
 
   # config.console_mcp_enabled = false
   # config.console_mcp_path    = '/mcp/console'
 
+  # Console HTTP requires a strong bearer token. Its Origin/Host guard is
+  # loopback-only by default; list the public MCP host and any browser client
+  # origin for a deliberate non-loopback deployment.
+  # config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
+  # config.console_mcp_allowed_origins = ['https://rails.internal.example']
+
   # Credential-column redaction (Layer 3).
   # Starts from a safe default list (passwords, tokens, secrets).
-  # Extend: Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[my_secret_col]
-  # Override entirely to remove a default:
-  # config.console_redacted_columns = %w[password token api_key]
+  # config.console_redacted_columns =
+  #   Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[my_secret_col]
+  # Replace the defaults only after auditing the full list against your schema.
 
   # Key-value pairs where the value should be redacted (e.g., env var names).
   # config.console_redacted_key_values = []
@@ -141,7 +151,8 @@ Woods.configure do |config|
   # Disable specific scanner patterns (rare — prefer blocked_tables).
   # config.console_disabled_scanner_patterns = []
 
-  # Allow the AI console to execute Ruby eval (off by default; very dangerous).
+  # Legacy unsafe-eval flag. `console_eval` is unavailable in supported modes;
+  # setting this to true fails closed at Console Server construction.
   # config.console_unsafe_eval_enabled = false
 
   # Expose SQL/query read tools inside embedded console (adds read-only DB
