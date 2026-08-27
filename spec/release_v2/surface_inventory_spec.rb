@@ -43,15 +43,15 @@ RSpec.describe 'release-v2 public-surface inventory' do
   end
 
   it 'rejects a drifted Index MCP count in the current guide' do
-    documentation_path = File.join(root, 'docs/USE_CASES_AND_FEATURE_GAPS.md')
+    documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
     original = File.read(documentation_path)
-    changed = original.sub('29 + 31 tools', '28 + 31 tools')
+    changed = original.sub('### Tools (29', '### Tools (28')
     expect(changed).not_to eq(original)
 
     File.write(documentation_path, changed)
 
     expect { surface_inventory.verify! }
-      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /USE_CASES_AND_FEATURE_GAPS\.md/)
+      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, %r{docs/MCP_SERVERS\.md})
   ensure
     File.write(documentation_path, original) if original
   end

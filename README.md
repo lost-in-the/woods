@@ -430,9 +430,6 @@ See [Backend Matrix](docs/BACKEND_MATRIX.md) for supported combinations and [Con
 Woods.configure do |config|
   config.output_dir = Rails.root.join('tmp/woods')
 
-  # CI: only extract models and controllers for faster builds
-  config.extractors = %i[models controllers] if ENV['CI']
-
   # Environment-conditional embedding provider
   if ENV['OPENAI_API_KEY']
     config.embedding_provider = :openai
@@ -643,7 +640,7 @@ Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required 
 
 ```bash
 bin/setup                  # Install dependencies
-bundle exec rake spec      # Run tests (~3300 examples)
+bundle exec rake spec      # Run tests (6,900+ examples)
 bundle exec rubocop        # Lint
 ```
 

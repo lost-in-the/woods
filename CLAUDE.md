@@ -232,7 +232,6 @@ See `docs/README.md` for the documentation index and roadmap.
 Key references:
 - Incremental extraction contract + dispatch inventory + differential harness → `docs/INCREMENTAL_EXTRACTION.md`
 - Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
-- Coverage gaps + future extractor work → `docs/COVERAGE_GAP_ANALYSIS.md`
 - Historical design documents (from the build phase) live in git history — see `docs/design/README.md`
 
 ## Backlog Workflow
