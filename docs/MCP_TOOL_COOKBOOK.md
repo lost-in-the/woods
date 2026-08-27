@@ -4,20 +4,20 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 
 ## Conditional Tools & Wiring
 
-The Index Server ships with **29 tools**: **14 are always registered** and **15 are conditionally registered** depending on whether their collaborator is wired into `Woods.configuration`. If you call a conditionally-wired tool that isn't registered, the MCP server will simply not advertise it in `tools/list`, clients see it as "tool not found," not as a runtime failure.
+The Index Server defines **29 schemas**: the packaged executable registers **14**, while **15** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
 
 | Tool group | Count | Wiring condition |
 |------------|-------|------------------|
 | Always-on | 14 | Always registered, `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `woods_status` |
 | `session_trace` | 1 | `Woods.configuration.session_store` set and session tracer enabled |
-| Operator (5) | 5 | Operator wired, `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
-| Feedback (4) | 4 | `Woods.configuration.feedback_store` wired, `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
+| Operator (5) | 5 | Custom embedded server wires an operator: `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
+| Feedback (4) | 4 | Custom embedded server wires a feedback store: `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
 | Snapshot (4) | 4 | `Woods.configuration.snapshot_store` wired (requires migrations 004 + 005), `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
 | `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
 
 `codebase_retrieve` is always registered (no `retrieve` alias exists), but only returns results once an embedding provider is configured and `rake woods:embed` has run.
 
-If your agent reports a tool is "missing," check Woods configuration first; the tool is gated by presence of the matching collaborator. **Console Server tools are not all unconditionally registered**: 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server) for the full tier table.
+If an agent reports a missing tool, compare its request with the connected server's registered list and [MCP server boundaries](MCP_SERVERS.md#conditional-index-capabilities). The normal packaged executable does not wire operator or feedback collaborators. **Console Server tools are not all unconditionally registered**: 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [MCP servers](MCP_SERVERS.md#console-server) for the supported inventory.
 
 ---
 
@@ -676,7 +676,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 
 ### "Run a custom SQL query"
 
-**Tool:** `console_sql` (Console Server, requires `console_embedded_read_tools: true`, see [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server))
+**Tool:** `console_sql` (Console Server, requires `console_embedded_read_tools: true`; see [MCP servers](MCP_SERVERS.md#console-server))
 
 ```json
 {

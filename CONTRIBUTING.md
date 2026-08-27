@@ -27,7 +27,7 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 
 | Path | Responsibility |
 |---|---|
-| `lib/woods/extractor/` | Runtime Rails extractors and extracted units |
+| `lib/woods/extractor.rb`, `lib/woods/extractors/` | Runtime Rails extraction pipeline and extractors |
 | `lib/woods/mcp/` | Read-only Index MCP server and protocol behavior |
 | `lib/woods/console/` | Live Rails Console MCP and safeguards |
 | `lib/woods/storage/`, `lib/woods/embedding/`, `lib/woods/retrieval/` | Persistence, vectors, and semantic retrieval |

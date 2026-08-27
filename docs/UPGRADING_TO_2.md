@@ -39,7 +39,7 @@ Run in the same environment that boots Rails:
 
 ```bash
 git status --short --branch
-bundle exec woods --version
+bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 bundle exec rails woods:stats
 bundle exec rails woods:validate
 ```
@@ -78,7 +78,7 @@ Then update only Woods and the dependencies Bundler requires:
 
 ```bash
 bundle update woods
-bundle exec woods --version
+bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 ```
 
 Confirm the result is 2.0.0 and the lockfile resolves `mcp` at `>= 1.2, < 2.0`.
@@ -196,7 +196,7 @@ Update agent prompts that refer to the old inventory. Standard Index launch prov
 
 Complete every applicable check:
 
-- [ ] `bundle exec woods --version` reports 2.0.0.
+- [ ] `bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'` reports 2.0.0.
 - [ ] Rails boots and eager-loads in the extraction environment.
 - [ ] `woods:extract`, `woods:validate`, and `woods:stats` succeed.
 - [ ] Expected namespaced and constrained identifiers appear.
@@ -215,12 +215,13 @@ If verification fails:
 
 1. stop v2 MCP, watcher, embedding, and exporter processes;
 2. restore the v1 Gemfile and lockfile or deploy the recorded v1 commit;
-3. restore the v1 durable vector store and managed export backup when v2 modified them;
-4. clean the generated index and extract again with v1;
-5. restore v1 MCP configuration and reconnect clients;
-6. verify v1 status and representative queries before reopening access.
+3. run the v1 `woods:clean` before restoring anything under the configured output directory;
+4. either restore the complete pre-upgrade v1 output-directory backup, or run a fresh v1 extraction and then restore its v1 `dumps/` and configuration artifacts;
+5. restore external vector-store and managed export backups when v2 modified them;
+6. restore v1 MCP configuration and reconnect clients;
+7. verify v1 status and representative queries before reopening access.
 
-A v1 gem cannot translate a v2 index or durable vector store back to v1 identifiers. Re-extraction and backup restoration are the rollback.
+A v1 gem cannot translate a v2 index or durable vector store back to v1 identifiers. Re-extraction and backup restoration are the rollback. Do not run `woods:clean` after restoring local or shared-filesystem dumps; v1 removes the entire output directory.
 
 ## Agent-operated upgrade prompt
 

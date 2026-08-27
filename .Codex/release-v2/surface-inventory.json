@@ -984,20 +984,8 @@
         "count": 34
       },
       {
-        "surface": "index_mcp_tools",
-        "count": 29
-      },
-      {
         "surface": "console_mcp_read_tools",
         "count": 11
-      },
-      {
-        "surface": "index_mcp_resources",
-        "count": 2
-      },
-      {
-        "surface": "index_mcp_resource_templates",
-        "count": 2
       }
     ],
     "docs/BACKEND_MATRIX.md": [],
@@ -1009,10 +997,6 @@
     ],
     "docs/CONSOLE_MCP_SETUP.md": [],
     "docs/DOCKER_SETUP.md": [
-      {
-        "surface": "index_mcp_tools",
-        "count": 29
-      },
       {
         "surface": "console_mcp_read_tools",
         "count": 11
@@ -1051,12 +1035,7 @@
         "count": 11
       }
     ],
-    "docs/MCP_TOOL_COOKBOOK.md": [
-      {
-        "surface": "index_mcp_tools",
-        "count": 29
-      }
-    ],
+    "docs/MCP_TOOL_COOKBOOK.md": [],
     "docs/MCP_WORKTREE_SETUP.md": [],
     "docs/NOTION_INTEGRATION.md": [],
     "docs/OBSIDIAN_INTEGRATION.md": [],
@@ -1081,14 +1060,6 @@
       {
         "surface": "extractor_registrations",
         "count": 34
-      },
-      {
-        "surface": "index_mcp_tools",
-        "count": 29
-      },
-      {
-        "surface": "console_mcp_schemas",
-        "count": 31
       }
     ]
   }

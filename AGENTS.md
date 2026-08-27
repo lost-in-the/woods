@@ -17,7 +17,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for shared policy and [CLAUDE.md](CLAUDE
 
 | Area | Paths |
 |---|---|
-| Extraction and graph | `lib/woods/extractor/`, `lib/woods/dependency_graph*`, `lib/woods/graph_*` |
+| Extraction and graph | `lib/woods/extractor.rb`, `lib/woods/extractors/`, `lib/woods/dependency_graph*`, `lib/woods/graph_*` |
 | Index MCP | `lib/woods/mcp/`, `exe/woods-mcp*` |
 | Console MCP | `lib/woods/console/`, `exe/woods-console-mcp` |
 | Storage/retrieval | `lib/woods/storage/`, `lib/woods/embedding/`, `lib/woods/retrieval/` |

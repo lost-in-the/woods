@@ -27,7 +27,7 @@ Add `gem "woods", "~> 2.0"` to the development group, then:
 
 ```bash
 bundle install
-bundle exec woods --version
+bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 bin/rails generate woods:install
 git diff -- config/initializers/woods.rb db/migrate
 ```

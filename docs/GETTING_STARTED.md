@@ -25,7 +25,7 @@ Then install and confirm the resolved version:
 
 ```bash
 bundle install
-bundle exec woods --version
+bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 ```
 
 If your application runs through Docker Compose, run Rails and Bundler commands inside its application service. See [Docker setup](DOCKER_SETUP.md) before configuring MCP paths.

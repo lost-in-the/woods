@@ -45,7 +45,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                 Host / CI Environment                    │
 │  ┌──────────┐   ┌──────────┐   ┌──────────────────────┐ │
 │  │  Embed   │──▶│  Index   │   │   MCP Index Server   │ │
-│  │  OpenAI  │   │  pgvector│   │   29 tools, no Rails │ │
+│  │  OpenAI  │   │  pgvector│   │ 14 default, no Rails │ │
 │  │  Ollama  │   │  Qdrant  │   └──────────────────────┘ │
 │  └──────────┘   └──────────┘                            │
 └──────────────────────────────────────────────────────────┘
@@ -274,7 +274,7 @@ The two servers have fundamentally different runtime requirements:
 
 ### Index Server (`woods-mcp`)
 
-**29 tools, 2 resources, 2 templates. Reads pre-extracted JSON. No Rails boot required.**
+**29 schemas; 14 register in the packaged default. Two resources and two templates. Reads pre-extracted JSON without booting Rails.**
 
 Starts with a path to the extraction output directory and reads from it:
 

@@ -59,7 +59,7 @@ Run the repository's normal dependency command:
 
 ```bash
 bundle install
-bundle exec woods --version
+bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 ```
 
 Do not broadly update unrelated gems. Review the Gemfile and lockfile diff before continuing.
