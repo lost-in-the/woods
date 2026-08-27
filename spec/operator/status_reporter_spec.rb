@@ -53,6 +53,33 @@ RSpec.describe Woods::Operator::StatusReporter do
       end
     end
 
+    context 'when the manifest lives only under a payload directory' do
+      # A payload-born index has no manifest.json at output_dir directly — it
+      # lives under the directory generation.json's `payload` pointer names.
+      before do
+        payload_dir = File.join(output_dir, 'payloads', 'gen-1')
+        FileUtils.mkdir_p(payload_dir)
+        manifest = {
+          'extracted_at' => '2026-02-15T10:00:00Z',
+          'total_units' => 7,
+          'counts' => { 'models' => 7 },
+          'git_sha' => 'def456',
+          'git_branch' => 'main'
+        }
+        File.write(File.join(payload_dir, 'manifest.json'), JSON.generate(manifest))
+        File.write(File.join(output_dir, 'generation.json'),
+                   JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+      end
+
+      it 'resolves the manifest through the generation pointer instead of reporting :not_extracted' do
+        status = reporter.report
+
+        expect(status[:status]).not_to eq(:not_extracted)
+        expect(status[:total_units]).to eq(7)
+        expect(status[:git_sha]).to eq('def456')
+      end
+    end
+
     context 'when manifest does not exist' do
       it 'returns status :not_extracted' do
         status = reporter.report

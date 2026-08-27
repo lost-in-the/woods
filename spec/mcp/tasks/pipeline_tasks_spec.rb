@@ -192,6 +192,28 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     end
   end
 
+  describe 'when the run fails with a ScriptError (not a StandardError)' do
+    before do
+      allow(Logger).to receive(:new).and_call_original
+      allow(Logger).to receive(:new).with($stderr).and_return(double('Logger', error: nil))
+      # The background thread's runner lazily requires the extractor; a
+      # half-typed file there raises SyntaxError, which is NOT a
+      # StandardError. Before the fix that unwound the thread past the task
+      # bookkeeping entirely, leaving the record "working" forever (until
+      # pid-death orphan detection eventually caught it).
+      allow(fake_extractor).to receive(:extract_all).and_raise(SyntaxError, 'unexpected end-of-input')
+    end
+
+    it 'still fails the task instead of leaving it working forever' do
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'failed' }
+
+      task = rpc('tasks/get', task_params(task_id)).fetch('result')
+      expect(task['status']).to eq('failed')
+      expect(task.dig('error', 'message')).to include('unexpected end-of-input')
+    end
+  end
+
   describe 'a client that did not declare the extension' do
     before { allow(fake_extractor).to receive(:extract_all).and_return(true) }
 

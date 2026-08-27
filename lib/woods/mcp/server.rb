@@ -90,10 +90,11 @@ module Woods
           respond_err = method(:error_response)
           op_missing = lambda do |tool|
             error_response(
-              'Pipeline operator is not configured. Pass `operator:` to Woods::MCP::Server.build ' \
-              'or use Woods::MCP::Bootstrapper to wire StatusReporter, ErrorEscalator, and PipelineGuard.',
+              'Pipeline operator is not configured. Pass `operator:` (a StatusReporter, ' \
+              'ErrorEscalator, and PipelineGuard) to Woods::MCP::Server.build when embedding ' \
+              'the server — neither packaged executable wires one today.',
               code: :not_configured, config_key: 'operator',
-              doc_link: 'docs/OPERATOR_GUIDE.md', tool: tool
+              doc_link: 'docs/MCP_SERVERS.md#pipeline-management-5', tool: tool
             )
           end
           fb_missing = lambda do |tool|
@@ -101,7 +102,7 @@ module Woods
               'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \
               'to enable retrieval feedback capture.',
               code: :not_configured, config_key: 'feedback_store',
-              doc_link: 'docs/FEEDBACK_STORE.md', tool: tool
+              doc_link: 'docs/MCP_SERVERS.md#feedback-4', tool: tool
             )
           end
           snap_missing = lambda do |tool|
@@ -109,7 +110,7 @@ module Woods
               'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \
               'and pass `snapshot_store:` to Woods::MCP::Server.build.',
               code: :not_configured, config_key: 'enable_snapshots',
-              doc_link: 'docs/TEMPORAL_SNAPSHOTS.md', tool: tool
+              doc_link: 'docs/MCP_SERVERS.md#temporal-snapshots-4', tool: tool
             )
           end
 
@@ -1286,7 +1287,12 @@ module Woods
               runner.call
             end
             task_store&.complete!(task.id, result: pipeline_task_result(tool)) if task
-          rescue StandardError => e
+          rescue StandardError, ScriptError => e
+            # ScriptError (SyntaxError, LoadError) is not a StandardError, and
+            # +runner.call+ can lazily +require_relative+ the extractor — a
+            # half-typed file must degrade this background thread, not kill it
+            # silently while the task record sits at "working" until pid-death
+            # (see the "rescue ScriptError anywhere a reload can happen" rule).
             logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
             logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
             # Recording the failure is the half that was missing: previously the

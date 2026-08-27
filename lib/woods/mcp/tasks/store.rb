@@ -410,10 +410,40 @@ module Woods
 
             File.delete(path)
             FileUtils.rm_f("#{path}.lock")
-          rescue SystemCallError, CorruptRecordError
+          rescue SystemCallError
             # Another process swept it first; nothing to do.
             nil
+          rescue CorruptRecordError
+            # Not a race — a valid record does not spontaneously fail schema
+            # validation. This is a record that will never parse (a version
+            # upgrade changed the schema, a hand-edited file, a torn write
+            # that never got a follow-up write). Left alone, sweep_expired!
+            # re-parses and re-fails on it every time it runs, forever. Delete
+            # it once it's old enough that a torn write from a concurrent
+            # create!/write would have long since finished; a record younger
+            # than the default TTL is left alone in case it's mid-write.
+            next unless corrupt_record_expired?(path)
+
+            File.delete(path)
+            FileUtils.rm_f("#{path}.lock")
           end
+        end
+
+        # Is a corrupt record old enough to delete outright?
+        #
+        # {#expired?} can't be used here — it reads +task.created_at+ from a
+        # successfully parsed {Task}, which is exactly what a corrupt record
+        # doesn't have. File mtime is the next best signal: {#write} rewrites
+        # the whole file on every transition, so mtime tracks "how long ago
+        # this record was last touched", which is what distinguishes a
+        # permanently broken record from a write still in flight.
+        #
+        # @param path [String] the corrupt record's file path
+        # @return [Boolean]
+        def corrupt_record_expired?(path)
+          Time.now.utc - File.mtime(path).utc > (DEFAULT_TTL_MS / 1000.0)
+        rescue SystemCallError
+          false
         end
       end
     end

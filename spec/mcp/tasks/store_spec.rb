@@ -427,6 +427,46 @@ RSpec.describe Woods::MCP::Tasks::Store do
 
       expect(store.get(task.id)).to be_nil
     end
+
+    describe 'sweeping a corrupt record' do
+      # A corrupt record is not a race between two sweepers — a valid record
+      # does not spontaneously fail schema validation. It is (almost always)
+      # permanent: a version upgrade, a hand-edit. Left alone it gets
+      # re-parsed and re-fails on every sweep forever, so age is the signal
+      # sweep_expired! uses to tell "permanently broken" from "a write still
+      # in flight" (which would also read as corrupt for the brief window
+      # between truncate and rename).
+      def corrupt_a_record(ttl_ms: 10_000)
+        task = store.create!(tool: 'pipeline_extract', ttl_ms: ttl_ms)
+        path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+        File.write(path, 'not json{')
+        path
+      end
+
+      it 'deletes a corrupt record older than the default expiry window' do
+        path = corrupt_a_record
+        old_time = Time.now - (described_class::DEFAULT_TTL_MS / 1000.0) - 60
+        File.utime(old_time, old_time, path)
+
+        store.send(:sweep_expired!)
+
+        expect(File.exist?(path)).to be false
+      end
+
+      it 'leaves a corrupt record younger than the default expiry window untouched' do
+        path = corrupt_a_record
+
+        store.send(:sweep_expired!)
+
+        expect(File.exist?(path)).to be true
+      end
+
+      it 'does not raise when sweeping a directory holding only a corrupt record' do
+        corrupt_a_record
+
+        expect { store.send(:sweep_expired!) }.not_to raise_error
+      end
+    end
   end
 
   describe 'concurrent polling' do

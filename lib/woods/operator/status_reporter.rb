@@ -4,6 +4,7 @@ require 'json'
 require 'time'
 
 require_relative '../atomic_file'
+require_relative '../generation'
 
 module Woods
   module Operator
@@ -51,9 +52,17 @@ module Woods
       # unparseable or unreadable manifest degrades to nil, the same as a
       # missing one: the report becomes :not_extracted rather than an error.
       #
+      # Resolved through {Woods::Generation#payload_dir}: a payload-born
+      # index keeps +manifest.json+ only under the directory the published
+      # generation names, never at +@output_dir+ directly, so reading the
+      # root path unconditionally reported :not_extracted against a fresh
+      # extraction. Resolves to +@output_dir+ itself for a flat (pre-payload)
+      # index, so this is a no-op for every index that predates payloads.
+      #
       # @return [Hash, nil]
       def read_manifest
-        path = File.join(@output_dir, 'manifest.json')
+        generation = Woods::Generation.new(output_dir: @output_dir)
+        path = generation.payload_dir(generation.current).join('manifest.json')
         return nil unless File.exist?(path)
 
         JSON.parse(AtomicFile.read(path))
