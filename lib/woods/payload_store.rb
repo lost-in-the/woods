@@ -27,7 +27,8 @@ module Woods
   class PayloadStore
     DIRNAME = 'payloads'
 
-    # How many payload generations to retain, overridable per host. Three is
+    # How many payload generations to retain, overridable per host via
+    # WOODS_PAYLOAD_RETENTION (read by Extractor#payload_retention). Three is
     # the current generation plus two a pinned reader might still be inside.
     DEFAULT_RETENTION = 3
 
@@ -112,6 +113,16 @@ module Woods
     # generation +generation.json+ names, and removing it would leave every
     # reader resolving a stale pointer back to the flat root.
     #
+    # A directory numbered ABOVE +protect+ cannot be a generation still
+    # ahead of us in a legitimate history — the counter only advances by
+    # bumping past the currently published number — so it can only be a
+    # leftover from before `generation.json` was lost and the counter
+    # restarted lower. `sort.last(keep)` would otherwise read those stale
+    # high numbers as "newest" and retain them forever while pruning the
+    # genuinely-previous generation, so they are always removed regardless
+    # of +keep+; ordinary retention then applies only to +protect+ and
+    # below.
+    #
     # Directories that do not parse as a generation payload are left alone —
     # retention only owns what it created.
     #
@@ -121,18 +132,44 @@ module Woods
     def prune(keep:, protect:)
       return [] unless root.directory?
 
-      numbered = generation_dirs
-      retained = numbered.map(&:first).sort.last(keep)
+      eligible, superseded = generation_dirs.partition { |number, _| number <= protect }
+      retained = eligible.map(&:first).sort.last(keep)
+      prunable = eligible.reject { |number, _| number == protect || retained.include?(number) }
 
-      numbered.filter_map do |number, dir|
-        next if number == protect || retained.include?(number)
+      remove_generation_dirs(superseded + prunable)
+    end
 
+    # Hardlink where the filesystem allows it, copy where it does not — a
+    # payload spanning a device boundary (a bind mount inside the output
+    # directory) must still publish, just without the saving.
+    #
+    # Public so a caller seeding a payload from something other than
+    # {#clone} — {Woods::Extractor#seed_payload_from_flat_root}, which walks
+    # an allowlist of flat-root entries rather than a whole directory tree —
+    # gets the same cross-device fallback. A bare +FileUtils.ln+ there raised
+    # on every run on a filesystem that disallows hardlinks (e.g. some
+    # overlay/bind-mount setups), degrading every run to a flat publish and
+    # never once giving the fallback a chance to run.
+    #
+    # @param source [Pathname, String] file to link or copy
+    # @param destination [Pathname, String] where it should land
+    # @return [void]
+    def link_or_copy(source, destination)
+      FileUtils.ln(source.to_s, destination.to_s)
+    rescue Errno::EXDEV, Errno::EPERM, Errno::EMLINK, NotImplementedError
+      FileUtils.cp(source.to_s, destination.to_s)
+    end
+
+    private
+
+    # @param pairs [Array<Array(Integer, Pathname)>]
+    # @return [Array<Integer>] the generation numbers removed
+    def remove_generation_dirs(pairs)
+      pairs.map do |number, dir|
         FileUtils.rm_rf(dir.to_s)
         number
       end
     end
-
-    private
 
     # @return [Array<Array(Integer, Pathname)>]
     def generation_dirs
@@ -149,15 +186,6 @@ module Woods
         FileUtils.mkdir_p(destination.dirname.to_s)
         link_or_copy(entry, destination)
       end
-    end
-
-    # Hardlink where the filesystem allows it, copy where it does not — a
-    # payload spanning a device boundary (a bind mount inside the output
-    # directory) must still publish, just without the saving.
-    def link_or_copy(source, destination)
-      FileUtils.ln(source.to_s, destination.to_s)
-    rescue Errno::EXDEV, Errno::EPERM, Errno::EMLINK, NotImplementedError
-      FileUtils.cp(source.to_s, destination.to_s)
     end
   end
 end

@@ -591,9 +591,16 @@ module Woods
     # calling either without this leaves `@dependents_dirty` and
     # `@incremental_written` holding a previous run's state.
     #
+    # `begin_payload!(strict: true)`: an incremental write set is only the
+    # touched units, so a degrade to flat here (see {#begin_payload!}) would
+    # both read the wrong baseline graph below and publish an index missing
+    # every unit it didn't touch. Raises rather than degrading; the caller
+    # sees {Woods::ExtractionError} and the generation is left unbumped.
+    #
     # @return [void]
+    # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run
-      begin_payload!
+      begin_payload!(strict: true)
       graph_path = payload_dir.join('dependency_graph.json')
       @dependency_graph = DependencyGraph.from_h(JSON.parse(File.read(graph_path))) if graph_path.exist?
 
@@ -681,17 +688,46 @@ module Woods
     # incremental run patches — sees the previous generation, exactly as it
     # did when the index was flat.
     #
-    # A failure here degrades to the flat layout rather than failing the run.
-    # The index is then non-atomic, which is what it was before payloads
-    # existed, and the next successful run restores the boundary.
+    # A failure here degrades to the flat layout rather than failing the run
+    # — but only when a flat publish can actually be complete. A full
+    # extraction's write set is every unit in the app, so a flat publish from
+    # it is a whole index; the next successful run restores the payload
+    # boundary. `strict:` opts out of that degrade for {#extract_changed} and
+    # {#refresh}, whose write set is only the units they touched: over a
+    # payload-born index (`marker.payload` set), the flat root holds nothing
+    # newer than the last time this index was flat — possibly nothing at all
+    # — so publishing there would both compute the wrong incremental baseline
+    # ({#prepare_incremental_run} reads its graph from wherever `payload_dir`
+    # resolves to) and, even with the right baseline, redirect every reader
+    # to a near-empty directory missing every untouched unit. There is no
+    # complete flat index an incremental degrade can produce, so this raises
+    # instead — see {Woods::ExtractionError}. The generation is never bumped
+    # over a raised run, so readers keep serving the last good index.
     #
+    # @param strict [Boolean] raise instead of degrading to a flat publish
+    #   when the published generation names a payload
     # @return [void]
-    def begin_payload!
+    # @raise [Woods::ExtractionError] when `strict` and a payload-born index's
+    #   payload directory could not be opened for this run
+    def begin_payload!(strict: false)
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
       @payload_dir = @payload_store.create(@payload_generation)
       seed_payload(marker)
     rescue StandardError => e
+      if strict && marker&.payload
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          Could not open a payload directory for this incremental run
+          (#{e.class}: #{e.message}), and generation #{marker.number}'s payload
+          lives in #{marker.payload} rather than the flat output root. An
+          incremental run only writes the units it touched, so publishing flat
+          here would produce an index missing every untouched unit. Fix the
+          underlying filesystem issue (permissions, free space, a broken
+          mount), or run a full `woods:extract` to rebuild a complete flat
+          index before incremental runs resume.
+        MSG
+      end
+
       Rails.logger.warn(
         "[Woods] Could not open a payload directory (#{e.class}: #{e.message}) — publishing flat"
       )
@@ -718,6 +754,14 @@ module Woods
       end
     end
 
+    # Uses {PayloadStore#link_or_copy} rather than a bare +FileUtils.ln+ for
+    # the same reason {PayloadStore#clone} does: a filesystem that disallows
+    # hardlinks (EXDEV/EPERM/EMLINK/NotImplementedError) must still seed the
+    # payload, just by copying. Before this, that raise was caught by
+    # {#begin_payload!}'s rescue and degraded every run on such a filesystem
+    # to a flat publish — the fallback existed in {PayloadStore} but this,
+    # the only other file-level linker, never reached it.
+    #
     # @return [void]
     def seed_payload_from_flat_root
       (PAYLOAD_FILES + payload_entry_dirs).each do |entry|
@@ -725,7 +769,7 @@ module Woods
         next unless source.exist?
 
         @payload_store.clone(source, @payload_dir.join(entry)) if source.directory?
-        FileUtils.ln(source.to_s, @payload_dir.join(entry).to_s) if source.file?
+        @payload_store.link_or_copy(source, @payload_dir.join(entry)) if source.file?
       end
     end
 

@@ -2313,4 +2313,126 @@ RSpec.describe Woods::Extractor do
       expect(extractor.send(:convention_path_unit?, 'Thing')).to be false
     end
   end
+
+  # ── begin_payload! strict degrade (P2) ───────────────────────────────
+  #
+  # An incremental run's write set is only the units it touched. Degrading a
+  # failed payload-directory open to a flat publish is sound for a FULL
+  # extraction (its write set is everything), but for extract_changed/refresh
+  # over a payload-born index the flat root holds nothing newer than the last
+  # time the index was flat — so the degrade would both compute the wrong
+  # incremental baseline and publish an index missing every untouched unit.
+  describe '#begin_payload! strict degrade (P2)' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+
+    before { FileUtils.mkdir_p(output_dir) }
+
+    # Publishes a generation whose payload lives under payloads/gen-1 rather
+    # than the flat output root, mimicking an index that has already moved
+    # onto the payload layout.
+    def publish_payload_born_generation
+      store = Woods::PayloadStore.new(output_dir)
+      dir = store.create(1)
+      FileUtils.mkdir_p(dir.join('models'))
+      File.write(dir.join('dependency_graph.json'),
+                 JSON.generate(nodes: {}, edges: {}, reverse: {}, file_map: {}))
+      File.write(dir.join('manifest.json'), '{}')
+      Woods::Generation.new(output_dir: output_dir)
+                       .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+    end
+
+    it 'aborts extract_changed instead of publishing a collapsed flat index' do
+      require 'woods'
+      publish_payload_born_generation
+      store = extractor.instance_variable_get(:@payload_store)
+      allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+
+      expect { extractor.extract_changed(['app/models/user.rb']) }
+        .to raise_error(Woods::ExtractionError, /payload/i)
+
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(1)
+    end
+
+    it 'aborts refresh instead of publishing a collapsed flat index' do
+      require 'woods'
+      publish_payload_born_generation
+      store = extractor.instance_variable_get(:@payload_store)
+      allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+
+      expect { extractor.refresh(:routes) }
+        .to raise_error(Woods::ExtractionError, /payload/i)
+
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(1)
+    end
+
+    # Existing behavior, pinned: a full run's write set is complete, so
+    # degrading to flat still produces a correct manifest and unit set — it
+    # is only the incremental paths above that cannot make this safe.
+    it 'still publishes a complete flat index on full extraction when payload creation fails' do
+      require 'woods'
+      require 'active_support'
+      require 'active_support/isolated_execution_state'
+      require 'active_support/core_ext/time'
+      require 'active_support/core_ext/string/inflections'
+      original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.concurrent_extraction = false
+      allow(Time).to receive(:current).and_return(Time.now)
+      allow(Rails).to receive(:version).and_return('8.0.0')
+      allow(extractor).to receive(:safe_eager_load!)
+      allow(extractor).to receive(:git_available?).and_return(false)
+
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
+      unit.source_code = 'class User; end'
+      fake_models_class = Class.new { define_method(:extract_all) { [unit] } }
+      fake_empty_class = Class.new do
+        def extract_all
+          []
+        end
+      end
+      stub_const('Woods::Extractor::EXTRACTORS',
+                 { models: fake_models_class, rails_source: fake_empty_class })
+
+      store = extractor.instance_variable_get(:@payload_store)
+      allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+
+      extractor.extract_all
+
+      filename = extractor.send(:collision_safe_filename, 'User')
+      expect(File.exist?(File.join(output_dir, 'models', filename))).to be(true)
+      expect(File.exist?(File.join(output_dir, 'models', '_index.json'))).to be(true)
+
+      generation_data = JSON.parse(File.read(File.join(output_dir, 'generation.json')))
+      expect(generation_data).not_to have_key('payload')
+
+      manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+      expect(manifest['total_units']).to eq(1)
+
+      Woods.configuration = original_config
+    end
+  end
+
+  # ── seed_payload_from_flat_root cross-device fallback (P3) ───────────
+  #
+  # PayloadStore#link_or_copy already rescues EXDEV/EPERM/EMLINK/
+  # NotImplementedError and copies instead — but this file-level seeding
+  # bypassed it with a bare FileUtils.ln, so a filesystem that disallows
+  # hardlinks raised here on EVERY run and begin_payload! degraded to flat
+  # every time, never giving the fallback a chance to activate.
+  describe '#seed_payload_from_flat_root cross-device fallback (P3)' do
+    it 'copies a flat-root file into the payload instead of raising' do
+      output_dir = File.join(tmpdir, 'output')
+      FileUtils.mkdir_p(output_dir)
+      File.write(File.join(output_dir, 'manifest.json'), '{"total_units":1}')
+
+      target_extractor = described_class.new(output_dir: output_dir)
+      payload_store = Woods::PayloadStore.new(output_dir)
+      payload_dir = payload_store.create(1)
+      target_extractor.instance_variable_set(:@payload_dir, payload_dir)
+      allow(FileUtils).to receive(:ln).and_raise(Errno::EXDEV, 'cross-device link')
+
+      expect { target_extractor.send(:seed_payload_from_flat_root) }.not_to raise_error
+      expect(File.read(payload_dir.join('manifest.json'))).to eq('{"total_units":1}')
+    end
+  end
 end
