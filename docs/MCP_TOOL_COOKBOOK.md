@@ -12,7 +12,7 @@ The Index Server defines **29 schemas**: the packaged executable registers **14*
 | `session_trace` | 1 | `Woods.configuration.session_store` set and session tracer enabled |
 | Operator (5) | 5 | Custom embedded server wires an operator: `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
 | Feedback (4) | 4 | Custom embedded server wires a feedback store: `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
-| Snapshot (4) | 4 | `enable_snapshots = true` (or `WOODS_SNAPSHOTS=true`) lets packaged servers build the output-directory store automatically; custom embedded servers pass `snapshot_store:`. SQLite internal migrations are automatic, with JSON fallback. Tools: `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
+| Snapshot (4) | 4 | Extraction with `enable_snapshots = true` normally creates `woods.sqlite3`, which packaged servers discover. If extraction used the JSON fallback, set `WOODS_SNAPSHOTS=true` on the standalone server. Custom embedded servers pass `snapshot_store:`. Internal SQLite migrations are automatic. Tools: `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
 | `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
 
 `codebase_retrieve` is always registered (no `retrieve` alias exists), but only returns results once an embedding provider is configured and `rake woods:embed` has run.
@@ -707,6 +707,14 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 ---
 
 ## Pipeline Management
+
+These tools require a custom embedded server with an operator; the packaged
+`woods-mcp` executable does not register them. A client that declares the MCP
+Tasks extension receives a durable task handle and polls `tasks/get` for
+completion. Woods does not advertise safe cancellation: `tasks/cancel` returns
+an unsupported-method error, and in-flight work continues to completion or
+failure. Clients without the extension receive the legacy background-start
+acknowledgement.
 
 ### "Check if the index is stale"
 

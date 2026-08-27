@@ -333,6 +333,8 @@ Woods.configure do |config|
     url: ENV.fetch("QDRANT_URL", "http://localhost:6333"),
     collection: "woods_units"
   }
+  config.embedding_provider = :openai
+  config.embedding_options = { api_key: ENV.fetch("OPENAI_API_KEY") }
 end
 ```
 
@@ -347,6 +349,8 @@ Woods.configure do |config|
     connection: your_pg_connection,   # a PG::Connection to a pgvector-enabled DB
     dimensions: 1536
   }
+  config.embedding_provider = :openai
+  config.embedding_options = { api_key: ENV.fetch("OPENAI_API_KEY") }
 end
 ```
 
@@ -499,10 +503,15 @@ config.vector_store_options = { url: 'http://localhost:6333', collection: 'woods
 
 **Cause:** SQLite does not support concurrent writers. If multiple extraction processes run simultaneously, they contend on the metadata store.
 
-**Fix:** Use one extraction process at a time, or switch to a pgvector backend that supports concurrent access:
+**Fix:** Use one embedding publisher at a time. A pgvector backend can accept
+concurrent vector writes, but Woods' SQLite metadata/output artifact still
+needs a coordinated publisher. Configure the hosted preset completely:
 
 ```ruby
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 ```
 
 ---

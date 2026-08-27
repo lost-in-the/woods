@@ -303,10 +303,19 @@ Woods.configure_with_preset(:local)
 Woods.configure_with_preset(:shared_filesystem)
 
 # PostgreSQL + OpenAI: pgvector vectors, SQLite metadata, OpenAI embeddings
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 
 # Production scale: Qdrant vectors, SQLite metadata, OpenAI embeddings
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+  }
+end
 ```
 
 Presets can be overridden with a block:
@@ -370,7 +379,7 @@ Enable them in your initializer:
 config.enable_snapshots = true
 ```
 
-Snapshots prefer their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database. When `sqlite3` is unavailable or the store cannot open, Woods falls back to JSON files in the output directory. `Woods::Db::Migrator` runs the internal SQLite migrations automatically during extraction and MCP boot; `bundle exec rails db:migrate` does not touch this store and no manual migration step is needed. The packaged MCP server wires `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail` after snapshots are enabled and captured.
+Snapshots prefer their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database. Extraction falls back to JSON files when the `sqlite3` gem is unavailable; other SQLite open/migration failures are reported and do not capture a snapshot. `Woods::Db::Migrator` runs the internal SQLite migrations automatically during extraction and MCP boot; `bundle exec rails db:migrate` does not touch this store and no manual migration step is needed. The packaged MCP server discovers an existing `woods.sqlite3` automatically. When extraction used the JSON fallback, set `WOODS_SNAPSHOTS=true` on the server so it wires `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail`.
 
 ---
 

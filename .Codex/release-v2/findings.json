@@ -57,31 +57,33 @@
     {
       "id": "V2-MCP-001",
       "severity": "P1",
-      "affected_public_behavior": "The advertised MCP task cancellation endpoint records cancellation intent without stopping the associated pipeline work or protecting publication.",
+      "affected_public_behavior": "Durable pipeline tasks expose completion and reconnect polling without claiming cancellation; tasks/cancel fails explicitly because Woods cannot safely stop and unpublish lock-owning work.",
       "evidence_paths": [
-        "lib/woods/mcp/tasks/extension.rb:99",
-        "lib/woods/mcp/server.rb:949"
+        "lib/woods/mcp/tasks/extension.rb:108",
+        "spec/mcp/tasks/pipeline_tasks_spec.rb:131",
+        "CHANGELOG.md:55"
       ],
-      "reproduction_command": "bundle exec rspec spec/mcp/tasks/extension_spec.rb spec/mcp/server_spec.rb",
+      "reproduction_command": "bundle exec rspec spec/mcp/tasks/extension_spec.rb spec/mcp/tasks/pipeline_tasks_spec.rb",
       "owner": "release-v2-04",
-      "status": "confirmed",
-      "disposition": "deferred_with_issue",
-      "release_blocking": true
+      "status": "resolved",
+      "disposition": "documented_limitation",
+      "release_blocking": false
     },
     {
       "id": "V2-CONFIG-001",
       "severity": "P1",
-      "affected_public_behavior": "Preset and adapter configuration can disagree with the provider, storage, and persistence behavior used by the build and serving paths.",
+      "affected_public_behavior": "Preset/provider/store configuration validates required options, persists the resolved artifact contract, and reopens with the same provider and storage behavior.",
       "evidence_paths": [
-        "lib/woods/builder.rb:34",
+        "lib/woods/builder.rb:45",
         "lib/woods/resolved_config.rb:54",
-        "lib/woods/storage/metadata_store.rb:1"
+        "lib/woods/mcp/config_resolver.rb:1",
+        "spec/integration/preset_persistence_spec.rb:1"
       ],
-      "reproduction_command": "bundle exec rspec spec/builder_spec.rb spec/resolved_config_spec.rb spec/storage",
+      "reproduction_command": "bundle exec rspec spec/builder_spec.rb spec/resolved_config_spec.rb spec/mcp/config_resolver_spec.rb spec/integration/preset_persistence_spec.rb",
       "owner": "release-v2-05",
-      "status": "confirmed",
-      "disposition": "deferred_with_issue",
-      "release_blocking": true
+      "status": "resolved",
+      "disposition": "fixed",
+      "release_blocking": false
     }
   ]
 }

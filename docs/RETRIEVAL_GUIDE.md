@@ -61,20 +61,26 @@ Woods.configure_with_preset(:shared_filesystem)
 
 # PostgreSQL: pgvector + SQLite metadata + OpenAI.
 # Requires pgvector, sqlite3, and an OpenAI API key.
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 
 # Production: Qdrant + SQLite metadata + OpenAI.
 # Requires Qdrant, sqlite3, and an OpenAI API key.
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+  }
+end
 ```
 
 Presets accept a block for overrides:
 
 ```ruby
-Woods.configure_with_preset(:postgresql) do |config|
-  config.embedding_options  = { api_key: ENV['OPENAI_API_KEY'] }
-  config.max_context_tokens = 12_000
-end
+Woods.configure_with_preset(:local) { |config| config.max_context_tokens = 12_000 }
 ```
 
 ### Manual configuration
@@ -163,7 +169,10 @@ result = retriever.retrieve("explain the checkout flow", budget: 16_000)
 `Woods.build_retriever` instantiates a retriever from the current configuration:
 
 ```ruby
-Woods.configure_with_preset(:postgresql) { |c| c.embedding_options = { api_key: ENV['OPENAI_API_KEY'] } }
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 retriever = Woods.build_retriever
 result    = retriever.retrieve("what validations does Order have?")
 ```

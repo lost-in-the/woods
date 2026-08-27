@@ -12,20 +12,20 @@ Every backend combination falls into one of three shapes based on how data survi
 
 | Shape | Vector store | Metadata store | Durability | Right preset |
 |---|---|---|---|---|
-| **Single-process** | `:in_memory` | `:in_memory` or `:sqlite` | Lives and dies with the Ruby VM | `:local` |
+| **Local artifact** | `:in_memory` + dump to `output_dir` | `:sqlite` under `output_dir` | Reopens from the published output artifact | `:local` |
 | **Shared filesystem** | `:in_memory` + `Snapshotter` dump to `output_dir` | `:in_memory` + `Snapshotter` dump to `output_dir` | Process-local, hydrated from disk on MCP boot; dumps retained per `dump_retention_count` (default 3) | `:shared_filesystem` |
-| **Distributed** | `:pgvector`, `:qdrant` | `:sqlite` | Fully external; multiple processes read/write concurrently | `:postgresql`, `:production` |
+| **Durable vector backend** | `:pgvector` or `:qdrant` | `:sqlite` under `output_dir` | Vectors are external; metadata/config remain a deployed output artifact | `:postgresql`, `:production` |
 
 The shape determines the capability matrix:
 
-| Capability | Single-process | Shared filesystem | Distributed |
+| Capability | Local artifact | Shared filesystem | Durable vector backend |
 |---|---|---|---|
-| Survives process restart | No | Yes (via dump) | Yes (backend) |
-| Multi-writer embedding | No | No (single writer assumed) | Yes (backend-dependent) |
+| Survives process restart | Yes (via output artifact) | Yes (via dump) | Yes (backend + output artifact) |
+| Multi-writer embedding | No | No (single writer assumed) | Do not assume it for the complete index; coordinate one publisher even if the vector backend supports concurrent writes |
 | Requires sqlite3 gem in host | Yes | No | With `:postgresql`/`:production` |
 | Requires embedding/vector service | Ollama | Ollama | OpenAI plus pgvector or Qdrant |
-| Cross-machine query | No | No | Yes |
-| `woods.json` schema-versioned config snapshot | n/a | Yes | Host config used directly |
+| Cross-machine query | After deploying/copying `output_dir` | Yes, when the filesystem is shared | External vectors are shared; metadata/config still require a shared or deployed `output_dir` |
+| `woods.json` schema-versioned config snapshot | Yes | Yes | Yes |
 
 `Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:shared_filesystem`, `:postgresql`, and `:production`.
 
@@ -386,7 +386,10 @@ Woods.configure_with_preset(:local)
 ### Rails 8 Standard
 
 ```ruby
-Woods.configure_with_preset(:postgresql)
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = { connection: ActiveRecord::Base.connection }
+end
 # Vector: pgvector
 # Metadata: SQLite
 # Graph: In-memory
@@ -402,7 +405,13 @@ Woods.configure_with_preset(:postgresql)
 ```ruby
 # No dedicated :mysql preset exists. Use :production and reuse your MySQL
 # connection for the app itself: Woods' own metadata store stays SQLite.
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+  }
+end
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory
@@ -418,8 +427,17 @@ Woods.configure_with_preset(:production)
 ```ruby
 # No dedicated :self_hosted preset exists. Use :production, then override
 # embedding_provider to :ollama.
-Woods.configure_with_preset(:production)
-Woods.configure { |c| c.embedding_provider = :ollama }
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_provider = :ollama
+  config.embedding_options = {
+    model: 'nomic-embed-text',
+    host: ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
+  }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+  }
+end
 # Vector: Qdrant
 # Metadata: SQLite
 # Graph: In-memory

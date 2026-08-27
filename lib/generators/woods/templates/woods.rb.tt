@@ -6,8 +6,10 @@
 # Quick-start presets (uncomment one instead of the full block below):
 #   Woods.configure_with_preset(:local)       # SQLite metadata + local Ollama (sqlite3 gem required)
 #   Woods.configure_with_preset(:shared_filesystem) # persisted files + local Ollama; no sqlite3
-#   Woods.configure_with_preset(:postgresql)  # pgvector + OpenAI (PostgreSQL + sqlite3 gem)
-#   Woods.configure_with_preset(:production)  # Qdrant + OpenAI (sqlite3 gem required)
+#   :postgresql  # pgvector + OpenAI; requires sqlite3, API key, and connection options
+#   :production  # Qdrant + OpenAI; requires sqlite3, API key, URL, and collection
+# Copy the complete hosted-preset blocks from CONFIGURATION_REFERENCE.md;
+# the preset name alone cannot supply credentials or backend connection details.
 #
 # Presets accept a block for overrides:
 #   Woods.configure_with_preset(:local) { |c| c.max_context_tokens = 16_000 }
@@ -97,7 +99,7 @@ Woods.configure do |config|
   # config.extract_navigation_edges = true
 
   # Temporal snapshots prefer Woods' output-directory SQLite database and fall
-  # back to JSON when SQLite is unavailable. Internal migrations run
+  # back to JSON when the sqlite3 gem is unavailable. Internal migrations run
   # automatically; this does not require `rails db:migrate`.
   # config.enable_snapshots = false
 

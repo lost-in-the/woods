@@ -54,7 +54,9 @@ derive unit identifiers, which changes the index format's observable contract.
     from the specification.
   - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
     `pipeline_embed` return a durable task handle to clients that declare the extension:
-    poll with `tasks/get`, cancel with `tasks/cancel`. Records live on disk under
+    poll with `tasks/get`. Cancellation is not advertised: `tasks/cancel` returns
+    `Method not found` because Woods cannot safely stop work already holding the
+    pipeline lock or prevent it from publishing. Records live on disk under
     `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
     mid-run can reconnect — even to a restarted server — and collect the result, and a
     task whose owning process died resolves to `failed` instead of leaving an agent

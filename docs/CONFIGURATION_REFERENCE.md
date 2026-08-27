@@ -245,12 +245,23 @@ Woods.configure_with_preset(:local)
 Woods.configure_with_preset(:shared_filesystem)
 # → in_memory everything + Snapshotter-based persistence via output_dir
 
-# PostgreSQL: requires pgvector, sqlite3 gem, and OpenAI API key
-Woods.configure_with_preset(:postgresql)
+# PostgreSQL: requires pgvector, sqlite3 gem, OpenAI key, and connection
+Woods.configure_with_preset(:postgresql) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    connection: ActiveRecord::Base.connection
+  }
+end
 # → pgvector vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 
 # Production: requires Qdrant, sqlite3 gem, and OpenAI API key
-Woods.configure_with_preset(:production)
+Woods.configure_with_preset(:production) do |config|
+  config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+  }
+end
 # → Qdrant vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 ```
 
