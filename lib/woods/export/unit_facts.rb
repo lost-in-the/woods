@@ -59,17 +59,6 @@ module Woods
         @meta['callbacks'].map { |cb| { type: cb['type'], filter: cb['filter'] } }
       end
 
-      # Blast-radius bucket for a dependent count.
-      #
-      # @param dependent_count [Integer]
-      # @return [Symbol] :high (>50), :moderate (>20), or :none
-      def self.blast_radius(dependent_count)
-        return :high if dependent_count > 50
-        return :moderate if dependent_count > 20
-
-        :none
-      end
-
       private
 
       def associations

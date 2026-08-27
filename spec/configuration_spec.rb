@@ -266,6 +266,19 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#add_gem' do
+    it 'records the gem under gem_configs' do
+      config.add_gem('foo_gem', paths: ['lib/foo'], priority: :high)
+
+      expect(config.gem_configs).to eq('foo_gem' => { paths: ['lib/foo'], priority: :high })
+    end
+
+    it 'warns that gem configs are not used' do
+      expect { config.add_gem('foo_gem', paths: ['lib/foo']) }
+        .to output(/gem configs are not used/).to_stderr
+    end
+  end
+
   describe '#pretty_json=' do
     it 'accepts true' do
       config.pretty_json = true

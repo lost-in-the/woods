@@ -155,23 +155,6 @@ module Woods
           end
         end
 
-        # Attach a progress message without leaving `working`.
-        #
-        # @param id [String]
-        # @param message [String]
-        # @return [Task, nil] the updated record, or nil if unknown/terminal
-        def note_progress!(id, message)
-          with_task_lock(id) do
-            task = read(id)
-            return nil if task.nil? || task.terminal?
-
-            task.status_message = message.to_s
-            task.updated_at = Time.now.utc.iso8601
-            write(task)
-            task
-          end
-        end
-
         private
 
         def path_for(id)
@@ -299,11 +282,17 @@ module Woods
 
         # Only terminal records expire. An unfinished task must outlive its ttl
         # rather than vanish mid-run and strand a client that is still polling.
+        #
+        # Measured from `updated_at` — the terminal transition itself — not
+        # `created_at`. A pipeline that runs longer than ttl_ms would otherwise
+        # be born expired: `complete!` writes the terminal record at the run's
+        # end, and if expiry counted from the start, the very next `tasks/get`
+        # would report it unknown before the client ever saw the result.
         def expired?(task)
           return false unless task.terminal?
           return false if task.ttl_ms.nil?
 
-          Time.now.utc - Time.parse(task.created_at) > (task.ttl_ms / 1000.0)
+          Time.now.utc - Time.parse(task.updated_at) > (task.ttl_ms / 1000.0)
         rescue ArgumentError, TypeError
           false
         end
@@ -327,7 +316,35 @@ module Woods
         end
 
         def producer_alive?(task)
+          # A foreign-boot producer identity (e.g. a task minted inside a
+          # container) can't be judged by this reader's own pid table at all —
+          # `task.pid` names a slot in a namespace this process doesn't share,
+          # so `process_alive?` would be checking an unrelated, possibly
+          # reused, host pid. Leave those tasks alone rather than risk failing
+          # one that is still running.
+          return true if foreign_boot?(task.producer_identity)
+
           process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
+        end
+
+        def foreign_boot?(producer_identity)
+          boot = producer_identity[/\Aboot=([^;]+)/, 1]
+          return false unless boot
+
+          boot != current_boot_identity
+        end
+
+        def current_boot_identity
+          return @current_boot_identity if defined?(@current_boot_identity)
+
+          @current_boot_identity = if File.readable?('/proc/sys/kernel/random/boot_id')
+                                     boot_id = File.read('/proc/sys/kernel/random/boot_id').strip
+                                     boot_id.empty? ? nil : boot_id
+                                   else
+                                     darwin_boot_identity
+                                   end
+        rescue SystemCallError
+          @current_boot_identity = nil
         end
 
         def process_alive?(pid)

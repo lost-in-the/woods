@@ -57,10 +57,6 @@ RSpec.describe 'DB Migration Pipeline Integration', :integration do
   describe 'Migrator' do
     let(:migrator) { Woods::Db::Migrator.new(connection: db) }
 
-    it 'starts with all migrations pending' do
-      expect(migrator.pending_versions).to eq([1, 2, 3, 4, 5, 6])
-    end
-
     it 'runs all 6 migrations' do
       applied = migrator.migrate!
 
@@ -93,12 +89,6 @@ RSpec.describe 'DB Migration Pipeline Integration', :integration do
 
       expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6])
       expect(migrator.schema_version.current_version).to eq(6)
-    end
-
-    it 'has no pending migrations after running all' do
-      migrator.migrate!
-
-      expect(migrator.pending_versions).to eq([])
     end
 
     it 'is idempotent — re-running returns empty' do

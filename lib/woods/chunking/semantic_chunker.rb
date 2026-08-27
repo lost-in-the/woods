@@ -543,8 +543,6 @@ module Woods
       include ChunkBuilder
       include LineDepthTracking
 
-      FILTER_PATTERN = /^\s*(before_action|after_action|around_action|skip_before_action)\b/
-
       # @param unit [ExtractedUnit]
       def initialize(unit)
         @unit = unit

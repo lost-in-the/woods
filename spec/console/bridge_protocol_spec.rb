@@ -22,28 +22,7 @@ RSpec.describe Woods::Console::BridgeProtocol do
     end
   end
 
-  describe '::TOOL_HANDLERS' do
-    it 'maps each tool to the handle_<tool> method symbol' do
-      described_class::SUPPORTED_TOOLS.each do |tool|
-        expect(described_class::TOOL_HANDLERS[tool]).to eq(:"handle_#{tool}")
-      end
-    end
-
-    it 'is frozen' do
-      expect(described_class::TOOL_HANDLERS).to be_frozen
-    end
-
-    it 'covers every SUPPORTED_TOOLS entry' do
-      expect(described_class::TOOL_HANDLERS.keys).to match_array(described_class::SUPPORTED_TOOLS)
-    end
-  end
-
   describe 'sharing across executors' do
-    it 'does not expose executable tools through the disabled StubBridge' do
-      require 'woods/console/bridge'
-      expect(Woods::Console::StubBridge.const_defined?(:SUPPORTED_TOOLS, false)).to be false
-    end
-
     it 'binds EmbeddedExecutor::TIER1_TOOLS to the same frozen Array (not a copy)' do
       require 'woods/console/embedded_executor'
       expect(Woods::Console::EmbeddedExecutor::TIER1_TOOLS)

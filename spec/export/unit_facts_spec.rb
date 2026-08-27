@@ -66,13 +66,4 @@ RSpec.describe Woods::Export::UnitFacts do
       )
     end
   end
-
-  describe '.blast_radius' do
-    it 'buckets a dependent count into :high / :moderate / :none' do
-      expect(described_class.blast_radius(51)).to eq(:high)
-      expect(described_class.blast_radius(21)).to eq(:moderate)
-      expect(described_class.blast_radius(20)).to eq(:none)
-      expect(described_class.blast_radius(0)).to eq(:none)
-    end
-  end
 end

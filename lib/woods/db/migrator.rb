@@ -53,14 +53,6 @@ module Woods
         applied
       end
 
-      # List version numbers of pending (unapplied) migrations.
-      #
-      # @return [Array<Integer>]
-      def pending_versions
-        applied = @schema_version.applied_versions
-        MIGRATIONS.map { |m| m::VERSION }.reject { |v| applied.include?(v) }
-      end
-
       private
 
       # @return [Array<Module>] Pending migration modules

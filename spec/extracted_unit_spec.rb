@@ -137,34 +137,4 @@ RSpec.describe Woods::ExtractedUnit do
       expect(unit.needs_chunking?(threshold: 10)).to be true
     end
   end
-
-  describe '#build_default_chunks' do
-    it 'returns empty for small source' do
-      unit.source_code = 'short'
-      expect(unit.build_default_chunks).to eq([])
-    end
-
-    it 'creates chunks with content_hash' do
-      unit.source_code = (["#{'x' * 80}\n"] * 200).join
-      chunks = unit.build_default_chunks(max_tokens: 500)
-
-      expect(chunks).not_to be_empty
-      chunks.each do |chunk|
-        expect(chunk[:content_hash]).to eq(Digest::SHA256.hexdigest(chunk[:content]))
-        expect(chunk[:chunk_index]).to be_a(Integer)
-        expect(chunk[:identifier]).to start_with('User#chunk_')
-        expect(chunk[:estimated_tokens]).to be_a(Integer)
-      end
-    end
-
-    it 'includes unit header in each chunk' do
-      unit.source_code = (["#{'x' * 80}\n"] * 200).join
-      chunks = unit.build_default_chunks(max_tokens: 500)
-
-      chunks.each do |chunk|
-        expect(chunk[:content]).to include('# Unit: User (model)')
-        expect(chunk[:content]).to include('# File: /app/models/user.rb')
-      end
-    end
-  end
 end

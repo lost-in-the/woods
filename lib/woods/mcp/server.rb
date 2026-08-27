@@ -207,7 +207,7 @@ module Woods
 
         # Notion export needs both an API token and at least one database ID.
         # A non-blank NOTION_API_TOKEN env var overrides the config token (see
-        # docs/NOTION_EXPORT.md). Resolution goes through
+        # docs/NOTION_INTEGRATION.md). Resolution goes through
         # Woods.resolve_notion_token so a blank env var is treated as absent
         # (rather than masking a valid configured token) — matching the
         # exporter and the notion_sync handler.
@@ -959,7 +959,7 @@ module Woods
                 'and set `session_tracer_enabled = true` in Woods.configure.',
                 code: :not_configured,
                 config_key: 'session_store',
-                doc_link: 'docs/SESSION_TRACER.md',
+                doc_link: 'docs/MCP_SERVERS.md#flow--session-2',
                 tool: 'session_trace'
               )
             end
@@ -1702,7 +1702,7 @@ module Woods
                 'notion_api_token is not configured. Set it in Woods.configure or via the NOTION_API_TOKEN env var.',
                 code: :not_configured,
                 config_key: 'notion_api_token',
-                doc_link: 'docs/NOTION_EXPORT.md',
+                doc_link: 'docs/NOTION_INTEGRATION.md',
                 tool: 'notion_sync'
               )
             end
@@ -1712,7 +1712,7 @@ module Woods
                 'notion_database_ids is not configured. Set it in Woods.configure.',
                 code: :not_configured,
                 config_key: 'notion_database_ids',
-                doc_link: 'docs/NOTION_EXPORT.md',
+                doc_link: 'docs/NOTION_INTEGRATION.md',
                 tool: 'notion_sync'
               )
             end

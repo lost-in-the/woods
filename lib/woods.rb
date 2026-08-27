@@ -293,12 +293,14 @@ module Woods
       @cache_enabled = value
     end
 
-    # Add a gem to be indexed
+    # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
+    # source indexing is not implemented.
     #
     # @param gem_name [String] Name of the gem
     # @param paths [Array<String>] Relative paths within the gem to index
     # @param priority [Symbol] :high, :medium, or :low
     def add_gem(gem_name, paths:, priority: :medium)
+      warn 'config.add_gem is accepted for forward compatibility but gem configs are not used.'
       @gem_configs[gem_name] = { paths: paths, priority: priority }
     end
 
