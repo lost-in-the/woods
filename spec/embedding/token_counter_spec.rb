@@ -33,7 +33,7 @@ RSpec.describe Woods::Embedding::TokenCounter do
 
     context 'when the tokenizers gem is available (Gemfile test group)' do
       it 'returns exact token counts via bert-base-uncased' do
-        skip 'tokenizers gem not installed' unless counter.exact?
+        skip 'tokenizers gem not installed' unless defined?(Tokenizers)
 
         # Sanity check: a dense Rails-style constant tokenizes into more
         # pieces than a naive chars/4 would suggest — nothing specific
@@ -42,11 +42,6 @@ RSpec.describe Woods::Embedding::TokenCounter do
         count = counter.count('ActionController::Metal::ConditionalGet')
         expect(count).to be > 0
         expect(count).to be < 'ActionController::Metal::ConditionalGet'.length
-      end
-
-      it 'reports exact? true' do
-        skip 'tokenizers gem not installed' unless counter.exact?
-        expect(counter.exact?).to be(true)
       end
     end
 
@@ -72,10 +67,6 @@ RSpec.describe Woods::Embedding::TokenCounter do
         counter.count('first call triggers load + warn')
         counter.count('second call stays on the fallback path')
       end
-
-      it 'reports exact? false' do
-        expect(described_class.new.exact?).to be(false)
-      end
     end
 
     context 'when the tokenizers gem is missing' do
@@ -95,18 +86,6 @@ RSpec.describe Woods::Embedding::TokenCounter do
         expect(Kernel).to receive(:warn).with(/gem 'tokenizers'/)
         described_class.new.count('anything')
       end
-    end
-  end
-
-  describe '#exact?' do
-    it 'lazy-loads only on first call' do
-      counter = described_class.new
-      # Before any count call, no load is attempted — but exact? itself
-      # triggers the load, so call it once and verify the second call
-      # is idempotent.
-      first = counter.exact?
-      second = counter.exact?
-      expect(first).to eq(second)
     end
   end
 

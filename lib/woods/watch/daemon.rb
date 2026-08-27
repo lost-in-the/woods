@@ -969,9 +969,21 @@ module Woods
       # race this method exists to close.
       def create_claim
         FileUtils.mkdir_p(@output_dir)
+        content = JSON.generate(pid: Process.pid, host: Status.host_identity)
         tmp_path = "#{claim_path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
-        File.write(tmp_path, JSON.generate(pid: Process.pid, host: Status.host_identity))
-        File.link(tmp_path, claim_path)
+        File.write(tmp_path, content)
+        begin
+          File.link(tmp_path, claim_path)
+        rescue Errno::EPERM, Errno::ENOTSUP
+          # Some filesystems (certain bind mounts, network shares) don't
+          # support hard links at all — that raises EPERM/ENOTSUP rather
+          # than the EEXIST a real conflict would raise. Fall back to a
+          # plain O_EXCL create so the daemon can still start there; this
+          # loses the tmp-write-then-link guarantee that content is
+          # complete before a reader can see the file exist, but the
+          # content here is a few bytes written in one syscall.
+          File.open(claim_path, File::WRONLY | File::CREAT | File::EXCL) { |f| f.write(content) }
+        end
         @claimed = true
         true
       rescue Errno::EEXIST
@@ -984,15 +996,34 @@ module Woods
       end
 
       # @return [Boolean] true when a stale claim was cleared and the caller
-      #   should retry {#create_claim}; false when the claim is live (or the
-      #   directory vanished) and the caller should give up
+      #   should retry {#create_claim}; false when the claim is live, was
+      #   already replaced by a winning contender, or the directory
+      #   vanished — every case where the caller should give up
       def reclaim_if_stale
+        ino = claim_inode
+        return false unless ino
         return false unless stale_claim?
+
+        # Race guard: two starters can both read the same dead-pid claim
+        # and both judge it stale before either deletes it. Re-stat
+        # immediately before deleting — if the inode changed since we
+        # captured it above, another daemon's create_claim already
+        # replaced the file with its own live claim, and deleting it now
+        # would destroy a claim we never judged stale.
+        return false unless claim_inode == ino
 
         FileUtils.rm_f(claim_path)
         true
       rescue Errno::ENOENT
         false
+      end
+
+      # @return [Integer, nil] the claim file's current inode, or nil if it
+      #   doesn't exist
+      def claim_inode
+        File.stat(claim_path).ino
+      rescue Errno::ENOENT
+        nil
       end
 
       # @return [Boolean] whether the current claim's pid evidence can be

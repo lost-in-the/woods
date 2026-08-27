@@ -159,9 +159,6 @@ module Woods
           @tombstones = Set.new
         end
 
-        # @return [Integer, nil] dimension of stored vectors, nil if empty
-        attr_reader :dim
-
         # @see Interface#store
         def store(id, vector, metadata = {})
           @dim ||= vector.length
@@ -247,7 +244,7 @@ module Woods
         def delete_by_filter(filters)
           @ids.each_with_index do |id, idx|
             next if @tombstones.include?(idx)
-            next unless filters.all? { |key, value| metadata_value(@metadata[idx], key) == value }
+            next unless filters.all? { |key, value| filter_match?(value, metadata_value(@metadata[idx], key)) }
 
             @tombstones << idx
             @id_to_index.delete(id)

@@ -579,6 +579,24 @@ RSpec.describe Woods::Retrieval::Ranker do
       expect { ranker.rank(candidates, classification: classification) }.not_to raise_error
     end
 
+    # B-108: GraphStore::Interface *defines* #pagerank as a
+    # NotImplementedError stub, so respond_to?(:pagerank) answers true for
+    # an adapter that merely includes the interface without overriding it
+    # — and NotImplementedError is a ScriptError, which `rescue
+    # StandardError` does not catch.
+    it 'swallows an adapter that only inherits the interface pagerank stub' do
+      stub_adapter_class = Class.new do
+        include Woods::Storage::GraphStore::Interface
+      end
+      stub_ranker = described_class.new(metadata_store: metadata_store, graph_store: stub_adapter_class.new)
+      allow(metadata_store).to receive(:find).with('Important')
+                                             .and_return({ metadata: { importance: :high } })
+
+      candidates = [candidate(identifier: 'Important', score: 0.5)]
+
+      expect { stub_ranker.rank(candidates, classification: classification) }.not_to raise_error
+    end
+
     it 'computes pagerank map once even across multiple rank() calls' do
       allow(graph_store).to receive(:pagerank).and_return('A' => 0.9, 'B' => 0.1).once
       allow(metadata_store).to receive(:find).and_return(nil)

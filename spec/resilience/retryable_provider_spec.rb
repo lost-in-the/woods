@@ -420,4 +420,27 @@ RSpec.describe Woods::Resilience::RetryableProvider do
       expect(described_class.ancestors).to include(Woods::Embedding::Provider::Interface)
     end
   end
+
+  describe '#max_input_tokens' do
+    it 'delegates to a wrapped provider that defines it' do
+      provider = recording_provider_class.new
+      def provider.max_input_tokens
+        4096
+      end
+      retryable = described_class.new(provider: provider)
+      expect(retryable.max_input_tokens).to eq(4096)
+    end
+
+    # B-108: Provider::Interface *defines* #max_input_tokens (as a
+    # NotImplementedError stub), so respond_to?(:max_input_tokens) answers
+    # true for a provider that merely includes the interface without
+    # overriding it — the raise reached the caller instead of nil.
+    it 'returns nil for a wrapped provider that only inherits the interface stub' do
+      provider_class = Class.new(recording_provider_class) do
+        include Woods::Embedding::Provider::Interface
+      end
+      retryable = described_class.new(provider: provider_class.new)
+      expect(retryable.max_input_tokens).to be_nil
+    end
+  end
 end

@@ -182,7 +182,7 @@ RSpec.describe Woods::Unblocked::Client do
     it 'still retries a GET on Net::ReadTimeout (idempotent verb)' do
       calls = fail_then_succeed(Net::ReadTimeout, [])
 
-      expect(client.list_collections).to eq([])
+      expect(client.list_documents).to eq([])
       expect(calls.call).to eq(2)
     end
 
@@ -282,7 +282,7 @@ RSpec.describe Woods::Unblocked::Client do
       allow(http).to receive(:read_timeout=)
       allow(http).to receive(:request).and_return(err)
 
-      expect { client.list_collections }
+      expect { client.list_documents }
         .to raise_error(Woods::Error, /401/)
     end
 
@@ -300,7 +300,7 @@ RSpec.describe Woods::Unblocked::Client do
       allow(http).to receive(:read_timeout=)
       allow(http).to receive(:request).and_return(err)
 
-      expect { client.list_collections }
+      expect { client.list_documents }
         .to raise_error(Woods::Error, /Invalid request body/)
     end
 
@@ -315,7 +315,7 @@ RSpec.describe Woods::Unblocked::Client do
       allow(http).to receive(:read_timeout=)
       allow(http).to receive(:request).and_return(err)
 
-      expect { client.list_collections }
+      expect { client.list_documents }
         .to raise_error(Woods::Error, /500/)
     end
   end
@@ -377,15 +377,6 @@ RSpec.describe Woods::Unblocked::Client do
           expect(e.message).not_to include(api_token)
           expect(e.message).to include('[REDACTED]')
         }
-    end
-  end
-
-  describe '#list_collections' do
-    it 'returns a bare-array response as-is (live API shape)' do
-      paths = stub_http_sequence([{ 'id' => 'c1', 'name' => 'Woods' }])
-      result = client.list_collections
-      expect(result).to eq([{ 'id' => 'c1', 'name' => 'Woods' }])
-      expect(paths.first).to include('collections')
     end
   end
 

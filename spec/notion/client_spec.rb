@@ -138,73 +138,6 @@ RSpec.describe Woods::Notion::Client do
     end
   end
 
-  describe '#query_all' do
-    let(:database_id) { 'db-uuid-789' }
-
-    it 'returns all results when has_more is false' do
-      stub_notion_request(
-        method: :post, path: "databases/#{database_id}/query",
-        status: 200, body: { 'results' => [{ 'id' => 'p1' }, { 'id' => 'p2' }], 'has_more' => false }
-      )
-
-      results = client.query_all(database_id: database_id)
-      expect(results).to have_attributes(size: 2)
-    end
-
-    it 'paginates when has_more is true' do
-      page1_response = instance_double(
-        Net::HTTPResponse,
-        code: '200',
-        body: JSON.generate({
-                              'results' => [{ 'id' => 'p1' }],
-                              'has_more' => true,
-                              'next_cursor' => 'cursor-abc'
-                            })
-      )
-      page2_response = instance_double(
-        Net::HTTPResponse,
-        code: '200',
-        body: JSON.generate({
-                              'results' => [{ 'id' => 'p2' }],
-                              'has_more' => false
-                            })
-      )
-
-      allow(page1_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
-      allow(page2_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
-
-      http = instance_double(Net::HTTP)
-      allow(Net::HTTP).to receive(:new).and_return(http)
-      allow(http).to receive(:use_ssl=)
-      allow(http).to receive(:open_timeout=)
-      allow(http).to receive(:read_timeout=)
-      allow(http).to receive(:request).and_return(page1_response, page2_response)
-
-      results = client.query_all(database_id: database_id)
-      expect(results.map { |r| r['id'] }).to eq(%w[p1 p2])
-    end
-
-    it 'stops rather than looping when has_more is true with a nil next_cursor' do
-      # A page with has_more true but no cursor would refetch page 1 forever.
-      page1_response = instance_double(
-        Net::HTTPResponse,
-        code: '200',
-        body: JSON.generate({ 'results' => [{ 'id' => 'p1' }], 'has_more' => true, 'next_cursor' => nil })
-      )
-      allow(page1_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
-
-      http = instance_double(Net::HTTP)
-      allow(Net::HTTP).to receive(:new).and_return(http)
-      allow(http).to receive(:use_ssl=)
-      allow(http).to receive(:open_timeout=)
-      allow(http).to receive(:read_timeout=)
-      allow(http).to receive(:request).and_return(page1_response)
-
-      results = client.query_all(database_id: database_id)
-      expect(results.map { |r| r['id'] }).to eq(%w[p1])
-    end
-  end
-
   describe '#find_page_by_title' do
     let(:database_id) { 'db-uuid-title' }
 
@@ -419,6 +352,27 @@ RSpec.describe Woods::Notion::Client do
 
       result = client.create_page(database_id: 'db', properties: {})
       expect(result['id']).to eq('page-ok')
+      expect(calls.call).to eq(2)
+    end
+
+    # #query_database is a POST, but it's a read — nothing is committed
+    # server-side that a repeat could double-apply. Classifying it like
+    # create_page's non-idempotent POST meant a ReadTimeout mid-exchange
+    # failed the whole unit instead of retrying a request that was always
+    # safe to repeat.
+    it 'retries a POST query_database on Net::ReadTimeout (read-only, safe to repeat)' do
+      calls = fail_then_succeed(Net::ReadTimeout, { 'results' => [], 'has_more' => false })
+
+      result = client.query_database(database_id: 'db')
+      expect(result['results']).to eq([])
+      expect(calls.call).to eq(2)
+    end
+
+    it 'retries find_page_by_title on Net::ReadTimeout (delegates to query_database)' do
+      calls = fail_then_succeed(Net::ReadTimeout, { 'results' => [{ 'id' => 'p1' }], 'has_more' => false })
+
+      result = client.find_page_by_title(database_id: 'db', title: 'users')
+      expect(result['id']).to eq('p1')
       expect(calls.call).to eq(2)
     end
 

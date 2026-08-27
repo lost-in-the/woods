@@ -810,6 +810,61 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect { build.send(:create_claim) }.to raise_error(Errno::EACCES)
     end
+
+    # Two starters can both read the same dead-pid claim and both judge it
+    # stale before either deletes it. Without a re-check immediately before
+    # the delete, the second starter's `rm_f` can remove the claim the first
+    # starter already replaced with its own live one.
+    it 'does not delete a claim that was replaced between the staleness check and the delete' do
+      FileUtils.mkdir_p(output_dir)
+      dead_pid = Process.spawn('true')
+      Process.wait(dead_pid)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: dead_pid, host: Woods::Watch::Status.host_identity))
+
+      daemon = build
+      raced = false
+      winner_content = JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity)
+      allow(File).to receive(:read).and_wrap_original do |original, path, *args|
+        result = original.call(path, *args)
+        if path == claim_path && !raced
+          raced = true
+          # Simulate a second starter's create_claim winning the race right
+          # after we've read (and judged stale) the original claim.
+          FileUtils.rm_f(claim_path)
+          File.write(claim_path, winner_content)
+        end
+        result
+      end
+
+      expect(daemon.send(:reclaim_if_stale)).to be false
+      expect(File.read(claim_path)).to eq(winner_content)
+    end
+
+    # `File.link` raises EPERM/ENOTSUP (rather than the documented EEXIST)
+    # on filesystems that don't support hard links at all — some bind
+    # mounts and network shares. Without a fallback, the daemon can never
+    # start on those filesystems even with no competing claim.
+    it 'falls back to an exclusive create when the filesystem rejects File.link' do
+      allow(File).to receive(:link).and_raise(Errno::EPERM, 'Operation not permitted')
+
+      daemon = build
+      expect(daemon.send(:create_claim)).to be true
+
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      recorded = JSON.parse(File.read(claim_path))
+      expect(recorded['pid']).to eq(Process.pid)
+    end
+
+    it 'still refuses a second claim after the File.link fallback (EEXIST from the exclusive create)' do
+      allow(File).to receive(:link).and_raise(Errno::ENOTSUP, 'Operation not supported')
+
+      first = build
+      expect(first.send(:create_claim)).to be true
+
+      second = build
+      expect(second.send(:create_claim)).to be false
+    end
   end
 
   # Every cycle writes generation.json and status.json, so watching the output

@@ -79,8 +79,7 @@ module Woods
             header, data_offset = parse_header(bin_data, bin_path)
             validate_magic!(header[:magic], bin_path)
             validate_schema_version!(header[:schema_version], bin_path)
-            dim = resolved_config.respond_to?(:dimension) ? resolved_config.dimension : nil
-            validate_dimension!(header[:dimension], dim, bin_path) if dim
+            validate_dimension_if_present!(header, resolved_config, bin_path)
             floats = bin_data.byteslice(data_offset, header[:vector_count] * header[:dimension] * 4)
                              .unpack("e#{header[:vector_count] * header[:dimension]}")
             hydrate_store(parse_idx(idx_path), floats, header[:dimension])
@@ -165,6 +164,18 @@ module Woods
               'upgrade the woods gem to read this artifact',
               details: { path: path.to_s, artifact_version: version, max_supported: SCHEMA_VERSION_SUPPORTED }
             )
+          end
+
+          # An empty dump writes dimension=0 in the header (build_header has
+          # no vector to measure) — that's not a real mismatch against the
+          # provider's dimension, just the absence of data. Skip the check
+          # rather than raising DimensionMismatch on every embed of an
+          # empty payload.
+          def validate_dimension_if_present!(header, resolved_config, path)
+            return unless header[:vector_count].positive?
+
+            dim = resolved_config.respond_to?(:dimension) ? resolved_config.dimension : nil
+            validate_dimension!(header[:dimension], dim, path) if dim
           end
 
           def validate_dimension!(stored, expected, path)

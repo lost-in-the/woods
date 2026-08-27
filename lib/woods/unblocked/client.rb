@@ -123,18 +123,6 @@ module Woods
                 }, idempotent: false)
       end
 
-      # List all collections.
-      #
-      # @return [Array<Hash>] Collection objects
-      def list_collections
-        result = request(:get, 'collections')
-        # The live API returns a bare JSON array; the envelope fallbacks are
-        # defensive (calling ['items'] on an Array raises TypeError).
-        return result if result.is_a?(Array)
-
-        result['items'] || result['data'] || [result].flatten.compact
-      end
-
       # Delete a document by ID.
       #
       # @param document_id [String] Document UUID

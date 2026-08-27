@@ -218,6 +218,17 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       loaded = dump_and_load(empty)
       expect(loaded.count).to eq(0)
     end
+
+    it 'does not raise DimensionMismatch for an empty dump against a configured provider dimension' do
+      empty = Woods::Storage::VectorStore::InMemory.new
+      dump_dir = artifact.new_dump_dir
+      artifact.promote(dump_dir)
+      described_class.dump(empty, artifact, dump_dir)
+
+      config = double('rc', dimension: 8)
+      expect { described_class.load_or_empty(artifact, resolved_config: config) }
+        .not_to raise_error
+    end
   end
 
   describe 'header validation on load' do

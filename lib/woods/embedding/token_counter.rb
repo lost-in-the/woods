@@ -58,13 +58,6 @@ module Woods
         tok ? tok.encode(text).ids.length : estimate(text)
       end
 
-      # True when the real tokenizer is loaded and in use.
-      #
-      # @return [Boolean]
-      def exact?
-        !tokenizer.nil?
-      end
-
       private
 
       def estimate(text)

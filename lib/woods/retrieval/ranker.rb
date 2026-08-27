@@ -385,6 +385,12 @@ module Woods
 
       # Compute rank-percentile scores from the graph store's PageRank hash.
       #
+      # `respond_to?` alone is the wrong guard: {Storage::GraphStore::Interface}
+      # *defines* +#pagerank+ as a +NotImplementedError+ stub, so an adapter
+      # that merely includes the interface without overriding it still
+      # answers +respond_to?+ with +true+ (B-108) — and +NotImplementedError+
+      # is a +ScriptError+, which the rescue below does not catch on its own.
+      #
       # @return [Hash{String => Float}] Empty hash when no graph store or no scores.
       def compute_pagerank_importance_map
         return {} unless @graph_store.respond_to?(:pagerank)
@@ -397,7 +403,7 @@ module Woods
         ranked.each_with_index.to_h do |(identifier, _score), rank|
           [identifier, 1.0 - (rank / total)]
         end
-      rescue StandardError
+      rescue StandardError, NotImplementedError
         {}
       end
 

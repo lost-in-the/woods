@@ -71,7 +71,8 @@ module Woods
 
     # Build a {Configuration} populated with the named preset's adapter types.
     #
-    # @param name [Symbol] Preset name — one of :local, :postgresql, or :production
+    # @param name [Symbol] Preset name — one of :local, :shared_filesystem,
+    #   :postgresql, or :production
     # @return [Configuration] A new Configuration with preset values applied
     # @raise [ArgumentError] if the preset name is not recognized
     def self.preset_config(name)
@@ -325,7 +326,7 @@ module Woods
     # @return [Embedding::TextPreparer]
     def build_text_preparer(provider)
       chars_per_token = chars_per_token_for(provider)
-      budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
+      budget = safe_max_input_tokens(provider)
       max_tokens = budget || Embedding::TextPreparer::DEFAULT_MAX_TOKENS
 
       Embedding::TextPreparer.new(max_tokens: max_tokens, chars_per_token: chars_per_token)
@@ -356,7 +357,7 @@ module Woods
     # @param provider [Embedding::Provider::Interface]
     # @return [Chunking::SemanticChunker]
     def build_chunker(provider)
-      budget = provider.respond_to?(:max_input_tokens) ? provider.max_input_tokens : nil
+      budget = safe_max_input_tokens(provider)
       max_chars = ((budget * chars_per_token_for(provider)).floor - CHUNKER_PREFIX_ALLOWANCE if budget)
 
       # Guard against a budget so small that the prefix allowance leaves
@@ -414,6 +415,24 @@ module Woods
                else :openai
                end
       TokenUtils.chars_per_token_for(symbol)
+    end
+
+    # Provider input-token budget, or nil when the provider has none.
+    # `respond_to?` alone is the wrong guard here: {Embedding::Provider::Interface}
+    # *defines* +max_input_tokens+ as a +NotImplementedError+ stub, so a
+    # provider that merely includes the interface without overriding it
+    # still answers +respond_to?+ with +true+ (B-108) and raises when
+    # called. A provider with no such method at all still needs the
+    # +respond_to?+ guard to avoid a bare +NoMethodError+.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Integer, nil]
+    def safe_max_input_tokens(provider)
+      return nil unless provider.respond_to?(:max_input_tokens)
+
+      provider.max_input_tokens
+    rescue NotImplementedError
+      nil
     end
 
     # Reach the concrete provider through the resilience wrapper.

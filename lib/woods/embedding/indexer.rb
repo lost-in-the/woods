@@ -610,7 +610,7 @@ module Woods
       # tokenizes hotter than chars/token averages suggest, and Ollama
       # rejects over-budget input outright (see ollama/ollama#14186).
       def needs_chunking?(unit)
-        budget_tokens = @provider.respond_to?(:max_input_tokens) ? @provider.max_input_tokens : nil
+        budget_tokens = safe_max_input_tokens
         return false if budget_tokens.nil?
         return false unless @text_preparer.respond_to?(:chars_per_token)
 
@@ -895,6 +895,23 @@ module Woods
         return false unless @output_dir
 
         implements_own?(@vector_store, :each_entry)
+      end
+
+      # @provider's input-token budget, or nil when it has none.
+      # `respond_to?` alone is the wrong guard here: {Embedding::Provider::Interface}
+      # *defines* +max_input_tokens+ as a +NotImplementedError+ stub, so a
+      # provider that merely includes the interface without overriding it
+      # still answers +respond_to?+ with +true+ (B-108) and raises when
+      # called. A provider with no such method at all still needs the
+      # +respond_to?+ guard to avoid a bare +NoMethodError+.
+      #
+      # @return [Integer, nil]
+      def safe_max_input_tokens
+        return nil unless @provider.respond_to?(:max_input_tokens)
+
+        @provider.max_input_tokens
+      rescue NotImplementedError
+        nil
       end
 
       # Does +object+ define +method_name+ itself, rather than inheriting the

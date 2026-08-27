@@ -109,35 +109,7 @@ module Woods
         body[:filter] = filter if filter
         body[:sorts] = sorts if sorts
 
-        request(:post, "databases/#{database_id}/query", body)
-      end
-
-      # Query all pages from a database, auto-paginating.
-      #
-      # @param database_id [String] Database UUID
-      # @param filter [Hash, nil] Notion filter object
-      # @return [Array<Hash>] All matching pages
-      def query_all(database_id:, filter: nil)
-        all_results = []
-        cursor = nil
-
-        loop do
-          body = {}
-          body[:filter] = filter if filter
-          body[:start_cursor] = cursor if cursor
-
-          response = request(:post, "databases/#{database_id}/query", body)
-          all_results.concat(response['results'] || [])
-
-          break unless response['has_more']
-
-          cursor = response['next_cursor']
-          # has_more true with a nil next_cursor would refetch page 1
-          # forever — stop with what we have rather than loop forever.
-          break if cursor.nil?
-        end
-
-        all_results
+        request(:post, "databases/#{database_id}/query", body, read_only: true)
       end
 
       # Find a page by its title property value.
@@ -170,15 +142,19 @@ module Woods
       #   only retries when `idempotent` is true, since a 503 can be an
       #   intermediary's response for an origin that already committed a
       #   non-idempotent write (see {RETRYABLE_STATUS_CODES}).
+      # @param read_only [Boolean] Whether this call reads without mutating
+      #   Notion state, independent of HTTP verb — {#query_database} is a
+      #   POST but commits nothing server-side, so a mid-exchange network
+      #   failure is always safe to retry (see {#safe_to_retry?}).
       # @return [Hash] Parsed JSON response
       # @raise [Woods::Error] on non-success responses (after retries for 429,
       #   and for 503 when idempotent), or immediately for a non-idempotent
       #   request's 503
-      def request(method, path, body = nil, idempotent: true)
+      def request(method, path, body = nil, idempotent: true, read_only: false)
         retries = 0
 
         loop do
-          response = execute_with_retry(method, path, body)
+          response = execute_with_retry(method, path, body, read_only: read_only)
 
           return JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
 
@@ -218,15 +194,16 @@ module Woods
       # token into logs or backtraces.
       #
       # @param method [Symbol] HTTP method, used to classify retryability
+      # @param read_only [Boolean] see {#request}
       # @return [Net::HTTPResponse]
       # @raise [Woods::Error] on persistent network failures, or immediately
       #   when a non-idempotent request fails ambiguously mid-exchange
-      def execute_with_retry(method, path, body)
+      def execute_with_retry(method, path, body, read_only: false)
         attempts = 0
         begin
           @rate_limiter.throttle { execute_http(method, path, body) }
         rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, Errno::ECONNREFUSED => e
-          raise_ambiguous_network_error(method, e) unless safe_to_retry?(method, e)
+          raise_ambiguous_network_error(method, e) unless safe_to_retry?(method, e, read_only: read_only)
 
           attempts += 1
           if attempts >= MAX_RETRIES
@@ -240,14 +217,16 @@ module Woods
       end
 
       # Whether a failed request may be retried without risking a
-      # double-apply: either the verb is idempotent, or the failure class
-      # proves the request never reached the server.
+      # double-apply: the call is a read regardless of verb, the verb
+      # itself is idempotent, or the failure class proves the request
+      # never reached the server.
       #
       # @param method [Symbol] HTTP method
       # @param error [Exception] the network failure
+      # @param read_only [Boolean] see {#request}
       # @return [Boolean]
-      def safe_to_retry?(method, error)
-        IDEMPOTENT_METHODS.include?(method) || PRE_REQUEST_ERRORS.any? { |klass| error.is_a?(klass) }
+      def safe_to_retry?(method, error, read_only: false)
+        read_only || IDEMPOTENT_METHODS.include?(method) || PRE_REQUEST_ERRORS.any? { |klass| error.is_a?(klass) }
       end
 
       # Raise for a non-idempotent request that failed mid-exchange. The

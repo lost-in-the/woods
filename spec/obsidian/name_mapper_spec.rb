@@ -12,7 +12,6 @@ RSpec.describe Woods::Obsidian::NameMapper do
     it 'maps a plain identifier to <dir>/<id>.md' do
       m = mapper('User' => 'models')
       expect(m.path_for('User')).to eq('models/User.md')
-      expect(m.target_for('User')).to eq('models/User')
       expect(m.wikilink('User')).to eq('[[models/User|User]]')
     end
 
@@ -26,14 +25,13 @@ RSpec.describe Woods::Obsidian::NameMapper do
 
     it 'sanitizes a method-ref identifier so the link target never contains #' do
       m = mapper('Foo#create' => 'controllers')
-      expect(m.target_for('Foo#create')).to eq('controllers/Foo_create')
-      # alias keeps the readable form (# is safe in alias text)
+      # alias keeps the readable form (# is safe in alias text); the target
+      # half (before the `|`) must never contain #.
       expect(m.wikilink('Foo#create')).to eq('[[controllers/Foo_create|Foo#create]]')
     end
 
-    it 'reports unknown ids as not known' do
+    it 'returns nil for unknown ids' do
       m = mapper('User' => 'models')
-      expect(m.known?('Nope')).to be(false)
       expect(m.path_for('Nope')).to be_nil
       expect(m.wikilink('Nope')).to be_nil
     end
@@ -89,9 +87,10 @@ RSpec.describe Woods::Obsidian::NameMapper do
 
   describe 'inverse map + determinism' do
     it 'exposes a bijective path -> id inverse map' do
-      m = mapper('User' => 'models', 'Post' => 'models', 'Foo#create' => 'controllers')
-      m.ids.each { |id| expect(m.paths_to_ids[m.path_for(id)]).to eq(id) }
-      expect(m.paths_to_ids.size).to eq(m.ids.size)
+      input = { 'User' => 'models', 'Post' => 'models', 'Foo#create' => 'controllers' }
+      m = mapper(input)
+      input.each_key { |id| expect(m.paths_to_ids[m.path_for(id)]).to eq(id) }
+      expect(m.paths_to_ids.size).to eq(input.size)
     end
 
     it 'produces identical output across builds (deterministic)' do

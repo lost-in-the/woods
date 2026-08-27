@@ -831,6 +831,23 @@ RSpec.describe Woods::Builder do
       expect(preparer.max_tokens).to eq(Woods::Embedding::TextPreparer::DEFAULT_MAX_TOKENS)
     end
 
+    # B-108: Provider::Interface *defines* #max_input_tokens (as a
+    # NotImplementedError stub), so respond_to?(:max_input_tokens) answers
+    # true for a provider that merely includes the interface without
+    # overriding it — the raise was reached instead of the "no budget"
+    # fallback.
+    it 'falls back to the preparer default when the provider only inherits the interface stub' do
+      provider_class = Class.new do
+        include Woods::Embedding::Provider::Interface
+
+        def model_name
+          'stub'
+        end
+      end
+      preparer = builder.build_text_preparer(provider_class.new)
+      expect(preparer.max_tokens).to eq(Woods::Embedding::TextPreparer::DEFAULT_MAX_TOKENS)
+    end
+
     # #188 — calibration must see through the resilience wrapper, or a
     # wrapped Ollama silently gets OpenAI's 4.0 chars/token ratio.
     it 'calibrates a resilience-wrapped Ollama exactly like the raw provider' do
@@ -897,6 +914,18 @@ RSpec.describe Woods::Builder do
       )
       chunker = builder.build_chunker(wrapped)
       expect(chunker.instance_variable_get(:@token_counter)).to be_a(Woods::Embedding::TokenCounter)
+    end
+
+    # B-108, mirrors the build_text_preparer regression above.
+    it 'disables the safety net when the provider only inherits the interface stub' do
+      provider_class = Class.new do
+        include Woods::Embedding::Provider::Interface
+
+        def model_name
+          'stub'
+        end
+      end
+      expect { builder.build_chunker(provider_class.new) }.not_to raise_error
     end
   end
 end
