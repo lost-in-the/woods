@@ -50,9 +50,14 @@ module Woods
       # retry is safe even for non-idempotent verbs.
       PRE_REQUEST_ERRORS = [Net::OpenTimeout, Errno::ECONNREFUSED].freeze
 
-      # Response codes retried for every verb: the server answered without
-      # committing the operation (429 = throttled before processing,
-      # 503 = refused service), so a retry cannot duplicate anything.
+      # Response codes potentially retried. 429 is safe for every verb — it
+      # means the server throttled the request before processing it. 503 is
+      # NOT unconditionally safe: that status proves the *origin* refused to
+      # process the request, but it can also be synthesized by an
+      # intermediary sitting in front of an origin that already committed
+      # the write, so the response alone doesn't prove non-commitment.
+      # {#request}'s `idempotent:` flag gates the 503 retry accordingly —
+      # see {#execute_with_retry} for the equivalent network-level split.
       RETRYABLE_STATUS_CODES = %w[429 503].freeze
 
       # @param api_token [String] Notion integration API token
@@ -78,7 +83,10 @@ module Woods
         }
         body[:children] = children if children.any?
 
-        request(:post, 'pages', body)
+        # Notion offers no idempotency key for page creation, and a 503 can
+        # be an intermediary's synthesized response for an origin that
+        # already committed — see {#request}.
+        request(:post, 'pages', body, idempotent: false)
       end
 
       # Update an existing page's properties.
@@ -124,6 +132,9 @@ module Woods
           break unless response['has_more']
 
           cursor = response['next_cursor']
+          # has_more true with a nil next_cursor would refetch page 1
+          # forever — stop with what we have rather than loop forever.
+          break if cursor.nil?
         end
 
         all_results
@@ -154,15 +165,24 @@ module Woods
       # @param method [Symbol] HTTP method (:post, :patch, :get)
       # @param path [String] API path (appended to BASE_URL)
       # @param body [Hash, nil] Request body
+      # @param idempotent [Boolean] Whether repeating this request cannot
+      #   double-apply the operation. 429 always retries regardless; a 503
+      #   only retries when `idempotent` is true, since a 503 can be an
+      #   intermediary's response for an origin that already committed a
+      #   non-idempotent write (see {RETRYABLE_STATUS_CODES}).
       # @return [Hash] Parsed JSON response
-      # @raise [Woods::Error] on non-success responses (after retries for 429/503)
-      def request(method, path, body = nil)
+      # @raise [Woods::Error] on non-success responses (after retries for 429,
+      #   and for 503 when idempotent), or immediately for a non-idempotent
+      #   request's 503
+      def request(method, path, body = nil, idempotent: true)
         retries = 0
 
         loop do
           response = execute_with_retry(method, path, body)
 
           return JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
+
+          raise_ambiguous_response_error(method, response) if response.code == '503' && !idempotent
 
           if RETRYABLE_STATUS_CODES.include?(response.code) && retries < MAX_RETRIES
             retries += 1
@@ -211,7 +231,7 @@ module Woods
           attempts += 1
           if attempts >= MAX_RETRIES
             raise Woods::Error,
-                  "Network error after #{attempts} retries: #{redact_token(e.message)}"
+                  "Network error after #{attempts} attempts: #{redact_token(e.message)}"
           end
 
           sleep(2**attempts)
@@ -243,6 +263,29 @@ module Woods
               "#{method.to_s.upcase} request interrupted mid-exchange (#{error.class}); " \
               'the operation may or may not have been applied server-side. ' \
               "Not retrying automatically to avoid duplicates; verify before re-running: #{redact_token(error.message)}"
+      end
+
+      # Raise for a non-idempotent request that received a 503. The response
+      # doesn't prove the origin never processed the request — an
+      # intermediary can synthesize a 503 for a request the origin already
+      # committed — so this mirrors {#raise_ambiguous_network_error}: same
+      # error class, same "verify before re-running" guidance, because the
+      # risk (a silently duplicated create) is identical.
+      #
+      # @param method [Symbol] HTTP method
+      # @param response [Net::HTTPResponse] the 503 response
+      # @raise [Woods::Error] always
+      def raise_ambiguous_response_error(method, response)
+        parsed = begin
+          JSON.parse(response.body)
+        rescue JSON::ParserError
+          {}
+        end
+        detail = parsed['message'] || 'Service Unavailable'
+        raise Woods::Error,
+              "#{method.to_s.upcase} request received 503 (#{redact_token(detail)}); " \
+              'the operation may or may not have been applied server-side. ' \
+              'Not retrying automatically to avoid duplicates; verify before re-running.'
       end
 
       # Raise a descriptive error from a non-success Notion response.

@@ -183,6 +183,26 @@ RSpec.describe Woods::Notion::Client do
       results = client.query_all(database_id: database_id)
       expect(results.map { |r| r['id'] }).to eq(%w[p1 p2])
     end
+
+    it 'stops rather than looping when has_more is true with a nil next_cursor' do
+      # A page with has_more true but no cursor would refetch page 1 forever.
+      page1_response = instance_double(
+        Net::HTTPResponse,
+        code: '200',
+        body: JSON.generate({ 'results' => [{ 'id' => 'p1' }], 'has_more' => true, 'next_cursor' => nil })
+      )
+      allow(page1_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:open_timeout=)
+      allow(http).to receive(:read_timeout=)
+      allow(http).to receive(:request).and_return(page1_response)
+
+      results = client.query_all(database_id: database_id)
+      expect(results.map { |r| r['id'] }).to eq(%w[p1])
+    end
   end
 
   describe '#find_page_by_title' do
@@ -423,14 +443,30 @@ RSpec.describe Woods::Notion::Client do
       expect(client).to have_received(:sleep).with(7.0)
     end
 
-    it 'retries a POST on 503 (server answered without committing)' do
+    it 'does not retry a POST create_page on 503 (no idempotency key to offer Notion)' do
+      # Notion offers no idempotency key, and a 503 can be synthesized by an
+      # intermediary in front of an origin that already committed the
+      # create — retrying risks a duplicate page the exporter can't reconcile.
       unavailable = instance_double(Net::HTTPResponse, code: '503', body: JSON.generate({ 'message' => 'down' }))
       allow(unavailable).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
       allow(unavailable).to receive(:[]).with('Retry-After').and_return(nil)
       allow(http).to receive(:request).and_return(unavailable, success_response({ 'id' => 'page-after-503' }))
 
-      result = client.create_page(database_id: 'db', properties: {})
-      expect(result['id']).to eq('page-after-503')
+      expect do
+        client.create_page(database_id: 'db', properties: {})
+      end.to raise_error(Woods::Error, /may or may not have been applied/)
+    end
+
+    it 'still retries a POST query_database on 503 (a read, safe to repeat)' do
+      unavailable = instance_double(Net::HTTPResponse, code: '503', body: JSON.generate({ 'message' => 'down' }))
+      allow(unavailable).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(unavailable).to receive(:[]).with('Retry-After').and_return(nil)
+      allow(http).to receive(:request).and_return(
+        unavailable, success_response({ 'results' => [], 'has_more' => false })
+      )
+
+      result = client.query_database(database_id: 'db')
+      expect(result['results']).to eq([])
     end
 
     it 'still raises on a POST 500 (ambiguous 5xx is not retried)' do

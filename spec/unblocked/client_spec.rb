@@ -205,14 +205,38 @@ RSpec.describe Woods::Unblocked::Client do
       expect(client).to have_received(:sleep).with(7.0)
     end
 
-    it 'retries a POST on 503 (server answered without committing)' do
+    it 'does not retry a POST create_collection on 503 (collections have no upsert key)' do
+      # Unblocked collections have no upsert key, and a 503 can be
+      # synthesized by an intermediary in front of an origin that already
+      # committed the create — retrying mints a duplicate no later sync
+      # reconciles.
       unavailable = instance_double(Net::HTTPResponse, code: '503', body: JSON.generate({ 'message' => 'down' }))
       allow(unavailable).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
       allow(unavailable).to receive(:[]).with('Retry-After').and_return(nil)
       allow(http).to receive(:request).and_return(unavailable, success_response({ 'id' => 'col-1' }))
 
-      result = client.create_collection(name: 'Woods', description: 'an index')
-      expect(result['id']).to eq('col-1')
+      expect do
+        client.create_collection(name: 'Woods', description: 'an index')
+      end.to raise_error(Woods::Error, /may or may not have been applied/)
+    end
+
+    it 'still retries a PUT put_document on 503 (documents upsert by uri)' do
+      unavailable = instance_double(Net::HTTPResponse, code: '503', body: JSON.generate({ 'message' => 'down' }))
+      allow(unavailable).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
+      allow(unavailable).to receive(:[]).with('Retry-After').and_return(nil)
+      allow(http).to receive(:request).and_return(unavailable, success_response({ 'id' => 'doc-1' }))
+
+      result = client.put_document(collection_id: 'c', title: 't', body: 'b', uri: 'u')
+      expect(result['id']).to eq('doc-1')
+    end
+
+    it 'raises after MAX_RETRIES total attempts on a persistent network error, aligned with the Notion twin' do
+      calls = always_fail(Net::OpenTimeout)
+
+      expect do
+        client.create_collection(name: 'Woods', description: 'an index')
+      end.to raise_error(Woods::Error, /Network error after 3 attempts/)
+      expect(calls.call).to eq(described_class::MAX_RETRIES)
     end
 
     it 'classifies PATCH like POST (non-idempotent) for future endpoints' do
