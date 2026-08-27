@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'woods'
 require 'woods/console/embedded_executor'
+require 'woods/console/redactor'
 
 # Focused spec for the console_query / handle_query path with read_tools_enabled.
 # Covers: group_by + aggregate select, having, multi-column group_by, order with
@@ -400,6 +401,143 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(response['error_type']).to eq('unsupported')
       expect(response['error']).to include('embedded_read_tools: true')
       expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
+    end
+  end
+end
+
+RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on select aliases' do
+  subject(:executor) do
+    described_class.new(
+      model_validator: validator,
+      safe_context: safe_context,
+      connection: connection,
+      read_tools_enabled: true
+    )
+  end
+
+  let(:registry) { { 'Order' => %w[id status amount user_id created_at] } }
+  let(:table_names) { { 'Order' => 'orders' } }
+  let(:validator) { Woods::Console::ModelValidator.new(registry: registry, table_names: table_names) }
+  let(:connection) { double('Connection') }
+  let(:redacted_columns) { [] }
+  let(:redacted_key_values) { [] }
+  let(:safe_context) do
+    Woods::Console::SafeContext.new(
+      connection: connection,
+      redacted_columns: redacted_columns,
+      redacted_key_values: redacted_key_values
+    )
+  end
+
+  let(:order_model) { class_double('Order') }
+  let(:relation) do
+    double('order_relation').tap do |rel|
+      allow(rel).to receive(:select).and_return(rel)
+      allow(rel).to receive(:limit).and_return(rel)
+      allow(rel).to receive(:to_sql).and_return('SELECT id FROM orders LIMIT 10000')
+    end
+  end
+  let(:query_result) do
+    double('ActiveRecord::Result',
+           columns: %w[amount status],
+           rows: [%w[s3cret-amount paid]],
+           count: 1)
+  end
+
+  before do
+    stub_const('Order', order_model)
+    allow(order_model).to receive(:all).and_return(relation)
+    allow(connection).to receive(:transaction) do |&block|
+      block.call
+    rescue ActiveRecord::Rollback
+      nil
+    end
+    allow(connection).to receive(:execute)
+    allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+    allow(connection).to receive(:select_all).and_return(query_result)
+  end
+
+  def send_query(select)
+    executor.send_request({ 'tool' => 'query', 'params' => { 'model' => 'Order', 'select' => select } })
+  end
+
+  context 'when the column is on console_redacted_columns (H2)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'rejects an alias over a redacted column' do
+      response = send_query(['amount AS note'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aliasing redacted column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects a qualified alias over a redacted column' do
+      response = send_query(['orders.amount AS note'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aliasing redacted column 'amount'/i)
+    end
+
+    it 'rejects an aliased aggregate over a redacted column' do
+      response = send_query(['SUM(amount) AS total'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects a bare aggregate over a redacted column' do
+      response = send_query(['SUM(amount)'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'keeps direct unaliased selection allowed, with the redactor masking it by header' do
+      response = send_query(['amount'])
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:select).with('amount')
+
+      envelope = { 'columns' => query_result.columns, 'rows' => query_result.rows }
+      masked = Woods::Console::Redactor.apply(envelope, safe_context)
+      expect(masked['rows']).to eq([['[REDACTED]', 'paid']])
+    end
+  end
+
+  context 'when the column is on console_redacted_key_values (H2, EAV)' do
+    let(:redacted_key_values) do
+      [{ 'key_column' => 'status', 'value_column' => 'amount', 'sensitive_keys' => %w[paid] }]
+    end
+
+    it 'rejects an alias over the EAV key column' do
+      response = send_query(['status AS lookup_key'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{key/value column 'status'}i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects an alias over the EAV value column' do
+      response = send_query(['amount AS extracted_value'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{key/value column 'amount'}i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'keeps direct unaliased EAV selection allowed (the positional redactor still fires)' do
+      response = send_query(%w[status amount])
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:select).with('status', 'amount')
+
+      envelope = { 'columns' => query_result.columns, 'rows' => query_result.rows }
+      masked = Woods::Console::Redactor.apply(envelope, safe_context)
+      # key cell 'paid' matches sensitive_keys → the value cell (amount) is masked
+      expect(masked['rows']).to eq([['[REDACTED]', 'paid']])
     end
   end
 end

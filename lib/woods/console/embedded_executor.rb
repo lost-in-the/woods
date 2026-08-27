@@ -817,14 +817,108 @@ module Woods
         end
       end
 
+      # Validate one select expression against the model and the redaction
+      # configuration.
+      #
+      # Exactly three shapes are refused (redaction stays positional by
+      # output header — {Woods::Console::Redactor} masks by column name, so
+      # any construct that renames the output header would carry plaintext
+      # past it):
+      #   1. an `AS` alias over a `console_redacted_columns` column
+      #      (`password_digest AS note` returns plaintext under the `note`
+      #      header, which no redaction rule matches);
+      #   2. an aggregate over a `console_redacted_columns` column, aliased
+      #      or bare (`SUM(salary)` leaks the aggregate of a column whose
+      #      individual values are masked — {#handle_aggregate} refuses the
+      #      same column via {#refuse_redacted_column!});
+      #   3. an `AS` alias over either column of a
+      #      `console_redacted_key_values` pair (the positional EAV rule
+      #      resolves key/value columns by header name, so renaming either
+      #      header silently disarms it).
+      #
+      # Direct, unaliased selection of a redacted column REMAINS ALLOWED:
+      # the output header keeps the column's real name, and the positional
+      # redactor masks the value. Aliasing a non-redacted column stays
+      # allowed.
+      #
+      # @param expr [String] a single select expression
+      # @param model_name [String]
+      # @return [String] the expression, unchanged, once validated
+      # @raise [ValidationError] on an unsafe expression or a refused shape
       def validate_select_expression!(expr, model_name)
         match = Server::SELECT_EXPRESSION_REGEXP.match(expr)
         raise ValidationError, "Rejected select expression: #{expr.inspect}" unless match
 
-        _fn, fn_arg, bare_col, _alias = match.captures
+        refuse_redacted_select_shapes!(match.captures, model_name)
+        expr
+      end
+
+      # Column-existence check plus the three redaction-refusal shapes; see
+      # {#validate_select_expression!} for the shape list.
+      #
+      # @param captures [Array] {Server::SELECT_EXPRESSION_REGEXP} captures
+      # @param model_name [String]
+      # @raise [ValidationError] on an unknown column or a refused shape
+      def refuse_redacted_select_shapes!(captures, model_name)
+        fn, fn_arg, bare_col, alias_name = captures
         column = bare_col || fn_arg
         validate_column_reference!(column, model_name) unless column == '*'
-        expr
+
+        refuse_redacted_select_alias!(bare_col, alias_name) if alias_name
+        refuse_redacted_aggregate_expression!(fn_arg) if fn
+      end
+
+      # Refuse an `AS` alias over a column protected by either redaction
+      # layer. A no-op when +alias_name+ is nil. See
+      # {#validate_select_expression!} for why the alias is refused while
+      # direct selection is not.
+      #
+      # @param column [String, nil] bare or qualified column reference
+      # @param alias_name [String, nil] the `AS` alias
+      # @raise [ValidationError] when the aliased column is protected
+      def refuse_redacted_select_alias!(column, alias_name)
+        return unless column
+
+        base = base_column_name(column)
+        if @safe_context.redacted_columns.include?(base)
+          raise ValidationError,
+                "Rejected: aliasing redacted column '#{base}' as '#{alias_name}' bypasses output " \
+                'redaction. Select it unaliased; the value is masked.'
+        end
+
+        kv_columns = @safe_context.redacted_key_values
+                                  .flat_map { |pattern| [pattern['key_column'], pattern['value_column']] }
+        return unless kv_columns.include?(base)
+
+        raise ValidationError,
+              "Rejected: aliasing redacted key/value column '#{base}' as '#{alias_name}' bypasses " \
+              'EAV output redaction. Select it unaliased.'
+      end
+
+      # Refuse an aggregate call over a `console_redacted_columns` column,
+      # mirroring {#handle_aggregate}'s {#refuse_redacted_column!} for the
+      # aggregate expressions accepted inside `select`.
+      #
+      # @param column [String, nil] aggregate argument (`*` is never redacted)
+      # @raise [ValidationError] when the aggregated column is redacted
+      def refuse_redacted_aggregate_expression!(column)
+        return if column.nil? || column == '*'
+
+        base = base_column_name(column)
+        return unless @safe_context.redacted_columns.include?(base)
+
+        raise ValidationError,
+              "Rejected: aggregating redacted column '#{base}' reads its value; it cannot be used " \
+              'as an aggregate input.'
+      end
+
+      # Strip a `table.` qualifier, returning the bare column name that
+      # redaction configuration is keyed on.
+      #
+      # @param column [String]
+      # @return [String]
+      def base_column_name(column)
+        column.split('.').last
       end
 
       # Validate group_by entries — bare columns only (no functions, no SQL).
