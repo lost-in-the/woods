@@ -27,6 +27,42 @@ module Woods
     # most of the length is declarative allowlist/denylist data (documented
     # named constants), not imperative logic.
     class SqlValidator # rubocop:disable Metrics/ClassLength
+      # Row-lock clauses that would take live row locks even under the
+      # rolled-back SafeContext transaction (M5).
+      #
+      # `SELECT ... FOR UPDATE` and friends hold row locks for the duration
+      # of the wrapping transaction — on both PostgreSQL (`FOR UPDATE`,
+      # `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, with optional
+      # `NOWAIT`/`SKIP LOCKED`) and MySQL (`FOR UPDATE` with the same
+      # modifiers, plus `LOCK IN SHARE MODE`). While SafeContext rolls the
+      # transaction back, the locks themselves are held live against other
+      # writers for the whole request — a denial-of-service lever, not a
+      # read. A dedicated check (rather than growing BODY_FORBIDDEN_KEYWORDS)
+      # because these are multi-word trailing clauses: the body-keyword scan
+      # is single-token and leader-anchored, neither of which can express
+      # "FOR immediately followed by an update/share keyword".
+      #
+      # Scanned against the noise-stripped SQL (comments and string literals
+      # removed), so prose like `WHERE note = 'waiting for update'` cannot
+      # fire it. Over-detection on a pathologically quoted identifier such
+      # as `"for update"` is accepted: conservative rejection is the
+      # validator's documented posture.
+      LOCK_CLAUSE_PATTERN = /
+        \bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b
+        |\bLOCK\s+IN\s+SHARE\s+MODE\b
+      /xi
+
+      # Matches an `AS (` opening whose balanced body {#check_writable_ctes!}
+      # inspects. Kept loose on purpose: deciding which `AS (` shapes are
+      # CTEs needs a real parser, and every non-CTE match (a WINDOW
+      # definition, a nested WITH) is only rejected when its body starts
+      # with DML, which is never valid in an allowed statement.
+      AS_BODY_PATTERN = /\bAS\s*\(/i
+
+      # A CTE (or any `AS (...)`) body that opens with a DML keyword —
+      # the writable-CTE shape, in any WITH position.
+      WRITABLE_CTE_BODY_PATTERN = /\A\s*(?:DELETE|UPDATE|INSERT)\b/i
+
       # Forbidden statement prefixes (case-insensitive).
       #
       # Expanded beyond DML/DDL to cover:
@@ -206,6 +242,9 @@ module Woods
         # Check for writable CTEs (before body keywords to give better error messages)
         check_writable_ctes!(normalized)
 
+        # Check for row-lock clauses (FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE)
+        check_lock_clauses!(normalized)
+
         # Check for forbidden keywords anywhere in the SQL body
         check_body_forbidden_keywords!(normalized)
 
@@ -278,20 +317,79 @@ module Woods
 
       # Check if the SQL contains writable CTEs (WITH...DELETE/UPDATE/INSERT).
       #
-      # Matches `WITH [RECURSIVE] name AS (...)` — `RECURSIVE` is optional
-      # syntax that sits between `WITH` and the CTE name, and without it in
-      # the pattern a recursive writable CTE fell through to the generic
-      # body-keyword scan, which still rejects it but with a less specific
-      # error message. Scans noise-stripped input for the same reason as
-      # {#check_body_forbidden_keywords!}.
+      # Walks EVERY `AS (...)` body in the statement, not just the first one.
+      # The previous implementation anchored a single regex to the WITH
+      # leader, so a writable CTE in second-or-later position validated
+      # cleanly and PostgreSQL executed it:
+      # `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`.
+      # There is no full SQL parser here, so the walker matches every
+      # `AS (` shape and extracts the balanced paren body after it. In an
+      # allowed statement the extra matches are harmless: a WINDOW definition
+      # (`w AS (PARTITION BY x)`) or a CTE nested inside another CTE body is
+      # only rejected when its body *starts* with a DML keyword, which is
+      # never legitimate grammar. Scans noise-stripped input for the same
+      # reason as {#check_body_forbidden_keywords!}.
       #
       # @param sql [String]
-      # @raise [SqlValidationError] if a writable CTE is found
+      # @raise [SqlValidationError] if a writable CTE body is found
       def check_writable_ctes!(sql)
         stripped = SqlNoiseStripper.strip_noise(sql)
-        return unless stripped.match?(/WITH\s+(?:RECURSIVE\s+)?\w+\s+AS\s*\(\s*(DELETE|UPDATE|INSERT)\b/i)
+        each_as_body(stripped) do |body|
+          next unless body.match?(WRITABLE_CTE_BODY_PATTERN)
 
-        raise SqlValidationError, 'Rejected: writable CTEs are not allowed'
+          raise SqlValidationError, 'Rejected: writable CTEs are not allowed'
+        end
+      end
+
+      # Check if the SQL carries a row-lock clause ({LOCK_CLAUSE_PATTERN}).
+      #
+      # Scans the noise-stripped SQL; see {LOCK_CLAUSE_PATTERN} for why this
+      # is a dedicated check instead of a body-keyword entry.
+      #
+      # @param sql [String]
+      # @raise [SqlValidationError] if a lock clause is found
+      def check_lock_clauses!(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql)
+        return unless stripped.match?(LOCK_CLAUSE_PATTERN)
+
+        raise SqlValidationError,
+              'Rejected: row-lock clauses (FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE) are not allowed'
+      end
+
+      # Yields the balanced paren body following every `AS (` occurrence.
+      #
+      # Continues scanning from just inside each match so bodies nested
+      # inside an already-yielded body (a WITH inside a CTE) are yielded
+      # too. String literals are already stripped, so no paren inside a
+      # literal can skew the balance count.
+      #
+      # @param stripped [String] noise-stripped SQL
+      # @yieldparam body [String] text between the parens
+      def each_as_body(stripped, &block)
+        pos = 0
+        while (match = stripped.match(AS_BODY_PATTERN, pos))
+          yield balanced_paren_body(stripped, match.end(0) - 1)
+          pos = match.end(0)
+        end
+      end
+
+      # Return the text between the `(` at +open_index+ and its matching
+      # `)`. An unterminated body returns the remainder of the string
+      # (over-detection only: the body still gets checked).
+      #
+      # @param text [String]
+      # @param open_index [Integer] index of the opening `(` in +text+
+      # @return [String]
+      def balanced_paren_body(text, open_index)
+        depth = 0
+        open_index.upto(text.length - 1) do |i|
+          depth += 1 if text[i] == '('
+          if text[i] == ')'
+            depth -= 1
+            return text[(open_index + 1)...i] if depth.zero?
+          end
+        end
+        text[(open_index + 1)..]
       end
 
       # Check if the SQL calls dangerous functions.

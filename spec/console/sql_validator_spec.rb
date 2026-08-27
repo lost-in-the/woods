@@ -182,6 +182,41 @@ RSpec.describe Woods::Console::SqlValidator do
         sql = 'WITH RECURSIVE d AS (DELETE FROM users RETURNING *) SELECT * FROM d'
         expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
       end
+
+      it 'rejects a writable CTE in second-or-later WITH position (M4)' do
+        sql = 'WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'rejects a writable CTE nested inside a readable CTE body' do
+        sql = 'WITH a AS (WITH b AS (DELETE FROM users RETURNING *) SELECT * FROM b) SELECT * FROM a'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'accepts a benign multi-CTE SELECT' do
+        sql = 'WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y) SELECT a.x, b.y FROM a JOIN b ON a.x = b.x'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a WINDOW clause whose AS (...) body is not a CTE' do
+        sql = 'SELECT sum(id) OVER w FROM users WINDOW w AS (PARTITION BY status)'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
+    context 'with row-lock clauses (M5)' do
+      [
+        'SELECT * FROM users FOR UPDATE',
+        'SELECT * FROM users FOR NO KEY UPDATE',
+        'SELECT * FROM users FOR SHARE',
+        'SELECT * FROM users FOR UPDATE NOWAIT',
+        'SELECT * FROM users LOCK IN SHARE MODE'
+      ].each do |sql|
+        it "rejects #{sql}" do
+          expect { validator.validate!(sql) }
+            .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+        end
+      end
     end
 
     context 'with INTO OUTFILE / INTO DUMPFILE' do
@@ -433,6 +468,75 @@ RSpec.describe Woods::Console::SqlValidator do
       it 'does not misclassify a grouped boolean expression as a function call' do
         expect { validator.validate!('SELECT * FROM users WHERE (active = true)') }.not_to raise_error
       end
+    end
+  end
+
+  describe '#check_writable_ctes! (direct unit tests)' do
+    it 'rejects a writable first CTE' do
+      sql = 'WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'rejects a writable second CTE' do
+      sql = 'WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'rejects a writable UPDATE body in second position' do
+      sql = 'WITH a AS (SELECT 1), u AS (UPDATE users SET admin = true RETURNING *) SELECT * FROM u'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'rejects a writable INSERT body in second position' do
+      sql = 'WITH a AS (SELECT 1), i AS (INSERT INTO logs(msg) VALUES (1) RETURNING *) SELECT * FROM i'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'accepts every body read-only in a multi-CTE WITH list' do
+      sql = 'WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y) SELECT a.x, b.y FROM a, b'
+      expect { validator.send(:check_writable_ctes!, sql) }.not_to raise_error
+    end
+
+    it 'accepts a WINDOW AS (...) body in a plain SELECT (no WITH)' do
+      sql = 'SELECT sum(id) OVER w FROM users WINDOW w AS (PARTITION BY status)'
+      expect { validator.send(:check_writable_ctes!, sql) }.not_to raise_error
+    end
+
+    it 'does not misread a DML keyword inside a string literal (noise stripped first)' do
+      sql = "WITH a AS (SELECT 'delete me' AS x) SELECT * FROM a"
+      expect { validator.send(:check_writable_ctes!, sql) }.not_to raise_error
+    end
+  end
+
+  describe '#check_lock_clauses! (direct unit tests)' do
+    [
+      'SELECT * FROM users FOR UPDATE',
+      'SELECT * FROM users FOR NO KEY UPDATE',
+      'SELECT * FROM users FOR SHARE',
+      'SELECT * FROM users FOR KEY SHARE',
+      'SELECT * FROM users FOR UPDATE NOWAIT',
+      'SELECT * FROM users FOR UPDATE SKIP LOCKED',
+      'SELECT * FROM users FOR UPDATE OF users NOWAIT',
+      'SELECT * FROM users LOCK IN SHARE MODE'
+    ].each do |sql|
+      it "rejects #{sql}" do
+        expect { validator.send(:check_lock_clauses!, sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+    end
+
+    it 'accepts a query with no lock clause' do
+      expect { validator.send(:check_lock_clauses!, 'SELECT * FROM users WHERE id = 1') }
+        .not_to raise_error
+    end
+
+    it 'accepts a column named update when no FOR precedes it' do
+      expect { validator.send(:check_lock_clauses!, 'SELECT id, update FROM events') }
+        .not_to raise_error
     end
   end
 end
