@@ -118,7 +118,10 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.
 
-**Fix:** If you suspect drift outside these trigger paths (or just want certainty), run a full extraction:
+**Fix:** Route and event changes that match the triggers above need no manual
+full extraction; `woods:incremental` and `woods:watch` rerun their whole-app
+extractors. If `woods:validate` still reports drift outside the trigger
+contract, use a full extraction as the recovery step:
 
 ```bash
 bundle exec rake woods:extract
@@ -331,7 +334,8 @@ Woods.configure do |config|
   config.vector_store = :qdrant
   config.vector_store_options = {
     url: ENV.fetch("QDRANT_URL", "http://localhost:6333"),
-    collection: "woods_units"
+    collection: "woods_units",
+    allow_private_hosts: true # explicit opt-in for trusted localhost/private URL
   }
   config.embedding_provider = :openai
   config.embedding_options = { api_key: ENV.fetch("OPENAI_API_KEY") }
@@ -492,7 +496,11 @@ docker run -p 6333:6333 qdrant/qdrant
 Or update your `vector_store_options` to point at the correct host/port:
 
 ```ruby
-config.vector_store_options = { url: 'http://localhost:6333', collection: 'woods' }
+config.vector_store_options = {
+  url: 'http://localhost:6333',
+  collection: 'woods',
+  allow_private_hosts: true
+}
 ```
 
 ---
@@ -663,6 +671,7 @@ config.notion_database_ids = {
 | `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
 | `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
 | `Connection refused (localhost:6333)` | Qdrant not running | Start Qdrant container |
+| Qdrant private/loopback URL rejected | SSRF guard is working | Add `allow_private_hosts: true` only for a deliberately trusted endpoint |
 | Missing `console_sql` / `console_query` | Read tools disabled | Enable `console_embedded_read_tools` |
 | `database is locked` | SQLite concurrent access | Run one extraction at a time |
 | `Dimension mismatch` | Embedding model changed | Full re-index: extract + embed |

@@ -173,7 +173,8 @@ config.vector_store = :qdrant
 config.vector_store_options = {
   url: 'http://localhost:6333',
   collection: 'woods',
-  dimensions: 1536
+  dimensions: 1536,
+  allow_private_hosts: true # explicit opt-in for trusted localhost/private URLs
 }
 ```
 
@@ -259,7 +260,8 @@ Woods.configure_with_preset(:production) do |config|
   config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
   config.vector_store_options = {
     url: ENV.fetch('QDRANT_URL'),
-    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only when QDRANT_URL is deliberately private
   }
 end
 # → Qdrant vectors, SQLite metadata, in_memory graph, OpenAI embeddings

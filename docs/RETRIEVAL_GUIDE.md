@@ -72,7 +72,8 @@ Woods.configure_with_preset(:production) do |config|
   config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
   config.vector_store_options = {
     url: ENV.fetch('QDRANT_URL'),
-    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only when QDRANT_URL is deliberately private
   }
 end
 ```
@@ -90,7 +91,11 @@ Woods.configure_with_preset(:local) { |config| config.max_context_tokens = 12_00
 ```ruby
 Woods.configure do |config|
   config.vector_store         = :qdrant
-  config.vector_store_options = { url: ENV['QDRANT_URL'], collection: 'myapp' }
+  config.vector_store_options = {
+    url: ENV.fetch('QDRANT_URL'),
+    collection: 'myapp',
+    allow_private_hosts: true # required for trusted localhost/RFC1918 URLs
+  }
   config.metadata_store       = :sqlite
   config.embedding_provider   = :openai
   config.embedding_options    = { api_key: ENV['OPENAI_API_KEY'] }

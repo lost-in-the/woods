@@ -241,9 +241,12 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 
 > Ollama's `/api/embed` enforces the model's native context length regardless of the `options.num_ctx` override ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). Woods advertises the native ceiling per model so the chunker sizes inputs correctly, see [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md).
 
-### Not implemented
+### Implemented provider boundary
 
-`Builder#build_embedding_provider` accepts exactly `:openai` and `:ollama`, anything else raises `ArgumentError`. Voyage Code 3/2 and Anthropic embeddings are not wired up:
+`Builder#build_embedding_provider` accepts `:openai`, `:ollama`, and `:fake`.
+The fake provider is deterministic and offline for specs, CI, and sandbox
+contract tests; it does not represent semantic quality. Other values raise
+`ArgumentError`. Voyage Code 3/2 and Anthropic embeddings are not wired up:
 
 - **Voyage Code 3 / Code 2**: code-specialized embeddings (1024/1536 dims, up to 32K token context). Would be the best-quality option for code retrieval if implemented; there is no `Woods::Embedding::Provider::Voyage` today.
 - **Anthropic**: Anthropic does not currently offer a standalone embedding API. Monitor for availability.
@@ -256,6 +259,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 | **Lowest cost / no external dependencies** | Ollama + `nomic-embed-text` |
 | **Self-hosted + large units** | Ollama + `bge-m3` (8192-token context vs. 2048) |
 | **Maximum quality** | OpenAI text-embedding-3-large |
+| **Offline deterministic tests** | `:fake` (contract testing only, not semantic ranking) |
 
 **Critical consideration:** Embedding dimensions must match across your entire index. Changing embedding providers or models requires a full re-index, `rake woods:embed` raises `Woods::MCP::DimensionMismatch` before embedding anything when the configured provider's dimension disagrees with the store's.
 
@@ -409,7 +413,8 @@ Woods.configure_with_preset(:production) do |config|
   config.embedding_options = { api_key: ENV.fetch('OPENAI_API_KEY') }
   config.vector_store_options = {
     url: ENV.fetch('QDRANT_URL'),
-    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # only for a deliberately trusted private endpoint
   }
 end
 # Vector: Qdrant
@@ -435,7 +440,8 @@ Woods.configure_with_preset(:production) do |config|
   }
   config.vector_store_options = {
     url: ENV.fetch('QDRANT_URL'),
-    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods')
+    collection: ENV.fetch('WOODS_QDRANT_COLLECTION', 'woods'),
+    allow_private_hosts: true # Qdrant is deliberately self-hosted/private here
   }
 end
 # Vector: Qdrant

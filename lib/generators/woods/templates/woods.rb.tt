@@ -46,7 +46,8 @@ Woods.configure do |config|
 
   # ── Embedding ───────────────────────────────────────────────────────────
 
-  # Embedding provider: :openai or :ollama
+  # Embedding provider: :openai, :ollama, or :fake. `:fake` is deterministic
+  # and offline for tests/CI; it does not provide meaningful semantic ranking.
   # config.embedding_provider = :openai
   # config.embedding_model    = 'text-embedding-3-small'
   # config.embedding_options  = { api_key: ENV['OPENAI_API_KEY'] }
@@ -81,7 +82,8 @@ Woods.configure do |config|
   # config.vector_store_options = {
   #   url:        ENV.fetch('QDRANT_URL', 'http://localhost:6333'),
   #   collection: 'woods',
-  #   dimensions: 1_536
+  #   dimensions: 1_536,
+  #   allow_private_hosts: true # required for trusted localhost/RFC1918 URLs
   # }
 
   # Metadata store: :in_memory, :sqlite
