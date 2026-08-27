@@ -979,8 +979,10 @@ module Woods
         file = File.open(claim_lock_path, File::RDWR | File::CREAT, 0o644) # rubocop:disable Style/FileOpen
         file.flock(File::LOCK_EX)
         file
-      rescue SystemCallError
+      rescue SystemCallError => e
         file&.close
+        @logger.warn("[Woods] watch: claim lock unavailable on #{@output_dir} (#{e.class}: #{e.message}); " \
+                     'startup claims are not serialized here, so two simultaneous starters can both win')
         nil
       end
 

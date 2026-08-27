@@ -837,6 +837,15 @@ RSpec.describe Woods::Watch::Daemon do
       end
     end
 
+    it 'warns and still claims when the filesystem refuses the claim lock' do
+      logger = instance_double(Logger, info: nil, warn: nil, error: nil, debug: nil)
+      daemon = build(logger: logger)
+      allow_any_instance_of(File).to receive(:flock).and_raise(Errno::ENOTSUP)
+
+      expect(daemon.send(:claim_startup?)).to be true
+      expect(logger).to have_received(:warn).with(/claim lock unavailable/)
+    end
+
     it 'does not delete a claim that was replaced between the staleness check and the delete' do
       FileUtils.mkdir_p(output_dir)
       dead_pid = Process.spawn('true')
