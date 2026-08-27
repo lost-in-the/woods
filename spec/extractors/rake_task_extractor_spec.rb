@@ -21,6 +21,50 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     end
   end
 
+  # ── B-126: one task reopened in two files ──────────────────────────
+
+  describe 'a task defined in two .rake files (B-126)' do
+    before do
+      create_file('lib/tasks/a_seed.rake', <<~RAKE)
+        namespace :db do
+          desc 'Seed the base data'
+          task seed: :environment do
+            puts 'base'
+          end
+        end
+      RAKE
+      create_file('lib/tasks/b_seed.rake', <<~RAKE)
+        namespace :db do
+          task seed: :environment do
+            Rake::Task['db:extra'].invoke
+          end
+        end
+      RAKE
+    end
+
+    it 'merges both definitions into one unit on a full run' do
+      units = described_class.new.extract_all.select { |u| u.identifier == 'db:seed' }
+      expect(units.size).to eq(1)
+      unit = units.first
+      expect(unit.metadata[:defined_in]).to eq(%w[lib/tasks/a_seed.rake lib/tasks/b_seed.rake])
+      expect(unit.source_code).to include("puts 'base'").and include("Rake::Task['db:extra']")
+      expect(unit.dependencies).to include(hash_including(target: 'db:extra', via: :task_invoke))
+    end
+
+    it 'produces the same merged unit from either file on a per-file run' do
+      extractor = described_class.new
+      from_a = extractor.extract_rake_file(File.join(tmp_dir, 'lib/tasks/a_seed.rake')).find do |u|
+        u.identifier == 'db:seed'
+      end
+      from_b = extractor.extract_rake_file(File.join(tmp_dir, 'lib/tasks/b_seed.rake')).find do |u|
+        u.identifier == 'db:seed'
+      end
+      expect(from_b.file_path).to eq(from_a.file_path)
+      expect(from_b.source_code).to eq(from_a.source_code)
+      expect(from_b.metadata[:defined_in]).to eq(from_a.metadata[:defined_in])
+    end
+  end
+
   # ── extract_all ──────────────────────────────────────────────────────
 
   describe '#extract_all' do

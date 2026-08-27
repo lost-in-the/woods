@@ -119,9 +119,12 @@ module Woods
         IN EXISTS NOT AND OR VALUES WHERE HAVING ON IS BETWEEN CASE WHEN
         THEN ELSE END FROM JOIN USING WITH SELECT DISTINCT ALL ANY SOME
         UNION INTERSECT EXCEPT ORDER GROUP BY ASC DESC LIMIT OFFSET AS INTO
-        OVER PARTITION FILTER WITHIN RETURNING
+        OVER PARTITION FILTER WITHIN RETURNING EXPLAIN
       ].freeze
 
+      # EXPLAIN is a statement leader, so `EXPLAIN (FORMAT JSON) SELECT` is an
+      # option list, not a call; ALLOWED_PREFIXES already refuses ANALYZE inside
+      # that list (B-125).
       # Matches a function-call shape: an identifier immediately followed by
       # `(`, where the identifier may be bare, double-quoted (ANSI/PostgreSQL),
       # or backtick-quoted (MySQL). Quoting the name was the bypass — a bare

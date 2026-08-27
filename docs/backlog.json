@@ -1770,7 +1770,7 @@
       "lib/woods/console/sql_validator.rb"
     ],
     "description": "check_function_allowlist! treats `EXPLAIN (` as a function call, so any parenthesized option list is refused even though the class docstring says EXPLAIN without ANALYZE is permitted. Found during the 2.0.0 readiness review; the ANALYZE/ANALYSE rejection itself is correct.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-126",
@@ -1783,7 +1783,7 @@
       "lib/woods/extractors/rake_task_extractor.rb"
     ],
     "description": "A full run keeps the first-globbed file and warns; an incremental run on the second file overwrites the unit with the second file's path and source. Qualify the identifier with the defining file or merge sources per task.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-127",
@@ -1796,7 +1796,7 @@
       "lib/woods/extractors/route_extractor.rb"
     ],
     "description": "Subdomain, header-versioned, and format-constrained routes sharing a verb and path are deduplicated down to the first one, so the index is missing routes. Fold the constraint into the identifier.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-128",
@@ -1810,6 +1810,6 @@
       "lib/tasks/woods.rake"
     ],
     "description": "IndexValidator is only used by spec/integration/multi_worktree_spec.rb as the stand-in for woods:validate, while the rake task has its own inline implementation. Make the task call the class, or delete the class and assert through the task.",
-    "status": "open"
+    "status": "resolved"
   }
 ]

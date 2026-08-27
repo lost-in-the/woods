@@ -16,6 +16,7 @@ into identifiers. Concretely:
 | `Payment::aasm` | `Billing::Payment::aasm` |
 | `IssueInvoice` | `Billing::IssueInvoice` |
 | `ClassMethods` (concern unit) | correctly named after its owning concern |
+| `GET /users` (a route with a subdomain, format, or callable constraint) | `GET /users [subdomain=api]`; unconstrained routes are unchanged |
 
 Anything that cached the old shape will miss silently: saved retrieval
 queries, external notes, exported Notion pages, exported Obsidian/Unblocked

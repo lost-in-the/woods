@@ -2639,6 +2639,12 @@ graph TD
   Woods__Extractors__RakeTaskExtractor_extract_rake_file -->|method_call| File
   Woods__Extractors__RakeTaskExtractor_extract_rake_file -->|method_call| Rails_logger
   Woods__Extractors__RakeTaskExtractor_extract_rake_file -->|method_call| Rails
+  Woods__Extractors__RakeTaskExtractor_rake_files["Woods::Extractors::RakeTaskExtractor#rake_files"]
+  Woods__Extractors__RakeTaskExtractor_all_definitions["Woods::Extractors::RakeTaskExtractor#all_definitions"]
+  Woods__Extractors__RakeTaskExtractor_all_definitions -->|method_call| File
+  Woods__Extractors__RakeTaskExtractor_all_definitions -->|method_call| Rails_logger
+  Woods__Extractors__RakeTaskExtractor_all_definitions -->|method_call| Rails
+  Woods__Extractors__RakeTaskExtractor_sibling_definitions["Woods::Extractors::RakeTaskExtractor#sibling_definitions"]
   Woods__Extractors__RakeTaskExtractor_parse_tasks["Woods::Extractors::RakeTaskExtractor#parse_tasks"]
   Woods__Extractors__RakeTaskExtractor_extract_namespace_name["Woods::Extractors::RakeTaskExtractor#extract_namespace_name"]
   Woods__Extractors__RakeTaskExtractor_extract_desc["Woods::Extractors::RakeTaskExtractor#extract_desc"]
@@ -2656,6 +2662,7 @@ graph TD
   Woods__Extractors__RakeTaskExtractor_excluded_namespace_ -->|method_call| EXCLUDED_NAMESPACES
   Woods__Extractors__RakeTaskExtractor_build_unit["Woods::Extractors::RakeTaskExtractor#build_unit"]
   Woods__Extractors__RakeTaskExtractor_build_unit -->|method_call| ExtractedUnit
+  Woods__Extractors__RakeTaskExtractor_relative_path["Woods::Extractors::RakeTaskExtractor#relative_path"]
   Woods__Extractors__RakeTaskExtractor_build_source_annotation["Woods::Extractors::RakeTaskExtractor#build_source_annotation"]
   Woods__Extractors__RakeTaskExtractor_build_metadata["Woods::Extractors::RakeTaskExtractor#build_metadata"]
   Woods__Extractors__RakeTaskExtractor_extract_dependencies["Woods::Extractors::RakeTaskExtractor#extract_dependencies"]
@@ -2675,6 +2682,12 @@ graph TD
   Woods__Extractors__RouteExtractor_extract_route -->|method_call| ExtractedUnit
   Woods__Extractors__RouteExtractor_extract_route -->|method_call| Rails_logger
   Woods__Extractors__RouteExtractor_extract_route -->|method_call| Rails
+  Woods__Extractors__RouteExtractor_route_identifier["Woods::Extractors::RouteExtractor#route_identifier"]
+  Woods__Extractors__RouteExtractor_identifier_constraints["Woods::Extractors::RouteExtractor#identifier_constraints"]
+  Woods__Extractors__RouteExtractor_constraint_value["Woods::Extractors::RouteExtractor#constraint_value"]
+  Woods__Extractors__RouteExtractor_callable_constraint_["Woods::Extractors::RouteExtractor#callable_constraint?"]
+  Woods__Extractors__RouteExtractor_number_colliding_identifiers["Woods::Extractors::RouteExtractor#number_colliding_identifiers"]
+  Woods__Extractors__RouteExtractor_number_colliding_identifiers -->|method_call| Hash
   Woods__Extractors__RouteExtractor_route_defaults["Woods::Extractors::RouteExtractor#route_defaults"]
   Woods__Extractors__RouteExtractor_route_verb["Woods::Extractors::RouteExtractor#route_verb"]
   Woods__Extractors__RouteExtractor_route_path["Woods::Extractors::RouteExtractor#route_path"]
@@ -4069,10 +4082,25 @@ graph TD
   Woods__Resilience__IndexValidator_validate -->|method_call| Dir
   ValidationReport["ValidationReport"]
   Woods__Resilience__IndexValidator_validate -->|method_call| ValidationReport
+  Woods__Resilience__IndexValidator_validate_against_manifest["Woods::Resilience::IndexValidator#validate_against_manifest"]
+  Woods__Resilience__IndexValidator_validate_against_manifest -->|method_call| File
+  Woods__Resilience__IndexValidator_validate_against_manifest -->|method_call| JSON
+  Woods__Resilience__IndexValidator_validate_against_manifest -->|method_call| Hash
+  Woods__Resilience__IndexValidator_validate_manifest_type["Woods::Resilience::IndexValidator#validate_manifest_type"]
+  Woods__Resilience__IndexValidator_validate_manifest_type -->|method_call| File
+  Woods__Resilience__IndexValidator_validate_manifest_type -->|method_call| Dir___
+  Woods__Resilience__IndexValidator_validate_unit_file["Woods::Resilience::IndexValidator#validate_unit_file"]
+  Woods__Resilience__IndexValidator_validate_unit_file -->|method_call| JSON
+  Woods__Resilience__IndexValidator_path_resolvable_["Woods::Resilience::IndexValidator#path_resolvable?"]
+  Woods__Resilience__IndexValidator_path_resolvable_ -->|method_call| File
+  Woods__Resilience__IndexValidator_validate_dependency_graph["Woods::Resilience::IndexValidator#validate_dependency_graph"]
+  Woods__Resilience__IndexValidator_validate_dependency_graph -->|method_call| File
+  Woods__Resilience__IndexValidator_validate_dependency_graph -->|method_call| JSON
+  Woods__Resilience__IndexValidator_payload_dir["Woods::Resilience::IndexValidator#payload_dir"]
+  Woods__Resilience__IndexValidator_payload_dir -->|method_call| Woods__Generation_new_payload_dir
+  Woods__Resilience__IndexValidator_payload_dir -->|method_call| Woods__Generation_new
+  Woods__Resilience__IndexValidator_payload_dir -->|method_call| Woods__Generation
   Woods__Resilience__IndexValidator_payload_type_dirs["Woods::Resilience::IndexValidator#payload_type_dirs"]
-  Woods__Resilience__IndexValidator_payload_type_dirs -->|method_call| Woods__Generation_new_payload_dir
-  Woods__Resilience__IndexValidator_payload_type_dirs -->|method_call| Woods__Generation_new
-  Woods__Resilience__IndexValidator_payload_type_dirs -->|method_call| Woods__Generation
   Dir_children["Dir.children"]
   Woods__Resilience__IndexValidator_payload_type_dirs -->|method_call| Dir_children
   Woods__Resilience__IndexValidator_payload_type_dirs -->|method_call| File
@@ -5173,10 +5201,8 @@ graph TD
   Woods__Watch__Daemon_create_claim -->|method_call| File
   Woods__Watch__Daemon_reclaim_if_stale["Woods::Watch::Daemon#reclaim_if_stale"]
   Woods__Watch__Daemon_reclaim_if_stale -->|method_call| FileUtils
-  Woods__Watch__Daemon_claim_inode["Woods::Watch::Daemon#claim_inode"]
-  File_stat["File.stat"]
-  Woods__Watch__Daemon_claim_inode -->|method_call| File_stat
-  Woods__Watch__Daemon_claim_inode -->|method_call| File
+  Woods__Watch__Daemon_claim_bytes["Woods::Watch::Daemon#claim_bytes"]
+  Woods__Watch__Daemon_claim_bytes -->|method_call| File
   Woods__Watch__Daemon_stale_claim_["Woods::Watch::Daemon#stale_claim?"]
   Woods__Watch__Daemon_stale_claim_ -->|method_call| JSON
   Woods__Watch__Daemon_same_claim_host_["Woods::Watch::Daemon#same_claim_host?"]

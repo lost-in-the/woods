@@ -52,6 +52,42 @@ RSpec.describe Woods::Resilience::IndexValidator do
       end
     end
 
+    context 'with a manifest (B-128: the woods:validate checks)' do
+      before do
+        write_unit_file('models', 'User.json', source_code: 'class User; end')
+        write_json('models/_index.json', [{ 'identifier' => 'User', 'file_path' => 'app/models/user.rb' }])
+        write_json('manifest.json', { 'counts' => { 'models' => 2, 'controllers' => 1 } })
+      end
+
+      it 'warns when a manifest count disagrees with the files on disk' do
+        report = described_class.new(index_dir: tmp_dir).validate
+        expect(report.warnings).to include('models: expected 2, found 1')
+      end
+
+      it 'reports a type directory the manifest names but the disk lacks' do
+        report = described_class.new(index_dir: tmp_dir).validate
+        expect(report.errors).to include('Missing directory: controllers')
+      end
+
+      it 'reports a missing dependency graph' do
+        report = described_class.new(index_dir: tmp_dir).validate
+        expect(report.errors).to include('Missing dependency_graph.json')
+      end
+
+      it 'warns about unit file paths that resolve nowhere when given an app root' do
+        write_json('models/User.json', { 'identifier' => 'User', 'source_code' => 'class User; end',
+                                         'file_path' => 'app/models/user.rb' })
+        report = described_class.new(index_dir: tmp_dir, app_root: tmp_dir).validate
+        expect(report.warnings.grep(/models: 1 unit\(s\) whose file_path resolves nowhere/)).not_to be_empty
+      end
+
+      it 'reports a unit file without source_code' do
+        write_json('models/Order.json', { 'identifier' => 'Order' })
+        report = described_class.new(index_dir: tmp_dir).validate
+        expect(report.errors.grep(/Order\.json: missing source_code/)).not_to be_empty
+      end
+    end
+
     context 'with missing _index.json' do
       before do
         # Create a type directory with unit files but no _index.json

@@ -1454,11 +1454,16 @@ flowchart TD
   Woods__Extractors__RakeTaskExtractor_build_unit(["new"])
   Woods__Extractors__RakeTaskExtractor_build_unit -->|construction: new| ExtractedUnit
   Woods -->|construction: new| ExtractedUnit
+  Woods -->|construction: new| Hash
   Woods__Extractors -->|construction: new| ExtractedUnit
+  Woods__Extractors -->|construction: new| Hash
   Woods__Extractors__RouteExtractor(["new"])
   Woods__Extractors__RouteExtractor -->|construction: new| ExtractedUnit
+  Woods__Extractors__RouteExtractor -->|construction: new| Hash
   Woods__Extractors__RouteExtractor_extract_route(["new"])
   Woods__Extractors__RouteExtractor_extract_route -->|construction: new| ExtractedUnit
+  Woods__Extractors__RouteExtractor_number_colliding_identifiers(["new"])
+  Woods__Extractors__RouteExtractor_number_colliding_identifiers -->|construction: new| Hash
   Woods -->|construction: new| ExtractedUnit
   Woods -->|construction: new| ExtractedUnit
   Woods__Extractors -->|construction: new| ExtractedUnit
@@ -2374,6 +2379,10 @@ flowchart TD
   ValidationReport["ValidationReport"]
   Woods -->|construction: new| ValidationReport
   Woods -->|construction: new| ValidationReport
+  Woods -->|deserialization: parse| JSON
+  Woods -->|construction: new| Hash
+  Woods -->|deserialization: parse| JSON
+  Woods -->|deserialization: parse| JSON
   Woods -->|construction: new| Woods__Generation
   Woods -->|deserialization: parse| JSON
   Woods -->|construction: new| Set
@@ -2382,6 +2391,10 @@ flowchart TD
   Woods__Resilience -->|construction: new| Struct
   Woods__Resilience -->|construction: new| ValidationReport
   Woods__Resilience -->|construction: new| ValidationReport
+  Woods__Resilience -->|deserialization: parse| JSON
+  Woods__Resilience -->|construction: new| Hash
+  Woods__Resilience -->|deserialization: parse| JSON
+  Woods__Resilience -->|deserialization: parse| JSON
   Woods__Resilience -->|construction: new| Woods__Generation
   Woods__Resilience -->|deserialization: parse| JSON
   Woods__Resilience -->|construction: new| Set
@@ -2391,6 +2404,10 @@ flowchart TD
   Woods__Resilience__IndexValidator -->|construction: new| Struct
   Woods__Resilience__IndexValidator -->|construction: new| ValidationReport
   Woods__Resilience__IndexValidator -->|construction: new| ValidationReport
+  Woods__Resilience__IndexValidator -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator -->|construction: new| Hash
+  Woods__Resilience__IndexValidator -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator -->|deserialization: parse| JSON
   Woods__Resilience__IndexValidator -->|construction: new| Woods__Generation
   Woods__Resilience__IndexValidator -->|deserialization: parse| JSON
   Woods__Resilience__IndexValidator -->|construction: new| Set
@@ -2399,8 +2416,15 @@ flowchart TD
   Woods__Resilience__IndexValidator_validate(["new"])
   Woods__Resilience__IndexValidator_validate -->|construction: new| ValidationReport
   Woods__Resilience__IndexValidator_validate -->|construction: new| ValidationReport
-  Woods__Resilience__IndexValidator_payload_type_dirs(["new"])
-  Woods__Resilience__IndexValidator_payload_type_dirs -->|construction: new| Woods__Generation
+  Woods__Resilience__IndexValidator_validate_against_manifest(["parse"])
+  Woods__Resilience__IndexValidator_validate_against_manifest -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator_validate_against_manifest -->|construction: new| Hash
+  Woods__Resilience__IndexValidator_validate_unit_file[\"deserialization"\]
+  Woods__Resilience__IndexValidator_validate_unit_file -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator_validate_dependency_graph[\"deserialization"\]
+  Woods__Resilience__IndexValidator_validate_dependency_graph -->|deserialization: parse| JSON
+  Woods__Resilience__IndexValidator_payload_dir(["new"])
+  Woods__Resilience__IndexValidator_payload_dir -->|construction: new| Woods__Generation
   Woods__Resilience__IndexValidator_validate_type_directory(["parse"])
   Woods__Resilience__IndexValidator_validate_type_directory -->|deserialization: parse| JSON
   Woods__Resilience__IndexValidator_validate_type_directory -->|construction: new| Set

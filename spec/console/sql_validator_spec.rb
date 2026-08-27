@@ -49,6 +49,11 @@ RSpec.describe Woods::Console::SqlValidator do
           .to raise_error(Woods::Console::SqlValidationError)
       end
 
+      it 'accepts EXPLAIN with a parenthesized option list that has no ANALYZE (B-125)' do
+        expect { validator.validate!('EXPLAIN (FORMAT JSON) SELECT 1') }.not_to raise_error
+        expect { validator.validate!('EXPLAIN (COSTS OFF, FORMAT TEXT) SELECT * FROM users') }.not_to raise_error
+      end
+
       it 'rejects EXPLAIN ANALYSE (PostgreSQL accepts the British spelling too)' do
         expect { validator.validate!('EXPLAIN ANALYSE SELECT * FROM users') }
           .to raise_error(Woods::Console::SqlValidationError)

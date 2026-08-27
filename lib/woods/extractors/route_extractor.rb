@@ -31,7 +31,7 @@ module Woods
         return [] unless rails_routes_available?
 
         routes = Rails.application.routes.routes
-        routes.filter_map { |route| extract_route(route) }
+        number_colliding_identifiers(routes.filter_map { |route| extract_route(route) })
       end
 
       private
@@ -59,7 +59,7 @@ module Woods
 
         verb = route_verb(route)
         path = route_path(route)
-        identifier = "#{verb} #{path}"
+        identifier = route_identifier(verb, path, route)
 
         controller_class = "#{controller.camelize}Controller"
 
@@ -78,6 +78,62 @@ module Woods
       rescue StandardError => e
         Rails.logger.error("Failed to extract route: #{e.message}")
         nil
+      end
+
+      # Identifier for a route: `VERB /path`, qualified by its request
+      # constraints when it has any (B-127). Two routes that share a verb and
+      # path but differ by subdomain, header, or format would otherwise
+      # collapse into one unit, and the second silently vanished from the
+      # index. Path-segment requirements (`id: /\d+/`) do not qualify: they
+      # do not distinguish routes with the same path spec, and folding them
+      # in would rename every `resources` route with an `id` constraint.
+      #
+      # @return [String] e.g. "GET /users" or "GET /users [subdomain=api]"
+      def route_identifier(verb, path, route)
+        base = "#{verb} #{path}"
+        parts = identifier_constraints(path, route)
+        parts.empty? ? base : "#{base} [#{parts.join(', ')}]"
+      end
+
+      # @return [Array<String>] sorted `key=value` pairs for the constraints
+      #   that qualify the identifier, plus `constraint=proc` when the route
+      #   is wrapped by a callable constraint
+      def identifier_constraints(path, route)
+        segment_keys = path.scan(/:(\w+)/).flatten.map(&:to_sym)
+        pairs = route_constraints(route).reject { |key, _| segment_keys.include?(key.to_sym) }
+        requirements = route.respond_to?(:requirements) && route.requirements.is_a?(Hash) ? route.requirements : {}
+        pairs[:format] = requirements[:format] if requirements.key?(:format) && !pairs.key?(:format)
+
+        parts = pairs.sort_by { |key, _| key.to_s }.map { |key, value| "#{key}=#{constraint_value(value)}" }
+        parts << 'constraint=proc' if callable_constraint?(route)
+        parts
+      end
+
+      def constraint_value(value)
+        value.is_a?(Regexp) ? value.source : value.to_s
+      end
+
+      # A `constraints -> (req) { ... }` block wraps the endpoint in
+      # ActionDispatch::Routing::Mapper::Constraints, which exposes the
+      # callables as +constraints+.
+      def callable_constraint?(route)
+        app = route.respond_to?(:app) ? route.app : nil
+        app.respond_to?(:constraints) && app.constraints.is_a?(Array) && app.constraints.any?
+      end
+
+      # Routes still sharing an identifier after constraints are applied
+      # (two callable constraints, say) are numbered in route order:
+      # `GET /users`, `GET /users #2`. Deterministic for a given routes file,
+      # and the second route is indexed instead of dropped.
+      def number_colliding_identifiers(units)
+        seen = Hash.new(0)
+        units.each do |unit|
+          seen[unit.identifier] += 1
+          next if seen[unit.identifier] == 1
+
+          unit.identifier = "#{unit.identifier} ##{seen[unit.identifier]}"
+        end
+        units
       end
 
       # Extract defaults hash from route, handling different Rails versions.

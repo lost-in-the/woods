@@ -215,6 +215,8 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **Key details:**
 - Pure runtime introspection, reads the live routing table, not `config/routes.rb` AST
 - Each unit's identifier is `"VERB /path"` (e.g., `"POST /orders"`)
+- A route with request constraints is qualified: `"GET /users [subdomain=api]"`, `"GET /users [format=json]"`, `"GET /users [constraint=proc]"` for a callable. Path-segment requirements (`id: /\d+/`) do not qualify
+- Routes that still share an identifier are numbered in route order (`"GET /users #2"`) so none are dropped
 - Records controller, action, route name, and constraints
 - Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` changes, it isn't skipped, just not diffed per file
 
@@ -449,6 +451,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Reads `.rake` files statically, no Rails boot required for parsing
 - Uses `block_opener?` for depth tracking; `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks
 - Supports nested namespaces (`namespace :data do namespace :import do task :users`)
+- A task reopened in more than one `.rake` file is one unit, as Rake sees it: the source carries every definition, `metadata.defined_in` lists the files, and a per-file incremental run yields the same merged unit as a full run
 
 ---
 
