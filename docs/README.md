@@ -17,7 +17,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 
 ## First-time setup
 
-- [Getting started](GETTING_STARTED.md): install, generate configuration, migrate, extract, validate, and connect the Index Server.
+- [Getting started](GETTING_STARTED.md): install, review generated configuration and the legacy migration, extract, validate, and connect the Index Server.
 - [Agent setup runbook](AGENT_SETUP.md): the same result with version checks, repository safety, approval boundaries, and a copyable agent prompt.
 - [Docker setup](DOCKER_SETUP.md): extraction inside the container, container-first MCP launch, optional host launch, and path translation.
 - [Configuration reference](CONFIGURATION_REFERENCE.md): every supported option, default, and environment variable.

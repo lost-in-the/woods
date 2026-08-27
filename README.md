@@ -135,6 +135,8 @@ ollama pull nomic-embed-text
 
 MySQL/PostgreSQL applications that do not bundle `sqlite3` can use `:shared_filesystem` for local persisted stores instead. PostgreSQL/OpenAI, Qdrant/OpenAI, and shared-filesystem configurations are documented in the [backend matrix](docs/BACKEND_MATRIX.md) and [configuration reference](docs/CONFIGURATION_REFERENCE.md).
 
+For dense Ruby source, add `gem "tokenizers", "~> 0.5"` for exact WordPiece token counting. Without it, Woods uses a character estimate that can over-pack some Ollama chunks.
+
 ```bash
 bin/rails woods:embed
 ```

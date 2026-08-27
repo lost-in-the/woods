@@ -206,10 +206,11 @@ Separately, if the supporting section ends up with no candidates (it only ever h
 
 ### `context_format`
 
-Controls how assembled units are formatted. Default: `:markdown`. Valid values: `:markdown`, `:xml`, `:plain`.
+Controls how assembled units are formatted. Default: `:markdown`. Valid values: `:claude`, `:markdown`, `:plain`, `:json`.
 
 ```ruby
-config.context_format = :xml  # For GPT-family prompts that prefer XML structure
+config.context_format = :claude # XML-wrapped output for Claude-style context
+config.context_format = :json   # Machine-readable output
 ```
 
 ### Switching embedding models

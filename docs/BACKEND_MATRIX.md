@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Decision guidance for picking a vector store, metadata store, graph store, and embedding provider. Covers what's implemented today, what's still a design target, and how the three shipped presets map to `lib/woods/builder.rb`.
+Decision guidance for picking a vector store, metadata store, graph store, and embedding provider. Covers what's implemented today, what's still a design target, and how the four shipped presets map to `lib/woods/builder.rb`.
 
 ---
 
@@ -22,12 +22,12 @@ The shape determines the capability matrix:
 |---|---|---|---|
 | Survives process restart | No | Yes (via dump) | Yes (backend) |
 | Multi-writer embedding | No | No (single writer assumed) | Yes (backend-dependent) |
-| Requires sqlite3 gem in host | With `:local` | No | With `:local`/`:postgresql`/`:production` |
-| Requires external service | No | No | Yes |
+| Requires sqlite3 gem in host | Yes | No | With `:postgresql`/`:production` |
+| Requires embedding/vector service | Ollama | Ollama | OpenAI plus pgvector or Qdrant |
 | Cross-machine query | No | No | Yes |
 | `woods.json` schema-versioned config snapshot | n/a | Yes | Host config used directly |
 
-`Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:postgresql`, `:production`, no others exist.
+`Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:shared_filesystem`, `:postgresql`, and `:production`.
 
 ---
 

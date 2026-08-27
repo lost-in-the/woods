@@ -164,7 +164,12 @@ In an initializer (`config/initializers/woods.rb`):
 Woods.configure do |config|
   config.console_mcp_enabled = true
   config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
-  config.console_redacted_columns = %w[password_digest api_key ssn]
+  config.console_mcp_allowed_origins = [
+    'https://rails.internal.example', # public Rails/MCP Host
+    'https://agent.example'           # browser client Origin, when applicable
+  ]
+  config.console_redacted_columns =
+    Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[ssn]
 end
 ```
 
@@ -172,6 +177,13 @@ Set `WOODS_CONSOLE_MCP_TOKEN` to a random value of at least 32 characters in
 the Rails server environment. The middleware stack registers automatically via
 the gem's Railtie and requires `Authorization: Bearer <token>` on every Console
 request. Missing or incorrect tokens receive `401 Unauthorized`.
+
+For non-loopback access, `console_mcp_allowed_origins` must include the public
+Rails/MCP host. If a browser-based client sends an `Origin` header from a
+different host, include that exact origin too. This allow-list controls both
+DNS-rebinding Host checks and browser CORS; keep Rails' own `config.hosts`, TLS,
+and proxy rules aligned with it. Server-to-server clients normally omit
+`Origin`, but their request `Host` must still be allowed.
 
 Do not mount `Woods::Console::RackMiddleware` by itself. The Railtie composes
 `OriginGuard`, `BearerAuth`, and the Console middleware in the supported order.
@@ -382,6 +394,14 @@ Woods.configure do |config|
 
   # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
   config.console_mcp_path = '/mcp/console'
+
+  # HTTP Origin + Host allow-list. Defaults to loopback only. Non-loopback
+  # Rack deployments must include their public MCP host; browser clients from
+  # another origin need that exact origin listed too.
+  config.console_mcp_allowed_origins = [
+    'https://rails.internal.example',
+    'https://agent.example'
+  ]
 
   # Layer 1. Table names that must never appear in a response.
   # Default: Woods::DEFAULT_CONSOLE_BLOCKED_TABLES (8 tables, see below).

@@ -52,7 +52,8 @@ Woods.configure do |config|
   # Ollama (local, no API key needed). `num_ctx` is auto-selected per model
   # (nomic-embed-text → 2048, bge-m3 → 8192). Install `gem "tokenizers"` for
   # exact BERT WordPiece token counting on dense Ruby source. See
-  # docs/EMBEDDING_MODELS.md for the full model comparison.
+  # https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/EMBEDDING_MODELS.md
+  # has the full model comparison.
   # config.embedding_provider = :ollama
   # config.embedding_options  = {
   #   model: 'nomic-embed-text',
@@ -95,14 +96,16 @@ Woods.configure do |config|
   # Extract link_to / redirect_to / form_action navigation edges.
   # config.extract_navigation_edges = true
 
-  # Temporal snapshots — requires migrations 004+005.
+  # Temporal snapshots use Woods' output-directory SQLite database. Internal
+  # migrations run automatically; this does not require `rails db:migrate`.
   # config.enable_snapshots = false
 
   # ── Console MCP ─────────────────────────────────────────────────────────
   #
   # The Console MCP server lets AI tools query your live Rails app.
   # It is DISABLED by default. Enable only after reviewing the security
-  # documentation in docs/CONSOLE_MCP_SETUP.md.
+  # documentation:
+  # https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/CONSOLE_MCP_SETUP.md
   #
   # Defense layers (all active by default when the server is on):
   #   Layer 1 — Table gate: rejects tool calls that touch a blocked table.
@@ -118,11 +121,17 @@ Woods.configure do |config|
   # config.console_mcp_enabled = false
   # config.console_mcp_path    = '/mcp/console'
 
+  # Console HTTP requires a strong bearer token. Its Origin/Host guard is
+  # loopback-only by default; list the public MCP host and any browser client
+  # origin for a deliberate non-loopback deployment.
+  # config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
+  # config.console_mcp_allowed_origins = ['https://rails.internal.example']
+
   # Credential-column redaction (Layer 3).
   # Starts from a safe default list (passwords, tokens, secrets).
-  # Extend: Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[my_secret_col]
-  # Override entirely to remove a default:
-  # config.console_redacted_columns = %w[password token api_key]
+  # config.console_redacted_columns =
+  #   Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS + %w[my_secret_col]
+  # Replace the defaults only after auditing the full list against your schema.
 
   # Key-value pairs where the value should be redacted (e.g., env var names).
   # config.console_redacted_key_values = []

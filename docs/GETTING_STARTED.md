@@ -130,6 +130,8 @@ ollama pull nomic-embed-text
 bin/rails woods:embed
 ```
 
+For dense Ruby source, add `gem "tokenizers", "~> 0.5"` for exact WordPiece token counting. Without it, Woods falls back to character-based estimation, which can over-pack some Ollama chunks.
+
 Reconnect the MCP server and check `woods_status`. For OpenAI, pgvector, Qdrant, model dimensions, and provider changes, read the [Retrieval guide](RETRIEVAL_GUIDE.md) and [Backend matrix](BACKEND_MATRIX.md).
 
 ### Keep the index current
