@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/sql_noise_stripper'
 
 RSpec.describe Woods::Console::SqlNoiseStripper do

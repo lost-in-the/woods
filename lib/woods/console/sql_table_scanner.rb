@@ -104,6 +104,30 @@ module Woods
       # first via #strip.
       ONLY_PREFIX = /\AONLY\s+/i
 
+      # Matches the standalone SQL `TABLE name` statement (PostgreSQL, and
+      # MySQL 8.0.19+) — shorthand for `SELECT * FROM name`. It appears as a
+      # full statement, inside a CTE body (`WITH x AS (TABLE blocked) ...`),
+      # or as a FROM-clause subquery (`FROM (TABLE blocked) AS t`), so it is
+      # scanned independently of FROM_CLAUSE/JOIN_REFERENCE rather than as
+      # part of either. The identifier grammar mirrors LEAD_IDENT.
+      TABLE_STATEMENT = /
+        \bTABLE\s+
+        (?:ONLY\s+)?
+        (?:
+          (?:
+            `(?<schema_bt>[^`]+)` |
+            "(?<schema_dq>[^"]+)" |
+            (?<schema_bare>\w+)
+          )
+          \.
+        )?
+        (?:
+          `(?<backtick>[^`]+)` |
+          "(?<double>[^"]+)"   |
+          (?<bare>\w+(?:\.\w+)?)
+        )
+      /xi
+
       # Returns every table/schema-qualified identifier referenced in the SQL
       # string. Noise (comments, string literals, dollar-quoted bodies) is
       # stripped before scanning. Both JOIN-style and ANSI-89 comma-join syntax
@@ -128,6 +152,7 @@ module Woods
           stripped = strip_noise(sql, dialect: dialect)
           collect_join_identifiers(stripped, results)
           collect_from_identifiers(stripped, results)
+          collect_table_statement_identifiers(stripped, results)
         end
         results.uniq
       end
@@ -162,6 +187,16 @@ module Woods
         end
       end
       private_class_method :collect_from_identifiers
+
+      # @api private
+      # Collect identifiers referenced by the standalone `TABLE name`
+      # statement (see {TABLE_STATEMENT}).
+      def self.collect_table_statement_identifiers(sql, results)
+        sql.scan(TABLE_STATEMENT) do
+          results << qualified_identifier(Regexp.last_match)
+        end
+      end
+      private_class_method :collect_table_statement_identifiers
 
       # @api private
       # Split a comma-separated list at depth 0, skipping commas inside parens.

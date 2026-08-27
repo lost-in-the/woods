@@ -49,9 +49,11 @@ module Woods
     #
     # Security posture with embedded_read_tools: true:
     #
-    # 1. SqlValidator denylist — console_sql rejects INSERT/UPDATE/DELETE/DROP/TRUNCATE/
-    #    ALTER/CREATE/REPLACE and similar DML/DDL at the string level before any database
-    #    interaction. Only SELECT and WITH...SELECT are allowed.
+    # 1. SqlValidator — console_sql rejects INSERT/UPDATE/DELETE/DROP/TRUNCATE/ALTER/CREATE
+    #    and similar DML/DDL keywords via a denylist at the string level before any database
+    #    interaction. REPLACE is rejected too, but by the separate allowed-prefix check
+    #    (only SELECT, WITH, and EXPLAIN may lead a statement), not the denylist — it isn't
+    #    in SqlValidator::FORBIDDEN_KEYWORDS.
     #
     # 2. SafeContext rollback — every request (including console_query) runs inside
     #    a database transaction that is always rolled back on completion. Even if a

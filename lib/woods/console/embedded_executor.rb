@@ -154,12 +154,20 @@ module Woods
       # `sql`/`query` are gated behind `embedded_read_tools: true`. Everything
       # else outside Tier 1 is unavailable through a supported server mode.
       #
+      # The flag has two names depending on transport: `embedded_read_tools:`
+      # on `Woods::Console::RackMiddleware` (HTTP), or
+      # `config.console_embedded_read_tools` read by `exe/woods-console`
+      # (stdio). This executor runs under both, so the message names both —
+      # naming only one leaves an operator on the other transport with no
+      # idea what to set.
+      #
       # @param tool [String] Tool name that was rejected
       # @return [String] Actionable error message
       def unsupported_message(tool)
         if EMBEDDED_READ_TOOLS.include?(tool)
           "Tool '#{tool}' requires embedded_read_tools: true on " \
-            'Woods::Console::RackMiddleware. ' \
+            'Woods::Console::RackMiddleware, or config.console_embedded_read_tools = true ' \
+            'for the stdio server (exe/woods-console). ' \
             'See docs/CONSOLE_MCP_SETUP.md.'
         else
           "Tool '#{tool}' is not available in a supported Console MCP mode."
@@ -467,7 +475,11 @@ module Woods
 
       def handle_find(params)
         validate_find_locator!(params)
-        @model_validator.validate_columns!(params['model'], params['by'].keys.map(&:to_s)) if params['by']
+        if params['by']
+          by_columns = params['by'].keys.map(&:to_s)
+          @model_validator.validate_columns!(params['model'], by_columns)
+          by_columns.each { |column| refuse_redacted_column!(column) }
+        end
         validate_select_columns!(params)
         model = resolve_model(params['model'])
         record = params['id'] ? model.find_by(id: params['id']) : model.find_by(params['by'])
@@ -509,7 +521,10 @@ module Woods
       def handle_aggregate(params)
         column = params['column']
         function = params['function']
-        @model_validator.validate_column!(params['model'], column) if column
+        if column
+          @model_validator.validate_column!(params['model'], column)
+          refuse_redacted_column!(column)
+        end
 
         unless Server::AGGREGATE_FUNCTIONS.include?(function)
           raise ValidationError, "Invalid aggregate function: #{function}. " \
@@ -551,7 +566,20 @@ module Woods
         record = model.find(params['id'])
         scope = record.public_send(association_name)
         scope = apply_scope(scope, params['scope'], model_name: reflection.klass.name) if params['scope']
+        gate_association_sql!(scope)
         { 'count' => scope.count }
+      end
+
+      # Defense-in-depth: gate_association! (called by
+      # {#handle_association_count} before this) only proves the
+      # association's OWN target table isn't blocked. A through-association,
+      # default_scope, or an applied scope can still render SQL that reaches
+      # a blocked table via a less-obvious join — mirrors handle_query's
+      # re-check of the final rendered SQL. Only renders `to_sql` when a
+      # gate is actually configured — it is otherwise unnecessary AR work on
+      # every request.
+      def gate_association_sql!(scope)
+        gate_sql!(scope.to_sql) if @table_gate
       end
 
       # Pure column-name validation for a scope Hash, no relation is built
@@ -565,11 +593,50 @@ module Woods
         return unless scope.is_a?(Hash)
 
         scope.each_key do |raw_key|
-          key = raw_key.to_s
-          match = ScopePredicateParser::SUFFIX_PATTERN.match(key)
-          column = match ? key.delete_suffix(match[1]) : key
+          column = scope_key_column(raw_key)
           @model_validator.validate_column!(model_name, column)
+          refuse_redacted_column!(column)
         end
+      end
+
+      # Strip a Ransack-style predicate suffix (e.g. `_matches`, `_gt`) from a
+      # scope Hash key, returning the bare column name underneath.
+      #
+      # @param raw_key [String, Symbol]
+      # @return [String]
+      def scope_key_column(raw_key)
+        key = raw_key.to_s
+        match = ScopePredicateParser::SUFFIX_PATTERN.match(key)
+        match ? key.delete_suffix(match[1]) : key
+      end
+
+      # Refuse a column that is configured as redacted
+      # (`console_redacted_columns`). {SafeContext#redact} only scrubs
+      # sensitive values from serialized *output* — accepting the same
+      # column as a scope/filter key, a find locator, an aggregate target,
+      # or an order_by column lets a caller read its plaintext value via a
+      # comparison, aggregate, or sort-order oracle before redaction ever
+      # runs.
+      #
+      # @param column [String] bare column name (no schema/table qualifier)
+      # @raise [ValidationError] if the column is on console_redacted_columns
+      def refuse_redacted_column!(column)
+        return unless @safe_context.redacted_columns.include?(column.to_s)
+
+        raise ValidationError,
+              "Rejected: column '#{column}' is redacted (console_redacted_columns) and cannot be used " \
+              'as a scope, filter, aggregate, find, or order key.'
+      end
+
+      # Refuse every column referenced by a scope Hash that is on
+      # console_redacted_columns, honoring predicate suffixes
+      # (`email_matches`, `salary_gt`, etc.) the same way
+      # {#validate_scope_columns!} does.
+      #
+      # @param scope [Hash]
+      # @raise [ValidationError] on the first redacted column found
+      def refuse_redacted_scope_keys!(scope)
+        scope.each_key { |raw_key| refuse_redacted_column!(scope_key_column(raw_key)) }
       end
 
       def gate_association!(model_name, association)
@@ -613,6 +680,7 @@ module Woods
         limit = params.fetch('limit', 10)
 
         @model_validator.validate_column!(params['model'], order_by)
+        refuse_redacted_column!(order_by)
         unless %w[asc desc].include?(direction)
           raise ValidationError, "direction must be asc or desc (got #{direction.inspect})"
         end
@@ -942,6 +1010,7 @@ module Woods
         when Hash
           return relation unless scope.any?
 
+          refuse_redacted_scope_keys!(scope)
           if model_name
             parser = ScopePredicateParser.new(model_name: model_name, model_validator: @model_validator)
             parser.parse(relation, scope)

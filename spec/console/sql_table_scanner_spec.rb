@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/sql_table_scanner'
 
 RSpec.describe Woods::Console::SqlTableScanner do
@@ -280,6 +281,63 @@ RSpec.describe Woods::Console::SqlTableScanner do
 
       it 'still returns real tables' do
         expect(identifiers).to include('users')
+      end
+    end
+
+    context 'with a MySQL executable comment (/*! ... */) hiding a table (must not hide FROM)' do
+      # MySQL executes the body of a /*! ... */ comment — it is not inert like
+      # an ordinary block comment. Stripping it as a normal comment let a
+      # blocked table slip past TableGate.
+      let(:sql) { 'SELECT * FROM t /*! , blocked */' }
+
+      it 'detects the table hidden inside the executable comment' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'with a MySQL executable comment around a dangerous expression' do
+      let(:sql) { 'SELECT 1 /*! , SLEEP(10) */ FROM blocked' }
+
+      it 'still detects the real table' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'with a MySQL # line comment confusing the quote scanner (must not hide FROM)' do
+      # Without # comment support the stripper misreads the apostrophe
+      # inside the comment as opening a string literal, swallowing the
+      # real FROM clause that follows into a fake literal.
+      let(:sql) { "SELECT * FROM t # 'x\n, blocked WHERE b = 'z'" }
+
+      it 'detects the table after the # comment' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'with the SQL TABLE statement (PostgreSQL / MySQL 8.0.19+)' do
+      let(:sql) { 'WITH x AS (TABLE blocked) SELECT * FROM x' }
+
+      it 'detects the table referenced via TABLE' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'with a TABLE statement inside a FROM subquery' do
+      let(:sql) { 'SELECT * FROM (TABLE blocked) AS t' }
+
+      it 'detects the table referenced via TABLE' do
+        expect(identifiers).to include('blocked')
+      end
+    end
+
+    context 'with a $ inside an identifier that is not a dollar-quote tag (must not hide FROM)' do
+      # PostgreSQL allows `$` inside identifiers. Treating a `$` that
+      # follows a word character as a dollar-quote opener hid the real
+      # FROM clause between two `$`-suffixed identifiers.
+      let(:sql) { 'SELECT t.id AS x$a$ FROM blocked t, (SELECT 1 AS z$a$) s' }
+
+      it 'detects the table hidden between the dollar-suffixed identifiers' do
+        expect(identifiers).to include('blocked')
       end
     end
 

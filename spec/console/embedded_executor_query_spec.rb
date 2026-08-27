@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/embedded_executor'
 
 # Focused spec for the console_query / handle_query path with read_tools_enabled.

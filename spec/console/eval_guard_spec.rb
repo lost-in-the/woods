@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/eval_guard'
 
 RSpec.describe Woods::Console::EvalGuard do

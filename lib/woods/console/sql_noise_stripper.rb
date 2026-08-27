@@ -97,9 +97,25 @@ module Woods
       # never under-detect: an unterminated literal is treated as an ordinary
       # character rather than swallowing the rest of the statement.
       #
+      # `#` opens a MySQL line comment, mirroring `--`, but only under the
+      # `:mysql` dialect — PostgreSQL does not treat `#` as a comment, and
+      # collapsing it there would hide SQL that a real PostgreSQL server
+      # still executes. A MySQL `/*! ... */` executable comment is left
+      # untouched (not treated as a comment at all, under either dialect):
+      # MySQL runs its body, so it must stay visible to every downstream
+      # scan; leaving it visible under `:postgres` too is over-detection at
+      # worst, never under-detection, on a server where it really is inert.
+      # An ordinary `/* ... */` block comment is replaced by a single
+      # newline rather than vanishing outright, mirroring how a `--`/`#`
+      # line comment's own trailing newline survives: SqlValidator's
+      # statement-leader scan needs a durable marker showing a comment sat
+      # here so a comment-hidden statement (`SELECT 1 /*;*/ DELETE ...`)
+      # still reads as following a boundary once comments are gone.
+      #
       # @param sql [String] the SQL string to process
       # @param dialect [Symbol] `:postgres` (default) or `:mysql` — controls
-      #   single-quote escape rules (see {.strip_literals}).
+      #   single-quote escape rules (see {.strip_literals}) and whether `#`
+      #   opens a line comment.
       # @return [String] a new string with comments removed and every string
       #   literal replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
@@ -126,7 +142,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ch == '$' && (tag = dollar_tag_at(sql, i))
+          elsif ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
             close = sql.index(tag, i + tag.length)
             if close
               out << "''"
@@ -135,12 +151,18 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ch == '-' && sql[i + 1] == '-'
+          elsif (ch == '-' && sql[i + 1] == '-') || (mysql && ch == '#')
             nl = sql.index("\n", i)
             i = nl || len
-          elsif ch == '/' && sql[i + 1] == '*'
+          elsif ch == '/' && sql[i + 1] == '*' && sql[i + 2] != '!'
             close = sql.index('*/', i + 2)
             if close
+              # Preserve a newline in place of the removed comment, mirroring
+              # line comments (see class docs): callers that check for
+              # statement structure (SqlValidator's statement-leader scan)
+              # need a survivable marker showing a comment sat here, the
+              # same way a `--`/`#` comment's own trailing newline does.
+              out << "\n"
               i = close + 2
             else
               # Unterminated block comment: never under-detect. Leave it in
@@ -171,6 +193,19 @@ module Woods
         m && m[0]
       end
       private_class_method :dollar_tag_at
+
+      # Whether the character immediately before +index+ is a word character
+      # (`\w`). PostgreSQL allows `$` inside identifiers (`x$a$`), so a `$`
+      # is only a candidate dollar-quote opener when it does NOT follow an
+      # identifier character — otherwise `x$a$ FROM blocked, (SELECT 1 AS
+      # z$a$)` gets misread as one dollar-quoted literal spanning the real
+      # FROM clause.
+      #
+      # @api private
+      def self.preceded_by_word_char?(sql, index)
+        index.positive? && sql[index - 1].match?(/\w/)
+      end
+      private_class_method :preceded_by_word_char?
 
       # Return the index just past the closing quote of the single-quoted
       # literal that opens at +start+, honoring `''` (both dialects) and `\'`

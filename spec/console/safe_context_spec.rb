@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/safe_context'
 
 RSpec.describe Woods::Console::SafeContext do
@@ -50,6 +51,8 @@ RSpec.describe Woods::Console::SafeContext do
         double('MysqlConnection').tap do |conn|
           allow(conn).to receive(:adapter_name).and_return('Mysql2')
           allow(conn).to receive(:execute)
+          allow(conn).to receive(:select_value)
+            .with('SELECT @@SESSION.max_execution_time').and_return(0)
           allow(conn).to receive(:transaction) do |&block|
             block.call
           rescue ActiveRecord::Rollback
@@ -69,6 +72,34 @@ RSpec.describe Woods::Console::SafeContext do
         ctx = described_class.new(connection: mysql_connection, timeout_ms: 2000)
         expect(mysql_connection).to receive(:execute).with('SET max_execution_time = 2000')
         ctx.execute { |_c| nil }
+      end
+
+      # max_execution_time is SESSION scope on MySQL — there is no
+      # per-statement LOCAL equivalent — so it survives ROLLBACK and would
+      # otherwise leak onto the next request served from the same pooled
+      # connection. The previous session value must be read before the
+      # override and restored once the block completes.
+      it 'restores the previous session-scoped max_execution_time after the block' do
+        allow(mysql_connection).to receive(:select_value)
+          .with('SELECT @@SESSION.max_execution_time').and_return(1234)
+        ctx = described_class.new(connection: mysql_connection, timeout_ms: 5000)
+
+        ctx.execute { |_c| nil }
+
+        expect(mysql_connection).to have_received(:execute).with('SET max_execution_time = 5000').ordered
+        expect(mysql_connection).to have_received(:execute).with('SET max_execution_time = 1234').ordered
+      end
+
+      it 'restores the previous value even when the block raises' do
+        allow(mysql_connection).to receive(:select_value)
+          .with('SELECT @@SESSION.max_execution_time').and_return(999)
+        ctx = described_class.new(connection: mysql_connection, timeout_ms: 5000)
+
+        expect do
+          ctx.execute { |_c| raise 'boom' }
+        end.to raise_error('boom')
+
+        expect(mysql_connection).to have_received(:execute).with('SET max_execution_time = 999')
       end
     end
 

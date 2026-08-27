@@ -654,7 +654,9 @@ module Woods
           description: [
             'Execute read-only SQL against the live database (SELECT/WITH...SELECT only).',
             'SqlValidator blocks all DML/DDL. Every query runs inside a rolled-back transaction — no writes persist.',
-            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
+            'Requires embedded_read_tools: true on the rack middleware, or ' \
+            'config.console_embedded_read_tools = true for the stdio server ' \
+            '(see docs/CONSOLE_MCP_SETUP.md).',
             'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
           ].join(' '),
           properties: {
@@ -677,7 +679,9 @@ module Woods
             'Example: {model: "Order", select: ["status", "COUNT(*) AS n"], group_by: ["status"]}.',
             'Use console_count or console_aggregate for simple aggregates without a custom SELECT.',
             'Use console_sql when you need raw SQL that the query builder cannot express.',
-            'Requires embedded_read_tools: true in the rack middleware (see docs/CONSOLE_MCP_SETUP.md).',
+            'Requires embedded_read_tools: true on the rack middleware, or ' \
+            'config.console_embedded_read_tools = true for the stdio server ' \
+            '(see docs/CONSOLE_MCP_SETUP.md).',
             'Max 10,000 rows returned. Returns columns + rows arrays like a SQL result set.'
           ].join(' '),
           properties: {

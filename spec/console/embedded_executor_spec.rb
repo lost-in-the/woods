@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'json'
 require 'tmpdir'
+require 'woods'
 require 'woods/console/embedded_executor'
 
 RSpec.describe Woods::Console::EmbeddedExecutor do
@@ -799,6 +800,62 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       end
     end
 
+    context 'association_count tool with a TableGate (defense-in-depth on rendered SQL)' do
+      # gate_association! only proves the association's OWN target table
+      # isn't blocked. A through-association, default_scope, or custom
+      # scope on the association can still render SQL that reaches a
+      # blocked table via a less-obvious join — the same class of gap
+      # handle_query's own gate_sql!(relation.to_sql) call closes.
+      let(:user_model) { class_double('User') }
+      let(:record) { double('User record') }
+      let(:assoc_relation) { double('AssocRelation') }
+      let(:table_gate) do
+        Woods::Console::TableGate.new(
+          blocked_tables: %w[secrets],
+          model_tables: { 'User' => 'users', 'Post' => 'posts' },
+          model_reflections: { 'User' => { 'posts' => 'posts' } }
+        )
+      end
+
+      subject(:executor) do
+        described_class.new(model_validator: validator, safe_context: safe_context, connection: connection,
+                            table_gate: table_gate)
+      end
+
+      before do
+        stub_const('User', user_model)
+        allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(double('reflection'))
+        allow(user_model).to receive(:find).with(1).and_return(record)
+        allow(record).to receive(:posts).and_return(assoc_relation)
+      end
+
+      it 'refuses when the rendered association SQL reaches a blocked table through a less-obvious join' do
+        allow(assoc_relation).to receive(:to_sql)
+          .and_return('SELECT posts.* FROM posts INNER JOIN secrets ON secrets.post_id = posts.id')
+
+        response = executor.send_request({
+                                           'tool' => 'association_count',
+                                           'params' => { 'model' => 'User', 'id' => 1, 'association' => 'posts' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/secrets/)
+      end
+
+      it 'still counts when the rendered SQL only touches allowed tables' do
+        allow(assoc_relation).to receive(:to_sql).and_return('SELECT posts.* FROM posts')
+        allow(assoc_relation).to receive(:count).and_return(3)
+
+        response = executor.send_request({
+                                           'tool' => 'association_count',
+                                           'params' => { 'model' => 'User', 'id' => 1, 'association' => 'posts' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['count']).to eq(3)
+      end
+    end
+
     context 'schema tool' do
       let(:user_model) { class_double('User') }
       let(:id_col) { double('Column', type: :integer, null: false, default: nil) }
@@ -1023,6 +1080,17 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
       end
 
+      # RackMiddleware's constructor option and exe/woods-console's
+      # (stdio server) config flag are two different names for enabling the
+      # same tools — a message naming only one leaves a stdio-server
+      # operator with no idea what to set.
+      it 'names both the RackMiddleware option and the stdio server config flag' do
+        response = executor.send_request({ 'tool' => 'sql', 'params' => { 'sql' => 'SELECT 1' } })
+
+        expect(response['error']).to include('embedded_read_tools: true')
+        expect(response['error']).to include('console_embedded_read_tools')
+      end
+
       it 'points query at embedded_read_tools and the docs' do
         response = executor.send_request({
                                            'tool' => 'query',
@@ -1167,6 +1235,137 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
           expect(response['ok']).to be false
           expect(response['error']).to match(/Unknown model/)
         end
+      end
+    end
+
+    # SafeContext#redact scrubs a redacted column from serialized output, but
+    # accepting the same column as an aggregate target, a scope/filter key, a
+    # find locator, or an order_by column reads its plaintext value before
+    # redaction ever runs — a comparison/ordering/aggregate oracle over a
+    # column the operator explicitly configured as sensitive.
+    context 'redacted column oracle guard' do
+      let(:user_model) { class_double('User') }
+      let(:safe_context) do
+        Woods::Console::SafeContext.new(connection: connection, redacted_columns: %w[email])
+      end
+
+      subject(:executor) do
+        described_class.new(model_validator: validator, safe_context: safe_context, connection: connection)
+      end
+
+      before do
+        stub_const('User', user_model)
+      end
+
+      it 'refuses a redacted column as a console_aggregate column' do
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'sum', 'column' => 'email' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as a console_find locator key' do
+        response = executor.send_request({
+                                           'tool' => 'find',
+                                           'params' => { 'model' => 'User', 'by' => { 'email' => 'a@b.com' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as a console_count scope key' do
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => { 'email' => 'a@b.com' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column carrying a predicate suffix (e.g. _matches/LIKE) as a scope key' do
+        response = executor.send_request({
+                                           'tool' => 'count',
+                                           'params' => { 'model' => 'User', 'scope' => { 'email_matches' => '%a%' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as a console_sample scope key' do
+        response = executor.send_request({
+                                           'tool' => 'sample',
+                                           'params' => { 'model' => 'User', 'scope' => { 'email' => 'a@b.com' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as a console_pluck scope key' do
+        response = executor.send_request({
+                                           'tool' => 'pluck',
+                                           'params' => { 'model' => 'User', 'columns' => ['id'],
+                                                         'scope' => { 'email' => 'a@b.com' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as console_recent order_by' do
+        response = executor.send_request({
+                                           'tool' => 'recent',
+                                           'params' => { 'model' => 'User', 'order_by' => 'email' }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as a console_recent scope key' do
+        response = executor.send_request({
+                                           'tool' => 'recent',
+                                           'params' => { 'model' => 'User', 'scope' => { 'email' => 'a@b.com' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column as a console_association_count scope key' do
+        reflection = double('reflection', klass: user_model)
+        allow(user_model).to receive(:reflect_on_association).with(:invitees).and_return(reflection)
+        allow(user_model).to receive(:find)
+
+        response = executor.send_request({
+                                           'tool' => 'association_count',
+                                           'params' => {
+                                             'model' => 'User', 'id' => 1, 'association' => 'invitees',
+                                             'scope' => { 'email' => 'a@b.com' }
+                                           }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/redacted/i)
+        expect(user_model).not_to have_received(:find)
+      end
+
+      it 'still allows an aggregate on a non-redacted column' do
+        allow(user_model).to receive(:sum).with(:id).and_return(7)
+
+        response = executor.send_request({
+                                           'tool' => 'aggregate',
+                                           'params' => { 'model' => 'User', 'function' => 'sum', 'column' => 'id' }
+                                         })
+
+        expect(response['ok']).to be true
+        expect(response['result']['value']).to eq(7)
       end
     end
   end

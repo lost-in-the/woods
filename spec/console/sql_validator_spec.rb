@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
 require 'woods/console/sql_validator'
 
 RSpec.describe Woods::Console::SqlValidator do
@@ -45,6 +46,11 @@ RSpec.describe Woods::Console::SqlValidator do
 
       it 'rejects EXPLAIN ANALYZE (actually executes the plan on PG/MySQL 8)' do
         expect { validator.validate!('EXPLAIN ANALYZE SELECT * FROM users') }
+          .to raise_error(Woods::Console::SqlValidationError)
+      end
+
+      it 'rejects EXPLAIN ANALYSE (PostgreSQL accepts the British spelling too)' do
+        expect { validator.validate!('EXPLAIN ANALYSE SELECT * FROM users') }
           .to raise_error(Woods::Console::SqlValidationError)
       end
     end
@@ -295,6 +301,40 @@ RSpec.describe Woods::Console::SqlValidator do
     it 'rejects MERGE by name (defense in depth beyond the allowed-prefix fallback)' do
       sql = 'MERGE INTO target USING source ON (target.id = source.id) WHEN MATCHED THEN UPDATE SET x = 1'
       expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /MERGE/)
+    end
+  end
+
+  describe 'forbidden keyword false positives on identifier-shaped column names' do
+    # FORBIDDEN_BODY_REGEXES used to match a bare word anywhere in the
+    # stripped body, so a column legitimately named after a forbidden
+    # keyword (do, start, release, lock, handler, ...) was rejected even
+    # though it was never used as a statement. Only a statement-leader
+    # position (start of the SQL, or right after a `;`/comment-preserved
+    # boundary) should count.
+    %w[do start release lock handler].each do |column|
+      it "accepts a WHERE clause comparing the column `#{column}`" do
+        sql = "SELECT * FROM t WHERE #{column} = 1"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
+    it 'accepts a SELECT list containing a column named after a forbidden keyword' do
+      expect { validator.validate!('SELECT id, start, release FROM events') }.not_to raise_error
+    end
+
+    it 'still rejects DELETE hidden after a line comment (comment-hidden injection)' do
+      sql = "SELECT 1 --;\nDELETE FROM users"
+      expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /DELETE/)
+    end
+
+    it 'still rejects DELETE hidden after a block comment containing a semicolon' do
+      sql = 'SELECT 1 /*;*/ DELETE FROM users'
+      expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError)
+    end
+
+    it 'still rejects a forbidden keyword at the very start of the statement' do
+      expect { validator.validate!('LOCK TABLE users') }
+        .to raise_error(Woods::Console::SqlValidationError, /LOCK/)
     end
   end
 

@@ -427,4 +427,19 @@ RSpec.describe Woods::Console::Server do
       expect(spec.properties).to eq({})
     end
   end
+
+  # The opt-in flag has two names depending on transport: `embedded_read_tools:`
+  # on RackMiddleware (HTTP), or `config.console_embedded_read_tools` read by
+  # exe/woods-console (stdio). A description naming only the rack option
+  # leaves a stdio-server operator with no idea what to set.
+  describe 'read-tool opt-in descriptions name both transports' do
+    %w[console_sql console_query].each do |name|
+      it "#{name} names both the RackMiddleware option and the stdio server config flag" do
+        spec = all_specs.find { |s| s.name == name }
+
+        expect(spec.description).to include('embedded_read_tools: true')
+        expect(spec.description).to include('console_embedded_read_tools')
+      end
+    end
+  end
 end
