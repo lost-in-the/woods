@@ -34,7 +34,7 @@ If missing or stale, run the narrow maintenance path justified by the evidence: 
 
 ## 3. Check the MCP process and path
 
-Compare the client config with the exact command, absolute `cwd`, bundle, and host-visible index path. Run the configured executable manually to read stderr:
+Compare the client config with the exact command, absolute `cwd`, bundle, and index path visible to that process. Run the configured executable manually to read stderr. For a host bundle:
 
 ```bash
 bundle exec woods-mcp-start ./tmp/woods
@@ -42,7 +42,7 @@ bundle exec woods-mcp-start ./tmp/woods
 
 Then reconnect through the MCP client and call `woods_status`. Use client-native tool inspection after initialization. Expect 14 packaged Index tools, not all conditional schemas.
 
-For Docker, map container output to the path visible to the host/client process.
+For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
 
 ## 4. Check semantic retrieval
 

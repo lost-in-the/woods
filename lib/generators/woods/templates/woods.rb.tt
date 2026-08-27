@@ -4,7 +4,8 @@
 # Full reference: https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md
 #
 # Quick-start presets (uncomment one instead of the full block below):
-#   Woods.configure_with_preset(:local)       # in-memory + Ollama, no external services
+#   Woods.configure_with_preset(:local)       # SQLite metadata + local Ollama (sqlite3 gem required)
+#   Woods.configure_with_preset(:shared_filesystem) # persisted files + local Ollama; no sqlite3
 #   Woods.configure_with_preset(:postgresql)  # pgvector + OpenAI (PostgreSQL required)
 #   Woods.configure_with_preset(:production)  # Qdrant + OpenAI (production-scale)
 #
@@ -32,13 +33,8 @@ Woods.configure do |config|
 
   # ── Extractors ──────────────────────────────────────────────────────────
 
-  # Enabled extractors. Default set covers the most common Rails layers.
-  # See CONFIGURATION_REFERENCE.md for the full list of available symbols.
-  # config.extractors = %i[
-  #   models controllers services components view_components
-  #   jobs mailers graphql serializers managers policies validators
-  #   rails_source
-  # ]
+  # All built-in extractors run. `config.extractors` is accepted for forward
+  # compatibility but does not select a subset; non-default values warn.
 
   # Include Rails / gem source in the index (increases extraction time).
   # config.include_framework_sources = true

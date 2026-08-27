@@ -81,7 +81,7 @@ The generated directory is disposable build output. Add `tmp/woods/` to `.gitign
 
 The Index Server reads the generated index. It does not boot Rails and does not query application records.
 
-For a project-scoped client such as Claude Code, add `.mcp.json` at the application root:
+For a project-scoped stdio MCP client, add the equivalent server entry at the application root (for clients that support `.mcp.json`, use this shape):
 
 ```json
 {
@@ -97,7 +97,7 @@ For a project-scoped client such as Claude Code, add `.mcp.json` at the applicat
 
 Use an absolute `cwd`. It ensures Bundler resolves the application's Woods version and makes the relative index path unambiguous. Reconnect or restart the MCP client after changing its configuration.
 
-For Cursor, Windsurf, Docker volume paths, direct `woods-mcp`, and HTTP transport, use [MCP servers](MCP_SERVERS.md).
+For client-specific configuration locations, Docker, direct `woods-mcp`, and HTTP transport, use [MCP servers](MCP_SERVERS.md).
 
 ## 6. Verify from the client
 
@@ -120,7 +120,7 @@ The Index schema inventory totals 29 tools. Fourteen register in a normal packag
 
 Structural search, exact lookup, dependency traversal, graph analysis, and flow tracing do not need embeddings. Add embeddings only when agents need natural-language retrieval.
 
-The local preset uses SQLite metadata, persisted in-memory vectors, and a local Ollama service:
+The local preset uses SQLite metadata, persisted in-memory vectors, and a local Ollama service. Add `gem "sqlite3"` to the application bundle if it is not already present. MySQL/PostgreSQL applications that do not want that dependency can use the `:shared_filesystem` preset instead; it still uses Ollama but persists all stores beneath the Woods output directory.
 
 ```ruby
 # config/initializers/woods.rb
@@ -137,14 +137,23 @@ Reconnect the MCP server and check `woods_status`. For OpenAI, pgvector, Qdrant,
 
 ### Keep the index current
 
-For ordinary file changes, run an incremental update or keep a resident watcher running:
+For automatic maintenance, keep a watcher running beside the Rails development process:
 
 ```bash
-bin/rails woods:incremental
 bin/rails woods:watch
 ```
 
-Use a full `woods:extract` after broad configuration changes, major upgrades, or when validation reports drift. CI and shared-artifact patterns are covered in [Incremental extraction](INCREMENTAL_EXTRACTION.md) and [Watch daemon](WATCH_DAEMON.md).
+```text
+# Procfile.dev
+web:   bin/rails server
+woods: bundle exec rake woods:watch
+```
+
+On startup it reconciles changes made since the last successful generation. While running it batches file events, reloads Rails code when safe, extracts affected units, and publishes atomically. The Index Server detects the new generation on its next call and reloads automatically. After the initial extraction, ordinary code edits need no manual extraction or MCP restart.
+
+When dependencies, initializers, database configuration, credentials, or schema change, Rails cannot safely reload all captured state. The watcher records a degraded reason and exits with status 75 so the process manager can restart it. Docker bind mounts may require polling; follow [Watch daemon](WATCH_DAEMON.md).
+
+The watcher maintains the structural index. If semantic retrieval is enabled, also run `bin/rails woods:embed_incremental` to update vectors. Without a resident watcher, run `bin/rails woods:incremental` after changes. Use a full `woods:extract` after major upgrades or when validation reports drift. CI and shared-artifact patterns are covered in [Incremental extraction](INCREMENTAL_EXTRACTION.md).
 
 ### Enable the Console Server
 

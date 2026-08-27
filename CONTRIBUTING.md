@@ -13,6 +13,8 @@ Search existing issues and pull requests first. A minimal reproduction in a smal
 
 ## Development setup
 
+Prerequisites are Git, Ruby 3.0 or later, and a Bundler version compatible with that Ruby. The repository tests several Ruby versions and intentionally does not pin one local version; select a supported Ruby with your normal version manager, then confirm `ruby --version` and `bundle --version`. `bin/setup` installs the bundle but does not install or select Ruby.
+
 ```bash
 git clone https://github.com/lost-in-the/woods.git
 cd woods

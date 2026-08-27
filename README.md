@@ -85,7 +85,7 @@ Restart or reconnect your MCP client, then ask it to call `woods_status`. A read
 
 The Index Server reads the published index from disk. It does not boot Rails or query application records.
 
-> **Using Docker?** Run the Rails commands inside the app container, but keep the Index Server on the host and point it at the host-visible volume path. Follow [Docker setup](docs/DOCKER_SETUP.md).
+> **Using Docker?** Run Rails commands inside the application container. If Woods is installed only there, launch the Index Server through that container too; a host-side server requires a host Ruby bundle and host-visible index. Follow [Docker setup](docs/DOCKER_SETUP.md).
 
 The complete walkthrough, including expected output and first questions to ask, is in [Getting started](docs/GETTING_STARTED.md).
 
@@ -99,7 +99,7 @@ The complete walkthrough, including expected output and first questions to ask, 
 | Teach an agent how to query Woods effectively | [Agent guide](docs/AGENT_GUIDE.md) |
 | Add semantic search with OpenAI or local Ollama | [Retrieval guide](docs/RETRIEVAL_GUIDE.md) |
 | Query live Rails data through the optional Console Server | [Console MCP setup and security](docs/CONSOLE_MCP_SETUP.md) |
-| Keep the index current while code changes | [Incremental extraction](docs/INCREMENTAL_EXTRACTION.md) or [watch daemon](docs/WATCH_DAEMON.md) |
+| Keep the index current automatically while coding | [Watch daemon](docs/WATCH_DAEMON.md) |
 | Upgrade an existing 1.x installation | [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md) |
 | Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
 
@@ -128,7 +128,7 @@ Exact search, lookup, graph traversal, and flow tools work after extraction alon
 Woods.configure_with_preset(:local)
 ```
 
-The `:local` preset uses SQLite metadata, in-memory vectors persisted under the index, and a local Ollama service. It needs no cloud API key, but Ollama must be installed and running. PostgreSQL/OpenAI, Qdrant/OpenAI, and shared-filesystem configurations are documented in the [backend matrix](docs/BACKEND_MATRIX.md) and [configuration reference](docs/CONFIGURATION_REFERENCE.md).
+The `:local` preset uses SQLite metadata, in-memory vectors persisted under the index, and a local Ollama service. It needs the `sqlite3` gem in the application bundle plus an installed, running Ollama service, but no cloud API key. MySQL/PostgreSQL applications that do not bundle `sqlite3` can use `:shared_filesystem` for local persisted stores instead. PostgreSQL/OpenAI, Qdrant/OpenAI, and shared-filesystem configurations are documented in the [backend matrix](docs/BACKEND_MATRIX.md) and [configuration reference](docs/CONFIGURATION_REFERENCE.md).
 
 ```bash
 bin/rails woods:embed
@@ -144,17 +144,25 @@ Run a full extraction after installation or broad configuration changes:
 bin/rails woods:extract
 ```
 
-For ordinary code changes, choose one maintenance path:
+For automatic maintenance during development, run the watcher as a dedicated process:
 
 ```bash
-# Update paths changed since the previous extraction
-bin/rails woods:incremental
-
-# Or run a resident process that batches changes
 bin/rails woods:watch
 ```
 
-Woods publishes complete generations atomically. Readers stay on the previous complete generation until the next one is ready.
+Add it to your development process manager so it starts beside Rails:
+
+```text
+# Procfile.dev
+web:   bin/rails server
+woods: bundle exec rake woods:watch
+```
+
+The watcher catches up changes made while it was stopped, batches new file changes, reloads Rails code when safe, and publishes complete generations atomically. The Index Server notices a new generation on its next tool call and refreshes itself. **After the initial extraction, ordinary code changes need no manual re-extraction or MCP restart.**
+
+Changes to boot-captured state, including dependencies, initializers, database configuration, credentials, or schema, make the watcher exit with status 75 so a process supervisor can restart it cleanly. If semantic retrieval is enabled, the watcher keeps structural context current; run `bin/rails woods:embed_incremental` to update vectors.
+
+Without a resident watcher, run `bin/rails woods:incremental` after changes. See [Watch daemon](docs/WATCH_DAEMON.md) for Docker polling, failure behavior, and restart triggers.
 
 ## What gets indexed
 

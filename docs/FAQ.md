@@ -54,21 +54,9 @@ The generated defaults are enough for structural extraction to `tmp/woods/`. Emb
 
 ---
 
-### How do I set up the MCP server for Claude Code?
+### How do I set up Woods in my MCP client?
 
-Extract first, then configure a project-scoped stdio server using the application's bundle and host-visible index path. Use the verified example in [MCP servers](MCP_SERVERS.md#configure-a-stdio-client).
-
----
-
-### How do I set up the MCP server for Cursor?
-
-Use the same project-scoped stdio command, adapted to Cursor's configuration location. See [MCP servers](MCP_SERVERS.md#client-locations).
-
----
-
-### How do I set up the MCP server for Windsurf?
-
-Use the same project-scoped stdio command, adapted to Windsurf's configuration location. See [MCP servers](MCP_SERVERS.md#client-locations).
+Extract first, then configure a project-scoped stdio server using the application's bundle and an index path visible to the server process. Woods works with any model through a client that supports MCP stdio or Streamable HTTP. Use the verified examples in [MCP servers](MCP_SERVERS.md#configure-a-stdio-client), adapting them to the client's configuration location.
 
 ---
 
@@ -201,49 +189,52 @@ This is an MCP client behavior, not a server bug. Some clients batch parallel to
 
 ### Does extraction run inside or outside the container?
 
-Extraction runs **inside** the container, it requires Rails to be booted. The Index Server runs **outside** the container on the host, it only reads static JSON files. The Console Server connects to a process inside the container through `docker exec -i`. This split architecture means you only need Docker for operations that require Rails.
+Extraction runs **inside** the container because it requires Rails to be booted. By default, launch the Index Server through the same application container so it can use the installed bundle and container index path; it still reads only static files and does not boot Rails. A host-side Index Server is optional when the host has the application bundle and can read the index volume. The Console Server connects to a booted Rails process inside the container.
 
 ```
-HOST                           CONTAINER
-─────────────────              ──────────────────
-Index Server (reads JSON) ◀── volume mount ─── rake extract (writes JSON)
-woods-console-mcp      ──── docker exec ──▶  rake console (queries Rails)
+HOST                           APPLICATION CONTAINER
+─────────────────              ─────────────────────────
+MCP client ── compose exec ──▶ woods-mcp (reads JSON)
+Rails commands ──────────────▶ rake extract (writes JSON)
+Console client ──────────────▶ rake console (queries Rails)
 ```
 
 See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker architecture guide.
 
 ---
 
-### Why do I get a "No manifest.json" error when I know extraction succeeded?
+### Why does the Index Server say no published manifest exists after extraction?
 
-The Index Server is looking at the wrong path, specifically the container-internal path rather than the host-side path. The Index Server runs on the host and reads from the volume-mounted output directory.
+The server is usually running in a different filesystem context from the path you supplied. A Docker-launched server needs the container path; an optional host-launched server needs a host-visible path and the application bundle installed on the host.
 
 ```jsonc
 {
   "mcpServers": {
     "codebase": {
-      "command": "woods-mcp-start",
-      "args": ["./tmp/woods"]    // host path (NOT the container /app/tmp/woods)
+      "command": "docker",
+      "args": ["compose", "exec", "-T", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
 ```
 
-Do not use `/app/tmp/woods` (the container path), the host process cannot access it. Verify with `ls ./tmp/woods/manifest.json` on the host.
+Verify the active v2 generation with `docker compose exec app bundle exec rake woods:validate` and `woods:stats`. Do not require a root `manifest.json`: Woods 2 normally publishes root `generation.json`, which points to the active payload manifest.
 
 ---
 
 ### How do I configure the Console Server with Docker?
 
-For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -i`:
+For the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
 
 ```json
 {
   "mcpServers": {
     "codebase-console": {
       "command": "docker",
-      "args": ["compose", "exec", "-i", "app",
-               "bundle", "exec", "rake", "woods:console"]
+      "args": ["compose", "exec", "-T", "app",
+               "bundle", "exec", "rake", "woods:console"],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }

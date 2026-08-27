@@ -120,7 +120,7 @@ Prefer a project-scoped configuration so the executable, bundle, and index all b
 }
 ```
 
-For Docker, extraction usually runs inside the Rails container while the stdio MCP process runs on the host. Resolve `./tmp/woods` to the host-visible side of the mounted volume; do not put a container-only path in a host client configuration.
+For Docker, extraction runs inside the Rails container. If Woods is installed only there, configure the client to launch `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods` with the host application root as `cwd`. Use a host-side `bundle exec woods-mcp-start` only after verifying the host has a supported Ruby, the application bundle, and a host-visible index. In either mode, supply the path visible to the server process.
 
 Reconnect the client and call `woods_status`. Confirm a current generation and non-zero unit counts before claiming setup works.
 
@@ -133,6 +133,24 @@ Use a class known to exist in the application:
 3. Call `dependents` with depth 1 or 2 to confirm graph edges are queryable.
 
 If `codebase_retrieve` reports that semantic search is disabled, that is expected for structural-only setup. Do not configure credentials merely to remove the message.
+
+## 8. Offer automatic index maintenance
+
+Ask whether the owner wants Woods added to the development process manager. If authorized, use the repository's existing Procfile or equivalent convention:
+
+```text
+web:   bin/rails server
+woods: bundle exec rake woods:watch
+```
+
+The watcher catches up missed changes, maintains the structural index as files change, and publishes generations the Index MCP server detects automatically. Ordinary edits then need no manual re-extraction or MCP restart. It should run in development, not production.
+
+Report these boundaries in the handoff:
+
+- boot-captured changes make the watcher exit 75 and require supervisor restart;
+- container bind mounts may require `WOODS_WATCH_POLL=1`;
+- semantic vectors still require `woods:embed_incremental`;
+- without a resident watcher, the fallback is `woods:incremental` after changes.
 
 ## Stop and ask before
 
@@ -172,6 +190,7 @@ Verified capabilities:
 - search/lookup/dependents checked: yes/no
 - semantic retrieval: disabled/enabled (provider)
 - Console MCP: disabled/enabled (authorization)
+- automatic structural updates: disabled/enabled (process manager)
 
 Follow-up or unresolved risk:
 ```
@@ -180,7 +199,7 @@ Never report a capability as enabled solely because its schema exists in source.
 
 ## Copyable prompt for an installation agent
 
-> Install Woods 2.x in this Rails repository using `docs/AGENT_SETUP.md`. Start with read-only preflight and preserve unrelated changes. Default to the structural Index Server; do not enable embeddings, Console MCP, HTTP transport, secrets, or purge overrides without asking me. Inspect generated files before migrating, run extraction and validation in the app's normal execution environment, configure a project-scoped MCP server with a host-visible index path, and verify `woods_status`, `search`, `lookup`, and `dependents`. Finish with the runbook's handoff report.
+> Install Woods 2.x in this Rails repository using `docs/AGENT_SETUP.md`. Start with read-only preflight and preserve unrelated changes. Default to the structural Index Server; do not enable embeddings, Console MCP, HTTP transport, secrets, or purge overrides without asking me. Inspect generated files before migrating, run extraction and validation in the app's normal execution environment, configure a project-scoped MCP server in the same filesystem context as the application bundle and index, and verify `woods_status`, `search`, `lookup`, and `dependents`. Finish with the runbook's handoff report.
 
 ## Related guides
 

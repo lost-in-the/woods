@@ -1,6 +1,6 @@
 # Console MCP Server Setup
 
-The Console MCP Server gives AI tools (Claude Code, Cursor, Windsurf) live access to your Rails application: real database counts, record lookups, schema inspection, and job monitoring, all inside rolled-back transactions.
+The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: real database counts, record lookups, schema inspection, and job monitoring, all inside rolled-back transactions.
 
 ## Transport Options at a Glance
 
@@ -31,21 +31,7 @@ The rake task does two things before starting the MCP server:
 
 ### MCP Client Configuration
 
-**Claude Code** (`.mcp.json` or `claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "rails-console": {
-      "command": "bundle",
-      "args": ["exec", "rake", "woods:console"],
-      "cwd": "/path/to/your/rails-app"
-    }
-  }
-}
-```
-
-**Cursor / Windsurf** (`.cursor/mcp.json`):
+Add this server entry to your MCP client's project configuration:
 
 ```json
 {
@@ -62,7 +48,7 @@ The rake task does two things before starting the MCP server:
 ### What Happens Under the Hood
 
 ```
-MCP client (Claude Code)
+MCP client
   │
   │ spawns via stdio
   │
@@ -93,7 +79,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
 
 ### MCP Client Configuration
 
-**Claude Code:**
+**Plain Docker:**
 
 ```json
 {
@@ -118,16 +104,16 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
     "rails-console": {
       "command": "docker",
       "args": [
-        "exec", "-i",
-        "myapp-web-1",
+        "compose", "exec", "-T", "web",
         "bundle", "exec", "rake", "woods:console"
-      ]
+      ],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
 ```
 
-> **Note:** The container name in MCP config must match exactly what `docker ps` shows. Docker Compose generates names like `<project>-<service>-<index>`. Check with `docker ps --format '{{.Names}}'`.
+> **Note:** Compose uses the service name and `-T` to disable its pseudo-TTY. Plain `docker exec` uses the exact container name from `docker ps` and needs `-i` to keep stdin open.
 
 ### Environment Variables
 
@@ -187,7 +173,7 @@ the default Railtie mount remains stateless.
 
 ### MCP Client Configuration
 
-**Claude Code** (streamable-http transport):
+For an MCP client that supports Streamable HTTP:
 
 ```json
 {

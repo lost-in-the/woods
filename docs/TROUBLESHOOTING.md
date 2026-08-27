@@ -352,7 +352,7 @@ end
 
 For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)`, in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in, it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
 
-See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL section](BACKEND_MATRIX.md#mysql) for graph-traversal details (recursive CTEs on 8.0+).
+See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL + Qdrant section](BACKEND_MATRIX.md#mysql--qdrant-classic-rails) for graph-traversal details (recursive CTEs on 8.0+).
 
 ---
 
@@ -524,7 +524,7 @@ services:
       - .:/app    # Full app mount, output lands at ./tmp/woods/
 ```
 
-Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`, or, if that's absent, `cat tmp/woods/generation.json` and check under the `payload` path it names (see [No manifest.json error](#no-manifestjson-error-when-starting-the-index-server) above).
+Then re-run extraction. Prefer `docker compose exec app bundle exec rake woods:validate` and `woods:stats`; these checks follow the active v2 generation. Host visibility is only required for an optional host-side Index Server.
 
 ---
 
@@ -532,17 +532,18 @@ Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`, or
 
 **Symptom:** The MCP client reports a broken pipe or immediate disconnection when using Docker.
 
-**Cause:** The `-i` flag is missing from `docker exec` or `docker compose exec`. Without `-i`, stdin is not attached and the MCP protocol cannot communicate.
+**Cause:** Plain `docker exec` lacks `-i`, or Docker Compose allocated its default pseudo-TTY. Either breaks stdio MCP communication.
 
-**Fix:** Add `-i` to your `.mcp.json`:
+**Fix:** Use `-T` with Compose (`stdin` remains attached), or `-i` with plain `docker exec`:
 
 ```json
 {
   "mcpServers": {
     "codebase-console": {
       "command": "docker",
-      "args": ["compose", "exec", "-i", "app",
-               "bundle", "exec", "rake", "woods:console"]
+      "args": ["compose", "exec", "-T", "app",
+               "bundle", "exec", "rake", "woods:console"],
+      "cwd": "/absolute/host/path/to/app"
     }
   }
 }
@@ -648,7 +649,7 @@ config.notion_database_ids = {
 
 | Error message | Cause | Fix |
 |---------------|-------|-----|
-| `No manifest.json found` | Wrong path in `.mcp.json` | Use host path, not container path |
+| `No manifest.json found` | Wrong index path or no published generation | Use the path visible to the server process; run `woods:validate` |
 | `uninitialized constant Rails` | Not running inside Rails app | Run via `bundle exec rake` in Rails root |
 | `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
 | `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |

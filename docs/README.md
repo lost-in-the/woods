@@ -10,6 +10,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 | Ask an agent to install or configure Woods | [Agent setup runbook](AGENT_SETUP.md) | A safe, reviewable install with an agent handoff report |
 | Configure an MCP client or Docker path | [MCP servers](MCP_SERVERS.md) | A working Index Server and, if authorized, an optional Console Server |
 | Use Woods tools as an agent | [Agent guide](AGENT_GUIDE.md) | A repeatable query workflow for code context, flows, and blast radius |
+| Keep the index current automatically | [Watch daemon](WATCH_DAEMON.md) | A resident development process that catches up changes and republishes the index |
 | Upgrade from Woods 1.x | [Upgrade to Woods 2.0](UPGRADING_TO_2.md) | A backed-up, re-indexed, verified v2 installation |
 | Diagnose an error | [Troubleshooting](TROUBLESHOOTING.md) | Symptom-to-cause checks for extraction, MCP, embeddings, storage, and Docker |
 | Contribute to Woods | [Contributing](../CONTRIBUTING.md) | A tested change with synchronized docs and plugin guidance |
@@ -18,7 +19,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 
 - [Getting started](GETTING_STARTED.md): install, generate configuration, migrate, extract, validate, and connect the Index Server.
 - [Agent setup runbook](AGENT_SETUP.md): the same result with version checks, repository safety, approval boundaries, and a copyable agent prompt.
-- [Docker setup](DOCKER_SETUP.md): extraction inside the container, Index Server on the host, and path translation.
+- [Docker setup](DOCKER_SETUP.md): extraction inside the container, container-first MCP launch, optional host launch, and path translation.
 - [Configuration reference](CONFIGURATION_REFERENCE.md): every supported option, default, and environment variable.
 - [Backend matrix](BACKEND_MATRIX.md): choose structural-only, local Ollama, pgvector/OpenAI, Qdrant/OpenAI, or shared-filesystem deployment.
 
@@ -56,7 +57,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 
 ## Maintainer material
 
-Historical build-phase documents are not user guides. The live MCP protocol decision record is in [design/MCP_2026_STRATEGY.md](design/MCP_2026_STRATEGY.md). The repository also keeps generated self-analysis diagrams under [self-analysis/](self-analysis/) and the maintainer work ledger in `backlog.json`.
+Historical build-phase documents are not user guides. Source checkouts also contain the [MCP protocol decision record](https://github.com/lost-in-the/woods/blob/main/docs/design/MCP_2026_STRATEGY.md), [generated self-analysis diagrams](https://github.com/lost-in-the/woods/tree/main/docs/self-analysis), and the maintainer work ledger in `backlog.json`; these maintainer-only paths are not packaged with the gem.
 
 ## Canonical owners
 

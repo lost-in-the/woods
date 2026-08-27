@@ -31,9 +31,10 @@ Create a `.mcp.json` in the worktree's root directory with the same woods server
     "woods-console": {
       "command": "docker",
       "args": [
-        "compose", "exec", "-i", "app",
+        "compose", "exec", "-T", "app",
         "bundle", "exec", "rake", "woods:console"
-      ]
+      ],
+      "cwd": "/absolute/host/path/to/worktree"
     }
   }
 }

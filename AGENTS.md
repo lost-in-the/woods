@@ -45,7 +45,7 @@ WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
   bin/rspec spec/integration/live_backends_spec.rb
 ```
 
-Use the repository's selected Ruby and Bundler. Do not broadly update dependencies to make one command pass.
+Use a supported Ruby (3.0 or later; the repository intentionally has no single version file) and a compatible Bundler. Do not broadly update dependencies to make one command pass.
 
 ## Invariants
 
@@ -62,7 +62,7 @@ Use the repository's selected Ruby and Bundler. Do not broadly update dependenci
 - The packaged default exposes 14 tools. `codebase_retrieve` registers but needs embeddings to return semantic context.
 - The other 15 schemas require specialized builder collaborators or configuration. The packaged executable does not wire pipeline-operator or feedback-store capabilities.
 - Extraction runs in Rails; the Index Server reads the published index without booting Rails.
-- Docker clients must use a path visible to the process that starts MCP, usually the host side of a volume.
+- Docker clients must use a path visible to the process that starts MCP. Prefer running MCP through the application container when Woods is installed only there; a host launch requires the host bundle and a host-visible index.
 - Keep stdout protocol-only. Normally leave `MCP_PROTOCOL_VERSION` unset so the SDK negotiates.
 
 ### Console MCP

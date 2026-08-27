@@ -136,8 +136,10 @@ tmp/woods/
 
 ## Who Is Woods For?
 
-**Teams using AI coding assistants**: Claude Code, Cursor, Windsurf, Copilot. If your
-team asks an AI to help with Rails code and gets wrong answers, Woods is the fix.
+**Teams using MCP-capable coding tools and agents.** Woods is model-independent; it
+supplies Rails context through MCP to tools backed by OpenAI, Anthropic, Google, xAI,
+or other model providers. If an agent helps with Rails code but lacks runtime context,
+Woods fills that gap.
 
 **Rails apps of any size.** Small apps benefit from accurate schema and route context.
 Large monoliths benefit most, hundreds of models with deep callback chains and concern

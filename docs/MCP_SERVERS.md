@@ -55,28 +55,39 @@ bundle exec woods-mcp ./tmp/woods
 
 Keep stdout reserved for MCP protocol messages. Diagnose startup failures from stderr or by running the same command in a terminal.
 
-### Client locations
+### Client configuration locations
 
-| Client | Typical project configuration | Notes |
-|---|---|---|
-| Claude Code | `.mcp.json` | Use the JSON shape above |
-| Cursor | `.cursor/mcp.json` | Use the client's `mcpServers` format and the same command/cwd |
-| Windsurf | Windsurf MCP settings | Use the same command/cwd; location varies by client release |
-| Other stdio clients | Client-specific MCP settings | Preserve `command`, `args`, and absolute `cwd` semantics |
+MCP clients expose project or user-level server settings in different locations. Use project scope when available, preserve the `command`, `args`, and absolute `cwd` semantics above, and translate only the surrounding client-specific format. Woods is model-independent: compatibility depends on the client supporting MCP stdio or Streamable HTTP, not on whether the connected model is from OpenAI, Anthropic, Google, xAI, or another provider.
 
 Client configuration formats can change independently of Woods. If a client rejects otherwise valid JSON, check that client's current MCP documentation.
 
-### Docker path rule
+### Docker process and path rule
 
-Extraction runs inside the Rails container. A desktop or coding client normally starts stdio processes on the host. Therefore the Index Server argument must be the host-visible side of the volume that contains the container's `tmp/woods/`.
+Extraction runs inside the Rails container. When Woods is installed only in that container, prefer launching the Index Server through it too:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "docker",
+      "args": ["compose", "exec", "-T", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
+      "cwd": "/absolute/host/path/to/app"
+    }
+  }
+}
+```
+
+Compose resolves the project from `cwd`; `-T` disables its pseudo-TTY while stdin remains connected to MCP. This server uses the container path and does not require Ruby or Woods on the host.
+
+A host-side `bundle exec woods-mcp-start` is also valid, but only when the application bundle is installed on the host and the output is host-visible:
 
 ```text
 Rails container: /app/tmp/woods
 Volume mapping:   ./tmp:/app/tmp
-MCP index path:   /absolute/host/project/tmp/woods
+Host MCP path:    /absolute/host/project/tmp/woods
 ```
 
-If the client itself runs in a container, both `cwd` and index path must be visible in that container. See [Docker setup](DOCKER_SETUP.md).
+Always choose the path visible to the server process. See [Docker setup](DOCKER_SETUP.md).
 
 ### Verify the connection
 
