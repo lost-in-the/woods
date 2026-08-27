@@ -56,8 +56,11 @@ After explicit authorization, enable the live-data master switch in the Rails in
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
+  config.console_mcp_token = ENV["WOODS_CONSOLE_MCP_TOKEN"]
 end
 ```
+
+The token authenticates HTTP requests and is not sent by a stdio client. Production Rails boot still requires `WOODS_CONSOLE_MCP_TOKEN` to contain at least 32 characters whenever Console is enabled, including for a stdio-only setup. Keep it in the application's secret store. Outside production, omitting it warns and leaves the Console HTTP endpoint guarded with 401.
 
 Then add a direct Console process:
 
