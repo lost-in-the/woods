@@ -980,16 +980,26 @@ module Woods
       #
       # Keeps the +@dump_retention_count+ most-recently-created directories
       # (sorted by name, which is a UTC timestamp so lexicographic order equals
-      # chronological order). The current +latest+ directory is always kept.
+      # chronological order). The current +latest+ directory is always kept —
+      # true by construction: it is filtered out of the prune candidates
+      # below, not merely assumed to sort last. A backward wall-clock step
+      # (NTP correction, a stubbed clock in a spec) can mint a new dump
+      # directory whose name sorts *before* older ones, which used to put the
+      # dump #persist_snapshot had just promoted at the front of the "oldest
+      # first" prune list — deleting it out from under the +latest+ pointer
+      # that was made to point at it moments earlier.
       def prune_old_dumps(artifact)
         return if @dump_retention_count.nil? || @dump_retention_count <= 0
 
         dumps_root = artifact.dumps_root
         return unless dumps_root.exist?
 
+        latest = artifact.latest_dump_path&.to_s
         dirs = sorted_dump_dirs(dumps_root)
         excess = dirs.length - @dump_retention_count
-        dirs.first(excess).each { |dir| FileUtils.rm_rf(dir) } if excess.positive?
+        return unless excess.positive?
+
+        (dirs.first(excess) - [latest]).each { |dir| FileUtils.rm_rf(dir) }
       end
 
       def sorted_dump_dirs(dumps_root)

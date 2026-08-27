@@ -429,8 +429,12 @@ module Woods
     end
 
     # Diagnostic for the build_chunker budget guard.
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @param budget [Integer]
+    # @return [String]
     def chunker_budget_message(provider, budget)
-      "embedding model '#{provider.respond_to?(:model) ? provider.model : provider.class}' " \
+      "embedding model '#{provider.respond_to?(:model_name) ? provider.model_name : provider.class}' " \
         "reports a max_input_tokens of #{budget}, which leaves no room for " \
         "the chunk prefix (#{CHUNKER_PREFIX_ALLOWANCE} chars). Configure a " \
         'model with a larger native context, or set num_ctx explicitly.'

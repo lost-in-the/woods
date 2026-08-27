@@ -955,6 +955,36 @@ RSpec.describe Woods::Embedding::Indexer do
         # The oldest directory should have been pruned
         expect(File.exist?(old_dirs.first)).to be false
       end
+
+      it 'never prunes the just-promoted latest dump, even when a backward clock step ' \
+         'names it lexicographically oldest' do
+        stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+        stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+        allow(vector_snapshotter).to receive(:dump)
+
+        dumps_dir = File.join(output_dir, 'dumps')
+        FileUtils.mkdir_p(dumps_dir)
+
+        # Two "normal" dumps already on disk, both dated after the backward
+        # step this run is about to take.
+        %w[2026-04-20T00-00-00Z 2026-04-21T00-00-00Z].each do |name|
+          FileUtils.mkdir_p(File.join(dumps_dir, name))
+        end
+
+        # Simulate an NTP correction (or a stubbed clock in an earlier test
+        # bleeding state): this run's dump directory is minted with a name
+        # that sorts BEFORE both existing dumps.
+        allow(Time).to receive(:now).and_return(Time.utc(2020, 1, 1))
+
+        indexer_with_retention.index_all
+
+        artifact = Woods::IndexArtifact.new(output_dir)
+        latest_dir = artifact.latest_dump_path
+
+        expect(latest_dir).not_to be_nil
+        expect(File.directory?(latest_dir.to_s)).to be true
+        expect(File.basename(latest_dir.to_s)).to eq('2020-01-01T00-00-00Z')
+      end
     end
   end
 

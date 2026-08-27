@@ -5,8 +5,12 @@ module Woods
     # Tracks which schema migrations have been applied.
     #
     # Uses a simple `woods_schema_migrations` table with a single
-    # `version` column. Works with any database connection that supports
-    # `execute` and returns arrays (SQLite3, pg, mysql2).
+    # `version` column. **SQLite-only**: the DDL/DML here relies on
+    # SQLite-specific syntax (`datetime('now')` as a column default,
+    # `INSERT OR IGNORE`, `?` positional placeholders), and both real call
+    # sites ({Woods::Db::Migrator}'s callers) pass an `SQLite3::Database`.
+    # Pgvector/MySQL hosts should use their own migration path (see the
+    # pgvector generator's own migrations) rather than this class.
     #
     # @example
     #   db = SQLite3::Database.new('woods.db')

@@ -356,6 +356,14 @@ RSpec.describe Woods::Builder do
         .to raise_error(ArgumentError, /no room for the chunk prefix/)
     end
 
+    # No provider exposes #model — only #model_name. The diagnostic used to
+    # probe respond_to?(:model), which is always false, so it silently fell
+    # through to naming the provider's Ruby class instead of the model.
+    it 'names the model via #model_name, not the provider class' do
+      expect { builder.build_chunker(tiny_provider) }
+        .to raise_error(ArgumentError, /'tiny-test-model'/)
+    end
+
     it 'still builds a chunker when the budget leaves positive headroom' do
       reasonable = Woods::Embedding::Provider::Ollama.new(model: 'all-minilm')
       expect { builder.build_chunker(reasonable) }.not_to raise_error

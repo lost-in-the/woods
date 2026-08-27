@@ -286,8 +286,13 @@ module Woods
           @id_to_index[id] = idx
         end
 
-        # Overwrite an existing entry in place. Tombstones the old slot's
-        # deletion marker (if any) so the new vector is live again.
+        # Overwrite an existing entry in place.
+        #
+        # Only reachable via +#store+ for an +idx+ still present in
+        # +@id_to_index+ — every path that tombstones an index (+#delete+,
+        # +#delete_by_filter+) removes its id from +@id_to_index+ in the same
+        # operation, so an idx looked up here can never also be in
+        # +@tombstones+. There is nothing to un-tombstone.
         def overwrite(idx, vector, metadata)
           base = idx * @dim
           i = 0
@@ -296,7 +301,6 @@ module Woods
             i += 1
           end
           @metadata[idx] = metadata
-          @tombstones.delete(idx)
         end
 
         # Walk every non-tombstoned index, apply filters, score survivors.

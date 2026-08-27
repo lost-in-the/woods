@@ -3,6 +3,7 @@
 require 'json'
 require 'set'
 require_relative '../filename_utils'
+require_relative '../atomic_file'
 
 require_relative '../generation'
 
@@ -61,16 +62,7 @@ module Woods
           return ValidationReport.new(valid?: false, warnings: warnings, errors: errors)
         end
 
-        # Resolve the published generation's payload: an index that publishes
-        # per-generation payloads keeps `payloads/`, `dumps/` and `tasks/`
-        # beside them at the root, none of which are type directories.
-        payload = Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
-        type_dirs = Dir.children(payload).filter_map do |name|
-          full_path = File.join(payload, name)
-          full_path if File.directory?(full_path)
-        end
-
-        type_dirs.each do |type_dir|
+        payload_type_dirs(errors).each do |type_dir|
           validate_type_directory(type_dir, warnings, errors)
         end
 
@@ -78,6 +70,30 @@ module Woods
       end
 
       private
+
+      # Resolve the published generation's payload and list its type
+      # directories (e.g. models/, controllers/) — an index that publishes
+      # per-generation payloads keeps `payloads/`, `dumps/` and `tasks/`
+      # beside them at the root, none of which are type directories.
+      #
+      # @param errors [Array<String>] accumulated errors; appended to if the
+      #   payload directory named by the published generation isn't on disk
+      # @return [Array<String>] absolute paths to type directories
+      def payload_type_dirs(errors)
+        payload = Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
+        Dir.children(payload).filter_map do |name|
+          full_path = File.join(payload, name)
+          full_path if File.directory?(full_path)
+        end
+      rescue Errno::ENOENT
+        # A published `generation.json` pointing at a payload directory
+        # that isn't actually on disk (e.g. a generation bump raced a
+        # promote, or the payload was manually removed) is an index
+        # integrity problem this validator exists to report — not a
+        # crash for its caller to catch.
+        errors << "Payload directory does not exist: #{payload}"
+        []
+      end
 
       # Validate a single type directory (e.g., models/, controllers/).
       #
@@ -93,7 +109,7 @@ module Woods
           return
         end
 
-        index_entries = JSON.parse(File.read(index_path))
+        index_entries = JSON.parse(Woods::AtomicFile.read(index_path))
         indexed_identifiers = Set.new
 
         index_entries.each do |entry|
@@ -144,7 +160,7 @@ module Woods
       # @param identifier [String] The unit identifier (for error messages)
       # @param errors [Array<String>] Accumulated errors
       def validate_content_hash(unit_file, identifier, errors)
-        data = JSON.parse(File.read(unit_file))
+        data = JSON.parse(Woods::AtomicFile.read(unit_file))
         source_code = data['source_code']
         stored_hash = data['source_hash']
 
