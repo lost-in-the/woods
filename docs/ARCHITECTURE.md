@@ -125,7 +125,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the nine unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `rails_source`/`gem_source` work the same way, triggered by `Gemfile.lock`, gated separately by `include_framework_sources`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the nine unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source` (gated by `include_framework_sources`). Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
 
 ---
 
@@ -305,7 +305,7 @@ Use the Index Server for:
 - Temporal snapshots (comparing codebase state over time)
 - Feedback collection
 
-Note: pipeline management and feedback collection require specialized builder collaborators. The packaged `woods-mcp` executable wires neither, so those tools are not registered in a standard launch; snapshot tools are wired by default.
+Note: pipeline management and feedback collection require specialized builder collaborators. The packaged `woods-mcp` executable wires neither, so those tools are not registered in a standard launch. Snapshot tools register only when snapshots are enabled (`enable_snapshots: true`, `WOODS_SNAPSHOTS=true`, or an existing snapshot database in the index directory).
 
 The Index Server is safe to run anywhere, it has no database connection and makes no writes to the Rails application.
 
