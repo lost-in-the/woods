@@ -21,6 +21,7 @@
 # manifest) raises Encoding::InvalidByteSequenceError. AtomicFile.write is
 # binmode, so the read side must go through AtomicFile.read to match.
 require 'woods/atomic_file'
+require 'woods/generation'
 
 namespace :woods do
   # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
@@ -191,27 +192,6 @@ namespace :woods do
     Dir.rmdir(output_dir)
   rescue SystemCallError
     nil
-  end
-
-  # Does a unit's recorded file_path point at anything in THIS environment?
-  #
-  # Framework units carry absolute gem paths — deliberately
-  # environment-specific, see RailsSourceExtractor — and those resolve fine
-  # in the environment that extracted them. What this catches is the #169
-  # failure class generally: units whose absolute path was written by a
-  # different environment (a container's /app/...) and whose relative form
-  # doesn't exist under Rails.root either — an index a reader can retrieve
-  # from but never open a source file for.
-  #
-  # For an absolute path `Rails.root.join` returns the path itself, so one
-  # expression covers both forms.
-  #
-  # @param file_path [String]
-  # @return [Boolean]
-  def woods_path_resolvable?(file_path)
-    File.exist?(file_path) || File.exist?(Rails.root.join(file_path))
-  rescue StandardError
-    false
   end
 
   # Changed paths across a git range, for `woods:incremental`'s CI branches.
@@ -499,6 +479,8 @@ namespace :woods do
 
   desc 'Validate extracted index integrity'
   task validate: :environment do
+    require 'woods/resilience/index_validator'
+
     output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     unless output_dir.exist?
@@ -506,8 +488,7 @@ namespace :woods do
       exit 1
     end
 
-    payload_dir = woods_payload_dir(output_dir)
-    manifest_path = payload_dir.join('manifest.json')
+    manifest_path = woods_payload_dir(output_dir).join('manifest.json')
     unless manifest_path.exist?
       puts 'ERROR: Manifest not found. Run extraction first.'
       exit 1
@@ -520,61 +501,12 @@ namespace :woods do
     puts "  Git SHA: #{manifest['git_sha']}"
     puts
 
-    errors = []
-    warnings = []
-    unresolvable = Hash.new { |hash, key| hash[key] = [] }
+    # One implementation of the check (B-128): the class the worktree
+    # integration spec asserts through is the one this task runs.
+    report = Woods::Resilience::IndexValidator.new(index_dir: output_dir.to_s, app_root: Rails.root.to_s).validate
+    errors = report.errors
+    warnings = report.warnings
 
-    # Check each type directory
-    manifest['counts'].each do |type, expected_count|
-      type_dir = payload_dir.join(type)
-      unless type_dir.exist?
-        errors << "Missing directory: #{type}"
-        next
-      end
-
-      actual_count = Dir[type_dir.join('*.json')].reject { |f| f.end_with?('_index.json') }.size
-
-      warnings << "#{type}: expected #{expected_count}, found #{actual_count}" if actual_count != expected_count
-
-      # Validate each unit file is valid JSON
-      Dir[type_dir.join('*.json')].each do |file|
-        next if file.end_with?('_index.json')
-
-        begin
-          data = JSON.parse(Woods::AtomicFile.read(file))
-          errors << "#{file}: missing identifier" unless data['identifier']
-          errors << "#{file}: missing source_code" unless data['source_code']
-          # The #169 staleness class, caught generally: a file_path that
-          # resolves neither as written nor under Rails.root was recorded by
-          # a different environment (or its source has since vanished).
-          if data['file_path'] && !woods_path_resolvable?(data['file_path'])
-            unresolvable[type] << (data['identifier'] || File.basename(file))
-          end
-        rescue JSON::ParserError => e
-          errors << "#{file}: invalid JSON - #{e.message}"
-        end
-      end
-    end
-
-    unresolvable.each do |type, identifiers|
-      sample = identifiers.first(3).join(', ')
-      warnings << "#{type}: #{identifiers.size} unit(s) whose file_path resolves nowhere " \
-                  "(e.g. #{sample}) — extracted in a different environment? Re-run extraction."
-    end
-
-    # Check dependency graph
-    graph_path = payload_dir.join('dependency_graph.json')
-    if graph_path.exist?
-      begin
-        JSON.parse(Woods::AtomicFile.read(graph_path))
-      rescue JSON::ParserError
-        errors << 'dependency_graph.json: invalid JSON'
-      end
-    else
-      errors << 'Missing dependency_graph.json'
-    end
-
-    # Report
     if errors.any?
       puts 'ERRORS:'
       errors.each { |e| puts "  ✗ #{e}" }

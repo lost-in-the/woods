@@ -137,6 +137,30 @@ derive unit identifiers, which changes the index format's observable contract.
   reclaim checks the claim inode before removing it and falls back to an
   exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
   honours array filters like `#search`.
+- **`woods:clean` and `woods:validate` no longer raise `NameError` in a host
+  app.** `woods.rake` reached `Woods::Generation` through the extractor, which
+  those tasks never load. Caught by every woods-testbed variant.
+- **The daemon's stale-claim race guard compares bytes, not the inode.** Linux
+  reuses a freed inode for the next file in the directory, so the inode check
+  let a just-replaced live claim be deleted. Failed on CI, passed on macOS.
+- **Routes that differ only by constraint are all indexed.** The identifier is
+  `VERB /path`, qualified by request constraints when the route has any:
+  `GET /users [subdomain=api]`, `GET /users [format=json]`, `constraint=proc`
+  for a callable. Routes that still collide are numbered in route order
+  (`GET /users #2`) instead of being dropped. Unconstrained routes keep their
+  old identifier; a constrained one changes, so the clean re-index above
+  covers it.
+- **A rake task reopened in two `.rake` files is one unit**, the way Rake sees
+  it: its source carries every definition, `metadata.defined_in` lists the
+  files, and a per-file incremental run produces the same merged unit as a
+  full run. Previously the second file overwrote the first.
+- **`woods:validate` and `Resilience::IndexValidator` are one implementation.**
+  The task now runs the class, which gained the task's manifest-count,
+  unit-file, file-path, and dependency-graph checks (`app_root:` opts into
+  the file-path check).
+- **`EXPLAIN (FORMAT JSON) SELECT` is accepted.** The option list was read as
+  a call to a function named `EXPLAIN`. `EXPLAIN ANALYZE` in any form is
+  still refused.
 - **Class names are position-aware in every file-scanning extractor.** Jobs,
   serializers, decorators, policies, Pundit policies, managers, and validators
   took the first `class` token in the file, so `module Billing; class ChargeJob`

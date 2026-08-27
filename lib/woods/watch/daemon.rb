@@ -1000,17 +1000,19 @@ module Woods
       #   already replaced by a winning contender, or the directory
       #   vanished — every case where the caller should give up
       def reclaim_if_stale
-        ino = claim_inode
-        return false unless ino
+        snapshot = claim_bytes
+        return false unless snapshot
         return false unless stale_claim?
 
         # Race guard: two starters can both read the same dead-pid claim
-        # and both judge it stale before either deletes it. Re-stat
-        # immediately before deleting — if the inode changed since we
-        # captured it above, another daemon's create_claim already
-        # replaced the file with its own live claim, and deleting it now
-        # would destroy a claim we never judged stale.
-        return false unless claim_inode == ino
+        # and both judge it stale before either deletes it. Re-read
+        # immediately before deleting: if the bytes changed since the
+        # snapshot, another daemon's create_claim already replaced the file
+        # with its own live claim, and deleting it now would destroy a claim
+        # we never judged stale. Bytes, not the inode: Linux reuses a freed
+        # inode for the very next file created in the directory, so an
+        # inode comparison passed the replaced claim through.
+        return false unless claim_bytes == snapshot
 
         FileUtils.rm_f(claim_path)
         true
@@ -1018,10 +1020,10 @@ module Woods
         false
       end
 
-      # @return [Integer, nil] the claim file's current inode, or nil if it
+      # @return [String, nil] the claim file's current bytes, or nil if it
       #   doesn't exist
-      def claim_inode
-        File.stat(claim_path).ino
+      def claim_bytes
+        File.read(claim_path)
       rescue Errno::ENOENT
         nil
       end
