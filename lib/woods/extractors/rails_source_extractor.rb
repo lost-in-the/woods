@@ -55,12 +55,11 @@ module Woods
           'lib/active_record/nested_attributes.rb'
         ],
         'actionpack' => [
+          # callbacks.rb, rendering.rb, redirecting.rb, and params_wrapper.rb
+          # all live under metal/, not directly under action_controller/ —
+          # the metal/ directory entry below already covers them.
           'lib/action_controller/metal',
-          'lib/action_controller/callbacks.rb',
-          'lib/abstract_controller/callbacks.rb',
-          'lib/action_controller/rendering.rb',
-          'lib/action_controller/redirecting.rb',
-          'lib/action_controller/params_wrapper.rb'
+          'lib/abstract_controller/callbacks.rb'
         ],
         'activesupport' => [
           'lib/active_support/callbacks.rb',
@@ -77,8 +76,7 @@ module Woods
         ],
         'actionmailer' => [
           'lib/action_mailer/base.rb',
-          'lib/action_mailer/delivery_methods.rb',
-          'lib/action_mailer/callbacks.rb'
+          'lib/action_mailer/delivery_methods.rb'
         ]
       }.freeze
 

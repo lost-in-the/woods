@@ -108,6 +108,19 @@ RSpec.configure do |config|
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)
   end
 
+  # Several spec files nil out Woods.configuration in their own after hooks
+  # and never restore it, so any later example that reads the global (for
+  # example Extractor#json_serialize) fails under a seed that orders it
+  # after them. Restore whatever the example started with.
+  config.around(:each) do |example|
+    # Some spec files load only one lib file, before Woods.configuration exists.
+    restorable = Woods.respond_to?(:configuration=)
+    previous = Woods.configuration if restorable
+    example.run
+  ensure
+    Woods.configuration = previous if restorable
+  end
+
   # Keep the RubyGems update check hermetic and deterministic across the suite:
   # never touch the network, and isolate the cache to a per-process tmp file so
   # an incidental `build_status`/`woods_status` call can't hit rubygems.org or

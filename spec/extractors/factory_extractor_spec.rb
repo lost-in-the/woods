@@ -423,6 +423,7 @@ RSpec.describe Woods::Extractors::FactoryExtractor do
       expect(meta[:parent_factory]).to be_nil
       expect(meta[:callbacks]).to be_an(Array)
       expect(meta[:transient_attributes]).to be_an(Array)
+      expect(meta[:line_number]).to eq(1)
     end
 
     it 'correctly collects traits, associations, sequences, and callbacks together' do

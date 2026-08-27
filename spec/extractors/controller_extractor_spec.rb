@@ -277,6 +277,40 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     end
   end
 
+  # ── extract_permitted_params ─────────────────────────────────────────
+
+  describe '#extract_permitted_params' do
+    it 'does not leak params.require into a preceding method with no permit call' do
+      source = <<~RUBY
+        def filter_params
+          params.fetch(:f, {})
+        end
+
+        def post_params
+          params.require(:post).permit(:title, :body)
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result).to have_key('post_params')
+      expect(result).not_to have_key('filter_params')
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title body])
+    end
+
+    it 'recognizes the Rails 8 params.expect(...) form' do
+      source = <<~RUBY
+        def post_params
+          params.expect(post: [:title, :body])
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title body])
+    end
+  end
+
   # ── extract_metadata — own actions only ──────────────────────────────
 
   describe '#extract_metadata (own actions)' do

@@ -280,7 +280,8 @@ module Woods
           sequences: factory_data[:sequences],
           parent_factory: factory_data[:parent_factory],
           callbacks: factory_data[:callbacks].uniq,
-          transient_attributes: factory_data[:transient_attributes]
+          transient_attributes: factory_data[:transient_attributes],
+          line_number: factory_data[:line_number]
         }
       end
 

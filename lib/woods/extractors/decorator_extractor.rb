@@ -97,23 +97,15 @@ module Woods
       # @param source [String] Ruby source code
       # @return [String, nil] The class name or nil
       def extract_class_name(file_path, source)
-        namespaces = source.scan(/^\s*module\s+([\w:]+)/).flatten
-        class_match = source.match(/^\s*class\s+([\w:]+)/)
-
-        if class_match
-          base_class = class_match[1]
-          if namespaces.any? && !base_class.include?('::')
-            "#{namespaces.join('::')}::#{base_class}"
-          else
-            base_class
-          end
-        else
-          relative = file_path.sub("#{Rails.root}/", '')
-          relative
+        # Position-aware (SourceNesting, #174): only modules still open at
+        # the class declaration qualify it. A sibling module that closed
+        # earlier, or a helper module nested inside the class, does not.
+        qualified_first_class_name(source) ||
+          file_path
+            .sub("#{Rails.root}/", '')
             .sub(%r{^app/(decorators|presenters|form_objects)/}, '')
             .sub('.rb', '')
             .camelize
-        end
       end
 
       # ──────────────────────────────────────────────────────────────────────

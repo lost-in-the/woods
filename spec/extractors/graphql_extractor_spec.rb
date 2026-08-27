@@ -571,6 +571,31 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(unit.identifier).to eq('Types::Timestampable')
     end
 
+    # Classifying by path/regex even when the runtime class resolved let a
+    # type under app/graphql/types/ that is actually a mutation subclass
+    # classify as :graphql_type on a full run (runtime pass) but
+    # :graphql_mutation incrementally (per-file pass used classify_unit_type
+    # unconditionally), leaving a stale duplicate unit behind.
+    it 'classifies from the resolved runtime class ahead of the path/regex heuristic' do
+      mutation_base = Class.new
+      stub_const('GraphQL::Schema::Mutation', mutation_base)
+      stub_const('Types::CreateUser', Class.new(mutation_base))
+
+      source = <<~RUBY
+        module Types
+          class CreateUser < Types::BaseMutation
+            argument :name, String, required: true
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/types/create_user.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.type).to eq(:graphql_mutation)
+    end
+
     it 'returns nil for non-GraphQL files' do
       source = <<~RUBY
         class PlainService
@@ -738,6 +763,25 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       complexity = unit.metadata[:complexity]
       expect(complexity).not_to be_empty
       expect(complexity.first[:field]).to eq('friends')
+    end
+
+    # `match?` never sets `$~`, so `Regexp.last_match(1)` after it always
+    # read back 0 regardless of the actual schema-level limit.
+    it 'detects schema-level max_complexity with the real value, not 0' do
+      source = <<~RUBY
+        module Types
+          class QueryType < Types::BaseObject
+            max_complexity 250
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/types/query_type.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      schema_complexity = unit.metadata[:complexity].find { |c| c[:field] == :schema }
+      expect(schema_complexity[:complexity]).to eq(250)
     end
   end
 

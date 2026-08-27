@@ -699,6 +699,36 @@ RSpec.describe Woods::Extractors::JobExtractor do
     end
   end
 
+  describe 'block-namespaced jobs (#174)' do
+    it 'qualifies a class declared inside a module block' do
+      path = create_file('app/jobs/billing/charge_job.rb', <<~RUBY)
+        module Billing
+          class ChargeJob < ApplicationJob
+            def perform(id); end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      expect(unit.identifier).to eq('Billing::ChargeJob')
+      expect(unit.namespace).to eq('Billing')
+    end
+
+    it 'ignores a helper module nested inside the class' do
+      path = create_file('app/jobs/charge_job.rb', <<~RUBY)
+        class ChargeJob < ApplicationJob
+          module Helpers
+          end
+
+          def perform(id); end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      expect(unit.identifier).to eq('ChargeJob')
+    end
+  end
+
   # ── Error Handling ───────────────────────────────────────────────────
 
   describe 'error handling' do

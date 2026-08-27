@@ -26,6 +26,13 @@ module Woods
       # Namespaces to exclude from extraction (this gem's own tasks)
       EXCLUDED_NAMESPACES = %w[woods].freeze
 
+      # Matches a line-leading `end` that closes a block, whether it stands
+      # alone or is followed by a method chain (`end.freeze`) or a closing
+      # delimiter (`end)`, `end]`, `end,`). An exact `== 'end'` check misses
+      # those, leaving the namespace/task depth counters out of sync with
+      # blocks that never get popped.
+      END_LINE = /\Aend\b/
+
       def initialize
         @directories = RAKE_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
       end
@@ -118,7 +125,7 @@ module Woods
           depth += 1 if block_opener?(stripped)
 
           # Track end keywords
-          next unless stripped == 'end'
+          next unless stripped.match?(END_LINE)
 
           depth -= 1
           # Pop namespace if we've returned to the depth where it was opened
@@ -245,7 +252,12 @@ module Woods
       # @return [String] The block body source
       def extract_task_block(lines, task_line_index)
         task_line = lines[task_line_index]
-        return '' unless task_line&.include?('do')
+        # `block_opener?`, not a bare `include?('do')` substring check — a
+        # task named `docs` (`task docs: :environment`) contains the
+        # substring "do" in its own name, which made a blockless task look
+        # like it opened a `do` block and swallowed the following task's
+        # lines as its own body.
+        return '' unless task_line && block_opener?(task_line.strip)
 
         depth = 1
         body_lines = []
@@ -255,7 +267,7 @@ module Woods
           stripped = line.strip
 
           depth += 1 if block_opener?(stripped)
-          depth -= 1 if stripped == 'end'
+          depth -= 1 if stripped.match?(END_LINE)
 
           break if depth.zero?
 
@@ -330,7 +342,8 @@ module Woods
           task_dependencies: task_data[:task_dependencies],
           arguments: task_data[:arguments],
           has_environment_dependency: task_data[:task_dependencies].include?('environment'),
-          source_lines: (task_data[:block_source] || '').lines.size
+          source_lines: (task_data[:block_source] || '').lines.size,
+          line_number: task_data[:line_number]
         }
       end
 

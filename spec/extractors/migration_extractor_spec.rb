@@ -832,6 +832,24 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
       expect(unit.metadata[:direction]).to eq('change')
     end
 
+    # `migration_class?` used a plain `\w+` for the class name while
+    # `extract_class_name` accepted `[\w:]+`, so a compact-form namespaced
+    # migration (`class Billing::AddFoo < ...`) was silently skipped even
+    # though its identifier resolved fine.
+    it 'handles compact-form namespaced class names (Billing::AddFoo)' do
+      path = create_file('db/migrate/20240101000000_add_foo.rb', <<~RUBY)
+        class Billing::AddFoo < ActiveRecord::Migration[7.1]
+          def change
+            add_column :invoices, :foo, :string
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_migration_file(path)
+      expect(unit).not_to be_nil
+      expect(unit.identifier).to eq('Billing::AddFoo')
+    end
+
     it 'handles namespaced class names' do
       path = create_file('db/migrate/20240101000000_create_users.rb', <<~RUBY)
         module Legacy

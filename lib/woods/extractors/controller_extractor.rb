@@ -28,6 +28,11 @@ module Woods
       include SharedDependencyScanner
       include RouteHelperResolver
 
+      # Matches everything between a `def foo_params` line and its
+      # params.require/permit or params.expect call, without crossing into
+      # a sibling method's body. Used by {#extract_permitted_params}.
+      PARAMS_METHOD_BODY = /(?:(?!\bdef\b)[\s\S])*?/
+
       # @return [Array<String>] Warnings collected during extraction
       #   (concern-inlining fallbacks). Drained by the orchestrator, which
       #   collects warnings from every extractor that exposes them.
@@ -203,17 +208,11 @@ module Woods
 
       # Build composite source with routes and filters as headers.
       #
-      # Callers pass the already concern-inlined source (see
-      # {#build_controller_source_with_concerns}); the nil fallback reads
-      # from disk and inlines so both paths agree.
-      def build_composite_source(controller, source = nil)
-        if source.nil?
-          source_path = source_file_for(controller)
-          return '' unless source_path && File.exist?(source_path)
-
-          source, = build_controller_source_with_concerns(controller, File.read(source_path))
-        end
-
+      # The sole caller ({#extract_controller}) always passes the
+      # already concern-inlined source (see
+      # {#build_controller_source_with_concerns}), which returns '' rather
+      # than nil for a missing file — so this never sees a nil source.
+      def build_composite_source(controller, source)
         # Prepend route information
         routes_comment = build_routes_comment(controller)
 
@@ -571,9 +570,22 @@ module Woods
 
         params = {}
 
-        # Match params.require(:x).permit(...) patterns
-        source.scan(/def\s+(\w+_params).*?params\.require\(:(\w+)\)\.permit\((.*?)\)/m) do |method, model, permitted|
+        # Match params.require(:x).permit(...) patterns. The body segment
+        # between the method name and the require/permit call is bounded by
+        # a negative lookahead on `def` so a method with no permit call
+        # (e.g. `filter_params; params.fetch(:f); end`) never lets the scan
+        # run into the *next* method's body and misattribute its params.
+        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.require\(:(\w+)\)\.permit\((.*?)\)/) do |method, model, permitted|
           params[method] = {
+            model: model,
+            permitted: permitted.scan(/:(\w+)/).flatten
+          }
+        end
+
+        # Rails 8's params.expect(post: [:title, :body]) replacement for
+        # require(...).permit(...).
+        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.expect\(\s*(\w+):\s*\[(.*?)\]\s*\)/) do |method, model, permitted|
+          params[method] ||= {
             model: model,
             permitted: permitted.scan(/:(\w+)/).flatten
           }

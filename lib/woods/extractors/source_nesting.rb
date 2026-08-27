@@ -47,6 +47,14 @@ module Woods
       # unit a file is named for.
       MIXIN_INNER_MODULES = %w[ClassMethods InstanceMethods].freeze
 
+      # Matches a line-leading `end` that closes a block, whether it stands
+      # alone or is followed by a method chain (`end.freeze`, `end.join(x)`)
+      # or a closing delimiter (`end)`, `end]`, `end,`). An exact `== 'end'`
+      # check misses all of those, so a line like `LIST = %w[a b].map do |x|
+      # x end.freeze` pushed a stack frame on `do` that its own `end` never
+      # popped.
+      END_LINE = /\Aend\b/
+
       # Fully-qualified name of the first +class+ declaration in the source.
       #
       # Enclosing modules still open at that position are joined with the
@@ -67,7 +75,7 @@ module Woods
             # A self-terminated declaration (`module Foo; end`) is not an
             # opener under the house pattern and encloses nothing.
             stack << decl[2] if block_opener?(stripped)
-          elsif stripped == 'end'
+          elsif stripped.match?(END_LINE)
             stack.pop
           elsif block_opener?(stripped)
             stack << nil # anonymous block (do/def/if/...): depth only, no name

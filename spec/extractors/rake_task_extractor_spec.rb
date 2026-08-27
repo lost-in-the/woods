@@ -332,6 +332,7 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(meta[:arguments]).to eq(['days'])
       expect(meta[:has_environment_dependency]).to be true
       expect(meta[:source_lines]).to be_a(Integer)
+      expect(meta[:line_number]).to eq(3)
     end
 
     it 'sets has_environment_dependency to false when no :environment dep' do
@@ -471,6 +472,25 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(units.first.metadata[:task_dependencies]).to contain_exactly('environment', 'setup')
     end
 
+    # `extract_task_block` used to gate on a bare `include?('do')`, so a
+    # blockless task whose own name contains the substring "do" (`docs`)
+    # looked like it opened a block and swallowed the next task's body.
+    it 'does not let a blockless task named "docs" swallow the next task as its own body' do
+      path = create_file('lib/tasks/docs.rake', <<~RAKE)
+        task docs: :environment
+        task :other do
+          DocsService.call
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      docs = units.find { |u| u.identifier == 'docs' }
+      other = units.find { |u| u.identifier == 'other' }
+
+      expect(docs.dependencies.map { |d| d[:target] }).not_to include('DocsService')
+      expect(other.dependencies.map { |d| d[:target] }).to include('DocsService')
+    end
+
     it 'extracts a label-form task without a do block' do
       path = create_file('lib/tasks/modern.rake', <<~RAKE)
         task setup: :environment
@@ -539,6 +559,34 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
 
       generate = units.find { |u| u.identifier == 'admin:reports:generate' }
       expect(generate.namespace).to eq('admin:reports')
+    end
+  end
+
+  # ── Chained `end` and namespace depth tracking ──────────────────────
+
+  describe 'chained end lines' do
+    # An exact `stripped == 'end'` check missed `end.freeze`, so the
+    # depth counter never returned to the level `namespace :admin do`
+    # opened at, and the namespace was never popped for tasks that follow.
+    it 'keeps namespace depth in sync when a block end is chained (end.freeze)' do
+      path = create_file('lib/tasks/admin.rake', <<~RAKE)
+        namespace :admin do
+          LIST = %w[a b].map do |x|
+            x
+          end.freeze
+
+          task :cleanup do
+            puts "cleaning"
+          end
+        end
+
+        task :outer do
+          puts "outer"
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+      expect(units.map(&:identifier)).to contain_exactly('admin:cleanup', 'outer')
     end
   end
 

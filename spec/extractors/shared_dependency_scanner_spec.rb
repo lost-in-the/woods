@@ -540,6 +540,22 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       result = form_scanner.scan_form_dependencies(source)
       expect(result).to all(satisfy { |d| d[:via] == :form_action })
     end
+
+    # Plain Ruby sources (Phlex, ViewComponent, mailers) have no `%` at all,
+    # so a `[^%]`-bounded scan ran straight past this form's own `do` block
+    # and attributed an unrelated later route helper to it.
+    it 'does not attribute an unrelated later path helper in plain Ruby source with no % characters' do
+      source = <<~RUBY
+        def render_form
+          form_with model: @post do |f|
+            f.submit
+          end
+          href = posts_path
+        end
+      RUBY
+      result = form_scanner.scan_form_dependencies(source)
+      expect(result).to be_empty
+    end
   end
 
   # ── Graph resolution: constantize + short names (fills a graph gap where

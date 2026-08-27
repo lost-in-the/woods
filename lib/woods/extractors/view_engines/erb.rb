@@ -19,8 +19,9 @@ module Woods
         ENGINE_NAME = :erb
 
         # Matches named route helpers (e.g. `posts_path`, `user_url`) in
-        # template source. Identical shape across ERB / plain Ruby, so
-        # shared with {SharedDependencyScanner}.
+        # template source. Same shape as
+        # {SharedDependencyScanner::ROUTE_HELPER_PATTERN}, but this engine
+        # has no dependency on that module, so it keeps its own copy.
         ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
         # Matches form_with / form_for calls whose action is a named
@@ -72,8 +73,17 @@ module Woods
           EXTENSIONS
         end
 
+        # Render option keys that are never themselves a partial name. The
+        # bare `render :foo` shorthand pattern below cannot tell `render
+        # :partial => 'shared/header'` (the pre-Ruby-3.0 hash-rocket form of
+        # the `partial:` option) from an actual `render :partial_name` call,
+        # so it must exclude these explicitly rather than record the option
+        # key as a partial.
+        RESERVED_RENDER_OPTIONS = %w[partial template layout].freeze
+
         # Matches:
         # - `render partial: 'foo/bar'`
+        # - `render :partial => 'foo/bar'` (hash-rocket form)
         # - `render 'foo/bar'`
         # - `render :foo`
         #
@@ -85,12 +95,16 @@ module Woods
             partials << match[0]
           end
 
+          source.scan(/render\s+:partial\s*=>\s*['"]([^'"]+)['"]/).each do |match|
+            partials << match[0]
+          end
+
           source.scan(/render\s+['"]([^'"]+)['"]/).each do |match|
             partials << match[0]
           end
 
           source.scan(/render\s+:(\w+)/).each do |match|
-            partials << match[0]
+            partials << match[0] unless RESERVED_RENDER_OPTIONS.include?(match[0])
           end
 
           partials.to_a

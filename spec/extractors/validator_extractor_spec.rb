@@ -72,6 +72,23 @@ RSpec.describe Woods::Extractors::ValidatorExtractor do
 
   # ── extract_validator_file ───────────────────────────────────────────
 
+  describe 'block-namespaced classes (#174)' do
+    it 'qualifies a class declared inside a module block' do
+      path = create_file('app/validators/admin/order_validator.rb', <<~RUBY)
+        module Admin
+          class OrderValidator < ActiveModel::Validator
+            def validate(record); end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_validator_file(path)
+      expect(unit).not_to be_nil
+      expect(unit.identifier).to eq('Admin::OrderValidator')
+      expect(unit.namespace).to eq('Admin')
+    end
+  end
+
   describe '#extract_validator_file' do
     it 'extracts EachValidator metadata' do
       path = create_file('app/validators/email_format_validator.rb', <<~RUBY)

@@ -146,10 +146,15 @@ module Woods
 
       # Check whether the source defines an ActiveRecord::Migration subclass.
       #
+      # `[\w:]+`, matching {#extract_class_name}'s class-name pattern — a
+      # compact-form declaration (`class Billing::AddFoo < ...`) satisfies
+      # extract_class_name but failed the plain `\w+` here, so the file was
+      # silently skipped even though it had a resolvable identifier.
+      #
       # @param source [String] Ruby source code
       # @return [Boolean]
       def migration_class?(source)
-        source.match?(/class\s+\w+\s*<\s*ActiveRecord::Migration/)
+        source.match?(/class\s+[\w:]+\s*<\s*ActiveRecord::Migration/)
       end
 
       # ──────────────────────────────────────────────────────────────────────
