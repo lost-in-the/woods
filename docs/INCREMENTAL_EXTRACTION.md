@@ -119,7 +119,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | Trigger | Re-runs |
 |---|---|
 | `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
-| `Gemfile.lock` | engines, middleware |
+| `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb` | scheduled_jobs |
 | `app/models/**/*.rb` | state_machines |
