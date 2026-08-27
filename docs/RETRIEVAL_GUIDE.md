@@ -38,6 +38,8 @@ query
 | `:hybrid` | `comprehensive` or `exploratory` scope | Runs vector + keyword + graph expansion, deduplicates |
 | `:direct` | `locate`/`reference` + `pinpoint` scope | Looks up identifiers directly in metadata store; falls back to keyword |
 
+Keyword results are scored by how many distinct fields matched (identifier, source, metadata) — not by the store's result order. Each matched field adds 0.25, capped at 1.0, so a result matching on identifier and source scores higher than one matching source alone.
+
 ---
 
 ## Configuring Retrieval
@@ -195,7 +197,12 @@ Sets the default token budget for context assembly. Default: `8000`. The `budget
 config.max_context_tokens = 12_000  # More context per retrieval
 ```
 
-The `ContextAssembler` allocates budget across sections: structural (10%), primary (50%), supporting (25%), framework (15%). When the query has no framework context, the framework allocation is redistributed proportionally to primary and supporting.
+The `ContextAssembler` carves off 10% for the structural overview first, then splits what's left:
+
+- **Framework context active** (the query mentions Rails/framework keywords — `rails`, `activerecord`, `middleware`, etc.): primary 55%, supporting 25%, framework 20%.
+- **No framework context**: primary 65%, supporting 35% — the framework section gets nothing, and its share is not proportionally folded into the other two; the fractions are just different, not rescaled.
+
+Separately, if the supporting section ends up with no candidates (it only ever holds `:graph_expansion` results), its reserved budget is reclaimed into primary rather than wasted.
 
 ### `context_format`
 

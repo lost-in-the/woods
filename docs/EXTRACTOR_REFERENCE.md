@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **34 extractor classes** producing **39 distinct unit types** — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **34 extractor classes** producing **38 distinct unit types** — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 40 files: 34 extractor classes (each ending in `_extractor.rb`) plus 6 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`). The 39 unit types comes from some extractors emitting multiple categories — e.g., `RailsSourceExtractor` produces `rails_source` and `gem_source`, `ConfigurationExtractor` produces multiple config-derived types. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing) but are not themselves extractors and do not appear in the unit type enumeration.
+> **Counts explained.** `lib/woods/extractors/` contains 41 files: 34 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 38 unit types comes from some extractors emitting multiple categories — `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -216,7 +216,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Pure runtime introspection — reads the live routing table, not `config/routes.rb` AST
 - Each unit's identifier is `"VERB /path"` (e.g., `"POST /orders"`)
 - Records controller, action, route name, and constraints
-- Since routes don't map to individual files, incremental re-extraction skips this type (always full)
+- Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` changes — it isn't skipped, just not diffed per file
 
 **Example output (abbreviated):**
 
@@ -241,6 +241,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **Key details:**
 - Extracts the entire stack as one unit (not one per middleware)
 - Records middleware class names, insertion order, and any initialization arguments
+- No per-file mapping, so incremental re-extraction re-runs `MiddlewareExtractor` wholesale when `config/application.rb`, `Gemfile.lock`, or a file under `config/initializers`/`config/environments` changes
 
 ---
 
@@ -402,7 +403,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 **Key details:**
 - Uses `Rails::Engine.subclasses` at runtime — finds both gem-mounted and in-repo engines
-- Incremental re-extraction skips engine units (they don't map to individual files; requires full extraction)
+- Engine units don't map to individual files, so incremental re-extraction re-runs `EngineExtractor` wholesale when `config/routes.rb` or `Gemfile.lock` changes
 - A mounted engine may duplicate some routes; the deduplication phase handles this
 
 ---
@@ -436,7 +437,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever)
 - Extracts job class name, cron expression, queue, and any arguments
 - File-based (static read, no Rails introspection needed)
-- Incremental re-extraction skips scheduled jobs (no per-file mapping)
+- No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes
 
 ---
 
@@ -489,6 +490,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Only extracts the **latest version** of each view (highest `_vNN` suffix)
 - Older versions are skipped
 - Records whether the view is materialized and which tables it references
+- Incremental re-extraction re-runs `DatabaseViewExtractor` wholesale on any `.sql` change under `db/views` — a per-file dispatch could index a version a full extraction drops
 
 ---
 
@@ -499,7 +501,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **Key details:**
 - Detects which library is active by checking `defined?` for each DSL constant
 - Extracts states, events, transitions, guard conditions, and callbacks
-- Returns an array from the file method (like `ScheduledJobExtractor`) — cannot be used in the incremental file-based dispatch map
+- Returns an array from the file method (like `ScheduledJobExtractor`) — cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans
 
 ---
 
@@ -509,7 +511,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 **Key details:**
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
-- No single-file extraction method — requires full extraction to update (like routes)
+- No single-file extraction method — incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
 
 ---
@@ -535,6 +537,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Scans `spec/factories` and `test/factories`
 - Produces one unit per factory definition (including trait sub-factories)
 - Useful for understanding test data structure and available factory combinations
+- No per-file mapping, so incremental re-extraction re-runs `FactoryExtractor` wholesale on any `.rb` change under the factory directories
 
 ---
 
@@ -574,35 +577,22 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ## How Do I Enable or Disable Extractors?
 
-All 34 extractors run during a full extraction. The `config.extractors` array controls which unit types are considered by the *retrieval pipeline* (embedding and search scope), not which extractors run during extraction.
+You can't, today. All 34 extractors always run during a full extraction —
+there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+`config.extractors`. The array is accepted for forward compatibility: setting
+it to anything other than its default value emits a warning and has no
+effect on which extractors run or what the retrieval pipeline sees.
+Extractor selection is a documented future knob, not a shipped feature.
 
-To customize the retrieval scope:
+The one real customization point is registering additional gems for
+`RailsSourceExtractor` to index:
 
 ```ruby
 # config/initializers/woods.rb
 Woods.configure do |config|
-  # Default retrieval scope (13 types)
-  config.extractors = %i[
-    models controllers services components view_components
-    jobs mailers graphql serializers managers policies validators
-    rails_source
-  ]
-
-  # Add more types to retrieval scope
-  config.extractors += %i[concerns routes migrations]
-
-  # Or restrict to a focused subset
-  config.extractors = %i[models controllers services]
-
-  # Index additional gem source files
   config.add_gem "devise", paths: ["lib/devise/models"], priority: :high
+  config.add_gem "pundit", paths: ["lib/pundit"], priority: :medium
 end
-```
-
-To add a custom gem to be indexed by `RailsSourceExtractor`:
-
-```ruby
-config.add_gem "pundit", paths: ["lib/pundit"], priority: :medium
 ```
 
 ---
@@ -613,7 +603,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:poro`, `:lib` |
+| `type` | Symbol | Unit category, one of the 38 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |

@@ -139,15 +139,18 @@ identifier plus an add of the new one, same as any other rename.
 
 | Exporter | Tracks state via | Mass-deletion guard |
 |---|---|---|
-| Notion | Database properties, matched by unit identifier | none documented; runs the mapped Data Models/Columns sync each time |
+| Notion | `<output_dir>/notion_sync_manifest.json` (content hash + page id) | not applicable — there is no delete path; a renamed/removed unit's old page is left in Notion untouched, only its manifest entry is pruned |
 | Obsidian | `.woods-vault` sentinel + stale-note sweep over the vault | refuses beyond 30% of managed notes; `WOODS_OBSIDIAN_FORCE_PURGE` overrides |
 | Unblocked | `<output_dir>/unblocked_sync_manifest.json` | refuses beyond 30% of a manifest tracking 10+ documents; `UNBLOCKED_FORCE_PURGE` overrides |
 
 On a rename-heavy upgrade, expect to need the relevant force-purge variable
-once, for the same reason `WOODS_ALLOW_PURGE` is needed for the vector store:
-the guard is doing its job by refusing a deletion that looks like a partial
-index, and a full re-index after a rename-shape change is exactly that
-deletion, legitimately.
+once for Obsidian/Unblocked, for the same reason `WOODS_ALLOW_PURGE` is
+needed for the vector store: the guard is doing its job by refusing a
+deletion that looks like a partial index, and a full re-index after a
+rename-shape change is exactly that deletion, legitimately. Notion has no
+equivalent guard to trip since it never deletes pages — set
+`WOODS_NOTION_FORCE=1` instead if you want every page re-checked (rather
+than skipped by an unchanged content hash) after a rename-heavy re-index.
 
 ## MCP Client Requirements
 
@@ -208,6 +211,7 @@ Gemfile.lock - confirms mcp (1.2.0) resolved, within the gemspec range
 docs/BACKEND_MATRIX.md - MySQL requires an external vector backend (:qdrant); PostgreSQL can use pgvector in-database
 docs/OBSIDIAN_INTEGRATION.md - .woods-vault sentinel, stale-note sweep, 30% guard, WOODS_OBSIDIAN_FORCE_PURGE
 docs/UNBLOCKED_INTEGRATION.md - sync manifest, 30% guard on 10+ document manifests, UNBLOCKED_FORCE_PURGE
+lib/woods/notion/exporter.rb - notion_sync_manifest.json, WOODS_NOTION_FORCE, no page-delete path (manifest-prune only)
 lib/woods.rb - output_dir default (tmp/woods), dump_retention_count default (3), embedding_model config accessor
 lib/woods/embedding/indexer.rb - WOODS_ALLOW_PURGE env var and purge-guard messages
 exe/woods-mcp-start - MCP_PROTOCOL_VERSION handling and stderr announcement

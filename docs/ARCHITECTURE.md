@@ -52,7 +52,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
                                                  ▲
                         ┌────────────────────────┘
                         │  Console MCP Server
-                        │  31 tools, live Rails
+                        │  9 tools default, live Rails
                         │  (runs inside the app)
 ```
 
@@ -125,7 +125,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction skips** unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`. These require a full extraction to update.
+**Incremental extraction re-runs wholesale**, rather than skipping, the eight unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines) — when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `rails_source`/`gem_source` work the same way, triggered by `Gemfile.lock`, gated separately by `include_framework_sources`.
 
 ---
 
@@ -233,7 +233,7 @@ Woods uses three independent store abstractions:
 | Store | Purpose | Available Backends |
 |-------|---------|-------------------|
 | **VectorStore** | Embedding vectors for semantic search | In-memory (dev/test), pgvector (PostgreSQL), Qdrant |
-| **MetadataStore** | Unit metadata for keyword search and type filtering | In-memory, SQLite, pgvector (JSON columns) |
+| **MetadataStore** | Unit metadata for keyword search and type filtering | In-memory, SQLite |
 | **GraphStore** | Dependency graph for graph-based traversal | In-memory, JSON file (via `dependency_graph.json`) |
 
 The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax — no backend-specific SQL is written into the core.
@@ -241,13 +241,16 @@ The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON 
 ### Configuration Presets
 
 ```ruby
-# Local development (SQLite + in-memory vector)
+# Local development (SQLite + in-memory vector, single process)
 Woods.configure_with_preset(:local)
+
+# Shared filesystem (rake embed writes a dump; a separate MCP server reads it)
+Woods.configure_with_preset(:shared_filesystem)
 
 # PostgreSQL with pgvector
 Woods.configure_with_preset(:postgresql)
 
-# Production (Qdrant for vectors, pgvector for metadata)
+# Production (Qdrant for vectors, SQLite for metadata)
 Woods.configure_with_preset(:production)
 ```
 
@@ -291,7 +294,7 @@ The Index Server is safe to run anywhere — it has no database connection and m
 
 ### Console Server (`woods-console-mcp`)
 
-**31 tools, 4 tiers. Bridges to a live Rails process. Runs inside the app.**
+**31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process — no separate bridge process.**
 
 Starts via rake task inside the Rails app (or `docker compose exec`):
 
@@ -300,13 +303,11 @@ bundle exec rake woods:console
 ```
 
 Use the Console Server for:
-- Live database queries (`User.where(...)` with schema awareness)
-- Model diagnostics (validate a record, inspect associations)
-- Job queue monitoring (pending jobs, failed jobs, queue depths)
-- Cache inspection (hit rates, key patterns)
-- Guarded write operations (tier 4, requires confirmation)
+- Live database queries (`User.where(...)` with schema awareness) — Tier 1, registered by default
+- Model diagnostics, job queue monitoring, cache inspection — Tier 2/3 schemas exist but are **not registered** in any supported mode today
+- SQL/query — Tier 4, opt-in via `console_embedded_read_tools`; `console_eval` is inventory-only and unavailable
 
-All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback — this is intentional defense-in-depth. Tier 4 tools that need to actually write require explicit human-in-the-loop confirmation.
+All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback — this is intentional defense-in-depth. See [MCP_SERVERS.md](MCP_SERVERS.md#console-server) for the full tool inventory and tier breakdown.
 
 ### Which Should I Use?
 

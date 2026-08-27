@@ -137,7 +137,16 @@ Add this to your Windsurf MCP configuration file. The Index Server is transport-
 
 ### What does Woods extract?
 
-Woods extracts 34 types of units from a Rails application. The default extraction set includes models (with inlined concerns and schema), controllers, services, view components, jobs, mailers, GraphQL types/mutations/queries, serializers, managers, policies, validators, and Rails framework source. Additional extractors are available for state machines, events, decorators, database views, rake tasks, Action Cable channels, and more. See [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) for the full extractor list.
+Woods runs **34 extractor classes** on every full extraction — there is no
+opt-in/opt-out. Between them they produce 38 distinct unit types (some
+extractors emit more than one type — GraphQL alone produces four, and
+`RailsSourceExtractor` produces both `rails_source` and `gem_source`).
+Coverage
+includes models (with inlined concerns and schema), controllers, services,
+view components, jobs, mailers, GraphQL types/mutations/queries, serializers,
+managers, policies, validators, Rails framework source, state machines,
+events, decorators, database views, rake tasks, Action Cable channels, and
+more. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for the full list.
 
 ---
 
@@ -158,7 +167,7 @@ bundle exec rake woods:incremental
 docker compose exec app bundle exec rake woods:incremental
 ```
 
-Incremental mode is ideal for CI pipelines and local development workflows. It is typically 5-10× faster than a full extraction. Note that some unit types (routes, middleware, engines) require full extraction to update — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for details.
+Incremental mode is ideal for CI pipelines and local development workflows. It is typically 5-10× faster than a full extraction. Eight unit types — `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view` — don't map to individual files, so incremental mode re-runs their extractor **wholesale** whenever the relevant trigger path changes (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines). You never need to run a full extraction just because one of these changed — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for details.
 
 ---
 
@@ -188,9 +197,9 @@ After embedding, the `codebase_retrieve` MCP tool supports natural-language quer
 
 ---
 
-### Why do some extractor types require full extraction?
+### Why do some extractor types re-run wholesale on incremental runs?
 
-Unit types that don't map to individual files — routes, middleware, engines, scheduled jobs, state machines, events, and factories — are extracted by introspecting the entire application at once rather than a single file. There's no way to incrementally update them by watching one file change. When any of these types change, run a full extraction:
+Eight unit types — routes, middleware, engines, scheduled jobs, state machines, events, factories, and database views — don't map to individual files. They're extracted by introspecting the entire application at once rather than one file at a time. Incremental mode handles this by re-running the whole extractor when a trigger path changes (`config/routes.rb`, `Gemfile.lock`, the relevant model/factory directories, and so on) instead of skipping the type. A full extraction is only needed if you suspect drift, not as routine maintenance:
 
 ```bash
 bundle exec rake woods:extract
@@ -428,7 +437,7 @@ Enable them in your initializer:
 config.enable_snapshots = true
 ```
 
-Snapshots require database migrations 004 and 005 to be run first (`bundle exec rails db:migrate`). The `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail` MCP tools become available after enabling.
+Snapshots use their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database — `bundle exec rails db:migrate` does not touch it. `Woods::Db::Migrator` runs migrations 004 and 005 against that database automatically, both when a full extraction runs and when `woods-mcp` boots with snapshots enabled. No manual migration step is needed. The `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail` MCP tools become available after enabling.
 
 ---
 
@@ -482,10 +491,9 @@ For Docker-based CI:
 
 ### How do I check if the index is healthy?
 
-Two rake tasks validate index integrity:
+Two rake tasks validate index integrity. Both are `:environment` tasks — they boot Rails, same as extraction:
 
 ```bash
-# Check integrity (no Rails required)
 bundle exec rake woods:validate
 
 # Show unit counts and extraction stats
@@ -498,37 +506,24 @@ The `pipeline_status` MCP tool reports the last extraction time, unit counts, an
 
 ### Can I add custom extractors?
 
-Yes. Implement the extractor interface and register it:
-
-```ruby
-class MyExtractor
-  def initialize; end
-
-  def extract_all
-    # Return Array<ExtractedUnit>
-  end
-end
-```
-
-Then add it to the extractors list:
-
-```ruby
-config.extractors += [:my_extractor]
-```
-
-The extractor must be accessible at boot time. See the existing extractors in `lib/woods/extractors/` for the interface and conventions.
+Not today. `Woods::Extractor::EXTRACTORS` is a frozen constant listing the 34
+built-in extractor classes, and nothing in the extraction path consults
+`config.extractors` to add to that list. `config.extractors` exists only for
+forward compatibility — setting it to anything other than the default warns
+and has no effect on which extractors run. If you need a custom extractor
+today, the extractor interface (`initialize` + `extract_all` returning
+`Array<ExtractedUnit>`) is stable and documented in
+[EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md), but wiring one in requires
+patching `EXTRACTORS` directly (a gem fork or monkeypatch), not a config call.
 
 ---
 
 ### How do I exclude sensitive directories from extraction?
 
-Use `config.extractors` to remove specific extractor types, or exclude directories from eager loading:
+`config.extractors` cannot remove an extractor from the run — see above.
+Exclude a directory from eager loading instead:
 
 ```ruby
-# Exclude specific extractor types
-config.extractors -= %i[factories test_mappings]
-
-# Exclude a directory from eager loading (prevents that dir from being indexed)
 # config/application.rb
 config.eager_load_paths -= [Rails.root.join('app/internal')]
 ```

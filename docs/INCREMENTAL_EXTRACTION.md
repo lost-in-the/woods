@@ -297,12 +297,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
   B-062), and two files defining the same constant tie-break differently in
   full vs incremental extraction (B-063). Both pre-date this work; the harness
   side-steps them by giving each generated artifact family its own name prefix.
-- **Class-based units are never swept.** A unit discovered from runtime
-  descendants records a *convention* path when its source location can't be
-  resolved, and that path need not exist — on Rails < 7.1,
-  `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata` are
-  real `ActiveRecord::Base` descendants whose file path
-  (`app/models/active_record/schema_migration.rb`) no application has.
+- **Class-based units are never swept** — see [Deletion](#deletion) above for
+  why (the `SchemaMigration`/`InternalMetadata` convention-path case).
   Deleting a class-based unit therefore requires either the caller naming the
   path or the discovery-set reconciliation above; the sweep never infers it.
 - **Git metadata for untouched units.** An incremental run refreshes

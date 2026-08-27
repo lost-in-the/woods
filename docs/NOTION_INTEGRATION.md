@@ -24,6 +24,22 @@ Woods extracts your Rails application via runtime introspection and pushes struc
 
 All syncs are **idempotent** — existing pages are updated, new pages are created. Re-running the sync is always safe.
 
+## Sync Manifest (Incremental Sync)
+
+Sync is incremental. A **sync manifest** (`<output_dir>/notion_sync_manifest.json`) records the content hash and Notion page id of every page last pushed. On each run the exporter:
+
+- **skips** a page whose built content hash is unchanged (zero API calls),
+- **updates** only pages whose content actually changed, via the cached page id,
+- **self-heals** the cached id if the page was deleted or archived behind it (one lookup, then a normal create).
+
+Manifest entries for models/columns that vanished from the current extraction are pruned, but **no Notion page is ever deleted** by the sync — there is no delete path. A renamed or removed model just leaves its old page in Notion untouched.
+
+If the manifest is missing (first run, or a CI cache miss), the exporter falls back to the full lookup/create path for every page and rebuilds the manifest — correct, just more API calls than a steady-state run.
+
+### Escape hatch
+
+Set `WOODS_NOTION_FORCE=1` (or pass `force_full: true` to the exporter) to ignore the manifest for one run and re-check every page — useful after a mapper/format change that alters every page's content, where the unchanged-hash skip would otherwise mask the update.
+
 ## Setup
 
 ### 1. Create a Notion Integration
@@ -212,6 +228,10 @@ end
 Notion's API allows 3 requests per second. The gem's built-in rate limiter handles this automatically. For large codebases (100+ models), expect the sync to take a few minutes.
 
 If you see 429 errors, the client retries up to 3 times with exponential backoff using the `Retry-After` header.
+
+### Retries and duplicates
+
+A 429 is always retried, for any request — the server rejected it before doing any work. A 503 is different: an intermediary in front of Notion's API can synthesize a 503 for a request the origin already committed, so blindly retrying it risks creating a duplicate page. The client only retries a 503 for **idempotent** requests (reads, and page updates keyed by an existing page id). Page *creation* has no idempotency key, so a 503 on `create_page` is raised immediately instead of retried — you'll see the error and can re-run the sync, which is safe because the manifest either already recorded the created page or will create it fresh.
 
 ## Error Handling
 

@@ -254,7 +254,7 @@ Safe, foundational queries against the live database.
 | `console_sample` | Random sample of records (max 25) |
 | `console_find` | Find a single record by primary key or unique column |
 | `console_pluck` | Extract column values with optional distinct (max 1000 rows) |
-| `console_aggregate` | Run sum/avg/min/max on a column |
+| `console_aggregate` | Run sum/average/minimum/maximum on a column (count needs no column) |
 | `console_association_count` | Count associated records for a specific record |
 | `console_schema` | Database schema for a model with optional index info |
 | `console_recent` | Recently created/updated records (max 50) |

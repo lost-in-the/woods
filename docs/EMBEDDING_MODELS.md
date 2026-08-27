@@ -12,7 +12,7 @@ default is conservative, and how to add a new one.
 | `bge-m3` | **8192** | 1024 | 1.2 GB | Large Rails units, fewer chunks |
 | `snowflake-arctic-embed2` | 8192 | 1024 | 1.2 GB | Multilingual projects |
 | `mxbai-embed-large` | 512 | 1024 | 670 MB | Short text (tweets, commit msgs) |
-| `all-minilm` | 256 | 384 | 46 MB | Tight-memory environments |
+| `all-minilm` | 512 | 384 | 46 MB | Tight-memory environments |
 
 The default is `nomic-embed-text` because it's small, fast, and ships with every
 fresh Ollama install. If you're indexing a large Rails codebase and don't mind
@@ -93,8 +93,9 @@ If you want Woods to auto-pick `num_ctx` for a model we don't ship support for:
    than the server enforces — see the nomic-embed-text case above). Send a
    request with a known-large input and check for 400s:
    ```bash
-   # Probe script in this repo: scripts/probes/ollama_context_probe.rb
-   ruby scripts/probes/ollama_context_probe.rb your-model 8192
+   curl -s http://localhost:11434/api/embed \
+     -d "{\"model\":\"your-model\",\"input\":\"$(ruby -e 'print "word " * 8500')\"}" \
+     | jq '.error // "no error — context held"'
    ```
 4. Add it to `MODEL_CONTEXT_LENGTHS` in `lib/woods/embedding/provider.rb`
    (keep the value at the **enforced** ceiling, not the advertised one).

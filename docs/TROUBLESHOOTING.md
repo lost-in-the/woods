@@ -95,25 +95,30 @@ ls app/decorators/ app/state_machines/ 2>/dev/null
 ls tmp/woods/decorators/ tmp/woods/state_machines/ 2>/dev/null
 ```
 
-Note: `config.extractors` controls the **retrieval scope** (which types appear in search results), not which extractors run during extraction. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
+Note: `config.extractors` does not control anything today — it's accepted for forward compatibility only and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
 
 ---
 
-### Incremental extraction misses changes to routes, middleware, or engines
+### Incremental extraction doesn't seem to update routes, middleware, or engines
 
-**Symptom:** After changing your routes file or adding a middleware, running `rake woods:incremental` doesn't update those units.
+**Symptom:** After changing your routes file or adding a middleware, `rake woods:incremental` doesn't seem to update those units.
 
-**Cause:** Some unit types do not map to individual files and cannot be incrementally updated. The following types require a full extraction to update:
+**Cause:** Eight unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Incremental mode still updates them — it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
 
-- `route` — routes are extracted from the live router, not a single file
-- `middleware` — the full middleware stack is introspected at once
-- `engine` — mounted engines are discovered from the app
-- `scheduled_job` — job schedules are extracted from the scheduler config
-- `state_machine` — multi-file extraction
-- `event` — two-pass publish/subscribe collection
-- `factory` — multi-file collection
+| Type | Trigger path |
+|------|--------------|
+| `route` | `config/routes.rb` |
+| `engine` | `config/routes.rb`, `Gemfile.lock` |
+| `middleware` | `config/application.rb`, `Gemfile.lock`, any file under `config/initializers`/`config/environments` |
+| `scheduled_job` | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb` |
+| `state_machine` | any `.rb` change under the scanned model directories |
+| `factory` | any `.rb` change under `spec/factories`/`test/factories` |
+| `event` | any `.rb` change under `app/` |
+| `database_view` | any `.sql` change under `db/views` |
 
-**Fix:** Run a full extraction when these types change:
+If your change doesn't match one of these trigger paths, the type genuinely wasn't updated — that's the actual bug to chase, not a documented limitation.
+
+**Fix:** If you suspect drift outside these trigger paths (or just want certainty), run a full extraction:
 
 ```bash
 bundle exec rake woods:extract
@@ -142,7 +147,7 @@ bundle exec rake woods:extract
 
 **Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct — only the provenance metadata is off.
 
-**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory — often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg). See [#137].
+**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory — often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg).
 
 **Fix:** Make the worktree's git directory reachable from the extraction environment — for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly — Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
 
@@ -175,7 +180,14 @@ Verify the output is accessible from the host:
 ls ./tmp/woods/manifest.json
 ```
 
-If this fails, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
+**Since Woods 2.0, a healthy index may not have `manifest.json` at the output root at all.** Extraction publishes each generation into an immutable `payloads/gen-<N>/` directory and points to it from `generation.json`. If the flat path is missing, check the payload path instead before assuming extraction failed:
+
+```bash
+cat ./tmp/woods/generation.json                    # {"number": 42, "payload": "payloads/gen-42", ...}
+ls ./tmp/woods/payloads/gen-42/manifest.json
+```
+
+`woods-mcp-start` and `IndexReader` already resolve this automatically — this is only for manual inspection. If neither path has a manifest, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
 
 ---
 
@@ -295,8 +307,10 @@ bundle exec rake woods:console 2>/dev/null
 
 ```
 console_count(model: "Order", scope: { status: "pending" })
-console_sample(model: "Order", scope: { created_at: { gte: "2025-01-01" } })
+console_sample(model: "Order", scope: { created_at_gteq: "2025-01-01" })
 ```
+
+Scope keys are flat, Ransack-style predicates (`_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) suffixed onto a column name — `scope: { created_at: { gte: "..." } }` (a nested hash) is rejected. A plain key with no suffix (`status: "pending"`) is an equality match.
 
 ---
 
@@ -510,7 +524,7 @@ services:
       - .:/app    # Full app mount — output lands at ./tmp/woods/
 ```
 
-Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`.
+Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json` — or, if that's absent, `cat tmp/woods/generation.json` and check under the `payload` path it names (see [No manifest.json error](#no-manifestjson-error-when-starting-the-index-server) above).
 
 ---
 

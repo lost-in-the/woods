@@ -12,14 +12,18 @@ end
 
 ## Common Configuration Patterns
 
-### CI-Only Extraction (Subset of Extractors)
+### CI-Only Extraction (Skip Framework Sources)
+
+`config.extractors` cannot select a subset of extractors — it's accepted for
+forward compatibility only (see [Extractors](#extractors) below). To speed up
+CI, skip the one extractor that's actually optional instead:
 
 ```ruby
 Woods.configure do |config|
   config.output_dir = Rails.root.join('tmp/woods')
 
-  # In CI, only extract models and controllers for faster builds
-  config.extractors = %i[models controllers services] if ENV['CI']
+  # In CI, skip Rails/gem framework source extraction for faster builds
+  config.include_framework_sources = false if ENV['CI']
 end
 ```
 
@@ -59,13 +63,13 @@ end
 Columns:
 
 - **User-settable**: a direct `Woods.configure { |c| c.<option> = ... }` writes the value verbatim.
-- **Preset-derived**: set by `Builder.preset_config(:local | :postgresql | :production)` as a group. You can override any preset value afterwards in the `configure` block — later writes win.
+- **Preset-derived**: set by `Builder.preset_config(:local | :shared_filesystem | :postgresql | :production)` as a group. You can override any preset value afterwards in the `configure` block — later writes win.
 - **Computed**: derived from other options at read time (or at `build_*` time by `Woods::Builder`). Writing directly has no effect; change the inputs instead.
 
 | Option | Type | Default | Role | Description |
 |--------|------|---------|------|-------------|
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
-| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | user-settable | List of enabled extractors (see [Extractors](#extractors) below) |
+| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
 | `max_context_tokens` | Integer | `8000` | user-settable | Maximum tokens for retrieval context windows |
 | `similarity_threshold` | Float | `0.7` | user-settable | Minimum similarity score (0.0-1.0) for retrieval results |
@@ -105,7 +109,7 @@ config.embedding_options = {
 }
 ```
 
-The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `snowflake-arctic-embed2` → 8192, `mxbai-embed-large` → 512, `all-minilm` → 256). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
+The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `mxbai-embed-large` → 512, `snowflake-arctic-embed` → 512, `snowflake-arctic-embed2` → 8192, `all-minilm` → 512). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
 
 **Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
 
@@ -299,22 +303,38 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 
 ## Extractors
 
-The `extractors` config accepts an array of symbols. Default set:
+`config.extractors` accepts an array of symbols but **extractor selection is
+not implemented**. All 34 extractors always run during a full extraction,
+regardless of what this array holds — nothing in the extraction path reads
+it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
+config). Setting `extractors` to anything other than its default value emits
+a warning:
 
 ```ruby
-config.extractors = %i[
-  models controllers services components view_components
-  jobs mailers graphql serializers managers policies validators
-  rails_source
-]
+config.extractors = %i[models controllers services]
+# => warns: "config.extractors is accepted for forward compatibility but
+#    extractor selection is not implemented; all extractors run."
 ```
 
-Additional extractors available (not in default set):
+The array exists for forward compatibility with a future selection knob.
+Leave it at its default. The full list of what always runs:
 
 | Symbol | Extractor | What it adds |
 |--------|-----------|-------------|
+| `:models` | ModelExtractor | ActiveRecord models, with concerns inlined and schema prepended |
+| `:controllers` | ControllerExtractor | Controllers with route context and filter chains |
+| `:services` | ServiceExtractor | Service/interactor/operation objects |
+| `:components` | PhlexExtractor | Phlex components |
+| `:view_components` | ViewComponentExtractor | ViewComponent classes |
+| `:jobs` | JobExtractor | ActiveJob/Sidekiq workers |
+| `:mailers` | MailerExtractor | ActionMailer classes |
+| `:graphql` | GraphQLExtractor | GraphQL types, mutations, resolvers, queries |
+| `:serializers` | SerializerExtractor | AMS/Blueprinter/Alba/Draper serializers |
+| `:managers` | ManagerExtractor | SimpleDelegator wrapper classes |
+| `:policies` | PolicyExtractor | Non-Pundit domain policy classes |
+| `:validators` | ValidatorExtractor | Custom ActiveModel validators |
 | `:concerns` | ConcernExtractor | ActiveSupport::Concern modules |
-| `:routes` | RouteExtractor | Rails routes (auto-included) |
+| `:routes` | RouteExtractor | Rails routes |
 | `:middleware` | MiddlewareExtractor | Rack middleware stack |
 | `:i18n` | I18nExtractor | Locale translation files |
 | `:pundit_policies` | PunditExtractor | Pundit authorization policies |
@@ -332,8 +352,11 @@ Additional extractors available (not in default set):
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
 | `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
+| `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
 | `:libs` | LibExtractor | Ruby files in lib/ |
+
+See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
 ## Console MCP Options
 
@@ -359,20 +382,75 @@ deployment guide including defense layers.
 
 ## Environment Variables
 
-These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block — most exist so the MCP servers can self-configure when no explicit config is available.
+These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block — most exist so the MCP servers, rake tasks, and exporters can self-configure or override config without an initializer edit.
 
-| Variable | Read by | Default | Purpose |
-|----------|---------|---------|---------|
-| `WOODS_DIR` | `woods-mcp` bootstrapper | `Dir.pwd` | Path to the extraction output directory. |
-| `WOODS_REQUIRE_INDEX` | `woods-mcp` bootstrapper | unset | Set to `"1"` to fail closed: the Index Server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host (ran `woods:extract`, no embedding provider) boots in pattern/structural mode without it. |
-| `WOODS_ALLOW_AUTODETECT` | `woods-mcp` bootstrapper | unset | **Deprecated no-op.** Auto-detect is now the default when no `woods.json` and no provider are present; this flag is still accepted for backward compatibility but has no effect. |
-| `WOODS_SEARCH_MAX_SCAN` | `woods-mcp` `search` tool | `500` | Cap on the number of unit files loaded during a phase-2 (metadata/source_code) search. When the cap is hit, the response includes `partial: true`. Set empty or unset to use the default. |
-| `WOODS_SNAPSHOTS` | `woods-mcp` bootstrapper | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
-| `WOODS_CONSOLE_CONFIG` | `woods-console-mcp` launcher | `~/.woods/console.yml` when present | Explicit launcher YAML path. An explicit missing path fails startup. |
-| `WOODS_CONSOLE_UNSAFE_EVAL` | Console server | unset | Legacy setting. The exact value `true` requests unavailable eval capability and therefore fails server construction closed. |
-| `OPENAI_API_KEY` | `woods-mcp` bootstrapper | — | When set and no embedding provider is configured, the MCP server auto-enables OpenAI-backed semantic search with in-memory stores. |
-| `OLLAMA_BASE_URL` | `woods-mcp` bootstrapper auto-detect | `http://localhost:11434` | Base URL the bootstrapper probes (`GET /api/tags`, 500ms timeout) when no embedding provider is configured. A reachable Ollama instance auto-enables local semantic search. |
-| `OLLAMA_EMBED_MODEL` | `woods-mcp` bootstrapper auto-detect | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
+### Index Server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_DIR` | `Dir.pwd` | Path to the extraction output directory. |
+| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. |
+| `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
+| `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
+| `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
+| `WOODS_ALLOW_PURGE` | unset | Set to `"1"` to override the 30%-deletion purge guard in `woods:embed`/`woods:embed_incremental`. |
+| `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain. |
+| `WOODS_MCP_CACHE_TTL_MS` | `10000` | Cache TTL advertised in tool result `_meta`. `0` disables caching. |
+| `WOODS_NO_UPDATE_CHECK` | unset | Set to `"1"` to skip the `woods_status` RubyGems version check. |
+| `OPENAI_API_KEY` | — | When set and no embedding provider is configured, the server auto-enables OpenAI-backed semantic search with in-memory stores. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Probed (`GET /api/tags`, 500ms timeout) when no embedding provider is configured. A reachable instance auto-enables local semantic search. |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
+| `WOODS_QDRANT_URL`, `WOODS_QDRANT_COLLECTION`, `WOODS_QDRANT_API_KEY` | — | Override/require Qdrant connection settings when a pgvector/Qdrant-backed index is served outside its host application (no `Woods.configuration` available). |
+| `WOODS_PG_URL` | — | Required when a pgvector-backed index is served outside its host application. |
+
+### HTTP transport (`woods-mcp-http`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. |
+| `WOODS_MCP_HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated origin allow-list. |
+| `WOODS_MCP_HTTP_STATELESS` | `1` (stateless) | Set to `0`/`false`/`no` to restore session-based mode. |
+
+### Console Server (`woods-console-mcp`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_CONSOLE_CONFIG` | `~/.woods/console.yml` when present | Explicit launcher YAML path. An explicit missing path fails startup. |
+| `WOODS_CONSOLE_MCP_TOKEN` | unset | Bearer token for the embedded Rack middleware; see `console_mcp_token` above. |
+| `WOODS_CONSOLE_UNSAFE_EVAL` | unset | Legacy setting. The exact value `true` requests unavailable eval capability and fails server construction closed. |
+
+### Watch daemon (`woods:watch`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. |
+| `WOODS_LOCK_WAIT` | `Watch::Daemon::LOCK_STALE_TIMEOUT` (600s) | How long a rake writer waits for `PipelineLock` before exiting non-zero. |
+| `WOODS_WATCH_POLL` | auto-detected | Set to `"1"`/`"0"` to force/disable polling mode (vs. `listen` gem, e.g. in a container without inotify). |
+| `WOODS_WATCH_DEBOUNCE` | `0.4` (seconds) | Delay before processing a batch of file-change events. |
+| `WOODS_WATCH_FULL_THRESHOLD` | `50` | Number of changed paths in one batch that triggers a full extraction instead of incremental. |
+| `WOODS_WATCH_IDLE_TIMEOUT` | unset (no timeout) | Seconds of inactivity before the daemon exits. |
+| `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
+
+### Extraction rake tasks
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for `woods:extract`/`woods:incremental`/`woods:watch` without editing the initializer. |
+| `RAILS_ENV`, `GITHUB_BASE_REF` | — | Read by `woods:incremental`'s changed-file detection in CI. |
+
+### Exporters
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NOTION_API_TOKEN` | `config.notion_api_token` | Overrides the configured Notion token. |
+| `WOODS_NOTION_FORCE` | unset | Set to `"1"` (or pass `force_full: true`) to ignore the Notion sync manifest for one run and re-check every page. |
+| `UNBLOCKED_API_TOKEN`, `UNBLOCKED_COLLECTION_ID`, `UNBLOCKED_REPO_URL` | `config.unblocked_*` | Overrides the configured Unblocked connection settings. |
+| `UNBLOCKED_DAILY_BUDGET` | `1000` | Per-run call cap for `woods:unblocked_sync`. |
+| `UNBLOCKED_FORCE_FULL_SYNC` | unset | Set to `"1"` to re-push every Unblocked document, ignoring the unchanged-hash skip. |
+| `UNBLOCKED_FORCE_PURGE` | unset | Set to `"1"` to bypass the Unblocked 30%-deletion guard. |
+| `WOODS_OBSIDIAN_VAULT` | `<output_dir>/obsidian_vault` | Vault output path for `woods:obsidian`. |
+| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK`, `WOODS_OBSIDIAN_INCLUDE_SOURCE` | `false` | Include framework units / full source in the exported vault. |
+| `WOODS_OBSIDIAN_FORCE_PURGE` | unset | Bypass the Obsidian 30%-deletion guard on the stale-note sweep. |
 
 The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 

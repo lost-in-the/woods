@@ -292,8 +292,10 @@ Use environment checks in the initializer to adapt extraction behavior:
 Woods.configure do |config|
   config.output_dir = ENV.fetch('WOODS_OUTPUT_DIR', Rails.root.join('tmp/woods'))
 
-  # CI: subset of extractors for faster builds
-  config.extractors = %i[models controllers services] if ENV['CI']
+  # CI: skip framework source extraction for faster builds.
+  # (config.extractors can't select a subset — it's accepted for forward
+  # compatibility only. See CONFIGURATION_REFERENCE.md#extractors.)
+  config.include_framework_sources = false if ENV['CI']
 
   # Choose embedding provider based on available credentials
   if ENV['OPENAI_API_KEY']

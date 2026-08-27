@@ -274,3 +274,7 @@ configure `config.unblocked_collection_id`.
 **Documents not appearing in answers** — Documents take ~1 minute to become
 available. Also verify the collection is enabled in your Unblocked data source
 settings.
+
+## Retries and Duplicates
+
+A 429 is always retried, for any request — the server rejected it before doing any work. A 503 is different: an intermediary in front of Unblocked's API can synthesize a 503 for a request the origin already committed, so a blind retry risks creating a duplicate. The client only retries a 503 for **idempotent** requests (reads, and document upserts keyed by URI). Collection *creation* has no idempotency key, so a 503 on `create_collection` is raised immediately instead of retried. Document upserts and syncs are unaffected — they're idempotent by URI, so a 503 there retries normally.

@@ -327,9 +327,9 @@ Which tasks need Docker and which don't:
 | `woods:console` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:flow[EntryPoint]` | Yes | `docker compose exec app bundle exec rake ...` |
 | `woods:notion_sync` | Yes | `docker compose exec app bundle exec rake ...` |
-| `woods:validate` | No | Host or container |
-| `woods:stats` | No | Host or container |
-| `woods:clean` | No | Host or container |
+| `woods:validate` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:stats` | Yes | `docker compose exec app bundle exec rake ...` |
+| `woods:clean` | Yes | `docker compose exec app bundle exec rake ...` |
 
 ## Container Name Discovery
 
