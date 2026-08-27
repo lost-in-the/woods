@@ -1,100 +1,80 @@
 # Contributing to Woods
 
-Thank you for your interest in contributing to Woods!
+Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents should also read [AGENTS.md](AGENTS.md).
 
-## Bug Reports
+## Choose the right channel
 
-Please open an issue on GitHub with:
+- **Bug:** open an issue with reproduction steps, expected and actual behavior, Woods/Ruby/Rails versions, database adapter, and the smallest useful log or stack trace.
+- **Feature:** describe the user problem, intended outcome, alternatives considered, and affected extraction/MCP/storage surfaces.
+- **Security issue:** do not open a public issue. Follow [SECURITY.md](SECURITY.md).
+- **Question or documentation gap:** open an issue and point to the page or workflow that was unclear.
 
-- A clear description of the bug
-- Steps to reproduce
-- Expected vs. actual behavior
-- Your Ruby version, Rails version, and database adapter
+Search existing issues and pull requests first. A minimal reproduction in a small Rails app is more useful than a large application dump; never attach secrets or production data.
 
-## Feature Requests
-
-Open an issue describing:
-
-- The problem you're trying to solve
-- Your proposed solution
-- Any alternatives you've considered
-
-## Pull Requests
-
-1. Fork the repo and create your branch from `main`
-2. Install dependencies: `bin/setup`
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure the test suite passes: `bin/rake spec`
-6. Ensure code style passes: `bin/rubocop`
-7. Update CHANGELOG.md with your changes
-8. Complete the **Pre-PR requirements** below
-9. Open a pull request
-
-### Pre-PR requirements
-
-These are hard gates, a PR that fails either is incomplete:
-
-1. **Documentation must be current.** Any doc affected by the change, README, `docs/`, the
-   `plugin/skills/` user guides, `CHANGELOG.md`, must be updated in the *same* PR. Don't ship
-   behavior the docs still describe the old way.
-2. **Investigate plugin-functionality impact.** If the change touches anything the distributed
-   user skills rely on, a rake task, MCP tool or its arguments, an executable (`woods-mcp`,
-   `woods-mcp-start`, `woods-console-mcp`, `woods-mcp-http`), a config key, or setup steps, investigate whether `plugin/skills/{woods-setup,woods-mcp-config,woods-diagnose}` need to
-   change.
-
-### Claude Code plugin changes
-
-`plugin/` is distributed as the `woods-plugin` via the
-[`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) marketplace (a `git-subdir`
-reference to this subtree). Installed users may run an **older** gem than `main`, so:
-
-- If a change adds/removes/renames a tool, task, executable, or config key that a skill
-  documents, **update the skill in the same PR**.
-- The skills carry a Version Preflight (operate only against the installed version). **Land the
-  skill change with the release that ships the capability**, never document a feature in a
-  skill before the version that provides it is released. Bump `plugin/.claude-plugin/plugin.json`
-  `version` when the skill content changes.
-- If the change requires a new marketplace entry, `ref` pin, or metadata edit, open a **paired
-  PR against `lost-in-the/plugins`** and link it from this PR.
-
-## Development Setup
+## Development setup
 
 ```bash
 git clone https://github.com/lost-in-the/woods.git
 cd woods
 bin/setup
-bin/rake spec    # Run tests
-bin/rubocop      # Check style
+bin/rake spec
+bin/rubocop
 ```
 
-## Testing
+Create a branch from current `main`. Keep each pull request to one logical change and preserve unrelated formatting and refactors for separate work.
 
-Woods has two test suites:
+## Understand the repository
 
-- **Gem unit specs** (`spec/`): Run with `bin/rake spec`. No Rails boot required.
-- **Integration specs**: Run inside a host Rails app to test real extraction.
+| Path | Responsibility |
+|---|---|
+| `lib/woods/extractor/` | Runtime Rails extractors and extracted units |
+| `lib/woods/mcp/` | Read-only Index MCP server and protocol behavior |
+| `lib/woods/console/` | Live Rails Console MCP and safeguards |
+| `lib/woods/storage/`, `lib/woods/embedding/`, `lib/woods/retrieval/` | Persistence, vectors, and semantic retrieval |
+| `lib/tasks/` | Rails/Rake operational interface |
+| `spec/` | Unit, contract, and opt-in integration specs |
+| `spec/dummy/` | Booted Rails fixture application |
+| `docs/` | User, agent, operational, and reference documentation |
+| `plugin/skills/` | Distributed Woods setup/configuration/diagnosis skills |
 
-All new features need tests. Bug fixes should include a regression test.
+Read [CLAUDE.md](CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
+
+## Make the change
+
+1. Reproduce a bug or define the expected behavior.
+2. Add or update the smallest test that can fail for the behavior.
+3. Make the targeted implementation change.
+4. Run the narrow test, then the relevant broader suite.
+5. Update the canonical documentation, plugin skill, and changelog when the public contract changes.
+6. Review the complete diff before opening a pull request.
+
+Woods extracts Rails behavior through a booted runtime. Features that depend on routes, Active Record reflections, descendants, or framework internals must use runtime introspection. Unit tests may isolate collaborators, but version-sensitive behavior also needs the booted-app lane.
+
+## Validate in proportion to the change
+
+Start with the smallest command that exercises your work:
+
+```bash
+# One spec file
+bin/rspec spec/path/to/spec.rb
+
+# Unit/contract suite (booted-app and live-backend lanes excluded)
+bin/rake spec
+
+# Style
+bin/rubocop
+```
+
+Before requesting review, run the full unit suite and style check unless the PR explains why one cannot run.
 
 ### Rails version matrix
 
-The gem supports `railties >= 6.0`. Coverage is split across two CI jobs:
+The gem supports Ruby 3.0 or later and Rails 6.0 through 8.x. CI separates fast unit coverage from real Rails boots:
 
-- The base unit `test` job runs `rake spec` across **Ruby 3.0–4.0** on the
-  default (newest) Rails. The unit specs stub Rails, so they run once on the base
-  Gemfile rather than per Rails version.
-- The `rails-matrix` job runs the **booted-app extraction test**
-  (`spec/integration/booted_extraction_spec.rb` against `spec/dummy`) under each
-  supported Rails, 6.0, 6.1, 7.0, 7.1, 7.2, 8.0, 8.1, using per-version gemfiles
-  under `gemfiles/`. This is the version-sensitive gate: it boots a real Rails
-  app in-process and runs an extraction. (The booted spec is tagged `:booted_app`
-  and excluded from the default `rake spec`; `WOODS_RUN_BOOTED_APP=1` opts it in,
-  and it must run in its own process, it can't share one with the unit suite.)
+- the base test job runs unit specs across supported Ruby versions;
+- the `rails-matrix` job boots `spec/dummy` and performs extraction for each supported Rails line using `gemfiles/rails_*.gemfile`.
 
-The Rails pins live in `Appraisals`; the gemfiles are hand-maintained
-(`eval_gemfile`-ing the base `Gemfile` and pinning Rails) because Appraisal can't
-generate from the conditional base Gemfile. To run a single Rails row locally:
+Run one Rails row locally:
 
 ```bash
 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle install
@@ -102,53 +82,64 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
   bin/rspec spec/integration/booted_extraction_spec.rb
 ```
 
-When adding a Rails line: add it to both `Appraisals` and `gemfiles/`, and add a
-valid Ruby×Rails pair to the `rails-matrix` job in `.github/workflows/ci.yml`.
-**For a row below Rails 7.1**, the gemfile must set `ENV['WOODS_SQLITE3_REQ'] =
-'~> 1.4'` *before* `eval_gemfile` (those Rails versions pin `sqlite3 ~> 1.4` in
-their adapter at load time) and pin `concurrent-ruby '< 1.3.5'` (1.3.5 dropped
-the implicit `require "logger"` those releases rely on under Ruby 3.x), copy an
-existing `gemfiles/rails_6.0.gemfile` as the template.
+When adding a Rails line, update `Appraisals`, the corresponding hand-maintained gemfile, and `.github/workflows/ci.yml`. For Rails below 7.1, copy an existing 6.x gemfile so its sqlite3 and concurrent-ruby compatibility pins are preserved.
 
-### Live-backend lane
+### Live storage backends
 
-Storage adapters are also exercised against **real** servers by the
-`live-backends` CI job (`spec/integration/live_backends_spec.rb`, tagged
-`:live_backends`). The rest of the storage specs use doubles: they verify the
-SQL and HTTP an adapter *builds*, but not what a server does with it, which is
-how #181 shipped, a `PG::CardinalityViolation` that only a real PostgreSQL
-could raise.
-
-Run it locally against containers:
+The opt-in `live-backends` lane verifies behavior against PostgreSQL/pgvector and Qdrant that doubles cannot prove, including batch conflicts, delete addressing, filter translation, and extension setup.
 
 ```bash
-docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=woods_test pgvector/pgvector:pg16
-docker run -d -p 6333:6333 qdrant/qdrant:v1.12.4
-
 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile bundle install
 WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
   bin/rspec spec/integration/live_backends_spec.rb
 ```
 
-`gemfiles/live_backends.gemfile` adds `pg` and `activerecord` (the Pgvector
-adapter takes an ActiveRecord connection); Qdrant needs no gem. Override the
-endpoints with `WOODS_PG_URL` and `WOODS_QDRANT_URL`.
+The lane expects reachable PostgreSQL/pgvector and Qdrant services. Configure endpoints with `WOODS_PG_URL` and `WOODS_QDRANT_URL`. New adapter behavior that depends on a real server belongs in this lane.
 
-**Any new behavior that only a real backend can exhibit belongs here**: batch
-conflict semantics, filter translation, delete addressing, extension setup.
+## Keep public surfaces synchronized
 
-## Code Style
+A pull request is incomplete when behavior and user guidance disagree.
 
-- `frozen_string_literal: true` on every file
-- YARD documentation on public methods
-- `rescue StandardError`, never bare `rescue`
-- All extractors return `Array<ExtractedUnit>`
+Update the canonical owner for any changed contract:
 
-## Runtime Introspection Requirement
+| Change | Documentation owner |
+|---|---|
+| Install or first run | `docs/GETTING_STARTED.md` |
+| Agent-operated installation | `docs/AGENT_SETUP.md` |
+| Configuration key/default | `docs/CONFIGURATION_REFERENCE.md` |
+| MCP setup or registered tools | `docs/MCP_SERVERS.md` |
+| Agent query workflow | `docs/AGENT_GUIDE.md` |
+| Console security/transport | `docs/CONSOLE_MCP_SETUP.md` |
+| Major-version behavior | `docs/UPGRADING_TO_2.md` |
+| Failure diagnosis | `docs/TROUBLESHOOTING.md` |
 
-Woods uses runtime introspection, not static parsing. If your feature requires access to Rails internals (ActiveRecord reflections, route introspection, etc.), it must run inside a booted Rails environment. Unit tests should use mocks/stubs; integration tests should run in a real Rails app.
+If a rake task, executable, MCP tool/argument, config key, setup step, or diagnosis path changes, inspect all three distributed skills under `plugin/skills/`. Update affected skills in the same Woods PR and bump `plugin/.claude-plugin/plugin.json` when skill content changes.
 
-## License
+The plugin is published through the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) marketplace as a git-subdir reference. Open and cross-link a paired marketplace PR when compatibility metadata, the entry, or its ref must change. Skills must check the installed Woods version and must not document unreleased capabilities as available.
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+Update `CHANGELOG.md` for user-visible changes. Internal refactors and typo-only documentation fixes normally do not need an entry.
+
+## Pull request evidence
+
+Include:
+
+- the problem and user-visible outcome;
+- implementation scope and important tradeoffs;
+- exact validation commands and results;
+- Rails/storage lanes run or intentionally not run;
+- public docs and plugin impact;
+- migration, compatibility, security, and rollback notes when applicable;
+- screenshots or transcript excerpts only when they materially verify behavior.
+
+Do not use empty assertions or output-only tests. A regression test must fail before the fix and exercise the same runtime path as production behavior.
+
+## Code conventions
+
+- Add `# frozen_string_literal: true` to Ruby files.
+- Document public APIs with YARD where it improves their contract.
+- Rescue `StandardError` or a narrower class; never use a bare rescue.
+- Extractors return `Array<Woods::ExtractedUnit>`.
+- Keep MCP stdout free of non-protocol output.
+- Prefer explicit structured errors over suppressing a failure.
+
+By contributing, you agree that your contribution is licensed under the [MIT License](LICENSE.txt).
