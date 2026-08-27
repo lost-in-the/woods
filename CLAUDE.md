@@ -126,7 +126,7 @@ lib/
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
-│   ├── retriever.rb                     # Retriever orchestrator with degradation tiers
+│   ├── retriever.rb                     # Retriever orchestrator (strategy dispatch + type-rank reporting)
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
 │   ├── flow_assembler.rb               # Per-query runtime flow aggregation
 │   ├── flow_document.rb                # Serialization envelope for flow output
@@ -198,7 +198,7 @@ exe/
 
 **Two test suites** — the gem has unit specs with mocks, and a separate Rails app has integration specs that run real extractions.
 
-- **Gem unit specs** (`spec/`): RSpec with `rubocop-rspec` enforcement. Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
+- **Gem unit specs** (`spec/`): RSpec (`rubocop-rspec` is installed but not loaded as a RuboCop plugin — enabling it repo-wide is an open backlog item). Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
 - **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained — Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`.
 - **Integration specs** (in a separate Rails app): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Set up a host Rails app per the Getting Started guide, then run `bundle exec rspec spec/integration/`.
 - Every extractor needs tests for: happy path extraction, edge cases (empty files, namespaced classes, STI), concern inlining, dependency detection
@@ -233,7 +233,7 @@ Key references:
 - Incremental extraction contract + dispatch inventory + differential harness → `docs/INCREMENTAL_EXTRACTION.md`
 - Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
 - Coverage gaps + future extractor work → `docs/COVERAGE_GAP_ANALYSIS.md`
-- Historical design documents (from the build phase) → `_project-resources/docs/`
+- Historical design documents (from the build phase) live in git history — see `docs/design/README.md`
 
 ## Backlog Workflow
 
@@ -333,7 +333,7 @@ At the start of a session, read `.claude/context/session-state.md` for context f
 - `DecoratorExtractor` scans `app/decorators/`, `app/presenters/`, and `app/form_objects/` — these directories are also added to `EXTRACTION_DIRECTORIES` for eager loading.
 - `CachingExtractor` scans controllers, models, and view templates (`.erb`) — the `file_type` parameter on `extract_caching_file` defaults to nil (auto-detected from path).
 - `TestMappingExtractor` scans `spec/` and `test/` directories — these are outside `app/` so they don't need eager loading. Test files are read statically.
-- Notion export requires `notion_api_token` and `notion_database_ids` to be configured. If only one database ID is set, the other sync (columns or data_models) is skipped gracefully. Environment variable `NOTION_API_TOKEN` overrides config. The Notion API enforces 3 req/sec — `RateLimiter` handles this automatically.
+- Notion export requires `notion_api_token` and `notion_database_ids` to be configured. The data-models sync runs with just the `data_models` id; the columns sync requires **both** ids (column rows relate to their parent model pages), so a columns-only config syncs nothing. Environment variable `NOTION_API_TOKEN` overrides config. The Notion API enforces 3 req/sec — `RateLimiter` handles this automatically.
 - Obsidian export (`woods:obsidian`, `lib/woods/obsidian/`) writes a local vault — no API/token/Configuration accessors (path + flags are constructor kwargs, exposed via `WOODS_OBSIDIAN_*` env). It reads `raw_graph_data` (string keys + **persisted** pagerank — never `reader.dependency_graph`, which drops pagerank and symbolizes types). All edges derive from the graph's `edges`/`reverse`; per-unit JSON is read only for note bodies. Frontmatter is **flat-scalars-only** (Obsidian's Properties UI corrupts nested objects) emitted via Psych; structured edges live in the `_woods/` sidecar. The stale-note sweep and `.obsidian/` config writes are both gated behind a `.woods-vault` ownership sentinel + a 30% purge guard (mirrors Unblocked). `include_framework` covers `rails_source` only (`gem_source` is unreachable via `IndexReader::TYPE_DIRS`). See `docs/OBSIDIAN_INTEGRATION.md`.
 - Navigation edge extraction (`link_to`, `redirect_to`, `form_action`) is gated by `extract_navigation_edges` config (default: true). Extractors that scan for navigation edges must include both `SharedDependencyScanner` and `RouteHelperResolver`, and call `build_route_helper_map` in their initializer.
 - `RouteHelperResolver` uses `IGNORED_HELPER_PREFIXES` to filter false positives from non-route `_path`/`_url` suffixes (e.g., `file_path`, `base_url`, `log_path`). Add new prefixes there when false positives are discovered in host apps.
