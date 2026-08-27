@@ -60,8 +60,28 @@ module Woods
       AS_BODY_PATTERN = /\bAS\s*\(/i
 
       # A CTE (or any `AS (...)`) body that opens with a DML keyword —
-      # the writable-CTE shape, in any WITH position.
-      WRITABLE_CTE_BODY_PATTERN = /\A\s*(?:DELETE|UPDATE|INSERT)\b/i
+      # the writable-CTE shape, in any WITH position. A single leading
+      # `(` is tolerated: PostgreSQL rejects `WITH a AS ((DELETE ...))`
+      # outright, so this is over-detection on a syntax that never runs,
+      # not under-detection.
+      WRITABLE_CTE_BODY_PATTERN = /\A\s*\(?\s*(?:DELETE|UPDATE|INSERT)\b/i
+
+      # Matches a CTE list attached to a top-level data-modifying statement:
+      # `WITH a AS (SELECT 1) DELETE FROM users RETURNING *`. Legal grammar
+      # on PostgreSQL; the statement prefix is `WITH`, so the allowed-prefix
+      # check passes it, and DELETE/UPDATE have no body keyword for the
+      # body scans to catch (INSERT only tripped INTO, MERGE nothing).
+      #
+      # The lazy `[\s\S]*?` reaches the first closing paren that is
+      # immediately followed by a DML keyword. In an allowed statement
+      # that position is grammatically impossible: after a CTE list's
+      # final `)` only SELECT (or another WITH) is valid, and a DML word
+      # anywhere else is separated from the paren by other tokens or sits
+      # inside a string literal, which {SqlNoiseStripper.strip_noise}
+      # removed. Column names like `updated_at`/`deleted_at` cannot match:
+      # `\b` requires the keyword to start right after the paren, and a
+      # bare `update` column follows a comma or SELECT, not a paren.
+      WITH_ATTACHED_DML_PATTERN = /\bWITH\b[\s\S]*?\)\s*(?:DELETE|UPDATE|INSERT|MERGE)\b/i
 
       # Forbidden statement prefixes (case-insensitive).
       #
@@ -242,6 +262,9 @@ module Woods
         # Check for writable CTEs (before body keywords to give better error messages)
         check_writable_ctes!(normalized)
 
+        # Check for a CTE list attached to top-level DML
+        check_with_attached_dml!(normalized)
+
         # Check for row-lock clauses (FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE)
         check_lock_clauses!(normalized)
 
@@ -354,6 +377,26 @@ module Woods
 
         raise SqlValidationError,
               'Rejected: row-lock clauses (FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE) are not allowed'
+      end
+
+      # Check if a CTE list is attached to a top-level data-modifying
+      # statement ({WITH_ATTACHED_DML_PATTERN}).
+      #
+      # PostgreSQL allows `WITH a AS (SELECT 1) DELETE FROM users RETURNING *`;
+      # the statement starts with WITH so it passes the allowed-prefix check,
+      # and only INSERT ever tripped a body keyword (INTO), incidentally.
+      # Runs before {#check_body_forbidden_keywords!} so the WITH-attached
+      # shapes get this specific message rather than the generic INTO one.
+      #
+      # @param sql [String]
+      # @raise [SqlValidationError] if DML follows the CTE list
+      def check_with_attached_dml!(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql)
+        return unless stripped.match?(WITH_ATTACHED_DML_PATTERN)
+
+        raise SqlValidationError,
+              'Rejected: a WITH clause cannot be attached to a data-modifying ' \
+              'statement (DELETE/UPDATE/INSERT/MERGE)'
       end
 
       # Yields the balanced paren body following every `AS (` occurrence.

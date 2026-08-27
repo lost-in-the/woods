@@ -20,7 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check anchored its match to the statement leader, so
   `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
   passed validation and PostgreSQL executed the DELETE. Every `AS (...)` body in
-  the statement is now inspected.
+  the statement is now inspected. A CTE list attached to top-level DML
+  (`WITH a AS (SELECT 1) DELETE FROM users RETURNING *`) is also rejected; DELETE
+  and UPDATE previously validated because the statement prefix is WITH and neither
+  keyword is a body keyword (only the INSERT variant tripped a check, incidentally
+  via INTO).
 - **Row-lock clauses are rejected.** `SELECT ... FOR UPDATE`, `FOR NO KEY UPDATE`,
   `FOR SHARE`, `FOR KEY SHARE` (with `NOWAIT`/`SKIP LOCKED`), and MySQL
   `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration

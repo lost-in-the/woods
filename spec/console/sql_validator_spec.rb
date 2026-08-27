@@ -198,8 +198,64 @@ RSpec.describe Woods::Console::SqlValidator do
         expect { validator.validate!(sql) }.not_to raise_error
       end
 
+      it 'rejects a writable CTE wrapped in extra parens (leading-paren gap)' do
+        sql = 'WITH a AS ((DELETE FROM users RETURNING *)) SELECT * FROM a'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
+
       it 'accepts a WINDOW clause whose AS (...) body is not a CTE' do
         sql = 'SELECT sum(id) OVER w FROM users WINDOW w AS (PARTITION BY status)'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
+    context 'with WITH-attached top-level DML' do
+      # The CTE list can be attached to a top-level data-modifying statement
+      # (legal PostgreSQL grammar): `WITH a AS (SELECT 1) DELETE FROM users
+      # RETURNING *`. The prefix check sees `WITH` and allows it; DELETE and
+      # UPDATE have no body keyword to trip the body scan. The INSERT variant
+      # was caught only incidentally, by its INTO.
+      {
+        'DELETE' => 'WITH a AS (SELECT 1) DELETE FROM users RETURNING *',
+        'UPDATE' => 'WITH a AS (SELECT 1) UPDATE users SET admin = true RETURNING *',
+        'INSERT' => 'WITH a AS (SELECT 1) INSERT INTO users (id) VALUES (1) RETURNING *',
+        'MERGE' => 'WITH a AS (SELECT 1) MERGE INTO users USING a ON (true) WHEN MATCHED THEN DELETE'
+      }.each do |keyword, sql|
+        it "rejects WITH ... #{keyword} at top level" do
+          expect { validator.validate!(sql) }
+            .to raise_error(Woods::Console::SqlValidationError, /data-modifying statement/i)
+        end
+      end
+    end
+
+    context 'with benign statements that must not trip the WITH-attached DML check' do
+      it 'accepts WITH ... SELECT with a WHERE on updated_at' do
+        sql = 'WITH a AS (SELECT 1) SELECT * FROM a WHERE updated_at > ?'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a column named update_count in the outer SELECT' do
+        sql = 'WITH a AS (SELECT 1) SELECT update_count FROM a'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a deleted_at predicate inside the CTE body' do
+        sql = 'WITH a AS (SELECT id FROM posts WHERE deleted_at IS NULL) SELECT * FROM a'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a deleted_at predicate in the outer WHERE' do
+        sql = 'WITH a AS (SELECT id FROM posts) SELECT * FROM a WHERE deleted_at IS NULL'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a nested subquery whose closing paren is followed by FROM' do
+        sql = 'WITH a AS (SELECT (SELECT max(id) FROM posts) AS top FROM posts) SELECT * FROM a'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a DELETE keyword that is not immediately after a closing paren' do
+        sql = 'WITH a AS (SELECT 1) SELECT * FROM a WHERE note = \'please delete\''
         expect { validator.validate!(sql) }.not_to raise_error
       end
     end
