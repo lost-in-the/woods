@@ -102,6 +102,20 @@ The complete walkthrough, including expected output and first questions to ask, 
 | Upgrade an existing 1.x installation | [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md) |
 | Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
 
+## Optional Claude Code workflows
+
+Woods itself is MCP-client and model independent. For Claude Code users, the
+separately packaged Woods plugin adds guided setup, MCP configuration, and
+diagnosis workflows:
+
+```text
+/plugin marketplace add lost-in-the/plugins
+/plugin install woods-plugin@lost-in-the-plugins
+```
+
+Other MCP clients do not need this plugin; follow the human or agent runbooks
+linked above and configure either stdio or Streamable HTTP directly.
+
 ## Two servers, two trust boundaries
 
 Woods ships two MCP servers. Most users only need the Index Server.

@@ -6,8 +6,8 @@
 # Quick-start presets (uncomment one instead of the full block below):
 #   Woods.configure_with_preset(:local)       # SQLite metadata + local Ollama (sqlite3 gem required)
 #   Woods.configure_with_preset(:shared_filesystem) # persisted files + local Ollama; no sqlite3
-#   Woods.configure_with_preset(:postgresql)  # pgvector + OpenAI (PostgreSQL required)
-#   Woods.configure_with_preset(:production)  # Qdrant + OpenAI (production-scale)
+#   Woods.configure_with_preset(:postgresql)  # pgvector + OpenAI (PostgreSQL + sqlite3 gem)
+#   Woods.configure_with_preset(:production)  # Qdrant + OpenAI (sqlite3 gem required)
 #
 # Presets accept a block for overrides:
 #   Woods.configure_with_preset(:local) { |c| c.max_context_tokens = 16_000 }
@@ -114,9 +114,9 @@ Woods.configure do |config|
   #   Layer 3 — Column + EAV redaction: named credential columns and
   #              key/value pairs are replaced with [REDACTED].
   #   Layer 4 — SqlValidator + SafeContext (always on, no config): rejects
-  #              DML/DDL before any DB interaction, and wraps every request
-  #              in a rolled-back transaction so a write is discarded even if
-  #              SqlValidator is bypassed.
+  #              DML/DDL before any DB interaction, and rolls back work on the
+  #              current database connection. It cannot contain jobs, mail,
+  #              HTTP calls, callbacks, threads, or other connections/shards.
 
   # config.console_mcp_enabled = false
   # config.console_mcp_path    = '/mcp/console'

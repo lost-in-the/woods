@@ -15,9 +15,15 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 | Diagnose an error | [Troubleshooting](TROUBLESHOOTING.md) | Symptom-to-cause checks for extraction, MCP, embeddings, storage, and Docker |
 | Contribute to Woods | [Contributing](../CONTRIBUTING.md) | A tested change with synchronized docs and plugin guidance |
 
+Claude Code users can optionally install the packaged setup/configuration
+workflows with `/plugin marketplace add lost-in-the/plugins`, followed by
+`/plugin install woods-plugin@lost-in-the-plugins`. Woods and its MCP servers
+do not otherwise depend on Claude Code; other clients use the same runbooks
+and stdio or Streamable HTTP endpoints directly.
+
 ## First-time setup
 
-- [Getting started](GETTING_STARTED.md): install, review generated configuration and the legacy migration, extract, validate, and connect the Index Server.
+- [Getting started](GETTING_STARTED.md): install, review generated configuration, remove the unused legacy application migration unless an older/custom integration requires it, extract, validate, and connect the Index Server.
 - [Agent setup runbook](AGENT_SETUP.md): the same result with version checks, repository safety, approval boundaries, and a copyable agent prompt.
 - [Docker setup](DOCKER_SETUP.md): extraction inside the container, container-first MCP launch, optional host launch, and path translation.
 - [Configuration reference](CONFIGURATION_REFERENCE.md): every supported option, default, and environment variable.

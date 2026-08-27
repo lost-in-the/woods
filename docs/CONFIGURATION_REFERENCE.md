@@ -245,11 +245,11 @@ Woods.configure_with_preset(:local)
 Woods.configure_with_preset(:shared_filesystem)
 # → in_memory everything + Snapshotter-based persistence via output_dir
 
-# PostgreSQL: requires pgvector extension and OpenAI API key
+# PostgreSQL: requires pgvector, sqlite3 gem, and OpenAI API key
 Woods.configure_with_preset(:postgresql)
 # → pgvector vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 
-# Production: requires Qdrant server and OpenAI API key
+# Production: requires Qdrant, sqlite3 gem, and OpenAI API key
 Woods.configure_with_preset(:production)
 # → Qdrant vectors, SQLite metadata, in_memory graph, OpenAI embeddings
 ```

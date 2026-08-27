@@ -246,6 +246,20 @@ The HTTP endpoint grants read access to live database data. In production enviro
 embedded server used by Options A-C, either directly or through `docker exec`
 or `ssh`. It does not enable additional tool tiers.
 
+This option requires the Woods gem and `woods-console-mcp` executable on the
+host that runs the MCP client. If Woods exists only inside a container, use
+[Option B](#option-b-docker) instead. When Woods is in a host application
+bundle rather than installed as a standalone executable, launch it through
+that bundle and set the application directory as `cwd`:
+
+```json
+{
+  "command": "bundle",
+  "args": ["exec", "woods-console-mcp"],
+  "cwd": "/absolute/host/path/to/app"
+}
+```
+
 ### How It Works
 
 ```
@@ -661,9 +675,10 @@ Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has 
 No currently executable tool claims a confirmation or privileged audit-log
 contract. Tier 2, Tier 3, and `console_eval` remain unregistered inventory.
 
-### Rolled-Back Transactions
+### Current-Connection Rollback
 
-Every tool invocation runs inside a database transaction that is **always rolled back**:
+Database work performed through the request's current Active Record connection
+runs inside a transaction that is **always rolled back**:
 
 ```ruby
 def with_rolled_back_transaction
@@ -675,10 +690,15 @@ def with_rolled_back_transaction
 end
 ```
 
-This means:
+This means direct mutations on that connection are discarded. It is a final
+guard for ordinary database work, not a sandbox or a universal side-effect
+guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,
+threaded work, `after_rollback` callbacks, or writes through another connection
+or shard. The validator, table gate, credential defenses, and operator trust
+boundary remain necessary.
 
-- Any accidental mutation from a validation or callback is rolled back
-- The database is left unchanged regardless of what the tool does
+- Direct accidental mutation on the wrapped connection is rolled back.
+- External, asynchronous, callback, and cross-connection effects may execute live.
 
 ### Statement Timeout
 
@@ -715,7 +735,7 @@ Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `
 ### MCP client shows no tools or "connection refused"
 
 - **Rake/Docker:** Check that `cwd` in MCP config points to the Rails app root (where `Rakefile` lives).
-- **HTTP:** Check that the Rails server is running and listening on the expected port. Try `curl http://localhost:3000/mcp/console`, a 200 or 405 means the middleware is mounted.
+- **HTTP:** Check that the Rails server is running and listening on the expected port. An unauthenticated `curl http://localhost:3000/mcp/console` should return `401` when the enabled middleware and bearer-auth guard are mounted. A request with the configured bearer token proceeds to MCP protocol handling.
 - **All modes:** Run `bundle exec rake woods:console` directly in a terminal. It should hang (waiting for MCP protocol input) rather than exit immediately. If it exits, check the error output.
 
 ### Rails boot noise breaks MCP protocol

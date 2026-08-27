@@ -94,7 +94,7 @@ module Woods
               'ErrorEscalator, and PipelineGuard) to Woods::MCP::Server.build when embedding ' \
               'the server — neither packaged executable wires one today.',
               code: :not_configured, config_key: 'operator',
-              doc_link: 'docs/MCP_SERVERS.md#pipeline-management-5', tool: tool
+              doc_link: 'docs/MCP_TOOL_COOKBOOK.md#conditional-tools--wiring', tool: tool
             )
           end
           fb_missing = lambda do |tool|
@@ -102,7 +102,7 @@ module Woods
               'Feedback store is not configured. Pass `feedback_store:` to Woods::MCP::Server.build ' \
               'to enable retrieval feedback capture.',
               code: :not_configured, config_key: 'feedback_store',
-              doc_link: 'docs/MCP_SERVERS.md#feedback-4', tool: tool
+              doc_link: 'docs/MCP_TOOL_COOKBOOK.md#conditional-tools--wiring', tool: tool
             )
           end
           snap_missing = lambda do |tool|
@@ -110,7 +110,7 @@ module Woods
               'Snapshot store is not configured. Set `enable_snapshots: true` in Woods.configure ' \
               'and pass `snapshot_store:` to Woods::MCP::Server.build.',
               code: :not_configured, config_key: 'enable_snapshots',
-              doc_link: 'docs/MCP_SERVERS.md#temporal-snapshots-4', tool: tool
+              doc_link: 'docs/MCP_TOOL_COOKBOOK.md#conditional-tools--wiring', tool: tool
             )
           end
 
@@ -959,7 +959,7 @@ module Woods
                 'and set `session_tracer_enabled = true` in Woods.configure.',
                 code: :not_configured,
                 config_key: 'session_store',
-                doc_link: 'docs/MCP_SERVERS.md#flow--session-2',
+                doc_link: 'docs/MCP_TOOL_COOKBOOK.md#conditional-tools--wiring',
                 tool: 'session_trace'
               )
             end

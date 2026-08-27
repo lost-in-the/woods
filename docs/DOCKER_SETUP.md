@@ -252,6 +252,12 @@ The `woods-console-mcp` binary runs on the host and replaces itself with
 `docker exec -i ... bundle exec rake woods:console`. It exposes the same
 embedded tool surface as Option 1.
 
+This optional path requires Woods and the `woods-console-mcp` executable on
+the host. If Woods is installed only in the application container, use the
+direct Docker command in Option 1. If the host executable comes from the
+application bundle, configure the client with `bundle exec` and an absolute
+host `cwd`, as shown in the [launcher guide](CONSOLE_MCP_SETUP.md#option-d-launcher-wrapper).
+
 **Step 1: Create `console.yml`**
 
 ```yaml

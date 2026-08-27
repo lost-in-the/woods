@@ -82,7 +82,7 @@ derive unit identifiers, which changes the index format's observable contract.
   documentation subdirectories are excluded from the package; the repo keeps
   them for CI. Historical build-phase design documents were removed from
   `docs/` for the release and remain in git history.
-- **The Claude plugin releases with the gem.** `plugin.json` is 2.0.0.
+- **The Claude plugin releases with the gem.** `plugin.json` is 2.0.1.
 - **`config.extractors` warns when set.** The knob is accepted for forward
   compatibility but extractor selection is not implemented; all extractors run.
   Docs no longer teach it as a live setting. The unused `log_level` accessor
