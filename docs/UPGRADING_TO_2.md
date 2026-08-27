@@ -25,6 +25,7 @@ After this runbook you will have:
 | `mcp >= 1.2, < 2.0` and protocol negotiation | Old lockfiles or manually pinned protocol versions can fail | Bundle update Woods/MCP; normally leave protocol version unset |
 | Index MCP surface aligned to executable wiring | Agents may ask for tools that only exist as conditional schemas | Update agent instructions to the 14-tool default |
 | Console surface tightened to 9 or 11 tools | Agents may ask for Tier 2/3 or eval schemas that do not execute | Use registered default/read tools only |
+| Console HTTP authentication fails closed | An enabled Console without a valid token returns HTTP 401 outside production and prevents Rails from booting in production | Preserve or configure a secret token of at least 32 characters; send it only to the HTTP transport |
 | Durable-store reconciliation and a 30% purge guard | The first v2 embed may refuse a legitimate rename-heavy deletion | Back up, inspect the deletion, then use the one-run override only if correct |
 | Embedding dimension preflight | A previously tolerated model/store mismatch now fails before writing | Rebuild into a store with the configured dimension |
 | Export reconciliation guards | Obsidian or Unblocked can refuse a rename-heavy stale-document sweep | Back up and use exporter-specific override only after review |
@@ -44,7 +45,7 @@ bundle exec rails woods:stats
 bundle exec rails woods:validate
 ```
 
-Record the current Woods version, output directory, storage preset/providers, embedding model and dimension, Console configuration, and enabled exports. Save current MCP client configuration and any custom scripts that read `tmp/woods/` directly.
+Record the current Woods version, output directory, storage preset/providers, embedding model and dimension, Console configuration, and enabled exports. For Console, record the transport, token source or presence without recording its value, allowed origins, path, and embedded read-tool setting. Save current MCP client configuration and any custom scripts that read `tmp/woods/` directly.
 
 ### 2. Back up durable data
 
@@ -92,7 +93,7 @@ Pay particular attention to:
 - `output_dir` and environment overrides;
 - storage and embedding provider settings;
 - the configured embedding model/dimension;
-- Console MCP and embedded read-tool flags;
+- `console_mcp_enabled`, the `console_mcp_token` secret source, allowed origins, path, and embedded read-tool flags;
 - snapshot, session, Notion, Obsidian, and Unblocked settings;
 - old `config.extractors` or `config.add_gem` calls, which are not implemented selectors.
 
@@ -192,6 +193,31 @@ Normally leave `MCP_PROTOCOL_VERSION` unset. The SDK negotiates with legacy clie
 
 Update agent prompts that refer to the old inventory. Standard Index launch provides 14 tools. Standard Console launch provides nine, or eleven with explicitly enabled embedded read tools. See [MCP servers](MCP_SERVERS.md).
 
+### Console users: preserve or configure the HTTP token
+
+If Console MCP is disabled, no Console token action is required. If it is enabled, configure a token of at least 32 characters through a secret manager or environment variable rather than committing it to the initializer:
+
+```bash
+WOODS_CONSOLE_MCP_TOKEN="$(openssl rand -hex 32)"
+export WOODS_CONSOLE_MCP_TOKEN
+```
+
+```ruby
+config.console_mcp_token = ENV.fetch("WOODS_CONSOLE_MCP_TOKEN")
+```
+
+Persist the generated value in the application's normal secret store before opening a new shell or deploying. Never print, log, or commit the token during an agent-operated upgrade.
+
+Rails-mounted Console HTTP clients must send the token as `Authorization: Bearer <token>`. With Console enabled, a missing token has these outcomes:
+
+- outside production, Rails warns and the Console HTTP endpoint returns 401;
+- in production, Rails refuses to boot;
+- in every environment, a configured token shorter than 32 characters raises a configuration error.
+
+The stdio Console transport does not send or authenticate with the bearer token. Outside production it can run without one, although Rails still warns because enabling Console also activates the guarded Rack endpoint. In production, Rails boot validation still requires the token even when stdio is the intended transport. The safest default is to configure the token whenever Console is enabled, or leave Console disabled.
+
+See [Console MCP setup](CONSOLE_MCP_SETUP.md) for client examples and [Configuration reference](CONFIGURATION_REFERENCE.md) for the complete security settings.
+
 ## Verify before rollout
 
 Complete every applicable check:
@@ -205,6 +231,9 @@ Complete every applicable check:
 - [ ] `search`, `lookup`, and `dependents` work with v2 identifiers.
 - [ ] Semantic retrieval works after re-embedding, if enabled.
 - [ ] Console exposes only the authorized 9/11 tools, if enabled.
+- [ ] An enabled Console reads a token of at least 32 characters from a secret source; its value was not printed or committed.
+- [ ] Console HTTP rejects a request without the bearer token with 401 and accepts the configured client, if HTTP is used.
+- [ ] Console stdio starts through the application bundle, if stdio is used.
 - [ ] Exports were reconciled and stale-document changes reviewed.
 - [ ] MCP and automation prompts no longer name inventory-only tools.
 - [ ] Backups remain available through the rollout window.
@@ -225,6 +254,6 @@ A v1 gem cannot translate a v2 index or durable vector store back to v1 identifi
 
 ## Agent-operated upgrade prompt
 
-> Upgrade this Rails application from Woods 1.x to 2.0 using `docs/UPGRADING_TO_2.md`. Start with read-only inventory and preserve unrelated changes. Before cleaning or reconciling anything, identify the output directory, providers, exports, direct index consumers, and restorable backups. Do not use purge overrides, enable Console/read tools, change credentials, or modify shared infrastructure without asking me. Perform a clean v2 extraction, validate it, update MCP instructions to the packaged 14-tool Index and 9/11 Console surfaces, and return the completed verification checklist plus rollback location.
+> Upgrade this Rails application from Woods 1.x to 2.0 using `docs/UPGRADING_TO_2.md`. Start with read-only inventory and preserve unrelated changes. Before cleaning or reconciling anything, identify the output directory, providers, exports, direct index consumers, and restorable backups. Report only whether a Console token exists and where it comes from, never its value. Do not use purge overrides, enable Console/read tools, create or rotate tokens, change credentials, or modify shared infrastructure without asking me. Perform a clean v2 extraction, validate it, update MCP instructions to the packaged 14-tool Index and 9/11 Console surfaces, and return the completed verification checklist plus rollback location.
 
 For failures, use [Troubleshooting](TROUBLESHOOTING.md). For current setup, use [Getting started](GETTING_STARTED.md).
