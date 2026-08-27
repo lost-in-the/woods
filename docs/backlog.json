@@ -832,8 +832,8 @@
       "lib/woods/dependency_graph.rb",
       "lib/woods/extractor.rb"
     ],
-    "description": "DependencyGraph keys nodes on the bare identifier, so two units of different types that share one (a Scenic view `reports` from db/views/reports_v01.sql and a factory `reports` from spec/factories/reports.rb) collapse onto a single node — last registration wins, and the loser also loses its type-index entry. Both unit JSON files are still written, so the index and the graph disagree. deduplicate_results only dedupes within a type. Surfaced by the #164 differential harness, which works around it by giving each generated artifact family its own name prefix. Fix likely means keying the graph on (type, identifier) or namespacing identifiers per type, which touches every graph consumer (MCP tools, Obsidian, retrieval).",
-    "status": "open",
+    "description": "DependencyGraph keys nodes on the bare identifier, so two units of different types that share one (a Scenic view `reports` from db/views/reports_v01.sql and a factory `reports` from spec/factories/reports.rb) collapse onto a single node — last registration wins, and the loser also loses its type-index entry. Both unit JSON files are still written, so the index and the graph disagree. deduplicate_results only dedupes within a type. Surfaced by the #164 differential harness, which works around it by giving each generated artifact family its own name prefix. Fix likely means keying the graph on (type, identifier) or namespacing identifiers per type, which touches every graph consumer (MCP tools, Obsidian, retrieval). RESOLVED: #225 (PR #242) gave the graph typed node identity, and the release/2.0.0-readiness branch closed the remaining holes: wholesale replacement now prunes by (identifier, type), dependents serialize on every unit sharing an identifier, and incremental git enrichment keys on each type's own file path. B-100/#213 (type-prefixed identifiers for embed ids and export names) remains the open root-fix design.",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1675,5 +1675,88 @@
     ],
     "description": "mcp 1.2.0 now handles the core 2026-07-28 server lifecycle: RequestEnvelope validation, resultType, header mismatch errors, Mcp-Method/Mcp-Name validation, stateless HTTP and server/discover. The remaining gaps relevant to Woods are extension-level: no native Tasks extension and no subscriptions/listen. Woods compensates locally for Tasks with Tasks::Extension and a durable Store; subscriptions/listen still blocks generation-driven push notifications. Filing issues or PRs upstream would let Woods delete local protocol-extension code when native support lands.",
     "status": "ready"
+  },
+  {
+    "id": "B-119",
+    "slug": "metadata-only-changes-skip-dump",
+    "title": "Metadata-only unit changes never reach the promoted dump on local presets",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "embedding",
+    "files": [
+      "lib/woods/embedding/indexer.rb"
+    ],
+    "description": "snapshot_worth_writing? gates on processed/vanished counts, and the skip decision is source_hash (source only). A rename or dependency change with unchanged source leaves processed=0, so metadata.msgpack and per-vector file_path metadata keep the old path until an unrelated unit changes. B-069's shape for mutation instead of deletion; durable presets are unaffected (SQLite metadata store writes every run). Fix direction: compare non-source metadata against the hydrated dump, or fold file_path/deps into the checkpoint hash.",
+    "status": "open"
+  },
+  {
+    "id": "B-120",
+    "slug": "rubocop-rspec-not-loaded",
+    "title": "rubocop-rspec is installed but never loaded as a plugin",
+    "severity": "low",
+    "category": "tooling",
+    "layer": "infrastructure",
+    "files": [
+      ".rubocop.yml"
+    ],
+    "description": ".rubocop.yml has no plugins:/require: entry for rubocop-rspec, so every RSpec cop is inert despite the gem being installed. Enabling repo-wide floods 300+ spec files with offenses, so it needs its own pass: enable, auto-gen a todo file, then burn it down.",
+    "status": "open"
+  },
+  {
+    "id": "B-121",
+    "slug": "standalone-failing-spec-files",
+    "title": "Four spec files fail when run standalone",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/extractors/i18n_extractor_spec.rb",
+      "spec/extractors/mailer_extractor_spec.rb",
+      "spec/extractors/rails_source_extractor_spec.rb",
+      "spec/extractors/view_component_extractor_spec.rb"
+    ],
+    "description": "These pass in the full suite but fail standalone (missing requires / shared state): i18n 15/15, mailer 24/32, rails_source 33/33, view_component 16/23 at last measurement. A spec that only passes with company hides real breakage until someone bisects a single file. Same class as the controller_extractor_fixture_spec require fixed in #219.",
+    "status": "open"
+  },
+  {
+    "id": "B-122",
+    "slug": "generator-dead-tables",
+    "title": "woods:install migrations create three tables nothing reads or writes",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "infrastructure",
+    "files": [
+      "lib/generators/woods/install_generator.rb",
+      "lib/generators/woods/templates/"
+    ],
+    "description": "The generator's migrations 001-003 create woods_units/woods_edges/woods_embeddings, but no runtime code reads or writes them: the SQLite metadata store uses its own units table and pgvector uses woods_vectors. Every install host gets three permanently empty tables plus migration ceremony. Either wire them to a real store or drop them from the generator (with an upgrade note).",
+    "status": "open"
+  },
+  {
+    "id": "B-123",
+    "slug": "config-extractors-unimplemented",
+    "title": "config.extractors accepts a selection that nothing implements",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "The accessor validates and stores an extractor list, but extraction always runs all 34 (EXTRACTORS is frozen and never filtered by config). As of 2.0.0 setting a non-default value warns and the docs stopped teaching it as live. Decide for 2.1: implement selection (interacts with PathDispatcher, whole-app triggers, and incremental equivalence) or remove the accessor with a deprecation cycle.",
+    "status": "open"
+  },
+  {
+    "id": "B-124",
+    "slug": "rake-top-level-helper-methods",
+    "title": "woods.rake defines ~12 bare helper methods on Object in every host app",
+    "severity": "low",
+    "category": "code-hygiene",
+    "layer": "infrastructure",
+    "files": [
+      "lib/tasks/woods.rake"
+    ],
+    "description": "Top-level method definitions in a rake file land on Object in the host app. woods_evaluation.rake documents this exact hazard as the reason it module-wraps; woods.rake does not. The woods_ prefix makes collisions unlikely; module-wrap for consistency when convenient.",
+    "status": "open"
   }
 ]

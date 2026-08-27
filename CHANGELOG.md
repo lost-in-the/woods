@@ -69,6 +69,16 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Changed
 
+- **The packaged gem ships only user-facing files.** Internal release machinery
+  (`lib/tasks/release_v2.rake`, `lib/woods/release_v2/`) and non-user-facing
+  documentation subdirectories are excluded from the package; the repo keeps
+  them for CI. Historical build-phase design documents were removed from
+  `docs/` for the release and remain in git history.
+- **The Claude plugin releases with the gem.** `plugin.json` is 2.0.0.
+- **`config.extractors` warns when set.** The knob is accepted for forward
+  compatibility but extractor selection is not implemented; all extractors run.
+  Docs no longer teach it as a live setting. The unused `log_level` accessor
+  is removed.
 - **`woods-mcp-start` no longer pins the MCP protocol version.** It defaulted
   `MCP_PROTOCOL_VERSION` to `2024-11-05` — the oldest revision there is — which silently
   opted every user out of four protocol revisions. The SDK server is dual-era, answering
@@ -80,6 +90,75 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Every MCP entry point boots a payload-layout index.** The #226 layout moved
+  `manifest.json` into `payloads/gen-<N>/`, but `woods-mcp`, `woods-mcp-http`,
+  `woods-mcp-start`, the retriever's graph hydration, and the operator status
+  reporter still looked for root-level artifacts: a fresh 2.0 extract was refused
+  at boot with "Run `rake woods:extract` first", the retriever's graph store
+  hydrated empty (silent loss of PageRank and graph expansion), and status read
+  `:not_extracted`. All five now resolve through the generation pointer, with the
+  legacy flat layout still accepted.
+- **MCP `reload` no longer crashes the stdio server on pgvector/Qdrant.** The
+  reload metadata backfill guarded on `respond_to?(:each_entry)`, which the
+  vector-store interface answers true for while raising `NotImplementedError`
+  (the B-108 anti-pattern); on stdio that unwound the transport loop and killed
+  the process. The guard is now an ownership check.
+- **Wholesale replacement prunes by `(identifier, type)`.** The #225 typed-graph
+  work missed one call site: a factories (or any wholesale) re-run removing a
+  vanished unit deleted every type sharing the identifier, so a same-named
+  Scenic view's node and JSON file vanished from the index until a full run.
+  Colliding identifiers also now serialize dependents on every sharing unit and
+  carry each type's own git metadata instead of one type's history.
+- **Incremental runs abort instead of publishing a collapsed index.** When
+  payload creation failed over a payload-born index, the degrade path published
+  a near-empty flat root and redirected readers to it. Incremental and refresh
+  runs now raise without bumping the generation; full runs keep the flat
+  fallback (their write set is complete). Payload seeding also gained the
+  cross-device copy fallback, and payload pruning survives a restarted
+  generation counter.
+- **Woods artifacts are read encoding-safely everywhere.** Twelve remaining bare
+  `File.read` sites (extractor incremental path, rake validate/stats/flow, the
+  index validator) crashed with `Encoding::InvalidByteSequenceError` under
+  `LANG=C` (the documented daemon container environment) on any multibyte byte.
+  All now use `AtomicFile.read`.
+- **Extraction-family rake tasks honor `config.output_dir`.** They hardcoded
+  `tmp/woods` while the embed and export families used the configured
+  directory, so a host that set `output_dir` split its index in two silently.
+- **The watch daemon captures files changed during startup catch-up.** The
+  watcher started only after catch-up finished, so a save during a long
+  catch-up extraction was lost until the next edit. The watcher now starts
+  first. A dead container daemon's startup claim also no longer blocks a
+  host-side daemon forever (host identity is compared before trusting pid
+  liveness), and a lock-release failure after a successful cycle no longer
+  relabels the cycle as a lock failure.
+- **Retrieval ranking and budgeting defects.** RRF source merging demoted
+  strong cross-source hits into the supporting section; the framework partition
+  never fired for real graph-expansion candidates; empty metadata could shadow
+  real metadata; `:within_type_fallback` was reported for types the fallback
+  never returned; an empty supporting section stranded ~35% of the token budget;
+  keyword scores encoded arbitrary database row order as the dominant ranking
+  signal. All fixed; keyword scores now derive from matched-field counts.
+- **Console SQL validation stops rejecting English.** Body keyword scans ran
+  over string literals, so `WHERE body = 'please update the record'` was refused
+  as an UPDATE; scans now run over noise-stripped SQL while comment-hidden
+  injections stay caught. `MERGE` joined the forbidden set, recursive writable
+  CTEs get the specific error, and the stdio transport passes the table map so
+  qualified `table.column` references validate like they do over HTTP.
+- **Exporter clients treat ambiguous 503s honestly.** A 503 for a
+  non-idempotent create (Notion `create_page`, Unblocked `create_collection`)
+  can arrive from an intermediary after the origin committed, so those now
+  raise the ambiguous-outcome error instead of retrying into a duplicate; 429
+  and idempotent requests retry as before. Notion's `query_all` gained the
+  nil-cursor loop guard, and the two clients' retry budgets now agree.
+- **Session tracer fairness and hygiene.** The Redis store evicted arbitrary
+  sessions at the cap (now oldest-first, matching the file store), and
+  client-controlled header values are escaped before landing in the
+  session-context document served to agents.
+- **Storage edge paths.** Dump-capability detection uses ownership checks
+  (typed `InapplicableBackend` instead of a bare `NotImplementedError`), the
+  in-memory metadata search no longer matches on injected timestamps, dump
+  pruning can never delete the just-promoted dump after a backward clock step,
+  and the tasks store sweeps corrupt records older than the TTL.
 - **A generation's payload is published atomically (#226).** `generation.json` was
   bumped atomically and last, but it named the output root — a directory of
   independently-written files — so a reader refreshing mid-publish could load a
