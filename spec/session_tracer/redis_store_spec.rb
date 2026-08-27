@@ -211,6 +211,21 @@ RSpec.describe Woods::SessionTracer::RedisStore do
 
       expect(bounded.sessions(limit: 10).size).to eq(2)
     end
+
+    # Redis sets are unordered, so an eviction based on `smembers` order
+    # evicts whatever the set happens to yield first — which, keyed on
+    # insertion order here, is the OPPOSITE of chronological order below.
+    # Eviction must instead go by last recorded activity.
+    it 'evicts the oldest session by recorded activity, not by set/insertion order' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      bounded.record('newest', request_data.merge('timestamp' => '2026-02-13T12:00:00Z'))
+      bounded.record('oldest', request_data.merge('timestamp' => '2026-02-13T09:00:00Z'))
+      bounded.record('middle', request_data.merge('timestamp' => '2026-02-13T10:00:00Z'))
+
+      expect(bounded.read('oldest')).to eq([])
+      expect(bounded.read('newest').size).to eq(1)
+      expect(bounded.read('middle').size).to eq(1)
+    end
   end
 
   describe 'dependency and serializer failures' do

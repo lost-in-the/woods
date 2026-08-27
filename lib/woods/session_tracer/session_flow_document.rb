@@ -165,7 +165,7 @@ module Woods
       # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       def to_context
         lines = []
-        header = "<session_context session_id=\"#{@session_id}\" requests=\"#{@steps.size}\" " \
+        header = "<session_context session_id=\"#{escape_attribute(@session_id)}\" requests=\"#{@steps.size}\" " \
                  "tokens=\"#{@token_count}\" units=\"#{@context_pool.size}\">"
         lines << header
 
@@ -184,8 +184,10 @@ module Woods
         @context_pool.each do |identifier, unit|
           type = unit[:type] || 'unknown'
           file_path = unit[:file_path] || 'unknown'
-          lines << %(<unit identifier="#{identifier}" type="#{type}" file="#{file_path}">)
-          lines << (unit[:source_code] || '# source not available')
+          tag = %(<unit identifier="#{escape_attribute(identifier)}" type="#{escape_attribute(type)}" ) \
+                "file=\"#{escape_attribute(file_path)}\">"
+          lines << tag
+          lines << escape_content(unit[:source_code] || '# source not available')
           lines << '</unit>'
         end
 
@@ -209,6 +211,39 @@ module Woods
 
         lines << '</session_context>'
         lines.join("\n")
+      end
+
+      private
+
+      # Escape a value for use inside a double-quoted attribute in
+      # {#to_context}'s markup.
+      #
+      # This is prompt-injection hardening, not XML conformance: `session_id`
+      # comes from the client-controlled X-Trace-Session header, and unit
+      # identifiers/paths flow through from extracted code. Unescaped, a
+      # crafted value (e.g. `"><injected_tag>`) breaks out of the attribute
+      # and inserts sibling markup into context an LLM later reads as trusted
+      # structure.
+      #
+      # @param value [Object]
+      # @return [String]
+      def escape_attribute(value)
+        value.to_s
+             .gsub('&', '&amp;')
+             .gsub('"', '&quot;')
+             .gsub('<', '&lt;')
+             .gsub('>', '&gt;')
+      end
+
+      # Escape a value for use as element content (between tags) in
+      # {#to_context}'s markup. Same prompt-injection motivation as
+      # {#escape_attribute}; content only needs `&` and `<` escaped since
+      # there's no attribute quote to break out of.
+      #
+      # @param value [Object]
+      # @return [String]
+      def escape_content(value)
+        value.to_s.gsub('&', '&amp;').gsub('<', '&lt;')
       end
 
       # @api private

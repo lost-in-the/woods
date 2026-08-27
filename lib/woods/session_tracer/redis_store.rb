@@ -120,12 +120,31 @@ module Woods
         "#{KEY_PREFIX}#{sanitize_session_id(session_id)}"
       end
 
+      # Evict the oldest sessions once the active-session index overflows
+      # `@max_sessions`.
+      #
+      # Redis sets are unordered, so `ids.first(overflow)` evicted arbitrary
+      # members — a session recorded seconds ago could be dropped while one
+      # untouched for hours survived. Ordering by last recorded activity
+      # matches the FileStore twin's oldest-by-mtime eviction.
+      #
+      # This reads every candidate session's history to find its last
+      # timestamp, same tradeoff as {#sessions}: the alternative is a sorted
+      # set keyed on write time, a storage-format change this does not
+      # warrant.
+      #
+      # @param current_session_id [String] never evicted, even if oldest
+      # @return [void]
       def prune_sessions(current_session_id)
         ids = @redis.smembers(SESSIONS_KEY)
         overflow = ids.size - @max_sessions
         return unless overflow.positive?
 
-        victims = ids.reject { |id| id == current_session_id }.first(overflow)
+        victims = ids
+                  .reject { |id| id == current_session_id }
+                  .sort_by { |id| recency_key(session_summary(id, read(id))) }
+                  .first(overflow)
+
         victims.each do |id|
           @redis.del(session_key(id))
           @redis.srem(SESSIONS_KEY, id)
