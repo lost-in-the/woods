@@ -2,7 +2,7 @@
 
 ## Branch Baseline
 
-- Branch: `audit/v2-final-release`
+- Branch: `release/2.0.0-readiness` (audit began on `audit/v2-final-release`)
 - Base SHA: `8fea1922886ac34991820ddf6a97dae94fe06fa3`
 - Base relationship command: `git merge-base HEAD 8fea1922886ac34991820ddf6a97dae94fe06fa3`
 - Expected result: `8fea1922886ac34991820ddf6a97dae94fe06fa3`

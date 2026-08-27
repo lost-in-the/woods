@@ -34,13 +34,14 @@ RSpec.describe 'release environment protection' do
   def matrixed_job_names
     {
       'test' => 'Unit specs (Ruby 4.0)',
+      'rails-matrix' => 'Booted extraction (Ruby 4.0 / Rails 8.1)',
       'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache)',
       'http-transport' => 'MCP transports (official clients)'
     }
   end
 
   def full_job_set
-    %w[test live-backends http-transport coverage security lint build].map do |id|
+    %w[test rails-matrix live-backends http-transport coverage security lint build].map do |id|
       { 'name' => matrixed_job_names.fetch(id, id), 'conclusion' => 'success' }
     end
   end
