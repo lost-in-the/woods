@@ -1,7 +1,7 @@
 # Why Woods?
 
 AI coding assistants are only as good as the context they receive. For Rails applications,
-that context is almost always wrong — not because the AI is bad, but because Rails hides
+that context is almost always wrong, not because the AI is bad, but because Rails hides
 most of its behavior behind conventions, concerns, and runtime magic that no static tool
 can see. Woods fixes this.
 
@@ -10,8 +10,8 @@ can see. Woods fixes this.
 ## The Problem: LLMs Get Rails Wrong
 
 Rails is a framework built on convention over configuration. That's great for developers,
-but it means the "real" code — the callbacks, the scopes, the route bindings, the concern
-behavior — isn't visible in source files. An LLM reading your files sees the skeleton.
+but it means the "real" code, the callbacks, the scopes, the route bindings, the concern
+behavior, isn't visible in source files. An LLM reading your files sees the skeleton.
 Woods shows the whole body.
 
 **Three concrete examples:**
@@ -24,7 +24,7 @@ Without Woods, an LLM reads your 40-line `User` model and guesses:
 User has: before_validation :normalize_email, before_save :set_slug
 ```
 
-But `User` includes `Auditable`, `Searchable`, and `SoftDeletable` — each with their own
+But `User` includes `Auditable`, `Searchable`, and `SoftDeletable`, each with their own
 callback chains. The real answer is a chain of 11 callbacks across 4 files, including
 `after_commit :reindex_search` and `after_destroy :purge_avatar`.
 
@@ -52,7 +52,7 @@ prepends the real route table to the controller source. No guessing.
 ### "What does the checkout flow do?"
 
 Without Woods, an LLM reads `CheckoutService` and sees a 60-line service object.
-It describes what the service does — but misses that `order.save!` triggers `after_commit
+It describes what the service does, but misses that `order.save!` triggers `after_commit
 :send_confirmation_email` on `Order`, which itself enqueues `InventoryJob` via
 `after_save :reserve_stock` on `LineItem`.
 
@@ -72,14 +72,14 @@ middleware, and more.
 
 **Concern inlining.** Every `include`d concern is read from disk and embedded directly into
 the model unit. When an AI asks about `User`, it gets `User` + `Auditable` + `Searchable`
-in one context block — not three separate lookups.
+in one context block, not three separate lookups.
 
 ```ruby
 # What an AI sees without Woods (app/models/user.rb):
 class User < ApplicationRecord
   include Auditable
   include Searchable
-end  # 4 lines — the AI guesses what these concerns add
+end  # 4 lines, the AI guesses what these concerns add
 
 # What Woods produces (User.json source_code field):
 # == Schema Information
@@ -117,7 +117,7 @@ exactly which HTTP verbs and paths map to which actions. URL → code is always 
 **Dependency graph.** 34 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
-**Two MCP servers.** The Index Server (29 tools) reads pre-extracted JSON from disk — no
+**Two MCP servers.** The Index Server (29 tools) reads pre-extracted JSON from disk, no
 Rails boot needed. The Console Server (31 tools) bridges to a live Rails process for
 database queries, job inspection, and model diagnostics.
 
@@ -135,15 +135,14 @@ tmp/woods/
 
 ## Who Is Woods For?
 
-**Teams using AI coding assistants** — Claude Code, Cursor, Windsurf, Copilot. If your
+**Teams using AI coding assistants**: Claude Code, Cursor, Windsurf, Copilot. If your
 team asks an AI to help with Rails code and gets wrong answers, Woods is the fix.
 
 **Rails apps of any size.** Small apps benefit from accurate schema and route context.
-Large monoliths benefit most — hundreds of models with deep callback chains and concern
+Large monoliths benefit most, hundreds of models with deep callback chains and concern
 hierarchies are exactly where static tools fail and Woods shines.
 
-**Anyone who wants structured codebase context.** The extraction output is plain JSON —
-useful beyond AI tools for documentation, impact analysis, and onboarding.
+**Anyone who wants structured codebase context.** The extraction output is plain JSON, useful beyond AI tools for documentation, impact analysis, and onboarding.
 
 Woods works with any database (MySQL, PostgreSQL, SQLite), any background job
 system (Sidekiq, Solid Queue, GoodJob), and any view layer (ERB, Phlex, ViewComponent).
@@ -155,11 +154,11 @@ See [docs/BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matri
 
 Woods is not a universal fit. Skip it when:
 
-- **You're not building in Rails.** Woods leans hard on `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs — the value dries up outside Rails. For Django, Phoenix, or non-framework Ruby, other tools are a better fit.
+- **You're not building in Rails.** Woods leans hard on `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs, the value dries up outside Rails. For Django, Phoenix, or non-framework Ruby, other tools are a better fit.
 - **You need static analysis without booting.** Extraction requires a booted Rails environment because runtime introspection is the whole point. If your constraint is "can't boot the app" (locked-down CI, untrusted code review), static parsers are what you want.
-- **Production-only environments.** Extraction should run in development or CI. The Console Server is explicitly unsafe for production even with all five defense layers — it is a dev/staging tool.
+- **Production-only environments.** Extraction should run in development or CI. The Console Server is explicitly unsafe for production even with all five defense layers, it is a dev/staging tool.
 - **Row-level data is the goal.** Woods extracts schema and structure, not data. If you need to index row content for retrieval (customer records, documents, audit events), a different pipeline is appropriate.
-- **Tiny apps that already fit in context.** A 20-model app may not benefit — the LLM can probably read every file. Woods' win scales with monolith size and concern depth.
+- **Tiny apps that already fit in context.** A 20-model app may not benefit, the LLM can probably read every file. Woods' win scales with monolith size and concern depth.
 - **You want a hosted service.** Woods is a gem, not a SaaS. Extraction output lives on your machines and the MCP servers run on your hardware. There is no cloud component.
 
 ---

@@ -11,17 +11,17 @@ Use this guide to produce a correct `.mcp.json` for your environment. Answer the
 
 ## Version Preflight
 
-Confirm the installed Woods version before generating config — the available MCP executables
+Confirm the installed Woods version before generating config. The available MCP executables
 and tool tiers depend on it:
 
 ```bash
 bundle info woods        # installed version + path
 ```
 
-This guide targets **Woods ≥ 2.0.0**. If the installed gem is older, some executables
-(`woods-mcp-http`, `woods-console-mcp`) or console tool tiers referenced below may not exist —
-tell the user to update (`bundle update woods`) rather than wiring config for tools the
-installed version doesn't ship.
+This guide targets **Woods 2.0.0 or later**.
+
+- Older gem: some commands, tools, or config keys below will not exist. Tell the user to run `bundle update woods` first.
+- Newer release on RubyGems: mention it so the user can pick it up.
 
 ---
 
@@ -32,7 +32,7 @@ installed version doesn't ship.
 - No → use the Local Development template
 
 **2. Which AI tool?**
-- Claude Code → put `.mcp.json` in your Rails app root (or `~/.claude/claude_desktop_config.json` for global)
+- Claude Code → put `.mcp.json` in your Rails app root (or `claude mcp add --scope user` for a global entry in `~/.claude.json`)
 - Cursor → `.cursor/mcp.json`
 - Windsurf → `.windsurf/mcp.json`
 
@@ -42,7 +42,7 @@ All three tools use the same JSON format.
 - No → use the Embedded Console template as-is (9 tools)
 - Yes → same template, plus `config.console_embedded_read_tools = true` in your initializer (11 tools)
 
-There is no config, transport, or launcher setting that registers Tier 2, Tier 3, or `console_eval` — those 22 tool schemas are inventory-only in every supported mode. Don't offer a "bridge" template for them; it doesn't exist.
+There is no config, transport, or launcher setting that registers Tier 2, Tier 3, or `console_eval`. Those 22 tool schemas are inventory-only in every supported mode. Don't offer a "bridge" template for them; it doesn't exist.
 
 ---
 
@@ -68,13 +68,13 @@ The Index Server runs as a host process reading local files. The Console Server 
 }
 ```
 
-`woods-mcp-start` is a self-healing wrapper that validates `manifest.json` before starting and auto-installs missing dependencies. Use it instead of `woods-mcp` for local development.
+`woods-mcp-start` is a wrapper that checks the index directory and its manifest (following the `generation.json` pointer) before it execs `woods-mcp`, so a missing extraction fails with a clear message instead of a protocol error. Use it instead of `woods-mcp` for local development.
 
 `cwd` must be an **absolute path** to the Rails app root (where `Rakefile` lives). Relative paths are not supported for `cwd`.
 
 ---
 
-### Docker — Embedded Console (Tier 1 tools only)
+### Docker: Embedded Console (Tier 1 tools only)
 
 The Index Server reads volume-mounted output on the host. The Console Server runs inside the container via `docker exec -i`.
 
@@ -97,7 +97,7 @@ The Index Server reads volume-mounted output on the host. The Console Server run
 }
 ```
 
-The `-i` flag is required — it keeps stdin open for the MCP protocol. Without it, the container rejects input immediately.
+The `-i` flag is required: it keeps stdin open for the MCP protocol. Without it, the container rejects input immediately.
 
 Find your container name with:
 
@@ -109,9 +109,9 @@ Docker Compose generates names like `<project>-<service>-<index>` (e.g., `myapp-
 
 ---
 
-### Docker — Launcher Wrapper (same 9/11 tools, centralized config)
+### Docker: Launcher Wrapper (same 9/11 tools, centralized config)
 
-`woods-console-mcp` is a process launcher, not a different server — it execs
+`woods-console-mcp` is a process launcher, not a different server. It execs
 the identical embedded server used by the templates above, just via a YAML
 file instead of MCP-client-specific args. It does not add tool tiers; there
 is no JSON-lines bridge in the shipped gem (`Server.build(config:)` always
@@ -119,8 +119,8 @@ raises `Woods::ConfigurationError` pointing here). Use this when you want one
 `console.yml` to work across multiple MCP clients instead of duplicating the
 `docker exec` args in each client's config.
 
-First, create `~/.woods/console.yml`. Keys are flat — `mode`, `container`,
-`command` — not nested under a `connection:` key, and there is no `service:`
+First, create `~/.woods/console.yml`. Keys are flat (`mode`, `container`,
+`command`), not nested under a `connection:` key, and there is no `service:`
 or `compose_file:` key (the launcher execs `docker exec` against a container
 name, not `docker compose`):
 
@@ -196,7 +196,7 @@ When the Console Server runs as a Rack middleware endpoint instead of a subproce
 }
 ```
 
-Requires `config.console_mcp_enabled = true` and `config.console_mcp_token` set in your initializer — every request must carry the matching bearer token or the middleware returns `401`. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option C for full setup.
+Requires `config.console_mcp_enabled = true` and `config.console_mcp_token` set in your initializer. Every request must carry the matching bearer token or the middleware returns `401`. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option C for full setup.
 
 ---
 
@@ -241,10 +241,10 @@ The Index Server always reads local files. For SSH setups, copy the extraction o
 The Index Server takes a path to the extraction output directory, not the Rails root:
 
 ```
-# Wrong — points to Rails root
+# Wrong: points to Rails root
 "args": ["/path/to/your/rails-app"]
 
-# Correct — points to extraction output
+# Correct: points to extraction output
 "args": ["/path/to/your/rails-app/tmp/woods"]
 ```
 
@@ -253,10 +253,10 @@ The Index Server takes a path to the extraction output directory, not the Rails 
 The Index Server runs on the host and cannot access container paths:
 
 ```
-# Wrong — container-internal path
+# Wrong: container-internal path
 "args": ["/app/tmp/woods"]
 
-# Correct — host path to volume-mounted output
+# Correct: host path to volume-mounted output
 "args": ["./tmp/woods"]
 ```
 

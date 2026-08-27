@@ -69,6 +69,14 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Changed
 
+- **Dead code removed.** The unwired formatting adapters (Claude, GPT, Generic),
+  console job/cache adapters, `StubBridge`, `HealthCheck`, `Instrumentation`,
+  `Notion::Mapper`, and a dozen spec-only methods are gone. `config.add_gem`
+  now warns like `config.extractors`: accepted, not implemented.
+- **Docs rewritten for readability**: shorter sentences, tables for
+  comparisons, no em-dashes, one owner per fact. The MCP 2026 handoff document
+  was folded into the strategy ADR.
+
 - **The packaged gem ships only user-facing files.** Internal release machinery
   (`lib/tasks/release_v2.rake`, `lib/woods/release_v2/`) and non-user-facing
   documentation subdirectories are excluded from the package; the repo keeps
@@ -89,6 +97,62 @@ derive unit identifiers, which changes the index format's observable contract.
   is implied — no on-disk artifact format changed.
 
 ### Fixed
+
+- **Console SQL gate no longer has MySQL comment and dollar-quote blind spots.**
+  `SqlNoiseStripper` did not know `#` line comments or `/*! ... */` executable
+  comments (both live SQL on MySQL), and treated a `$` inside a PostgreSQL
+  identifier as a dollar-quote opener, so a blocked table could be hidden from
+  `TableGate`. The `TABLE name` statement form was never scanned at all. All
+  four are closed, with the `#` rule gated on the MySQL dialect.
+- **Redacted columns are refused as query inputs, not only masked on output.**
+  `console_aggregate(column:)`, scope keys (including `_matches`), `find(by:)`,
+  and `recent(order_by:)` accepted `console_redacted_columns`, which gave a
+  plaintext aggregate or a comparison oracle over a secret.
+- **The MySQL console timeout no longer leaks into the host's connection pool.**
+  `SET max_execution_time` is session-scoped and survives rollback; the prior
+  value is now read and restored in `ensure`.
+- **Console SQL validation stops rejecting columns named `do`, `start`,
+  `lock`, `release`, or `handler`.** Forbidden statement keywords now match only
+  at a statement-leader position. `EXPLAIN ANALYSE` (the PostgreSQL spelling) is
+  rejected like `ANALYZE`. `console_association_count` gates the rendered SQL, so
+  a blocked `through` table is refused.
+- **Long-running MCP tasks no longer expire the moment they complete.** Terminal
+  task ttl is measured from the terminal transition, not from creation. A task
+  minted under a different boot identity (a container) is left alone by a host
+  reader instead of being marked failed.
+- **Extractor accuracy batch.** `permitted_params` no longer leaks across method
+  bodies (and reads Rails 8 `params.expect`); GraphQL complexity is read from a
+  real match; per-file GraphQL classification agrees with the runtime pass;
+  `form_action` edges stop at `do`/`end`; `SourceNesting` pops on `end.freeze`;
+  `render :partial => 'x'` resolves the real partial; a rake task whose name
+  contains `do` no longer swallows its neighbours; inline-namespaced migrations
+  are extracted; mounted engines are unwrapped from `Mapper::Constraints` so
+  `mounted_path` is populated, and `Rails::Application` is no longer reported as
+  an engine.
+- **An empty vector dump no longer refuses to boot.** `woods:embed` over an empty
+  payload wrote `dimension = 0` and every later boot raised `DimensionMismatch`.
+- **Storage hardening.** Interface stubs are no longer probed with `respond_to?`
+  (B-108) in the retryable provider, builder, indexer, and ranker; Notion
+  read-only POSTs retry on a network failure; the watch daemon's stale-claim
+  reclaim checks the claim inode before removing it and falls back to an
+  exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
+  honours array filters like `#search`.
+- **Class names are position-aware in every file-scanning extractor.** Jobs,
+  serializers, decorators, policies, Pundit policies, managers, and validators
+  took the first `class` token in the file, so `module Billing; class ChargeJob`
+  indexed as bare `ChargeJob` (and the class-based second pass then added a
+  duplicate `Billing::ChargeJob`), while the decorator scanner joined every
+  `module` token, including helpers nested inside the class. All of them now
+  go through `SourceNesting#qualified_first_class_name` (#174).
+- **Policy `evaluated_models` no longer invents models from parameter syntax.**
+  `def initialize(order, user = nil, strict: false)` produced `Nil`, `Strict`,
+  and `False` model edges; only bare positional parameters are read now.
+- **The release gate requires the booted-extraction matrix.**
+  `script/validate-release-run` did not list the `rails-matrix` CI job, so a
+  red Rails 6.0 to 8.1 row could not block a release.
+- **Spec order no longer leaks a nil `Woods.configuration`.** Four spec files
+  nil it out in `after` hooks; `spec_helper` now restores whatever each example
+  started with, which fixes two seed-dependent failures in `extractor_spec`.
 
 - **Every MCP entry point boots a payload-layout index.** The #226 layout moved
   `manifest.json` into `payloads/gen-<N>/`, but `woods-mcp`, `woods-mcp-http`,

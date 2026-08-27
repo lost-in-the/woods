@@ -1,10 +1,10 @@
 # Woods Documentation
 
 Woods is a Ruby gem that extracts structured data from Rails applications for AI-assisted
-development. Unlike file-level tools, it uses **runtime introspection**, booting the Rails app
-and querying `ActiveRecord::Base.descendants`, `Rails.application.routes`, and reflection APIs,
-to produce version-accurate representations with inlined concerns, resolved callback chains, and
-schema-aware associations.
+development. It uses **runtime introspection**, not file parsing: it boots the Rails app and
+queries `ActiveRecord::Base.descendants`, `Rails.application.routes`, and the reflection APIs.
+The output is version-accurate: inlined concerns, resolved callback chains, and schema-aware
+associations.
 
 ## Current State
 
@@ -72,17 +72,17 @@ introspection (`BehavioralProfile`), and optional pre-computed request flow maps
 ## Design
 
 Historical build-phase design documents were removed for the 2.0 release: see
-[design/README.md](design/README.md) for the two documents that remain live, and
-`git log --follow -- docs/design/` for the rest.
+[design/README.md](design/README.md) for the one that remains live, and
+`git log --follow -- docs/design/` for the rest. `backlog.json` in this directory is the
+maintainers' bug and work ledger, not user documentation.
 
 | Document | Purpose |
 |----------|---------|
 | [design/MCP_2026_STRATEGY.md](design/MCP_2026_STRATEGY.md) | MCP 2026-07-28 adoption: what changed in the protocol, what the SDK implements, compatibility matrix for legacy clients and old Ruby |
-| [design/MCP_2026_NEXT_STEPS.md](design/MCP_2026_NEXT_STEPS.md) | Handoff: what's done, what's blocked on the `mcp` gem, what a full local dev environment unlocks (B-112 to B-115) |
 
 ## Self-Analysis
 
-[self-analysis/](self-analysis/) — Woods run against its own codebase: architecture overview,
+[self-analysis/](self-analysis/): Woods run against its own codebase: architecture overview,
 call graph, data flow, and dependency map, each as a Mermaid diagram.
 
 ## Benchmarks

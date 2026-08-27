@@ -1,13 +1,13 @@
 # MCP HTTP Transport
 
-Reference for `exe/woods-mcp-http` — the Index Server's HTTP transport, for hosts where a stdio subprocess isn't practical (shared access, multiple clients, a remote agent).
+Reference for `exe/woods-mcp-http`, the Index Server's HTTP transport, for hosts where a stdio subprocess isn't practical (shared access, multiple clients, a remote agent).
 
 ## What's shipped
 
-- **`exe/woods-mcp-http`** — the only HTTP entry point. There is no `--http` flag on `woods-mcp` and no `Woods::MCP::RackMiddleware` for the Index Server (the Console Server has its own separate `RackMiddleware` — see [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md)).
+- **`exe/woods-mcp-http`**: the only HTTP entry point. There is no `--http` flag on `woods-mcp` and no `Woods::MCP::RackMiddleware` for the Index Server (the Console Server has its own separate `RackMiddleware`, see [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md)).
 - Built on `MCP::Server::Transports::StreamableHTTPTransport` from the `mcp` gem (`>= 1.2, < 2.0`), which implements MCP protocol version 2026-07-28 (legacy `initialize` still served for older clients).
 - **Stateless by default.** `WOODS_MCP_HTTP_STATELESS=0` restores legacy session mode.
-- **Bearer auth** (`WOODS_MCP_HTTP_TOKEN`) and an **origin guard** (`WOODS_MCP_HTTP_ALLOWED_ORIGINS`) — see [Security](#security).
+- **Bearer auth** (`WOODS_MCP_HTTP_TOKEN`) and an **origin guard** (`WOODS_MCP_HTTP_ALLOWED_ORIGINS`), see [Security](#security).
 - Needs a Rack-compatible server (e.g. `puma`) in the host bundle. Uses the `rackup` gem when present, falls back to Rack 2's handler registry otherwise.
 
 ## Running it
@@ -31,7 +31,7 @@ HOST=0.0.0.0 PORT=9292 WOODS_MCP_HTTP_TOKEN=$(bundle exec rake woods:generate_to
 
 MCP 2026-07-28 ([SEP-2567](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2567)) removes protocol-level sessions, and `woods-mcp-http` runs stateless by default.
 
-For this server the session was never carrying anything: the index lives on disk, `IndexReader` self-refreshes off the published generation, and no tool holds per-client state. What the session *did* do was tie every client to one server process — so restarting the server (gem upgrade, machine sleep, worktree rebuild) invalidated every session and forced each client through a re-initialize. Stateless makes a restart invisible, and lets several instances serve one volume-mounted index without sticky routing.
+For this server the session was never carrying anything: the index lives on disk, `IndexReader` self-refreshes off the published generation, and no tool holds per-client state. What the session *did* do was tie every client to one server process, so restarting the server (gem upgrade, machine sleep, worktree rebuild) invalidated every session and forced each client through a re-initialize. Stateless makes a restart invisible, and lets several instances serve one volume-mounted index without sticky routing.
 
 What changes in stateless mode:
 
@@ -40,14 +40,14 @@ What changes in stateless mode:
 | `Mcp-Session-Id` | never issued or required | issued on `initialize`, required after |
 | `GET` on the MCP endpoint | `405 Method Not Allowed` | opens a standalone SSE stream |
 | `DELETE` on the MCP endpoint | `200` no-op (see note) | terminates the session |
-| A request carrying a stale `Mcp-Session-Id` | ignored, served normally | `404` — client must re-initialize |
-| Server-initiated notifications | **not delivered** — there is no stream to push on | delivered to the session's SSE stream |
+| A request carrying a stale `Mcp-Session-Id` | ignored, served normally | `404`, client must re-initialize |
+| Server-initiated notifications | **not delivered**: there is no stream to push on | delivered to the session's SSE stream |
 | Server restart | invisible to clients | every client must re-initialize |
 | Horizontal scaling | any POST may hit any instance | requires sticky routing |
 
-> **`Mcp-Session-Id` and CORS.** In stateless mode the header is neither read nor emitted, so it is absent from `Access-Control-Expose-Headers`. A client that depends on it needs `WOODS_MCP_HTTP_STATELESS=0` — a transitional escape hatch, since the header is gone from the specification.
+> **`Mcp-Session-Id` and CORS.** In stateless mode the header is neither read nor emitted, so it is absent from `Access-Control-Expose-Headers`. A client that depends on it needs `WOODS_MCP_HTTP_STATELESS=0`, a transitional escape hatch, since the header is gone from the specification.
 
-> **DELETE returns 200, not 405.** The specification says a server supporting only this revision *should* answer `405` to DELETE; the `mcp` gem instead answers `200 {"success": true}` in stateless mode. This is the SDK's call, not Woods' — there is no session to terminate either way, so the request is a no-op whichever status it carries.
+> **DELETE returns 200, not 405.** The specification says a server supporting only this revision *should* answer `405` to DELETE; the `mcp` gem instead answers `200 {"success": true}` in stateless mode. This is the SDK's call, not Woods', there is no session to terminate either way, so the request is a no-op whichever status it carries.
 
 The last row is the one that matters in practice: a client holding a session id from *before* a restart is simply served, rather than getting a `404` and having to re-initialize.
 
@@ -61,7 +61,7 @@ The `mcp` gem does not authenticate at the transport layer, so `exe/woods-mcp-ht
 |-----------------------------------|------------------------------|---------------------------------------------------------------|
 | `localhost` / `127.0.0.1` / `::1` | no                           | Boots with a warning; unauthenticated loopback access only  |
 | `localhost` / `127.0.0.1` / `::1` | yes                          | Boots; every request must present `Authorization: Bearer …` |
-| anything else                     | no                           | **Refuses to boot** — aborts with a pointer to this section |
+| anything else                     | no                           | **Refuses to boot**: aborts with a pointer to this section |
 | anything else                     | yes                          | Boots; every request must present `Authorization: Bearer …` |
 
 This matches the posture used by other unauthenticated local servers (Redis `protected-mode`, Postgres `listen_addresses`): loopback works freely, non-loopback requires an explicit credential.
@@ -86,12 +86,12 @@ Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request
 
 ### Browser origins (DNS rebinding defense)
 
-A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header (curl, MCP stdio clients, server-to-server) pass through — bearer auth still gates them.
+A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header (curl, MCP stdio clients, server-to-server) pass through, bearer auth still gates them.
 
 | Scenario          | `WOODS_MCP_HTTP_ALLOWED_ORIGINS`      | Origins accepted                                                |
 |--------------------|-----------------------------------------|-------------------------------------------------------------------|
 | default            | unset                                    | `http(s)://localhost`, `127.0.0.1`, `::1` (any port)              |
-| explicit list      | `https://app.example.com`                | exactly `https://app.example.com` — loopback no longer allowed  |
+| explicit list      | `https://app.example.com`                | exactly `https://app.example.com`, loopback no longer allowed  |
 | multiple origins   | `https://a.example,https://b.example`    | each listed origin                                                |
 
 `OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin` and `Vary: Origin`. `Access-Control-Expose-Headers: Mcp-Session-Id` appears only in legacy session mode (`WOODS_MCP_HTTP_STATELESS=0`).
@@ -141,4 +141,4 @@ Bind `woods-mcp-http` to `HOST=127.0.0.1` when a proxy handles the public surfac
 - **Plaintext tokens on the wire.** Bearer auth over HTTP leaks the token to anything on the network path. Terminate TLS at a reverse proxy (nginx, Caddy, Cloudflare) for any deployment beyond a single trusted host.
 - **No rotation primitive.** There is one static token. Rotating it requires restarting the server and updating clients.
 - **No per-client identity.** Every valid request is equally trusted; there are no scopes or audit trails. Treat the token as a shared secret for a trust boundary you already control.
-- **No in-process TLS.** TLS is a reverse-proxy concern — Caddy/nginx/Cloudflare handle certs, HSTS, and cipher policy better than a Rack-level implementation would.
+- **No in-process TLS.** TLS is a reverse-proxy concern. Caddy/nginx/Cloudflare handle certs, HSTS, and cipher policy better than a Rack-level implementation would.

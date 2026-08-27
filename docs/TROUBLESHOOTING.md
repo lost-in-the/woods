@@ -10,7 +10,7 @@ This guide covers the most common problems encountered when installing, extracti
 
 **Symptom:** Running `rake woods:extract` completes without errors but produces fewer units than expected, or only some model types appear.
 
-**Cause:** `eager_load!` failed silently partway through loading your application. Zeitwerk processes directories alphabetically — if a directory early in the alphabet (e.g., `app/graphql/`) fails to load due to a missing gem, Zeitwerk aborts that pass and never reaches `app/models/`. Woods detects this and falls back to per-directory loading, but some units may still be missing.
+**Cause:** `eager_load!` failed silently partway through loading your application. Zeitwerk processes directories alphabetically, if a directory early in the alphabet (e.g., `app/graphql/`) fails to load due to a missing gem, Zeitwerk aborts that pass and never reaches `app/models/`. Woods detects this and falls back to per-directory loading, but some units may still be missing.
 
 **Fix:**
 
@@ -35,15 +35,15 @@ config.eager_load_paths -= [Rails.root.join('app/graphql')]
 
 **Symptom:** Running a rake task fails immediately with `NameError: uninitialized constant Rails` or a similar error about ActiveRecord, ApplicationRecord, or other Rails constants.
 
-**Cause:** Extraction requires a booted Rails environment. Woods uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs) — these APIs do not exist outside a running Rails app.
+**Cause:** Extraction requires a booted Rails environment. Woods uses runtime introspection (`ActiveRecord::Base.descendants`, `Rails.application.routes`, reflection APIs), these APIs do not exist outside a running Rails app.
 
 **Fix:** Always run extraction rake tasks inside your Rails app:
 
 ```bash
-# Correct — run from Rails app root
+# Correct: run from Rails app root
 bundle exec rake woods:extract
 
-# Docker — run inside container
+# Docker: run inside container
 docker compose exec app bundle exec rake woods:extract
 ```
 
@@ -55,7 +55,7 @@ Woods cannot extract from source files alone. It is not a static analysis tool.
 
 **Symptom:** A full extraction takes several minutes instead of 10-30 seconds.
 
-**Cause:** Two common causes — a very large codebase (500+ models), or framework source extraction enabled on an app with many gems.
+**Cause:** Two common causes, a very large codebase (500+ models), or framework source extraction enabled on an app with many gems.
 
 **Fix:**
 
@@ -79,7 +79,7 @@ Incremental extraction only re-extracts files that changed since the last run. I
 
 **Symptom:** You expect state machines, events, decorators, or other unit types but they don't appear in the output directory.
 
-**Cause:** All 34 extractors always run during extraction — there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
+**Cause:** All 34 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
 
 - The expected directory doesn't exist (e.g., no `app/decorators/` for decorators)
 - The required gem isn't installed (e.g., `aasm` or `state_machines` for state machine extraction)
@@ -95,7 +95,7 @@ ls app/decorators/ app/state_machines/ 2>/dev/null
 ls tmp/woods/decorators/ tmp/woods/state_machines/ 2>/dev/null
 ```
 
-Note: `config.extractors` does not control anything today — it's accepted for forward compatibility only and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
+Note: `config.extractors` does not control anything today, it's accepted for forward compatibility only and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
 
 ---
 
@@ -103,7 +103,7 @@ Note: `config.extractors` does not control anything today — it's accepted for 
 
 **Symptom:** After changing your routes file or adding a middleware, `rake woods:incremental` doesn't seem to update those units.
 
-**Cause:** Eight unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Incremental mode still updates them — it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
+**Cause:** Eight unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
 
 | Type | Trigger path |
 |------|--------------|
@@ -116,7 +116,7 @@ Note: `config.extractors` does not control anything today — it's accepted for 
 | `event` | any `.rb` change under `app/` |
 | `database_view` | any `.sql` change under `db/views` |
 
-If your change doesn't match one of these trigger paths, the type genuinely wasn't updated — that's the actual bug to chase, not a documented limitation.
+If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.
 
 **Fix:** If you suspect drift outside these trigger paths (or just want certainty), run a full extraction:
 
@@ -130,7 +130,7 @@ bundle exec rake woods:extract
 
 **Symptom:** Units have `last_modified_at: null` or `change_frequency: 0` in the JSON output.
 
-**Cause:** The git repository is a shallow clone (common in CI with `fetch-depth: 1`). Woods uses `git log` to compute change frequency — a shallow clone has no history to analyze.
+**Cause:** The git repository is a shallow clone (common in CI with `fetch-depth: 1`). Woods uses `git log` to compute change frequency, a shallow clone has no history to analyze.
 
 **Fix:** Fetch at least two commits:
 
@@ -145,11 +145,11 @@ bundle exec rake woods:extract
 
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
 
-**Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct — only the provenance metadata is off.
+**Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct, only the provenance metadata is off.
 
-**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory — often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg).
+**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory, often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg).
 
-**Fix:** Make the worktree's git directory reachable from the extraction environment — for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly — Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
+**Fix:** Make the worktree's git directory reachable from the extraction environment, for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly. Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
 
 ---
 
@@ -187,7 +187,7 @@ cat ./tmp/woods/generation.json                    # {"number": 42, "payload": "
 ls ./tmp/woods/payloads/gen-42/manifest.json
 ```
 
-`woods-mcp-start` and `IndexReader` already resolve this automatically — this is only for manual inspection. If neither path has a manifest, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
+`woods-mcp-start` and `IndexReader` already resolve this automatically, this is only for manual inspection. If neither path has a manifest, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
 
 ---
 
@@ -195,7 +195,7 @@ ls ./tmp/woods/payloads/gen-42/manifest.json
 
 **Symptom:** `woods-mcp` exits 2 with `MissingArtifact: No woods.json found ...`.
 
-**Cause:** Strict mode is enabled (`WOODS_REQUIRE_INDEX=1`) but no embedding index has been written. By default the server boots without `woods.json` — it serves pattern/regex/structural tools and skips semantic search. You only see this error when you've explicitly opted into fail-closed behavior.
+**Cause:** Strict mode is enabled (`WOODS_REQUIRE_INDEX=1`) but no embedding index has been written. By default the server boots without `woods.json`, it serves pattern/regex/structural tools and skips semantic search. You only see this error when you've explicitly opted into fail-closed behavior.
 
 **Fix:** Either generate the index so semantic search is available:
 
@@ -204,7 +204,7 @@ bundle exec rake woods:extract
 bundle exec rake woods:embed          # writes woods.json + vector dumps
 ```
 
-…or unset `WOODS_REQUIRE_INDEX` to boot in pattern-only mode. (The older `WOODS_ALLOW_AUTODETECT=1` flag is no longer needed — auto-detect is the default.)
+…or unset `WOODS_REQUIRE_INDEX` to boot in pattern-only mode. (The older `WOODS_ALLOW_AUTODETECT=1` flag is no longer needed, auto-detect is the default.)
 
 ---
 
@@ -233,7 +233,7 @@ which woods-mcp-start
 
 ```bash
 bundle exec rake woods:console
-# Should hang waiting for MCP protocol input — if it exits, check the error
+# Should hang waiting for MCP protocol input: if it exits, check the error
 ```
 
 ---
@@ -287,12 +287,12 @@ bundle exec rake woods:console 2>/dev/null
 
 **Symptom:** The MCP client reports "server disconnected" or "transport closed" during normal use.
 
-**Cause:** Several possible causes — the server process crashed, the stdio transport pipe was broken, or the client's idle timeout expired.
+**Cause:** Several possible causes, the server process crashed, the stdio transport pipe was broken, or the client's idle timeout expired.
 
 **Fix:**
 
 1. Check server stderr for crash output.
-2. Use `woods-mcp-start` (the self-healing wrapper) instead of `woods-mcp` directly — it restarts the server on crash.
+2. Use `woods-mcp-start` (the self-healing wrapper) instead of `woods-mcp` directly, it restarts the server on crash.
 3. For Docker setups, ensure the container stays running: `docker compose exec -d app tail -f /dev/null` keeps it alive.
 
 ---
@@ -310,7 +310,7 @@ console_count(model: "Order", scope: { status: "pending" })
 console_sample(model: "Order", scope: { created_at_gteq: "2025-01-01" })
 ```
 
-Scope keys are flat, Ransack-style predicates (`_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) suffixed onto a column name — `scope: { created_at: { gte: "..." } }` (a nested hash) is rejected. A plain key with no suffix (`status: "pending"`) is an equality match.
+Scope keys are flat, Ransack-style predicates (`_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`) suffixed onto a column name, `scope: { created_at: { gte: "..." } }` (a nested hash) is rejected. A plain key with no suffix (`status: "pending"`) is an equality match.
 
 ---
 
@@ -320,12 +320,12 @@ Scope keys are flat, Ransack-style predicates (`_eq`, `_gt`, `_gteq`, `_lt`, `_l
 
 **Symptom:** You're on MySQL (or Percona / MariaDB / Aurora MySQL) and `config.vector_store = :pgvector` fails at boot, or you can't find a `:mysql` vector adapter in `lib/woods/storage/`.
 
-**Cause:** MySQL has no native vector-search extension equivalent to `pgvector`. Woods does not emulate vector search in MySQL — every vector adapter the gem ships delegates to a real vector engine. Note that being on MySQL only constrains the *vector* choice: Woods keeps its own metadata in SQLite or memory (`metadata_store: :sqlite | :in_memory`), never in your application database, so there is no MySQL metadata adapter to configure. (Native `:mysql` / `:postgresql` metadata adapters are future work — `BACKEND_MATRIX.md` documents the shape they would take.)
+**Cause:** MySQL has no native vector-search extension equivalent to `pgvector`. Woods does not emulate vector search in MySQL, every vector adapter the gem ships delegates to a real vector engine. Note that being on MySQL only constrains the *vector* choice: Woods keeps its own metadata in SQLite or memory (`metadata_store: :sqlite | :in_memory`), never in your application database, so there is no MySQL metadata adapter to configure. (Native `:mysql` / `:postgresql` metadata adapters are future work, `BACKEND_MATRIX.md` documents the shape they would take.)
 
 **Fix:** Pair the host app with one of the supported external vector backends. Qdrant is the recommended default for self-hosted / Docker stacks:
 
 ```ruby
-# config/initializers/woods.rb — MySQL host app: vectors go to Qdrant
+# config/initializers/woods.rb: MySQL host app: vectors go to Qdrant
 Woods.configure do |config|
   config.metadata_store = :sqlite   # Woods-internal metadata, not your app DB
   config.vector_store = :qdrant
@@ -350,7 +350,7 @@ Woods.configure do |config|
 end
 ```
 
-For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)` — in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in — it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
+For local development against a MySQL app, the `:local` preset (`Woods.configure_with_preset(:local)`, in-memory vectors, SQLite metadata, Ollama embeddings) is a reasonable stand-in, it keeps the dev environment dependency-free at the cost of not exercising the production vector engine. Production MySQL stacks should run Qdrant; the `:production` preset (`vector_store: :qdrant`) is the matching starting point.
 
 See [`docs/BACKEND_MATRIX.md`](BACKEND_MATRIX.md#database-compatibility) for the full matrix and the [MySQL section](BACKEND_MATRIX.md#mysql) for graph-traversal details (recursive CTEs on 8.0+).
 
@@ -369,7 +369,7 @@ bundle exec rake woods:extract
 bundle exec rake woods:embed
 ```
 
-Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` rather than letting it become a runtime error: `rake woods:embed` refuses before embedding anything (comparing the provider's dimension against the width the `woods_vectors` table or Qdrant collection was created with), and the MCP server refuses at boot (comparing against the dump's WVF1 header). The message names both dimensions and the remedy — drop the vector store and re-index.
+Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` rather than letting it become a runtime error: `rake woods:embed` refuses before embedding anything (comparing the provider's dimension against the width the `woods_vectors` table or Qdrant collection was created with), and the MCP server refuses at boot (comparing against the dump's WVF1 header). The message names both dimensions and the remedy, drop the vector store and re-index.
 
 **A dimension mismatch is never silently tolerated.** If you are getting poor results without seeing this error, the cause is something else.
 
@@ -383,7 +383,7 @@ Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` 
 
 **Fix:**
 
-For 401 — set the API key:
+For 401, set the API key:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -396,7 +396,7 @@ Or configure it in your initializer:
 config.embedding_options = { api_key: ENV['OPENAI_API_KEY'] }
 ```
 
-For 429 — embedding generation is automatically retried with backoff. If rate limits persist, consider batching with smaller codebases or switching to Ollama for local embeddings.
+For 429, embedding generation is automatically retried with backoff. If rate limits persist, consider batching with smaller codebases or switching to Ollama for local embeddings.
 
 ---
 
@@ -422,7 +422,7 @@ config.embedding_options = { host: 'http://localhost:11434' }
 
 **Symptom:** `rake woods:embed` fails with `Ollama API error: 400 {"error":"the input length exceeds the context length"}`. Individual chunks may look smaller than the configured `num_ctx`.
 
-**Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source — so chunks that look safe by char count still trip the 2048-token ceiling.
+**Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source, so chunks that look safe by char count still trip the 2048-token ceiling.
 
 **Fix:** Upgrade to Woods 1.3+ and install the `tokenizers` gem:
 
@@ -446,7 +446,7 @@ config.embedding_options = {
 }
 ```
 
-Pull the model first (`ollama pull bge-m3`) and **drop the vector index before re-embedding** — the dimension change (768 → 1024) is incompatible with existing vectors. See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full tradeoff matrix.
+Pull the model first (`ollama pull bge-m3`) and **drop the vector index before re-embedding**: the dimension change (768 → 1024) is incompatible with existing vectors. See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full tradeoff matrix.
 
 ---
 
@@ -521,10 +521,10 @@ Woods.configure_with_preset(:postgresql)
 services:
   app:
     volumes:
-      - .:/app    # Full app mount — output lands at ./tmp/woods/
+      - .:/app    # Full app mount, output lands at ./tmp/woods/
 ```
 
-Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json` — or, if that's absent, `cat tmp/woods/generation.json` and check under the `payload` path it names (see [No manifest.json error](#no-manifestjson-error-when-starting-the-index-server) above).
+Then re-run extraction. Verify on the host with `ls tmp/woods/manifest.json`, or, if that's absent, `cat tmp/woods/generation.json` and check under the `payload` path it names (see [No manifest.json error](#no-manifestjson-error-when-starting-the-index-server) above).
 
 ---
 
@@ -576,7 +576,7 @@ Update the container name in your configuration to match exactly.
 
 ```text
 "args": ["./tmp/woods"]     ✓ host path
-"args": ["/app/tmp/woods"]  ✗ container path — Index Server cannot read this
+"args": ["/app/tmp/woods"]  ✗ container path. Index Server cannot read this
 ```
 
 ---
@@ -640,7 +640,7 @@ config.notion_database_ids = {
 
 **Cause:** The Notion API enforces a 3 requests/second rate limit. `RateLimiter` handles this automatically, but a codebase with hundreds of models will take proportionally longer.
 
-**Behavior:** This is expected and handled automatically. No action needed — the sync will complete.
+**Behavior:** This is expected and handled automatically. No action needed, the sync will complete.
 
 ---
 
@@ -678,8 +678,8 @@ For a single-call health snapshot, call the Index Server's `woods_status` tool. 
 - Console-bridge reachability
 - Which optional features are configured (embedding provider, Notion, session tracer)
 - Per-feature config-key hints for anything missing
-- `server.update` — the installed gem version, the latest published version, and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)
+- `server.update`: the installed gem version, the latest published version, and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)
 
-Agents cold-connecting to a server should call `woods_status` before any other tool — it eliminates most "why is this empty?" guesswork.
+Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
 
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.

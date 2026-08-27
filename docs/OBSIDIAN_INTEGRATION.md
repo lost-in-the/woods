@@ -1,16 +1,16 @@
 # Obsidian Integration
 
-Export Woods extraction artifacts to a self-contained [Obsidian](https://obsidian.md) vault — a
+Export Woods extraction artifacts to a self-contained [Obsidian](https://obsidian.md) vault, a
 folder of interlinked Markdown notes, one per extracted unit. The vault is designed to be read two
 ways at once:
 
-- **By humans** — explore the app's structure in Obsidian's graph view, filter and sort units in an
+- **By humans**: explore the app's structure in Obsidian's graph view, filter and sort units in an
   Obsidian [Bases](https://help.obsidian.md/bases) table, and drill into a single unit's note with its
   dependencies and dependents as clickable wikilinks.
-- **By agents** — load the entire dependency topology from a single `_woods/` sidecar (one read,
+- **By agents**: load the entire dependency topology from a single `_woods/` sidecar (one read,
   no per-note fan-out), with a stable `id → note path` manifest for navigation.
 
-Unlike the Notion and Unblocked exporters, this one writes **local files only** — there is no API
+Unlike the Notion and Unblocked exporters, this one writes **local files only**: there is no API
 token, no network call, and no rate limit. An Obsidian vault is just a folder.
 
 ## Quick start
@@ -25,7 +25,7 @@ bundle exec rake woods:obsidian
 
 Then in Obsidian: **Open folder as vault** → point it at `tmp/woods/obsidian_vault`. For the full
 experience (graph colors, Bases, link format) open the generated folder *as its own vault* rather than
-nesting it inside an existing one — a nested folder inherits the host vault's config and ignores the
+nesting it inside an existing one, a nested folder inherits the host vault's config and ignores the
 shipped `.obsidian/` settings.
 
 ## What gets generated
@@ -33,14 +33,14 @@ shipped `.obsidian/` settings.
 ```
 obsidian_vault/
 ├── .woods-vault              # ownership sentinel (marks this dir as woods-managed)
-├── .obsidian/                # vault config — only written into a woods-owned vault
+├── .obsidian/                # vault config, only written into a woods-owned vault
 │   ├── app.json              #   newLinkFormat: absolute, useMarkdownLinks: false
 │   ├── types.json            #   property types (pagerank → number, tags → tags)
 │   └── graph.json            #   color groups by #woods/<type> (global graph)
 ├── _woods/                   # machine sidecar (the agent interface)
 │   ├── manifest.json         #   { notes: {id → {path,type,pagerank,tags}}, paths: {path → id} }
-│   ├── dependency_graph.json #   verbatim copy — full topology for traversal
-│   └── graph_analysis.json   #   verbatim copy — hubs / cycles / orphans / bridges
+│   ├── dependency_graph.json #   verbatim copy, full topology for traversal
+│   └── graph_analysis.json   #   verbatim copy, hubs / cycles / orphans / bridges
 ├── Units.base                # Obsidian Bases view (filterable/sortable unit inventory)
 ├── _Overview.md              # top-level map of contents
 ├── models/
@@ -54,7 +54,7 @@ obsidian_vault/
 ## A unit note
 
 Each note carries **flat YAML frontmatter** (the machine-queryable surface) and a Markdown body with
-wikilinks (the human surface). Frontmatter is kept flat on purpose — Obsidian's Properties UI does
+wikilinks (the human surface). Frontmatter is kept flat on purpose. Obsidian's Properties UI does
 not support nested objects or arrays-of-objects, so the structured edge data lives in the `_woods/`
 sidecar instead.
 
@@ -79,12 +79,12 @@ aliases:
 
 **File:** `app/models/user.rb` | **LOC:** 84 | **Table:** users (17 columns)
 
-> [!warning] Hub — high blast radius
+> [!warning] Hub, high blast radius
 > 12 units depend on this (PageRank 0.0421).
 
 ## Depends on
-- [[models/Account|Account]] — *belongs_to*
-- [[mailers/WelcomeMailer|WelcomeMailer]] — *job_enqueue*
+- [[models/Account|Account]], *belongs_to*
+- [[mailers/WelcomeMailer|WelcomeMailer]], *job_enqueue*
 
 ## Used by (12)
 **controllers:** [[controllers/Users__RegistrationsController|Users::RegistrationsController]]
@@ -99,13 +99,13 @@ note's `# H1` carries the clean identifier so the sanitized filename never shows
 
 | Surface | Best for | Notes |
 |---|---|---|
-| **Graph view** | seeing connections / blast radius at a glance | colored by `#woods/<type>` tag (global graph); for the *local* graph, create the color-by-tag groups once — Obsidian persists them per-vault |
-| **Bases (`Units.base`)** | inventory & triage — "all models sorted by PageRank", "show me the hubs" | requires Obsidian ≥ 1.9 (cards/list views ≥ 1.10); inert and harmless on older versions |
+| **Graph view** | seeing connections / blast radius at a glance | colored by `#woods/<type>` tag (global graph); for the *local* graph, create the color-by-tag groups once. Obsidian persists them per-vault |
+| **Bases (`Units.base`)** | inventory & triage, "all models sorted by PageRank", "show me the hubs" | requires Obsidian ≥ 1.9 (cards/list views ≥ 1.10); inert and harmless on older versions |
 | **Note bodies + backlinks** | drilling into one unit and navigating outward | "Depends on" / "Used by" are clickable; Obsidian's backlink panel shows inbound links |
 
 ## Configuration
 
-All options are passed to the rake task via environment variables — there are **no global
+All options are passed to the rake task via environment variables, there are **no global
 `Woods.configure` settings** for this exporter (the vault path is an output location, not a
 credential):
 
@@ -137,16 +137,16 @@ Woods::Obsidian::VaultExporter.new(
 
 ## Re-running and safety
 
-The exporter **fully regenerates** the vault on every run (no incremental manifest — local writes are
+The exporter **fully regenerates** the vault on every run (no incremental manifest, local writes are
 cheap). Output is deterministic: re-running against an unchanged extraction produces byte-identical
 notes, so unchanged units never show up in a git diff.
 
 Notes Woods manages carry `woods_managed: true` in their frontmatter. On each run, after all notes are
-written successfully, a **sweep** removes managed notes whose unit no longer exists — so deletions in
+written successfully, a **sweep** removes managed notes whose unit no longer exists, so deletions in
 your code propagate. Several guards make the sweep safe to point at a real vault:
 
 - It only runs against a directory carrying the `.woods-vault` sentinel (written by Woods on first run).
-- It only deletes notes with the `woods_managed: true` marker — your own notes are never touched.
+- It only deletes notes with the `woods_managed: true` marker, your own notes are never touched.
 - It refuses to delete more than 30% of managed notes at once (the signature of a partial extraction)
   unless `WOODS_OBSIDIAN_FORCE_PURGE=1` is set.
 - It resolves symlinks and confirms every deletion target is inside the vault root.
@@ -154,12 +154,12 @@ your code propagate. Several guards make the sweep safe to point at a real vault
   reviewed note is not).
 
 The same ownership check guards the `.obsidian/` config: Woods will **not** overwrite an existing,
-foreign `.obsidian/` folder — it leaves your Obsidian settings untouched and warns instead.
+foreign `.obsidian/` folder, it leaves your Obsidian settings untouched and warns instead.
 
 ## Limitations
 
 - **Bases needs Obsidian ≥ 1.9** (≥ 1.10 for card/list views). The `.base` file is harmless on older
-  versions — it simply doesn't render.
+  versions, it simply doesn't render.
 - **`gem_source` units are not exported.** They aren't reachable through the index reader; only
   `rails_source` is covered by `include_framework`.
 - **Hand-edits diverge.** The vault is meant to be regenerated. Editing a note's properties in

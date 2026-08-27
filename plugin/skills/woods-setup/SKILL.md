@@ -1,6 +1,6 @@
 ---
 name: woods-setup
-description: Guide through Woods initial setup — install, configure, extract, verify, and connect MCP servers
+description: Guide through Woods initial setup: install, configure, extract, verify, and connect MCP servers
 ---
 
 # Woods Setup Guide
@@ -17,10 +17,10 @@ Check which Woods version is installed and operate only against it:
 bundle info woods        # installed version + path (once the gem is in the Gemfile)
 ```
 
-This guide targets **Woods ≥ 2.0.0**. If the installed gem is older, some rake tasks, MCP
-tools, or config keys referenced below may not exist — tell the user to update
-(`bundle update woods`) rather than running commands the installed version doesn't support.
-If a newer release is available on RubyGems, mention it so the user can pick up new features.
+This guide targets **Woods 2.0.0 or later**.
+
+- Older gem: some commands, tools, or config keys below will not exist. Tell the user to run `bundle update woods` first.
+- Newer release on RubyGems: mention it so the user can pick it up.
 
 ---
 
@@ -82,7 +82,13 @@ bundle exec rails db:migrate
 Woods.configure_with_preset(:production)
 ```
 
-**Embedding-free (structural search only):** Skip embeddings entirely — all Index Server tools work without them. Only `codebase_retrieve` requires an embedding provider.
+**Shared filesystem (several worktrees, one index):** In-memory vectors + SQLite metadata on a shared path. See the `:shared_filesystem` preset in [CONFIGURATION_REFERENCE.md](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md).
+
+```ruby
+Woods.configure_with_preset(:shared_filesystem)
+```
+
+**Embedding-free (structural search only):** Skip embeddings entirely. All Index Server tools work without them. Only `codebase_retrieve` requires an embedding provider.
 
 ```ruby
 Woods.configure do |config|
@@ -123,7 +129,7 @@ bundle exec rake woods:validate
 
 Inspect the manifest directly. As of the current release, extraction publishes
 into `tmp/woods/payloads/gen-<N>/`, and `generation.json` at the index root
-points at the current one — a bare `cat tmp/woods/manifest.json` will miss it
+points at the current one. A bare `cat tmp/woods/manifest.json` will miss it
 on a fresh install:
 
 ```bash
@@ -132,7 +138,7 @@ cat "tmp/woods/${gen:-.}/manifest.json"
 ```
 
 (`${gen:-.}` falls back to the flat root for an index written before payloads
-existed — that path still works unchanged.)
+existed; that path still works unchanged.)
 
 A healthy manifest looks like:
 
@@ -177,7 +183,7 @@ Add both servers to your AI tool's MCP configuration.
 }
 ```
 
-**Docker (embedded console — Tier 1 tools only):**
+**Docker (embedded console, Tier 1 tools only):**
 
 ```json
 {
@@ -202,7 +208,7 @@ The Index Server always runs on the host reading volume-mounted JSON. Use the ho
 
 ### Cursor / Windsurf (`.cursor/mcp.json`)
 
-Same structure as Claude Code above — both tools use the same JSON format.
+Same structure as Claude Code above. Both tools use the same JSON format.
 
 ---
 
@@ -230,5 +236,5 @@ This should output the tool list and then hang (waiting for more input). Press C
 
 - Run incremental extraction after code changes: `bundle exec rake woods:incremental`
 - Set up CI extraction: see the GitHub Actions example in [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_TOOL_COOKBOOK.md)
-- Unlock `console_sql` / `console_query` (the only tools a config flag can add — Tier 2, Tier 3, and `console_eval` are inventory-only in every mode): set `config.console_embedded_read_tools = true`. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md)
-- Enable temporal snapshots for change tracking: set `enable_snapshots: true` in your initializer
+- Unlock `console_sql` / `console_query` (the only tools a config flag can add; Tier 2, Tier 3, and `console_eval` are inventory-only in every mode): set `config.console_embedded_read_tools = true`. See [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md)
+- Enable temporal snapshots for change tracking: set `config.enable_snapshots = true` in your initializer

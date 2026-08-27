@@ -1,6 +1,6 @@
 # Woods Architecture
 
-This doc explains how Woods works from the inside — how extraction, storage, retrieval, and the two MCP servers fit together.
+This doc explains how Woods works from the inside, how extraction, storage, retrieval, and the two MCP servers fit together.
 
 ---
 
@@ -10,16 +10,16 @@ Woods runs in three phases across two environments:
 
 ```
 Inside Rails app (rake task):
-  1. Extract — 34 extractors introspect the live Rails environment
-  2. Resolve — dependency graph is built and enriched with git data
-  3. Write   — one JSON file per code unit to tmp/woods/
+  1. Extract, 34 extractors introspect the live Rails environment
+  2. Resolve, dependency graph is built and enriched with git data
+  3. Write, one JSON file per code unit to tmp/woods/
 
 On the host / in CI:
-  4. Embed  — units are chunked and embedded into a vector store
-  5. Query  — MCP server reads the JSON index and answers questions
+  4. Embed, units are chunked and embedded into a vector store
+  5. Query, MCP server reads the JSON index and answers questions
 ```
 
-The key insight: **extraction requires a booted Rails application** (`ActiveRecord::Base.descendants`, `Rails.application.routes`, etc.), but *querying* does not. The Index MCP server reads static JSON — no Rails, no database.
+The key insight: **extraction requires a booted Rails application** (`ActiveRecord::Base.descendants`, `Rails.application.routes`, etc.), but *querying* does not. The Index MCP server reads static JSON, no Rails, no database.
 
 ---
 
@@ -64,15 +64,15 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 
 Every unit carries:
 
-- **`identifier`** — unique key, usually the class name (`"User"`, `"OrdersController"`) or a descriptive string for non-class units (`"POST /orders"`)
-- **`type`** — what kind of thing this is (`:model`, `:controller`, `:service`, `:route`, etc.)
-- **`file_path`** — relative path from `Rails.root` (e.g., `"app/models/user.rb"`)
-- **`source_code`** — the annotated source: for models this includes concerns inlined and schema prepended; for controllers this includes a route context header
-- **`metadata`** — type-specific structured data (associations, callbacks, actions, fields, etc.)
-- **`dependencies`** — forward edges: `[{ type:, target:, via: }]`
-- **`dependents`** — reverse edges, populated in a second pass after all units are registered
-- **`chunks`** — semantic sub-sections for large units (populated by `SemanticChunker`)
-- **`estimated_tokens`** — approximate token count using 4.0 chars/token (benchmarked conservative floor)
+- **`identifier`**: unique key, usually the class name (`"User"`, `"OrdersController"`) or a descriptive string for non-class units (`"POST /orders"`)
+- **`type`**: what kind of thing this is (`:model`, `:controller`, `:service`, `:route`, etc.)
+- **`file_path`**: relative path from `Rails.root` (e.g., `"app/models/user.rb"`)
+- **`source_code`**: the annotated source: for models this includes concerns inlined and schema prepended; for controllers this includes a route context header
+- **`metadata`**: type-specific structured data (associations, callbacks, actions, fields, etc.)
+- **`dependencies`**: forward edges: `[{ type:, target:, via: }]`
+- **`dependents`**: reverse edges, populated in a second pass after all units are registered
+- **`chunks`**: semantic sub-sections for large units (populated by `SemanticChunker`)
+- **`estimated_tokens`**: approximate token count using 4.0 chars/token (benchmarked conservative floor)
 
 Units are serialized to JSON with two additional fields: `extracted_at` (timestamp) and `source_hash` (SHA-256 of source_code for change detection).
 
@@ -84,7 +84,7 @@ See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for the full field table an
 
 ### Eager Loading
 
-Before any extractor runs, `Rails.application.eager_load!` is called once to load all application classes into memory. If `eager_load!` fails with a `NameError` (common when `app/graphql/` references an uninstalled gem — Zeitwerk processes directories alphabetically, so a failure in `graphql/` can prevent `models/` from loading), the orchestrator falls back to per-directory loading across the 19 directories in `EXTRACTION_DIRECTORIES`.
+Before any extractor runs, `Rails.application.eager_load!` is called once to load all application classes into memory. If `eager_load!` fails with a `NameError` (common when `app/graphql/` references an uninstalled gem. Zeitwerk processes directories alphabetically, so a failure in `graphql/` can prevent `models/` from loading), the orchestrator falls back to per-directory loading across the 19 directories in `EXTRACTION_DIRECTORIES`.
 
 ### Five Phases
 
@@ -125,7 +125,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the eight unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines) — when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `rails_source`/`gem_source` work the same way, triggered by `Gemfile.lock`, gated separately by `include_framework_sources`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the eight unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `rails_source`/`gem_source` work the same way, triggered by `Gemfile.lock`, gated separately by `include_framework_sources`.
 
 ---
 
@@ -133,8 +133,8 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 
 The `DependencyGraph` is a directed graph where nodes are `ExtractedUnit` identifiers and edges are dependency relationships. It tracks:
 
-- **Forward edges** (`@edges`): what each unit depends on — populated when units are registered
-- **Reverse edges** (`@reverse`): what depends on each unit — built during registration and in the resolve phase
+- **Forward edges** (`@edges`): what each unit depends on, populated when units are registered
+- **Reverse edges** (`@reverse`): what depends on each unit, built during registration and in the resolve phase
 
 ```ruby
 graph = DependencyGraph.new
@@ -150,7 +150,7 @@ graph.affected_by(["app/models/user.rb"])  # BFS over reverse edges
 
 ### PageRank Scoring
 
-`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on — the same insight as Google's PageRank applied to code graphs.
+`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs.
 
 Scores feed into the retrieval ranker as one signal in the final ranking formula.
 
@@ -160,11 +160,11 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 
 | Metric | What it means |
 |--------|--------------|
-| **Orphans** | Units with no dependents — potential dead code or public entry points. Framework sources are excluded (they're naturally unreferenced in the reverse index). |
-| **Dead ends** | Units with no dependencies — self-contained leaf nodes (value objects, standalone utilities) |
-| **Hubs** | Units with many dependents — architectural bottlenecks; changes here have high blast radius |
-| **Cycles** | Circular dependencies — A→B→C→A. Detected via DFS. |
-| **Bridges** | Edges whose removal would disconnect the graph — high-risk structural connections |
+| **Orphans** | Units with no dependents, potential dead code or public entry points. Framework sources are excluded (they're naturally unreferenced in the reverse index). |
+| **Dead ends** | Units with no dependencies, self-contained leaf nodes (value objects, standalone utilities) |
+| **Hubs** | Units with many dependents, architectural bottlenecks; changes here have high blast radius |
+| **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS. |
+| **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
 
 Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.md`.
 
@@ -216,7 +216,7 @@ Allocates token budget across layers:
 
 ```
 Token Budget Allocation:
-├── 10%  Structural overview ("Codebase: 42 units — 10 models, 5 controllers, ...")
+├── 10%  Structural overview ("Codebase: 42 units, 10 models, 5 controllers, ...")
 ├── 50%  Primary relevant units (highest-ranked candidates)
 ├── 25%  Supporting context (direct dependencies of primary units)
 └── 15%  Framework reference (Rails source, when query intent = :framework)
@@ -236,7 +236,7 @@ Woods uses three independent store abstractions:
 | **MetadataStore** | Unit metadata for keyword search and type filtering | In-memory, SQLite |
 | **GraphStore** | Dependency graph for graph-based traversal | In-memory, JSON file (via `dependency_graph.json`) |
 
-The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax — no backend-specific SQL is written into the core.
+The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax, no backend-specific SQL is written into the core.
 
 ### Configuration Presets
 
@@ -290,11 +290,11 @@ Use the Index Server for:
 - Temporal snapshots (comparing codebase state over time)
 - Feedback collection
 
-The Index Server is safe to run anywhere — it has no database connection and makes no writes to the Rails application.
+The Index Server is safe to run anywhere, it has no database connection and makes no writes to the Rails application.
 
 ### Console Server (`woods-console-mcp`)
 
-**31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process — no separate bridge process.**
+**31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process, no separate bridge process.**
 
 Starts via rake task inside the Rails app (or `docker compose exec`):
 
@@ -303,11 +303,11 @@ bundle exec rake woods:console
 ```
 
 Use the Console Server for:
-- Live database queries (`User.where(...)` with schema awareness) — Tier 1, registered by default
-- Model diagnostics, job queue monitoring, cache inspection — Tier 2/3 schemas exist but are **not registered** in any supported mode today
-- SQL/query — Tier 4, opt-in via `console_embedded_read_tools`; `console_eval` is inventory-only and unavailable
+- Live database queries (`User.where(...)` with schema awareness). Tier 1, registered by default
+- Model diagnostics, job queue monitoring, cache inspection. Tier 2/3 schemas exist but are **not registered** in any supported mode today
+- SQL/query. Tier 4, opt-in via `console_embedded_read_tools`; `console_eval` is inventory-only and unavailable
 
-All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback — this is intentional defense-in-depth. See [MCP_SERVERS.md](MCP_SERVERS.md#console-server) for the full tool inventory and tier breakdown.
+All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback, this is intentional defense-in-depth. See [MCP_SERVERS.md](MCP_SERVERS.md#console-server) for the full tool inventory and tier breakdown.
 
 ### Which Should I Use?
 
@@ -325,19 +325,19 @@ All Console Server queries run inside a **rolled-back transaction** (`SafeContex
 
 ## How Does Semantic Chunking Work?
 
-Large units are split into semantic chunks before embedding. The `SemanticChunker` is type-aware — it doesn't split on arbitrary token counts.
+Large units are split into semantic chunks before embedding. The `SemanticChunker` is type-aware, it doesn't split on arbitrary token counts.
 
 ### Model Chunking
 
 Models are split into purpose-specific sections:
 
 ```
-summary      — class declaration, table info, concerns list
-associations — all has_many, belongs_to, has_one, HABTM
-callbacks    — all before/after/around hooks with side-effects
-validations  — all validates and validate calls
-scopes       — named scopes
-methods      — remaining public and private methods
+summary, class declaration, table info, concerns list
+associations, all has_many, belongs_to, has_one, HABTM
+callbacks, all before/after/around hooks with side-effects
+validations, all validates and validate calls
+scopes, named scopes
+methods, remaining public and private methods
 ```
 
 Each chunk includes a header with the unit's identifier, type, and file path so it's self-contained when retrieved without the parent.
@@ -347,16 +347,16 @@ Each chunk includes a header with the unit's identifier, type, and file path so 
 Controllers chunk per-action:
 
 ```
-summary      — class declaration, before_action filters, layout
-<action>     — each public action method with its applicable filters and route context
+summary, class declaration, before_action filters, layout
+<action>, each public action method with its applicable filters and route context
 ```
 
 This matches how queries actually come in: "how does the create action work?" retrieves only the `create` chunk and the filter context, not the entire controller.
 
 ### Threshold
 
-Units below 200 estimated tokens stay as a single `:whole` chunk. Above that, the semantic chunker applies type-specific splitting. Units that are still large after splitting use the fallback `build_default_chunks` method (line-based splitting with a 1500-token limit per chunk).
+Units below 200 estimated tokens stay as a single `:whole` chunk. Above that, the semantic chunker applies type-specific splitting, with a line-based fallback (1500-token limit per chunk) for units that are still too large.
 
 ### Why Not Just Split by Token Count?
 
-Token-count splits break semantic units arbitrarily — an `associations` section split mid-way loses context. Semantic splits align with how the code is actually understood: "tell me about the associations" maps to the associations chunk, not to arbitrary line ranges 150–300.
+Token-count splits break semantic units arbitrarily, an `associations` section split mid-way loses context. Semantic splits align with how the code is actually understood: "tell me about the associations" maps to the associations chunk, not to arbitrary line ranges 150–300.

@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **34 extractor classes** producing **38 distinct unit types** — one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **34 extractor classes** producing **38 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 41 files: 34 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 38 unit types comes from some extractors emitting multiple categories — `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 41 files: 34 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 38 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,12 +13,12 @@ Woods ships **34 extractor classes** producing **38 distinct unit types** — on
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract     — All 34 extractors run, producing ExtractedUnit objects
-Phase 1.5: Dedupe    — Duplicate identifiers are dropped (engines can double-register routes)
-Phase 2: Resolve     — Reverse dependency edges are built (A depends on B → B gets a dependent)
-Phase 3: Graph       — PageRank + structural analysis (orphans, hubs, cycles, bridges)
-Phase 4: Enrich      — Git metadata added (last author, change frequency, recent commits)
-Phase 5: Write       — One JSON file per unit, _index.json per type, dependency_graph.json, SUMMARY.md
+Phase 1: Extract    . All 34 extractors run, producing ExtractedUnit objects
+Phase 1.5: Dedupe   . Duplicate identifiers are dropped (engines can double-register routes)
+Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
+Phase 3: Graph      . PageRank + structural analysis (orphans, hubs, cycles, bridges)
+Phase 4: Enrich     . Git metadata added (last author, change frequency, recent commits)
+Phase 5: Write      . One JSON file per unit, _index.json per type, dependency_graph.json, SUMMARY.md
 ```
 
 ### Two Discovery Strategies
@@ -27,8 +27,8 @@ Extractors discover code one of two ways:
 
 | Strategy | How it works | Examples |
 |----------|-------------|---------|
-| **Class-based** | `ActiveRecord::Base.descendants`, `ApplicationController.descendants`, etc. — requires `eager_load!` | ModelExtractor, ControllerExtractor, MailerExtractor |
-| **File-based** | Scans conventional directories (`app/services`, `db/migrate`, etc.) — more robust for non-AR classes | ServiceExtractor, MigrationExtractor, ViewTemplateExtractor |
+| **Class-based** | `ActiveRecord::Base.descendants`, `ApplicationController.descendants`, etc., requires `eager_load!` | ModelExtractor, ControllerExtractor, MailerExtractor |
+| **File-based** | Scans conventional directories (`app/services`, `db/migrate`, etc.), more robust for non-AR classes | ServiceExtractor, MigrationExtractor, ViewTemplateExtractor |
 
 Some extractors combine both (e.g., `JobExtractor` scans directories first, then supplements with `ApplicationJob.descendants`).
 
@@ -55,11 +55,11 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
-- **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically — enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
+- **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
 
 **Edge cases:**
 - STI subclasses are extracted separately from their parent (each has its own identifier)
-- `callback.options` was removed in Rails 4.2 — the extractor uses `@if`/`@unless` ivars and ActionFilter duck-typing to extract `:only`/`:except` action lists
+- `callback.options` was removed in Rails 4.2, the extractor uses `@if`/`@unless` ivars and ActionFilter duck-typing to extract `:only`/`:except` action lists
 - AR-generated internal methods (like `autosave_associated_records_for_comments`) are filtered by a single combined regex to avoid noise
 
 **Example output (abbreviated):**
@@ -98,7 +98,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ### ControllerExtractor
 
-**What it captures:** Every `ApplicationController` and `ActionController::API` descendant. Route context is prepended to the source — each controller gets a header block showing which HTTP verb + path maps to each action. Before/after filter chains are resolved per action.
+**What it captures:** Every `ApplicationController` and `ActionController::API` descendant. Route context is prepended to the source, each controller gets a header block showing which HTTP verb + path maps to each action. Before/after filter chains are resolved per action.
 
 **Key details:**
 - Discovers controllers via `ApplicationController.descendants` (and `ActionController::API.descendants` if present)
@@ -136,7 +136,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ### ServiceExtractor
 
-**What it captures:** Service objects, interactors, operations, commands, and use cases — the "business logic layer." Discovers them by scanning conventional directories for Ruby files.
+**What it captures:** Service objects, interactors, operations, commands, and use cases, the "business logic layer." Discovers them by scanning conventional directories for Ruby files.
 
 **Key details:**
 - Scans: `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`
@@ -192,7 +192,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 **Key details:**
 - Discovers via class introspection (`ActionMailer::Base.descendants`)
-- Each mailer action corresponds to an email template — template paths are recorded in metadata
+- Each mailer action corresponds to an email template, template paths are recorded in metadata
 - Extracts `default from:`, `layout`, and per-action subject patterns
 
 ---
@@ -202,7 +202,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** Rails initializers (`config/initializers/**/*.rb`) and environment files (`config/environments/*.rb`). Also extracts a behavioral profile from the resolved `Rails.application.config` values at runtime.
 
 **Key details:**
-- `BehavioralProfile` introspects live config using `respond_to?`/`defined?` guards — a missing config section produces `nil`, not an error
+- `BehavioralProfile` introspects live config using `respond_to?`/`defined?` guards, a missing config section produces `nil`, not an error
 - Captures: asset pipeline config, middleware additions, cache store, logger config, and custom initializer logic
 - One unit per config file, plus one special `:behavioral_profile` unit per environment
 
@@ -213,10 +213,10 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** Every route in the Rails routing table via `Rails.application.routes.routes`. Each route becomes its own `ExtractedUnit`.
 
 **Key details:**
-- Pure runtime introspection — reads the live routing table, not `config/routes.rb` AST
+- Pure runtime introspection, reads the live routing table, not `config/routes.rb` AST
 - Each unit's identifier is `"VERB /path"` (e.g., `"POST /orders"`)
 - Records controller, action, route name, and constraints
-- Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` changes — it isn't skipped, just not diffed per file
+- Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` changes, it isn't skipped, just not diffed per file
 
 **Example output (abbreviated):**
 
@@ -252,7 +252,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, Stimulus controller names, and route helper usage.
 
 **Key details:**
-- Phlex components render pure Ruby — no template files to parse separately
+- Phlex components render pure Ruby, no template files to parse separately
 - Slots and sub-component composition are extracted from the `view_template` method
 
 ---
@@ -266,7 +266,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
 **Edge cases:**
-- Phlex and ViewComponent both scan `app/components` — the orchestrator uses separate extractors for each. A Phlex component won't be extracted by ViewComponentExtractor and vice versa (the filtering is by superclass, not file name)
+- Phlex and ViewComponent both scan `app/components`, the orchestrator uses separate extractors for each. A Phlex component won't be extracted by ViewComponentExtractor and vice versa (the filtering is by superclass, not file name)
 
 ---
 
@@ -275,13 +275,13 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** ERB view templates from `app/views`. Extracts render calls (partials and components), instance variable references, and helper method usage.
 
 **Key details:**
-- File-based scanning — no Rails boot needed for the actual file reading
+- File-based scanning, no Rails boot needed for the actual file reading
 - Records which partials a template renders and which instance variables it expects
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
 
-**Template engine coverage.** ERB only as a parsed template engine — HAML, Slim, and Turbo Streams are not parsed at all; an app using HAML or Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges — the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110 — HAML / Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier`, and append the class to `ENGINES`.
+**Template engine coverage.** ERB only as a parsed template engine, HAML, Slim, and Turbo Streams are not parsed at all; an app using HAML or Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, HAML / Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier`, and append the class to `ENGINES`.
 
 ---
 
@@ -402,7 +402,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** Mounted Rails engines via runtime introspection. Records mount points and route counts for each engine.
 
 **Key details:**
-- Uses `Rails::Engine.subclasses` at runtime — finds both gem-mounted and in-repo engines
+- Uses `Rails::Engine.subclasses` at runtime, finds both gem-mounted and in-repo engines
 - Engine units don't map to individual files, so incremental re-extraction re-runs `EngineExtractor` wholesale when `config/routes.rb` or `Gemfile.lock` changes
 - A mounted engine may duplicate some routes; the deduplication phase handles this
 
@@ -446,7 +446,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** Rake tasks from `lib/tasks/*.rake`. Extracts namespaces, task names, descriptions, prerequisites (`:depends_on`), and the task body.
 
 **Key details:**
-- Reads `.rake` files statically — no Rails boot required for parsing
+- Reads `.rake` files statically, no Rails boot required for parsing
 - Uses `block_opener?` for depth tracking; `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks
 - Supports nested namespaces (`namespace :data do namespace :import do task :users`)
 
@@ -490,7 +490,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Only extracts the **latest version** of each view (highest `_vNN` suffix)
 - Older versions are skipped
 - Records whether the view is materialized and which tables it references
-- Incremental re-extraction re-runs `DatabaseViewExtractor` wholesale on any `.sql` change under `db/views` — a per-file dispatch could index a version a full extraction drops
+- Incremental re-extraction re-runs `DatabaseViewExtractor` wholesale on any `.sql` change under `db/views`, a per-file dispatch could index a version a full extraction drops
 
 ---
 
@@ -501,7 +501,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **Key details:**
 - Detects which library is active by checking `defined?` for each DSL constant
 - Extracts states, events, transitions, guard conditions, and callbacks
-- Returns an array from the file method (like `ScheduledJobExtractor`) — cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans
+- Returns an array from the file method (like `ScheduledJobExtractor`), cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans
 
 ---
 
@@ -511,7 +511,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 **Key details:**
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
-- No single-file extraction method — incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
+- No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
 
 ---
@@ -555,7 +555,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ### LibExtractor
 
-**What it captures:** Ruby files from `lib/` — utility modules, standalone libraries, and infrastructure code.
+**What it captures:** Ruby files from `lib/`, utility modules, standalone libraries, and infrastructure code.
 
 **Key details:**
 - Excludes `lib/tasks/` (covered by RakeTaskExtractor) and `lib/generators/`
@@ -568,32 +568,23 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 **What it captures:** High-value Rails framework source and gem source files, pinned to the exact versions in `Gemfile.lock`.
 
 **Key details:**
-- Reads from `Gem.loaded_specs` — paths depend on the installed gem location
+- Reads from `Gem.loaded_specs`, paths depend on the installed gem location
 - Indexes selected paths from: `activerecord` (associations, callbacks, validations, relation, enum, transactions), `actionpack` (controller metal, callbacks, rendering, redirecting), `activesupport` (callbacks, concern, configurable, delegation)
-- Additional gems can be indexed via `config.add_gem "devise", paths: [...]`
+- `config.add_gem` is accepted but not implemented; only the fixed framework path list is indexed
 - This is what makes framework-specific queries accurate: "what options does `has_many` support?" returns the actual source for the installed Rails version
 
 ---
 
 ## How Do I Enable or Disable Extractors?
 
-You can't, today. All 34 extractors always run during a full extraction —
-there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 34 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
 Extractor selection is a documented future knob, not a shipped feature.
 
-The one real customization point is registering additional gems for
-`RailsSourceExtractor` to index:
-
-```ruby
-# config/initializers/woods.rb
-Woods.configure do |config|
-  config.add_gem "devise", paths: ["lib/devise/models"], priority: :high
-  config.add_gem "pundit", paths: ["lib/pundit"], priority: :medium
-end
-```
+`config.add_gem` is in the same state: accepted with a warning, not read by
+`RailsSourceExtractor`. There is no shipped way to widen the framework path list.
 
 ---
 
@@ -608,7 +599,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
 | `source_code` | String | The full source code, potentially enriched: models have concerns inlined and schema prepended; controllers have a route context header prepended |
-| `metadata` | Hash | Type-specific structured data — associations, callbacks, actions, fields, etc. Keys and structure vary by extractor |
+| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor |
 | `dependencies` | Array\<Hash\> | Forward edges: `[{ type: :model, target: "User", via: "belongs_to" }, ...]` |
 | `dependents` | Array\<Hash\> | Reverse edges: **populated in Phase 2 (Resolve)**, not Phase 1 (Extract). After Phase 2 every field on a unit is effectively immutable. Shape: `[{ type: :controller, identifier: "OrdersController" }, ...]` |
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |

@@ -6,7 +6,9 @@
 
 **Your AI coding assistant is guessing about your Rails app. Woods gives it the real answers.**
 
-Rails hides enormous amounts of behavior behind conventions, concerns, and runtime magic. When you ask an AI assistant "what callbacks fire when a User saves?" or "what routes map to this controller?", it guesses from training data — and gets it wrong. Woods runs *inside* your Rails app, extracts what's actually happening at runtime, and serves that context directly to your AI tools via [MCP](https://modelcontextprotocol.io/).
+Rails hides a lot of behavior behind conventions, concerns, and runtime magic. Ask an AI assistant "what callbacks fire when a User saves?" and it guesses from training data, and gets it wrong.
+
+Woods runs *inside* your Rails app, extracts what actually happens at runtime, and serves that context to your AI tools over [MCP](https://modelcontextprotocol.io/).
 
 Works with **Claude Code**, **Cursor**, **Windsurf**, and any MCP-compatible tool.
 
@@ -22,7 +24,7 @@ Ask your AI assistant about your Rails app and watch it confidently hallucinate:
 | "What routes map to OrdersController?" | Standard REST routes | Custom `POST /checkout`, nested under `/shops/:shop_id` |
 | "What does the checkout flow do?" | Describes `CheckoutService` | Misses that `order.save!` triggers 3 callbacks that enqueue 2 jobs |
 
-The AI isn't bad — it just can't see what Rails is doing. Your 40-line model file has 10x that behavior when you factor in included concerns, schema context, callback chains, validations, and association reflections. Static analysis can't reach any of it.
+The AI isn't bad. It just can't see what Rails is doing. Your 40-line model file has 10x that behavior when you factor in included concerns, schema context, callback chains, validations, and association reflections. Static analysis can't reach any of it.
 
 **Woods fixes this by running inside Rails and extracting what's actually there.**
 
@@ -53,7 +55,7 @@ bundle exec rake woods:stats
 # 5. Add the MCP server to your AI tool (see "Connect to Your AI Tool" below)
 ```
 
-After extraction, your AI tool gets accurate, structured context about every model, controller, service, job, route, and more — including all the behavior that Rails hides.
+After extraction, your AI tool gets accurate, structured context about every model, controller, service, job, route, and more, including all the behavior that Rails hides.
 
 > **Docker?** Run extraction inside the container: `docker compose exec app bundle exec rake woods:extract`. The MCP server runs on the host reading volume-mounted output. See [Docker Setup](docs/DOCKER_SETUP.md).
 
@@ -67,16 +69,16 @@ Woods boots your Rails app, introspects everything using runtime APIs, and write
 
 ### Concern Inlining
 
-Your `User` model includes `Auditable`, `Searchable`, and `SoftDeletable`. An AI tool reading `app/models/user.rb` sees 40 lines. Woods inlines all three concerns directly into the extracted unit — the AI sees the full 200-line behavioral surface area in one block.
+Your `User` model includes `Auditable`, `Searchable`, and `SoftDeletable`. An AI tool reading `app/models/user.rb` sees 40 lines. Woods inlines all three concerns directly into the extracted unit, so the AI sees the full 200-line behavioral surface in one block.
 
 ```ruby
-# What your AI sees (app/models/user.rb) — 4 lines:
+# What your AI sees (app/models/user.rb): 4 lines
 class User < ApplicationRecord
   include Auditable
   include Searchable
 end
 
-# What Woods produces — full source with schema + inlined concerns:
+# What Woods produces: full source with schema + inlined concerns
 # == Schema Information
 # email    :string           not null
 # name     :string
@@ -115,11 +117,11 @@ Controller source gets a route map prepended showing the real HTTP verb + path +
 
 34 extractors build a bidirectional graph: what each unit depends on, and what depends on it. Change a concern and trace every model it touches. Refactor a service and see every controller that calls it. PageRank scoring identifies the most important nodes in your codebase.
 
-Navigation edges (`link_to`, `redirect_to`, `form_action`) trace UI user journeys through the graph — filter with the `via` parameter on `dependencies`/`dependents` tools to isolate navigation paths from code references.
+Navigation edges (`link_to`, `redirect_to`, `form_action`) trace UI user journeys through the graph. Filter with the `via` parameter on `dependencies`/`dependents` tools to isolate navigation paths from code references.
 
 ### Callback Side-Effect Analysis
 
-`CallbackAnalyzer` detects what actually happens inside callbacks — which columns get written, which jobs get enqueued, which services get called, which mailers fire. This is the #1 source of unexpected bugs in Rails, and the #1 thing AI tools get wrong.
+`CallbackAnalyzer` detects what actually happens inside callbacks: which columns get written, which jobs get enqueued, which services get called, which mailers fire. This is the #1 source of unexpected bugs in Rails, and the #1 thing AI tools get wrong.
 
 ---
 
@@ -156,7 +158,7 @@ After extraction, each model is a self-contained JSON file with schema, associat
 
 ### Callback Chain with Side-Effects
 
-Woods resolves the full callback chain in execution order and detects side-effects — which columns get written, which jobs get enqueued, which mailers fire:
+Woods resolves the full callback chain in execution order and detects side-effects: which columns get written, which jobs get enqueued, which mailers fire:
 
 ```json
 { "callbacks": [
@@ -192,11 +194,11 @@ To find which controller handles a URL, use the MCP `search` tool:
 { "tool": "search", "params": { "query": "/checkout", "types": ["route"] } }
 ```
 
-This returns all matching route units with their controller and action — no guessing about custom routes, nested resources, or engine mount points.
+This returns all matching route units with their controller and action. No guessing about custom routes, nested resources, or engine mount points.
 
 ### Looking Up a Model's Full Structure
 
-Use the MCP `lookup` tool to get a model's complete JSON representation — schema, associations, validations, callbacks, and inlined concerns in one call:
+Use the MCP `lookup` tool to get a model's complete JSON representation: schema, associations, validations, callbacks, and inlined concerns in one call:
 
 ```json
 { "tool": "lookup", "params": { "identifier": "Order", "include_source": true } }
@@ -218,7 +220,7 @@ Use the MCP `dependencies` tool to trace what a service triggers:
 { "tool": "dependencies", "params": { "identifier": "CheckoutService", "depth": 2, "types": ["job"] } }
 ```
 
-Returns all job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks (e.g., `CheckoutService` → `Order` → `OrderConfirmationJob`).
+Returns all job units reachable from `CheckoutService` within 2 hops, including jobs triggered indirectly via model callbacks (e.g., `CheckoutService` → `Order` → `OrderConfirmationJob`).
 
 ### Tracing UI Navigation
 
@@ -228,11 +230,11 @@ Use the MCP `dependents` tool with `via` filtering to find what links to a contr
 { "tool": "dependents", "params": { "identifier": "OrdersController", "depth": 1, "via": ["link_to", "form_action"] } }
 ```
 
-Returns view templates that navigate to `OrdersController` via `link_to` helpers or form submissions — isolating UI navigation edges from code references and other relationship types.
+Returns view templates that navigate to `OrdersController` via `link_to` helpers or form submissions, isolating UI navigation edges from code references and other relationship types.
 
 ### Runtime-Generated Method Detection
 
-Because Woods runs inside the booted Rails process, it captures every method Rails generates dynamically — enum predicates, association builders, attribute accessors, and scope methods that static analysis tools cannot see:
+Because Woods runs inside the booted Rails process, it captures every method Rails generates dynamically: enum predicates, association builders, attribute accessors, and scope methods that static analysis tools cannot see:
 
 ```json
 {
@@ -254,12 +256,12 @@ Static tools miss `status_active?`, `status_pending?`, `build_line_item`, `creat
 Woods publishes three **user-facing guide skills** as a Claude Code plugin so agents can walk
 you through setup, MCP configuration, and troubleshooting without leaving your editor:
 
-- `woods-setup` — install, configure, extract, verify, connect MCP servers
-- `woods-mcp-config` — generate a correct `.mcp.json` for your environment
-- `woods-diagnose` — systematic troubleshooting for extraction/MCP/embedding/storage
+- `woods-setup`: install, configure, extract, verify, connect MCP servers
+- `woods-mcp-config`: generate a correct `.mcp.json` for your environment
+- `woods-diagnose`: systematic troubleshooting for extraction/MCP/embedding/storage
 
 The plugin ships from the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins)
-marketplace suite, which references this repo's `plugin/` subtree via a `git-subdir` source —
+marketplace suite, which references this repo's `plugin/` subtree via a `git-subdir` source;
 so installing fetches only the skill files, not the whole gem:
 
 ```bash
@@ -271,18 +273,18 @@ so installing fetches only the skill files, not the whole gem:
 The skill files live in this repo under [`plugin/skills/`](plugin/skills/) (the plugin root is
 [`plugin/`](plugin/), with its manifest at `plugin/.claude-plugin/plugin.json`). Each skill
 opens with a Version Preflight so agents operate only against your installed Woods version. To
-test a local checkout: `claude --plugin-dir /path/to/woods/plugin`. Requires **Woods ≥ 1.5.0**.
+test a local checkout: `claude --plugin-dir /path/to/woods/plugin`. Requires **Woods 2.0.0 or later**.
 The internal dev-workflow skills under `.claude/skills/` are **not** part of this plugin.
 
 ## Connect to Your AI Tool
 
 Woods ships two MCP servers. Most users only need the **Index Server**.
 
-### Index Server — Reads Pre-Extracted Data (No Rails Required)
+### Index Server: Reads Pre-Extracted Data (No Rails Required)
 
-29 tools for code lookup, dependency traversal, semantic search, graph analysis, and more (14 always-on + 15 that register based on wiring: 5 operator / 4 feedback / 4 snapshot / 1 session-trace / 1 Notion). Reads static JSON from disk — fast, no Rails boot needed.
+29 tools for code lookup, dependency traversal, semantic search, graph analysis, and more. 14 are always on; the other 15 register when their collaborator is wired (see [MCP_SERVERS.md](docs/MCP_SERVERS.md)). Reads static JSON from disk: fast, no Rails boot needed.
 
-**Claude Code** — add to `.mcp.json` in your project root:
+**Claude Code**: add to `.mcp.json` in your project root:
 
 ```json
 {
@@ -297,7 +299,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 
 > `woods-mcp-start` is a self-healing wrapper that validates the index, checks dependencies, and auto-restarts on failure. Recommended for Claude Code.
 
-**Cursor / Windsurf** — add to your MCP config:
+**Cursor / Windsurf**: add to your MCP config:
 
 ```json
 {
@@ -310,7 +312,7 @@ Woods ships two MCP servers. Most users only need the **Index Server**.
 }
 ```
 
-### Console Server — Live Rails Queries (Optional)
+### Console Server: Live Rails Queries (Optional)
 
 9 tools for read-only model queries and schema inspection, plus optional
 `console_sql` and `console_query`. Connects to a live Rails process and wraps
@@ -357,20 +359,20 @@ See [Extractor Reference](docs/EXTRACTOR_REFERENCE.md) for per-extractor documen
 
 ### For AI-Assisted Development
 
-- **Context-aware code generation** — your AI sees the full model (with concerns, schema, and callbacks) before writing new code
-- **Feature planning** — query the dependency graph to understand blast radius before changing anything
-- **PR context** — compute affected units from a diff and explain downstream impact
-- **Code review** — surface hidden callback side-effects that a reviewer might miss
-- **Onboarding** — new team members ask "how does checkout work?" and get the real execution flow
+- **Context-aware code generation**: your AI sees the full model (with concerns, schema, and callbacks) before writing new code
+- **Feature planning**: query the dependency graph to understand blast radius before changing anything
+- **PR context**: compute affected units from a diff and explain downstream impact
+- **Code review**: surface hidden callback side-effects that a reviewer might miss
+- **Onboarding**: new team members ask "how does checkout work?" and get the real execution flow
 
 ### For Architecture & Technical Debt
 
-- **Dead code detection** — `GraphAnalyzer` finds orphaned units with no dependents
-- **Hub identification** — find models with 50+ dependents that are bottlenecks
-- **Cycle detection** — circular dependencies surfaced automatically
-- **Migration risk** — DDL metadata shows which pending migrations touch large tables
-- **API surface audit** — every endpoint, its method, path, filters, and permitted params
-- **Callback chain auditing** — the #1 source of Rails bugs, now visible and traceable
+- **Dead code detection**: `GraphAnalyzer` finds orphaned units with no dependents
+- **Hub identification**: find models with 50+ dependents that are bottlenecks
+- **Cycle detection**: circular dependencies surfaced automatically
+- **Migration risk**: DDL metadata shows which pending migrations touch large tables
+- **API surface audit**: every endpoint, its method, path, filters, and permitted params
+- **Callback chain auditing**: the #1 source of Rails bugs, now visible and traceable
 
 ---
 
@@ -391,19 +393,19 @@ end
 
 For embedding and semantic search, use a preset to configure storage and embedding together:
 
-Presets set adapter *types* only. The `:postgresql` and `:production` presets still need you to supply the store connection and the embedding API key in the override block — otherwise the builder raises at wiring time.
+Presets set adapter *types* only. The `:postgresql` and `:production` presets still need you to supply the store connection and the embedding API key in the override block. Otherwise the builder raises at wiring time.
 
 ```ruby
-# Local development — no external services needed (Ollama for embeddings)
+# Local development: no external services needed (Ollama for embeddings)
 Woods.configure_with_preset(:local)
 
-# PostgreSQL — pgvector + OpenAI. Supply a live PG connection and the API key:
+# PostgreSQL: pgvector + OpenAI. Supply a live PG connection and the API key:
 Woods.configure_with_preset(:postgresql) do |config|
   config.vector_store_options = { connection: ActiveRecord::Base.connection }
   config.embedding_options    = { api_key: ENV.fetch('OPENAI_API_KEY') }
 end
 
-# Production scale — Qdrant + OpenAI. Supply the Qdrant URL/collection and key:
+# Production scale: Qdrant + OpenAI. Supply the Qdrant URL/collection and key:
 Woods.configure_with_preset(:production) do |config|
   config.vector_store_options = { url: ENV.fetch('QDRANT_URL'), collection: 'my_app' }
   config.embedding_options    = { api_key: ENV.fetch('OPENAI_API_KEY') }
@@ -447,7 +449,7 @@ end
 
 ### Incremental Updates
 
-After the initial extraction, update only changed files — typically 5-10x faster:
+After the initial extraction, update only changed files, typically 5-10x faster:
 
 ```bash
 bundle exec rake woods:incremental
@@ -480,7 +482,7 @@ rake woods:clean               # Remove index output (alias: woods:clear)
 rake woods:embed               # Embed units for semantic search (alias: woods:nest)
 rake woods:embed_incremental   # Embed changed units only (alias: woods:hone)
 rake woods:notion_sync         # Sync models/columns to Notion (alias: woods:send)
-rake woods:obsidian            # Export to an Obsidian vault — graph view + Bases (alias: woods:vault)
+rake woods:obsidian            # Export to an Obsidian vault: graph view + Bases (alias: woods:vault)
 ```
 
 > **Visualize connections in Obsidian.** `woods:obsidian` renders the codebase as a self-contained
@@ -507,7 +509,7 @@ On the host (no Rails needed):
 
 ### The ExtractedUnit
 
-Everything flows through `ExtractedUnit` — the universal data structure. Each unit carries:
+Everything flows through `ExtractedUnit`, the universal data structure. Each unit carries:
 
 | Field | What It Contains |
 |-------|-----------------|
@@ -516,7 +518,7 @@ Everything flows through `ExtractedUnit` — the universal data structure. Each 
 | `file_path` | Source file location relative to Rails root |
 | `namespace` | Module namespace (`"Admin"`, `nil` for top-level) |
 | `source_code` | Annotated source with inlined concerns and schema |
-| `metadata` | Structured data — associations, callbacks, routes, fields |
+| `metadata` | Structured data: associations, callbacks, routes, fields |
 | `dependencies` | What this unit depends on (forward edges) |
 | `dependents` | What depends on this unit (reverse edges) |
 | `chunks` | Semantic sub-sections for large units |
@@ -573,7 +575,7 @@ tmp/woods/
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases, graph internals, retrieval pipeline, and semantic chunking.
+See [Architecture](docs/ARCHITECTURE.md) for the deep dive: extraction phases, graph internals, retrieval pipeline, and semantic chunking.
 
 ---
 
@@ -615,11 +617,11 @@ See [Architecture](docs/ARCHITECTURE.md) for the deep dive — extraction phases
 
 Woods runs inside your Rails app, so treat its output and servers with the same sensitivity as your source code.
 
-- **Extraction output is source-equivalent.** `tmp/woods/` holds your source and schema as JSON — schema only, no database rows, no credentials. Keep it out of world-readable paths and public container images.
+- **Extraction output is source-equivalent.** `tmp/woods/` holds your source and schema as JSON: schema only, no database rows, no credentials. Keep it out of world-readable paths and public container images.
 - **The Index Server is read-only.** It serves pre-extracted JSON and has no write or execution path. The HTTP transport refuses a non-loopback bind without `WOODS_MCP_HTTP_TOKEN` and enforces an `Origin` allow-list.
 - **The Console Server is an admin-trust boundary, not a sandbox.** It runs live database reads inside rolled-back transactions behind a five-layer defense stack, exposing 9 read-only tools by default (raw `console_sql`/`console_query` are opt-in). Rollback does not undo async side effects (`perform_later`, `deliver_later`, HTTP egress). Keep `console_mcp_enabled = false` in production.
 
-See [SECURITY.md](SECURITY.md) for the full blast-radius analysis and [Console MCP Setup — Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the layer-by-layer breakdown.
+See [SECURITY.md](SECURITY.md) for the full blast-radius analysis and [Console MCP Setup: Safety Model](docs/CONSOLE_MCP_SETUP.md#safety-model) for the layer-by-layer breakdown.
 
 ## Upgrading from 1.x
 
@@ -632,9 +634,9 @@ Woods 2.0 changes unit identifiers, requires a clean re-index, and updates MCP c
 - Ruby >= 3.0 (through Ruby 4.0)
 - Rails >= 6.0
 
-CI exercises Rails 6.0, 6.1, 7.0, 7.1, 7.2, 8.0, and 8.1 across Ruby 3.0–4.0 — see the supported-version table in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+CI exercises Rails 6.0, 6.1, 7.0, 7.1, 7.2, 8.0, and 8.1 across Ruby 3.0 to 4.0. See the supported-version table in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
-Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required for basic extraction — embedding and vector search are optional add-ons.
+Works with MySQL, PostgreSQL, and SQLite. No additional infrastructure required for basic extraction; embedding and vector search are optional add-ons.
 
 ## Development
 

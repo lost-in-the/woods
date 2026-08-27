@@ -1,6 +1,6 @@
 # Docker Setup Guide
 
-This guide covers running Woods in a Dockerized Rails application — extraction, MCP server configuration, and troubleshooting.
+This guide covers running Woods in a Dockerized Rails application, extraction, MCP server configuration, and troubleshooting.
 
 ## Architecture Overview
 
@@ -15,7 +15,7 @@ Index Server (29 tools)                 Rails App
         ▲                                         │
         └──── volume mount ◀──────────────────────┘
 
-Console Server — two launch paths:
+Console Server, two launch paths:
 
   Embedded (9 tools)                    rake woods:console
   MCP client spawns via                   boots Rails, runs MCP in-process
@@ -26,7 +26,7 @@ Console Server — two launch paths:
   execs docker exec -i ──────────────▶  same embedded server
 ```
 
-**Why the split?** The Index Server reads static JSON files — it doesn't need Rails, ActiveRecord, or any of your app's dependencies. Running it on the host avoids container overhead and makes the extraction output available to any MCP client. The Console Server queries live application state, so it must run inside (or connect to) the Rails environment.
+**Why the split?** The Index Server reads static JSON files, it doesn't need Rails, ActiveRecord, or any of your app's dependencies. Running it on the host avoids container overhead and makes the extraction output available to any MCP client. The Console Server queries live application state, so it must run inside (or connect to) the Rails environment.
 
 ## Installation
 
@@ -90,7 +90,7 @@ The extraction output must be accessible on the host for the Index Server to rea
 services:
   app:
     volumes:
-      - .:/app                    # Full app mount — output lands at ./tmp/woods/
+      - .:/app                    # Full app mount, output lands at ./tmp/woods/
       # OR mount just the output:
       # - ./tmp/woods:/app/tmp/woods
 ```
@@ -117,7 +117,7 @@ When configuring paths, use the **host path** for the Index Server and the **con
 
 ## Index Server Setup
 
-The Index Server runs on the host — it reads JSON files, not Rails. Point it at the volume-mounted extraction output using the **host path**.
+The Index Server runs on the host, it reads JSON files, not Rails. Point it at the volume-mounted extraction output using the **host path**.
 
 ### Start manually
 
@@ -140,11 +140,11 @@ woods-mcp-start ./tmp/woods
 
 The `woods-mcp-start` wrapper validates the index directory, checks for `manifest.json`, ensures dependencies are installed, and restarts on failure. Use it instead of `woods-mcp` directly.
 
-> **Common mistake:** Using the container path (`/app/tmp/woods`) in `.mcp.json`. The host-side Index Server needs the host-side path to the volume-mounted output. (The in-container variant below is the opposite — it takes the container path.)
+> **Common mistake:** Using the container path (`/app/tmp/woods`) in `.mcp.json`. The host-side Index Server needs the host-side path to the volume-mounted output. (The in-container variant below is the opposite, it takes the container path.)
 
 ### In-container Index Server (tmpfs / non-host-visible indexes)
 
-The host-side setup above assumes the extraction output is readable from the host. That breaks when `/app/tmp` is mounted as **tmpfs** for speed, or when the index directory lives in a **named Docker volume** — in both cases the index is not host-visible, so the host cannot run `woods-mcp-start ./tmp/woods`.
+The host-side setup above assumes the extraction output is readable from the host. That breaks when `/app/tmp` is mounted as **tmpfs** for speed, or when the index directory lives in a **named Docker volume**: in both cases the index is not host-visible, so the host cannot run `woods-mcp-start ./tmp/woods`.
 
 The alternative is to run the Index Server **inside the container** via `docker exec`, pointing at the **container path**:
 
@@ -161,7 +161,7 @@ The alternative is to run the Index Server **inside the container** via `docker 
 
 (With Compose, `"args": ["compose", "exec", "-i", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"]` works the same way. The `-i` flag is required, exactly as for the embedded Console Server.)
 
-This form is also **cwd-independent** — there is no relative launcher path to resolve, which matters when the same server entry is referenced from multiple project roots or git worktrees.
+This form is also **cwd-independent**: there is no relative launcher path to resolve, which matters when the same server entry is referenced from multiple project roots or git worktrees.
 
 Two gotchas:
 

@@ -6,11 +6,6 @@ graph TD
   Woods__Ast["Woods::Ast"]
   Woods__Ast__CallSiteExtractor["Woods::Ast::CallSiteExtractor"]
   Woods__Ast__CallSiteExtractor_extract["Woods::Ast::CallSiteExtractor#extract"]
-  Woods__Ast__CallSiteExtractor_extract_significant["Woods::Ast::CallSiteExtractor#extract_significant"]
-  Set["Set"]
-  Woods__Ast__CallSiteExtractor_extract_significant -->|method_call| Set
-  INSIGNIFICANT_METHODS["INSIGNIFICANT_METHODS"]
-  Woods__Ast__CallSiteExtractor_extract_significant -->|method_call| INSIGNIFICANT_METHODS
   Woods__Ast__CallSiteExtractor_collect_calls["Woods::Ast::CallSiteExtractor#collect_calls"]
   Woods__Ast__MethodExtractor["Woods::Ast::MethodExtractor"]
   SourceSpan["SourceSpan"]
@@ -19,7 +14,6 @@ graph TD
   Parser["Parser"]
   Woods__Ast__MethodExtractor_initialize -->|method_call| Parser
   Woods__Ast__MethodExtractor_extract_method["Woods::Ast::MethodExtractor#extract_method"]
-  Woods__Ast__MethodExtractor_extract_all_methods["Woods::Ast::MethodExtractor#extract_all_methods"]
   Woods__Ast__MethodExtractor_extract_method_source["Woods::Ast::MethodExtractor#extract_method_source"]
   Woods__Ast__SourceSpan["Woods::Ast::SourceSpan"]
   Woods__Ast__SourceSpan_extract_source_span["Woods::Ast::SourceSpan#extract_source_span"]
@@ -134,6 +128,7 @@ graph TD
   Woods__Builder_chars_per_token_for["Woods::Builder#chars_per_token_for"]
   TokenUtils["TokenUtils"]
   Woods__Builder_chars_per_token_for -->|method_call| TokenUtils
+  Woods__Builder_safe_max_input_tokens["Woods::Builder#safe_max_input_tokens"]
   Woods__Builder_unwrap_provider["Woods::Builder#unwrap_provider"]
   Woods__Builder_chunker_budget_message["Woods::Builder#chunker_budget_message"]
   Woods__Builder_build_metadata_store["Woods::Builder#build_metadata_store"]
@@ -397,40 +392,6 @@ graph TD
   Woods__Chunking__MethodChunker_start_method["Woods::Chunking::MethodChunker#start_method"]
   Woods__Chunking__MethodChunker_build_chunks["Woods::Chunking::MethodChunker#build_chunks"]
   Woods__Console["Woods::Console"]
-  Woods__Console__Adapters["Woods::Console::Adapters"]
-  Woods__Console__Adapters__CacheAdapter["Woods::Console::Adapters::CacheAdapter"]
-  Woods__Console__Adapters__CacheAdapter_detect["Woods::Console::Adapters::CacheAdapter#detect"]
-  Woods__Console__Adapters__CacheAdapter_detect -->|method_call| Rails
-  Rails_cache_class_name["Rails.cache.class.name"]
-  Woods__Console__Adapters__CacheAdapter_detect -->|method_call| Rails_cache_class_name
-  Rails_cache_class["Rails.cache.class"]
-  Woods__Console__Adapters__CacheAdapter_detect -->|method_call| Rails_cache_class
-  Rails_cache["Rails.cache"]
-  Woods__Console__Adapters__CacheAdapter_detect -->|method_call| Rails_cache
-  STORE_PATTERNS["STORE_PATTERNS"]
-  Woods__Console__Adapters__CacheAdapter_detect -->|method_call| STORE_PATTERNS
-  Woods__Console__Adapters__CacheAdapter_stats["Woods::Console::Adapters::CacheAdapter#stats"]
-  Woods__Console__Adapters__CacheAdapter_info["Woods::Console::Adapters::CacheAdapter#info"]
-  Woods__Console__Adapters__GoodJobAdapter["Woods::Console::Adapters::GoodJobAdapter"]
-  JobAdapter["JobAdapter"]
-  Woods__Console__Adapters__GoodJobAdapter -->|inheritance| JobAdapter
-  Woods__Console__Adapters__GoodJobAdapter_available_["Woods::Console::Adapters::GoodJobAdapter.available?"]
-  Woods__Console__Adapters__GoodJobAdapter_prefix["Woods::Console::Adapters::GoodJobAdapter#prefix"]
-  Woods__Console__Adapters__JobAdapter["Woods::Console::Adapters::JobAdapter"]
-  Woods__Console__Adapters__JobAdapter_queue_stats["Woods::Console::Adapters::JobAdapter#queue_stats"]
-  Woods__Console__Adapters__JobAdapter_recent_failures["Woods::Console::Adapters::JobAdapter#recent_failures"]
-  Woods__Console__Adapters__JobAdapter_find_job["Woods::Console::Adapters::JobAdapter#find_job"]
-  Woods__Console__Adapters__JobAdapter_scheduled_jobs["Woods::Console::Adapters::JobAdapter#scheduled_jobs"]
-  Woods__Console__Adapters__JobAdapter_retry_job["Woods::Console::Adapters::JobAdapter#retry_job"]
-  Woods__Console__Adapters__JobAdapter_prefix["Woods::Console::Adapters::JobAdapter#prefix"]
-  Woods__Console__Adapters__SidekiqAdapter["Woods::Console::Adapters::SidekiqAdapter"]
-  Woods__Console__Adapters__SidekiqAdapter -->|inheritance| JobAdapter
-  Woods__Console__Adapters__SidekiqAdapter_available_["Woods::Console::Adapters::SidekiqAdapter.available?"]
-  Woods__Console__Adapters__SidekiqAdapter_prefix["Woods::Console::Adapters::SidekiqAdapter#prefix"]
-  Woods__Console__Adapters__SolidQueueAdapter["Woods::Console::Adapters::SolidQueueAdapter"]
-  Woods__Console__Adapters__SolidQueueAdapter -->|inheritance| JobAdapter
-  Woods__Console__Adapters__SolidQueueAdapter_available_["Woods::Console::Adapters::SolidQueueAdapter.available?"]
-  Woods__Console__Adapters__SolidQueueAdapter_prefix["Woods::Console::Adapters::SolidQueueAdapter#prefix"]
   Woods__Console__AuditLogger["Woods::Console::AuditLogger"]
   Woods__Console__AuditLogger_initialize["Woods::Console::AuditLogger#initialize"]
   CredentialScanner["CredentialScanner"]
@@ -450,10 +411,6 @@ graph TD
   Woods__Console__AuditLogger_ensure_directory_["Woods::Console::AuditLogger#ensure_directory!"]
   Woods__Console__AuditLogger_ensure_directory_ -->|method_call| File
   Woods__Console__AuditLogger_ensure_directory_ -->|method_call| FileUtils
-  Woods__Console__UnsupportedBridgeError["Woods::Console::UnsupportedBridgeError"]
-  Woods__Console__UnsupportedBridgeError -->|inheritance| Woods__Error
-  Woods__Console__StubBridge["Woods::Console::StubBridge"]
-  Woods__Console__StubBridge_initialize["Woods::Console::StubBridge#initialize"]
   Woods__Console__BridgeProtocol["Woods::Console::BridgeProtocol"]
   Woods__Console__ConfirmationDeniedError["Woods::Console::ConfirmationDeniedError"]
   Woods__Console__ConfirmationDeniedError -->|inheritance| Woods__Error
@@ -601,9 +558,13 @@ graph TD
   Server__AGGREGATE_FUNCTIONS["Server::AGGREGATE_FUNCTIONS"]
   Woods__Console__EmbeddedExecutor_handle_aggregate -->|method_call| Server__AGGREGATE_FUNCTIONS
   Woods__Console__EmbeddedExecutor_handle_association_count["Woods::Console::EmbeddedExecutor#handle_association_count"]
+  Woods__Console__EmbeddedExecutor_gate_association_sql_["Woods::Console::EmbeddedExecutor#gate_association_sql!"]
   Woods__Console__EmbeddedExecutor_validate_scope_columns_["Woods::Console::EmbeddedExecutor#validate_scope_columns!"]
+  Woods__Console__EmbeddedExecutor_scope_key_column["Woods::Console::EmbeddedExecutor#scope_key_column"]
   ScopePredicateParser__SUFFIX_PATTERN["ScopePredicateParser::SUFFIX_PATTERN"]
-  Woods__Console__EmbeddedExecutor_validate_scope_columns_ -->|method_call| ScopePredicateParser__SUFFIX_PATTERN
+  Woods__Console__EmbeddedExecutor_scope_key_column -->|method_call| ScopePredicateParser__SUFFIX_PATTERN
+  Woods__Console__EmbeddedExecutor_refuse_redacted_column_["Woods::Console::EmbeddedExecutor#refuse_redacted_column!"]
+  Woods__Console__EmbeddedExecutor_refuse_redacted_scope_keys_["Woods::Console::EmbeddedExecutor#refuse_redacted_scope_keys!"]
   Woods__Console__EmbeddedExecutor_gate_association_["Woods::Console::EmbeddedExecutor#gate_association!"]
   Woods__Console__EmbeddedExecutor_handle_schema["Woods::Console::EmbeddedExecutor#handle_schema"]
   Woods__Console__EmbeddedExecutor_handle_recent["Woods::Console::EmbeddedExecutor#handle_recent"]
@@ -804,6 +765,7 @@ graph TD
   Woods__Console__SafeContext_fetch_pattern_string["Woods::Console::SafeContext#fetch_pattern_string"]
   Woods__Console__SafeContext_apply_key_value_redaction["Woods::Console::SafeContext#apply_key_value_redaction"]
   Woods__Console__SafeContext_set_timeout["Woods::Console::SafeContext#set_timeout"]
+  Woods__Console__SafeContext_set_mysql_timeout["Woods::Console::SafeContext#set_mysql_timeout"]
   Woods__Console__SafeContext_warn_timeout_unsupported["Woods::Console::SafeContext#warn_timeout_unsupported"]
   Woods__Console__SafeContext_warn_timeout_unsupported -->|method_call| Rails
   Woods__Console__SafeContext_warn_timeout_unsupported -->|method_call| Rails_logger
@@ -828,6 +790,7 @@ graph TD
   Woods__Console__SqlNoiseStripper_dollar_tag_at["Woods::Console::SqlNoiseStripper.dollar_tag_at"]
   DOLLAR_TAG["DOLLAR_TAG"]
   Woods__Console__SqlNoiseStripper_dollar_tag_at -->|method_call| DOLLAR_TAG
+  Woods__Console__SqlNoiseStripper_preceded_by_word_char_["Woods::Console::SqlNoiseStripper.preceded_by_word_char?"]
   Woods__Console__SqlNoiseStripper_single_quote_end["Woods::Console::SqlNoiseStripper.single_quote_end"]
   Woods__Console__SqlTableScanner["Woods::Console::SqlTableScanner"]
   Woods__Console__SqlTableScanner_identifiers_in["Woods::Console::SqlTableScanner.identifiers_in"]
@@ -839,6 +802,7 @@ graph TD
   Regexp_last_match["Regexp.last_match"]
   Woods__Console__SqlTableScanner_collect_from_identifiers -->|method_call| Regexp_last_match
   Woods__Console__SqlTableScanner_collect_from_identifiers -->|method_call| Regexp
+  Woods__Console__SqlTableScanner_collect_table_statement_identifiers["Woods::Console::SqlTableScanner.collect_table_statement_identifiers"]
   Woods__Console__SqlTableScanner_split_top_level_commas["Woods::Console::SqlTableScanner.split_top_level_commas"]
   Woods__Console__SqlTableScanner_lead_identifier["Woods::Console::SqlTableScanner.lead_identifier"]
   LEAD_IDENT["LEAD_IDENT"]
@@ -879,6 +843,7 @@ graph TD
   Woods__Console__TableGateError -->|inheritance| Woods__Error
   Woods__Console__TableGate["Woods::Console::TableGate"]
   Woods__Console__TableGate_initialize["Woods::Console::TableGate#initialize"]
+  Set["Set"]
   Woods__Console__TableGate_initialize -->|method_call| Set
   Woods__Console__TableGate_initialize -->|method_call| Array
   Woods__Console__TableGate_active_["Woods::Console::TableGate#active?"]
@@ -1055,9 +1020,6 @@ graph TD
   SchemaVersion["SchemaVersion"]
   Woods__Db__Migrator_initialize -->|method_call| SchemaVersion
   Woods__Db__Migrator_migrate_["Woods::Db::Migrator#migrate!"]
-  Woods__Db__Migrator_pending_versions["Woods::Db::Migrator#pending_versions"]
-  MIGRATIONS_map["MIGRATIONS.map"]
-  Woods__Db__Migrator_pending_versions -->|method_call| MIGRATIONS_map
   Woods__Db__Migrator_pending_migrations["Woods::Db::Migrator#pending_migrations"]
   MIGRATIONS["MIGRATIONS"]
   Woods__Db__Migrator_pending_migrations -->|method_call| MIGRATIONS
@@ -1232,6 +1194,7 @@ graph TD
   Woods__Embedding__Indexer_checkpoint_hashes["Woods::Embedding::Indexer#checkpoint_hashes"]
   Woods__Embedding__Indexer_checkpoint_hashes_versioned["Woods::Embedding::Indexer#checkpoint_hashes_versioned"]
   Woods__Embedding__Indexer_persistable_["Woods::Embedding::Indexer#persistable?"]
+  Woods__Embedding__Indexer_safe_max_input_tokens["Woods::Embedding::Indexer#safe_max_input_tokens"]
   Woods__Embedding__Indexer_implements_own_["Woods::Embedding::Indexer#implements_own?"]
   Woods__Embedding__Indexer_persist_snapshot["Woods::Embedding::Indexer#persist_snapshot"]
   IndexArtifact["IndexArtifact"]
@@ -1324,7 +1287,6 @@ graph TD
   Woods__Embedding__TokenCounter_initialize["Woods::Embedding::TokenCounter#initialize"]
   Woods__Embedding__TokenCounter_initialize -->|method_call| Mutex
   Woods__Embedding__TokenCounter_count["Woods::Embedding::TokenCounter#count"]
-  Woods__Embedding__TokenCounter_exact_["Woods::Embedding::TokenCounter#exact?"]
   Woods__Embedding__TokenCounter_estimate["Woods::Embedding::TokenCounter#estimate"]
   Woods__Embedding__TokenCounter_tokenizer["Woods::Embedding::TokenCounter#tokenizer"]
   Woods__Embedding__TokenCounter_try_load["Woods::Embedding::TokenCounter#try_load"]
@@ -1415,7 +1377,6 @@ graph TD
   Woods__Export__UnitFacts_scopes["Woods::Export::UnitFacts#scopes"]
   Woods__Export__UnitFacts_concerns["Woods::Export::UnitFacts#concerns"]
   Woods__Export__UnitFacts_callbacks["Woods::Export::UnitFacts#callbacks"]
-  Woods__Export__UnitFacts_blast_radius["Woods::Export::UnitFacts.blast_radius"]
   Woods__Export__UnitFacts_associations["Woods::Export::UnitFacts#associations"]
   Woods__ExtractedUnit["Woods::ExtractedUnit"]
   Woods__ExtractedUnit_initialize["Woods::ExtractedUnit#initialize"]
@@ -1424,8 +1385,6 @@ graph TD
   Woods__ExtractedUnit_serialized_metadata["Woods::ExtractedUnit#serialized_metadata"]
   Woods__ExtractedUnit_serialized_metadata -->|method_call| JSON
   Woods__ExtractedUnit_needs_chunking_["Woods::ExtractedUnit#needs_chunking?"]
-  Woods__ExtractedUnit_build_default_chunks["Woods::ExtractedUnit#build_default_chunks"]
-  Woods__ExtractedUnit_build_chunk_header["Woods::ExtractedUnit#build_chunk_header"]
   Woods__Extractor["Woods::Extractor"]
   FilenameUtils["FilenameUtils"]
   Woods__Extractor -->|include| FilenameUtils
@@ -1979,7 +1938,6 @@ graph TD
   Woods__Extractors__ControllerExtractor_source_file_for -->|method_call| Rails
   Woods__Extractors__ControllerExtractor_source_file_for -->|method_call| File
   Woods__Extractors__ControllerExtractor_build_composite_source["Woods::Extractors::ControllerExtractor#build_composite_source"]
-  Woods__Extractors__ControllerExtractor_build_composite_source -->|method_call| File
   Woods__Extractors__ControllerExtractor_build_routes_comment["Woods::Extractors::ControllerExtractor#build_routes_comment"]
   Woods__Extractors__ControllerExtractor_build_filters_comment["Woods::Extractors::ControllerExtractor#build_filters_comment"]
   Woods__Extractors__ControllerExtractor_extract_filter_chain["Woods::Extractors::ControllerExtractor#extract_filter_chain"]
@@ -2084,8 +2042,10 @@ graph TD
   Woods__Extractors__EngineExtractor_engine_subclasses -->|method_call| Rails__Engine
   ObjectSpace_each_object["ObjectSpace.each_object"]
   Woods__Extractors__EngineExtractor_engine_subclasses -->|method_call| ObjectSpace_each_object
+  Woods__Extractors__EngineExtractor_host_application_class_["Woods::Extractors::EngineExtractor#host_application_class?"]
   Woods__Extractors__EngineExtractor_build_mount_map["Woods::Extractors::EngineExtractor#build_mount_map"]
   Woods__Extractors__EngineExtractor_build_mount_map -->|method_call| Rails_application_routes_routes
+  Woods__Extractors__EngineExtractor_unwrap_mounted_app["Woods::Extractors::EngineExtractor#unwrap_mounted_app"]
   Woods__Extractors__EngineExtractor_engine_class_["Woods::Extractors::EngineExtractor#engine_class?"]
   Woods__Extractors__EngineExtractor_extract_mount_path["Woods::Extractors::EngineExtractor#extract_mount_path"]
   Woods__Extractors__EngineExtractor_extract_engine["Woods::Extractors::EngineExtractor#extract_engine"]
@@ -2171,7 +2131,6 @@ graph TD
   Woods__Extractors__GraphQLExtractor_extract_from_runtime_type -->|method_call| Rails_logger
   Woods__Extractors__GraphQLExtractor_extract_from_runtime_type -->|method_call| Rails
   Woods__Extractors__GraphQLExtractor_graphql_source_present_["Woods::Extractors::GraphQLExtractor#graphql_source_present?"]
-  Woods__Extractors__GraphQLExtractor_graphql_runtime_available_["Woods::Extractors::GraphQLExtractor#graphql_runtime_available?"]
   Woods__Extractors__GraphQLExtractor_find_schema_class["Woods::Extractors::GraphQLExtractor#find_schema_class"]
   GraphQL__Schema_descendants["GraphQL::Schema.descendants"]
   Woods__Extractors__GraphQLExtractor_find_schema_class -->|method_call| GraphQL__Schema_descendants
@@ -2255,7 +2214,6 @@ graph TD
   Woods__Extractors__JobExtractor_extract_job_class -->|method_call| Rails_logger
   Woods__Extractors__JobExtractor_extract_job_class -->|method_call| Rails
   Woods__Extractors__JobExtractor_extract_class_name["Woods::Extractors::JobExtractor#extract_class_name"]
-  Woods__Extractors__JobExtractor_extract_class_name -->|method_call| Regexp
   Woods__Extractors__JobExtractor_job_file_["Woods::Extractors::JobExtractor#job_file?"]
   Woods__Extractors__JobExtractor_source_file_for["Woods::Extractors::JobExtractor#source_file_for"]
   Woods__Extractors__JobExtractor_source_file_for -->|method_call| Rails_root_join
@@ -2569,8 +2527,10 @@ graph TD
   Woods__Extractors__PolicyExtractor_detect_decision_methods["Woods::Extractors::PolicyExtractor#detect_decision_methods"]
   Woods__Extractors__PolicyExtractor_detect_decision_methods -->|method_call| Regexp
   Woods__Extractors__PolicyExtractor_detect_evaluated_models["Woods::Extractors::PolicyExtractor#detect_evaluated_models"]
-  Woods__Extractors__PolicyExtractor_detect_evaluated_models -->|method_call| Regexp
+  Regexp_last_match_split["Regexp.last_match.split"]
+  Woods__Extractors__PolicyExtractor_detect_evaluated_models -->|method_call| Regexp_last_match_split
   Woods__Extractors__PolicyExtractor_detect_evaluated_models -->|method_call| Regexp_last_match
+  Woods__Extractors__PolicyExtractor_detect_evaluated_models -->|method_call| Regexp
   Woods__Extractors__PolicyExtractor_pundit_policy_["Woods::Extractors::PolicyExtractor#pundit_policy?"]
   Woods__Extractors__PolicyExtractor_extract_dependencies["Woods::Extractors::PolicyExtractor#extract_dependencies"]
   Woods__Extractors__PoroExtractor["Woods::Extractors::PoroExtractor"]
@@ -2614,7 +2574,6 @@ graph TD
   Woods__Extractors__PunditExtractor_extract_pundit_file -->|method_call| Rails_logger
   Woods__Extractors__PunditExtractor_extract_pundit_file -->|method_call| Rails
   Woods__Extractors__PunditExtractor_extract_class_name["Woods::Extractors::PunditExtractor#extract_class_name"]
-  Woods__Extractors__PunditExtractor_extract_class_name -->|method_call| Regexp
   Woods__Extractors__PunditExtractor_pundit_policy_["Woods::Extractors::PunditExtractor#pundit_policy?"]
   Woods__Extractors__PunditExtractor_annotate_source["Woods::Extractors::PunditExtractor#annotate_source"]
   Woods__Extractors__PunditExtractor_extract_metadata["Woods::Extractors::PunditExtractor#extract_metadata"]
@@ -2759,9 +2718,6 @@ graph TD
   Woods__Extractors__ScheduledJobExtractor_extract_job_class_from_runner["Woods::Extractors::ScheduledJobExtractor#extract_job_class_from_runner"]
   Woods__Extractors__ScheduledJobExtractor_build_whenever_unit["Woods::Extractors::ScheduledJobExtractor#build_whenever_unit"]
   Woods__Extractors__ScheduledJobExtractor_build_whenever_unit -->|method_call| ExtractedUnit
-  Woods__Extractors__ScheduledJobExtractor_infer_format["Woods::Extractors::ScheduledJobExtractor#infer_format"]
-  Woods__Extractors__ScheduledJobExtractor_infer_format -->|method_call| File
-  Woods__Extractors__ScheduledJobExtractor_infer_format -->|method_call| SCHEDULE_FILES
   Woods__Extractors__ScheduledJobExtractor_build_dependencies["Woods::Extractors::ScheduledJobExtractor#build_dependencies"]
   Woods__Extractors__ScheduledJobExtractor_humanize_frequency["Woods::Extractors::ScheduledJobExtractor#humanize_frequency"]
   CRON_HUMANIZE["CRON_HUMANIZE"]
@@ -2790,7 +2746,6 @@ graph TD
   Woods__Extractors__SerializerExtractor_extract_serializer_class -->|method_call| Rails_logger
   Woods__Extractors__SerializerExtractor_extract_serializer_class -->|method_call| Rails
   Woods__Extractors__SerializerExtractor_extract_class_name["Woods::Extractors::SerializerExtractor#extract_class_name"]
-  Woods__Extractors__SerializerExtractor_extract_class_name -->|method_call| Regexp
   Woods__Extractors__SerializerExtractor_serializer_file_["Woods::Extractors::SerializerExtractor#serializer_file?"]
   Woods__Extractors__SerializerExtractor_source_file_for["Woods::Extractors::SerializerExtractor#source_file_for"]
   Woods__Extractors__SerializerExtractor_source_file_for -->|method_call| Rails_root_join
@@ -2858,6 +2813,7 @@ graph TD
   Woods__Extractors__SharedDependencyScanner_scan_form_dependencies -->|method_call| Woods
   Woods__Extractors__SharedDependencyScanner_scan_form_dependencies -->|method_call| Set
   Woods__Extractors__SharedUtilityMethods["Woods::Extractors::SharedUtilityMethods"]
+  Woods__Extractors__SharedUtilityMethods -->|include| SourceNesting
   Woods__Extractors__SharedUtilityMethods_find_files_in_directories["Woods::Extractors::SharedUtilityMethods#find_files_in_directories"]
   Woods__Extractors__SharedUtilityMethods_find_files_in_directories -->|method_call| Dir
   Woods__Extractors__SharedUtilityMethods_app_source_["Woods::Extractors::SharedUtilityMethods#app_source?"]
@@ -2865,7 +2821,6 @@ graph TD
   Woods__Extractors__SharedUtilityMethods_resolve_source_location -->|method_call| Object
   Woods__Extractors__SharedUtilityMethods_resolve_source_location -->|method_call| Object_const_source_location
   Woods__Extractors__SharedUtilityMethods_extract_class_name["Woods::Extractors::SharedUtilityMethods#extract_class_name"]
-  Woods__Extractors__SharedUtilityMethods_extract_class_name -->|method_call| Regexp
   Woods__Extractors__SharedUtilityMethods_extract_parent_class["Woods::Extractors::SharedUtilityMethods#extract_parent_class"]
   Woods__Extractors__SharedUtilityMethods_count_loc["Woods::Extractors::SharedUtilityMethods#count_loc"]
   Woods__Extractors__SharedUtilityMethods_skip_file_["Woods::Extractors::SharedUtilityMethods#skip_file?"]
@@ -3021,6 +2976,8 @@ graph TD
   Woods__Extractors__ViewEngines__Erb_extensions["Woods::Extractors::ViewEngines::Erb#extensions"]
   Woods__Extractors__ViewEngines__Erb_scan_partials["Woods::Extractors::ViewEngines::Erb#scan_partials"]
   Woods__Extractors__ViewEngines__Erb_scan_partials -->|method_call| Set
+  RESERVED_RENDER_OPTIONS["RESERVED_RENDER_OPTIONS"]
+  Woods__Extractors__ViewEngines__Erb_scan_partials -->|method_call| RESERVED_RENDER_OPTIONS
   Woods__Extractors__ViewEngines__Erb_scan_instance_variables["Woods::Extractors::ViewEngines::Erb#scan_instance_variables"]
   Woods__Extractors__ViewEngines__Erb_scan_helpers["Woods::Extractors::ViewEngines::Erb#scan_helpers"]
   Woods__Extractors__ViewEngines__Erb_scan_helpers -->|method_call| Set
@@ -3190,22 +3147,6 @@ graph TD
   Woods__Formatting["Woods::Formatting"]
   Woods__Formatting__Base["Woods::Formatting::Base"]
   Woods__Formatting__Base_format["Woods::Formatting::Base#format"]
-  Woods__Formatting__ClaudeAdapter["Woods::Formatting::ClaudeAdapter"]
-  Woods__Formatting__ClaudeAdapter -->|inheritance| Base
-  Woods__Formatting__ClaudeAdapter_format["Woods::Formatting::ClaudeAdapter#format"]
-  Woods__Formatting__ClaudeAdapter_format_content["Woods::Formatting::ClaudeAdapter#format_content"]
-  Woods__Formatting__ClaudeAdapter_format_sources["Woods::Formatting::ClaudeAdapter#format_sources"]
-  Woods__Formatting__ClaudeAdapter_source_attributes["Woods::Formatting::ClaudeAdapter#source_attributes"]
-  Woods__Formatting__ClaudeAdapter_indent["Woods::Formatting::ClaudeAdapter#indent"]
-  Woods__Formatting__ClaudeAdapter_escape_xml["Woods::Formatting::ClaudeAdapter#escape_xml"]
-  Woods__Formatting__GenericAdapter["Woods::Formatting::GenericAdapter"]
-  Woods__Formatting__GenericAdapter -->|inheritance| Base
-  Woods__Formatting__GenericAdapter_format["Woods::Formatting::GenericAdapter#format"]
-  Woods__Formatting__GenericAdapter_format_sources["Woods::Formatting::GenericAdapter#format_sources"]
-  Woods__Formatting__GptAdapter["Woods::Formatting::GptAdapter"]
-  Woods__Formatting__GptAdapter -->|inheritance| Base
-  Woods__Formatting__GptAdapter_format["Woods::Formatting::GptAdapter#format"]
-  Woods__Formatting__GptAdapter_format_sources["Woods::Formatting::GptAdapter#format_sources"]
   Woods__Formatting__HumanAdapter["Woods::Formatting::HumanAdapter"]
   Woods__Formatting__HumanAdapter -->|inheritance| Base
   Woods__Formatting__HumanAdapter_format["Woods::Formatting::HumanAdapter#format"]
@@ -3640,7 +3581,6 @@ graph TD
   Woods__MCP__Tasks__Store_get["Woods::MCP::Tasks::Store#get"]
   Woods__MCP__Tasks__Store_complete_["Woods::MCP::Tasks::Store#complete!"]
   Woods__MCP__Tasks__Store_fail_["Woods::MCP::Tasks::Store#fail!"]
-  Woods__MCP__Tasks__Store_note_progress_["Woods::MCP::Tasks::Store#note_progress!"]
   Woods__MCP__Tasks__Store_path_for["Woods::MCP::Tasks::Store#path_for"]
   Woods__MCP__Tasks__Store_path_for -->|method_call| File
   Woods__MCP__Tasks__Store_read["Woods::MCP::Tasks::Store#read"]
@@ -3672,12 +3612,16 @@ graph TD
   Woods__MCP__Tasks__Store_expired_ -->|method_call| Time
   Woods__MCP__Tasks__Store_adopt_orphan["Woods::MCP::Tasks::Store#adopt_orphan"]
   Woods__MCP__Tasks__Store_producer_alive_["Woods::MCP::Tasks::Store#producer_alive?"]
+  Woods__MCP__Tasks__Store_foreign_boot_["Woods::MCP::Tasks::Store#foreign_boot?"]
+  Woods__MCP__Tasks__Store_current_boot_identity["Woods::MCP::Tasks::Store#current_boot_identity"]
+  Woods__MCP__Tasks__Store_current_boot_identity -->|method_call| File
+  File_read["File.read"]
+  Woods__MCP__Tasks__Store_current_boot_identity -->|method_call| File_read
   Woods__MCP__Tasks__Store_process_alive_["Woods::MCP::Tasks::Store#process_alive?"]
   Woods__MCP__Tasks__Store_process_alive_ -->|method_call| Process
   Woods__MCP__Tasks__Store_producer_identity_for["Woods::MCP::Tasks::Store#producer_identity_for"]
   Woods__MCP__Tasks__Store_producer_identity_for -->|method_call| File
   Woods__MCP__Tasks__Store_linux_process_identity["Woods::MCP::Tasks::Store#linux_process_identity"]
-  File_read["File.read"]
   Woods__MCP__Tasks__Store_linux_process_identity -->|method_call| File_read
   Woods__MCP__Tasks__Store_linux_process_identity -->|method_call| File
   Woods__MCP__Tasks__Store_linux_start_ticks["Woods::MCP::Tasks::Store#linux_start_ticks"]
@@ -3735,7 +3679,6 @@ graph TD
   Woods__Notion__Client_create_page["Woods::Notion::Client#create_page"]
   Woods__Notion__Client_update_page["Woods::Notion::Client#update_page"]
   Woods__Notion__Client_query_database["Woods::Notion::Client#query_database"]
-  Woods__Notion__Client_query_all["Woods::Notion::Client#query_all"]
   Woods__Notion__Client_find_page_by_title["Woods::Notion::Client#find_page_by_title"]
   Woods__Notion__Client_request["Woods::Notion::Client#request"]
   Woods__Notion__Client_request -->|method_call| JSON
@@ -3810,12 +3753,6 @@ graph TD
   Woods__Notion__Exporter_extract_title_text["Woods::Notion::Exporter#extract_title_text"]
   Woods__Notion__Exporter_build_reader["Woods::Notion::Exporter#build_reader"]
   Woods__Notion__Exporter_build_reader -->|method_call| Woods__MCP__IndexReader
-  Woods__Notion__Mapper["Woods::Notion::Mapper"]
-  Woods__Notion__Mapper_for["Woods::Notion::Mapper.for"]
-  REGISTRY["REGISTRY"]
-  Woods__Notion__Mapper_for -->|method_call| REGISTRY
-  Woods__Notion__Mapper_supported_types["Woods::Notion::Mapper.supported_types"]
-  Woods__Notion__Mapper_supported_types -->|method_call| REGISTRY
   Woods__Notion__Mappers["Woods::Notion::Mappers"]
   Woods__Notion__Mappers__ColumnMapper["Woods::Notion::Mappers::ColumnMapper"]
   Shared["Shared"]
@@ -3882,17 +3819,6 @@ graph TD
   Woods__Notion__SyncManifest_warn_scope_discard["Woods::Notion::SyncManifest#warn_scope_discard"]
   Woods__Notion__SyncManifest_discard["Woods::Notion::SyncManifest#discard"]
   Woods__Observability["Woods::Observability"]
-  Woods__Observability__HealthCheck["Woods::Observability::HealthCheck"]
-  Woods__Observability__HealthCheck_initialize["Woods::Observability::HealthCheck#initialize"]
-  Woods__Observability__HealthCheck_run["Woods::Observability::HealthCheck#run"]
-  HealthStatus["HealthStatus"]
-  Woods__Observability__HealthCheck_run -->|method_call| HealthStatus
-  Woods__Observability__HealthCheck_probe_store["Woods::Observability::HealthCheck#probe_store"]
-  Woods__Observability__HealthCheck_probe_provider["Woods::Observability::HealthCheck#probe_provider"]
-  Woods__Observability__Instrumentation["Woods::Observability::Instrumentation"]
-  Woods__Observability__Instrumentation_instrument["Woods::Observability::Instrumentation#instrument"]
-  ActiveSupport__Notifications["ActiveSupport::Notifications"]
-  Woods__Observability__Instrumentation_instrument -->|method_call| ActiveSupport__Notifications
   Woods__Observability__StructuredLogger_initialize["Woods::Observability::StructuredLogger#initialize"]
   Woods__Observability__StructuredLogger_write_entry["Woods::Observability::StructuredLogger#write_entry"]
   Woods__Obsidian["Woods::Obsidian"]
@@ -3903,10 +3829,7 @@ graph TD
   Woods__Obsidian__PathTraversalError -->|inheritance| ExportError
   Woods__Obsidian__NameMapper["Woods::Obsidian::NameMapper"]
   Woods__Obsidian__NameMapper_initialize["Woods::Obsidian::NameMapper#initialize"]
-  Woods__Obsidian__NameMapper_ids["Woods::Obsidian::NameMapper#ids"]
-  Woods__Obsidian__NameMapper_known_["Woods::Obsidian::NameMapper#known?"]
   Woods__Obsidian__NameMapper_path_for["Woods::Obsidian::NameMapper#path_for"]
-  Woods__Obsidian__NameMapper_target_for["Woods::Obsidian::NameMapper#target_for"]
   Woods__Obsidian__NameMapper_wikilink["Woods::Obsidian::NameMapper#wikilink"]
   Woods__Obsidian__NameMapper_paths_to_ids["Woods::Obsidian::NameMapper#paths_to_ids"]
   Woods__Obsidian__NameMapper_build["Woods::Obsidian::NameMapper#build"]
@@ -4837,8 +4760,6 @@ graph TD
   Woods__Storage__VectorStore__Qdrant_response_error -->|method_call| RequestError
   Woods__Storage__VectorStore__Qdrant_transport_error["Woods::Storage::VectorStore::Qdrant#transport_error"]
   Woods__Storage__VectorStore__Qdrant_transport_error -->|method_call| RequestError
-  Woods__Storage__VectorStore__Qdrant_retry_safe_["Woods::Storage::VectorStore::Qdrant#retry_safe?"]
-  Woods__Storage__VectorStore__Qdrant_idempotent_post_["Woods::Storage::VectorStore::Qdrant#idempotent_post?"]
   Woods__Storage__VectorStore__Qdrant_write_request_["Woods::Storage::VectorStore::Qdrant#write_request?"]
   Woods__Storage__VectorStore__Qdrant_read_only_post_["Woods::Storage::VectorStore::Qdrant#read_only_post?"]
   Woods__Storage__VectorStore__Qdrant_http_client["Woods::Storage::VectorStore::Qdrant#http_client"]
@@ -4970,7 +4891,6 @@ graph TD
   Woods__Unblocked__Client_initialize["Woods::Unblocked::Client#initialize"]
   Woods__Unblocked__Client_put_document["Woods::Unblocked::Client#put_document"]
   Woods__Unblocked__Client_create_collection["Woods::Unblocked::Client#create_collection"]
-  Woods__Unblocked__Client_list_collections["Woods::Unblocked::Client#list_collections"]
   Woods__Unblocked__Client_delete_document["Woods::Unblocked::Client#delete_document"]
   Woods__Unblocked__Client_list_documents["Woods::Unblocked::Client#list_documents"]
   Woods__Unblocked__Client_all_documents["Woods::Unblocked::Client#all_documents"]
@@ -5249,9 +5169,14 @@ graph TD
   Woods__Watch__Daemon_claim_startup_ -->|method_call| ENV
   Woods__Watch__Daemon_create_claim["Woods::Watch::Daemon#create_claim"]
   Woods__Watch__Daemon_create_claim -->|method_call| FileUtils
+  Woods__Watch__Daemon_create_claim -->|method_call| JSON
   Woods__Watch__Daemon_create_claim -->|method_call| File
   Woods__Watch__Daemon_reclaim_if_stale["Woods::Watch::Daemon#reclaim_if_stale"]
   Woods__Watch__Daemon_reclaim_if_stale -->|method_call| FileUtils
+  Woods__Watch__Daemon_claim_inode["Woods::Watch::Daemon#claim_inode"]
+  File_stat["File.stat"]
+  Woods__Watch__Daemon_claim_inode -->|method_call| File_stat
+  Woods__Watch__Daemon_claim_inode -->|method_call| File
   Woods__Watch__Daemon_stale_claim_["Woods::Watch::Daemon#stale_claim?"]
   Woods__Watch__Daemon_stale_claim_ -->|method_call| JSON
   Woods__Watch__Daemon_same_claim_host_["Woods::Watch::Daemon#same_claim_host?"]
@@ -5317,8 +5242,6 @@ graph TD
   Woods__Watch__Status_host_identity["Woods::Watch::Status.host_identity"]
   Socket["Socket"]
   Woods__Watch__Status_host_identity -->|method_call| Socket
-  Woods__Watch__Status_clear["Woods::Watch::Status#clear"]
-  Woods__Watch__Status_clear -->|method_call| FileUtils
   Woods__Watch__Status_same_host_["Woods::Watch::Status#same_host?"]
   Woods__Watch__Status_process_alive_["Woods::Watch::Status#process_alive?"]
   Woods__Watch__Status_process_alive_ -->|method_call| Process

@@ -4,20 +4,20 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 
 ## Conditional Tools & Wiring
 
-The Index Server ships with **29 tools** — **14 are always registered** and **15 are conditionally registered** depending on whether their collaborator is wired into `Woods.configuration`. If you call a conditionally-wired tool that isn't registered, the MCP server will simply not advertise it in `tools/list` — clients see it as "tool not found," not as a runtime failure.
+The Index Server ships with **29 tools**: **14 are always registered** and **15 are conditionally registered** depending on whether their collaborator is wired into `Woods.configuration`. If you call a conditionally-wired tool that isn't registered, the MCP server will simply not advertise it in `tools/list`, clients see it as "tool not found," not as a runtime failure.
 
 | Tool group | Count | Wiring condition |
 |------------|-------|------------------|
-| Always-on | 14 | Always registered — `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `woods_status` |
+| Always-on | 14 | Always registered, `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `woods_status` |
 | `session_trace` | 1 | `Woods.configuration.session_store` set and session tracer enabled |
-| Operator (5) | 5 | Operator wired — `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
-| Feedback (4) | 4 | `Woods.configuration.feedback_store` wired — `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
-| Snapshot (4) | 4 | `Woods.configuration.snapshot_store` wired (requires migrations 004 + 005) — `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
+| Operator (5) | 5 | Operator wired, `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
+| Feedback (4) | 4 | `Woods.configuration.feedback_store` wired, `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
+| Snapshot (4) | 4 | `Woods.configuration.snapshot_store` wired (requires migrations 004 + 005), `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
 | `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
 
 `codebase_retrieve` is always registered (no `retrieve` alias exists), but only returns results once an embedding provider is configured and `rake woods:embed` has run.
 
-If your agent reports a tool is "missing," check Woods configuration first; the tool is gated by presence of the matching collaborator. **Console Server tools are not all unconditionally registered** — 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server) for the full tier table.
+If your agent reports a tool is "missing," check Woods configuration first; the tool is gated by presence of the matching collaborator. **Console Server tools are not all unconditionally registered**: 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server) for the full tier table.
 
 ---
 
@@ -104,7 +104,7 @@ To focus on just associations and callbacks without the full source:
 }
 ```
 
-**Example response** — `metadata.callbacks` contains the resolved callback chain in execution order, including callbacks inherited from concerns. Side-effects show what each callback actually does:
+**Example response**: `metadata.callbacks` contains the resolved callback chain in execution order, including callbacks inherited from concerns. Side-effects show what each callback actually does:
 
 ```json
 {
@@ -144,7 +144,7 @@ Callbacks from included concerns (like `audit_trail` from `Auditable`) are resol
 }
 ```
 
-**What you'll get:** The `source_code` field contains the model source with all included concerns appended inline. This is the key feature — your AI tool sees the full behavioral surface area in one block:
+**What you'll get:** The `source_code` field contains the model source with all included concerns appended inline. This is the key feature, your AI tool sees the full behavioral surface area in one block:
 
 ```
 # == Schema Information
@@ -206,7 +206,7 @@ The `metadata.inlined_concerns` array lists which concerns were resolved:
 }
 ```
 
-**What you'll get:** A BFS tree of everything that references `User` — controllers, services, jobs, mailers — up to 2 hops out. Set `depth: 1` for direct dependents only.
+**What you'll get:** A BFS tree of everything that references `User`, controllers, services, jobs, mailers, up to 2 hops out. Set `depth: 1` for direct dependents only.
 
 To find only which jobs depend on `User`:
 
@@ -247,7 +247,7 @@ To find only which jobs depend on `User`:
 }
 ```
 
-**What you'll get:** Forward dependency tree — concerns, associations, services called from callbacks, jobs enqueued, etc.
+**What you'll get:** Forward dependency tree, concerns, associations, services called from callbacks, jobs enqueued, etc.
 
 ---
 
@@ -311,7 +311,7 @@ Search `source_code` when you want semantic matches, not just naming matches.
 ]
 ```
 
-**Follow up** — look up the controller for full source with filters and route context:
+**Follow up**: look up the controller for full source with filters and route context:
 
 ```json
 {
@@ -334,7 +334,7 @@ Search `source_code` when you want semantic matches, not just naming matches.
 }
 ```
 
-**What you'll get:** All job units reachable from `CheckoutService` within 2 hops — including jobs triggered indirectly via model callbacks:
+**What you'll get:** All job units reachable from `CheckoutService` within 2 hops, including jobs triggered indirectly via model callbacks:
 
 ```json
 {
@@ -378,7 +378,7 @@ This traces through the dependency graph: `CheckoutService` calls `Order#save!`,
 }
 ```
 
-Because Woods runs inside a booted Rails process, it captures every method Rails generates dynamically — things static analysis tools cannot see. The metadata shows these in structured form:
+Because Woods runs inside a booted Rails process, it captures every method Rails generates dynamically, things static analysis tools cannot see. The metadata shows these in structured form:
 
 **Example response (relevant sections):**
 
@@ -402,7 +402,7 @@ Because Woods runs inside a booted Rails process, it captures every method Rails
 }
 ```
 
-Woods captures the `enums`, `scopes`, and `associations` metadata directly from ActiveRecord reflection — the method names below are inferred per standard Rails conventions, not listed explicitly in the `_index.json`. From this metadata, you can infer every runtime-generated method:
+Woods captures the `enums`, `scopes`, and `associations` metadata directly from ActiveRecord reflection, the method names below are inferred per standard Rails conventions, not listed explicitly in the `_index.json`. From this metadata, you can infer every runtime-generated method:
 
 | Source | Generated Methods |
 |--------|------------------|
@@ -443,13 +443,13 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Execution flow from the controller action through services, callbacks, jobs enqueued, and mailers sent — assembled from the dependency graph. Increase `depth` to trace deeper call chains.
+**What you'll get:** Execution flow from the controller action through services, callbacks, jobs enqueued, and mailers sent, assembled from the dependency graph. Increase `depth` to trace deeper call chains.
 
 ---
 
 ### "Why is this page slow?"
 
-`console_slow_endpoints` is Tier 3 — schema-only, not executable in any supported mode (see [Conditional Tools & Wiring](#conditional-tools--wiring)). Trace the code path directly instead:
+`console_slow_endpoints` is Tier 3, schema-only, not executable in any supported mode (see [Conditional Tools & Wiring](#conditional-tools--wiring)). Trace the code path directly instead:
 
 **Tool:** `trace_flow` (Index Server)
 
@@ -460,7 +460,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** A full execution flow showing every layer the request touches — services, callbacks, jobs enqueued, mailers sent. Pair this with your own APM/logging for the "which endpoint is actually slow" half of the question; Woods answers "why," not "which."
+**What you'll get:** A full execution flow showing every layer the request touches, services, callbacks, jobs enqueued, mailers sent. Pair this with your own APM/logging for the "which endpoint is actually slow" half of the question; Woods answers "why," not "which."
 
 ---
 
@@ -477,7 +477,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Units with no dependents — nothing in the codebase references them. Good candidates for removal or investigation.
+**What you'll get:** Units with no dependents, nothing in the codebase references them. Good candidates for removal or investigation.
 
 ---
 
@@ -492,7 +492,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Models ranked by PageRank score. Higher scores mean more units depend on them — these are your core domain objects. Touching these files has the widest blast radius.
+**What you'll get:** Models ranked by PageRank score. Higher scores mean more units depend on them, these are your core domain objects. Touching these files has the widest blast radius.
 
 ---
 
@@ -522,7 +522,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Units whose removal would disconnect parts of the dependency graph — the load-bearing structural elements of your codebase.
+**What you'll get:** Units whose removal would disconnect parts of the dependency graph, the load-bearing structural elements of your codebase.
 
 ---
 
@@ -536,7 +536,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Units that have no forward dependencies — leaf nodes. These tend to be pure utility classes or simple value objects.
+**What you'll get:** Units that have no forward dependencies, leaf nodes. These tend to be pure utility classes or simple value objects.
 
 ---
 
@@ -551,7 +551,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Relevant Rails source units matching the keyword — the actual implementation from the installed gem. Useful for understanding framework behavior without leaving your AI tool.
+**What you'll get:** Relevant Rails source units matching the keyword, the actual implementation from the installed gem. Useful for understanding framework behavior without leaving your AI tool.
 
 ---
 
@@ -559,7 +559,7 @@ Static tools miss all of these because they only exist after Rails processes the
 
 ### Scope predicates
 
-Tools that accept a `scope` parameter (`console_count`, `console_sample`, `console_pluck`, `console_aggregate`, `console_association_count`, `console_recent`) support Ransack-style predicate suffixes on hash keys. Plain keys are treated as equality, suffixed keys build safe Arel predicates. Column names are validated against the model's schema — SQL injection via column names is not possible.
+Tools that accept a `scope` parameter (`console_count`, `console_sample`, `console_pluck`, `console_aggregate`, `console_association_count`, `console_recent`) support Ransack-style predicate suffixes on hash keys. Plain keys are treated as equality, suffixed keys build safe Arel predicates. Column names are validated against the model's schema, SQL injection via column names is not possible.
 
 | Suffix | SQL equivalent | Example |
 |--------|----------------|---------|
@@ -676,7 +676,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 
 ### "Run a custom SQL query"
 
-**Tool:** `console_sql` (Console Server, requires `console_embedded_read_tools: true` — see [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server))
+**Tool:** `console_sql` (Console Server, requires `console_embedded_read_tools: true`, see [AGENT_GUIDE.md](AGENT_GUIDE.md#console-server))
 
 ```json
 {
@@ -685,7 +685,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 }
 ```
 
-**What you'll get:** Query results as an array of row hashes. Only `SELECT` and `WITH...SELECT` queries are permitted — all writes are rejected at the validator level before reaching the database.
+**What you'll get:** Query results as an array of row hashes. Only `SELECT` and `WITH...SELECT` queries are permitted, all writes are rejected at the validator level before reaching the database.
 
 ---
 
@@ -716,7 +716,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 {}
 ```
 
-**What you'll get:** Last extraction time, current unit counts, and staleness indicators — whether the index reflects recent changes.
+**What you'll get:** Last extraction time, current unit counts, and staleness indicators, whether the index reflects recent changes.
 
 ---
 

@@ -5,32 +5,21 @@ flowchart TD
   Woods(["new"])
   Set["Set"]
   Woods -->|construction: new| Set
-  Woods -->|construction: new| Set
   Woods__Ast(["new"])
   Woods__Ast -->|construction: new| Set
-  Woods__Ast -->|construction: new| Set
-  Woods__Ast__CallSiteExtractor(["new"])
-  Woods__Ast__CallSiteExtractor -->|construction: new| Set
-  Woods__Ast__CallSiteExtractor_extract_significant(["new"])
-  Woods__Ast__CallSiteExtractor_extract_significant -->|construction: new| Set
   Parser["Parser"]
   Woods -->|construction: new| Parser
   _parser["@parser"]
   Woods -->|deserialization: parse| _parser
-  Woods -->|deserialization: parse| _parser
   Woods__Ast -->|construction: new| Parser
-  Woods__Ast -->|deserialization: parse| _parser
   Woods__Ast -->|deserialization: parse| _parser
   Woods__Ast__MethodExtractor(["new"])
   Woods__Ast__MethodExtractor -->|construction: new| Parser
-  Woods__Ast__MethodExtractor -->|deserialization: parse| _parser
   Woods__Ast__MethodExtractor -->|deserialization: parse| _parser
   Woods__Ast__MethodExtractor_initialize(["new"])
   Woods__Ast__MethodExtractor_initialize -->|construction: new| Parser
   Woods__Ast__MethodExtractor_extract_method[\"deserialization"\]
   Woods__Ast__MethodExtractor_extract_method -->|deserialization: parse| _parser
-  Woods__Ast__MethodExtractor_extract_all_methods[\"deserialization"\]
-  Woods__Ast__MethodExtractor_extract_all_methods -->|deserialization: parse| _parser
   Struct["Struct"]
   Woods -->|construction: new| Struct
   Woods__Ast -->|construction: new| Struct
@@ -490,11 +479,6 @@ flowchart TD
   Woods__Console__AuditLogger_initialize -->|construction: new| CredentialScanner
   Woods__Console__AuditLogger_entries[\"deserialization"\]
   Woods__Console__AuditLogger_entries -->|deserialization: parse| JSON
-  SUPPORTED_TOOLS["SUPPORTED_TOOLS"]
-  Woods -->|serialization: to_h| SUPPORTED_TOOLS
-  Woods__Console -->|serialization: to_h| SUPPORTED_TOOLS
-  Woods__Console__BridgeProtocol[/"serialization"/]
-  Woods__Console__BridgeProtocol -->|serialization: to_h| SUPPORTED_TOOLS
   Woods__Console__CredentialIndex(["new"])
   MCP__Tool__Response["MCP::Tool::Response"]
   Woods -->|construction: new| MCP__Tool__Response
@@ -2181,12 +2165,6 @@ flowchart TD
   Woods__Notion__Exporter_build_manifest -->|construction: new| SyncManifest
   Woods__Notion__Exporter_build_reader(["new"])
   Woods__Notion__Exporter_build_reader -->|construction: new| Woods__MCP__IndexReader
-  Woods -->|construction: new| klass
-  Woods__Notion -->|construction: new| klass
-  Woods__Notion__Mapper(["new"])
-  Woods__Notion__Mapper -->|construction: new| klass
-  Woods__Notion__Mapper_for(["new"])
-  Woods__Notion__Mapper_for -->|construction: new| klass
   Woods__Console__CredentialScanner["Woods::Console::CredentialScanner"]
   Woods -->|construction: new| Woods__Console__CredentialScanner
   Woods__Notion -->|construction: new| Woods__Console__CredentialScanner
@@ -2214,17 +2192,6 @@ flowchart TD
   Woods__Notion__SyncManifest_canonicalize -->|serialization: to_h| value_map_sort_by
   Woods__Notion__SyncManifest_load[\"deserialization"\]
   Woods__Notion__SyncManifest_load -->|deserialization: parse| JSON
-  Woods -->|construction: new| Struct
-  HealthStatus["HealthStatus"]
-  Woods -->|construction: new| HealthStatus
-  Woods__Observability(["new"])
-  Woods__Observability -->|construction: new| Struct
-  Woods__Observability -->|construction: new| HealthStatus
-  Woods__Observability__HealthCheck(["new"])
-  Woods__Observability__HealthCheck -->|construction: new| Struct
-  Woods__Observability__HealthCheck -->|construction: new| HealthStatus
-  Woods__Observability__HealthCheck_run(["new"])
-  Woods__Observability__HealthCheck_run -->|construction: new| HealthStatus
   Woods -->|construction: new| Hash
   Woods__Obsidian(["new"])
   Woods__Obsidian -->|construction: new| Hash

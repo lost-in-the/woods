@@ -38,7 +38,7 @@ query
 | `:hybrid` | `comprehensive` or `exploratory` scope | Runs vector + keyword + graph expansion, deduplicates |
 | `:direct` | `locate`/`reference` + `pinpoint` scope | Looks up identifiers directly in metadata store; falls back to keyword |
 
-Keyword results are scored by how many distinct fields matched (identifier, source, metadata) — not by the store's result order. Each matched field adds 0.25, capped at 1.0, so a result matching on identifier and source scores higher than one matching source alone.
+Keyword results are scored by how many distinct fields matched (identifier, source, metadata), not by the store's result order. Each matched field adds 0.25, capped at 1.0, so a result matching on identifier and source scores higher than one matching source alone.
 
 ---
 
@@ -51,13 +51,13 @@ Retrieval requires an embedding provider and a vector store. Set these in `confi
 Three named presets cover the most common deployment scenarios:
 
 ```ruby
-# Local development — Ollama (local) + in-memory vector store. No external services.
+# Local development: Ollama (local) + in-memory vector store. No external services.
 Woods.configure_with_preset(:local)
 
-# PostgreSQL — pgvector + OpenAI. Requires PostgreSQL with the vector extension.
+# PostgreSQL: pgvector + OpenAI. Requires PostgreSQL with the vector extension.
 Woods.configure_with_preset(:postgresql)
 
-# Production — Qdrant + OpenAI. Dedicated vector database.
+# Production: Qdrant + OpenAI. Dedicated vector database.
 Woods.configure_with_preset(:production)
 ```
 
@@ -72,7 +72,7 @@ end
 
 ### Manual configuration
 
-**MySQL host app (Qdrant required — MySQL has no native vector extension):**
+**MySQL host app (Qdrant required. MySQL has no native vector extension):**
 
 ```ruby
 Woods.configure do |config|
@@ -165,12 +165,12 @@ result    = retriever.retrieve("what validations does Order have?")
 
 ## Degradation Tiers
 
-Retrieval degrades gracefully when components are unavailable. The Retriever itself does not implement explicit fallback tiers — degradation happens naturally through how each component handles errors:
+Retrieval degrades gracefully when components are unavailable. The Retriever itself does not implement explicit fallback tiers, degradation happens naturally through how each component handles errors:
 
-- **Embedding provider unavailable** — `codebase_retrieve` returns no results. The MCP tool description notes this condition. Check `pipeline_status` to confirm embeddings exist.
-- **Vector store unavailable** — vector and hybrid strategies fail at query time. Keyword and graph strategies remain available for direct calls to `SearchExecutor`.
-- **Metadata store error** — the structural context overview (unit counts by type) is silently omitted; `Retriever#build_structural_context` rescues `StandardError` and returns `nil`. The retrieval result is still returned without the overview.
-- **Graph store unavailable** — graph expansion in hybrid strategy produces no graph candidates; vector and keyword candidates are still ranked and returned.
+- **Embedding provider unavailable**: `codebase_retrieve` returns no results. The MCP tool description notes this condition. Check `pipeline_status` to confirm embeddings exist.
+- **Vector store unavailable**: vector and hybrid strategies fail at query time. Keyword and graph strategies remain available for direct calls to `SearchExecutor`.
+- **Metadata store error**: the structural context overview (unit counts by type) is silently omitted; `Retriever#build_structural_context` rescues `StandardError` and returns `nil`. The retrieval result is still returned without the overview.
+- **Graph store unavailable**: graph expansion in hybrid strategy produces no graph candidates; vector and keyword candidates are still ranked and returned.
 
 In all cases, errors in individual components produce empty candidate sets for that source rather than raising through the `Retriever`. Configure circuit breakers via `Woods::Resilience::CircuitBreaker` on external providers (Qdrant, OpenAI) for production deployments.
 
@@ -199,8 +199,8 @@ config.max_context_tokens = 12_000  # More context per retrieval
 
 The `ContextAssembler` carves off 10% for the structural overview first, then splits what's left:
 
-- **Framework context active** (the query mentions Rails/framework keywords — `rails`, `activerecord`, `middleware`, etc.): primary 55%, supporting 25%, framework 20%.
-- **No framework context**: primary 65%, supporting 35% — the framework section gets nothing, and its share is not proportionally folded into the other two; the fractions are just different, not rescaled.
+- **Framework context active** (the query mentions Rails/framework keywords, `rails`, `activerecord`, `middleware`, etc.): primary 55%, supporting 25%, framework 20%.
+- **No framework context**: primary 65%, supporting 35%, the framework section gets nothing, and its share is not proportionally folded into the other two; the fractions are just different, not rescaled.
 
 Separately, if the supporting section ends up with no candidates (it only ever holds `:graph_expansion` results), its reserved budget is reclaimed into primary rather than wasted.
 
@@ -214,7 +214,7 @@ config.context_format = :xml  # For GPT-family prompts that prefer XML structure
 
 ### Switching embedding models
 
-The embedding model must match between `rake woods:embed` and retrieval. Different models produce vectors with different dimensionalities — Woods raises `Woods::MCP::DimensionMismatch` when they disagree, at embed time for durable stores and at MCP boot for dumps. After changing `embedding_model`, drop the vector store and re-run full extraction and embedding:
+The embedding model must match between `rake woods:embed` and retrieval. Different models produce vectors with different dimensionalities. Woods raises `Woods::MCP::DimensionMismatch` when they disagree, at embed time for durable stores and at MCP boot for dumps. After changing `embedding_model`, drop the vector store and re-run full extraction and embedding:
 
 ```bash
 bundle exec rake woods:extract

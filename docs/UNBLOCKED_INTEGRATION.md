@@ -2,8 +2,8 @@
 
 Woods can sync extraction data to [Unblocked](https://getunblocked.com) via its
 Documents API. This gives Unblocked's automated code review and Q&A tools
-structural codebase context — associations, blast radius, entry points, side
-effects — alongside the institutional context (PRs, Slack, tickets) it already
+structural codebase context, associations, blast radius, entry points, side
+effects, alongside the institutional context (PRs, Slack, tickets) it already
 provides.
 
 ## How It Works
@@ -13,7 +13,7 @@ provides.
 3. Documents appear in your Unblocked collection within ~1 minute
 4. Unblocked's code review agent and Q&A tools reference the structural context
 
-Documents are **upserted by URI** — running sync again updates existing documents
+Documents are **upserted by URI**: running sync again updates existing documents
 without creating duplicates. URIs point to your GitHub repository for working
 citation links in Unblocked answers.
 
@@ -28,15 +28,15 @@ not currently offer a creation path for them):
 curl -X POST https://getunblocked.com/api/v1/collections \
   -H "Authorization: Bearer $UNBLOCKED_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "Codebase Architecture", "description": "Structural metadata from Woods extraction — models, controllers, services, dependencies, and blast radius analysis.", "iconUrl": "https://raw.githubusercontent.com/lost-in-the/woods/main/assets/woods-mark-black.svg"}'
+  -d '{"name": "Codebase Architecture", "description": "Structural metadata from Woods extraction, models, controllers, services, dependencies, and blast radius analysis.", "iconUrl": "https://raw.githubusercontent.com/lost-in-the/woods/main/assets/woods-mark-black.svg"}'
 ```
 
 > **Known API quirk:** the live API rejects collection creation with a bare
 > `400 Bad Request` unless `iconUrl` is included, even though the API docs mark
-> it optional. Always pass an `iconUrl` — the Woods mark above is a stable,
+> it optional. Always pass an `iconUrl`, the Woods mark above is a stable,
 > repo-hosted square SVG you can use directly.
 
-Creating the collection from Ruby is simpler — `Client#create_collection`
+Creating the collection from Ruby is simpler, `Client#create_collection`
 defaults `iconUrl` to the Woods mark (`Client::DEFAULT_ICON_URL`), so the quirk
 can't bite:
 
@@ -46,7 +46,7 @@ require 'woods/unblocked/client'
 client = Woods::Unblocked::Client.new(api_token: ENV['UNBLOCKED_API_TOKEN'])
 collection = client.create_collection(
   name: 'Codebase Architecture',
-  description: 'Structural metadata from Woods extraction — models, ' \
+  description: 'Structural metadata from Woods extraction, models, ' \
                'controllers, services, dependencies, and blast radius analysis.'
 )
 collection['id'] # => use as UNBLOCKED_COLLECTION_ID
@@ -58,8 +58,8 @@ Pass `icon_url:` to use your own icon instead of the default.
 
 In the Unblocked web app: **Settings** → **API Tokens** → **Create Token**.
 
-- **Personal Access Token** — 1,000 API calls/day, scoped to your account
-- **Team Access Token** — access to all team documents (recommended for CI)
+- **Personal Access Token**: 1,000 API calls/day, scoped to your account
+- **Team Access Token**: access to all team documents (recommended for CI)
 
 ### 3. Configure Woods
 
@@ -151,12 +151,11 @@ sync uses ~800-1200 calls for the initial build. If your app exceeds 1,000 units
 ## CI Integration
 
 Add a post-merge step. The sync is incremental (see below), so the one thing CI
-must do beyond running the task is **persist the sync manifest between runs** —
-otherwise every deploy starts from scratch and re-pushes everything.
+must do beyond running the task is **persist the sync manifest between runs**, otherwise every deploy starts from scratch and re-pushes everything.
 
 ### GitHub Actions
 
-`actions/cache` entries are **immutable** — an exact-key hit skips the post-job
+`actions/cache` entries are **immutable**: an exact-key hit skips the post-job
 save, which would freeze the manifest at its first-run state forever. Use a
 unique key plus `restore-keys` so every run saves a fresh manifest and the next
 run restores the most recent one:
@@ -182,7 +181,7 @@ steps:
 ### Buildkite
 
 Buildkite has no native cache primitive. Note that plain
-`buildkite-agent artifact download` is **scoped to the current build** — it
+`buildkite-agent artifact download` is **scoped to the current build**: it
 cannot restore a previous build's manifest on its own. Use the S3-backed
 [cache plugin](https://github.com/buildkite-plugins/cache-buildkite-plugin)
 (simplest), or resolve the last successful build's ID via the REST API and pass
@@ -215,7 +214,7 @@ fresh manifest for free at the end of each run.
 
 > **Concurrency:** two syncs racing (e.g. per-deploy CI on quick successive
 > merges) can interleave manifest writes and put/delete calls. Gating this is
-> the host pipeline's responsibility — set a Buildkite `concurrency_group` (or
+> the host pipeline's responsibility, set a Buildkite `concurrency_group` (or
 > the GitHub Actions `concurrency:` key) on the sync step.
 
 ## Incremental Updates
@@ -231,7 +230,7 @@ document id of everything last pushed. On each run the exporter:
 Documents are upserted by URI, so the sync is always safe to re-run. If the
 manifest is missing (first run, or a CI cache miss) the exporter reconciles
 document ids from the remote collection and falls back to a full re-push,
-rebuilding the manifest — correct, just more API calls than one run. In steady
+rebuilding the manifest, correct, just more API calls than one run. In steady
 state an unchanged codebase costs ~0 calls.
 
 Pair with `woods:incremental` to re-extract only changed files; the sync then
@@ -239,10 +238,10 @@ pushes only the documents whose content actually changed.
 
 ### Escape hatches
 
-- `UNBLOCKED_FORCE_FULL_SYNC=1` — re-push every document, ignoring the unchanged
+- `UNBLOCKED_FORCE_FULL_SYNC=1`: re-push every document, ignoring the unchanged
   check (still uses the manifest for deletes). Use after a `DocumentBuilder`
   format change, which alters every body.
-- `UNBLOCKED_FORCE_PURGE=1` — bypass the mass-deletion guard. The guard refuses
+- `UNBLOCKED_FORCE_PURGE=1`: bypass the mass-deletion guard. The guard refuses
   to delete more than 30% of a manifest tracking ≥10 documents in one run, which
   protects against running the sync against a **partial index** (e.g.
   `woods:incremental` output in a fresh directory), where the current unit set
@@ -251,12 +250,12 @@ pushes only the documents whose content actually changed.
   The guard also fires on *intentional* large removals: dropping a unit type
   from the sync set, changing `unblocked_repo_url` (every URI changes), or a
   big codebase deletion can all legitimately exceed 30%. The refusal warning
-  names the counts — if the deletions are expected, re-run once with
+  names the counts, if the deletions are expected, re-run once with
   `UNBLOCKED_FORCE_PURGE=1`.
 
 ## Troubleshooting
 
-**"call budget exhausted for this run"** — The per-run cap
+**"call budget exhausted for this run"**: The per-run cap
 (`UNBLOCKED_DAILY_BUDGET`, default 1000) stopped the sync. This is a guard rail
 against one run spending the whole allowance; it is **not** a reading of what
 your token has left. The real 1,000 call/day limit is enforced server-side and
@@ -265,16 +264,16 @@ regardless of what earlier runs (or other machines sharing the token) consumed.
 Raise the cap if a legitimate cold sync needs more, or use a Team Access Token
 if higher server-side limits are available.
 
-**"Unblocked API error 401"** — Check your API token. Personal tokens are scoped
+**"Unblocked API error 401"**: Check your API token. Personal tokens are scoped
 to your account; Team tokens access all team data.
 
-**"collection_id is required"** — Set `UNBLOCKED_COLLECTION_ID` env var or
+**"collection_id is required"**: Set `UNBLOCKED_COLLECTION_ID` env var or
 configure `config.unblocked_collection_id`.
 
-**Documents not appearing in answers** — Documents take ~1 minute to become
+**Documents not appearing in answers**: Documents take ~1 minute to become
 available. Also verify the collection is enabled in your Unblocked data source
 settings.
 
 ## Retries and Duplicates
 
-A 429 is always retried, for any request — the server rejected it before doing any work. A 503 is different: an intermediary in front of Unblocked's API can synthesize a 503 for a request the origin already committed, so a blind retry risks creating a duplicate. The client only retries a 503 for **idempotent** requests (reads, and document upserts keyed by URI). Collection *creation* has no idempotency key, so a 503 on `create_collection` is raised immediately instead of retried. Document upserts and syncs are unaffected — they're idempotent by URI, so a 503 there retries normally.
+A 429 is always retried, for any request, the server rejected it before doing any work. A 503 is different: an intermediary in front of Unblocked's API can synthesize a 503 for a request the origin already committed, so a blind retry risks creating a duplicate. The client only retries a 503 for **idempotent** requests (reads, and document upserts keyed by URI). Collection *creation* has no idempotency key, so a 503 on `create_collection` is raised immediately instead of retried. Document upserts and syncs are unaffected, they're idempotent by URI, so a 503 there retries normally.
