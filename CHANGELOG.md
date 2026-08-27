@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Index MCP reads no longer break under a C/US-ASCII host locale.** The
+  Index Server read manifest.json, per-type `_index.json` files, and
+  SUMMARY.md with bare `Pathname#read`, which tags the bytes with the host's
+  default external encoding. Under a C locale that tag is US-ASCII, so any
+  non-ASCII content in an index artifact (a branch like `feature/café`, a
+  unit identifier, summary prose) made `JSON.parse` raise
+  `Encoding::InvalidByteSequenceError`, surfacing search, lookup,
+  dependencies, dependents, framework, and recent_changes results as
+  misleading `corrupt_artifact` errors and degrading structure and
+  `woods_status`. All `IndexReader` artifact reads now go through one
+  UTF-8-forcing binary read (the mode unit loading already used), so an
+  index is read correctly regardless of host locale. No re-index needed.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
