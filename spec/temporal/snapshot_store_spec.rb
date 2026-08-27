@@ -162,6 +162,31 @@ RSpec.describe Woods::Temporal::SnapshotStore do
       )
     end
 
+    # SQLite skips the busy handler when it detects a lock-order deadlock
+    # (a connection holding SHARED asking for RESERVED while another holds
+    # RESERVED), so BEGIN IMMEDIATE can raise BusyException immediately in
+    # spite of busy_timeout. Seen once on CI; a bounded retry covers it.
+    it 'retries the immediate transaction once when SQLite reports the database locked' do
+      attempts = 0
+      allow(db).to receive(:transaction).and_wrap_original do |original, *args, &block|
+        attempts += 1
+        raise SQLite3::BusyException, 'database is locked' if attempts == 1
+
+        original.call(*args, &block)
+      end
+      allow(store).to receive(:sleep)
+
+      expect(store.capture(manifest_v1, units_v1)).to include(git_sha: 'aaa1111')
+      expect(attempts).to eq(2)
+    end
+
+    it 'gives up after the retry budget and raises the lock error' do
+      allow(db).to receive(:transaction).and_raise(SQLite3::BusyException, 'database is locked')
+      allow(store).to receive(:sleep)
+
+      expect { store.capture(manifest_v1, units_v1) }.to raise_error(SQLite3::BusyException)
+    end
+
     it 'keeps concurrent captures complete across separate SQLite connections' do
       Dir.mktmpdir('woods-temporal-concurrency') do |dir|
         database = File.join(dir, 'temporal.sqlite3')

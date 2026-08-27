@@ -137,6 +137,9 @@ derive unit identifiers, which changes the index format's observable contract.
   reclaim checks the claim inode before removing it and falls back to an
   exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
   honours array filters like `#search`.
+- **Snapshot capture retries a locked SQLite database.** SQLite skips the busy
+  handler in its deadlock-avoidance case, so two concurrent captures could
+  fail at `BEGIN IMMEDIATE` despite `busy_timeout`. Three bounded attempts.
 - **`woods:clean` and `woods:validate` no longer raise `NameError` in a host
   app.** `woods.rake` reached `Woods::Generation` through the extractor, which
   those tasks never load. Caught by every woods-testbed variant.
