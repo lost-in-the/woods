@@ -163,6 +163,12 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
       services = identifiers_in(slot[:output], 'services')
 
       expect(services).to include("Slot#{slot[:index]}Service")
+      # G-1 regression: the copied dummy's wrapper-nested fixtures must
+      # resolve to their child constants in every slot, even though the
+      # autoloader singleton still reports the canonical boot root. Before
+      # the active-root fallback both files derived Domain::Container here
+      # and the collision guard aborted the slot's extraction.
+      expect(services).to include('Domain::Container::Parser', 'Domain::Container::Renderer')
       (0...WOODS_MW_WORKTREES).reject { |other| other == slot[:index] }.each do |other|
         expect(services).not_to(include("Slot#{other}Service"), 'cross-worktree contamination')
       end
@@ -215,6 +221,10 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
         expect(reader.loaded_generation).to eq(published)
         expect(identifiers_in(slot[:output], 'services')).to include("Churn#{slot[:index]}0Service")
       end
+      # G-1 regression: same as the disjointness example — every slot's
+      # extraction must publish the wrapper-nested fixtures resolved.
+      expect(identifiers_in(slot[:output], 'services'))
+        .to include('Domain::Container::Parser', 'Domain::Container::Renderer')
     end
   end
 

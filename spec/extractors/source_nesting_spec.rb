@@ -325,6 +325,54 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
       expect(scanner.governed_class_name('/rails/lib/external/analytics.rb', source)).to be_nil
     end
+
+    it 'governs a copied-app file under the active root when the autoloader belongs elsewhere' do
+      # Multi-worktree/copy scenario: the loader singleton reports the boot
+      # root's directories while extraction names files under a repointed
+      # active root. The root-relative `app/<kind>/` shape governs those.
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to eq('Domain::Container::Parser')
+    end
+
+    it 'stays unmanaged outside both the autoloader roots and the active root' do
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module External
+          class Analytics
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/elsewhere/lib/external/analytics.rb', source)).to be_nil
+    end
+
+    it 'stays unmanaged for a non-app path under the active root' do
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module External
+          class Analytics
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/lib/external/analytics.rb', source)).to be_nil
+    end
   end
 
   # ── #qualified_outer_module_name ─────────────────────────────────────

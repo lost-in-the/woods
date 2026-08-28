@@ -225,6 +225,7 @@ module Woods
       # @return [String, nil] Camelized constant path, or nil when the file
       #   is not under a managed root
       def managed_constant_path(file_path)
+        file_path = File.expand_path(file_path.to_s)
         root = managed_root_for(file_path)
         return nil unless root
 
@@ -234,19 +235,63 @@ module Woods
 
       # The managed root directory containing +file_path+, if any.
       #
-      # When a Rails autoloader is up its directory list is the authority: a
-      # file it does not claim is not governed, even if it happens to sit
-      # under an `app/` segment (lib/, spec/, engines' wheels...). Only when
-      # no autoloader information exists at all does {MANAGED_PATH_PATTERN}
-      # stand in offline.
+      # When a Rails autoloader is up, its directory list is the authority
+      # for the files it claims. But the loader belongs to the BOOT root,
+      # while copied-app and multi-worktree extractions name files under a
+      # root the loader has never heard of: the active root (Rails.root,
+      # repointed per slot) is where extraction is happening. Files the
+      # loader does not claim therefore fall back to a ROOT-RELATIVE check:
+      # the file must sit under the active root and follow the conventional
+      # `app/<kind>/` layout. Anything else is unmanaged — no broad trust of
+      # paths that merely look like app trees. Only when no autoloader
+      # information exists at all (no Rails, a spec stub) does
+      # {MANAGED_PATH_PATTERN} stand in offline.
       #
       # @param file_path [String] Absolute path to the source file
       # @return [String, nil] Absolute root ending in `/`, or nil
       def managed_root_for(file_path)
+        file_path = File.expand_path(file_path)
         dirs = autoload_root_dirs
-        return dirs.find { |dir| file_path.start_with?("#{dir}/") } if dirs
+
+        if dirs
+          claimed = dirs.map { |dir| File.expand_path(dir) }
+                        .find { |dir| file_path.start_with?("#{dir}/") }
+          return claimed if claimed
+
+          return active_root_managed_for(file_path)
+        end
 
         MANAGED_PATH_PATTERN.match(file_path)&.captures&.first
+      end
+
+      # Root-relative managed root for a file the autoloader does not
+      # claim: the conventional `app/<kind>/` shape under the ACTIVE
+      # extraction root, or nil when there is no active root or the file
+      # sits outside it.
+      #
+      # @param file_path [String] Absolute path to the source file
+      # @return [String, nil] Absolute `.../app/<kind>/` root, or nil
+      def active_root_managed_for(file_path)
+        active = active_root
+        return nil unless active && file_path.start_with?("#{active}/")
+
+        shape = file_path[active.length..].to_s.match(%r{\A(/app/[^/]+/)})
+        return nil unless shape
+
+        "#{active}#{shape[1]}"
+      end
+
+      # The active extraction root, expanded: the boot root in a normal
+      # extraction, the repointed root in a copied or multi-worktree slot.
+      #
+      # @return [String, nil]
+      def active_root
+        return nil unless defined?(Rails) && Rails.respond_to?(:root)
+
+        root = Rails.root
+        root && File.expand_path(root.to_s)
+      rescue StandardError
+        nil
       end
 
       # Directories of the main Rails autoloader, or nil when there is no
