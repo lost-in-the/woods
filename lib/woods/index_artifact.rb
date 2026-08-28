@@ -4,6 +4,7 @@ require 'pathname'
 require 'json'
 require 'fileutils'
 require 'tempfile'
+require 'woods/atomic_file'
 
 module Woods
   # Whole Value for the on-disk artifact layout under +output_dir+.
@@ -211,6 +212,10 @@ module Woods
       tmp.fsync
       tmp.close
       File.rename(tmp.path, path.to_s)
+      # The class doc promises the dump directory is fully fsynced before the
+      # latest pointer flips; a renamed-but-unflushed directory entry would
+      # break that promise on a crash (M11).
+      Woods::AtomicFile.fsync_directory(path.dirname.to_s)
     rescue StandardError
       tmp&.close
       tmp&.unlink

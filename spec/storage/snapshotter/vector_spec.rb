@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'pathname'
+require 'woods/atomic_file'
 require 'woods/storage/snapshotter/vector'
 require 'woods/index_artifact'
 require 'woods/resolved_config'
@@ -341,8 +342,22 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
     end
   end
 
-  describe 'failure-mode: float blob truncated after valid header' do
-    # vectors.bin header is intact but the float payload is shorter than
+  describe 'durability: dump directory fsync (M11)' do
+    # AtomicFile fsyncs the containing directory after the rename; the
+    # snapshotter's own atomic_write skipped that step, so a crash could
+    # leave a renamed-but-unflushed directory entry behind. The vectors
+    # and idx files share one directory — one fsync per file is expected.
+    it 'fsyncs the dump directory after the atomic renames' do
+      dump_dir = artifact.new_dump_dir
+      store = make_store([['v1', [1.0, 0.0, 0.0, 0.0]]])
+
+      expect(Woods::AtomicFile).to receive(:fsync_directory).with(dump_dir.to_s).at_least(:once).and_call_original
+
+      described_class.dump(store, artifact, dump_dir)
+    end
+  end
+
+  describe 'failure-mode: float blob truncated after valid header' do    # vectors.bin header is intact but the float payload is shorter than
     # vector_count × dimension × 4 bytes. byteslice on the truncated blob
     # pads the missing tail with nil — those nil-floated vectors used to
     # load into the live store, crash search with TypeError, and re-publish

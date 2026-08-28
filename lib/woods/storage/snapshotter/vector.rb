@@ -2,6 +2,7 @@
 
 require 'pathname'
 require 'tempfile'
+require 'woods/atomic_file'
 require 'woods/storage/vector_store'
 require 'woods/mcp/errors'
 require 'woods/version'
@@ -241,6 +242,9 @@ module Woods
             tmp.fsync
             tmp.close
             File.rename(tmp.path, path.to_s)
+            # Match AtomicFile: the directory entry itself must survive a
+            # crash after the rename, or the dump is not durable (M11).
+            Woods::AtomicFile.fsync_directory(path.dirname.to_s)
           rescue StandardError
             tmp&.close
             tmp&.unlink

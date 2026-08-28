@@ -291,6 +291,16 @@ RSpec.describe Woods::IndexArtifact do
       nested.write_config('schema_version' => 1)
       expect(File.exist?(nested.config_path)).to be(true)
     end
+
+    # The class doc promises the dump directory is fully fsynced before the
+    # latest pointer flips. That holds only if every atomic_write — not just
+    # AtomicFile's own — fsyncs the containing directory after the rename,
+    # or a crash can leave a renamed-but-unflushed directory entry behind.
+    it 'fsyncs the containing directory after the atomic rename (M11)' do
+      expect(Woods::AtomicFile).to receive(:fsync_directory).with(tmpdir).and_call_original
+
+      artifact.write_config('schema_version' => 1)
+    end
   end
 
   # FIX 3 (P1): the vector/metadata dump and the root woods.json used to be
