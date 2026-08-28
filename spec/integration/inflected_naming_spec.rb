@@ -56,6 +56,12 @@ RSpec.describe 'Inflected Zeitwerk naming', :booted_app do
         end
       RUBY
     end
+    FileUtils.mkdir_p(File.join(@app_root, 'config/initializers'))
+    File.write(File.join(@app_root, 'config/initializers/woods_inflections.rb'), <<~RUBY)
+      Rails.autoloaders.each do |loader|
+        loader.inflector.inflect('api' => 'API')
+      end
+    RUBY
 
     @db_dir = Dir.mktmpdir('woods_inflected_db')
     ENV['WOODS_DUMMY_DB'] = File.join(@db_dir, 'dummy.sqlite3')
@@ -65,6 +71,7 @@ RSpec.describe 'Inflected Zeitwerk naming', :booted_app do
         config.eager_load = false
         config.logger = Logger.new(IO::NULL)
         config.consider_all_requests_local = true
+        config.autoloader = :zeitwerk if config.respond_to?(:autoloader=)
       end
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = @app_root
@@ -76,13 +83,9 @@ RSpec.describe 'Inflected Zeitwerk naming', :booted_app do
     # loudly rather than quietly testing nothing.
     BootedAppRoot.assert!(@app_root)
 
-    # BEFORE the loaders are set up inside initialize!: the loader's own
-    # inflector gains the custom inflection, so app/services/api/container/
-    # parser.rb is expected to define API::Container::Parser. Configuring
-    # after initialize! is too late — the autoload registrations were made
-    # with the un-inflected names.
-    Rails.application
-    Rails.autoloaders.main.inflector.inflect('api' => 'API')
+    # The initializer above runs before autoload registrations are finalized
+    # on Rails 6.0 through 8.1; direct pre-initialize access to
+    # Rails.autoloaders.main is nil on Rails 6.0/6.1.
     WoodsDummyApplication.initialize!
 
     ActiveRecord::Base.establish_connection(:test)

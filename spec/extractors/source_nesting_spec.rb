@@ -346,6 +346,50 @@ RSpec.describe Woods::Extractors::SourceNesting do
         .to eq('Domain::Container::Parser')
     end
 
+    it 'uses the foreign loader expected path for copied roots with custom inflections' do
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      allow(loader).to receive(:cpath_expected_at) do |path|
+        case path
+        when '/boot/root/app/services/api/container/parser.rb' then 'API::Container::Parser'
+        end
+      end
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/parser.rb', source))
+        .to eq('API::Container::Parser')
+    end
+
+    it 'uses the foreign loader inflector for copied-only files' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) do |basename, _abspath|
+        basename == 'api' ? 'API' : basename.split('_').map(&:capitalize).join
+      end
+      loader = double('loader', dirs: ['/boot/root/app/services'], inflector: inflector)
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/renderer.rb', source))
+        .to eq('API::Container::Renderer')
+    end
+
     it 'stays unmanaged outside both the autoloader roots and the active root' do
       loader = double('loader', dirs: ['/boot/root/app/services'])
       stub_const('Rails', double('Rails', root: '/active/root',

@@ -226,10 +226,11 @@ module Woods
       #   is not under a managed root
       def managed_constant_path(file_path)
         file_path = File.expand_path(file_path.to_s)
-        root, owner = managed_root_for(file_path)
+        root, owner, foreign_root = managed_root_for(file_path)
         return nil unless root
 
         return loader_expected_cpath(file_path) if owner == :loader
+        return foreign_loader_constant_path(file_path, root, foreign_root) if owner == :foreign_loader
 
         local_managed_constant_path(file_path, root)
       end
@@ -253,10 +254,8 @@ module Woods
         nil
       end
 
-      # The local path-to-constant convention. Reserved for roots the
-      # active loader does not own: the offline stand-in ({MANAGED_PATH_PATTERN})
-      # and the copied/multi-worktree active-root fallback, where there is
-      # no loader to ask.
+      # The local path-to-constant convention. Reserved for roots with no
+      # loader to ask: the offline stand-in ({MANAGED_PATH_PATTERN}).
       #
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] The managed root the path is relative to
@@ -264,6 +263,66 @@ module Woods
       def local_managed_constant_path(file_path, root)
         relative = file_path[root.length..].to_s.sub(/\.rb\z/, '')
         relative.split('/').reject(&:empty?).map { |segment| camelize_segment(segment) }.join('::')
+      end
+
+      # Constant path for a copied/multi-worktree file whose active root is
+      # governed by the boot loader's root shape. Prefer the loader API by
+      # mapping the active file onto the corresponding boot-loader root; when
+      # the file exists only in the copy, keep the loader's inflector instead
+      # of falling back to Woods' default camelizer.
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root the path is relative to
+      # @param foreign_root [String, nil] Matching managed root from loader.dirs
+      # @return [String]
+      def foreign_loader_constant_path(file_path, root, foreign_root)
+        mapped = foreign_root && mapped_foreign_path(file_path, root, foreign_root)
+        expected = loader_expected_cpath(mapped) if mapped
+        expected || inflected_managed_constant_path(file_path, root)
+      end
+
+      # @param file_path [String] Expanded absolute path under the active root
+      # @param root [String] Active managed root
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [String]
+      def mapped_foreign_path(file_path, root, foreign_root)
+        relative = file_path[root.length..].to_s
+        File.join(foreign_root, relative)
+      end
+
+      # The path-to-constant convention using the active loader's inflector.
+      # This is for copied-only foreign-root files where +cpath_expected_at+
+      # has no real boot-path file to resolve, but the loader's configured
+      # basename rules still govern (`api` => +API+).
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] The managed root the path is relative to
+      # @return [String]
+      def inflected_managed_constant_path(file_path, root)
+        relative = file_path[root.length..].to_s.sub(/\.rb\z/, '')
+        segments = relative.split('/').reject(&:empty?)
+        current = root.chomp('/')
+        segments.map do |segment|
+          current = File.join(current, segment)
+          loader_camelize(segment, current)
+        end.join('::')
+      end
+
+      # @param segment [String] Path segment without extension
+      # @param abspath [String] Absolute path passed to Zeitwerk inflectors
+      # @return [String]
+      def loader_camelize(segment, abspath)
+        loader = main_loader
+        inflector = loader.respond_to?(:inflector) ? loader.inflector : nil
+        return camelize_segment(segment) unless inflector.respond_to?(:camelize)
+
+        begin
+          inflector.camelize(segment, abspath)
+        rescue ArgumentError
+          inflector.camelize(segment)
+        end
+      rescue StandardError
+        camelize_segment(segment)
       end
 
       # The managed root directory containing +file_path+, if any, with the
@@ -277,9 +336,9 @@ module Woods
       # loader root belongs to a DIFFERENT tree — copied-app and
       # multi-worktree extractions, where the loader belongs to the boot
       # root while Rails.root is repointed per slot — does the root-relative
-      # `app/<kind>/` shape under the active root govern. No broad trust of
-      # paths that merely look like app trees. When no autoloader
-      # information exists at all (no Rails, a spec stub),
+      # `app/<kind>/` shape under the active root govern, still using the
+      # foreign loader's inflector. No broad trust of paths that merely look
+      # like app trees. When no autoloader information exists at all (no Rails, a spec stub),
       # {MANAGED_PATH_PATTERN} stands in offline.
       #
       # @param file_path [String] Absolute path to the source file
@@ -303,7 +362,7 @@ module Woods
         return nil if dirs.any? { |dir| dir.start_with?("#{active}/") }
         return nil if dirs.empty?
 
-        active_root_managed_for(file_path, active)
+        active_root_managed_for(file_path, active, dirs)
       end
 
       # Root-relative managed root for a file the autoloader does not
@@ -313,14 +372,20 @@ module Woods
       #
       # @param file_path [String] Absolute path to the source file
       # @param active [String] Expanded active extraction root
-      # @return [Array(String, Symbol), nil] `[root, :convention]`, or nil
-      def active_root_managed_for(file_path, active)
+      # @param dirs [Array<String>] Foreign loader roots
+      # @return [Array(String, Symbol, String), nil] `[root, :foreign_loader,
+      #   foreign_root]`, or nil
+      def active_root_managed_for(file_path, active, dirs)
         return nil unless file_path.start_with?("#{active}/")
 
         shape = file_path[active.length..].to_s.match(%r{\A(/app/[^/]+/)})
         return nil unless shape
 
-        ["#{active}#{shape[1]}", :convention]
+        root = "#{active}#{shape[1]}"
+        suffix = shape[1].chomp('/')
+        foreign_root = dirs.find { |dir| dir.end_with?(suffix) }
+
+        [root, :foreign_loader, foreign_root]
       end
 
       # The active extraction root, expanded: the boot root in a normal
