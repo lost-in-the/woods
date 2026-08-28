@@ -228,6 +228,39 @@ RSpec.describe Woods::Console::SqlValidator do
       end
     end
 
+    context 'with a MySQL # comment splitting a lock clause (PR-248 High 2)' do
+      # check_lock_clauses! strips noise with the PostgreSQL dialect, where #
+      # is not a comment, so MySQL leaves `LOCK` and `IN SHARE MODE`
+      # separated by a comment and the lock-clause regex never matches.
+      it 'rejects LOCK # comment / IN SHARE MODE' do
+        sql = "SELECT * FROM users LOCK # mysql comment\nIN SHARE MODE"
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+    end
+
+    context 'with lock-check false positives that must keep passing' do
+      it 'accepts a # inside a string literal (PostgreSQL prose)' do
+        sql = "SELECT * FROM notes WHERE body = 'use # for headings'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a string literal containing a lock phrase after a #' do
+        sql = "SELECT * FROM notes WHERE body = '# LOCK IN SHARE MODE'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a column literally named locked' do
+        sql = 'SELECT * FROM events WHERE locked = false'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts LOCK as an identifier fragment' do
+        sql = 'SELECT lock_in_share FROM metrics WHERE id = 1'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
     context 'with benign statements that must not trip the WITH-attached DML check' do
       it 'accepts WITH ... SELECT with a WHERE on updated_at' do
         sql = 'WITH a AS (SELECT 1) SELECT * FROM a WHERE updated_at > ?'

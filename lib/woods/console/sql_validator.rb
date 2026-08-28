@@ -366,6 +366,20 @@ module Woods
 
       # Check if the SQL carries a row-lock clause ({LOCK_CLAUSE_PATTERN}).
       #
+      # Runs the pattern against BOTH dialect normalizations of the SQL:
+      # {SqlNoiseStripper.strip_noise} defaults to PostgreSQL, where `#` is
+      # an ordinary character, so MySQL text like
+      # `SELECT * FROM users LOCK # note\nIN SHARE MODE` kept the comment
+      # between `LOCK` and `IN SHARE MODE` and the regex never matched —
+      # while the MySQL server removes the comment and takes the lock. The
+      # `:mysql` pass (which strips `#` comments) catches those; checking
+      # both stripped forms and rejecting on either is a union, so the
+      # MySQL view can only ever add detections, never hide one. This is
+      # validation-only: it changes what {SqlValidator} refuses, never what
+      # {SqlNoiseStripper} does for other callers (TableGate still scans its
+      # own stripped text; MySQL `/*! ... */` executable comments stay
+      # visible under both dialects by design).
+      #
       # Scans the noise-stripped SQL; see {LOCK_CLAUSE_PATTERN} for why this
       # is a dedicated check instead of a body-keyword entry.
       #
@@ -373,7 +387,8 @@ module Woods
       # @raise [SqlValidationError] if a lock clause is found
       def check_lock_clauses!(sql)
         stripped = SqlNoiseStripper.strip_noise(sql)
-        return unless stripped.match?(LOCK_CLAUSE_PATTERN)
+        mysql_stripped = SqlNoiseStripper.strip_noise(sql, dialect: :mysql)
+        return unless stripped.match?(LOCK_CLAUSE_PATTERN) || mysql_stripped.match?(LOCK_CLAUSE_PATTERN)
 
         raise SqlValidationError,
               'Rejected: row-lock clauses (FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE) are not allowed'

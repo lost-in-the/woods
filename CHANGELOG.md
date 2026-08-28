@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now refused: an alias over a `console_redacted_columns` column, an aggregate over
   one (aliased or bare), and an alias over either column of a
   `console_redacted_key_values` pair. Direct, unaliased selection of a redacted
-  column is unchanged and stays masked.
+  column is unchanged and stays masked. Aggregates over either column of a
+  `console_redacted_key_values` pair are also refused: an aggregate such as
+  `MAX(amount)` over the rows a sensitive key selects reads the redacted EAV value
+  itself.
 - **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
   check anchored its match to the statement leader, so
   `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
@@ -28,7 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Row-lock clauses are rejected.** `SELECT ... FOR UPDATE`, `FOR NO KEY UPDATE`,
   `FOR SHARE`, `FOR KEY SHARE` (with `NOWAIT`/`SKIP LOCKED`), and MySQL
   `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration
-  of the rolled-back transaction.
+  of the rolled-back transaction. The check runs against both the PostgreSQL and
+  MySQL comment normalizations, so a MySQL `#` comment between `LOCK` and
+  `IN SHARE MODE` can no longer hide the clause.
 
 ## [2.0.0] - 2026-08-20
 
