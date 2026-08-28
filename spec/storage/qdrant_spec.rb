@@ -20,6 +20,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     allow(http).to receive(:keep_alive_timeout=)
     allow(http).to receive(:start).and_return(http)
     allow(http).to receive(:started?).and_return(true)
+    allow(http).to receive(:finish)
   end
 
   describe '#initialize' do
@@ -448,6 +449,17 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
   end
 
   describe 'connection retry' do
+    it 'closes a discarded connection before replacing it (no leaked socket)' do
+      allow(http).to receive(:request).and_raise(Errno::ECONNREFUSED)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }.to raise_error(described_class::RequestError)
+
+      # Net::HTTP.new is stubbed to the same double, so both the first
+      # discard and the post-retry discard close that (shared) client.
+      expect(http).to have_received(:finish).twice
+    end
+
     it 'retries once on ECONNRESET' do
       response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":0}}')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)

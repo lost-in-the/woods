@@ -367,7 +367,7 @@ module Woods
           JSON.parse(response.body)
         rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout, IOError
           # Connection dropped — reset and retry once
-          @http_client = nil
+          discard_http_client
           begin
             response = http_client.request(request)
           rescue StandardError => retry_error
@@ -406,6 +406,22 @@ module Woods
           http.keep_alive_timeout = 30
           http.start
           @http_client = http
+        end
+
+        # Close a persistent connection before dropping the reference. Nil-ing
+        # {#http_client} alone abandons the open socket — the descriptor stays
+        # allocated until GC finalizes the object — so finish it first. Finish
+        # raises IOError on a session that was never started, and a connection
+        # that died mid-request can refuse to close cleanly; the rescue keeps
+        # the discard best-effort and only guarantees the reference is dropped.
+        #
+        # @return [void]
+        def discard_http_client
+          @http_client&.finish
+        rescue StandardError
+          nil
+        ensure
+          @http_client = nil
         end
       end
     end

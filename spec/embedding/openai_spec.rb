@@ -42,6 +42,7 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
     allow(http_double).to receive(:keep_alive_timeout=)
     allow(http_double).to receive(:start).and_return(http_double)
     allow(http_double).to receive(:started?).and_return(true)
+    allow(http_double).to receive(:finish)
     allow(success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
     allow(batch_success_response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
   end
@@ -280,6 +281,23 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
 
       result = provider.embed('hello')
       expect(result).to eq(single_embedding)
+    end
+
+    it 'closes the discarded connection before issuing the retry (no leaked socket)' do
+      allow(http_double).to receive(:request).and_raise(Errno::ECONNRESET)
+      retry_http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http_double, retry_http)
+      allow(retry_http).to receive(:use_ssl=)
+      allow(retry_http).to receive(:open_timeout=)
+      allow(retry_http).to receive(:read_timeout=)
+      allow(retry_http).to receive(:keep_alive_timeout=)
+      allow(retry_http).to receive(:start).and_return(retry_http)
+      allow(retry_http).to receive(:started?).and_return(true)
+      allow(retry_http).to receive(:request).and_return(success_response)
+
+      provider.embed('hello')
+
+      expect(http_double).to have_received(:finish)
     end
 
     it 'propagates error when retry also fails' do
