@@ -1821,6 +1821,18 @@ RSpec.describe Woods::Extractor do
       expect(output['graph_sha']).to eq(expected_sha)
     end
 
+    # P9e — #225 standardized artifact reads on AtomicFile.read (a plain
+    # File.read tags content with the process's default external encoding,
+    # which is US-ASCII under LANG=C). The graph_sha digest still read the
+    # dependency graph through bare File.read.
+    it 'reads dependency_graph.json through AtomicFile for the graph_sha digest' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      expect(Woods::AtomicFile)
+        .to receive(:read).with(Pathname.new(File.join(output_dir, 'dependency_graph.json'))).and_call_original
+
+      extractor.send(:write_graph_analysis)
+    end
+
     it 'preserves original analysis data alongside staleness metadata' do
       extractor.instance_variable_set(:@graph_analysis, { hubs: %w[User Post], orphans: ['Legacy'] })
       extractor.send(:write_graph_analysis)
