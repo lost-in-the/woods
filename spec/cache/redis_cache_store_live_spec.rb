@@ -56,23 +56,21 @@ RSpec.describe Woods::Cache::RedisCacheStore, :live_backends do
     track("woods:spec:#{SecureRandom.hex(6)}:#{suffix}")
   end
 
-  after do
+  def cleanup_tracked_keys!
     tracked = Array(@tracked_keys)
     redis.del(*tracked) if tracked.any?
+  end
 
-    # Belt and braces for the woods:spec family, in case a key was built
-    # without going through track().
-    cursor = '0'
-    loop do
-      cursor, keys = redis.scan(cursor, match: 'woods:spec:*', count: 100)
-      redis.del(*keys) if keys.any?
-      break if cursor == '0'
-    end
-
+  def assert_tracked_keys_removed!
     # The backends below are shared CI/dev servers: a leaked key is test
     # state retention, so cleanup failure fails the example.
-    survivors = tracked.select { |k| redis.exists?(k) }
+    survivors = Array(@tracked_keys).select { |k| redis.exists?(k) }
     expect(survivors).to be_empty, "leftover test keys in the shared Redis: #{survivors.join(', ')}"
+  end
+
+  after do
+    cleanup_tracked_keys!
+    assert_tracked_keys_removed!
   end
 
   describe 'JSON round-trip against a real server' do
@@ -114,6 +112,23 @@ RSpec.describe Woods::Cache::RedisCacheStore, :live_backends do
       expect(store.exist?(k)).to be(true)
       store.delete(k)
       expect(store.exist?(k)).to be(false)
+    end
+  end
+
+  describe 'test cleanup isolation' do
+    it 'removes tracked keys without deleting foreign-run woods:spec sentinels' do
+      tracked = key('tracked-cleanup')
+      foreign = "woods:spec:foreign-run:#{SecureRandom.hex(6)}:sentinel"
+
+      store.write(tracked, 'tracked')
+      redis.set(foreign, 'foreign')
+
+      cleanup_tracked_keys!
+
+      expect(redis.exists?(tracked)).to be(false)
+      expect(redis.get(foreign)).to eq('foreign')
+    ensure
+      redis.del(foreign) if foreign
     end
   end
 
