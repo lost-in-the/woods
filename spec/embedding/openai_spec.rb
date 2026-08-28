@@ -300,7 +300,7 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       expect(http_double).to have_received(:finish)
     end
 
-    # Flipped pin (#G-4 remediation, L17): this spec used to pin the raw
+    # Flipped pin (L17): this spec used to pin the raw
     # Errno::ECONNRESET escaping post_request when the one retry also failed.
     # That leaked an untyped transport error to callers that rescue
     # Woods::Error; Ollama and Qdrant already wrap this path, so OpenAI now
