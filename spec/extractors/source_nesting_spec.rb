@@ -379,6 +379,38 @@ RSpec.describe Woods::Extractors::SourceNesting do
       end
     end
 
+    it 'selects the foreign loader root whose mapped file exists when an earlier candidate is absent' do
+      Dir.mktmpdir('woods_source_nesting') do |tmp|
+        boot_root = File.join(tmp, 'boot')
+        active_root = File.join(tmp, 'active')
+        engine_services = File.join(boot_root, 'engine/app/services')
+        main_services = File.join(boot_root, 'main/app/services')
+        mapped_path = File.join(main_services, 'api/container/parser.rb')
+        FileUtils.mkdir_p(File.dirname(mapped_path))
+        File.write(mapped_path, '')
+
+        loader = double('loader', dirs: [engine_services, main_services])
+        allow(loader).to receive(:cpath_expected_at) do |path|
+          raise "unexpected mapped path #{path}" unless path == mapped_path
+
+          'API::Container::Parser'
+        end
+        stub_const('Rails', double('Rails', root: active_root,
+                                            autoloaders: double('autoloaders', main: loader)))
+        source = <<~RUBY
+          module API
+            class Container
+              class Parser
+              end
+            end
+          end
+        RUBY
+
+        expect(scanner.governed_class_name(File.join(active_root, 'app/services/api/container/parser.rb'), source))
+          .to eq('API::Container::Parser')
+      end
+    end
+
     it 'preserves a foreign loader non-claim for an existing mapped file' do
       Dir.mktmpdir('woods_source_nesting') do |tmp|
         boot_root = File.join(tmp, 'boot')
@@ -426,6 +458,28 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
       expect(scanner.governed_class_name('/active/root/app/services/api/container/renderer.rb', source))
         .to eq('API::Container::Renderer')
+    end
+
+    it 'leaves copied-only files unmanaged when multiple foreign roots match' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) do |basename, _abspath|
+        basename == 'api' ? 'API' : basename.split('_').map(&:capitalize).join
+      end
+      loader = double('loader', dirs: ['/boot/root/app/services', '/boot/engine/app/services'], inflector: inflector)
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/renderer.rb', source))
+        .to be_nil
     end
 
     it 'leaves copied-only files unmanaged when the matching loader root has a custom namespace' do

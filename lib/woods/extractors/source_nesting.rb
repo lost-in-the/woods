@@ -418,9 +418,13 @@ module Woods
       end
 
       # Root-relative managed root for a file the autoloader does not
-      # claim, when the loader's roots all belong to another tree: the
-      # conventional `app/<kind>/` shape under the ACTIVE extraction root,
-      # or nil when the file sits outside it.
+      # claim, when the loader's roots all belong to another tree: match
+      # the conventional `app/<kind>/` shape under the ACTIVE extraction
+      # root to the corresponding foreign loader roots. If exactly one
+      # mapped foreign file exists, that loader root is authoritative. If
+      # none exists, copied-only inflector fallback is allowed only for an
+      # unambiguous single foreign root. Ambiguous roots stay unmanaged
+      # rather than guessing between namespaces, collapses, or inflectors.
       #
       # @param file_path [String] Absolute path to the source file
       # @param active [String] Expanded active extraction root
@@ -435,7 +439,18 @@ module Woods
 
         root = "#{active}#{shape[1]}"
         suffix = shape[1].chomp('/')
-        foreign_root = dirs.find { |dir| dir.end_with?(suffix) }
+        candidates = dirs.select { |dir| dir.end_with?(suffix) }
+        return nil if candidates.empty?
+
+        existing = candidates.select do |foreign_root|
+          File.exist?(mapped_foreign_path(file_path, root, foreign_root))
+        end
+
+        return [root, :foreign_loader, existing.first] if existing.one?
+        return nil if existing.any?
+
+        foreign_root = candidates.one? ? candidates.first : nil
+        return nil unless foreign_root
 
         [root, :foreign_loader, foreign_root]
       end
