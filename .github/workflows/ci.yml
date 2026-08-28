@@ -281,16 +281,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Packaged-gem smoke on every PR (2.0 policy): builds the artifact and runs
-  # the structural half of spec/integration/packaged_gem_spec.rb — file
-  # inventory, the five executables, README link targets, community files,
-  # release metadata. The heavyweight installed-artifact examples stay
-  # release-gated: without WOODS_RUN_PACKAGE_SMOKE in the environment,
-  # spec_helper's :packaged_gem filter drops them, which is exactly what
-  # keeps this job lightweight compared to release.yml's package-test.
+  # Packaged-gem smoke on every PR (2.0 policy). Two tiers live in
+  # spec/integration/packaged_gem_spec.rb:
+  #
+  # - the untagged structural examples: the built gem's file inventory,
+  #   executables, README link targets, community files, release metadata;
+  # - the :package_install boot smoke (enabled below via
+  #   WOODS_RUN_PACKAGE_INSTALL): the artifact installed into an isolated gem
+  #   home, `require 'woods'` proven to load from the installed gem rather
+  #   than the checkout, and one packaged executable booted through a
+  #   JSON-RPC initialize with protocol-pure stdout.
+  #
+  # What does NOT run here: the heavyweight installed-artifact suite
+  # (:packaged_gem — full protocol drives, generators, Rails extraction in a
+  # bundled dummy app). That gate is all-or-nothing over its own tag, which
+  # is why the smoke tier carries a separate tag and env var instead of
+  # reusing it; it stays release-gated behind WOODS_RUN_PACKAGE_SMOKE in
+  # release.yml.
   package-smoke:
     name: Packaged gem smoke
     runs-on: ubuntu-latest
+    env:
+      WOODS_RUN_PACKAGE_INSTALL: '1'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
       - name: Set up Ruby
@@ -298,5 +310,5 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Build the gem and check its packaged surface
+      - name: Build the gem, install it, and boot it
         run: bundle exec rspec spec/integration/packaged_gem_spec.rb
