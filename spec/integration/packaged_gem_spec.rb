@@ -189,15 +189,27 @@ RSpec.describe 'packaged gem' do
       )
     end
 
-    it "loads 'woods' from the installed gem, with no repository path on the load path" do
+    it "loads 'woods' from the installed gem, with nothing from the checkout's lib on the load path" do
       script = <<~'RUBY'
         require 'woods'
-        root = File.expand_path(ENV.fetch('WOODS_REPOSITORY_ROOT'))
-        leaked = $LOAD_PATH.select { |p| File.expand_path(p).start_with?(root) }
-        abort "repository load path leaked: #{leaked.join(', ')}" unless leaked.empty?
-        loaded = Gem.loaded_specs.fetch('woods').full_gem_path
         home = File.realpath(ENV.fetch('WOODS_SMOKE_GEM_HOME'))
+        # The bundle path may legitimately live below the checkout (CI's
+        # vendor/bundle), so a blanket "nothing under the repository root"
+        # rule would reject the very GEM_PATH entries smoke_env adds. The
+        # checkout's own lib is the only load-path entry that means "loaded
+        # from source instead of the installed gem".
+        lib = File.join(File.expand_path(ENV.fetch('WOODS_REPOSITORY_ROOT')), 'lib')
+        leaked = $LOAD_PATH.select do |p|
+          expanded = File.expand_path(p)
+          expanded == lib || expanded.start_with?("#{lib}/")
+        end
+        abort "checkout lib leaked onto the load path: #{leaked.join(', ')}" unless leaked.empty?
+        loaded = Gem.loaded_specs.fetch('woods').full_gem_path
         abort "woods loaded from #{loaded}, not the installed gem" unless loaded.start_with?(home)
+        # loaded_specs names the gem; source_location proves the FILE actually
+        # came from the isolated install, not a same-named copy elsewhere.
+        defined_in = File.realpath(Woods.method(:configuration).source_location.fetch(0))
+        abort "woods source loaded from #{defined_in}" unless defined_in.start_with?("#{home}/")
         puts 'ok'
       RUBY
       env = smoke_env.merge(
