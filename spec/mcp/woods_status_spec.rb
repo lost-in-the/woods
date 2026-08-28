@@ -21,10 +21,11 @@ RSpec.describe 'woods_status tool' do
     end
 
     it 'embeds an update sub-hash reporting the installed version (no update by default)' do
-      # spec_helper stubs the network fetch to nil, so a hermetic run reports no update.
+      # spec_helper stubs the network fetch to nil, so a hermetic run reports no update
+      # and latest_version falls back to the installed version (the newest one known).
       expect(status[:server][:update]).to eq(
         current_version: Woods::VERSION,
-        latest_version: nil,
+        latest_version: Woods::VERSION,
         update_available: false
       )
     end

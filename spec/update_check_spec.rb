@@ -148,6 +148,32 @@ RSpec.describe Woods::UpdateCheck do
         update_available: true
       )
     end
+
+    it 'reports the installed version as latest_version when it is ahead of the registry' do
+      hash = described_class.status_hash(
+        current: '2.0.0', cache_path: cache_path, now: now,
+        fetcher: ->(_url) { '1.6.0' }
+      )
+
+      expect(hash).to eq(
+        current_version: '2.0.0',
+        latest_version: '2.0.0',
+        update_available: false
+      )
+    end
+
+    it 'reports the installed version as latest_version when the registry probe fails' do
+      hash = described_class.status_hash(
+        current: '1.5.0', cache_path: cache_path, now: now,
+        fetcher: ->(_url) { raise SocketError, 'offline' }
+      )
+
+      expect(hash).to eq(
+        current_version: '1.5.0',
+        latest_version: '1.5.0',
+        update_available: false
+      )
+    end
   end
 
   describe '.tool_not_found_message' do
