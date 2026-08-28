@@ -66,6 +66,28 @@ module Woods
         end
       end
 
+      # Shared connection hygiene for adapters that hold one persistent
+      # Net::HTTP client in +@http_client+. Closing a connection before
+      # dropping the reference keeps the descriptor from lingering until GC.
+      module DiscardableClient
+        # Close the persistent connection before dropping the reference.
+        # Nil-ing +@http_client+ alone abandons the open socket — the
+        # descriptor stays allocated until GC finalizes the object — so
+        # finish it first. Finish raises IOError on a session that was never
+        # started, and a connection that died mid-request can refuse to close
+        # cleanly; the rescue keeps the discard best-effort and only
+        # guarantees the reference is dropped.
+        #
+        # @return [void]
+        def discard_http_client
+          @http_client&.finish
+        rescue StandardError
+          nil
+        ensure
+          @http_client = nil
+        end
+      end
+
       # Raised when an embedding API answers with a non-success HTTP
       # response. Carries the HTTP status and the raw +Retry-After+ header
       # (when the server sent one) so {Woods::Resilience::RetryableProvider}
@@ -200,6 +222,7 @@ module Woods
       #   vectors = provider.embed_batch(["text1", "text2"])
       class Ollama
         include Interface
+        include DiscardableClient
 
         DEFAULT_MODEL = 'nomic-embed-text'
         DEFAULT_HOST = 'http://localhost:11434'
@@ -406,22 +429,6 @@ module Woods
           http.keep_alive_timeout = 30
           http.start
           @http_client = http
-        end
-
-        # Close a persistent connection before dropping the reference. Nil-ing
-        # {#http_client} alone abandons the open socket — the descriptor stays
-        # allocated until GC finalizes the object — so finish it first. Finish
-        # raises IOError on a session that was never started, and a connection
-        # that died mid-request can refuse to close cleanly; the rescue keeps
-        # the discard best-effort and only guarantees the reference is dropped.
-        #
-        # @return [void]
-        def discard_http_client
-          @http_client&.finish
-        rescue StandardError
-          nil
-        ensure
-          @http_client = nil
         end
       end
     end

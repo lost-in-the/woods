@@ -18,6 +18,7 @@ module Woods
       #   vectors = provider.embed_batch(["text1", "text2"])
       class OpenAI
         include Interface
+        include DiscardableClient
 
         ENDPOINT = URI('https://api.openai.com/v1/embeddings')
         DEFAULT_MODEL = 'text-embedding-3-small'
@@ -208,22 +209,6 @@ module Woods
           http.keep_alive_timeout = 30
           http.start
           @http_client = http
-        end
-
-        # Close a persistent connection before dropping the reference. Nil-ing
-        # {#http_client} alone abandons the open socket — the descriptor stays
-        # allocated until GC finalizes the object — so finish it first. Finish
-        # raises IOError on a session that was never started, and a connection
-        # that died mid-request can refuse to close cleanly; the rescue keeps
-        # the discard best-effort and only guarantees the reference is dropped.
-        #
-        # @return [void]
-        def discard_http_client
-          @http_client&.finish
-        rescue StandardError
-          nil
-        ensure
-          @http_client = nil
         end
       end
     end
