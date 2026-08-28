@@ -100,6 +100,18 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Wrapper-nested classes no longer collide on one identifier.** A file under
+  a managed autoload path is now named for the constant its path spells
+  (Zeitwerk-governed naming): `app/services/domain/container/parser.rb`
+  declaring `module Domain; class Container; class Parser` indexes as
+  `Domain::Container::Parser` instead of the wrapper `Domain::Container`.
+  Previously every sibling under the same wrapper indexed as the wrapper and
+  same-type dedup silently dropped all but one. The source parser remains the
+  fallback for unmanaged or unconventional paths, and extraction now aborts
+  naming both file paths when one type+identifier is still derived from two
+  different files. **Re-extract after upgrading** — embeddings, exports, and
+  saved queries keyed by the old identifiers need regeneration.
+
 - **Console stdio setup now explains production token validation.** Stdio clients do
   not send the HTTP bearer token, but Rails still requires a 32-character-or-longer
   `console_mcp_token` at production boot whenever Console MCP is enabled. The upgrade,

@@ -14,7 +14,7 @@ A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
 Phase 1: Extract    . All 34 extractors run, producing ExtractedUnit objects
-Phase 1.5: Dedupe   . Duplicate identifiers are dropped (engines can double-register routes)
+Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Graph      . PageRank + structural analysis (orphans, hubs, cycles, bridges)
 Phase 4: Enrich     . Git metadata added (last author, change frequency, recent commits)
@@ -31,6 +31,16 @@ Extractors discover code one of two ways:
 | **File-based** | Scans conventional directories (`app/services`, `db/migrate`, etc.), more robust for non-AR classes | ServiceExtractor, MigrationExtractor, ViewTemplateExtractor |
 
 Some extractors combine both (e.g., `JobExtractor` scans directories first, then supplements with `ApplicationJob.descendants`).
+
+### Identifier Naming (source-derived units)
+
+File-based extractors derive an identifier in three steps, first match wins:
+
+1. **Zeitwerk-governed naming.** For a file under a managed autoload path, the expected constant path is computed — from `Rails.autoloaders.main` when a Rails autoloader is up, from the same path-to-constant convention offline otherwise — and the source must declare exactly that constant: `app/services/domain/container/parser.rb` is expected to define `Domain::Container::Parser`. This is what lets a file whose namespaces are written as *classes* (`module Domain; class Container; class Parser`) name the file's own constant instead of the wrapper `Domain::Container`, which every sibling under the same wrapper would otherwise collide with.
+2. **Position-aware nesting scan** (`SourceNesting`, the supporting utility above). The first `class` declaration qualified by the namespaces actually open at that position. Compact declarations keep their segments; a helper module nested inside the class and sibling modules that closed earlier do not contribute.
+3. **Path convention.** Camelize the path under `app/<kind>/` (details vary per extractor).
+
+Unmanaged paths (`lib/`, configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide, exactly as before the governed lookup existed.
 
 ### Eager Loading
 
