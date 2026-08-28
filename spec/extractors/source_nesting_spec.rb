@@ -215,6 +215,118 @@ RSpec.describe Woods::Extractors::SourceNesting do
     end
   end
 
+  # ── #governed_class_name ─────────────────────────────────────────────
+
+  describe '#governed_class_name' do
+    it 'resolves a class nested in class namespaces to the file-named constant' do
+      # G-1: the source-derived parser returns at the first class
+      # declaration, so `module Domain; class Container; class Parser`
+      # named the unit Domain::Container — the wrapper, not the file's
+      # constant. Zeitwerk governs the expected name for a managed path;
+      # every wrapper sibling then collided on one identifier and same-type
+      # dedup silently dropped all but one.
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+              def call(input)
+                input.parse
+              end
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/parser.rb', source))
+        .to eq('Domain::Container::Parser')
+    end
+
+    it 'resolves a module declared inside class namespaces' do
+      source = <<~RUBY
+        module Domain
+          class Container
+            module Formats
+              NAMES = %w[json xml].freeze
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/formats.rb', source))
+        .to eq('Domain::Container::Formats')
+    end
+
+    it 'gives sibling wrapper files distinct identifiers' do
+      parser = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+      renderer = <<~RUBY
+        module Domain
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/parser.rb', parser))
+        .to eq('Domain::Container::Parser')
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/renderer.rb', renderer))
+        .to eq('Domain::Container::Renderer')
+    end
+
+    it 'matches a compact declaration inside wrappers' do
+      source = <<~RUBY
+        module Domain
+          class Container::Parser
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/parser.rb', source))
+        .to eq('Domain::Container::Parser')
+    end
+
+    it 'resolves a conventional top-level file to its own constant' do
+      source = <<~RUBY
+        class CheckoutService
+          def call(order); end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/checkout_service.rb', source))
+        .to eq('CheckoutService')
+    end
+
+    it 'returns nil when no declaration matches the managed constant' do
+      # Unconventional source under a managed path: the caller falls back to
+      # the source parser, preserving pre-#G-1 behavior.
+      source = <<~RUBY
+        class PaymentService
+          def call; end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/payment.rb', source)).to be_nil
+    end
+
+    it 'returns nil for a path outside any managed app/ root' do
+      source = <<~RUBY
+        module External
+          class Analytics
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/lib/external/analytics.rb', source)).to be_nil
+    end
+  end
+
   # ── #qualified_outer_module_name ─────────────────────────────────────
 
   describe '#qualified_outer_module_name' do

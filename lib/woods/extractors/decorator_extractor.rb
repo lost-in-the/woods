@@ -97,10 +97,11 @@ module Woods
       # @param source [String] Ruby source code
       # @return [String, nil] The class name or nil
       def extract_class_name(file_path, source)
-        # Position-aware (SourceNesting, #174): only modules still open at
-        # the class declaration qualify it. A sibling module that closed
-        # earlier, or a helper module nested inside the class, does not.
-        qualified_first_class_name(source) ||
+        # Zeitwerk-governed naming (G-1) first, then position-aware
+        # (SourceNesting, #174): only modules still open at the class
+        # declaration qualify it. A sibling module that closed earlier, or a
+        # helper module nested inside the class, does not.
+        governed_class_name(file_path, source) || qualified_first_class_name(source) ||
           file_path
             .sub("#{Rails.root}/", '')
             .sub(%r{^app/(decorators|presenters|form_objects)/}, '')
