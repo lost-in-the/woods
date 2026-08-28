@@ -272,6 +272,10 @@ module Woods
       # Camelize one path segment the way Zeitwerk's default inflector
       # treats conventional names: `payment` → +Payment+, `fee_schedule` →
       # +FeeSchedule+. Kept local so the scanner stays free of ActiveSupport.
+      # It diverges from Zeitwerk on all-caps segments and cannot honor a
+      # custom inflector (e.g. `api` configured as +API+): the mismatch only
+      # fails the governed match, which falls back to the source parser —
+      # governance is lost, an identifier is never wrong.
       #
       # @param segment [String]
       # @return [String]
