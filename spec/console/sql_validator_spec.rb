@@ -239,6 +239,30 @@ RSpec.describe Woods::Console::SqlValidator do
       end
     end
 
+    context 'with MySQL executable comments splitting a lock clause (PR-248 round-2 High 3)' do
+      # /*!...*/ is executable-comment syntax: MySQL treats the body as
+      # whitespace when the version guard is unsatisfied, and executes it in
+      # place otherwise. Both noise-stripping views keep the markers, so the
+      # lock regex must be run over both semantics of the comment.
+      it 'rejects LOCK /*!99999 */ IN SHARE MODE (guard-unsatisfied: whitespace semantics)' do
+        sql = 'SELECT * FROM users LOCK /*!99999 */ IN SHARE MODE'
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+
+      it 'rejects FOR /*!99999 */ UPDATE (guard-unsatisfied: whitespace semantics)' do
+        sql = 'SELECT * FROM users FOR /*!99999 */ UPDATE'
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+
+      it 'rejects a lock keyword hidden in the executable comment body (guard-satisfied semantics)' do
+        sql = 'SELECT * FROM users LOCK /*! IN SHARE */ MODE'
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+    end
+
     context 'with lock-check false positives that must keep passing' do
       it 'accepts a # inside a string literal (PostgreSQL prose)' do
         sql = "SELECT * FROM notes WHERE body = 'use # for headings'"
@@ -557,6 +581,48 @@ RSpec.describe Woods::Console::SqlValidator do
       it 'does not misclassify a grouped boolean expression as a function call' do
         expect { validator.validate!('SELECT * FROM users WHERE (active = true)') }.not_to raise_error
       end
+    end
+  end
+
+  describe 'dialect-aware lock validation (PR-248 round-2 High 4)' do
+    # MySQL treats \' as an escaped apostrophe, so the whole literal is one
+    # string and the prose inside it ("request for update") never reaches
+    # SQL grammar. The PostgreSQL normalization ends the literal early and
+    # exposes `for update` — a true view of an invalid-on-PG statement, but
+    # a false rejection of valid MySQL. With the adapter known, only the
+    # matching normalization runs.
+    let(:mysql_literal_sql) { "SELECT * FROM notes WHERE body = 'customer\\'s request for update'" }
+
+    it 'accepts a MySQL escaped-apostrophe literal containing FOR UPDATE under the MySQL dialect' do
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(mysql_literal_sql) }
+        .not_to raise_error
+    end
+
+    it 'still rejects the MySQL # comment lock split under the MySQL dialect' do
+      sql = "SELECT * FROM users LOCK # mysql comment\nIN SHARE MODE"
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'still rejects executable-comment lock splits under the MySQL dialect' do
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users LOCK /*!99999 */ IN SHARE MODE') }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users FOR /*!99999 */ UPDATE') }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users LOCK /*! IN SHARE */ MODE') }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'retains PostgreSQL quote behavior: the escaped literal exposes a lock clause under the PG dialect' do
+      expect { Woods::Console::SqlValidator.new(dialect: :postgres).validate!(mysql_literal_sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'keeps the conservative union when no dialect is given' do
+      expect { validator.validate!(mysql_literal_sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      expect { validator.validate!("SELECT * FROM users LOCK # c\nIN SHARE MODE") }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
     end
   end
 

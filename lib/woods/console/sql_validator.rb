@@ -27,6 +27,30 @@ module Woods
     # most of the length is declarative allowlist/denylist data (documented
     # named constants), not imperative logic.
     class SqlValidator # rubocop:disable Metrics/ClassLength
+      # SQL dialects whose normalization the lock-clause check can run over.
+      KNOWN_DIALECTS = %i[postgres mysql].freeze
+
+      # The dialect the statement will execute under, when the caller knows
+      # it. `nil` (the default) keeps the conservative union: every check
+      # runs against both dialect normalizations, which can reject a
+      # statement that is valid under one dialect's quote grammar (a MySQL
+      # `\'` escape hides prose that the PostgreSQL view reads as SQL). When
+      # the execution boundary knows the adapter, passing the matching
+      # dialect validates the statement the way the server will actually
+      # parse it. Every known bypass form stays rejected under every
+      # dialect: the executable-comment views in {#lock_clause_views} cover
+      # `#` comment splits and `/*!...*/` splits under both semantics.
+      #
+      # @return [Symbol, nil]
+      attr_reader :dialect
+
+      def initialize(dialect: nil)
+        unless dialect.nil? || KNOWN_DIALECTS.include?(dialect)
+          raise ArgumentError, "Unknown dialect #{dialect.inspect}. Supported: #{KNOWN_DIALECTS.inspect}"
+        end
+
+        @dialect = dialect
+      end
       # Row-lock clauses that would take live row locks even under the
       # rolled-back SafeContext transaction (M5).
       #
@@ -82,6 +106,12 @@ module Woods
       # `\b` requires the keyword to start right after the paren, and a
       # bare `update` column follows a comma or SELECT, not a paren.
       WITH_ATTACHED_DML_PATTERN = /\bWITH\b[\s\S]*?\)\s*(?:DELETE|UPDATE|INSERT|MERGE)\b/i
+
+      # Matches a MySQL executable comment (`/*!...*/` or the version-guarded
+      # `/*!NNNNN...*/`), capturing the body. Only scanned by
+      # {#lock_clause_views} — {SqlNoiseStripper} deliberately leaves these
+      # markers in place because their meaning is version-dependent.
+      EXECUTABLE_COMMENT_PATTERN = %r{/\*!(?:\d{5})?(.*?)\*/}m
 
       # Forbidden statement prefixes (case-insensitive).
       #
@@ -364,21 +394,20 @@ module Woods
         end
       end
 
-      # Check if the SQL carries a row-lock clause ({LOCK_CLAUSE_PATTERN}).
+      # Check if the SQL carries a row-lock clause ({LOCK_CLAUSE_PATTERN})
+      # in any dialect-normalized view of the statement.
       #
-      # Runs the pattern against BOTH dialect normalizations of the SQL:
-      # {SqlNoiseStripper.strip_noise} defaults to PostgreSQL, where `#` is
-      # an ordinary character, so MySQL text like
-      # `SELECT * FROM users LOCK # note\nIN SHARE MODE` kept the comment
-      # between `LOCK` and `IN SHARE MODE` and the regex never matched —
-      # while the MySQL server removes the comment and takes the lock. The
-      # `:mysql` pass (which strips `#` comments) catches those; checking
-      # both stripped forms and rejecting on either is a union, so the
-      # MySQL view can only ever add detections, never hide one. This is
-      # validation-only: it changes what {SqlValidator} refuses, never what
-      # {SqlNoiseStripper} does for other callers (TableGate still scans its
-      # own stripped text; MySQL `/*! ... */` executable comments stay
-      # visible under both dialects by design).
+      # {#lock_clause_views} produces, for each SQL dialect, the
+      # noise-stripped text with every MySQL executable comment
+      # (`/*!...*/`) interpreted under BOTH of its possible semantics:
+      # replaced by whitespace (version guard unsatisfied — MySQL treats
+      # the comment as a plain comment and `LOCK /*!99999 */ IN SHARE MODE`
+      # runs as a live lock clause), and replaced by its body (guard
+      # satisfied — the body executes in place, so `LOCK /*! IN SHARE */
+      # MODE` also runs as one). Running the pattern over every view and
+      # rejecting on any match means a lock clause cannot be split or
+      # hidden by a comment form without at least one view seeing it,
+      # while no comment body is ever hidden from the check.
       #
       # Scans the noise-stripped SQL; see {LOCK_CLAUSE_PATTERN} for why this
       # is a dedicated check instead of a body-keyword entry.
@@ -386,12 +415,27 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a lock clause is found
       def check_lock_clauses!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
-        mysql_stripped = SqlNoiseStripper.strip_noise(sql, dialect: :mysql)
-        return unless stripped.match?(LOCK_CLAUSE_PATTERN) || mysql_stripped.match?(LOCK_CLAUSE_PATTERN)
+        return unless lock_clause_views(sql).any? { |view| view.match?(LOCK_CLAUSE_PATTERN) }
 
         raise SqlValidationError,
               'Rejected: row-lock clauses (FOR UPDATE / FOR SHARE / LOCK IN SHARE MODE) are not allowed'
+      end
+
+      # Every dialect-normalized view of the SQL the lock-clause check must
+      # consider. With {#dialect} known, only that dialect's view is
+      # produced (the server will parse the statement one way); without it,
+      # both views run as a conservative union. Each view is scanned under
+      # both executable-comment semantics; see {#check_lock_clauses!}.
+      #
+      # @param sql [String]
+      # @return [Array<String>]
+      def lock_clause_views(sql)
+        dialects = dialect ? [dialect] : KNOWN_DIALECTS
+        dialects.flat_map do |dialect_name|
+          stripped = SqlNoiseStripper.strip_noise(sql, dialect: dialect_name)
+          [stripped.gsub(EXECUTABLE_COMMENT_PATTERN, ' '),
+           stripped.gsub(EXECUTABLE_COMMENT_PATTERN) { Regexp.last_match[1] }]
+        end
       end
 
       # Check if a CTE list is attached to a top-level data-modifying

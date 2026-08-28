@@ -1197,6 +1197,57 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
           expect(response['ok']).to be true
           expect(connection).to have_received(:select_all).with('EXPLAIN SELECT id FROM users')
         end
+
+        context 'with a recording MySQL adapter (PR-248 round-2 High 4)' do
+          before do
+            allow(connection).to receive(:adapter_name).and_return('Mysql2')
+            # SafeContext's MySQL timeout reads the prior session value first;
+            # housekeeping, not the validated statement.
+            allow(connection).to receive(:select_value).and_return(nil)
+          end
+
+          it 'executes a benign SELECT through the MySQL-dialect validation path' do
+            allow(connection).to receive(:select_all).and_return(select_result)
+            escaped_literal = "SELECT * FROM notes WHERE body = 'customer\\'s request for update'"
+
+            response = executor_with_read.send_request({
+                                                         'tool' => 'sql',
+                                                         'params' => { 'sql' => escaped_literal }
+                                                       })
+
+            expect(response['ok']).to be true
+            expect(connection).to have_received(:select_all).once
+          end
+
+          it 'runs no adapter execution for a rejected executable-comment lock statement' do
+            allow(connection).to receive(:select_all)
+            guarded_sql = 'SELECT * FROM users LOCK /*!99999 */ IN SHARE MODE'
+
+            response = executor_with_read.send_request({
+                                                         'tool' => 'sql',
+                                                         'params' => { 'sql' => guarded_sql }
+                                                       })
+
+            expect(response).to include('ok' => false, 'error_type' => 'validation')
+            expect(response['error']).to match(/lock/i)
+            expect(connection).not_to have_received(:select_all)
+            expect(connection).not_to have_received(:execute).with(a_string_matching(/lock/i))
+          end
+
+          it 'runs no adapter execution for a rejected # comment lock split' do
+            allow(connection).to receive(:select_all)
+            hash_comment_sql = "SELECT * FROM users LOCK # mysql comment\nIN SHARE MODE"
+
+            response = executor_with_read.send_request({
+                                                         'tool' => 'sql',
+                                                         'params' => { 'sql' => hash_comment_sql }
+                                                       })
+
+            expect(response).to include('ok' => false, 'error_type' => 'validation')
+            expect(response['error']).to match(/lock/i)
+            expect(connection).not_to have_received(:select_all)
+          end
+        end
       end
 
       context 'query tool' do
