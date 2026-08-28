@@ -339,8 +339,16 @@ module Woods
         end
 
         # @see Interface#store
+        # @raise [ArgumentError] if +metadata+ carries no type key
+        #
+        # The type column backs {#find_by_type}, so an absent key used to
+        # fall through +type.to_s+ and be stored as +""+ — fabricating a
+        # type where none existed rather than surfacing the missing field
+        # (L22).
         def store(id, metadata)
           type = metadata[:type] || metadata['type']
+          raise ArgumentError, "metadata for #{id.inspect} has no type key" unless type
+
           data = JSON.generate(metadata)
 
           with_lock_retry do

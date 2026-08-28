@@ -177,6 +177,14 @@ RSpec.describe Woods::Storage::MetadataStore do
         result = store.find('User')
         expect(result['version']).to eq(2)
       end
+
+      # L22 — the type column backs find_by_type, but an absent key fell
+      # through `type.to_s` and was stored as "", fabricating a type where
+      # none existed instead of surfacing the missing field.
+      it 'rejects metadata stored without a type key instead of writing an empty type' do
+        expect { store.store('Ghost', { file_path: 'app/models/ghost.rb' }) }
+          .to raise_error(ArgumentError, /type/)
+      end
     end
 
     describe '#find' do
