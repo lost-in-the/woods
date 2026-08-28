@@ -21,11 +21,14 @@ module Woods
     class << self
       # Analyze Ruby source files and produce ExtractedUnit objects.
       #
-      # @param paths [Array<String>] File paths or directories to analyze
+      # @param paths [Array<String>, nil] File paths or directories to analyze
+      # @param sources [Hash{String => String}, nil] Pre-read source keyed by
+      #   absolute file path. This lets callers analyze one consistent source
+      #   snapshot rather than re-reading files while they may be changing.
       # @param trace_data [Array<Hash>, nil] Optional runtime trace data for enrichment
       # @return [Array<ExtractedUnit>] All extracted units
-      def analyze(paths:, trace_data: nil)
-        files = discover_files(paths)
+      def analyze(paths: nil, sources: nil, trace_data: nil)
+        files = sources ? sources.keys.sort : discover_files(Array(paths))
         return [] if files.empty?
 
         parser = Ast::Parser.new
@@ -36,7 +39,7 @@ module Woods
         units = []
 
         files.each do |file_path|
-          source = read_file(file_path)
+          source = source_for(file_path, sources)
           next unless source
 
           units.concat(class_analyzer.analyze(source: source, file_path: file_path))
@@ -71,6 +74,12 @@ module Woods
           end
         end
         files.uniq
+      end
+
+      def source_for(file_path, sources)
+        return sources.fetch(file_path) if sources
+
+        read_file(file_path)
       end
 
       # Read a file safely, returning nil on failure.
