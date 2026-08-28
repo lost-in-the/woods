@@ -129,7 +129,7 @@ module Woods
           #
           # @param target [Pathname] final destination
           # @param store [#count, #each_entry] populated metadata store
-          def write_atomic(target, store)
+          def write_atomic(target, store) # rubocop:disable Metrics/AbcSize
             tmp = Tempfile.new([FILENAME, '.tmp'], target.dirname.to_s)
             begin
               tmp.binmode

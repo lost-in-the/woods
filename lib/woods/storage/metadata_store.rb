@@ -308,7 +308,7 @@ module Woods
       #   store.store("User", { type: "model", namespace: "Admin" })
       #   store.find("User")  # => { "type" => "model", "namespace" => "Admin" }
       #
-      class SQLite
+      class SQLite # rubocop:disable Metrics/ClassLength
         include Interface
 
         # Attempts allowed for a contended write, including the first.

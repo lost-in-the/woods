@@ -357,7 +357,8 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
     end
   end
 
-  describe 'failure-mode: float blob truncated after valid header' do    # vectors.bin header is intact but the float payload is shorter than
+  describe 'failure-mode: float blob truncated after valid header' do
+    # vectors.bin header is intact but the float payload is shorter than
     # vector_count × dimension × 4 bytes. byteslice on the truncated blob
     # pads the missing tail with nil — those nil-floated vectors used to
     # load into the live store, crash search with TypeError, and re-publish
