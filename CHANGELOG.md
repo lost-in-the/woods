@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`woods_status` no longer reports a stale registry version alongside a newer
+  install.** When the installed gem is ahead of RubyGems (for example while
+  testing an unreleased release), `server.update.latest_version` now reports the
+  newest known version — the installed one — instead of the raw published
+  version, so the payload no longer pairs `current_version: 2.0.0` with
+  `latest_version: 1.6.0` and `update_available: false`. `update_available`
+  semantics and all key names are unchanged.
+- A wrong-dimension query vector now raises the typed `Woods::Error` before the
+  request leaves the process on both the pgvector and Qdrant search paths
+  (previously a server-side `PG::DataException` or Qdrant 400).
+- An OpenAI embedding request whose one retry also fails now raises the typed
+  `RequestError` (as Ollama already did) instead of leaking a raw
+  `Errno::ECONNRESET`. Persistent HTTP connections dropped on transport errors
+  are closed promptly instead of waiting for GC.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
