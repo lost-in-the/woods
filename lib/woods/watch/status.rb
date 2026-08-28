@@ -64,7 +64,12 @@ module Woods
           'updated_at' => @clock.call
         }.merge(details.transform_keys(&:to_s))
 
-        AtomicFile.write(@path, JSON.generate(record))
+        # 0644 on purpose (O1): host-side worktree hooks read this file
+        # through a bind mount (the documented deployment, see Daemon's
+        # daemon-deference check), making it the one artifact with a
+        # cross-boundary consumer. Everything else Woods writes keeps
+        # AtomicFile's restrictive 0600 default.
+        AtomicFile.write(@path, JSON.generate(record), mode: 0o644)
         record
       end
 
