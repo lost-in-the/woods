@@ -886,30 +886,46 @@ module Woods
                 'redaction. Select it unaliased; the value is masked.'
         end
 
-        kv_columns = @safe_context.redacted_key_values
-                                  .flat_map { |pattern| [pattern['key_column'], pattern['value_column']] }
-        return unless kv_columns.include?(base)
+        return unless redacted_kv_columns.include?(base)
 
         raise ValidationError,
               "Rejected: aliasing redacted key/value column '#{base}' as '#{alias_name}' bypasses " \
               'EAV output redaction. Select it unaliased.'
       end
 
-      # Refuse an aggregate call over a `console_redacted_columns` column,
-      # mirroring {#handle_aggregate}'s {#refuse_redacted_column!} for the
-      # aggregate expressions accepted inside `select`.
+      # Refuse an aggregate call over a column protected by either redaction
+      # layer, mirroring {#handle_aggregate}'s {#refuse_redacted_column!} for
+      # the aggregate expressions accepted inside `select`. The EAV check
+      # covers both columns of every `console_redacted_key_values` pair: an
+      # aggregate over the value column (e.g. `MAX(amount)` over the rows a
+      # sensitive key selects) reads the redacted value itself, and the key
+      # column is refused for symmetry with the alias rule.
       #
       # @param column [String, nil] aggregate argument (`*` is never redacted)
-      # @raise [ValidationError] when the aggregated column is redacted
+      # @raise [ValidationError] when the aggregated column is protected
       def refuse_redacted_aggregate_expression!(column)
         return if column.nil? || column == '*'
 
         base = base_column_name(column)
-        return unless @safe_context.redacted_columns.include?(base)
+        if @safe_context.redacted_columns.include?(base)
+          raise ValidationError,
+                "Rejected: aggregating redacted column '#{base}' reads its value; it cannot be used " \
+                'as an aggregate input.'
+        end
+
+        return unless redacted_kv_columns.include?(base)
 
         raise ValidationError,
-              "Rejected: aggregating redacted column '#{base}' reads its value; it cannot be used " \
-              'as an aggregate input.'
+              "Rejected: aggregating redacted key/value column '#{base}' reads its value; it cannot " \
+              'be used as an aggregate input.'
+      end
+
+      # The key and value columns of every configured EAV redaction pair.
+      #
+      # @return [Array<String>]
+      def redacted_kv_columns
+        @safe_context.redacted_key_values
+                     .flat_map { |pattern| [pattern['key_column'], pattern['value_column']] }
       end
 
       # Strip a `table.` qualifier, returning the bare column name that

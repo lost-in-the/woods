@@ -433,6 +433,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
   let(:relation) do
     double('order_relation').tap do |rel|
       allow(rel).to receive(:select).and_return(rel)
+      allow(rel).to receive(:where).and_return(rel)
       allow(rel).to receive(:limit).and_return(rel)
       allow(rel).to receive(:to_sql).and_return('SELECT id FROM orders LIMIT 10000')
     end
@@ -525,6 +526,31 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
 
       expect(response).to include('ok' => false, 'error_type' => 'validation')
       expect(response['error']).to match(%r{key/value column 'amount'}i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects an aggregate over the EAV value column scoped to a sensitive key (PR-248 High 1)' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['MAX(amount) AS leaked'],
+                                           'scope' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{aggregating redacted key/value column 'amount'}i)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'rejects an aggregate over the EAV key column' do
+      response = send_query(['COUNT(status) AS keyed'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{aggregating redacted key/value column 'status'}i)
       expect(relation).not_to have_received(:select)
     end
 
