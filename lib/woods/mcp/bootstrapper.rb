@@ -132,6 +132,10 @@ module Woods
         state.mark(:hydrating)
 
         artifact = build_artifact(index_dir)
+        if static_source_map_without_embeddings?(artifact)
+          state.mark(:degraded, reason: Woods::Error.new('static source map has no embedding artifact'))
+          return [nil, state]
+        end
         config, _source = ConfigResolver.resolve(Woods.configuration,
                                                  artifact: artifact,
                                                  ollama_probe: method(:ollama_reachable?))
@@ -155,6 +159,20 @@ module Woods
 
         [retriever, state]
       end
+
+      def self.static_source_map_without_embeddings?(artifact)
+        return false unless artifact
+
+        generation = Woods::Generation.new(output_dir: artifact.output_dir)
+        manifest_path = generation.payload_dir(generation.current).join('manifest.json')
+        return false unless manifest_path.file?
+
+        provenance = JSON.parse(Woods::AtomicFile.read(manifest_path))['provenance'] || {}
+        provenance['mode'] == 'woods_static_ruby_source' && provenance['embeddings'] == 'absent'
+      rescue JSON::ParserError, SystemCallError
+        false
+      end
+      private_class_method :static_source_map_without_embeddings?
 
       # Refresh a live retriever's in-memory stores from the latest dumps on
       # disk. Used by the MCP +reload+ tool so agents can pick up a fresh embed

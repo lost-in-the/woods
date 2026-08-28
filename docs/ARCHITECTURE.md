@@ -78,6 +78,15 @@ Units are serialized to JSON with two additional fields: `extracted_at` (timesta
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for the full field table and a complete example JSON.
 
+### Internal static self-map
+
+`woods:self_map[output_dir]` is an internal Woods developer tool. It snapshots
+and statically maps Woods Ruby sources, rake tasks, and executables, then
+publishes them through the ordinary atomic index layout. It exposes typed
+`ruby_class`, `ruby_module`, `ruby_method`, and `ruby_file` units to the Index
+MCP reader. It does not boot Rails or include tests and documentation, and
+must not be presented as equivalent to runtime Rails extraction.
+
 ---
 
 ## How Does Extraction Work?
