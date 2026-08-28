@@ -80,9 +80,22 @@ module Woods
             validate_magic!(header[:magic], bin_path)
             validate_schema_version!(header[:schema_version], bin_path)
             validate_dimension_if_present!(header, resolved_config, bin_path)
-            floats = bin_data.byteslice(data_offset, header[:vector_count] * header[:dimension] * 4)
-                             .unpack("e#{header[:vector_count] * header[:dimension]}")
+            floats = read_float_blob(bin_data, header, data_offset, bin_path)
             hydrate_store(parse_idx(idx_path), floats, header[:dimension])
+          end
+
+          # A valid header over a truncated float payload used to unpack
+          # straight through: byteslice pads the missing tail with nil, so
+          # nil-floated vectors hydrated into the live store, crashed search
+          # with TypeError, and re-published as zeros on the next dump (M10).
+          # Unpack never invents data — the blob must be complete, and a
+          # truncated dump is an interrupted dump.
+          def read_float_blob(bin_data, header, data_offset, path)
+            float_count = header[:vector_count] * header[:dimension]
+            needed = float_count * 4
+            raise_truncated(path, bin_data.bytesize, data_offset + needed) if bin_data.bytesize - data_offset < needed
+
+            bin_data.byteslice(data_offset, needed).unpack("e#{float_count}")
           end
 
           def parse_header(bin_data, bin_path) # rubocop:disable Metrics/AbcSize

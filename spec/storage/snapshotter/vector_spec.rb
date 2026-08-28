@@ -343,13 +343,12 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
 
   describe 'failure-mode: float blob truncated after valid header' do
     # vectors.bin header is intact but the float payload is shorter than
-    # vector_count × dimension × 4 bytes. Array#unpack("e*") happily returns
-    # fewer floats than expected — the caller must detect and reject this.
-    #
-    # The expected behavior is that load_or_empty either raises UnsupportedArtifact
-    # or returns a store with no vectors (graceful-empty path). Either is acceptable
-    # for this boundary; the spec asserts it does NOT silently return wrong data
-    # (i.e., fewer loaded vectors than the header claimed).
+    # vector_count × dimension × 4 bytes. byteslice on the truncated blob
+    # pads the missing tail with nil — those nil-floated vectors used to
+    # load into the live store, crash search with TypeError, and re-publish
+    # as zeros on the next dump (M10). A truncated dump is an interrupted
+    # dump: load must raise the same typed artifact error the header
+    # validators raise, never hand back silently wrong data.
 
     let(:dump_dir) { artifact.new_dump_dir }
 
@@ -365,33 +364,24 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       File.binwrite(bin_path.to_s, full.byteslice(0, full.bytesize - truncate_by_bytes))
     end
 
-    it 'returns a degraded store (last vector has nil floats) when float data is truncated' do
+    it 'raises UnsupportedArtifact when whole vectors are missing from the payload' do
       dim = 4
       count = 3
       # Truncate the last full vector (4 floats × 4 bytes = 16 bytes).
       # The header says 3 vectors but only 2 complete vectors are in the payload.
-      # Ruby unpack returns nil for the missing float slots, so the last entry's
-      # vector array contains nils rather than floats. This spec documents the
-      # observable corruption; the header validator only guards the fixed-width
-      # header, not the float payload length.
       write_truncated_bin(dim, count, 16)
 
-      raised = false
-      result =
-        begin
-          described_class.load_or_empty(artifact)
-        rescue Woods::MCP::UnsupportedArtifact
-          raised = true
-          nil
-        end
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /truncated/)
+    end
 
-      unless raised
-        entries = result.each_entry.to_a
-        expect(entries).not_to be_empty
-        last_vec = entries.last&.at(1)
-        # Corruption manifests as nil floats in the last vector
-        expect(last_vec).to satisfy('contain at least one nil') { |v| v.to_a.any?(&:nil?) }
-      end
+    it 'raises UnsupportedArtifact when the payload ends mid-vector' do
+      # Two bytes off the tail: half a float. unpack would pad a single nil
+      # into the last vector, so this must raise too.
+      write_truncated_bin(4, 2, 2)
+
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /truncated/)
     end
   end
 
