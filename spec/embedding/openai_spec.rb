@@ -300,7 +300,12 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       expect(http_double).to have_received(:finish)
     end
 
-    it 'propagates error when retry also fails' do
+    # Flipped pin (#G-4 remediation, L17): this spec used to pin the raw
+    # Errno::ECONNRESET escaping post_request when the one retry also failed.
+    # That leaked an untyped transport error to callers that rescue
+    # Woods::Error; Ollama and Qdrant already wrap this path, so OpenAI now
+    # raises RequestError with retry-failed context instead.
+    it 'wraps a second-attempt failure in a typed RequestError with retry-failed context' do
       allow(http_double).to receive(:request)
         .and_raise(Errno::ECONNRESET)
       retry_http = instance_double(Net::HTTP)
@@ -311,9 +316,12 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       allow(retry_http).to receive(:keep_alive_timeout=)
       allow(retry_http).to receive(:start).and_return(retry_http)
       allow(retry_http).to receive(:started?).and_return(true)
-      allow(retry_http).to receive(:request).and_raise(Errno::ECONNRESET)
+      allow(retry_http).to receive(:request).and_raise(Errno::ECONNRESET, 'second drop')
 
-      expect { provider.embed('hello') }.to raise_error(Errno::ECONNRESET)
+      expect { provider.embed('hello') }.to raise_error(
+        Woods::Embedding::Provider::RequestError,
+        /OpenAI API error \(retry failed\): .*second drop/
+      )
     end
   end
 

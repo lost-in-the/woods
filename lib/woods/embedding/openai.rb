@@ -163,9 +163,16 @@ module Woods
 
           JSON.parse(response.body)
         rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
-          # Connection dropped — reset and retry once
+          # Connection dropped — reset and retry once. A second transport
+          # failure is wrapped (mirroring Ollama) rather than left to escape
+          # as a raw Errno, so callers rescuing Woods::Error see a typed,
+          # context-bearing failure.
           discard_http_client
-          response = http_client.request(request)
+          begin
+            response = http_client.request(request)
+          rescue StandardError => retry_error
+            raise RequestError, "OpenAI API error (retry failed): #{retry_error.message}"
+          end
           raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
