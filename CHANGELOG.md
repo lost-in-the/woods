@@ -18,7 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column is unchanged and stays masked. Aggregates over either column of a
   `console_redacted_key_values` pair are also refused: an aggregate such as
   `MAX(amount)` over the rows a sensitive key selects reads the redacted EAV value
-  itself.
+  itself. Selecting an EAV value column without its paired key column is refused
+  as well — the positional rule needs both headers, so a lone value column
+  returned plaintext.
+- **`console_query`'s having no longer leaks protected values.** `having` accepted
+  aggregates over redacted or EAV-protected columns (`MAX(amount) > ?`) and bare
+  predicates on redacted columns; repeated guesses revealed the protected value
+  from whether a row was returned. The same protected-column refusal used for
+  `select` aggregates now runs on the having template before any query executes.
 - **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
   check anchored its match to the statement leader, so
   `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
@@ -31,9 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Row-lock clauses are rejected.** `SELECT ... FOR UPDATE`, `FOR NO KEY UPDATE`,
   `FOR SHARE`, `FOR KEY SHARE` (with `NOWAIT`/`SKIP LOCKED`), and MySQL
   `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration
-  of the rolled-back transaction. The check runs against both the PostgreSQL and
-  MySQL comment normalizations, so a MySQL `#` comment between `LOCK` and
-  `IN SHARE MODE` can no longer hide the clause.
+  of the rolled-back transaction. The check is adapter-aware: `console_sql`
+  validates with the active adapter's dialect (MySQL and PostgreSQL quote/comment
+  grammars differ, so dialect-valid literals are no longer rejected), scanning
+  both normalizations when the adapter is unknown, and every view is checked under
+  both MySQL executable-comment (`/*!...*/`) semantics — `#` comments and
+  version-guarded comments can no longer split a lock clause apart.
 
 ## [2.0.0] - 2026-08-20
 
