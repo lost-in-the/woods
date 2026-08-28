@@ -42,17 +42,11 @@ module Woods
         snapshot = source_snapshot
         return { status: :skipped, generation: current_generation.number } if current_checksum == snapshot[:checksum]
 
-        units = build_units(snapshot[:sources])
-        graph = DependencyGraph.new
-        units.each { |unit| graph.register(unit) }
-        payload = PayloadStore.new(@output_dir).create(next_generation)
-        write_payload(payload, units, graph, snapshot[:checksum])
+        units, graph = GemMapSource.new(root: @root).build(snapshot[:sources])
+        payload = create_payload
+        GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum]).write
         ensure_snapshot_unchanged!(snapshot[:checksum])
-
-        marker = Generation.new(output_dir: @output_dir).bump!(
-          reason: 'woods_static_source_map', payload: PayloadStore.name_for(next_generation)
-        )
-        PayloadStore.new(@output_dir).prune(keep: PayloadStore::DEFAULT_RETENTION, protect: marker.number)
+        marker = publish_generation
         { status: :published, generation: marker.number, units: units.size }
       end
     end
@@ -108,6 +102,40 @@ module Woods
       nil
     end
 
+    def relative_path(path)
+      Pathname.new(path).expand_path.relative_path_from(@root).to_s
+    rescue ArgumentError
+      raise Woods::ExtractionError, "Source path escapes gem root: #{path}"
+    end
+
+    def create_payload
+      PayloadStore.new(@output_dir).create(next_generation)
+    end
+
+    def publish_generation
+      marker = Generation.new(output_dir: @output_dir).bump!(
+        reason: 'woods_static_source_map', payload: PayloadStore.name_for(next_generation)
+      )
+      PayloadStore.new(@output_dir).prune(keep: PayloadStore::DEFAULT_RETENTION, protect: marker.number)
+      marker
+    end
+  end
+
+  # Turns a pre-read Woods source snapshot into typed static analysis units.
+  class GemMapSource
+    def initialize(root:)
+      @root = root
+    end
+
+    def build(sources)
+      units = build_units(sources)
+      graph = DependencyGraph.new
+      units.each { |unit| graph.register(unit) }
+      [units, graph]
+    end
+
+    private
+
     def build_units(sources)
       analyzable = sources.select { |path, _| path.end_with?('.rb', '.rake') || executable?(path) }
       units = RubyAnalyzer.analyze(sources: analyzable)
@@ -156,16 +184,40 @@ module Woods
       end
     end
 
-    def write_payload(payload, units, graph, checksum)
-      TYPE_DIRECTORIES.each { |type, directory| write_type(payload.join(directory), units.select { |unit| unit.type == type }) }
-      write_graph(payload, graph)
-      write_manifest(payload, units, graph, checksum)
-      write_summary(payload, units, graph)
+    def relative_path(path)
+      Pathname.new(path).expand_path.relative_path_from(@root).to_s
+    rescue ArgumentError
+      raise Woods::ExtractionError, "Source path escapes gem root: #{path}"
     end
+  end
+
+  # Writes a complete source-map payload before GemMapper atomically publishes it.
+  class GemMapPublisher
+    include FilenameUtils
+
+    def initialize(payload:, units:, graph:, checksum:)
+      @payload = payload
+      @units = units
+      @graph = graph
+      @checksum = checksum
+    end
+
+    def write
+      GemMapper::TYPE_DIRECTORIES.each do |type, directory|
+        write_type(@payload.join(directory), @units.select { |unit| unit.type == type })
+      end
+      write_graph
+      write_manifest
+      write_summary
+    end
+
+    private
 
     def write_type(directory, units)
       FileUtils.mkdir_p(directory)
-      units.each { |unit| AtomicFile.write(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h)) }
+      units.each do |unit|
+        AtomicFile.write(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h))
+      end
       index = units.map do |unit|
         { identifier: unit.identifier, file_path: unit.file_path, namespace: unit.namespace,
           estimated_tokens: unit.estimated_tokens, chunk_count: unit.chunks.size }
@@ -173,36 +225,32 @@ module Woods
       AtomicFile.write(directory.join('_index.json'), JSON.pretty_generate(index))
     end
 
-    def write_graph(payload, graph)
-      data = graph.to_h
-      data[:pagerank] = graph.pagerank
-      AtomicFile.write(payload.join('dependency_graph.json'), JSON.pretty_generate(data))
-      AtomicFile.write(payload.join('graph_analysis.json'), JSON.pretty_generate(GraphAnalyzer.new(graph).analyze))
+    def write_graph
+      data = @graph.to_h
+      data[:pagerank] = @graph.pagerank
+      AtomicFile.write(@payload.join('dependency_graph.json'), JSON.pretty_generate(data))
+      AtomicFile.write(@payload.join('graph_analysis.json'), JSON.pretty_generate(GraphAnalyzer.new(@graph).analyze))
     end
 
-    def write_manifest(payload, units, graph, checksum)
-      counts = TYPE_DIRECTORIES.keys.to_h { |type| [TYPE_DIRECTORIES[type], units.count { |unit| unit.type == type }] }
+    def write_manifest
+      counts = GemMapper::TYPE_DIRECTORIES.keys.to_h do |type|
+        [GemMapper::TYPE_DIRECTORIES[type], @units.count { |unit| unit.type == type }]
+      end
       manifest = {
         extracted_at: Time.now.utc.iso8601, rails_version: nil, ruby_version: RUBY_VERSION,
-        counts: counts, total_units: units.size, total_chunks: 0, git_sha: nil, git_branch: nil,
-        provenance: PROVENANCE.merge(source_checksum: checksum), graph_nodes: graph.to_h.dig(:stats, :node_count),
-        graph_edges: graph.to_h.dig(:stats, :edge_count)
+        counts: counts, total_units: @units.size, total_chunks: 0, git_sha: nil, git_branch: nil,
+        provenance: GemMapper::PROVENANCE.merge(source_checksum: @checksum),
+        graph_nodes: @graph.to_h.dig(:stats, :node_count), graph_edges: @graph.to_h.dig(:stats, :edge_count)
       }
-      AtomicFile.write(payload.join('manifest.json'), JSON.pretty_generate(manifest))
+      AtomicFile.write(@payload.join('manifest.json'), JSON.pretty_generate(manifest))
     end
 
-    def write_summary(payload, units, graph)
-      stats = graph.to_h.fetch(:stats)
-      AtomicFile.write(payload.join('SUMMARY.md'), [
-        '# Woods static Ruby source map', '', "Units: #{units.size}", "Graph nodes: #{stats[:node_count]}",
+    def write_summary
+      stats = @graph.to_h.fetch(:stats)
+      AtomicFile.write(@payload.join('SUMMARY.md'), [
+        '# Woods static Ruby source map', '', "Units: #{@units.size}", "Graph nodes: #{stats[:node_count]}",
         "Graph edges: #{stats[:edge_count]}", 'Static source analysis only; not a Rails runtime extraction.'
       ].join("\n"))
-    end
-
-    def relative_path(path)
-      Pathname.new(path).expand_path.relative_path_from(@root).to_s
-    rescue ArgumentError
-      raise Woods::ExtractionError, "Source path escapes gem root: #{path}"
     end
   end
 end

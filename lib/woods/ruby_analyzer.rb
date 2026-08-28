@@ -39,7 +39,7 @@ module Woods
         units = []
 
         files.each do |file_path|
-          source = sources ? sources.fetch(file_path) : read_file(file_path)
+          source = source_for(file_path, sources)
           next unless source
 
           units.concat(class_analyzer.analyze(source: source, file_path: file_path))
@@ -74,6 +74,12 @@ module Woods
           end
         end
         files.uniq
+      end
+
+      def source_for(file_path, sources)
+        return sources.fetch(file_path) if sources
+
+        read_file(file_path)
       end
 
       # Read a file safely, returning nil on failure.
