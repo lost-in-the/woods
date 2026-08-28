@@ -43,18 +43,36 @@ RSpec.describe Woods::Cache::RedisCacheStore, :live_backends do
   before { stub_const('Rails', double('Rails', logger: Logger.new(IO::NULL))) }
 
   # Every example keys under a unique prefix, so examples cannot collide with
-  # each other or with a concurrent run; the after hook sweeps the prefix.
+  # each other or with a concurrent run. Keys built outside the woods:spec
+  # family (the namespace-clear example writes through the store's own
+  # woods:cache:* convention) must be tracked explicitly, so cleanup records
+  # every key at creation and deletes exactly those afterwards.
+  def track(key)
+    (@tracked_keys ||= []) << key
+    key
+  end
+
   def key(suffix)
-    "woods:spec:#{SecureRandom.hex(6)}:#{suffix}"
+    track("woods:spec:#{SecureRandom.hex(6)}:#{suffix}")
   end
 
   after do
+    tracked = Array(@tracked_keys)
+    redis.del(*tracked) if tracked.any?
+
+    # Belt and braces for the woods:spec family, in case a key was built
+    # without going through track().
     cursor = '0'
     loop do
       cursor, keys = redis.scan(cursor, match: 'woods:spec:*', count: 100)
       redis.del(*keys) if keys.any?
       break if cursor == '0'
     end
+
+    # The backends below are shared CI/dev servers: a leaked key is test
+    # state retention, so cleanup failure fails the example.
+    survivors = tracked.select { |k| redis.exists?(k) }
+    expect(survivors).to be_empty, "leftover test keys in the shared Redis: #{survivors.join(', ')}"
   end
 
   describe 'JSON round-trip against a real server' do
@@ -131,10 +149,11 @@ RSpec.describe Woods::Cache::RedisCacheStore, :live_backends do
   describe '#clear with a namespace' do
     # clear() only touches keys built with the store's own naming convention
     # (woods:cache:<namespace>:*), so the example must write through that
-    # convention for the scoping assertion to mean anything.
+    # convention for the scoping assertion to mean anything. Those keys sit
+    # outside the woods:spec sweep pattern, hence the explicit tracking.
     it 'clears only the matching namespace' do
-      embeddings = Woods::Cache.cache_key(:embeddings, SecureRandom.hex(6))
-      context = Woods::Cache.cache_key(:context, SecureRandom.hex(6))
+      embeddings = track(Woods::Cache.cache_key(:embeddings, SecureRandom.hex(6)))
+      context = track(Woods::Cache.cache_key(:context, SecureRandom.hex(6)))
       store.write(embeddings, 'v1')
       store.write(context, 'v2')
 
