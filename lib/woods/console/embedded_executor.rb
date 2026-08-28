@@ -633,10 +633,10 @@ module Woods
       # the selector used to identify sensitive rows and remains a valid
       # predicate, while the value column is the secret-bearing field.
       #
-      # @param column [String, Symbol] bare, qualified, or suffixed column key
+      # @param column [String, Symbol] already-normalized bare or qualified column name
       # @raise [ValidationError] when the column is protected for predicates
       def refuse_protected_predicate_column!(column)
-        base = base_column_name(scope_key_column(column))
+        base = base_column_name(column.to_s)
         return refuse_redacted_column!(base) if @safe_context.redacted_columns.include?(base)
         return unless redacted_eav_value_columns.include?(base)
 
@@ -652,7 +652,7 @@ module Woods
       # @param scope [Hash]
       # @raise [ValidationError] on the first protected column found
       def refuse_redacted_scope_keys!(scope)
-        scope.each_key { |raw_key| refuse_protected_predicate_column!(raw_key) }
+        scope.each_key { |raw_key| refuse_protected_predicate_column!(scope_key_column(raw_key)) }
       end
 
       # The value columns of every configured EAV redaction pair.

@@ -662,6 +662,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
   end
 
   context 'when protected predicate columns would act as comparison oracles (PR-248 round 3)' do
+    let(:registry) { { 'Order' => %w[id status amount amount_gt user_id created_at] } }
     let(:redacted_columns) { %w[user_id] }
     let(:redacted_key_values) do
       [{ 'key_column' => 'status', 'value_column' => 'amount', 'sensitive_keys' => %w[paid] }]
@@ -709,6 +710,21 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
       expect(connection).not_to have_received(:select_all)
     end
 
+    it 'keeps a real Hash HAVING column ending in a scope suffix allowed' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'amount_gt' => 100 }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with({ 'amount_gt' => 100 })
+      expect(connection).to have_received(:select_all)
+    end
+
     it 'refuses an EAV value column used as a bare array HAVING predicate before building a relation' do
       allow(connection).to receive(:select_all)
 
@@ -749,6 +765,21 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
       expect(relation).not_to have_received(:where)
       expect(relation).not_to have_received(:limit)
       expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'keeps a real array scope column ending in a scope suffix allowed' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['amount_gt > ?', 100]
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:where).with('amount_gt > ?', 100)
+      expect(connection).to have_received(:select_all)
     end
 
     it 'refuses an EAV value column used as a suffixed Hash scope key before building a relation' do
