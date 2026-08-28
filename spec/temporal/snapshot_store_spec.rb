@@ -60,6 +60,12 @@ RSpec.describe Woods::Temporal::SnapshotStore do
     ]
   end
 
+  # units_v2 plus one more unit — used for the re-capture diff spec below.
+  let(:units_v3) do
+    units_v2 + [{ identifier: 'Extra', type: 'model', source_hash: 'h5',
+                  metadata_hash: 'm5', dependencies_hash: 'd5' }]
+  end
+
   # ── capture ────────────────────────────────────────────────────────
 
   describe '#capture' do
@@ -129,6 +135,21 @@ RSpec.describe Woods::Temporal::SnapshotStore do
       expect(result[:units_added]).to eq(0)
       expect(result[:units_modified]).to eq(0)
       expect(result[:units_deleted]).to eq(0)
+    end
+
+    # L20 — find_latest ran before the upsert, so a re-capture at an
+    # unchanged HEAD resolved "previous" to the row being captured and
+    # update_diff_stats compared the freshly written unit set against
+    # itself: every stat zeroed out silently even when a real earlier
+    # snapshot existed. The SHA being captured is excluded instead.
+    it 'computes re-capture diff stats against the latest distinct SHA, not itself' do
+      store.capture(manifest_v1, units_v1)
+      store.capture(manifest_v2, units_v2)
+      result = store.capture(manifest_v2, units_v3)
+
+      expect(result[:units_added]).to eq(2)    # Comment + Extra vs aaa1111
+      expect(result[:units_modified]).to eq(1) # User
+      expect(result[:units_deleted]).to eq(1)  # Post
     end
 
     it 'uses one transaction for the complete capture' do
@@ -238,8 +259,8 @@ RSpec.describe Woods::Temporal::SnapshotStore do
           connection.results_as_hash = true
           child_store = described_class.new(connection: connection)
           original_find = child_store.method(:find_latest)
-          child_store.define_singleton_method(:find_latest) do
-            result = original_find.call
+          child_store.define_singleton_method(:find_latest) do |*args, **kwargs, &block|
+            result = original_find.call(*args, **kwargs, &block)
             first_ready.write('1')
             release_read.read(1)
             result
@@ -264,9 +285,9 @@ RSpec.describe Woods::Temporal::SnapshotStore do
             true
           end
           original_find = child_store.method(:find_latest)
-          child_store.define_singleton_method(:find_latest) do
+          child_store.define_singleton_method(:find_latest) do |*args, **kwargs, &block|
             second_event.write('R')
-            original_find.call
+            original_find.call(*args, **kwargs, &block)
           end
           child_store.capture(manifest_v2, units_v2)
           exit! 0

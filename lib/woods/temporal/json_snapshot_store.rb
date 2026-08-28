@@ -36,7 +36,11 @@ module Woods
         # reach snapshot_path, which raises ArgumentError on a non-hex SHA.
         return nil unless git_sha.is_a?(String) && git_sha.match?(/\A[0-9a-f]+\z/i)
 
-        previous = find_latest
+        # Exclude the SHA being captured, mirroring the SQLite store: a
+        # re-capture at an unchanged HEAD must diff against the latest
+        # distinct snapshot, not whatever this SHA's own file used to hold
+        # (L20).
+        previous = find_latest(exclude_sha: git_sha)
         snapshot = build_snapshot(manifest, git_sha, unit_hashes)
 
         if previous
@@ -207,8 +211,11 @@ module Woods
         end
       end
 
-      def find_latest
+      # @param exclude_sha [String, nil] SHA to leave out of the result
+      # @return [Hash, nil]
+      def find_latest(exclude_sha: nil)
         snapshots = load_all_summaries
+        snapshots.reject! { |s| s[:git_sha] == exclude_sha } if exclude_sha
         return nil if snapshots.empty?
 
         latest = snapshots.max_by { |s| s[:extracted_at] || '' }
