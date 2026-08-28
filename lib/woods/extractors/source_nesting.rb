@@ -274,11 +274,19 @@ module Woods
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] Active managed root the path is relative to
       # @param foreign_root [String, nil] Matching managed root from loader.dirs
-      # @return [String]
+      # @return [String, nil]
       def foreign_loader_constant_path(file_path, root, foreign_root)
         mapped = foreign_root && mapped_foreign_path(file_path, root, foreign_root)
-        expected = loader_expected_cpath(mapped) if mapped
-        expected || inflected_managed_constant_path(file_path, root)
+        return nil unless mapped
+
+        # If the corresponding boot-root path exists, the real loader can
+        # answer with full semantics: ignores, root namespaces, collapses,
+        # and custom inflections. A nil answer is an authoritative non-claim.
+        return loader_expected_cpath(mapped) if File.exist?(mapped)
+
+        return nil unless copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
+
+        inflected_managed_constant_path(file_path, root)
       end
 
       # @param file_path [String] Expanded absolute path under the active root
@@ -290,10 +298,12 @@ module Woods
         File.join(foreign_root, relative)
       end
 
-      # The path-to-constant convention using the active loader's inflector.
-      # This is for copied-only foreign-root files where +cpath_expected_at+
-      # has no real boot-path file to resolve, but the loader's configured
-      # basename rules still govern (`api` => +API+).
+      # The path-to-constant convention using the active loader's inflector
+      # for copied-only foreign-root files. This path deliberately handles
+      # only the common Object-root, non-collapsed shape; root namespaces and
+      # collapsed directories require +cpath_expected_at+ over a real mapped
+      # path, so copied-only files with those rules stay unmanaged instead
+      # of receiving a guessed identifier.
       #
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] The managed root the path is relative to
@@ -325,6 +335,47 @@ module Woods
         camelize_segment(segment)
       end
 
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root the path is relative to
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [Boolean]
+      def copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
+        loader_root_namespace(foreign_root) == Object &&
+          !mapped_path_uses_collapsed_directory?(file_path, root, foreign_root)
+      end
+
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [Module]
+      def loader_root_namespace(foreign_root)
+        loader = main_loader
+        namespaced_dirs = loader.dirs(namespaces: true) if loader.respond_to?(:dirs)
+        return Object unless namespaced_dirs.respond_to?(:[])
+
+        namespaced_dirs[foreign_root] || Object
+      rescue StandardError
+        Object
+      end
+
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [Boolean]
+      def mapped_path_uses_collapsed_directory?(file_path, root, foreign_root)
+        loader = main_loader
+        return false unless loader.respond_to?(:__collapse?)
+
+        relative = file_path[root.length..].to_s.sub(%r{\A/}, '').sub(/\.rb\z/, '')
+        segments = relative.split('/').reject(&:empty?)
+        current = foreign_root.chomp('/')
+
+        segments[0...-1].any? do |segment|
+          current = File.join(current, segment)
+          loader.__collapse?(current)
+        end
+      rescue StandardError
+        true
+      end
+
       # The managed root directory containing +file_path+, if any, with the
       # authority that vouches for it.
       #
@@ -343,7 +394,8 @@ module Woods
       #
       # @param file_path [String] Absolute path to the source file
       # @return [Array(String, Symbol), nil] `[root, owner]` with owner
-      #   +:loader+ or +:convention+, or nil when the file is unmanaged
+      #   +:loader+, +:foreign_loader+, or +:convention+, or nil when the
+      #   file is unmanaged
       def managed_root_for(file_path)
         file_path = File.expand_path(file_path)
         loader = main_loader
