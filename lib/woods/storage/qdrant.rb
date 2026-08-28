@@ -329,14 +329,22 @@ module Woods
 
         # Search for similar vectors.
         #
+        # The query vector is dimension-checked before the request, mirroring
+        # the upsert path: otherwise a wrong-dimension query surfaces as a
+        # Qdrant 400 instead of the typed Woods::Error callers already handle
+        # from {#store}/{#store_batch}.
+        #
         # @param query_vector [Array<Float>] The query embedding
         # @param limit [Integer] Maximum results to return
         # @param filters [Hash] Metadata key-value filters
         # @return [Array<SearchResult>] Results sorted by descending similarity,
         #   with +id+ carrying the Woods identifier (not the UUID point id)
         #   so the adapter is interchangeable with pgvector downstream.
+        # @raise [Woods::Error] if the query vector's length disagrees with the
+        #   configured dimension
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {})
+          validate_dimensions!(query_vector) if @dimensions
           body = {
             vector: query_vector,
             limit: limit,

@@ -250,6 +250,15 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       end
     end
 
+    it 'raises the typed dimension error for a wrong-dimension query before any request' do
+      dimensioned = described_class.new(url: 'http://localhost:6333', collection: 'test_collection',
+                                        dimensions: 3, allow_private_hosts: true)
+
+      expect { dimensioned.search([0.1, 0.2]) }
+        .to raise_error(Woods::Error, /Vector dimension mismatch: got 2, expected 3/)
+      expect(http).not_to have_received(:request)
+    end
+
     it 'translates an Array filter value into match.any membership (#108)' do
       store.search([0.1, 0.2, 0.3], filters: { type: %w[model service] })
 

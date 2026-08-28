@@ -342,6 +342,12 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
 
       expect(results).to be_empty
     end
+
+    it 'raises the typed dimension error for a wrong-dimension query before SQL runs' do
+      expect { store.search([0.1, 0.2]) }
+        .to raise_error(Woods::Error, /Vector dimension mismatch: got 2, expected 3/)
+      expect(connection).not_to have_received(:execute)
+    end
   end
 
   describe '#delete' do
