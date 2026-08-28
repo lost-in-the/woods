@@ -373,6 +373,92 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
       expect(scanner.governed_class_name('/active/root/lib/external/analytics.rb', source)).to be_nil
     end
+
+    it 'preserves the autoloader authority when its roots belong to the active root' do
+      # The loader roots are under the active root: this is the app's own
+      # loader, and a file it does not claim (deliberately excluded from
+      # autoloading) must stay unmanaged — the source parser decides, not
+      # the root-relative shape.
+      loader = double('loader', dirs: ['/active/root/app/models'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to be_nil
+    end
+
+    it 'stays unmanaged when the loader reports an empty authoritative set' do
+      loader = double('loader', dirs: [])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to be_nil
+    end
+
+    it 'takes the expected constant from the active loader when it owns the root' do
+      # Finding 2: a custom Zeitwerk inflection (`api => API`) means the
+      # loader expects API::Container::Parser while the local camelizer
+      # derives Api::Container::Parser. The governed lookup must follow the
+      # loader's own answer, or both wrapper siblings fall back and the
+      # collision guard aborts extraction.
+      loader = double('loader', dirs: ['/active/root/app/services'])
+      allow(loader).to receive(:cpath_expected_at) do |path|
+        case path
+        when %r{/api/container/parser\.rb\z}   then 'API::Container::Parser'
+        when %r{/api/container/renderer\.rb\z} then 'API::Container::Renderer'
+        end
+      end
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/parser.rb', source))
+        .to eq('API::Container::Parser')
+    end
+
+    it 'stays unmanaged when the loader that owns the root expects nothing for the file' do
+      # A loader decline (ignored path, non-derivable name) is authoritative
+      # for its own tree: the local camelizer must not rescue it.
+      loader = double('loader', dirs: ['/active/root/app/services'])
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to be_nil
+    end
   end
 
   # ── #qualified_outer_module_name ─────────────────────────────────────
