@@ -711,7 +711,7 @@ module Woods
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
         require_relative 'sql_validator'
-        SqlValidator.new.validate!(sql)
+        SqlValidator.new(dialect: sql_dialect).validate!(sql)
         # Post-validation, pre-execution TableGate — blocks every configured
         # table even if the sql is otherwise well-formed.
         gate_sql!(sql)
@@ -739,6 +739,22 @@ module Woods
       # @return [Boolean] true when the statement starts with EXPLAIN
       def explain_statement?(sql)
         sql.strip.match?(/\AEXPLAIN\b/i)
+      end
+
+      # The SQL dialect the active connection will parse the statement
+      # under, for {SqlValidator}'s dialect-aware lock-clause check. MySQL
+      # and PostgreSQL quote/comment grammars differ (`\'` escapes, `#`
+      # comments); validating with the matching dialect accepts dialect-valid
+      # literals and still rejects every known bypass form. Unknown adapters
+      # return nil and get the conservative both-dialect union.
+      #
+      # @return [Symbol, nil]
+      def sql_dialect
+        adapter = active_connection.adapter_name.to_s.downcase
+        return :mysql if adapter.include?('mysql')
+        return :postgres if adapter.include?('postgre')
+
+        nil
       end
 
       # Build and execute a structured ActiveRecord query.
@@ -806,14 +822,62 @@ module Woods
 
       # Normalize `select:` into an array of safe expressions. Each element
       # must be a column name (optionally qualified and/or aliased) or a
-      # whitelisted aggregate call over a column.
+      # whitelisted aggregate call over a column. The list is then validated
+      # as a set: positional EAV redaction resolves key/value columns by
+      # header name and needs BOTH headers present, so a value column
+      # selected without its paired key column would return plaintext.
       #
       # @param select [String, Array<String>]
       # @param model_name [String]
       # @return [Array<String>]
       def validated_select(select, model_name)
-        Array(select).map do |expr|
+        expressions = Array(select).map do |expr|
           validate_select_expression!(expr.strip, model_name)
+        end
+        refuse_orphan_eav_value_selection!(expressions)
+        expressions
+      end
+
+      # Refuse an EAV value column whose paired key column is missing from
+      # the select set. The per-expression checks ({#validate_select_expression!})
+      # already refused aliases and aggregates over protected columns, so
+      # what reaches here unaliased can only be direct column selection —
+      # and the positional redactor masks the value cell only when the key
+      # column is in the same header. Requiring the key column keeps direct
+      # EAV reads working ({Woods::Console::Redactor} masks the value);
+      # refusing outright would break legitimate key/value reads.
+      #
+      # @param expressions [Array<String>] validated select expressions
+      # @raise [ValidationError] when a value column is selected without its key
+      def refuse_orphan_eav_value_selection!(expressions)
+        selected = directly_selected_columns(expressions)
+
+        @safe_context.redacted_key_values.each do |pattern|
+          next unless selected.include?(pattern['value_column'])
+          next if selected.include?(pattern['key_column'])
+
+          raise ValidationError,
+                "Rejected: selecting EAV value column '#{pattern['value_column']}' without its paired " \
+                "key column '#{pattern['key_column']}' bypasses redaction; select both columns so the " \
+                'value can be masked.'
+        end
+      end
+
+      # The bare, unaliased columns referenced by a validated select list.
+      # Aggregates and aliases cannot appear here — the per-expression
+      # validation refuses them over protected columns before this runs.
+      #
+      # @param expressions [Array<String>]
+      # @return [Array<String>]
+      def directly_selected_columns(expressions)
+        expressions.filter_map do |expr|
+          match = Server::SELECT_EXPRESSION_REGEXP.match(expr)
+          next unless match
+
+          fn_arg, bare_col, alias_name = match.captures[1..]
+          next if fn_arg || alias_name
+
+          base_column_name(bare_col)
         end
       end
 
@@ -991,9 +1055,28 @@ module Woods
         # aggregate args can't reach the db without a column check.
         col = match[1] || match[3]
         validate_column_reference!(col, model_name) if col && col != '*'
+        refuse_protected_having_reference!(match)
         validate_having_bind!(having.last)
 
         having
+      end
+
+      # Redaction oracle refusal for a HAVING template. A predicate over a
+      # protected column leaks its value through repeated guesses — the
+      # response reveals whether any row satisfied the comparison.
+      # Aggregates are refused over both redaction layers (the EAV pair
+      # columns, matching {#refuse_redacted_aggregate_expression!} for
+      # select); bare-column predicates are refused over
+      # console_redacted_columns, matching how scope keys are treated
+      # ({#refuse_redacted_scope_keys!}).
+      #
+      # @param match [MatchData] {Server::HAVING_TEMPLATE_REGEXP} match
+      # @raise [ValidationError] when the referenced column is protected
+      def refuse_protected_having_reference!(match)
+        return refuse_redacted_column!(match[1]) if match[1]
+        return if match[3].nil? || match[3] == '*'
+
+        refuse_redacted_aggregate_expression!(match[3])
       end
 
       # Defense-in-depth: the public schema already restricts the bind to a

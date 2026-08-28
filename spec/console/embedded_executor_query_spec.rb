@@ -434,6 +434,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
     double('order_relation').tap do |rel|
       allow(rel).to receive(:select).and_return(rel)
       allow(rel).to receive(:where).and_return(rel)
+      allow(rel).to receive(:having).and_return(rel)
       allow(rel).to receive(:limit).and_return(rel)
       allow(rel).to receive(:to_sql).and_return('SELECT id FROM orders LIMIT 10000')
     end
@@ -564,6 +565,99 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
       masked = Woods::Console::Redactor.apply(envelope, safe_context)
       # key cell 'paid' matches sensitive_keys → the value cell (amount) is masked
       expect(masked['rows']).to eq([['[REDACTED]', 'paid']])
+    end
+
+    it 'refuses the EAV value column selected without its paired key column (PR-248 round-2 High 1)' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['amount'],
+                                           'scope' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+  end
+
+  context 'when having references protected columns (PR-248 round-2 High 2)' do
+    let(:redacted_key_values) do
+      [{ 'key_column' => 'status', 'value_column' => 'amount', 'sensitive_keys' => %w[paid] }]
+    end
+
+    it 'refuses an aggregate over the EAV value column in the having template' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['MAX(amount) > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{aggregating redacted key/value column 'amount'}i)
+      expect(relation).not_to have_received(:having)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'keeps a having predicate on a non-protected column working' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['COUNT(*) > ?', 1]
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with('COUNT(*) > ?', 1)
+    end
+  end
+
+  context 'when having aggregates an ordinary redacted column (PR-248 round-2 High 2)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'refuses an aggregate over the redacted column in the having template' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'amount'/i)
+      expect(relation).not_to have_received(:having)
+      expect(connection).not_to have_received(:select_all)
+    end
+  end
+
+  context 'when having carries a bare redacted column predicate (PR-248 round-2 High 2)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'refuses a bare redacted column predicate in the having template' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['amount > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'amount' is redacted/i)
+      expect(relation).not_to have_received(:having)
+      expect(connection).not_to have_received(:select_all)
     end
   end
 end
