@@ -46,6 +46,30 @@ bundle exec rake woods:generate_token    # Random bearer token for woods-mcp-htt
 # woods:send (notion_sync), woods:relay (unblocked_sync)
 ```
 
+### Source-checkout orientation: static Woods self-map
+
+For an initial audit, debugging a cross-cutting change, or estimating its blast
+radius within this gem, create a disposable static map before editing:
+
+```bash
+output_dir="$(mktemp -d)"
+bin/rake "woods:self_map[$output_dir]"
+bundle exec woods-mcp-start "$output_dir"
+```
+
+This is an internal Woods-only developer tool, not a host-app task. It publishes
+the standard atomic index generation and works with the packaged Index MCP
+server without Rails, a database, or embeddings. Query `woods_status`,
+`structure`, `search`, `lookup`, `dependencies`, and `dependents` to find
+source ownership, inspect constants and excerpts, and follow conservative
+static call/dependency relationships. Use a temporary or ignored output
+directory; do not scan or commit generated map output.
+
+The self-map is deliberately static. It cannot prove Rails runtime behavior,
+resolved callbacks, routes, Active Record reflections, eager-load outcomes, or
+Zeitwerk behavior. When those facts matter, use a booted host Rails app and the
+ordinary runtime extractor; never substitute the self-map for that validation.
+
 > **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
 
 ## Host app for integration testing: `woods-testbed`

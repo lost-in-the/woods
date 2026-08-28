@@ -35,6 +35,30 @@ bin/rake spec
 bin/rubocop
 ```
 
+## Map Woods itself before broad investigation
+
+When an agent is first auditing, debugging, or estimating the blast radius of
+a change to this gem, create a disposable static map of the Woods source before
+making broad assumptions about the tree:
+
+```bash
+output_dir="$(mktemp -d)"
+bin/rake "woods:self_map[$output_dir]"
+bundle exec woods-mcp-start "$output_dir"
+```
+
+The task is an internal, Woods-only developer tool. It publishes the normal
+atomic generation layout, so `woods-mcp` can query `woods_status`, `structure`,
+`search`, `lookup`, `dependencies`, and `dependents` without Rails, a database,
+or embeddings. Use it to orient on source ownership, inspect known constants,
+trace conservative static relationships, and assess likely change impact. Keep
+the output outside the checkout (or in ignored `tmp/`); never commit it.
+
+It is not Rails extraction: the map is static and cannot establish runtime
+Rails behavior, resolved callbacks, routes, Active Record reflections, or
+Zeitwerk results. For a host application's runtime behavior, boot that Rails
+application and use the ordinary extraction pipeline instead.
+
 The default suite excludes booted Rails and live backends. Run the relevant opt-in lane when behavior depends on them:
 
 ```bash
