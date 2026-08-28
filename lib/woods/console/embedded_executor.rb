@@ -595,7 +595,7 @@ module Woods
         scope.each_key do |raw_key|
           column = scope_key_column(raw_key)
           @model_validator.validate_column!(model_name, column)
-          refuse_redacted_column!(column)
+          refuse_protected_predicate_column!(column)
         end
       end
 
@@ -628,15 +628,38 @@ module Woods
               'as a scope, filter, aggregate, find, or order key.'
       end
 
-      # Refuse every column referenced by a scope Hash that is on
-      # console_redacted_columns, honoring predicate suffixes
-      # (`email_matches`, `salary_gt`, etc.) the same way
-      # {#validate_scope_columns!} does.
+      # Refuse a predicate column protected by either redaction layer. This
+      # is narrower than EAV alias/aggregate protection: the key column is
+      # the selector used to identify sensitive rows and remains a valid
+      # predicate, while the value column is the secret-bearing field.
+      #
+      # @param column [String, Symbol] bare, qualified, or suffixed column key
+      # @raise [ValidationError] when the column is protected for predicates
+      def refuse_protected_predicate_column!(column)
+        base = base_column_name(scope_key_column(column))
+        return refuse_redacted_column!(base) if @safe_context.redacted_columns.include?(base)
+        return unless redacted_eav_value_columns.include?(base)
+
+        raise ValidationError,
+              "Rejected: EAV value column '#{base}' is redacted (console_redacted_key_values) and cannot " \
+              'be used as a scope, filter, or having predicate.'
+      end
+
+      # Refuse every column referenced by a scope Hash that is protected for
+      # predicates, honoring predicate suffixes (`email_matches`,
+      # `salary_gt`, etc.) the same way {#validate_scope_columns!} does.
       #
       # @param scope [Hash]
-      # @raise [ValidationError] on the first redacted column found
+      # @raise [ValidationError] on the first protected column found
       def refuse_redacted_scope_keys!(scope)
-        scope.each_key { |raw_key| refuse_redacted_column!(scope_key_column(raw_key)) }
+        scope.each_key { |raw_key| refuse_protected_predicate_column!(raw_key) }
+      end
+
+      # The value columns of every configured EAV redaction pair.
+      #
+      # @return [Array<String>]
+      def redacted_eav_value_columns
+        @safe_context.redacted_key_values.filter_map { |pattern| pattern['value_column'] }
       end
 
       def gate_association!(model_name, association)
@@ -782,9 +805,36 @@ module Woods
       # @param params [Hash] Query parameters (select, joins, scope, group_by, having, order, limit)
       # @return [ActiveRecord::Relation]
       def build_query_relation(model, params)
-        relation = apply_query_clauses(model, params)
+        clauses = validated_query_clauses(model, params)
+        relation = apply_query_clauses(model, params, clauses)
         limit = params.fetch('limit', 10_000)
         relation.limit(limit)
+      end
+
+      # Validate every structured query clause before any ActiveRecord
+      # relation method can run. This keeps redaction-oracle refusals typed
+      # and prevents malformed predicates from reaching Arel/adapter code.
+      #
+      # @param model [Class] ActiveRecord model class
+      # @param params [Hash]
+      # @return [Hash] normalized, validated query clauses
+      def validated_query_clauses(model, params)
+        model_name = params['model']
+        {
+          select: params['select'] ? validated_select(params['select'], model_name) : nil,
+          joins: validated_query_joins(model, params['joins']),
+          scope: params.key?('scope') ? validated_query_scope(params['scope'], model_name) : nil,
+          group_by: params['group_by']&.any? ? validated_columns(params['group_by'], model_name) : nil,
+          having: params['having'] ? validated_having(params['having'], model_name) : nil,
+          order: params['order'] ? validated_order(params['order'], model_name) : nil
+        }
+      end
+
+      def validated_query_joins(model, joins)
+        return nil unless joins&.any?
+
+        validate_joins!(model, joins)
+        joins.map(&:to_sym)
       end
 
       # Optional aggregate-expression wrappers accepted inside a `select`.
@@ -802,21 +852,19 @@ module Woods
       #
       # @param model [Class] ActiveRecord model class
       # @param params [Hash]
+      # @param clauses [Hash] prevalidated query clauses
       # @return [ActiveRecord::Relation]
       # @raise [ValidationError] on unsafe column/expression input
-      def apply_query_clauses(model, params) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+      def apply_query_clauses(model, params, clauses)
         model_name = params['model']
         relation = model.all
 
-        relation = relation.select(*validated_select(params['select'], model_name)) if params['select']
-        if params['joins']&.any?
-          validate_joins!(model, params['joins'])
-          relation = relation.joins(params['joins'].map(&:to_sym))
-        end
-        relation = apply_query_scope(relation, params['scope'], model_name) if params.key?('scope')
-        relation = relation.group(*validated_columns(params['group_by'], model_name)) if params['group_by']&.any?
-        relation = relation.having(*validated_having(params['having'], model_name)) if params['having']
-        relation = relation.order(validated_order(params['order'], model_name)) if params['order']
+        relation = relation.select(*clauses[:select]) if clauses[:select]
+        relation = relation.joins(clauses[:joins]) if clauses[:joins]
+        relation = apply_scope(relation, clauses[:scope], model_name: model_name) if params.key?('scope')
+        relation = relation.group(*clauses[:group_by]) if clauses[:group_by]
+        relation = relation.having(*clauses[:having]) if clauses[:having]
+        relation = relation.order(clauses[:order]) if clauses[:order]
         relation
       end
 
@@ -1028,7 +1076,10 @@ module Woods
         when Hash
           raise ValidationError, 'having: empty hash' if having.empty?
 
-          having.each_key { |k| validate_column_reference!(k.to_s, model_name) }
+          having.each_key do |k|
+            validate_column_reference!(k.to_s, model_name)
+            refuse_protected_predicate_column!(k)
+          end
           [having]
         when Array
           validated_having_array!(having, model_name)
@@ -1066,14 +1117,13 @@ module Woods
       # response reveals whether any row satisfied the comparison.
       # Aggregates are refused over both redaction layers (the EAV pair
       # columns, matching {#refuse_redacted_aggregate_expression!} for
-      # select); bare-column predicates are refused over
-      # console_redacted_columns, matching how scope keys are treated
-      # ({#refuse_redacted_scope_keys!}).
+      # select); bare-column predicates are refused over protected
+      # predicate columns: console_redacted_columns and EAV value columns.
       #
       # @param match [MatchData] {Server::HAVING_TEMPLATE_REGEXP} match
       # @raise [ValidationError] when the referenced column is protected
       def refuse_protected_having_reference!(match)
-        return refuse_redacted_column!(match[1]) if match[1]
+        return refuse_protected_predicate_column!(match[1]) if match[1]
         return if match[3].nil? || match[3] == '*'
 
         refuse_redacted_aggregate_expression!(match[3])
@@ -1097,7 +1147,14 @@ module Woods
       # intentionally narrower than the legacy Tier 1 executor form: exactly
       # one safe column comparison template and one bind value.
       def apply_query_scope(relation, scope, model_name)
-        return apply_scope(relation, scope, model_name: model_name) if scope.is_a?(Hash)
+        apply_scope(relation, validated_query_scope(scope, model_name), model_name: model_name)
+      end
+
+      def validated_query_scope(scope, model_name)
+        if scope.is_a?(Hash)
+          validate_scope_columns!(scope, model_name)
+          return scope
+        end
 
         unless scope.is_a?(Array) && scope.length == 2 && scope.first.is_a?(String)
           raise ValidationError, 'scope must be an object or exact ["column OP ?", bind] array'
@@ -1114,7 +1171,8 @@ module Woods
         raise ValidationError, "scope: unsupported SQL template #{scope.first.inspect}" unless match
 
         validate_column_reference!(match[1], model_name)
-        apply_scope(relation, scope, model_name: model_name)
+        refuse_protected_predicate_column!(match[1])
+        scope
       end
 
       # Validate `order:` — only Hash `{col => :asc|:desc}` or bare column name.
@@ -1279,10 +1337,13 @@ module Woods
 
         placeholder_count = template.scan('?').size
         bind_count = scope.length - 1
-        return if placeholder_count == bind_count
+        unless placeholder_count == bind_count
+          raise ValidationError,
+                "scope template expects #{placeholder_count} bind(s), got #{bind_count}"
+        end
 
-        raise ValidationError,
-              "scope template expects #{placeholder_count} bind(s), got #{bind_count}"
+        match = Server::QUERY_SCOPE_TEMPLATE_REGEXP.match(template)
+        refuse_protected_predicate_column!(match[1]) if match
       end
 
       # Validate that any requested +columns+ are real model columns before

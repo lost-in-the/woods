@@ -23,9 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned plaintext.
 - **`console_query`'s having no longer leaks protected values.** `having` accepted
   aggregates over redacted or EAV-protected columns (`MAX(amount) > ?`) and bare
-  predicates on redacted columns; repeated guesses revealed the protected value
-  from whether a row was returned. The same protected-column refusal used for
-  `select` aggregates now runs on the having template before any query executes.
+  predicates on redacted columns or EAV value columns; repeated guesses revealed
+  the protected value from whether a row was returned. The same protected-column
+  refusal used for `select` aggregates now runs on the having template and hash
+  keys before any query executes. Structured scope predicates now apply the same
+  rule to redacted columns and EAV value columns while preserving EAV key-column
+  predicates.
 - **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
   check anchored its match to the statement leader, so
   `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`

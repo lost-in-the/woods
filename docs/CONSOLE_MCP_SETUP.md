@@ -548,7 +548,7 @@ Set the flag to `false` only when the host intentionally opts out of exact-value
 
 Redaction replaces matching column values with `"[REDACTED]"` before the MCP response is sent. Column names are matched by string, case-sensitive, use the exact names from your database schema.
 
-Redacted columns are also **refused as query inputs**: as the `column` of `console_aggregate`, as a scope or `by:` key (including `_matches` forms), and as `order_by`. Masking output alone would leave a comparison oracle over the secret.
+Redacted columns are also **refused as query inputs**: as the `column` of `console_aggregate`, as a scope or `by:` key (including `_matches` forms), and as `order_by`. EAV `value_column` entries from `console_redacted_key_values` are refused as scope and `having` predicates for the same reason; EAV `key_column` entries remain valid predicates because they identify the row whose value should be masked. Masking output alone would leave a comparison oracle over the secret.
 
 For `console_query`'s `select`, three expression shapes are additionally refused, because the redactor masks by output header name and these shapes rename or read the protected value:
 
@@ -558,7 +558,7 @@ For `console_query`'s `select`, three expression shapes are additionally refused
 
 Direct, unaliased selection of a redacted column stays allowed: the output header keeps the column's real name, and the positional redactor masks the value as usual. For an EAV pair, the **value column is only accepted when its paired key column is selected directly too** (that is what lets the positional rule mask it); selecting the value column alone is refused.
 
-`console_query`'s `having` is covered by the same oracle rule: an aggregate over a protected column (`MAX(amount) > ?`) or a bare predicate on a redacted column (`salary > ?`) is refused, since repeated guesses reveal the protected value from whether a row is returned.
+`console_query`'s `having` is covered by the same oracle rule: an aggregate over a protected column (`MAX(amount) > ?`), a bare predicate on a redacted column (`salary > ?`), or a predicate on an EAV value column is refused, since repeated guesses reveal the protected value from whether a row is returned. EAV key predicates stay allowed so callers can select the rows whose paired values need redaction.
 
 **Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, 31 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `password_salt`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `consumed_timestep`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.
 
