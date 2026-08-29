@@ -1308,6 +1308,63 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         stub_const('User', user_model)
       end
 
+      it 'refuses a protected identifier in console_sql before adapter execution' do
+        allow(connection).to receive(:select_all)
+        read_executor = described_class.new(
+          model_validator: validator,
+          safe_context: safe_context,
+          connection: connection,
+          read_tools_enabled: true
+        )
+
+        response = read_executor.send_request({
+                                                'tool' => 'sql',
+                                                'params' => { 'sql' => 'SELECT email AS note FROM users' }
+                                              })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/protected column 'email'/i)
+        expect(connection).not_to have_received(:select_all)
+      end
+
+      it 'does not let a direct protected projection excuse a second aliased copy' do
+        allow(connection).to receive(:select_all)
+        read_executor = described_class.new(
+          model_validator: validator,
+          safe_context: safe_context,
+          connection: connection,
+          read_tools_enabled: true
+        )
+
+        response = read_executor.send_request({
+                                                'tool' => 'sql',
+                                                'params' => { 'sql' => 'SELECT email, email AS note FROM users' }
+                                              })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(connection).not_to have_received(:select_all)
+      end
+
+      it 'allows a direct unaliased protected column so response redaction can mask it' do
+        allow(connection).to receive(:select_all).and_return(
+          double('result', columns: ['email'], rows: [['a@b.com']])
+        )
+        read_executor = described_class.new(
+          model_validator: validator,
+          safe_context: safe_context,
+          connection: connection,
+          read_tools_enabled: true
+        )
+
+        response = read_executor.send_request({
+                                                'tool' => 'sql',
+                                                'params' => { 'sql' => 'SELECT email FROM users WHERE id = 1' }
+                                              })
+
+        expect(response['ok']).to be true
+        expect(connection).to have_received(:select_all).with('SELECT email FROM users WHERE id = 1')
+      end
+
       it 'refuses a redacted column as a console_aggregate column' do
         response = executor.send_request({
                                            'tool' => 'aggregate',
@@ -1346,6 +1403,12 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response).to include('ok' => false, 'error_type' => 'validation')
         expect(response['error']).to match(/redacted/i)
+      end
+
+      it 'refuses a redacted column in a multi-bind scope template' do
+        expect do
+          executor.send(:validate_scope_array!, ['email = ? OR id = ?', 'a@b.com', 1])
+        end.to raise_error(Woods::Console::ValidationError, /redacted/i)
       end
 
       it 'refuses a redacted column as a console_sample scope key' do
@@ -1417,6 +1480,75 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
         expect(response['ok']).to be true
         expect(response['result']['value']).to eq(7)
+      end
+    end
+
+    context 'EAV output-shape guards on Tier 1 tools' do
+      let(:user_model) { class_double('User') }
+      let(:safe_context) do
+        Woods::Console::SafeContext.new(
+          connection: connection,
+          redacted_key_values: [
+            { key_column: 'email', value_column: 'name', sensitive_keys: %w[secret@example.test] }
+          ]
+        )
+      end
+
+      subject(:executor) do
+        described_class.new(model_validator: validator, safe_context: safe_context, connection: connection)
+      end
+
+      before do
+        stub_const('User', user_model)
+      end
+
+      %w[sample pluck recent].each do |tool|
+        it "refuses an orphan EAV value selection in console_#{tool}" do
+          expect(user_model).not_to receive(:all)
+          response = executor.send_request({
+                                             'tool' => tool,
+                                             'params' => { 'model' => 'User', 'columns' => ['name'] }
+                                           })
+
+          expect(response).to include('ok' => false, 'error_type' => 'validation')
+          expect(response['error']).to match(/EAV value column 'name'/i)
+        end
+      end
+
+      it 'refuses an orphan EAV value selection in console_find' do
+        expect(user_model).not_to receive(:find_by)
+        response = executor.send_request({
+                                           'tool' => 'find',
+                                           'params' => { 'model' => 'User', 'id' => 1, 'columns' => ['name'] }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/EAV value column 'name'/i)
+      end
+
+      it 'refuses an EAV value column as a console_find locator' do
+        expect(user_model).not_to receive(:find_by)
+        response = executor.send_request({
+                                           'tool' => 'find',
+                                           'params' => { 'model' => 'User', 'by' => { 'name' => 'plaintext' } }
+                                         })
+
+        expect(response).to include('ok' => false, 'error_type' => 'validation')
+        expect(response['error']).to match(/EAV value column 'name'/i)
+      end
+
+      it 'refuses an aggregate over either EAV pair column' do
+        %w[email name].each do |column|
+          response = executor.send_request({
+                                             'tool' => 'aggregate',
+                                             'params' => {
+                                               'model' => 'User', 'function' => 'maximum', 'column' => column
+                                             }
+                                           })
+
+          expect(response).to include('ok' => false, 'error_type' => 'validation')
+          expect(response['error']).to match(%r{aggregating redacted key/value column '#{column}'}i)
+        end
       end
     end
   end

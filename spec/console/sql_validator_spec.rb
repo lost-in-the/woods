@@ -604,6 +604,24 @@ RSpec.describe Woods::Console::SqlValidator do
         .to raise_error(Woods::Console::SqlValidationError, /lock/i)
     end
 
+    it 'rejects FOR UPDATE after a # inside a MySQL double-quoted string' do
+      sql = 'SELECT * FROM users WHERE note = "a#b" FOR UPDATE'
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'rejects FOR UPDATE after a # inside a MySQL backtick identifier' do
+      sql = 'SELECT `a#b` FROM users FOR UPDATE'
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'accepts a PostgreSQL E-string containing FOR UPDATE' do
+      sql = "SELECT E'customer\\'s request for update'"
+      expect { Woods::Console::SqlValidator.new(dialect: :postgres).validate!(sql) }
+        .not_to raise_error
+    end
+
     it 'still rejects executable-comment lock splits under the MySQL dialect' do
       expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users LOCK /*!99999 */ IN SHARE MODE') }
         .to raise_error(Woods::Console::SqlValidationError, /lock/i)

@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keys before any query executes. Structured scope predicates now apply the same
   rule to redacted columns and EAV value columns while preserving EAV key-column
   predicates.
+- **Tier 1 and raw-SQL redaction shapes now fail closed.** `console_sample`,
+  `console_find`, `console_pluck`, and `console_recent` refuse an EAV value column
+  unless its paired key column is selected too; `console_aggregate` refuses either
+  EAV pair column. Structured order/group inputs and legacy multi-bind scope arrays
+  now apply the protected-predicate guard. `console_sql` accepts a protected
+  identifier only as a direct, unaliased outer select column; aliases, aggregates,
+  predicates, CTE shapes, and unpaired EAV values are rejected before execution.
 - **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
   check anchored its match to the statement leader, so
   `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
@@ -43,7 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration
   of the rolled-back transaction. The check is adapter-aware: `console_sql`
   validates with the active adapter's dialect (MySQL and PostgreSQL quote/comment
-  grammars differ, so dialect-valid literals are no longer rejected), scanning
+  grammars differ; MySQL double-quoted strings/backtick identifiers and PostgreSQL
+  quoted identifiers/E-strings are tracked faithfully), while scanning
   both normalizations when the adapter is unknown, and every view is checked under
   both MySQL executable-comment (`/*!...*/`) semantics — `#` comments and
   version-guarded comments can no longer split a lock clause apart.

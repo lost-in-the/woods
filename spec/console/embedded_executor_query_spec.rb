@@ -824,6 +824,38 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
       expect(connection).not_to have_received(:select_all)
     end
 
+    it 'refuses an EAV value column used for ordering before building a relation' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'order' => { 'amount' => 'asc' }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(order_model).not_to have_received(:all)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses an ordinary redacted column used for grouping before building a relation' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'group_by' => ['user_id']
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'user_id' is redacted/i)
+      expect(order_model).not_to have_received(:all)
+      expect(connection).not_to have_received(:select_all)
+    end
+
     it 'keeps EAV key predicates allowed' do
       response = executor.send_request({
                                          'tool' => 'query',
