@@ -177,6 +177,14 @@ RSpec.describe Woods::Storage::MetadataStore do
         result = store.find('User')
         expect(result['version']).to eq(2)
       end
+
+      # L22 — the type column backs find_by_type, but an absent key fell
+      # through `type.to_s` and was stored as "", fabricating a type where
+      # none existed instead of surfacing the missing field.
+      it 'rejects metadata stored without a type key instead of writing an empty type' do
+        expect { store.store('Ghost', { file_path: 'app/models/ghost.rb' }) }
+          .to raise_error(ArgumentError, /type/)
+      end
     end
 
     describe '#find' do
@@ -314,6 +322,44 @@ RSpec.describe Woods::Storage::MetadataStore do
           .to raise_error(Woods::ConfigurationError, /sqlite3 gem.+Gemfile.+:in_memory/m)
       ensure
         Kernel.send(:define_method, :require, original_method) if original_method
+      end
+    end
+
+    # SQLite's busy handler only helps when it is set. The twin temporal
+    # store (Woods::Temporal::SnapshotStore) sets a busy timeout at open and
+    # pairs it with a bounded BEGIN IMMEDIATE retry; this adapter used to do
+    # neither, so a second writer sharing the metadata database raised
+    # SQLite3::BusyException straight through (O2).
+    describe 'write contention' do
+      it 'sets a busy timeout on the connection at open' do
+        db = store.instance_variable_get(:@db)
+
+        expect(db.get_first_value('PRAGMA busy_timeout')).to eq(5_000)
+      end
+
+      it 'retries a contended write instead of raising SQLite3::BusyException' do
+        attempts = 0
+        db = store.instance_variable_get(:@db)
+        allow(db).to receive(:execute).and_wrap_original do |original, sql, *args|
+          attempts += 1
+          raise SQLite3::BusyException, 'database is locked' if attempts == 1
+
+          original.call(sql, *args)
+        end
+        allow(store).to receive(:sleep)
+
+        store.store('User', { type: 'model', file_path: 'app/models/user.rb' })
+
+        expect(attempts).to eq(2)
+        expect(store.find('User')['type']).to eq('model')
+      end
+
+      it 'gives up after the retry budget and raises the lock error' do
+        db = store.instance_variable_get(:@db)
+        allow(db).to receive(:execute).and_raise(SQLite3::BusyException, 'database is locked')
+        allow(store).to receive(:sleep)
+
+        expect { store.store('User', { type: 'model' }) }.to raise_error(SQLite3::BusyException)
       end
     end
   end

@@ -1548,7 +1548,7 @@ module Woods
       enriched = @graph_analysis.merge(
         generated_at: Time.current.iso8601,
         graph_sha: Digest::SHA256.hexdigest(
-          File.read(payload_dir.join('dependency_graph.json'))
+          AtomicFile.read(payload_dir.join('dependency_graph.json'))
         )
       )
 

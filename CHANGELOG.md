@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A truncated vector dump now refuses to load instead of corrupting search (M10).**
+  `vectors.bin` with a valid header but a short float payload used to unpack with nil
+  padding: the nil-floated vectors loaded into the live store, crashed search with
+  `TypeError`, and re-published as zeros on the next dump. Loading now raises
+  `Woods::MCP::UnsupportedArtifact` pointing at the file; the remedy is a re-run of
+  `woods:embed`.
+- **Every atomic dump write now fsyncs its directory (M11).** The vector and metadata
+  snapshotters and the index artifact writer skipped the containing-directory fsync
+  `AtomicFile` performs, so a crash after the rename could leave a directory entry that
+  a reboot drops — a "complete" generation that vanishes. The class contract that the
+  dump directory is fully fsynced before the `latest` pointer flips now holds on every
+  write path.
+- **File permissions are explicit per artifact (O1).** `AtomicFile.write` takes a `mode:`
+  parameter defaulting to the restrictive 0600 Tempfile already used. The one artifact
+  with a cross-boundary consumer — the watch daemon's `watch_status.json`, read by
+  host-side hooks through a bind mount — is written 0644 by design.
+- **A second writer on the metadata SQLite database no longer raises
+  `SQLite3::BusyException` immediately (O2).** The connection now sets a busy timeout at
+  open and retries a contended write a bounded number of times, mirroring the temporal
+  snapshot store.
+- **Re-capturing an unchanged HEAD computes diff stats against real history (L20).**
+  Both temporal stores resolved "previous" to the snapshot being captured, so the
+  re-capture diffed against itself and zeroed every stat. Previous now excludes the SHA
+  being captured.
+- **Storing metadata without a type key raises instead of writing an empty type (L22).**
+  The SQLite metadata adapter coerced an absent key to `""` in the column that backs
+  `find_by_type`; it now raises `ArgumentError`.
+
 - **Select aliasing no longer defeats console redaction.** `console_query` accepted
   `select: ["password_digest AS note"]`; the positional redactor masks by output
   header name, so the aliased column returned plaintext. Three select shapes are

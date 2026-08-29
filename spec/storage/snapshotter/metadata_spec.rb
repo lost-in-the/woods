@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'pathname'
+require 'woods/atomic_file'
 require 'woods/storage/snapshotter/metadata'
 require 'woods/index_artifact'
 
@@ -36,6 +37,19 @@ RSpec.describe Woods::Storage::Snapshotter::Metadata do
       packer.write(header)
       records.each { |r| packer.write(r) }
       packer.flush
+    end
+  end
+
+  describe 'durability: dump directory fsync (M11)' do
+    # AtomicFile fsyncs the containing directory after the rename; the
+    # snapshotter's own atomic write skipped that step, so a crash could
+    # leave a renamed-but-unflushed directory entry behind.
+    it 'fsyncs the dump directory after the atomic rename' do
+      dump_dir = artifact.new_dump_dir
+
+      expect(Woods::AtomicFile).to receive(:fsync_directory).with(dump_dir.to_s).and_call_original
+
+      described_class.dump(populated_store, artifact, dump_dir)
     end
   end
 

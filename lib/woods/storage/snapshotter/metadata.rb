@@ -5,6 +5,7 @@ require 'tempfile'
 require 'time'
 require 'msgpack'
 require 'woods/version'
+require 'woods/atomic_file'
 require 'woods/storage/metadata_store'
 require 'woods/mcp/errors'
 
@@ -128,7 +129,7 @@ module Woods
           #
           # @param target [Pathname] final destination
           # @param store [#count, #each_entry] populated metadata store
-          def write_atomic(target, store)
+          def write_atomic(target, store) # rubocop:disable Metrics/AbcSize
             tmp = Tempfile.new([FILENAME, '.tmp'], target.dirname.to_s)
             begin
               tmp.binmode
@@ -142,6 +143,9 @@ module Woods
               tmp.fsync
               tmp.close
               File.rename(tmp.path, target.to_s)
+              # Match AtomicFile: the directory entry itself must survive a
+              # crash after the rename, or the dump is not durable (M11).
+              Woods::AtomicFile.fsync_directory(target.dirname.to_s)
             rescue StandardError
               tmp.close
               tmp.unlink

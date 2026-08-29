@@ -46,6 +46,21 @@ RSpec.describe Woods::AtomicFile do
       expect(leftovers).to be_empty
     end
 
+    it 'writes 0600 by default — restrictive unless an artifact says otherwise' do
+      path = File.join(@dir, 'note.md')
+      described_class.write(path, 'data')
+      expect(File.stat(path).mode & 0o777).to eq(0o600)
+    end
+
+    # O1: permissions are explicit per artifact. Only artifacts with a
+    # documented cross-boundary consumer pass a wider mode; Tempfile's 0600
+    # default must not silently widen (or silently forbid widening) anywhere.
+    it 'applies an explicitly requested wider mode' do
+      path = File.join(@dir, 'shared.md')
+      described_class.write(path, 'data', mode: 0o644)
+      expect(File.stat(path).mode & 0o777).to eq(0o644)
+    end
+
     it 'fsyncs the containing directory after the atomic rename' do
       expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
 
