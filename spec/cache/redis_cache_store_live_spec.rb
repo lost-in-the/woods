@@ -11,6 +11,13 @@
 #
 #   WOODS_REDIS_URL=redis://localhost:6379/0
 #
+# IMPORTANT: point WOODS_REDIS_URL at a disposable Redis instance or a
+# dedicated logical database. The namespace-clear contract intentionally
+# exercises the production `clear(namespace: :embeddings)` wildcard and will
+# delete every `woods:cache:embeddings:*` key in that database, including keys
+# created outside this test run. Exact-key teardown protects other test runs;
+# it cannot make the production clear operation safe on a shared dev cache.
+#
 # The live-backends CI lane provides the service (redis:7-alpine) and installs
 # the redis client gem with `bundle add redis` before running, since no
 # repository bundle carries it.
