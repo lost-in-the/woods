@@ -310,6 +310,10 @@ module Woods
       def self.autodetect_from_env(config, env:, ollama_probe:)
         probe = ollama_probe || method(:ollama_reachable?)
         openai_key = env.fetch('OPENAI_API_KEY', nil)
+        # A blank key is an absent key (M9). Truthiness alone wired :openai
+        # with api_key: "" — skipping the Ollama probe a missing key gets —
+        # and then died at Builder time with a raw ConfigurationError.
+        openai_key = nil if openai_key.is_a?(String) && openai_key.strip.empty?
         if openai_key
           config.vector_store = :in_memory
           config.metadata_store = :in_memory

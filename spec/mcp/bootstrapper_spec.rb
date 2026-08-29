@@ -437,6 +437,20 @@ RSpec.describe Woods::MCP::Bootstrapper do
       Woods.configuration = original
     end
 
+    it 'raises the typed Woods::ConfigurationError when the host provider is unusable (M9)' do
+      # A host initializer that sets :openai without a usable api_key cannot
+      # be auto-resolved. The raise is typed so the top-level rescue in
+      # exe/woods-mcp (BootstrapError, ConfigurationError) prints the
+      # one-line operator message instead of a raw backtrace.
+      Woods.configuration.embedding_provider = :openai
+      Woods.configuration.embedding_options = { api_key: '' }
+
+      Dir.mktmpdir do |dir|
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::ConfigurationError, /api_key/)
+      end
+    end
+
     it 'propagates UnsupportedArtifact when woods.json has a future schema_version' do
       require 'woods/index_artifact'
 
