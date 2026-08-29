@@ -103,6 +103,79 @@ RSpec.describe Woods::Resilience::IndexValidator do
       end
     end
 
+    context 'with a flows/ artifact directory (G-2)' do
+      # flows/ holds flow_index.json plus per-flow documents — no
+      # _index.json, no units. It used to be swept into the unit-type
+      # structural pass, so every index published with flow precomputation
+      # on failed validation with "Missing _index.json in flows/".
+      before do
+        write_json('flows/flow_index.json',
+                   { 'PostsController#create' => 'flows/PostsController_create.json' })
+        write_json('flows/PostsController_create.json',
+                   { 'entry_point' => 'PostsController#create', 'steps' => [] })
+      end
+
+      it 'validates clean — flows/ is not a unit-type directory' do
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).not_to include(a_string_matching(/flows/))
+        expect(report.valid?).to be true
+      end
+
+      it 'reports a flow document the index references but the disk lacks' do
+        File.delete(File.join(tmp_dir, 'flows', 'PostsController_create.json'))
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).to include(a_string_matching(/missing document.*PostsController_create\.json/))
+      end
+
+      it 'reports a malformed flow document' do
+        FileUtils.mkdir_p(File.join(tmp_dir, 'flows'))
+        File.write(File.join(tmp_dir, 'flows', 'PostsController_create.json'), '{ not json')
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).to include(a_string_matching(/PostsController_create\.json: invalid JSON/))
+      end
+
+      it 'reports a malformed flow index itself' do
+        File.write(File.join(tmp_dir, 'flows', 'flow_index.json'), '{ not json')
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).to include(a_string_matching(/flow_index\.json: invalid JSON/))
+      end
+
+      it 'does not validate flows at all when there is no flow index' do
+        File.delete(File.join(tmp_dir, 'flows', 'flow_index.json'))
+        File.write(File.join(tmp_dir, 'flows', 'Orphaned.json'), '{ ok }')
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).to be_empty
+      end
+    end
+
+    context 'with flows/ beside a manifest-counted type directory' do
+      # The manifest-driven path must leave flows/ to the flow validator,
+      # not pick it up as a counted type directory.
+      before do
+        write_unit_file('models', 'User.json', source_code: 'class User; end')
+        write_json('models/_index.json', [{ 'identifier' => 'User', 'file_path' => 'app/models/user.rb' }])
+        write_json('manifest.json', { 'counts' => { 'models' => 1 } })
+        write_json('dependency_graph.json', { 'nodes' => {} })
+        write_json('flows/flow_index.json', { 'PostsController#show' => 'flows/PostsController_show.json' })
+        write_json('flows/PostsController_show.json', { 'entry_point' => 'PostsController#show', 'steps' => [] })
+      end
+
+      it 'validates clean' do
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).to be_empty
+      end
+    end
+
     context 'with missing referenced files' do
       before do
         write_unit_file('models', 'User.json')

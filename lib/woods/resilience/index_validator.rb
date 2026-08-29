@@ -70,6 +70,7 @@ module Woods
         payload_type_dirs(errors).each do |type_dir|
           validate_type_directory(type_dir, warnings, errors)
         end
+        validate_flow_artifacts(errors)
         validate_against_manifest(warnings, errors)
 
         ValidationReport.new(valid?: errors.empty?, warnings: warnings, errors: errors)
@@ -162,10 +163,18 @@ module Woods
 
       private
 
-      # Resolve the published generation's payload and list its type
-      # directories (e.g. models/, controllers/) — an index that publishes
+      # Resolve the published generation's payload and list its unit-type
+      # directories (e.g. models/, controllers/). An index that publishes
       # per-generation payloads keeps `payloads/`, `dumps/` and `tasks/`
       # beside them at the root, none of which are type directories.
+      #
+      # The list is bounded by a type-directory allowlist (G-2): a directory
+      # the allowlist does not claim — `flows/` above all — is not a unit-type
+      # directory and never reaches {#validate_type_directory}, which demands
+      # an `_index.json` no auxiliary artifact can satisfy. Before the
+      # allowlist, every directory under the payload was treated as a unit
+      # type, so any index published with flow precomputation enabled failed
+      # validation with "Missing _index.json in flows/".
       #
       # @param errors [Array<String>] accumulated errors; appended to if the
       #   payload directory named by the published generation isn't on disk
@@ -174,7 +183,10 @@ module Woods
         payload = payload_dir
         Dir.children(payload).filter_map do |name|
           full_path = File.join(payload, name)
-          full_path if File.directory?(full_path)
+          next unless File.directory?(full_path)
+          next unless unit_type_directory?(name)
+
+          full_path
         end
       rescue Errno::ENOENT
         # A published `generation.json` pointing at a payload directory
@@ -184,6 +196,72 @@ module Woods
         # crash for its caller to catch.
         errors << "Payload directory does not exist: #{payload}"
         []
+      end
+
+      # @param name [String] directory basename under the payload
+      # @return [Boolean] true when extraction publishes unit types here
+      def unit_type_directory?(name)
+        type_directory_allowlist.include?(name)
+      end
+
+      # The shared allowlist: exactly the directories extraction publishes
+      # unit types into, derived from `Extractor::EXTRACTORS` so the two
+      # cannot drift. Required lazily — {IndexValidator} deliberately loads
+      # without Rails, and `woods/extractor` also loads clean, but a failure
+      # degrades to "no allowlist" (no structural type-directory pass)
+      # rather than to a crash. The manifest-driven checks in
+      # {#validate_against_manifest} still run either way.
+      #
+      # `flows/` is deliberately absent: it holds `flow_index.json` and
+      # per-flow documents, which {#validate_flow_artifacts} owns.
+      #
+      # @return [Array<String>]
+      def type_directory_allowlist
+        require_relative '../extractor' unless defined?(Woods::Extractor::EXTRACTORS)
+
+        @type_directory_allowlist ||= Woods::Extractor::EXTRACTORS.keys.map(&:to_s).freeze
+      rescue StandardError
+        []
+      end
+
+      # Validate the flows/ artifact family (G-2): `flow_index.json` parses,
+      # and every entry points at a flow document that exists and parses.
+      # A payload from a run that never enabled flow precomputation has no
+      # flows directory at all; a flows directory with no index has nothing
+      # to validate entries against, so it is left alone.
+      #
+      # @param errors [Array<String>] accumulated errors
+      def validate_flow_artifacts(errors)
+        flows_dir = File.join(payload_dir, 'flows')
+        return unless File.directory?(flows_dir)
+
+        index_path = File.join(flows_dir, 'flow_index.json')
+        return unless File.exist?(index_path)
+
+        index = parse_artifact(index_path, 'flows/flow_index.json', errors)
+        return unless index.is_a?(Hash)
+
+        index.each_value do |relative|
+          filename = File.basename(relative.to_s)
+          document = File.join(flows_dir, filename)
+          unless File.exist?(document)
+            errors << "flow_index.json references missing document: flows/#{filename}"
+            next
+          end
+
+          parse_artifact(document, "flows/#{filename}", errors)
+        end
+      end
+
+      # @param path [String] artifact path
+      # @param label [String] how to name the artifact in an error
+      # @param errors [Array<String>] accumulated errors
+      # @return [Object, nil] parsed JSON, or nil when it does not parse
+      def parse_artifact(path, label, errors)
+        JSON.parse(Woods::AtomicFile.read(path))
+      rescue JSON::ParserError => e
+        errors << "#{label}: invalid JSON - #{e.message}"
+        nil
       end
 
       # Validate a single type directory (e.g., models/, controllers/).
