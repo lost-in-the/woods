@@ -54,6 +54,22 @@ RSpec.describe Woods::Retrieval::QueryClassifier do
     end
   end
 
+  describe 'intent pattern ordering (L8)' do
+    # "find who calls X" matches BOTH the :locate pattern ("find") and the
+    # :trace pattern ("who calls"). First-match ordering put :locate first,
+    # so graph-based tracing queries were misrouted to keyword/direct
+    # locate handling. The tracing intent is the one the agent means.
+    it 'routes "find who calls X" to :trace, not :locate' do
+      expect(classifier.classify('find who calls UsersController#create').intent).to eq(:trace)
+      expect(classifier.classify('find what calls the billing service').intent).to eq(:trace)
+    end
+
+    it 'still routes plain locate queries that carry no trace words to :locate' do
+      expect(classifier.classify('find the payment controller').intent).to eq(:locate)
+      expect(classifier.classify('where is the User model defined?').intent).to eq(:locate)
+    end
+  end
+
   describe 'scope detection' do
     {
       'Show me exactly the User model' => :pinpoint,
