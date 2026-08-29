@@ -18,6 +18,7 @@ module Woods
       #   vectors = provider.embed_batch(["text1", "text2"])
       class OpenAI
         include Interface
+        include DiscardableClient
 
         ENDPOINT = URI('https://api.openai.com/v1/embeddings')
         DEFAULT_MODEL = 'text-embedding-3-small'
@@ -163,9 +164,16 @@ module Woods
 
           JSON.parse(response.body)
         rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
-          # Connection dropped — reset and retry once
-          @http_client = nil
-          response = http_client.request(request)
+          # Connection dropped — reset and retry once. A second transport
+          # failure is wrapped (mirroring Ollama) rather than left to escape
+          # as a raw Errno, so callers rescuing Woods::Error see a typed,
+          # context-bearing failure.
+          discard_http_client
+          begin
+            response = http_client.request(request)
+          rescue StandardError => retry_error
+            raise RequestError, "OpenAI API error (retry failed): #{retry_error.message}"
+          end
           raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)

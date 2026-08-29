@@ -341,6 +341,7 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
       allow(retry_http).to receive(:keep_alive_timeout=)
       allow(retry_http).to receive(:start).and_return(retry_http)
       allow(retry_http).to receive(:started?).and_return(true)
+      allow(http_double).to receive(:finish)
     end
 
     it 'retries once on Errno::ECONNRESET and returns the embedding' do
@@ -390,6 +391,15 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
       expect { provider.embed('hello') }.to raise_error(
         Woods::Error, /Ollama API error: 500 still down/
       )
+    end
+
+    it 'closes the discarded connection before issuing the retry (no leaked socket)' do
+      allow(http_double).to receive(:request).and_raise(Errno::ECONNRESET)
+      allow(retry_http).to receive(:request).and_return(success_response)
+
+      provider.embed('hello')
+
+      expect(http_double).to have_received(:finish)
     end
 
     it 'discards the original HTTP client and issues the retry on the fresh one' do

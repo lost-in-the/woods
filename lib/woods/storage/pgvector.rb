@@ -124,13 +124,21 @@ module Woods
 
         # Search for similar vectors using cosine distance.
         #
+        # The query vector is dimension-checked before SQL runs, mirroring the
+        # upsert path: otherwise a wrong-dimension query surfaces as a
+        # server-side PG::DataException instead of the typed Woods::Error
+        # callers already handle from {#store_batch}.
+        #
         # @param query_vector [Array<Float>] The query embedding
         # @param limit [Integer] Maximum results to return
         # @param filters [Hash] Metadata key-value filters
         # @return [Array<SearchResult>] Results sorted by descending similarity
+        # @raise [Woods::Error] if the query vector's length disagrees with the
+        #   configured dimension
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {})
           validate_vector!(query_vector)
+          validate_dimensions!(query_vector) if @dimensions
           vector_literal = build_vector_literal(query_vector)
           where_clause = build_where(filters)
 

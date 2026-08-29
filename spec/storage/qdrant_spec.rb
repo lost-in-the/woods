@@ -20,6 +20,7 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     allow(http).to receive(:keep_alive_timeout=)
     allow(http).to receive(:start).and_return(http)
     allow(http).to receive(:started?).and_return(true)
+    allow(http).to receive(:finish)
   end
 
   describe '#initialize' do
@@ -249,6 +250,15 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       end
     end
 
+    it 'raises the typed dimension error for a wrong-dimension query before any request' do
+      dimensioned = described_class.new(url: 'http://localhost:6333', collection: 'test_collection',
+                                        dimensions: 3, allow_private_hosts: true)
+
+      expect { dimensioned.search([0.1, 0.2]) }
+        .to raise_error(Woods::Error, /Vector dimension mismatch: got 2, expected 3/)
+      expect(http).not_to have_received(:request)
+    end
+
     it 'translates an Array filter value into match.any membership (#108)' do
       store.search([0.1, 0.2, 0.3], filters: { type: %w[model service] })
 
@@ -448,6 +458,17 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
   end
 
   describe 'connection retry' do
+    it 'closes a discarded connection before replacing it (no leaked socket)' do
+      allow(http).to receive(:request).and_raise(Errno::ECONNREFUSED)
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }.to raise_error(described_class::RequestError)
+
+      # Net::HTTP.new is stubbed to the same double, so both the first
+      # discard and the post-retry discard close that (shared) client.
+      expect(http).to have_received(:finish).twice
+    end
+
     it 'retries once on ECONNRESET' do
       response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":0}}')
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)

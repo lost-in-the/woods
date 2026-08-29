@@ -62,12 +62,21 @@ module Woods
     # The +server.update+ sub-hash for +woods_status+. Keys are snake_case to
     # match the rest of the status payload's JSON shape.
     #
+    # +latest_version+ reports the newest version this process knows about —
+    # the published one when it is ahead of the install, otherwise the
+    # installed version itself. Reporting the raw published version here made
+    # the payload self-contradictory whenever the installed gem was newer (an
+    # unreleased build): +current_version: 2.0.0+ next to +latest_version:
+    # 1.6.0+ with +update_available: false+ reads as if the running version is
+    # invalid. +update_available+ semantics are unchanged: true only when the
+    # published version is strictly newer than the installed one.
+    #
     # @return [Hash] +{ current_version:, latest_version:, update_available: }+
     def status_hash(current: Woods::VERSION, **opts)
       r = check(current: current, **opts)
       {
         current_version: r[:current],
-        latest_version: r[:latest],
+        latest_version: newest_known_version(r[:current], r[:latest]),
         update_available: r[:update_available]
       }
     end
@@ -97,6 +106,20 @@ module Woods
 
     def result(current, latest)
       { current: current, latest: latest, update_available: latest ? newer?(latest, current) : false }
+    end
+
+    # The newest version between the installed gem and the last published one
+    # this process knows about. Used by {status_hash} for public reporting;
+    # the raw published value stays internal for comparison and caching.
+    #
+    # @param current [String] installed version
+    # @param published [String, nil] last known published version (nil when
+    #   the probe failed or the check is disabled)
+    # @return [String]
+    def newest_known_version(current, published)
+      return current unless published && newer?(published, current)
+
+      published
     end
 
     def newer?(latest, current)
