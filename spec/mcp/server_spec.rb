@@ -1143,6 +1143,63 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  # L6: the rescue around the task-durability guard only covered
+  # SystemCallError/IOError. A guard BUG raising anything else (TypeError,
+  # NoMethodError, ...) escaped before the rescue ran and leaked the on-disk
+  # lock — every later writer (rake, daemon, other MCP runs) blocked until
+  # the stale window expired. The release must be ensure-based.
+  describe 'run_pipeline_in_background lock release (L6)' do
+    let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-l6-lock') }
+
+    after do
+      described_class.send(:pipeline_finish, :extraction)
+      FileUtils.rm_rf(tmp_output_dir)
+    end
+
+    def build_lock
+      require 'woods/coordination/pipeline_lock'
+      Woods::Coordination::PipelineLock.new(
+        lock_dir: tmp_output_dir, name: 'extraction', stale_timeout: 600
+      )
+    end
+
+    def run_with_guard_raising(lock)
+      described_class.send(
+        :run_pipeline_in_background,
+        kind: :extraction, tool: 'pipeline_extract', lock: lock,
+        task_store: nil, respond: ->(_text) {}, respond_err: ->(*_args) {},
+        runner: -> {}, started: -> {}, started_message: 'started'
+      )
+    end
+
+    it 'releases the on-disk lock when the task guard raises a non-SystemCallError' do
+      lock = build_lock
+      expect(lock.acquire).to be(true)
+      allow(described_class).to receive(:create_pipeline_task).and_raise(TypeError, 'guard bug')
+
+      expect do
+        run_with_guard_raising(lock)
+      end.to raise_error(TypeError, /guard bug/)
+
+      # The lock file is gone and a fresh contender can take the lock again.
+      expect(Dir.children(tmp_output_dir).grep(/\.lock\z/)).to be_empty
+      expect(build_lock.acquire).to be(true)
+    end
+
+    it 'still releases the on-disk lock on SystemCallError from the guard' do
+      lock = build_lock
+      expect(lock.acquire).to be(true)
+      allow(described_class).to receive(:create_pipeline_task).and_raise(Errno::EACCES, 'permission denied')
+
+      expect do
+        run_with_guard_raising(lock)
+      end.not_to raise_error
+
+      expect(Dir.children(tmp_output_dir).grep(/\.lock\z/)).to be_empty
+      expect(build_lock.acquire).to be(true)
+    end
+  end
+
   describe 'tool: pipeline_embed incremental param' do
     let(:guard) do
       instance_double(Woods::Operator::PipelineGuard).tap do |g|

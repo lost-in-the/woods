@@ -1326,49 +1326,63 @@ module Woods
         # @return [Hash, MCP::Tool::Response]
         def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, respond_err:, runner:, started:,
                                        started_message:)
-          task = create_pipeline_task(task_store, tool)
-          started.call
+          # Ownership of the on-disk lock transfers to the background thread
+          # the moment Thread.new succeeds — its ensure releases it when the
+          # run finishes. Before that point (guard failures, started hook),
+          # THIS method owns the lock and must release it on the way out
+          # (L6): the rescue below covers only SystemCallError/IOError, so a
+          # guard bug raising anything else used to leak the on-disk lock
+          # and block every later writer until the stale window expired.
+          handoff = false
+          begin
+            task = create_pipeline_task(task_store, tool)
+            started.call
 
-          Thread.new do
-            # Heartbeat, like the rake writers: a full run on a large host can
-            # outlive the lock's stale window, and an untouched lock would be
-            # retired by the next contender mid-run — recreating the two-writer
-            # clobber.
-            if lock
-              Woods::Coordination::LockHeartbeat.run(lock) { runner.call }
-            else
-              runner.call
+            Thread.new do
+              # Heartbeat, like the rake writers: a full run on a large host can
+              # outlive the lock's stale window, and an untouched lock would be
+              # retired by the next contender mid-run — recreating the two-writer
+              # clobber.
+              if lock
+                Woods::Coordination::LockHeartbeat.run(lock) { runner.call }
+              else
+                runner.call
+              end
+              task_store&.complete!(task.id, result: pipeline_task_result(tool)) if task
+            rescue StandardError, ScriptError => e
+              # ScriptError (SyntaxError, LoadError) is not a StandardError, and
+              # +runner.call+ can lazily +require_relative+ the extractor — a
+              # half-typed file must degrade this background thread, not kill it
+              # silently while the task record sits at "working" until pid-death
+              # (see the "rescue ScriptError anywhere a reload can happen" rule).
+              logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+              logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
+              # Recording the failure is the half that was missing: previously the
+              # error reached a log the agent cannot read, and the tool had
+              # already reported success.
+              task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+            ensure
+              lock&.release
+              Woods::MCP::Server.send(:pipeline_finish, kind)
             end
-            task_store&.complete!(task.id, result: pipeline_task_result(tool)) if task
-          rescue StandardError, ScriptError => e
-            # ScriptError (SyntaxError, LoadError) is not a StandardError, and
-            # +runner.call+ can lazily +require_relative+ the extractor — a
-            # half-typed file must degrade this background thread, not kill it
-            # silently while the task record sits at "working" until pid-death
-            # (see the "rescue ScriptError anywhere a reload can happen" rule).
-            logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-            logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
-            # Recording the failure is the half that was missing: previously the
-            # error reached a log the agent cannot read, and the tool had
-            # already reported success.
-            task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+            handoff = true
+
+            return Tasks::Extension.create_task_result(task) if task
+
+            respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
+          rescue SystemCallError, IOError => e
+            respond_err.call(
+              'The task could not be durably recorded, so the pipeline was not started.',
+              code: :task_store_unavailable,
+              tool: tool,
+              exception: e.class.name
+            )
           ensure
-            lock&.release
-            Woods::MCP::Server.send(:pipeline_finish, kind)
+            unless handoff
+              lock&.release
+              Woods::MCP::Server.send(:pipeline_finish, kind)
+            end
           end
-
-          return Tasks::Extension.create_task_result(task) if task
-
-          respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
-        rescue SystemCallError, IOError => e
-          lock&.release
-          Woods::MCP::Server.send(:pipeline_finish, kind)
-          respond_err.call(
-            'The task could not be durably recorded, so the pipeline was not started.',
-            code: :task_store_unavailable,
-            tool: tool,
-            exception: e.class.name
-          )
         end
 
         # Mint a task record, or return nil to take the legacy path.
