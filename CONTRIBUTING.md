@@ -41,6 +41,25 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 
 Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/v2.0.0/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
 
+### Agent orientation and static self-map
+
+When investigating Woods itself, agents can create a disposable, MCP-queryable
+map of the gem source before planning a broad change or debugging a cross-cutting
+problem:
+
+```bash
+output_dir="$(mktemp -d)"
+bin/rake "woods:self_map[$output_dir]"
+bundle exec woods-mcp-start "$output_dir"
+```
+
+This internal developer task publishes an atomic standard index generation.
+Use `woods_status`, `structure`, `search`, `lookup`, `dependencies`, and
+`dependents` to identify ownership and estimate the static blast radius. The
+map is Woods-only, has no embeddings, and must remain out of version control.
+It is not a replacement for booted Rails extraction or evidence of runtime
+Rails behavior; use the normal host-app pipeline for that.
+
 ## Make the change
 
 1. Reproduce a bug or define the expected behavior.

@@ -788,6 +788,18 @@ namespace :woods do
     puts 'Self-analysis complete.'
   end
 
+  # Internal developer tool. Unlike self_analyze, this publishes an ordinary
+  # index generation that the packaged Index MCP server can read. It is
+  # intentionally Woods-only and static: it does not boot Rails.
+  task :self_map, [:output_dir] do |_task, args|
+    require 'woods/gem_mapper'
+
+    gem_root = File.expand_path('../..', __dir__)
+    output_dir = args[:output_dir] || ENV.fetch('WOODS_SELF_MAP_OUTPUT', File.join(gem_root, 'tmp', 'woods_self_map'))
+    result = Woods::GemMapper.new(root: gem_root, output_dir: output_dir).map!
+    puts "Woods self-map #{result[:status]} (generation #{result[:generation]}) at #{output_dir}"
+  end
+
   desc 'Generate execution flow document for a Rails entry point'
   task :flow, [:entry_point] => :environment do |_t, args|
     require 'json'

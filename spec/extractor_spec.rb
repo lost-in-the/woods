@@ -1657,6 +1657,49 @@ RSpec.describe Woods::Extractor do
       expect(Rails.logger).to receive(:warn).with(/Deduplicated routes: dropped 2 duplicate/)
       extractor.send(:deduplicate_results)
     end
+
+    it 'deduplicates units that share a source file or have no source file' do
+      # Engine/runtime units legitimately re-derive the same identifier from
+      # the same (or no) source file — first occurrence wins, as before.
+      engine_a = make_unit(type: :route, identifier: 'GET /posts')
+      engine_b = make_unit(type: :route, identifier: 'GET /posts')
+      engine_a.file_path = nil
+      engine_b.file_path = nil
+
+      extractor.instance_variable_set(:@results, { routes: [engine_a, engine_b] })
+      extractor.send(:deduplicate_results)
+
+      expect(extractor.instance_variable_get(:@results)[:routes].size).to eq(1)
+    end
+
+    it 'aborts when one file path is a real file and the other is absent' do
+      runtime = make_unit(type: :job, identifier: 'SyncJob')
+      runtime.file_path = nil
+      file_derived = make_unit(type: :job, identifier: 'SyncJob')
+
+      extractor.instance_variable_set(:@results, { jobs: [runtime, file_derived] })
+
+      expect { extractor.send(:deduplicate_results) }
+        .to raise_error(Woods::ExtractionError, /job 'SyncJob'/)
+    end
+
+    it 'aborts when the same type+identifier is derived from different files' do
+      # G-1 companion: a same-type identifier collision is unrepresentable in
+      # the index (same graph node, last-writer-wins file), and `variants:` is
+      # cross-type graph identity only — not an escape hatch. Silence was the
+      # bug: both files' units must surface, and extraction must stop.
+      parser = make_unit(type: :service, identifier: 'Domain::Container')
+      renderer = make_unit(type: :service, identifier: 'Domain::Container')
+      renderer.file_path = '/app/services/domain/container/renderer.rb'
+
+      extractor.instance_variable_set(:@results, { services: [parser, renderer] })
+
+      expect { extractor.send(:deduplicate_results) }
+        .to raise_error(
+          Woods::ExtractionError,
+          %r{service 'Domain::Container'.*services/Domain::Container\.rb.*container/renderer\.rb}m
+        )
+    end
   end
 
   # ── collision_safe_filename ──────────────────────────────────────────

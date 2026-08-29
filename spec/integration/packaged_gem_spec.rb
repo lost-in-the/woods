@@ -9,6 +9,7 @@ require 'open3'
 require 'pathname'
 require 'rubygems/package'
 require 'socket'
+require 'timeout'
 require 'tmpdir'
 require 'uri'
 
@@ -148,6 +149,141 @@ RSpec.describe 'packaged gem' do
     expect(metadata.fetch('changelog_uri')).to eq('https://github.com/lost-in-the/woods/blob/v2.0.0/CHANGELOG.md')
     expect(metadata.fetch('documentation_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0/docs')
     expect(File.read(File.join(@unpacked, 'CHANGELOG.md'))).to include('## [2.0.0] - 2026-08-20')
+  end
+
+  # The every-PR tier (see the package-smoke job in ci.yml and the
+  # :package_install filter in spec_helper.rb). The structural examples above
+  # prove the artifact CONTAINS the right files; an inventory cannot catch a
+  # packaging error that stops the installed gem from LOADING, so this group
+  # installs the artifact into an isolated gem home and boots it. The full
+  # installed-artifact suite stays release-gated under :packaged_gem below.
+  describe 'installed artifact boot smoke', :package_install do
+    before(:context) do
+      @smoke_gem_home = File.join(@package_tmp, 'smoke-gem-home')
+      output, status = Open3.capture2e(
+        Gem.ruby, '-S', 'gem', 'install', '--local', '--ignore-dependencies', '--no-document',
+        '--install-dir', @smoke_gem_home, @artifact
+      )
+      raise output unless status.success?
+    end
+
+    # Isolated GEM_HOME first, then the gems this checkout's bundle installed
+    # (Bundler.bundle_path), then RubyGems' defaults. Runtime dependencies are
+    # NOT vendored into the smoke gem home (the install above uses
+    # --ignore-dependencies); they must resolve through GEM_PATH exactly as
+    # they do for a real user who gem-installs woods alongside their deps.
+    def smoke_env
+      clean_env = ENV.to_h
+      clean_env.each_key do |key|
+        clean_env[key] = nil if key.start_with?('BUNDLE_') || %w[RUBYLIB RUBYOPT].include?(key)
+      end
+      bundle_path = defined?(Bundler) ? Bundler.bundle_path.to_s : nil
+      gem_paths = [@smoke_gem_home, bundle_path, *Gem.path, *Gem.default_path].compact.uniq
+      clean_env.merge(
+        'GEM_HOME' => @smoke_gem_home,
+        'GEM_PATH' => gem_paths.join(File::PATH_SEPARATOR),
+        'OPENAI_API_KEY' => nil,
+        'OLLAMA_BASE_URL' => 'http://127.0.0.1:1',
+        'PATH' => [File.join(@smoke_gem_home, 'bin'), File.dirname(Gem.ruby), ENV.fetch('PATH')]
+                  .join(File::PATH_SEPARATOR)
+      )
+    end
+
+    it "loads 'woods' from the installed gem, with nothing from the checkout's lib on the load path" do
+      script = <<~'RUBY'
+        require 'woods'
+        home = File.realpath(ENV.fetch('WOODS_SMOKE_GEM_HOME'))
+        # The bundle path may legitimately live below the checkout (CI's
+        # vendor/bundle), so a blanket "nothing under the repository root"
+        # rule would reject the very GEM_PATH entries smoke_env adds. The
+        # checkout's own lib is the only load-path entry that means "loaded
+        # from source instead of the installed gem".
+        lib = File.join(File.expand_path(ENV.fetch('WOODS_REPOSITORY_ROOT')), 'lib')
+        leaked = $LOAD_PATH.select do |p|
+          expanded = File.expand_path(p)
+          expanded == lib || expanded.start_with?("#{lib}/")
+        end
+        abort "checkout lib leaked onto the load path: #{leaked.join(', ')}" unless leaked.empty?
+        loaded = Gem.loaded_specs.fetch('woods').full_gem_path
+        abort "woods loaded from #{loaded}, not the installed gem" unless loaded.start_with?(home)
+        # loaded_specs names the gem; source_location proves the FILE actually
+        # came from the isolated install, not a same-named copy elsewhere.
+        defined_in = File.realpath(Woods.method(:configuration).source_location.fetch(0))
+        abort "woods source loaded from #{defined_in}" unless defined_in.start_with?("#{home}/")
+        puts 'ok'
+      RUBY
+      env = smoke_env.merge(
+        'WOODS_REPOSITORY_ROOT' => PackagedGemSpec::ROOT,
+        'WOODS_SMOKE_GEM_HOME' => @smoke_gem_home
+      )
+      stdout, stderr, status = Open3.capture3(env, Gem.ruby, '-e', script, chdir: @package_tmp)
+
+      expect(status).to be_success, "require 'woods' failed outside the checkout:\n#{stderr}"
+      expect(stdout).to eq("ok\n")
+    end
+
+    it 'boots the installed woods-mcp and answers an initialize request with protocol-pure stdout' do
+      exe = File.join(@smoke_gem_home, 'bin', 'woods-mcp')
+      fixture = File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods')
+      request = JSON.generate(
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: {
+          protocolVersion: '2026-07-28', capabilities: {},
+          clientInfo: { name: 'pr-smoke', version: '1.0' }
+        }
+      )
+
+      stdin, stdout, stderr, wait_thread = Open3.popen3(smoke_env, exe, fixture, chdir: @package_tmp)
+      begin
+        # The first stdout line must already be the JSON-RPC response: any
+        # banner or warning interleaved here is a protocol violation, which is
+        # why the assertion is JSON.parse on line one rather than a grep.
+        response_line = nil
+        Timeout.timeout(20) do
+          stdin.puts(request)
+          stdin.close
+          response_line = stdout.gets
+        end
+
+        response = JSON.parse(response_line)
+        expect(response).to include('jsonrpc' => '2.0', 'id' => 1)
+        expect(response.fetch('result')).to include('serverInfo' => hash_including('name' => 'woods'))
+        # The negotiated version is the server's choice for a raw handshake
+        # (the official client's negotiation has its own contract spec); the
+        # smoke asserts a version was negotiated, not which one.
+        negotiated = response.fetch('result')['protocolVersion']
+        expect(negotiated).to be_a(String)
+        expect(negotiated).not_to be_empty
+
+        # Purity, continued: after the response, nothing further on stdout —
+        # EOF once the server exits on the closed stdin.
+        remaining = nil
+        Timeout.timeout(10) { remaining = stdout.read }
+        expect(remaining).to eq('')
+
+        wait_thread.join(5)
+        expect(wait_thread).not_to be_alive
+        expect(wait_thread.value).to be_success
+        expect(stderr.read).not_to include('LoadError')
+      ensure
+        stdin.close unless stdin.closed?
+        stdout.close unless stdout.closed?
+        stderr.close unless stderr.closed?
+        if wait_thread&.alive?
+          # Cleanup only — an expectation here would mask the real failure.
+          # The child can exit (and be reaped) between alive? and kill; the
+          # same race reap_process handles in the release-gated group below.
+          begin
+            Process.kill('TERM', wait_thread.pid)
+            wait_thread.join(5)
+            Process.kill('KILL', wait_thread.pid) if wait_thread.alive?
+            wait_thread.join(5)
+          rescue Errno::ESRCH, Errno::ECHILD
+            nil
+          end
+        end
+      end
+    end
   end
 
   describe 'clean installed artifact', :packaged_gem do

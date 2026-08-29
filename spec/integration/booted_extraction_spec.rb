@@ -135,6 +135,13 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
   end
 
+  # Finding G-1: files wrapped in class namespaces used to index as the
+  # wrapper (Domain::Container), and both siblings collided on it.
+  it 'resolves class-wrapper-nested services to their file-named constants' do
+    identifiers = index_for(:services).map { |u| u['identifier'] }
+    expect(identifiers).to include('Domain::Container::Parser', 'Domain::Container::Renderer')
+  end
+
   it 'resolves the Post -> Comment association as a dependency edge' do
     post_unit = find_unit(:models, 'Post')
     expect(post_unit).not_to be_nil

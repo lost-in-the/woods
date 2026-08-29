@@ -92,17 +92,24 @@ jobs:
       - name: Run multi-worktree integration
         run: bundle exec rspec spec/integration/multi_worktree_spec.rb
 
+      # Governed naming must follow the active Zeitwerk inflector (PR-251
+      # finding 2). Own process — boots its own Rails app with a custom
+      # `api => API` inflection and wrapper-nested siblings under app/services/api/.
+      - name: Run inflected-naming integration
+        run: bundle exec rspec spec/integration/inflected_naming_spec.rb
+
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but
   # cannot prove backend locking or transaction behavior.
   live-backends:
-    name: Live backends (pgvector + Qdrant + Solid Cache)
+    name: Live backends (pgvector + Qdrant + Solid Cache + Redis)
     runs-on: ubuntu-latest
     env:
       BUNDLE_GEMFILE: gemfiles/live_backends.gemfile
       WOODS_RUN_LIVE_BACKENDS: '1'
       WOODS_PG_URL: postgres://postgres:postgres@localhost:5432/woods_test
       WOODS_QDRANT_URL: http://localhost:6333
+      WOODS_REDIS_URL: redis://localhost:6379/0
     services:
       # pgvector's own image — the stock postgres image has no vector extension,
       # so `CREATE EXTENSION vector` in ensure_schema! would fail.
@@ -125,6 +132,15 @@ jobs:
         image: qdrant/qdrant:v1.12.4
         ports:
           - 6333:6333
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
       - name: Set up Ruby
@@ -132,6 +148,12 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
+      # The RedisCacheStore live specs need the redis client gem, which no
+      # repository bundle carries (the gem is an application-side dependency
+      # of the store). Adding it to the ephemeral checkout here keeps the
+      # tracked gemfiles untouched until 2.0 ships.
+      - name: Add the redis client gem
+        run: bundle add redis
       - name: Wait for Qdrant
         run: |
           for i in $(seq 1 30); do
@@ -148,6 +170,7 @@ jobs:
           bundle exec rspec
           spec/integration/live_backends_spec.rb
           spec/integration/solid_cache_compatibility_spec.rb
+          spec/cache/redis_cache_store_live_spec.rb
 
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with
@@ -263,3 +286,35 @@ jobs:
             dist/${{ steps.artifact.outputs.gem-name }}.sha256
           if-no-files-found: error
           retention-days: 7
+
+  # Packaged-gem smoke on every PR (2.0 policy). Two tiers live in
+  # spec/integration/packaged_gem_spec.rb:
+  #
+  # - the untagged structural examples: the built gem's file inventory,
+  #   executables, README link targets, community files, release metadata;
+  # - the :package_install boot smoke (enabled below via
+  #   WOODS_RUN_PACKAGE_INSTALL): the artifact installed into an isolated gem
+  #   home, `require 'woods'` proven to load from the installed gem rather
+  #   than the checkout, and one packaged executable booted through a
+  #   JSON-RPC initialize with protocol-pure stdout.
+  #
+  # What does NOT run here: the heavyweight installed-artifact suite
+  # (:packaged_gem — full protocol drives, generators, Rails extraction in a
+  # bundled dummy app). That gate is all-or-nothing over its own tag, which
+  # is why the smoke tier carries a separate tag and env var instead of
+  # reusing it; it stays release-gated behind WOODS_RUN_PACKAGE_SMOKE in
+  # release.yml.
+  package-smoke:
+    name: Packaged gem smoke
+    runs-on: ubuntu-latest
+    env:
+      WOODS_RUN_PACKAGE_INSTALL: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Build the gem, install it, and boot it
+        run: bundle exec rspec spec/integration/packaged_gem_spec.rb

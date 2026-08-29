@@ -12,7 +12,7 @@ No. Woods requires a booted Rails environment for extraction. It uses runtime in
 
 ### What Rails versions does Woods support?
 
-Woods supports **Rails 6.0 and newer**, on **Ruby 3.0 through 4.0**. CI runs an end-to-end extraction against Rails 6.0, 6.1, 7.0, 7.1, 7.2, and 8.0 (see the version matrix in [CONTRIBUTING.md](../CONTRIBUTING.md)). The gem declares `railties >= 6.0`; the only 6.1-introduced APIs it touches (`connection_db_config`, `has_many_inversing`) are `respond_to?`-guarded and degrade cleanly on 6.0.
+Woods supports **Rails 6.0 and newer**, on **Ruby 3.0 through 4.0**. CI runs an end-to-end extraction against Rails 6.0, 6.1, 7.0, 7.1, 7.2, 8.0, and 8.1 (see the version matrix in [CONTRIBUTING.md](../CONTRIBUTING.md)). The gem declares `railties >= 6.0`; the only 6.1-introduced APIs it touches (`connection_db_config`, `has_many_inversing`) are `respond_to?`-guarded and degrade cleanly on 6.0.
 
 ---
 
@@ -94,7 +94,7 @@ bundle exec rake woods:incremental
 docker compose exec app bundle exec rake woods:incremental
 ```
 
-Incremental mode is ideal for CI pipelines and local development workflows. It is typically 5-10× faster than a full extraction. Eight unit types, `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, don't map to individual files, so incremental mode re-runs their extractor **wholesale** whenever the relevant trigger path changes (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines). You never need to run a full extraction just because one of these changed, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for details.
+Incremental mode is ideal for CI pipelines and local development workflows. It is typically 5-10× faster than a full extraction. Nine unit types, `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source`, don't map to individual files, so incremental mode re-runs their extractor **wholesale** whenever the relevant trigger path changes (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines/rails_source; `rails_source` participates only when `include_framework_sources` is enabled). You never need to run a full extraction just because one of these changed, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for details.
 
 ---
 
@@ -126,7 +126,7 @@ After embedding, the `codebase_retrieve` MCP tool supports natural-language quer
 
 ### Why do some extractor types re-run wholesale on incremental runs?
 
-Eight unit types, routes, middleware, engines, scheduled jobs, state machines, events, factories, and database views, don't map to individual files. They're extracted by introspecting the entire application at once rather than one file at a time. Incremental mode handles this by re-running the whole extractor when a trigger path changes (`config/routes.rb`, `Gemfile.lock`, the relevant model/factory directories, and so on) instead of skipping the type. A full extraction is only needed if you suspect drift, not as routine maintenance:
+Nine unit types, routes, middleware, engines, scheduled jobs, state machines, events, factories, database views, and Rails/gem sources, don't map to individual files. They're extracted by introspecting the entire application at once rather than one file at a time. Incremental mode handles this by re-running the whole extractor when a trigger path changes (`config/routes.rb`, `Gemfile.lock`, the relevant model/factory directories, and so on) instead of skipping the type; Rails/gem sources participate only when `include_framework_sources` is enabled. A full extraction is only needed if you suspect drift, not as routine maintenance:
 
 ```bash
 bundle exec rake woods:extract
@@ -353,7 +353,7 @@ When you run `rake woods:embed`, Woods generates embedding vectors for each extr
 
 ### What is the `codebase_retrieve` tool for?
 
-`codebase_retrieve` is the primary semantic search tool on the Index Server. It accepts a natural-language description of what you're looking for ("find where user email validation happens", "which services send Stripe API calls") and returns the most relevant extracted units as formatted context. It requires embedding configuration, without an embedding provider, the tool is available but returns no results. Token budget is controlled by `config.max_context_tokens` (default: 8000).
+`codebase_retrieve` is the primary semantic search tool on the Index Server. It accepts a natural-language description of what you're looking for ("find where user email validation happens", "which services send Stripe API calls") and returns the most relevant extracted units as formatted context. It requires embedding configuration, without an embedding provider the tool responds with an error (`isError`, code `:not_configured`) and a remediation hint covering provider setup and the `search` tool for pattern-based matching in the meantime. Token budget is controlled by `config.max_context_tokens` (default: 8000).
 
 ---
 
