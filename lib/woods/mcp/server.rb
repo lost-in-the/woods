@@ -14,6 +14,7 @@ require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
+require_relative 'bootstrap_state'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'protocol_policy'
@@ -842,12 +843,24 @@ module Woods
               )
             end
             if retriever
-              result = retriever.retrieve(
-                query,
-                budget: budget || 8000,
-                types: types,
-                exclude_types: exclude_types
-              )
+              begin
+                result = retriever.retrieve(
+                  query,
+                  budget: budget || 8000,
+                  types: types,
+                  exclude_types: exclude_types
+                )
+              rescue Woods::Retriever::StoreError => e
+                # M8: a metadata-store failure mid-query must not surface as
+                # a raw raise through the tool boundary (or as the misleading
+                # :absent / empty answers the retriever used to produce).
+                next degraded_response.call(
+                  respond_err,
+                  reason: e.message,
+                  stores: [e.store],
+                  phase: 'query'
+                )
+              end
               if stale_check.call(result)
                 next respond_err.call(
                   'The vector index appears stale: matches were found but their source data is ' \

@@ -721,6 +721,55 @@ RSpec.describe Woods::MCP::Server do
           expect(text).to include('User (model)')
         end
       end
+
+      context 'when the retriever hits a metadata-store failure mid-query (M8)' do
+        let(:retriever) do
+          instance_double(Woods::Retriever).tap do |r|
+            allow(r).to receive(:retrieve).and_raise(
+              Woods::Retriever::StoreError,
+              'metadata store count failed for type "mailer": RuntimeError: store offline'
+            )
+          end
+        end
+
+        it 'maps the shared store error to typed degraded metadata instead of raising through the tool boundary' do
+          response = call_tool(server_with_retriever, 'codebase_retrieve', query: 'mailer')
+
+          expect(response.error?).to be(true)
+          expect(response.meta[:error_code]).to eq(:degraded_index)
+          expect(response.meta[:degraded]).to be(true)
+          expect(response.meta[:phase]).to eq('query')
+          expect(response.meta[:stores]).to eq(%w[metadata])
+          expect(response_text(response)).to include('degraded')
+        end
+      end
+
+      context 'when boot reported a hydration failure (M6)' do
+        let(:bootstrap_state) do
+          Woods::MCP::BootstrapState.new.tap do |s|
+            s.record_hydration_failure(:metadata, RuntimeError.new('simulated I/O error'))
+            s.mark(:degraded, reason: RuntimeError.new('simulated I/O error'))
+          end
+        end
+
+        let(:server_with_state) do
+          described_class.build(
+            index_dir: fixture_dir, retriever: retriever,
+            bootstrap_state: bootstrap_state, response_format: :json
+          )
+        end
+
+        it 'answers codebase_retrieve with typed degraded metadata before running the pipeline' do
+          response = call_tool(server_with_state, 'codebase_retrieve', query: 'User model')
+
+          expect(response.error?).to be(true)
+          expect(response.meta[:error_code]).to eq(:degraded_index)
+          expect(response.meta[:degraded]).to be(true)
+          expect(response.meta[:phase]).to eq('boot')
+          expect(response.meta[:stores]).to eq(%w[metadata])
+          expect(retriever).not_to have_received(:retrieve)
+        end
+      end
     end
   end
 
