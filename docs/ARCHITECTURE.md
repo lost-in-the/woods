@@ -134,7 +134,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the eight unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `rails_source`/`gem_source` work the same way, triggered by `Gemfile.lock`, gated separately by `include_framework_sources`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the nine unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source` (gated by `include_framework_sources`). Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
 
 ---
 
@@ -226,9 +226,9 @@ Allocates token budget across layers:
 ```
 Token Budget Allocation:
 ├── 10%  Structural overview ("Codebase: 42 units, 10 models, 5 controllers, ...")
-├── 50%  Primary relevant units (highest-ranked candidates)
-├── 25%  Supporting context (direct dependencies of primary units)
-└── 15%  Framework reference (Rails source, when query intent = :framework)
+└── 90%  Remaining budget, split by framework context:
+    ├── framework active:   55% primary / 25% supporting / 20% framework reference
+    └── framework inactive: 65% primary / 35% supporting (framework gets nothing)
 ```
 
 Units that exceed the budget are truncated to their first semantic chunk. The assembled context string is then optionally post-processed by a formatter (`context_format: :claude`, `:markdown`, `:plain`, `:json`).
@@ -314,6 +314,8 @@ Use the Index Server for:
 - Temporal snapshots (comparing codebase state over time)
 - Feedback collection
 
+Note: pipeline management and feedback collection require specialized builder collaborators. The packaged `woods-mcp` executable wires neither, so those tools are not registered in a standard launch. Snapshot tools register only when snapshots are enabled (`enable_snapshots: true`, `WOODS_SNAPSHOTS=true`, or an existing snapshot database in the index directory).
+
 The Index Server is safe to run anywhere, it has no database connection and makes no writes to the Rails application.
 
 ### Console Server (`woods-console-mcp`)
@@ -379,7 +381,7 @@ This matches how queries actually come in: "how does the create action work?" re
 
 ### Threshold
 
-Units below 200 estimated tokens stay as a single `:whole` chunk. Above that, the semantic chunker applies type-specific splitting, with a line-based fallback (1500-token limit per chunk) for units that are still too large.
+Units below 200 estimated tokens stay as a single `:whole` chunk. Above that, the semantic chunker applies type-specific splitting, with a line-based fallback for units that are still too large. The fallback's per-chunk limits are not fixed constants, they derive from the embedding provider's input budget (`max_chars` from `max_input_tokens` scaled by the provider's chars-per-token ratio, or an exact `max_tokens` when a tokenizer is available), so a provider with a larger context yields larger chunk ceilings.
 
 ### Why Not Just Split by Token Count?
 

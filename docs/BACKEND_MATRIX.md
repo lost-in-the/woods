@@ -229,7 +229,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 | `bge-m3` | **8192** | 1024 | 1.2 GB | Fewer chunks per unit, stronger code-search benchmarks |
 | `snowflake-arctic-embed2` | 8192 | 1024 | 1.2 GB | Multilingual variant of bge-m3 |
 | `mxbai-embed-large` | 512 | 1024 | 670 MB | Best for short text |
-| `all-minilm` | 256 | 384 | 46 MB | Tight-memory environments |
+| `all-minilm` | 512 | 384 | 46 MB | Tight-memory environments |
 
 **Cost:** Hardware only
 **Latency:** ~200ms single (GPU), ~2s single (CPU)

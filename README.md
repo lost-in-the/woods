@@ -128,7 +128,7 @@ Woods ships two MCP servers. Most users only need the Index Server.
 | Optional tools | Semantic retrieval activates after embedding; advanced Ruby embeddings can wire more collaborators | `console_sql` and `console_query` raise the total to 11 when explicitly enabled |
 | Default posture | Read-only index | Disabled; live-data access requires deliberate setup |
 
-The 14 Index tools cover health, exact lookup, search, dependency traversal, flow tracing, graph analysis, framework source, change recency, and optional semantic retrieval. The Console Server exposes nine supported model/schema tools by default. Twenty Tier 2/3 Console schemas and `console_eval` exist as source inventory but do not register in any supported mode.
+The 14 Index tools cover health, exact lookup, search, dependency traversal, flow tracing, graph analysis, framework source, change recency, and optional semantic retrieval. The Console Server exposes nine supported model/schema tools by default. Nineteen Tier 2/3 Console schemas (9 Tier 2, 10 Tier 3) and `console_eval` exist as source inventory but do not register in any supported mode.
 
 See [MCP servers](docs/MCP_SERVERS.md) for the callable tool lists and client configuration.
 
