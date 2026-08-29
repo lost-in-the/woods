@@ -1,0 +1,38 @@
+name: Performance
+
+# The :perf specs (spec/performance/) are wall-clock regression guards. They
+# are excluded from the default suite because wall-clock bounds jitter on
+# shared CI runners (see spec/spec_helper.rb and the spec's own header). This
+# workflow is the dedicated opt-in that header anticipates: dispatch it
+# manually when a change touches a measured path, and the nightly cron keeps a
+# standing baseline.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+# Least-privilege default: CI only needs to read the checkout.
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    name: Performance specs
+    runs-on: ubuntu-latest
+    env:
+      # Flips spec_helper's :perf exclusion so the tagged specs run. Without
+      # it the rspec invocation below would filter everything out — and
+      # fail_if_no_examples would catch that, but the env makes the intent
+      # explicit.
+      WOODS_RUN_PERF_SPECS: '1'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          # The latency bounds were derived on Ruby 3.3 (spec header), so this
+          # lane pins that interpreter instead of spanning a matrix.
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run performance specs
+        run: bundle exec rspec --tag perf spec/performance
