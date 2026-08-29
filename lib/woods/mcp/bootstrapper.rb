@@ -153,8 +153,9 @@ module Woods
         # artifact to validate against.
         resolved = build_resolved_config(config)
         state.resolved_config = resolved
-        retriever = build_retriever_from_config(config, resolved, artifact)
+        retriever = build_retriever_from_config(config, resolved, artifact, state)
         probe_and_mark_state(config, state)
+        derive_state_from_store_health(state)
         warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})"
 
         [retriever, state]
@@ -353,10 +354,10 @@ module Woods
       end
       private_class_method :build_artifact
 
-      def self.build_retriever_from_config(config, resolved, artifact)
-        vector_store = hydrated_vector_store(config, resolved, artifact)
-        metadata_store = hydrated_metadata_store(config, resolved, artifact)
-        graph_store = hydrated_graph_store(config, artifact)
+      def self.build_retriever_from_config(config, resolved, artifact, state = nil)
+        vector_store = hydrated_vector_store(config, resolved, artifact, state)
+        metadata_store = hydrated_metadata_store(config, resolved, artifact, state)
+        graph_store = hydrated_graph_store(config, artifact, state)
 
         # Cross-populate the vector store's per-entry metadata cache from
         # the metadata store. The WVF1 binary format stores only id + float
@@ -411,7 +412,7 @@ module Woods
       # @return [Woods::Storage::GraphStore::Memory, nil]
       # @raise [Woods::Storage::InapplicableBackend] if the configured
       #   graph_store reports +durable? => true+
-      def self.hydrated_graph_store(config, artifact)
+      def self.hydrated_graph_store(config, artifact, state = nil)
         return nil unless artifact
 
         generation = Woods::Generation.new(output_dir: artifact.output_dir)
@@ -435,6 +436,7 @@ module Woods
         raise
       rescue StandardError => e
         warn "[woods-mcp] graph hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        state&.record_hydration_failure(:graph, e)
         nil
       end
       private_class_method :hydrated_graph_store
@@ -531,7 +533,11 @@ module Woods
       # (in-memory configured + artifact on disk + resolved config) —
       # otherwise nil, which tells Builder to construct a fresh one.
       # Durable backends (pgvector, Qdrant) never match this path.
-      def self.hydrated_vector_store(config, resolved, artifact)
+      #
+      # A soft failure (transient I/O, corrupt dump) records the error on
+      # +state+ so the boot status reflects store health instead of reporting
+      # :hydrated over empty stores (M6).
+      def self.hydrated_vector_store(config, resolved, artifact, state = nil)
         return nil unless artifact && resolved
         return nil unless config.vector_store == :in_memory
 
@@ -543,11 +549,12 @@ module Woods
         raise
       rescue StandardError => e
         warn "[woods-mcp] vector hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        state&.record_hydration_failure(:vector, e)
         nil
       end
       private_class_method :hydrated_vector_store
 
-      def self.hydrated_metadata_store(config, resolved, artifact)
+      def self.hydrated_metadata_store(config, resolved, artifact, state = nil)
         return nil unless artifact && resolved
         return nil unless config.metadata_store == :in_memory
 
@@ -556,6 +563,7 @@ module Woods
         raise
       rescue StandardError => e
         warn "[woods-mcp] metadata hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        state&.record_hydration_failure(:metadata, e)
         nil
       end
       private_class_method :hydrated_metadata_store
@@ -570,6 +578,19 @@ module Woods
              'starting degraded — will retry on first query'
       end
       private_class_method :probe_and_mark_state
+
+      # Derive the final boot status from store health (M6). Reaching the
+      # provider is not enough to claim :hydrated: a hydration soft-failure
+      # left empty in-memory stores, and a "healthy" status on top of them
+      # presents a server that answers everything with nothing as fully
+      # operational. Provider-unreachable degradations keep their reason;
+      # only a false :hydrated is corrected.
+      def self.derive_state_from_store_health(state)
+        return unless state.hydration_failed? && state.status == :hydrated
+
+        state.mark(:degraded, reason: state.hydration_failures.values.first)
+      end
+      private_class_method :derive_state_from_store_health
     end
   end
 end

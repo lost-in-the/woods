@@ -5,6 +5,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'woods'
 require 'woods/mcp/bootstrapper'
+require 'woods/mcp/server'
 
 RSpec.describe Woods::MCP::Bootstrapper do
   describe '.resolve_index_dir' do
@@ -421,6 +422,98 @@ RSpec.describe Woods::MCP::Bootstrapper do
         expect { described_class.build_retriever(index_dir: dir) }
           .to raise_error(ArgumentError)
       end
+    end
+  end
+
+  describe 'M6: hydration failure must not report :hydrated' do
+    # A hydration soft-failure used to leave empty stores behind only a
+    # stderr warning while probe_and_mark_state marked :hydrated on provider
+    # reachability alone: a "healthy" server that answers everything with
+    # nothing. The state must be derived from store health, and
+    # codebase_retrieve must return typed degraded metadata instead of a
+    # clean empty result.
+    let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before do
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+      # Isolate the hydration signal: the provider is fine, the store is not.
+      allow(Woods::MCP::ProviderProbe).to receive(:reachable!).and_return(true)
+    end
+
+    it 'marks :degraded with the hydration error when metadata hydration fails' do
+      allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+        RuntimeError, 'simulated I/O error'
+      )
+      Dir.mktmpdir do |dir|
+        retriever, state = nil
+        expect do
+          retriever, state = described_class.build_retriever(index_dir: dir)
+        end.to output(/metadata hydration failed/).to_stderr
+
+        expect(retriever).not_to be_nil
+        expect(state.status).to eq(:degraded)
+        expect(state.status).not_to eq(:hydrated)
+        expect(state.hydration_failed?).to be(true)
+        expect(state.reason.message).to include('simulated I/O error')
+      end
+    end
+
+    it 'marks :degraded with the hydration error when vector hydration fails' do
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(
+        RuntimeError, 'simulated dump corruption'
+      )
+      Dir.mktmpdir do |dir|
+        retriever, state = described_class.build_retriever(index_dir: dir)
+
+        expect(retriever).not_to be_nil
+        expect(state.status).to eq(:degraded)
+        expect(state.hydration_failed?).to be(true)
+        expect(state.reason.message).to include('simulated dump corruption')
+      end
+    end
+
+    it 'keeps :hydrated when every store hydrates cleanly' do
+      Dir.mktmpdir do |dir|
+        _retriever, state = described_class.build_retriever(index_dir: dir)
+
+        expect(state.status).to eq(:hydrated)
+        expect(state.hydration_failed?).to be(false)
+      end
+    end
+
+    it 'surfaces typed degraded metadata through codebase_retrieve instead of a clean empty result' do
+      allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+        RuntimeError, 'simulated I/O error'
+      )
+      retriever, state = described_class.build_retriever(index_dir: fixture_dir)
+      server = Woods::MCP::Server.build(
+        index_dir: fixture_dir, retriever: retriever, bootstrap_state: state, response_format: :json
+      )
+
+      tools = server.instance_variable_get(:@tools)
+      response = tools['codebase_retrieve'].call(query: 'How does authentication work?', server_context: {})
+
+      expect(response.error?).to be(true)
+      expect(response.meta[:error_code]).to eq(:degraded_index)
+      expect(response.meta[:degraded]).to be(true)
+      expect(response.content.first[:text]).to include('degraded')
     end
   end
 
