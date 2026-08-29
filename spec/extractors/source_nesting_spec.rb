@@ -524,6 +524,28 @@ RSpec.describe Woods::Extractors::SourceNesting do
         .to be_nil
     end
 
+    it 'leaves copied-only files unmanaged when an intermediate directory is a loader root' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) { |basename, _abspath| basename.capitalize }
+      loader = double(
+        'loader',
+        dirs: ['/boot/root/app/services', '/boot/root/app/services/concerns'],
+        inflector: inflector
+      )
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Concerns
+          class Auditable
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/concerns/auditable.rb', source))
+        .to be_nil
+    end
+
     it 'stays unmanaged outside both the autoloader roots and the active root' do
       loader = double('loader', dirs: ['/boot/root/app/services'])
       stub_const('Rails', double('Rails', root: '/active/root',

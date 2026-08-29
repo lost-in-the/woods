@@ -341,7 +341,22 @@ module Woods
       # @return [Boolean]
       def copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
         loader_root_namespace(foreign_root) == Object &&
-          !mapped_path_uses_collapsed_directory?(file_path, root, foreign_root)
+          !mapped_path_uses_collapsed_directory?(file_path, root, foreign_root) &&
+          !mapped_path_crosses_loader_root?(file_path, root, foreign_root)
+      end
+
+      # A nested loader root resets Zeitwerk's constant-path origin. The
+      # copied-only fallback cannot ask +cpath_expected_at+ about a file that
+      # exists only in the active copy, so it must not camelize the nested
+      # root directory as an extra namespace segment.
+      def mapped_path_crosses_loader_root?(file_path, root, foreign_root)
+        mapped = mapped_foreign_path(file_path, root, foreign_root)
+        Array(main_loader.dirs).any? do |dir|
+          nested = File.expand_path(dir.to_s.chomp('/'))
+          nested != foreign_root && mapped.start_with?("#{nested}/")
+        end
+      rescue StandardError
+        true
       end
 
       # @param foreign_root [String] Matching boot-loader managed root
