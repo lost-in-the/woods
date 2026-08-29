@@ -61,7 +61,7 @@ module Woods
       # @return [Array<Class>]
       def discoverable_classes
         ActiveRecord::Base.descendants
-                          .reject(&:abstract_class?)
+                          .reject { |m| abstract_class?(m) }
                           .reject { |m| m.name.nil? } # Skip anonymous classes
                           .reject { |m| habtm_join_model?(m) }
       end
@@ -102,6 +102,22 @@ module Woods
       end
 
       private
+
+      # Is this an abstract AR base class? Guarded exactly like
+      # {Woods::ModelNameCache#abstract_model?}: a descendant that raises on
+      # the call (a half-loaded class under the NameError fallback) is kept
+      # rather than dropped. An unguarded `.reject(&:abstract_class?)` here
+      # let that raise escape {#discoverable_classes} and abort the whole
+      # models phase (L1); per-class extraction failures are already handled
+      # by {#extract_model}'s own rescue.
+      #
+      # @param klass [Class]
+      # @return [Boolean] true when the class is an abstract AR base class
+      def abstract_class?(klass)
+        klass.respond_to?(:abstract_class?) && klass.abstract_class?
+      rescue StandardError
+        false
+      end
 
       # Find the source file for a model, handling STI and namespacing.
       #

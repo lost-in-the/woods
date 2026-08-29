@@ -50,6 +50,55 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     mod
   end
 
+  # ── discoverable_classes ──────────────────────────────────────────
+
+  describe '#discoverable_classes' do
+    # The suite stubs Rails rather than booting it; discoverable_classes
+    # reads ActiveRecord::Base.descendants, so provide the constant.
+    before do
+      stub_const('ActiveRecord', Module.new)
+      stub_const('ActiveRecord::Base', Class.new do
+        def self.descendants
+          []
+        end
+      end)
+    end
+
+    it 'skips a half-loaded class that raises on abstract_class? instead of failing the scan (L1)' do
+      # The NameError fallback can leave a descendant whose abstract_class?
+      # still raises (ModelNameCache guards the same call for exactly this
+      # reason, see model_name_cache.rb). discoverable_classes used to let
+      # the raise escape, aborting the whole models phase.
+      half_loaded = Class.new do
+        def self.abstract_class?
+          raise StandardError, 'half-loaded'
+        end
+      end
+      allow(half_loaded).to receive(:name).and_return('HalfLoaded')
+
+      allow(ActiveRecord::Base).to receive(:descendants).and_return([half_loaded, stub_bare_model('User')])
+
+      expect { extractor.discoverable_classes }.not_to raise_error
+      expect(extractor.discoverable_classes).to include(half_loaded)
+    end
+
+    it 'keeps a class that answers false to abstract_class?' do
+      model = stub_bare_model('User')
+      allow(model).to receive(:abstract_class?).and_return(false)
+      allow(ActiveRecord::Base).to receive(:descendants).and_return([model])
+
+      expect(extractor.discoverable_classes).to eq([model])
+    end
+
+    it 'drops an abstract base class' do
+      model = stub_bare_model('ApplicationRecord')
+      allow(model).to receive(:abstract_class?).and_return(true)
+      allow(ActiveRecord::Base).to receive(:descendants).and_return([model])
+
+      expect(extractor.discoverable_classes).to eq([])
+    end
+  end
+
   # ── habtm_join_model? ─────────────────────────────────────────────
 
   describe '#habtm_join_model?' do
