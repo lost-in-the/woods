@@ -700,9 +700,14 @@ RSpec.describe 'packaged gem' do
         'print ActiveRecord::Migration.current_version', chdir: app
       )
       expect_success(['ActiveRecord::Migration.current_version'], stdout, stderr, status)
-      expect(File.foreach(woods_migration).first).to include("ActiveRecord::Migration[#{stdout}]")
-      expect(File.foreach(pgvector_migration).first).to include("ActiveRecord::Migration[#{stdout}]")
-      expect(Dir[File.join(app, 'tmp/woods/models/Post_*.json')]).not_to be_empty
+      # The migration templates open with a documentation comment, so assert
+      # the version declaration anywhere in the generated file, not on line one.
+      migration_version = "ActiveRecord::Migration[#{stdout}]"
+      expect(File.read(woods_migration)).to include(migration_version)
+      expect(File.read(pgvector_migration)).to include(migration_version)
+      # Extraction publishes each generation under payloads/gen-<N>/, so the
+      # model payloads live below the generation directory, not the output root.
+      expect(Dir[File.join(app, 'tmp/woods/payloads/gen-*/models/Post_*.json')]).not_to be_empty
     end
   end
 end
