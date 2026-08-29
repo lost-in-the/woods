@@ -20,6 +20,7 @@ After this runbook you will have:
 | v2 change | What can break | Required response |
 |---|---|---|
 | Correct namespaced and constrained-route identifiers | Saved identifiers, external links, retrieval vectors, and exports can miss renamed units | Clean extract; rebuild embeddings and exports |
+| Wrapper-nested class identifiers resolved to the file's own constant | Files nested in class namespaces (e.g. `app/services/domain/container/parser.rb` defining `module Domain; class Container; class Parser`) gain identifiers like `Domain::Container::Parser` instead of sharing the wrapper's; layouts that still derive one type+identifier from two different files abort extraction naming both files | Clean extract; rebuild embeddings and exports |
 | Typed graph identity variants | Custom graph consumers may assume one node per identifier | Re-index; update custom consumers to handle type variants |
 | Atomic generations via `generation.json` | Custom scripts that read root `manifest.json` may fail | Follow the payload pointer or use Woods readers/tasks |
 | `mcp >= 1.2, < 2.0` and protocol negotiation | Old lockfiles or manually pinned protocol versions can fail | Bundle update Woods/MCP; normally leave protocol version unset |

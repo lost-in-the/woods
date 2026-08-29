@@ -137,8 +137,9 @@ module Woods
       # @param source [String] Ruby source code
       # @return [String, nil] The inferred class name
       def infer_class_name(file_path, source)
-        # Explicit class keyword — enclosing modules joined by position
-        qualified = qualified_first_class_name(source)
+        # Explicit class keyword — Zeitwerk-governed naming first (G-1), then
+        # enclosing modules joined by position (#174)
+        qualified = governed_class_name(file_path, source) || qualified_first_class_name(source)
         return qualified if qualified
 
         # Struct.new / Data.define: ConstantName = Struct.new(...)

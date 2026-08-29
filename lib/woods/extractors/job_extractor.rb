@@ -130,8 +130,9 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_class_name(file_path, source)
-        # Position-aware (SourceNesting, #174), then convention.
-        qualified_first_class_name(source) || file_path
+        # Zeitwerk-governed naming (G-1), then position-aware (#174), then
+        # convention.
+        governed_class_name(file_path, source) || qualified_first_class_name(source) || file_path
           .sub("#{Rails.root}/", '')
           .sub(%r{^app/(jobs|workers|sidekiq)/}, '')
           .sub('.rb', '')

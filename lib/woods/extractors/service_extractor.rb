@@ -57,11 +57,14 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a service
       def extract_service_file(file_path)
         source = File.read(file_path)
-        # Position-aware nesting scan first, so `module Billing; class Payment`
-        # is named Billing::Payment, not bare Payment (#174). When the file has
-        # no class declaration at all, extract_class_name falls through to the
-        # same path-based convention as before.
-        class_name = qualified_first_class_name(source) ||
+        # Zeitwerk-governed naming first (G-1): a file under a managed
+        # autoload path is named for the constant its path spells, so
+        # `module Domain; class Container; class Parser` names the file's
+        # Parser, not the wrapper. Position-aware nesting scan (#174) and the
+        # path-based convention remain the fallbacks for unmanaged or
+        # unconventional files.
+        class_name = governed_class_name(file_path, source) ||
+                     qualified_first_class_name(source) ||
                      extract_class_name(file_path, source, '(?:services|interactors|operations|commands|use_cases)')
 
         return nil unless class_name

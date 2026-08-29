@@ -366,7 +366,14 @@ module Woods
       # @param source [String]
       # @return [String, nil]
       def extract_class_name(file_path, source)
-        qualified_first_class_name(source) || qualified_outer_module_name(source)
+        # Zeitwerk-governed naming first (G-1) — managed graphql/ files are
+        # named for the constant their path spells, and the expected path can
+        # only match the outer, file-named declaration, so the #202
+        # outermost-class contract below is preserved by construction. Then
+        # the position-aware nesting scan (#174), then the outer module
+        # chain for module-only files (interfaces).
+        governed_class_name(file_path, source) ||
+          qualified_first_class_name(source) || qualified_outer_module_name(source)
       rescue StandardError
         # Fall back to convention from file path
         return nil unless defined?(Rails)

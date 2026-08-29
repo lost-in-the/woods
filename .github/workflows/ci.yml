@@ -92,6 +92,12 @@ jobs:
       - name: Run multi-worktree integration
         run: bundle exec rspec spec/integration/multi_worktree_spec.rb
 
+      # Governed naming must follow the active Zeitwerk inflector (PR-251
+      # finding 2). Own process — boots its own Rails app with a custom
+      # `api => API` inflection and wrapper-nested siblings under app/services/api/.
+      - name: Run inflected-naming integration
+        run: bundle exec rspec spec/integration/inflected_naming_spec.rb
+
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but
   # cannot prove backend locking or transaction behavior.
