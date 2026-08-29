@@ -309,6 +309,37 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
       expect(result['post_params']).to eq(model: 'post', permitted: %w[title body])
     end
+
+    it 'captures a multi-line require(...).permit(...) (M2)' do
+      source = <<~RUBY
+        def post_params
+          params.require(:post).permit(
+            :title,
+            :body,
+            :published
+          )
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title body published])
+    end
+
+    it 'captures a multi-line params.expect(...) list (M2)' do
+      source = <<~RUBY
+        def comment_params
+          params.expect(comment: [
+            :body,
+            :author
+          ])
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['comment_params']).to eq(model: 'comment', permitted: %w[body author])
+    end
   end
 
   # ── extract_metadata — own actions only ──────────────────────────────
