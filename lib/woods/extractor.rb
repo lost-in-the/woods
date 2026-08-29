@@ -1203,7 +1203,7 @@ module Woods
 
       controllers_dir = payload_dir.join('controllers')
       reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
-      removed = previous_flow_index_controllers & touched.to_set - reextracted.to_set
+      removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
       return if reextracted.empty? && removed.empty?
 
       Rails.logger.info "[Woods] Refreshing flows for #{reextracted.size} controller(s), " \
@@ -1236,8 +1236,8 @@ module Woods
       return Set.new unless index_path.exist?
 
       JSON.parse(AtomicFile.read(index_path))
-          .keys.map { |entry_point| entry_point.to_s.split('#', 2).first }.to_set
-    rescue JSON::ParserError, StandardError => e
+          .keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first }
+    rescue StandardError => e
       Rails.logger.warn "[Woods] Could not read previous flow_index.json: #{e.message}"
       Set.new
     end
@@ -1321,14 +1321,10 @@ module Woods
       index_path = flows_dir.join('flow_index.json')
       return unless index_path.exist?
 
-      referenced = begin
-        JSON.parse(AtomicFile.read(index_path)).values
-      rescue JSON::ParserError => e
-        Rails.logger.warn "[Woods] Orphaned-flow sweep skipped: flow_index.json does not parse (#{e.message})"
-        return
-      end
+      referenced = parse_flow_index_for_sweep(index_path)
+      return if referenced.nil?
 
-      keep = referenced.map { |relative| File.basename(relative.to_s) }.to_set << 'flow_index.json'
+      keep = referenced.to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json'
       orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
       return if orphans.empty?
 
@@ -1336,6 +1332,16 @@ module Woods
       Rails.logger.info "[Woods] Swept #{orphans.size} orphaned flow file(s)"
     rescue StandardError => e
       Rails.logger.error "[Woods] Orphaned-flow sweep failed: #{e.message}"
+    end
+
+    # @param index_path [Pathname]
+    # @return [Array<String>, nil] the referenced document paths, or nil
+    #   when the index does not parse (the caller then skips the sweep)
+    def parse_flow_index_for_sweep(index_path)
+      JSON.parse(AtomicFile.read(index_path)).values
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[Woods] Orphaned-flow sweep skipped: flow_index.json does not parse (#{e.message})"
+      nil
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2235,7 +2241,7 @@ module Woods
       end
       return readdable if defining_sources.empty?
 
-      CLASS_BASED_DISCOVERY.each do |key, spec|
+      CLASS_BASED_DISCOVERY.each_key do |key|
         extractor = extractor_for(key)
         next unless extractor.respond_to?(:discoverable_classes)
 

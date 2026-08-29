@@ -134,8 +134,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     flows_dir = File.join(payload_dir(dir), 'flows')
     return {} unless Dir.exist?(flows_dir)
 
-    Dir[File.join(flows_dir, '*.json')].each_with_object({}) do |path, snapshot|
-      snapshot[File.basename(path)] = JSON.parse(File.read(path)).except(*VOLATILE_FLOW_KEYS)
+    Dir[File.join(flows_dir, '*.json')].to_h do |path|
+      [File.basename(path), JSON.parse(File.read(path)).except(*VOLATILE_FLOW_KEYS)]
     end
   end
 

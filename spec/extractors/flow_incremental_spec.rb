@@ -318,8 +318,8 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
 
   def flow_inventory(index_dir)
     flows_dir = File.join(payload_of(index_dir), 'flows')
-    Dir[File.join(flows_dir, '*.json')].each_with_object({}) do |path, inventory|
-      inventory[File.basename(path)] = JSON.parse(File.read(path))
+    Dir[File.join(flows_dir, '*.json')].to_h do |path|
+      [File.basename(path), JSON.parse(File.read(path))]
     end
   end
 end
