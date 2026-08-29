@@ -504,21 +504,27 @@ module Woods
       # Reconcile once more, because pruning can un-know a class the first pass
       # skipped. A class-based file moved between autoload directories with its
       # constant unchanged is still registered under the old path when
-      # reconciliation runs, so it looks known and is not re-extracted; the prune
-      # that follows then removes it for its vanished path. One pass leaves the
-      # unit missing until some later run happens to notice — this pass closes it
-      # in the same run. Idempotent when nothing was pruned: the discovery set is
-      # compared against the graph, so an already-registered class is skipped.
+      # reconciliation runs, so it looks known and is not re-extracted; the
+      # prune that follows then removes it for its vanished path. This pass
+      # re-adds it in the same run (M1) instead of leaving the unit missing
+      # until some later run happens to notice. Idempotent when nothing was
+      # pruned: the discovery set is compared against the graph, so an
+      # already-registered class is skipped.
       #
-      # `except:` is what keeps it from undoing a *deletion*. Without a reload,
-      # a constant outlives the file that defined it — so deleting
-      # `app/models/user.rb` prunes `User` and then this pass finds `User` still
-      # in `ActiveRecord::Base.descendants` and re-registers it against a path
-      # that no longer exists. From then on nothing can remove it: the sweep
-      # excludes class-based units and no future change set names that path
-      # again. A resident daemon processing a batch before its reload hits this
-      # every time.
-      touched.merge(reconcile_class_based_types(affected_types, except: pruned))
+      # But not everything pruning removed may come back. `except:` keeps the
+      # *deletion* shape pruned: without a reload, a constant outlives the file
+      # that defined it — so deleting `app/models/user.rb` prunes `User`, and
+      # this pass finds `User` still in `ActiveRecord::Base.descendants`.
+      # Re-registering it would pin the unit to a path that no longer exists,
+      # and nothing could ever remove it: the sweep excludes class-based units
+      # and no future change set names that path again. A resident daemon
+      # processing a batch before its reload hits this every time. What
+      # separates the two shapes is the filesystem — only pruned identifiers
+      # that a still-existing file in the change set actually declares are
+      # re-addable. See {#readdable_pruned_classes}.
+      touched.merge(reconcile_class_based_types(
+                      affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
+                    ))
 
       finalize_incremental_unit_json(affected_types)
 
@@ -2041,6 +2047,68 @@ module Woods
       touched
     end
 
+    # Pruned class-based identifiers the tree still defines, and that the
+    # second reconciliation pass may therefore re-add.
+    #
+    # The class-based *move* shape — the file moved, the constant did not
+    # (M1) — prunes the unit for the vanished old path while the class stays
+    # in the discovery set, and the move target is an existing file that
+    # still declares it, so re-adding produces exactly the unit a full
+    # extraction of the same tree produces. The *deletion* shape must stay
+    # pruned: without a reload a constant outlives the file that defined it,
+    # so liveness alone proves nothing. The discriminator is the filesystem —
+    # an identifier is re-addable only when one of the change set's
+    # still-existing Ruby files under `app/` declares its class. An unrelated
+    # addition in the same batch does not resurrect a deleted model, because
+    # the added file does not declare it.
+    #
+    # @param pruned [Set<String>] identifiers removed by {#prune_vanished_units}
+    # @param change_set [ChangeSet]
+    # @return [Set<String>] identifiers safe to re-add this run
+    def readdable_pruned_classes(pruned, change_set)
+      readdable = Set.new
+      return readdable if pruned.empty?
+
+      defining_sources = change_set.existing_paths.filter_map do |path|
+        next unless path.to_s.end_with?('.rb') && path.to_s.start_with?("#{Rails.root}/app/")
+
+        File.read(path)
+      end
+      return readdable if defining_sources.empty?
+
+      CLASS_BASED_DISCOVERY.each do |key, spec|
+        extractor = extractor_for(key)
+        next unless extractor.respond_to?(:discoverable_classes)
+
+        extractor.discoverable_classes.each do |klass|
+          next if klass.name.nil? || !pruned.include?(klass.name)
+          next unless defining_sources.any? { |source| declares_class?(source, klass) }
+
+          readdable.add(klass.name)
+        end
+      end
+
+      readdable
+    rescue StandardError => e
+      # A failure here must not turn a deletion into a resurrection: the
+      # empty set keeps every pruned identifier excluded, which is the
+      # pre-M1 behavior.
+      Rails.logger.warn "[Woods] Could not determine re-addable pruned classes: #{e.message}"
+      Set.new
+    end
+
+    # Does this source declare the class? Mirrors ModelExtractor's class
+    # declaration pattern: both `class Name` and a namespaced
+    # `class Nesting::Name`, in or out of a wrapping module, while a nested
+    # `class Name::Inner` does not claim the parent.
+    #
+    # @param source [String]
+    # @param klass [Class]
+    # @return [Boolean]
+    def declares_class?(source, klass)
+      source.match?(/class\s+(?:[\w:]+::)?#{Regexp.escape(klass.name.demodulize)}\b(?!::)/)
+    end
+
     def add_discovered_classes(key, spec, discovered, known, excluded, affected_types)
       new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
       return Set.new if new_classes.empty?
@@ -2312,12 +2380,16 @@ module Woods
     # that derives its path from a constant name rather than from a file it was
     # read out of. Class-based types have always been excluded for that reason.
     #
-    # GraphQL joins them (#167): `source_file_for_class` falls back to
-    # `app/graphql/<underscored>.rb` when it cannot resolve a source location,
-    # and a runtime-defined type — the exact case #167 exists to index — has no
-    # such file. Without this the sweep pruned those units in the *same run*
-    # that added them, and `reconcile_class_based_types(..., except: pruned)`
-    # then refused to re-add them, so #167's target case never survived.
+    # Today the predicate keys on {CLASS_BASED} and nothing else (L4): the six
+    # class-based families — models, controllers, components, view components,
+    # mailers, channels. GRAPHQL_TYPES are deliberately NOT spared. An earlier
+    # version of this comment narrated GraphQL units being spared through a
+    # `source_file_for_class` convention-path fallback, but that fallback now
+    # returns nil rather than fabricating a convention path
+    # (`graphql_extractor.rb`), a runtime-defined GraphQL unit registers no
+    # path at all ({DependencyGraph#register} skips nil), and the static file
+    # pass records the real file it read — so the sweep's own bounds decide,
+    # and this predicate has no say in GraphQL either way.
     #
     # The original case: on Rails < 7.1 `ActiveRecord::SchemaMigration` and
     # `InternalMetadata` are real `ActiveRecord::Base` descendants a full
@@ -2328,9 +2400,11 @@ module Woods
     # never infers it.
     #
     # KNOWN COST (B-070 / #171): this keys on unit *type*, but the property is
-    # per-unit — GRAPHQL_TYPES is also true of units the static file pass
-    # produced, whose path is a real file. So a deleted `app/graphql/**.rb`
-    # survives an unnamed-path sweep. Named-path deletion still works, so
+    # per-unit — CLASS_BASED is also true of units whose recorded path has
+    # since been moved elsewhere, which is exactly the move shape
+    # {#readdable_pruned_classes} exists to re-add in the same run. For
+    # deletions the cost stays: a class-based unit whose file is gone survives
+    # an unnamed-path sweep. Named-path deletion still works, so
     # `woods:incremental` on a git diff is unaffected; the exposed caller is the
     # daemon's catch-up, which runs an empty change set precisely because
     # deletions leave no mtime.
@@ -2347,15 +2421,14 @@ module Woods
     # 2. *Let the sweep prune GraphQL and rely on the reconciler's addition half
     #    to re-add whatever the schema still holds.* This is what `except: pruned`
     #    exists to prevent (see the comment at its call site): without a reload a
-    #    constant outlives its deleted file, and the schema attachment survives in
-    #    memory too, so the re-add resurrects the deleted unit against a path that
-    #    no longer exists — permanently, since the sweep then spares it.
+    #    constant outlives its deleted file, and the re-add resurrects the deleted
+    #    unit against a path that no longer exists — permanently, since the sweep
+    #    then spares it.
     #
     # What would actually work is provenance: record at extraction time whether a
-    # source file existed for the unit (`extract_from_runtime_type` already knows
-    # — it falls back to a convention path only when `File.exist?` fails) and
-    # spare only the units that never had one. That needs the graph node to carry
-    # the flag, so it is a serialization change rather than a predicate tweak.
+    # source file existed for the unit and spare only the units that never had
+    # one. That needs the graph node to carry the flag, so it is a serialization
+    # change rather than a predicate tweak.
     #
     # @param type [Symbol, nil] the unit type the caller is about to remove
     # @return [Boolean]

@@ -400,6 +400,44 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'class-based move-shape (M1)' do
+    # A model file moved with its constant unchanged: the first
+    # reconciliation pass sees the class as known, the prune removes it for
+    # the vanished old path, and the second pass used to refuse to re-add
+    # it (`except: pruned`) — one generation served an index with the model
+    # missing. The moved file still defines the class, which is what makes
+    # a re-add safe: without it (a plain deletion), the constant outlives
+    # its file and must stay pruned.
+    it 're-adds a model whose file moved with its constant unchanged after ONE run' do
+      write_file('app/models/tag.rb', <<~RUBY)
+        class Tag < ApplicationRecord
+          self.table_name = 'posts'
+        end
+      RUBY
+      load app_path('app/models/tag.rb')
+
+      run_sequence([
+                     lambda {
+                       move_file('app/models/tag.rb', 'app/models/admin/tag.rb')
+                       %w[app/models/tag.rb app/models/admin/tag.rb]
+                     }
+                   ])
+    end
+
+    # Tag stays in ActiveRecord::Base.descendants for the rest of the
+    # process and now resolves to the new path — fold the moved file into
+    # the pristine tree so the runtime and the filesystem keep agreeing in
+    # every later example.
+    after do
+      moved = app_path('app/models/admin/tag.rb')
+      if File.exist?(moved)
+        pristine = File.join(@pristine_root, 'app/models/admin/tag.rb')
+        FileUtils.mkdir_p(File.dirname(pristine))
+        FileUtils.cp(moved, pristine)
+      end
+    end
+  end
+
   # ── Targeted refresh (phase 1) ───────────────────────────────────────────
 
   describe 'Extractor#refresh' do
