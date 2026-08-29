@@ -14,7 +14,8 @@ require 'woods/generation'
 # Three kinds of difference are deliberately tolerated, and nothing else:
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
-#    `generated_at` plus the digest that covers it in `graph_analysis.json`.
+#    `generated_at` plus the digest that covers it in `graph_analysis.json`,
+#    and `generated_at` inside each flow document (M3 flow equivalence).
 #    A unit an incremental run correctly left alone keeps an older stamp.
 # 2. **Ordering inside `dependents`** — a full extraction appends in
 #    extractor-iteration order, an incremental one in graph order. Both are
@@ -27,10 +28,16 @@ require 'woods/generation'
 # Everything else — unit sets, unit content, `_index.json`, graph nodes,
 # edges, reverse edges, file map, type index, stats, PageRank scores, and
 # manifest counts — must match exactly.
+#
+# Flow artifacts (`flows/flow_index.json` and every document it lives beside)
+# are compared too, once the run enables flow precomputation: flow documents
+# are excluded from the unit set (they are not units) and compared in their
+# own snapshot instead (M3).
 module IndexComparison # rubocop:disable Metrics/ModuleLength
   VOLATILE_UNIT_KEYS = %w[extracted_at].freeze
   VOLATILE_MANIFEST_KEYS = %w[extracted_at].freeze
   VOLATILE_ANALYSIS_KEYS = %w[generated_at graph_sha].freeze
+  VOLATILE_FLOW_KEYS = %w[generated_at].freeze
 
   module_function
 
@@ -42,7 +49,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       type_index_differences(incremental_dir, full_dir) +
       graph_differences(incremental_dir, full_dir) +
       manifest_differences(incremental_dir, full_dir) +
-      analysis_differences(incremental_dir, full_dir)
+      analysis_differences(incremental_dir, full_dir) +
+      flow_differences(incremental_dir, full_dir)
   end
 
   def unit_differences(incremental_dir, full_dir)
@@ -107,6 +115,30 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     ["graph_analysis.json: #{brief(hash_delta(incremental, full))}"]
   end
 
+  # Flow artifacts compared exactly modulo `generated_at` (M3): the index
+  # and every document it lives beside must agree between a full run and an
+  # incremental one. Both writes go through FlowPrecomputer's canonical JSON,
+  # so any difference is real drift, not formatting.
+  def flow_differences(incremental_dir, full_dir)
+    incremental = flow_snapshot(incremental_dir)
+    full = flow_snapshot(full_dir)
+
+    (incremental.keys | full.keys).sort.filter_map do |name|
+      next if incremental[name] == full[name]
+
+      "flow artifact flows/#{name}: incremental=#{brief(incremental[name])} full=#{brief(full[name])}"
+    end
+  end
+
+  def flow_snapshot(dir)
+    flows_dir = File.join(payload_dir(dir), 'flows')
+    return {} unless Dir.exist?(flows_dir)
+
+    Dir[File.join(flows_dir, '*.json')].each_with_object({}) do |path, snapshot|
+      snapshot[File.basename(path)] = JSON.parse(File.read(path)).except(*VOLATILE_FLOW_KEYS)
+    end
+  end
+
   # ── Snapshots ────────────────────────────────────────────────────────────
 
   # All per-unit JSON in an index, keyed by its path on disk — "type/basename".
@@ -126,6 +158,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   def unit_snapshot(dir)
     Dir[File.join(payload_dir(dir), '*', '*.json')].each_with_object({}) do |path, snapshot|
       next if File.basename(path) == '_index.json'
+      # flows/ holds flow documents, not units — {flow_snapshot} owns them.
+      next if File.basename(File.dirname(path)) == 'flows'
 
       data = JSON.parse(File.read(path)).except(*VOLATILE_UNIT_KEYS)
       data['dependents'] = (data['dependents'] || []).sort_by(&:to_a)

@@ -438,6 +438,61 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── Flow artifacts (M3) ──────────────────────────────────────────────────
+
+  # With precompute_flows on, the flow family — flow_index.json, every flow
+  # document, and the annotated controller units — is part of the equivalence
+  # contract. IndexComparison excludes flows/ from the unit set and compares
+  # it as its own snapshot (modulo the flow documents' generated_at stamp).
+  describe 'flow artifacts' do
+    around do |example|
+      Woods.configuration.precompute_flows = true
+      example.run
+    ensure
+      Woods.configuration.precompute_flows = false
+    end
+
+    it 'keeps flow artifacts equivalent to a full extraction as controllers change' do
+      run_sequence([
+                     lambda {
+                       write_file('app/controllers/things_controller.rb', <<~RUBY)
+                         class ThingsController < ApplicationController
+                           def index
+                             @things = Post.recent
+                           end
+                         end
+                       RUBY
+                       load app_path('app/controllers/things_controller.rb')
+                       'app/controllers/things_controller.rb'
+                     },
+                     lambda {
+                       write_file('app/controllers/things_controller.rb', <<~RUBY)
+                         class ThingsController < ApplicationController
+                           def index
+                             @things = Post.recent
+                           end
+
+                           def show
+                             @thing = Post.find(params[:id])
+                           end
+                         end
+                       RUBY
+                       load app_path('app/controllers/things_controller.rb')
+                       'app/controllers/things_controller.rb'
+                     }
+                   ])
+    end
+
+    # ThingsController stays in the controller descendants for the rest of
+    # the process and resolves to this file. Fold it into the pristine tree
+    # so the runtime and the filesystem keep agreeing in every later
+    # example.
+    after do
+      created = app_path('app/controllers/things_controller.rb')
+      FileUtils.cp(created, File.join(@pristine_root, 'app/controllers/things_controller.rb')) if File.exist?(created)
+    end
+  end
+
   # ── Targeted refresh (phase 1) ───────────────────────────────────────────
 
   describe 'Extractor#refresh' do

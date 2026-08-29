@@ -653,6 +653,7 @@ module Woods
       end
 
       write_incremental_graph_analysis
+      refresh_incremental_flows(touched)
       write_manifest(incremental: true)
       write_structural_summary
       publish_generation(reason)
@@ -1144,6 +1145,7 @@ module Woods
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: payload_dir.to_s)
       flow_map = precomputer.precompute
       rewrite_flow_annotated_units
+      sweep_orphaned_flow_files
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
     rescue StandardError => e
       Rails.logger.error "[Woods] Flow precomputation failed: #{e.message}"
@@ -1177,6 +1179,163 @@ module Woods
           json_serialize(type_index_entries(units))
         )
       end
+    end
+
+    # Incremental counterpart of Phase 5.5 (M3): the run's controller delta
+    # gets the same flow annotations a full run would give it, flow
+    # documents and flow_index.json are refreshed for the touched
+    # controllers while untouched controllers' entries carry forward, and
+    # flows/ documents no entry references are swept. Without this, a
+    # controller re-extracted incrementally lost metadata[:flow_paths],
+    # flow_index.json described pre-change routes, and flows/ files for
+    # deleted or renamed controllers persisted across every generation —
+    # seeded forward by PAYLOAD_DIRS.
+    #
+    # Runs inside {#finalize_incremental_run} so both extract_changed and
+    # refresh (whose routes cascade rewrites controllers wholesale) get it,
+    # and so a no-op run — which returns before this — leaves flows alone.
+    #
+    # @param touched [Set<String>] identifiers added, re-extracted, or removed
+    # @return [void]
+    def refresh_incremental_flows(touched)
+      return unless Woods.configuration.precompute_flows
+      return if touched.empty?
+
+      controllers_dir = payload_dir.join('controllers')
+      reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
+      removed = previous_flow_index_controllers & touched.to_set - reextracted.to_set
+      return if reextracted.empty? && removed.empty?
+
+      Rails.logger.info "[Woods] Refreshing flows for #{reextracted.size} controller(s), " \
+                        "#{removed.size} removed..."
+      precomputer = FlowPrecomputer.new(units: [], graph: @dependency_graph, output_dir: payload_dir.to_s)
+      annotations = precomputer.recompute_delta(
+        touched_units: reextracted.filter_map { |id| unit_from_payload(:controllers, id) },
+        removed_identifiers: removed.to_a
+      )
+      patch_flow_annotations(annotations)
+      sweep_orphaned_flow_files
+      # The annotation patch changed controller JSON after the run's type
+      # index regeneration; the index carries estimated_tokens, which the
+      # flow_paths are part of — a full run builds its index from the
+      # annotated in-memory units, so the incremental one re-derives it from
+      # the annotated files to match.
+      regenerate_type_index(:controllers) if annotations.any?
+    rescue StandardError => e
+      Rails.logger.error "[Woods] Incremental flow refresh failed: #{e.message}"
+    end
+
+    # Controller identifiers that hold entries in the previous generation's
+    # flow_index.json. Only these can be flow-removed this run: a controller
+    # with no index entries has no documents to sweep and no annotation to
+    # clear.
+    #
+    # @return [Set<String>]
+    def previous_flow_index_controllers
+      index_path = payload_dir.join('flows', 'flow_index.json')
+      return Set.new unless index_path.exist?
+
+      JSON.parse(AtomicFile.read(index_path))
+          .keys.map { |entry_point| entry_point.to_s.split('#', 2).first }.to_set
+    rescue JSON::ParserError, StandardError => e
+      Rails.logger.warn "[Woods] Could not read previous flow_index.json: #{e.message}"
+      Set.new
+    end
+
+    # Rehydrate one unit from its payload JSON for the incremental flow
+    # pass. FlowPrecomputer only needs the identifier and the actions
+    # metadata; the source lives on disk, where FlowAssembler reads it.
+    #
+    # @param type_key [Symbol] extractor key naming the payload directory
+    # @param identifier [String]
+    # @return [ExtractedUnit, nil]
+    def unit_from_payload(type_key, identifier)
+      path = payload_dir.join(type_key.to_s, collision_safe_filename(identifier))
+      return unless File.exist?(path)
+
+      data = JSON.parse(AtomicFile.read(path))
+      unit = ExtractedUnit.new(
+        type: data['type'],
+        identifier: data['identifier'] || identifier,
+        file_path: data['file_path']
+      )
+      unit.metadata = data['metadata'] || {}
+      unit.source_code = data['source_code']
+      unit
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[Woods] Could not rehydrate #{identifier} for flow refresh: #{e.message}"
+      nil
+    end
+
+    # Write metadata[:flow_paths] into the re-extracted controllers' unit
+    # JSON — the incremental counterpart of {#rewrite_flow_annotated_units}.
+    # A controller with no flows this run loses any annotation a previous
+    # run had written, which is what a full run would have produced for the
+    # same tree. Read-compare-write, like {#rewrite_unit_json_of_type}.
+    #
+    # @param annotations [Hash{String => Hash{String => String}}] from
+    #   {FlowPrecomputer#recompute_delta}
+    # @return [void]
+    def patch_flow_annotations(annotations)
+      annotations.each do |identifier, flow_paths|
+        path = payload_dir.join('controllers', collision_safe_filename(identifier))
+        next unless File.exist?(path)
+
+        data = JSON.parse(AtomicFile.read(path))
+        before = JSON.generate(data)
+
+        metadata = (data['metadata'] ||= {})
+        if flow_paths.any?
+          metadata['flow_paths'] = flow_paths
+        else
+          metadata.delete('flow_paths')
+        end
+        next if JSON.generate(data) == before
+
+        AtomicFile.write(path, json_serialize(data))
+      end
+    rescue StandardError => e
+      Rails.logger.error "[Woods] Could not patch flow annotations: #{e.message}"
+    end
+
+    # Remove flows/ documents no entry of flow_index.json references.
+    #
+    # Deliberately NOT part of {#sweep_orphaned_unit_files}: that sweep
+    # deletes per-type unit files no in-memory unit accounts for, while
+    # flows/ holds neither units nor an _index.json. The flow family is
+    # defined by flow_index.json's references, and this validates against
+    # exactly those (M3) — the same artifact the validator treats separately
+    # (G-2). Before this, a controller deleted or renamed incrementally left
+    # its flow documents behind forever.
+    #
+    # Skipped when the index is missing or does not parse: with nothing to
+    # validate against, deleting every document would be the one outcome
+    # worse than keeping orphans, and the next full extraction with flow
+    # precomputation on rebuilds the whole family.
+    #
+    # @return [void]
+    def sweep_orphaned_flow_files
+      flows_dir = payload_dir.join('flows')
+      return unless flows_dir.directory?
+
+      index_path = flows_dir.join('flow_index.json')
+      return unless index_path.exist?
+
+      referenced = begin
+        JSON.parse(AtomicFile.read(index_path)).values
+      rescue JSON::ParserError => e
+        Rails.logger.warn "[Woods] Orphaned-flow sweep skipped: flow_index.json does not parse (#{e.message})"
+        return
+      end
+
+      keep = referenced.map { |relative| File.basename(relative.to_s) }.to_set << 'flow_index.json'
+      orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
+      return if orphans.empty?
+
+      orphans.each { |file| FileUtils.rm_f(file) }
+      Rails.logger.info "[Woods] Swept #{orphans.size} orphaned flow file(s)"
+    rescue StandardError => e
+      Rails.logger.error "[Woods] Orphaned-flow sweep failed: #{e.message}"
     end
 
     # ──────────────────────────────────────────────────────────────────────

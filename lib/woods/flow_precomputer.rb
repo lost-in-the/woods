@@ -54,24 +54,57 @@ module Woods
       flow_map = {}
 
       controller_units.each do |unit|
-        actions = unit.metadata[:actions] || unit.metadata['actions'] || []
-        unit_flow_paths = {}
-
-        actions.each do |action|
-          entry_point = "#{unit.identifier}##{action}"
-          flow_path = assemble_and_write(assembler, entry_point, unit.identifier, action)
-          next unless flow_path
-
-          flow_map[entry_point] = flow_path
-          unit_flow_paths[action] = flow_path
-        end
-
+        entries, unit_flow_paths = assemble_controller_unit(assembler, unit)
+        flow_map.merge!(entries)
         unit.metadata[:flow_paths] = unit_flow_paths if unit_flow_paths.any?
       end
 
       write_flow_index(flow_map)
 
       flow_map
+    end
+
+    # Recompute the flow documents for the controllers an incremental run
+    # touched (M3), carrying every untouched controller's entries forward
+    # from the previous generation's flow_index.json — payload seeding
+    # hardlinks it into this run's payload directory — and rewriting the
+    # index with the merged result.
+    #
+    # Touched controllers replace their previous entries wholesale (a full
+    # run would emit exactly their current actions), so an action removed
+    # from a re-extracted controller leaves the index even though the file
+    # still exists. Controllers named in +removed_identifiers+ lost their
+    # unit this run (deleted or renamed) and leave the index entirely;
+    # {Woods::Extractor#sweep_orphaned_flow_files} then removes the
+    # documents nothing references anymore.
+    #
+    # @param touched_units [Array<ExtractedUnit>] the run's re-extracted
+    #   controller units, rehydrated from the payload this run seeded
+    # @param removed_identifiers [Array<String>] controller identifiers
+    #   whose unit the run pruned
+    # @return [Hash{String => Hash{String => String}}] per-controller
+    #   annotation (action => relative flow path) to write into the units'
+    #   metadata; an empty hash means "no flows", which clears any
+    #   annotation a previous run had written
+    def recompute_delta(touched_units:, removed_identifiers: [])
+      FileUtils.mkdir_p(@flows_dir)
+
+      assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
+      delta = {}
+      annotations = {}
+
+      touched_units.each do |unit|
+        entries, unit_flow_paths = assemble_controller_unit(assembler, unit)
+        annotations[unit.identifier] = unit_flow_paths
+        delta.merge!(entries)
+      end
+
+      replaced = touched_units.map(&:identifier) + Array(removed_identifiers)
+      carried = previous_flow_index.reject { |entry_point, _path| replaced.include?(controller_of(entry_point)) }
+
+      write_flow_index(carried.merge(delta))
+
+      annotations
     end
 
     private
@@ -81,6 +114,54 @@ module Woods
     # @return [Array<ExtractedUnit>]
     def controller_units
       @units.select { |u| u.type.to_s == 'controller' }
+    end
+
+    # Assemble and write every flow for one controller unit.
+    #
+    # @param assembler [FlowAssembler]
+    # @param unit [ExtractedUnit]
+    # @return [Array(Hash{String => String}, Hash{String => String})] the
+    #   entry_point => relative-path entries for the flow index, and the
+    #   action => relative-path annotation for the unit's metadata
+    def assemble_controller_unit(assembler, unit)
+      entries = {}
+      unit_flow_paths = {}
+
+      actions = unit.metadata[:actions] || unit.metadata['actions'] || []
+      actions.each do |action|
+        entry_point = "#{unit.identifier}##{action}"
+        flow_path = assemble_and_write(assembler, entry_point, unit.identifier, action)
+        next unless flow_path
+
+        entries[entry_point] = flow_path
+        unit_flow_paths[action] = flow_path
+      end
+
+      [entries, unit_flow_paths]
+    end
+
+    # The controller part of a flow index entry point.
+    #
+    # @param entry_point [String]
+    # @return [String]
+    def controller_of(entry_point)
+      entry_point.to_s.split('#', 2).first
+    end
+
+    # The previous generation's flow index, or an empty hash when none was
+    # published or it does not parse. A missing index means there is nothing
+    # to carry forward; a broken one degrades to a delta-only index rather
+    # than failing the extraction — the next full run rebuilds the family.
+    #
+    # @return [Hash{String => String}]
+    def previous_flow_index
+      path = File.join(@flows_dir, 'flow_index.json')
+      return {} unless File.exist?(path)
+
+      JSON.parse(Woods::AtomicFile.read(path))
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[Woods] Could not read previous flow_index.json: #{e.message}"
+      {}
     end
 
     # Assemble a flow for one entry point and write the JSON file.
