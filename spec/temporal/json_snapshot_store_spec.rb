@@ -60,6 +60,12 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
     ]
   end
 
+  # units_v2 plus one more unit — used for the re-capture diff spec below.
+  let(:units_v3) do
+    units_v2 + [{ identifier: 'Extra', type: 'model', source_hash: 'h5',
+                  metadata_hash: 'm5', dependencies_hash: 'd5' }]
+  end
+
   # ── snapshot_path validation ──────────────────────────────────────
 
   describe 'path traversal validation' do
@@ -184,6 +190,20 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
       expect(result[:units_added]).to eq(0)
       expect(result[:units_modified]).to eq(0)
       expect(result[:units_deleted]).to eq(0)
+    end
+
+    # L20 twin of the SQLite store — find_latest must resolve "previous" to
+    # the latest snapshot that is NOT the SHA being captured, so a
+    # re-capture at an unchanged HEAD diffs against real history instead of
+    # whatever the same SHA's file happened to hold.
+    it 'computes re-capture diff stats against the latest distinct SHA, not itself' do
+      store.capture(manifest_v1, units_v1)
+      store.capture(manifest_v2, units_v2)
+      result = store.capture(manifest_v2, units_v3)
+
+      expect(result[:units_added]).to eq(2)    # Comment + Extra vs aaa1111
+      expect(result[:units_modified]).to eq(1) # User
+      expect(result[:units_deleted]).to eq(1)  # Post
     end
 
     it 'returns nil when git_sha is nil' do

@@ -182,6 +182,154 @@ RSpec.describe Woods::Console::SqlValidator do
         sql = 'WITH RECURSIVE d AS (DELETE FROM users RETURNING *) SELECT * FROM d'
         expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
       end
+
+      it 'rejects a writable CTE in second-or-later WITH position (M4)' do
+        sql = 'WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'rejects a writable CTE nested inside a readable CTE body' do
+        sql = 'WITH a AS (WITH b AS (DELETE FROM users RETURNING *) SELECT * FROM b) SELECT * FROM a'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'accepts a benign multi-CTE SELECT' do
+        sql = 'WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y) SELECT a.x, b.y FROM a JOIN b ON a.x = b.x'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'rejects a writable CTE wrapped in extra parens (leading-paren gap)' do
+        sql = 'WITH a AS ((DELETE FROM users RETURNING *)) SELECT * FROM a'
+        expect { validator.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+      end
+
+      it 'accepts a WINDOW clause whose AS (...) body is not a CTE' do
+        sql = 'SELECT sum(id) OVER w FROM users WINDOW w AS (PARTITION BY status)'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
+    context 'with WITH-attached top-level DML' do
+      # The CTE list can be attached to a top-level data-modifying statement
+      # (legal PostgreSQL grammar): `WITH a AS (SELECT 1) DELETE FROM users
+      # RETURNING *`. The prefix check sees `WITH` and allows it; DELETE and
+      # UPDATE have no body keyword to trip the body scan. The INSERT variant
+      # was caught only incidentally, by its INTO.
+      {
+        'DELETE' => 'WITH a AS (SELECT 1) DELETE FROM users RETURNING *',
+        'UPDATE' => 'WITH a AS (SELECT 1) UPDATE users SET admin = true RETURNING *',
+        'INSERT' => 'WITH a AS (SELECT 1) INSERT INTO users (id) VALUES (1) RETURNING *',
+        'MERGE' => 'WITH a AS (SELECT 1) MERGE INTO users USING a ON (true) WHEN MATCHED THEN DELETE'
+      }.each do |keyword, sql|
+        it "rejects WITH ... #{keyword} at top level" do
+          expect { validator.validate!(sql) }
+            .to raise_error(Woods::Console::SqlValidationError, /data-modifying statement/i)
+        end
+      end
+    end
+
+    context 'with a MySQL # comment splitting a lock clause (PR-248 High 2)' do
+      # check_lock_clauses! strips noise with the PostgreSQL dialect, where #
+      # is not a comment, so MySQL leaves `LOCK` and `IN SHARE MODE`
+      # separated by a comment and the lock-clause regex never matches.
+      it 'rejects LOCK # comment / IN SHARE MODE' do
+        sql = "SELECT * FROM users LOCK # mysql comment\nIN SHARE MODE"
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+    end
+
+    context 'with MySQL executable comments splitting a lock clause (PR-248 round-2 High 3)' do
+      # /*!...*/ is executable-comment syntax: MySQL treats the body as
+      # whitespace when the version guard is unsatisfied, and executes it in
+      # place otherwise. Both noise-stripping views keep the markers, so the
+      # lock regex must be run over both semantics of the comment.
+      it 'rejects LOCK /*!99999 */ IN SHARE MODE (guard-unsatisfied: whitespace semantics)' do
+        sql = 'SELECT * FROM users LOCK /*!99999 */ IN SHARE MODE'
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+
+      it 'rejects FOR /*!99999 */ UPDATE (guard-unsatisfied: whitespace semantics)' do
+        sql = 'SELECT * FROM users FOR /*!99999 */ UPDATE'
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+
+      it 'rejects a lock keyword hidden in the executable comment body (guard-satisfied semantics)' do
+        sql = 'SELECT * FROM users LOCK /*! IN SHARE */ MODE'
+        expect { validator.validate!(sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+    end
+
+    context 'with lock-check false positives that must keep passing' do
+      it 'accepts a # inside a string literal (PostgreSQL prose)' do
+        sql = "SELECT * FROM notes WHERE body = 'use # for headings'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a string literal containing a lock phrase after a #' do
+        sql = "SELECT * FROM notes WHERE body = '# LOCK IN SHARE MODE'"
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a column literally named locked' do
+        sql = 'SELECT * FROM events WHERE locked = false'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts LOCK as an identifier fragment' do
+        sql = 'SELECT lock_in_share FROM metrics WHERE id = 1'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
+    context 'with benign statements that must not trip the WITH-attached DML check' do
+      it 'accepts WITH ... SELECT with a WHERE on updated_at' do
+        sql = 'WITH a AS (SELECT 1) SELECT * FROM a WHERE updated_at > ?'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a column named update_count in the outer SELECT' do
+        sql = 'WITH a AS (SELECT 1) SELECT update_count FROM a'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a deleted_at predicate inside the CTE body' do
+        sql = 'WITH a AS (SELECT id FROM posts WHERE deleted_at IS NULL) SELECT * FROM a'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a deleted_at predicate in the outer WHERE' do
+        sql = 'WITH a AS (SELECT id FROM posts) SELECT * FROM a WHERE deleted_at IS NULL'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a nested subquery whose closing paren is followed by FROM' do
+        sql = 'WITH a AS (SELECT (SELECT max(id) FROM posts) AS top FROM posts) SELECT * FROM a'
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+
+      it 'accepts a DELETE keyword that is not immediately after a closing paren' do
+        sql = 'WITH a AS (SELECT 1) SELECT * FROM a WHERE note = \'please delete\''
+        expect { validator.validate!(sql) }.not_to raise_error
+      end
+    end
+
+    context 'with row-lock clauses (M5)' do
+      [
+        'SELECT * FROM users FOR UPDATE',
+        'SELECT * FROM users FOR NO KEY UPDATE',
+        'SELECT * FROM users FOR SHARE',
+        'SELECT * FROM users FOR UPDATE NOWAIT',
+        'SELECT * FROM users LOCK IN SHARE MODE'
+      ].each do |sql|
+        it "rejects #{sql}" do
+          expect { validator.validate!(sql) }
+            .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+        end
+      end
     end
 
     context 'with INTO OUTFILE / INTO DUMPFILE' do
@@ -433,6 +581,135 @@ RSpec.describe Woods::Console::SqlValidator do
       it 'does not misclassify a grouped boolean expression as a function call' do
         expect { validator.validate!('SELECT * FROM users WHERE (active = true)') }.not_to raise_error
       end
+    end
+  end
+
+  describe 'dialect-aware lock validation (PR-248 round-2 High 4)' do
+    # MySQL treats \' as an escaped apostrophe, so the whole literal is one
+    # string and the prose inside it ("request for update") never reaches
+    # SQL grammar. The PostgreSQL normalization ends the literal early and
+    # exposes `for update` — a true view of an invalid-on-PG statement, but
+    # a false rejection of valid MySQL. With the adapter known, only the
+    # matching normalization runs.
+    let(:mysql_literal_sql) { "SELECT * FROM notes WHERE body = 'customer\\'s request for update'" }
+
+    it 'accepts a MySQL escaped-apostrophe literal containing FOR UPDATE under the MySQL dialect' do
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(mysql_literal_sql) }
+        .not_to raise_error
+    end
+
+    it 'still rejects the MySQL # comment lock split under the MySQL dialect' do
+      sql = "SELECT * FROM users LOCK # mysql comment\nIN SHARE MODE"
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'rejects FOR UPDATE after a # inside a MySQL double-quoted string' do
+      sql = 'SELECT * FROM users WHERE note = "a#b" FOR UPDATE'
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'rejects FOR UPDATE after a # inside a MySQL backtick identifier' do
+      sql = 'SELECT `a#b` FROM users FOR UPDATE'
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'accepts a PostgreSQL E-string containing FOR UPDATE' do
+      sql = "SELECT E'customer\\'s request for update'"
+      expect { Woods::Console::SqlValidator.new(dialect: :postgres).validate!(sql) }
+        .not_to raise_error
+    end
+
+    it 'still rejects executable-comment lock splits under the MySQL dialect' do
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users LOCK /*!99999 */ IN SHARE MODE') }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users FOR /*!99999 */ UPDATE') }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!('SELECT * FROM users LOCK /*! IN SHARE */ MODE') }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'retains PostgreSQL quote behavior: the escaped literal exposes a lock clause under the PG dialect' do
+      expect { Woods::Console::SqlValidator.new(dialect: :postgres).validate!(mysql_literal_sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+
+    it 'keeps the conservative union when no dialect is given' do
+      expect { validator.validate!(mysql_literal_sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      expect { validator.validate!("SELECT * FROM users LOCK # c\nIN SHARE MODE") }
+        .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+    end
+  end
+
+  describe '#check_writable_ctes! (direct unit tests)' do
+    it 'rejects a writable first CTE' do
+      sql = 'WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'rejects a writable second CTE' do
+      sql = 'WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'rejects a writable UPDATE body in second position' do
+      sql = 'WITH a AS (SELECT 1), u AS (UPDATE users SET admin = true RETURNING *) SELECT * FROM u'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'rejects a writable INSERT body in second position' do
+      sql = 'WITH a AS (SELECT 1), i AS (INSERT INTO logs(msg) VALUES (1) RETURNING *) SELECT * FROM i'
+      expect { validator.send(:check_writable_ctes!, sql) }
+        .to raise_error(Woods::Console::SqlValidationError, /writable CTE/i)
+    end
+
+    it 'accepts every body read-only in a multi-CTE WITH list' do
+      sql = 'WITH a AS (SELECT 1 AS x), b AS (SELECT 2 AS y) SELECT a.x, b.y FROM a, b'
+      expect { validator.send(:check_writable_ctes!, sql) }.not_to raise_error
+    end
+
+    it 'accepts a WINDOW AS (...) body in a plain SELECT (no WITH)' do
+      sql = 'SELECT sum(id) OVER w FROM users WINDOW w AS (PARTITION BY status)'
+      expect { validator.send(:check_writable_ctes!, sql) }.not_to raise_error
+    end
+
+    it 'does not misread a DML keyword inside a string literal (noise stripped first)' do
+      sql = "WITH a AS (SELECT 'delete me' AS x) SELECT * FROM a"
+      expect { validator.send(:check_writable_ctes!, sql) }.not_to raise_error
+    end
+  end
+
+  describe '#check_lock_clauses! (direct unit tests)' do
+    [
+      'SELECT * FROM users FOR UPDATE',
+      'SELECT * FROM users FOR NO KEY UPDATE',
+      'SELECT * FROM users FOR SHARE',
+      'SELECT * FROM users FOR KEY SHARE',
+      'SELECT * FROM users FOR UPDATE NOWAIT',
+      'SELECT * FROM users FOR UPDATE SKIP LOCKED',
+      'SELECT * FROM users FOR UPDATE OF users NOWAIT',
+      'SELECT * FROM users LOCK IN SHARE MODE'
+    ].each do |sql|
+      it "rejects #{sql}" do
+        expect { validator.send(:check_lock_clauses!, sql) }
+          .to raise_error(Woods::Console::SqlValidationError, /lock/i)
+      end
+    end
+
+    it 'accepts a query with no lock clause' do
+      expect { validator.send(:check_lock_clauses!, 'SELECT * FROM users WHERE id = 1') }
+        .not_to raise_error
+    end
+
+    it 'accepts a column named update when no FOR precedes it' do
+      expect { validator.send(:check_lock_clauses!, 'SELECT id, update FROM events') }
+        .not_to raise_error
     end
   end
 end

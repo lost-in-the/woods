@@ -308,8 +308,12 @@ module Woods
       #   store.store("User", { type: "model", namespace: "Admin" })
       #   store.find("User")  # => { "type" => "model", "namespace" => "Admin" }
       #
-      class SQLite
+      class SQLite # rubocop:disable Metrics/ClassLength
         include Interface
+
+        # Attempts allowed for a contended write, including the first.
+        # Mirrors {Woods::Temporal::SnapshotStore::LOCK_ATTEMPTS}.
+        LOCK_ATTEMPTS = 3
 
         # @param database [String, Pathname] Database file, or ":memory:" for an explicit in-memory store
         def initialize(database:)
@@ -325,19 +329,35 @@ module Woods
           FileUtils.mkdir_p(File.dirname(File.expand_path(database))) unless database == ':memory:'
           @db = ::SQLite3::Database.new(database)
           @db.results_as_hash = true
+          # SQLite's busy handler only helps when it is set. Two processes
+          # sharing one metadata database (a long extraction while an MCP
+          # server stores a checkpoint) used to raise SQLite3::BusyException
+          # immediately on the second writer (O2). Same value as the twin
+          # {Woods::Temporal::SnapshotStore}.
+          @db.busy_timeout = 5_000
           create_table
         end
 
         # @see Interface#store
+        # @raise [ArgumentError] if +metadata+ carries no type key
+        #
+        # The type column backs {#find_by_type}, so an absent key used to
+        # fall through +type.to_s+ and be stored as +""+ — fabricating a
+        # type where none existed rather than surfacing the missing field
+        # (L22).
         def store(id, metadata)
           type = metadata[:type] || metadata['type']
+          raise ArgumentError, "metadata for #{id.inspect} has no type key" unless type
+
           data = JSON.generate(metadata)
 
-          @db.execute(<<~SQL, [id, type.to_s, data, Time.now.iso8601])
-            INSERT INTO units (id, type, data, updated_at) VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-              type = excluded.type, data = excluded.data, updated_at = excluded.updated_at
-          SQL
+          with_lock_retry do
+            @db.execute(<<~SQL, [id, type.to_s, data, Time.now.iso8601])
+              INSERT INTO units (id, type, data, updated_at) VALUES (?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                type = excluded.type, data = excluded.data, updated_at = excluded.updated_at
+            SQL
+          end
         end
 
         # @see Interface#find
@@ -397,7 +417,9 @@ module Woods
 
         # @see Interface#delete
         def delete(id)
-          @db.execute('DELETE FROM units WHERE id = ?', [id])
+          with_lock_retry do
+            @db.execute('DELETE FROM units WHERE id = ?', [id])
+          end
         end
 
         # @see Interface#count
@@ -406,6 +428,29 @@ module Woods
         end
 
         private
+
+        # Bounded retry around a contended write, mirroring
+        # {Woods::Temporal::SnapshotStore#with_lock_retry}: SQLite skips the
+        # busy handler when it detects a lock-order deadlock, so a write can
+        # raise "database is locked" at once despite the busy timeout. A
+        # short bounded retry lets the other writer finish; anything else,
+        # or a non-SQLite connection, raises straight through.
+        def with_lock_retry
+          attempt = 0
+          begin
+            attempt += 1
+            yield
+          rescue StandardError => e
+            raise unless sqlite_busy?(e) && attempt < LOCK_ATTEMPTS
+
+            sleep(0.05 * attempt)
+            retry
+          end
+        end
+
+        def sqlite_busy?(error)
+          defined?(SQLite3::BusyException) && error.is_a?(SQLite3::BusyException)
+        end
 
         # Escape SQL LIKE metacharacters in a user query so they match
         # literally under the `ESCAPE '\'` clause {#search} emits. Without

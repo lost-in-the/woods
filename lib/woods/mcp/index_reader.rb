@@ -31,7 +31,7 @@ module Woods
         engines view_templates migrations action_cable_channels
         scheduled_jobs rake_tasks state_machines events decorators
         database_views caching factories test_mappings rails_source
-        poros libs
+        poros libs ruby_classes ruby_modules ruby_methods ruby_files
       ].freeze
 
       # Singular type name for each directory (used in search filtering).
@@ -274,7 +274,7 @@ module Woods
         ensure_fresh!
         @summary ||= begin
           path = current_payload_dir.join('SUMMARY.md')
-          path.file? ? path.read : nil
+          path.file? ? read_utf8(path) : nil
         end
       end
 
@@ -877,7 +877,7 @@ module Woods
         @index_cache ||= {}
         @index_cache[dir] ||= begin
           path = current_payload_dir.join(dir, '_index.json')
-          path.file? ? JSON.parse(path.read) : []
+          path.file? ? JSON.parse(read_utf8(path)) : []
         end
       end
 
@@ -942,11 +942,30 @@ module Woods
         File.open(path, 'rb', &block)
       end
 
+      # Read an index artifact as UTF-8, whatever the host locale.
+      #
+      # Bare Pathname#read tags the bytes with Encoding.default_external. On
+      # a C/US-ASCII host that tag is US-ASCII, so a single non-ASCII byte in
+      # an artifact (a branch like "feature/café" in manifest.json, a unit
+      # identifier, prose in SUMMARY.md) makes JSON.parse raise
+      # Encoding::InvalidByteSequenceError and leaves bare string reads with
+      # an invalid encoding — search, lookup, dependencies, dependents,
+      # framework, and recent_changes then surface as misleading
+      # corrupt_artifact results. Reading binary (the mode {#load_unit} has
+      # always used) and forcing UTF-8 keeps the bytes byte-identical while
+      # giving them the encoding extraction writes artifacts in.
+      #
+      # @param path [Pathname] Artifact path inside the loaded generation
+      # @return [String] Contents, tagged UTF-8
+      def read_utf8(path)
+        path.binread.force_encoding(Encoding::UTF_8)
+      end
+
       # Parse a JSON payload file (manifest, graph, analysis) resolved through
       # the loaded generation's {#payload_dir}.
       def parse_json(filename)
         path = current_payload_dir.join(filename)
-        JSON.parse(path.read)
+        JSON.parse(read_utf8(path))
       end
 
       # BFS traversal in either direction.

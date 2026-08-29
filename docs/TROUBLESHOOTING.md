@@ -103,7 +103,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 **Symptom:** After changing your routes file or adding a middleware, `rake woods:incremental` doesn't seem to update those units.
 
-**Cause:** Eight unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
+**Cause:** Nine unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
 
 | Type | Trigger path |
 |------|--------------|
@@ -115,6 +115,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 | `factory` | any `.rb` change under `spec/factories`/`test/factories` |
 | `event` | any `.rb` change under `app/` |
 | `database_view` | any `.sql` change under `db/views` |
+| `rails_source` | `Gemfile.lock` (only when `include_framework_sources` is enabled) |
 
 If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.
 
@@ -694,7 +695,7 @@ config.notion_database_ids = {
 For a single-call health snapshot, call the Index Server's `woods_status` tool. It reports:
 
 - Extraction freshness (last run time, unit count, index version)
-- Console-bridge reachability
+- Overall readiness plus index, watch, retriever, and bootstrap state (`ready`, `index`, `watch`, `retriever`, `bootstrap` sections)
 - Which optional features are configured (embedding provider, Notion, session tracer)
 - Per-feature config-key hints for anything missing
 - `server.update`: the installed gem version, the newest version the process knows about (the latest published release, or the installed version itself when the install is ahead of the registry or the check could not run), and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)

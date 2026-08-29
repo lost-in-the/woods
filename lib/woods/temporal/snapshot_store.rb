@@ -103,7 +103,11 @@ module Woods
         captured = nil
         with_lock_retry do
           @db.transaction(:immediate) do
-            previous = find_latest
+            # Exclude the SHA being captured: find_latest before the upsert
+            # otherwise resolves "previous" to this very row, and
+            # update_diff_stats then compares the freshly written unit set
+            # against itself — every stat zeroes out silently (L20).
+            previous = find_latest(exclude_sha: git_sha)
             upsert_snapshot(manifest, git_sha, unit_hashes.size)
 
             snapshot_id = fetch_snapshot_id(git_sha)
@@ -336,11 +340,23 @@ module Woods
         )
       end
 
-      # Find the most recent snapshot.
+      # Find the most recent snapshot, optionally excluding one SHA.
       #
+      # {#capture} always excludes the SHA it is about to upsert — see the
+      # note at the call site (L20).
+      #
+      # @param exclude_sha [String, nil] SHA to leave out of the result
       # @return [Hash, nil]
-      def find_latest
-        row = @db.get_first_row('SELECT * FROM woods_snapshots ORDER BY extracted_at DESC LIMIT 1')
+      def find_latest(exclude_sha: nil)
+        row =
+          if exclude_sha
+            @db.get_first_row(
+              'SELECT * FROM woods_snapshots WHERE git_sha != ? ORDER BY extracted_at DESC LIMIT 1',
+              [exclude_sha]
+            )
+          else
+            @db.get_first_row('SELECT * FROM woods_snapshots ORDER BY extracted_at DESC LIMIT 1')
+          end
         return nil unless row
 
         row_to_hash(row)

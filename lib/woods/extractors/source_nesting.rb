@@ -42,6 +42,14 @@ module Woods
       # anonymous block via {#block_opener?}).
       DECLARATION_PATTERN = /\A(module|class)\s+([A-Z]\w*(?:::[A-Z]\w*)*)/
 
+      # The offline stand-in for a Zeitwerk autoload root: the last `app/`
+      # directory segment in a path. When no Rails autoloader is up there is
+      # no loader to ask, so file-path governance falls back to the same
+      # convention the runtime loader follows — everything under
+      # `app/<kind>/` maps to constants, e.g.
+      # `app/services/domain/container/parser.rb` → +Domain::Container::Parser+.
+      MANAGED_PATH_PATTERN = %r{\A(.*/app/[^/]+/)}
+
       # Inner module names that hold mixin plumbing (ActiveSupport::Concern's
       # ClassMethods, the classic included-hook InstanceMethods) — never the
       # unit a file is named for.
@@ -66,23 +74,43 @@ module Woods
       # @return [String, nil] Qualified class name, or nil when the source
       #   contains no class declaration
       def qualified_first_class_name(source)
-        stack = []
-
-        each_significant_line(source) do |stripped|
-          if (decl = DECLARATION_PATTERN.match(stripped))
-            return (stack.compact << decl[2]).join('::') if decl[1] == 'class'
-
-            # A self-terminated declaration (`module Foo; end`) is not an
-            # opener under the house pattern and encloses nothing.
-            stack << decl[2] if block_opener?(stripped)
-          elsif stripped.match?(END_LINE)
-            stack.pop
-          elsif block_opener?(stripped)
-            stack << nil # anonymous block (do/def/if/...): depth only, no name
-          end
+        each_declaration(source) do |kind, _name, qualified|
+          return qualified if kind == 'class'
         end
 
         nil
+      end
+
+      # Zeitwerk-governed name for a file's primary constant (finding G-1).
+      #
+      # A file under a managed autoload path is expected by Zeitwerk to
+      # define the constant its path spells: `app/services/domain/container/
+      # parser.rb` must define +Domain::Container::Parser+. The
+      # source-derived parser ({#qualified_first_class_name}) returns at the
+      # FIRST class declaration, so a file whose namespaces are written as
+      # classes (`module Domain; class Container; class Parser`) named the
+      # unit after the wrapper (+Domain::Container+). Every sibling under the
+      # same wrapper then collided on one identifier, and same-type dedup
+      # silently dropped all but one.
+      #
+      # This method computes the expected constant path — from
+      # +Rails.autoloaders.main+ when a Rails autoloader is up, from the
+      # same path-to-constant convention offline otherwise — and returns the
+      # first declaration (class or module) whose qualified name equals it.
+      # When the path is not managed, or no declaration matches (an
+      # unconventional file), it returns nil and the caller falls back to
+      # {#qualified_first_class_name}: pre-G-1 behavior for everything the
+      # convention cannot vouch for.
+      #
+      # @param file_path [String, Pathname] Path to the source file
+      # @param source [String] Ruby source code
+      # @return [String, nil] The Zeitwerk-expected constant name, or nil
+      #   when the path is unmanaged or the source does not declare it
+      def governed_class_name(file_path, source)
+        expected = managed_constant_path(file_path.to_s)
+        return nil unless expected
+
+        first_declaration_named(expected, source)
       end
 
       # Fully-qualified name of the file's primary module.
@@ -149,6 +177,342 @@ module Woods
       end
 
       private
+
+      # Yield every module/class declaration with its position-aware
+      # qualified name. The stack discipline is the one documented on the
+      # module: declarations open frames, {#block_opener?} opens anonymous
+      # (depth-only) frames, and {END_LINE}-matching lines pop them.
+      #
+      # @param source [String] Ruby source code
+      # @yieldparam kind [String] 'module' or 'class'
+      # @yieldparam name [String] The declared (possibly compact) name
+      # @yieldparam qualified [String] Enclosing stack joined with the name
+      # @return [void]
+      def each_declaration(source)
+        stack = []
+
+        each_significant_line(source) do |stripped|
+          if (decl = DECLARATION_PATTERN.match(stripped))
+            yield decl[1], decl[2], (stack.compact << decl[2]).join('::')
+
+            # A self-terminated declaration (`module Foo; end`) is not an
+            # opener under the house pattern and encloses nothing.
+            stack << decl[2] if block_opener?(stripped)
+          elsif stripped.match?(END_LINE)
+            stack.pop
+          elsif block_opener?(stripped)
+            stack << nil # anonymous block (do/def/if/...): depth only, no name
+          end
+        end
+      end
+
+      # First declaration whose qualified name equals +expected+.
+      #
+      # @param expected [String] The Zeitwerk-expected constant path
+      # @param source [String] Ruby source code
+      # @return [String, nil] The matching qualified declaration name
+      def first_declaration_named(expected, source)
+        each_declaration(source) do |_kind, _name, qualified|
+          return qualified if qualified == expected
+        end
+
+        nil
+      end
+
+      # Constant path the file's position under a managed root expects.
+      #
+      # @param file_path [String] Absolute path to the source file
+      # @return [String, nil] Camelized constant path, or nil when the file
+      #   is not under a managed root
+      def managed_constant_path(file_path)
+        file_path = File.expand_path(file_path.to_s)
+        root, owner, foreign_root = managed_root_for(file_path)
+        return nil unless root
+
+        return loader_expected_cpath(file_path) if owner == :loader
+        return foreign_loader_constant_path(file_path, root, foreign_root) if owner == :foreign_loader
+
+        local_managed_constant_path(file_path, root)
+      end
+
+      # The constant path the active main loader expects for +file_path+,
+      # asked through the loader's own API so its inflector, namespace
+      # collapse, and ignore rules decide (a custom `api => API` inflection
+      # must win over the local camelizer). Available on Zeitwerk 2.6.4+;
+      # nil — unmanaged — when the loader's API is older, declines the
+      # file, or cannot derive a name. A decline is authoritative: the
+      # local camelizer must not rescue it.
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @return [String, nil]
+      def loader_expected_cpath(file_path)
+        loader = main_loader
+        return nil unless loader.respond_to?(:cpath_expected_at)
+
+        loader.cpath_expected_at(file_path)
+      rescue StandardError
+        nil
+      end
+
+      # The local path-to-constant convention. Reserved for roots with no
+      # loader to ask: the offline stand-in ({MANAGED_PATH_PATTERN}).
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] The managed root the path is relative to
+      # @return [String]
+      def local_managed_constant_path(file_path, root)
+        relative = file_path[root.length..].to_s.sub(/\.rb\z/, '')
+        relative.split('/').reject(&:empty?).map { |segment| camelize_segment(segment) }.join('::')
+      end
+
+      # Constant path for a copied/multi-worktree file whose active root is
+      # governed by the boot loader's root shape. Prefer the loader API by
+      # mapping the active file onto the corresponding boot-loader root; when
+      # the file exists only in the copy, keep the loader's inflector instead
+      # of falling back to Woods' default camelizer.
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root the path is relative to
+      # @param foreign_root [String, nil] Matching managed root from loader.dirs
+      # @return [String, nil]
+      def foreign_loader_constant_path(file_path, root, foreign_root)
+        mapped = foreign_root && mapped_foreign_path(file_path, root, foreign_root)
+        return nil unless mapped
+
+        # If the corresponding boot-root path exists, the real loader can
+        # answer with full semantics: ignores, root namespaces, collapses,
+        # and custom inflections. A nil answer is an authoritative non-claim.
+        return loader_expected_cpath(mapped) if File.exist?(mapped)
+
+        return nil unless copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
+
+        inflected_managed_constant_path(file_path, root)
+      end
+
+      # @param file_path [String] Expanded absolute path under the active root
+      # @param root [String] Active managed root
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [String]
+      def mapped_foreign_path(file_path, root, foreign_root)
+        relative = file_path[root.length..].to_s
+        File.join(foreign_root, relative)
+      end
+
+      # The path-to-constant convention using the active loader's inflector
+      # for copied-only foreign-root files. This path deliberately handles
+      # only the common Object-root, non-collapsed shape; root namespaces and
+      # collapsed directories require +cpath_expected_at+ over a real mapped
+      # path, so copied-only files with those rules stay unmanaged instead
+      # of receiving a guessed identifier.
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] The managed root the path is relative to
+      # @return [String]
+      def inflected_managed_constant_path(file_path, root)
+        relative = file_path[root.length..].to_s.sub(/\.rb\z/, '')
+        segments = relative.split('/').reject(&:empty?)
+        current = root.chomp('/')
+        segments.map do |segment|
+          current = File.join(current, segment)
+          loader_camelize(segment, current)
+        end.join('::')
+      end
+
+      # @param segment [String] Path segment without extension
+      # @param abspath [String] Absolute path passed to Zeitwerk inflectors
+      # @return [String]
+      def loader_camelize(segment, abspath)
+        loader = main_loader
+        inflector = loader.respond_to?(:inflector) ? loader.inflector : nil
+        return camelize_segment(segment) unless inflector.respond_to?(:camelize)
+
+        begin
+          inflector.camelize(segment, abspath)
+        rescue ArgumentError
+          inflector.camelize(segment)
+        end
+      rescue StandardError
+        camelize_segment(segment)
+      end
+
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root the path is relative to
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [Boolean]
+      def copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
+        loader_root_namespace(foreign_root) == Object &&
+          !mapped_path_uses_collapsed_directory?(file_path, root, foreign_root) &&
+          !mapped_path_crosses_loader_root?(file_path, root, foreign_root)
+      end
+
+      # A nested loader root resets Zeitwerk's constant-path origin. The
+      # copied-only fallback cannot ask +cpath_expected_at+ about a file that
+      # exists only in the active copy, so it must not camelize the nested
+      # root directory as an extra namespace segment.
+      def mapped_path_crosses_loader_root?(file_path, root, foreign_root)
+        mapped = mapped_foreign_path(file_path, root, foreign_root)
+        Array(main_loader.dirs).any? do |dir|
+          nested = File.expand_path(dir.to_s.chomp('/'))
+          nested != foreign_root && mapped.start_with?("#{nested}/")
+        end
+      rescue StandardError
+        true
+      end
+
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [Module]
+      def loader_root_namespace(foreign_root)
+        loader = main_loader
+        namespaced_dirs = loader.dirs(namespaces: true) if loader.respond_to?(:dirs)
+        return Object unless namespaced_dirs.respond_to?(:[])
+
+        namespaced_dirs[foreign_root] || Object
+      rescue StandardError
+        Object
+      end
+
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @return [Boolean]
+      def mapped_path_uses_collapsed_directory?(file_path, root, foreign_root)
+        loader = main_loader
+        return false unless loader.respond_to?(:__collapse?)
+
+        relative = file_path[root.length..].to_s.sub(%r{\A/}, '').sub(/\.rb\z/, '')
+        segments = relative.split('/').reject(&:empty?)
+        current = foreign_root.chomp('/')
+
+        segments[0...-1].any? do |segment|
+          current = File.join(current, segment)
+          loader.__collapse?(current)
+        end
+      rescue StandardError
+        true
+      end
+
+      # The managed root directory containing +file_path+, if any, with the
+      # authority that vouches for it.
+      #
+      # When a Rails autoloader is up, its directory list is the authority
+      # for the files it claims. For a file it does NOT claim, the
+      # non-claim stays authoritative whenever the loader demonstrably
+      # belongs to the active root (any loader directory under it) or
+      # reports an empty set (classic mode): unmanaged. Only when every
+      # loader root belongs to a DIFFERENT tree — copied-app and
+      # multi-worktree extractions, where the loader belongs to the boot
+      # root while Rails.root is repointed per slot — does the root-relative
+      # `app/<kind>/` shape under the active root govern, still using the
+      # foreign loader's inflector. No broad trust of paths that merely look
+      # like app trees. When no autoloader information exists at all (no Rails, a spec stub),
+      # {MANAGED_PATH_PATTERN} stands in offline.
+      #
+      # @param file_path [String] Absolute path to the source file
+      # @return [Array(String, Symbol), nil] `[root, owner]` with owner
+      #   +:loader+, +:foreign_loader+, or +:convention+, or nil when the
+      #   file is unmanaged
+      def managed_root_for(file_path)
+        file_path = File.expand_path(file_path)
+        loader = main_loader
+        unless loader
+          root = MANAGED_PATH_PATTERN.match(file_path)&.captures&.first
+          return root ? [root, :convention] : nil
+        end
+
+        dirs = Array(loader.dirs).map { |dir| File.expand_path(dir.to_s.chomp('/')) }
+
+        claimed = dirs.find { |dir| file_path.start_with?("#{dir}/") }
+        return [claimed, :loader] if claimed
+
+        active = active_root
+        return nil unless active
+        return nil if dirs.any? { |dir| dir.start_with?("#{active}/") }
+        return nil if dirs.empty?
+
+        active_root_managed_for(file_path, active, dirs)
+      end
+
+      # Root-relative managed root for a file the autoloader does not
+      # claim, when the loader's roots all belong to another tree: match
+      # the conventional `app/<kind>/` shape under the ACTIVE extraction
+      # root to the corresponding foreign loader roots. If exactly one
+      # mapped foreign file exists, that loader root is authoritative. If
+      # none exists, copied-only inflector fallback is allowed only for an
+      # unambiguous single foreign root. Ambiguous roots stay unmanaged
+      # rather than guessing between namespaces, collapses, or inflectors.
+      #
+      # @param file_path [String] Absolute path to the source file
+      # @param active [String] Expanded active extraction root
+      # @param dirs [Array<String>] Foreign loader roots
+      # @return [Array(String, Symbol, String), nil] `[root, :foreign_loader,
+      #   foreign_root]`, or nil
+      def active_root_managed_for(file_path, active, dirs)
+        return nil unless file_path.start_with?("#{active}/")
+
+        shape = file_path[active.length..].to_s.match(%r{\A(/app/[^/]+/)})
+        return nil unless shape
+
+        root = "#{active}#{shape[1]}"
+        suffix = shape[1].chomp('/')
+        candidates = dirs.select { |dir| dir.end_with?(suffix) }
+        return nil if candidates.empty?
+
+        existing = candidates.select do |foreign_root|
+          File.exist?(mapped_foreign_path(file_path, root, foreign_root))
+        end
+
+        return [root, :foreign_loader, existing.first] if existing.one?
+        return nil if existing.any?
+
+        foreign_root = candidates.one? ? candidates.first : nil
+        return nil unless foreign_root
+
+        [root, :foreign_loader, foreign_root]
+      end
+
+      # The active extraction root, expanded: the boot root in a normal
+      # extraction, the repointed root in a copied or multi-worktree slot.
+      #
+      # @return [String, nil]
+      def active_root
+        return nil unless defined?(Rails) && Rails.respond_to?(:root)
+
+        root = Rails.root
+        root && File.expand_path(root.to_s)
+      rescue StandardError
+        nil
+      end
+
+      # The main Rails autoloader, or nil when there is none to consult
+      # (no Rails, a spec stub). In classic mode the loader exists with an
+      # empty directory list — an authoritative empty set.
+      #
+      # @return [Zeitwerk::Loader, nil]
+      def main_loader
+        return nil unless defined?(Rails) && Rails.respond_to?(:autoloaders)
+
+        autoloaders = Rails.autoloaders
+        return nil unless autoloaders.respond_to?(:main)
+
+        main = autoloaders.main
+        main.respond_to?(:dirs) ? main : nil
+      rescue StandardError
+        nil
+      end
+
+      # Camelize one path segment the way Zeitwerk's default inflector
+      # treats conventional names: `payment` → +Payment+, `fee_schedule` →
+      # +FeeSchedule+. Kept local so the scanner stays free of ActiveSupport.
+      # It diverges from Zeitwerk on all-caps segments and cannot honor a
+      # custom inflector (e.g. `api` configured as +API+): the mismatch only
+      # fails the governed match, which falls back to the source parser —
+      # governance is lost, an identifier is never wrong.
+      #
+      # @param segment [String]
+      # @return [String]
+      def camelize_segment(segment)
+        segment.gsub(/(?:\A|_)([a-z])/) { Regexp.last_match(1).upcase }
+      end
 
       # Yield each non-blank, non-comment line of source, stripped.
       #

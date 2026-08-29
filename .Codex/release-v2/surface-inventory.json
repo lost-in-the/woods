@@ -331,6 +331,13 @@
       "prerequisites": []
     },
     {
+      "name": "woods:self_map",
+      "arguments": [
+        "output_dir"
+      ],
+      "prerequisites": []
+    },
+    {
       "name": "woods:send",
       "arguments": [],
       "prerequisites": [
@@ -971,7 +978,7 @@
     "index_mcp_tools": 29,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 32,
+    "rake_tasks": 33,
     "tasks_methods": 4
   },
   "documentation_claims": {

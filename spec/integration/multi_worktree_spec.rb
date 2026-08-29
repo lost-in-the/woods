@@ -43,6 +43,35 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
 
     @canonical = Dir.mktmpdir('woods_mw_canonical')
     FileUtils.cp_r(File.join(File.expand_path('../dummy', __dir__), '.'), @canonical)
+    FileUtils.mkdir_p(File.join(@canonical, 'app/services/api/container'))
+    File.write(File.join(@canonical, 'app/services/api/container.rb'), <<~RUBY)
+      module API
+        class Container
+          def self.wrap(input)
+            input
+          end
+        end
+      end
+    RUBY
+    %w[parser renderer].each do |name|
+      File.write(File.join(@canonical, 'app/services/api/container', "#{name}.rb"), <<~RUBY)
+        module API
+          class Container
+            class #{name.capitalize}
+              def call(input)
+                input
+              end
+            end
+          end
+        end
+      RUBY
+    end
+    FileUtils.mkdir_p(File.join(@canonical, 'config/initializers'))
+    File.write(File.join(@canonical, 'config/initializers/woods_inflections.rb'), <<~RUBY)
+      Rails.autoloaders.each do |loader|
+        loader.inflector.inflect('api' => 'API')
+      end
+    RUBY
 
     @db_dir = Dir.mktmpdir('woods_mw_db')
     ENV['WOODS_DUMMY_DB'] = File.join(@db_dir, 'dummy.sqlite3')
@@ -51,6 +80,7 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
       app_class = Class.new(Rails::Application) do
         config.eager_load = false
         config.logger = Logger.new(IO::NULL)
+        config.autoloader = :zeitwerk if config.respond_to?(:autoloader=)
       end
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = @canonical
@@ -163,6 +193,13 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
       services = identifiers_in(slot[:output], 'services')
 
       expect(services).to include("Slot#{slot[:index]}Service")
+      # G-1 regression: the copied dummy's wrapper-nested fixtures must
+      # resolve to their child constants in every slot, even though the
+      # autoloader singleton still reports the canonical boot root. Before
+      # the active-root fallback both files derived Domain::Container here
+      # and the collision guard aborted the slot's extraction.
+      expect(services).to include('Domain::Container::Parser', 'Domain::Container::Renderer')
+      expect(services).to include('API::Container::Parser', 'API::Container::Renderer')
       (0...WOODS_MW_WORKTREES).reject { |other| other == slot[:index] }.each do |other|
         expect(services).not_to(include("Slot#{other}Service"), 'cross-worktree contamination')
       end
@@ -215,6 +252,11 @@ RSpec.describe 'Multi-worktree operation', :booted_app do
         expect(reader.loaded_generation).to eq(published)
         expect(identifiers_in(slot[:output], 'services')).to include("Churn#{slot[:index]}0Service")
       end
+      # G-1 regression: same as the disjointness example — every slot's
+      # extraction must publish the wrapper-nested fixtures resolved.
+      expect(identifiers_in(slot[:output], 'services'))
+        .to include('Domain::Container::Parser', 'Domain::Container::Renderer',
+                    'API::Container::Parser', 'API::Container::Renderer')
     end
   end
 

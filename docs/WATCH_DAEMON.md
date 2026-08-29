@@ -109,6 +109,9 @@ within a debounce window), `degraded` (alive but *cannot* update, index frozen
 at a known generation, reason attached), `stopped` (nothing is maintaining this
 index). A stale answer is only dangerous when nothing says so.
 
+The file is written world-readable (0644) by design: host-side hooks read it
+through a bind mount. Every other artifact Woods writes stays at 0600.
+
 Note that `SyntaxError` is a `ScriptError`, not a `StandardError`. Rescuing
 only the latter would let a half-typed file kill the daemon.
 

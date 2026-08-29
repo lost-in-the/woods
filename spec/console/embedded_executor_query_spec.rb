@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'woods'
 require 'woods/console/embedded_executor'
+require 'woods/console/redactor'
 
 # Focused spec for the console_query / handle_query path with read_tools_enabled.
 # Covers: group_by + aggregate select, having, multi-column group_by, order with
@@ -400,6 +401,476 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(response['error_type']).to eq('unsupported')
       expect(response['error']).to include('embedded_read_tools: true')
       expect(response['error']).to include('docs/CONSOLE_MCP_SETUP.md')
+    end
+  end
+end
+
+RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on select aliases' do
+  subject(:executor) do
+    described_class.new(
+      model_validator: validator,
+      safe_context: safe_context,
+      connection: connection,
+      read_tools_enabled: true
+    )
+  end
+
+  let(:registry) { { 'Order' => %w[id status amount user_id created_at] } }
+  let(:table_names) { { 'Order' => 'orders' } }
+  let(:validator) { Woods::Console::ModelValidator.new(registry: registry, table_names: table_names) }
+  let(:connection) { double('Connection') }
+  let(:redacted_columns) { [] }
+  let(:redacted_key_values) { [] }
+  let(:safe_context) do
+    Woods::Console::SafeContext.new(
+      connection: connection,
+      redacted_columns: redacted_columns,
+      redacted_key_values: redacted_key_values
+    )
+  end
+
+  let(:order_model) { class_double('Order') }
+  let(:relation) do
+    double('order_relation').tap do |rel|
+      allow(rel).to receive(:select).and_return(rel)
+      allow(rel).to receive(:where).and_return(rel)
+      allow(rel).to receive(:having).and_return(rel)
+      allow(rel).to receive(:limit).and_return(rel)
+      allow(rel).to receive(:to_sql).and_return('SELECT id FROM orders LIMIT 10000')
+    end
+  end
+  let(:query_result) do
+    double('ActiveRecord::Result',
+           columns: %w[amount status],
+           rows: [%w[s3cret-amount paid]],
+           count: 1)
+  end
+
+  before do
+    stub_const('Order', order_model)
+    allow(order_model).to receive(:all).and_return(relation)
+    allow(connection).to receive(:transaction) do |&block|
+      block.call
+    rescue ActiveRecord::Rollback
+      nil
+    end
+    allow(connection).to receive(:execute)
+    allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+    allow(connection).to receive(:select_all).and_return(query_result)
+  end
+
+  def send_query(select)
+    executor.send_request({ 'tool' => 'query', 'params' => { 'model' => 'Order', 'select' => select } })
+  end
+
+  context 'when the column is on console_redacted_columns (H2)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'rejects an alias over a redacted column' do
+      response = send_query(['amount AS note'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aliasing redacted column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects a qualified alias over a redacted column' do
+      response = send_query(['orders.amount AS note'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aliasing redacted column 'amount'/i)
+    end
+
+    it 'rejects an aliased aggregate over a redacted column' do
+      response = send_query(['SUM(amount) AS total'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects a bare aggregate over a redacted column' do
+      response = send_query(['SUM(amount)'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'keeps direct unaliased selection allowed, with the redactor masking it by header' do
+      response = send_query(['amount'])
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:select).with('amount')
+
+      envelope = { 'columns' => query_result.columns, 'rows' => query_result.rows }
+      masked = Woods::Console::Redactor.apply(envelope, safe_context)
+      expect(masked['rows']).to eq([['[REDACTED]', 'paid']])
+    end
+  end
+
+  context 'when the column is on console_redacted_key_values (H2, EAV)' do
+    let(:redacted_key_values) do
+      [{ 'key_column' => 'status', 'value_column' => 'amount', 'sensitive_keys' => %w[paid] }]
+    end
+
+    it 'rejects an alias over the EAV key column' do
+      response = send_query(['status AS lookup_key'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{key/value column 'status'}i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects an alias over the EAV value column' do
+      response = send_query(['amount AS extracted_value'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{key/value column 'amount'}i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects an aggregate over the EAV value column scoped to a sensitive key (PR-248 High 1)' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['MAX(amount) AS leaked'],
+                                           'scope' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{aggregating redacted key/value column 'amount'}i)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'rejects an aggregate over the EAV key column' do
+      response = send_query(['COUNT(status) AS keyed'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{aggregating redacted key/value column 'status'}i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'keeps direct unaliased EAV selection allowed (the positional redactor still fires)' do
+      response = send_query(%w[status amount])
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:select).with('status', 'amount')
+
+      envelope = { 'columns' => query_result.columns, 'rows' => query_result.rows }
+      masked = Woods::Console::Redactor.apply(envelope, safe_context)
+      # key cell 'paid' matches sensitive_keys → the value cell (amount) is masked
+      expect(masked['rows']).to eq([['[REDACTED]', 'paid']])
+    end
+
+    it 'refuses the EAV value column selected without its paired key column (PR-248 round-2 High 1)' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['amount'],
+                                           'scope' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+  end
+
+  context 'when having references protected columns (PR-248 round-2 High 2)' do
+    let(:redacted_key_values) do
+      [{ 'key_column' => 'status', 'value_column' => 'amount', 'sensitive_keys' => %w[paid] }]
+    end
+
+    it 'refuses an aggregate over the EAV value column in the having template' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['MAX(amount) > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(%r{aggregating redacted key/value column 'amount'}i)
+      expect(relation).not_to have_received(:having)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'keeps a having predicate on a non-protected column working' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['COUNT(*) > ?', 1]
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with('COUNT(*) > ?', 1)
+    end
+  end
+
+  context 'when having aggregates an ordinary redacted column (PR-248 round-2 High 2)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'refuses an aggregate over the redacted column in the having template' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['SUM(amount) > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'amount'/i)
+      expect(relation).not_to have_received(:having)
+      expect(connection).not_to have_received(:select_all)
+    end
+  end
+
+  context 'when having carries a bare redacted column predicate (PR-248 round-2 High 2)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'refuses a bare redacted column predicate in the having template' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['amount > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'amount' is redacted/i)
+      expect(relation).not_to have_received(:having)
+      expect(connection).not_to have_received(:select_all)
+    end
+  end
+
+  context 'when protected predicate columns would act as comparison oracles (PR-248 round 3)' do
+    let(:registry) { { 'Order' => %w[id status amount amount_gt user_id created_at] } }
+    let(:redacted_columns) { %w[user_id] }
+    let(:redacted_key_values) do
+      [{ 'key_column' => 'status', 'value_column' => 'amount', 'sensitive_keys' => %w[paid] }]
+    end
+
+    it 'refuses an ordinary redacted column used as a Hash HAVING key before building a relation' do
+      allow(connection).to receive(:select_all)
+
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'user_id' => 100 }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'user_id' is redacted/i)
+      expect(order_model).not_to have_received(:all)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:having)
+      expect(relation).not_to have_received(:limit)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses an EAV value column used as a Hash HAVING key before building a relation' do
+      allow(connection).to receive(:select_all)
+
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'amount' => 100 }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(order_model).not_to have_received(:all)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:having)
+      expect(relation).not_to have_received(:limit)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'keeps a real Hash HAVING column ending in a scope suffix allowed' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => { 'amount_gt' => 100 }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:having).with({ 'amount_gt' => 100 })
+      expect(connection).to have_received(:select_all)
+    end
+
+    it 'refuses an EAV value column used as a bare array HAVING predicate before building a relation' do
+      allow(connection).to receive(:select_all)
+
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'having' => ['amount > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(order_model).not_to have_received(:all)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:having)
+      expect(relation).not_to have_received(:limit)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses an ordinary redacted column used as an array scope before building a relation' do
+      allow(connection).to receive(:select_all)
+
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['user_id > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'user_id' is redacted/i)
+      expect(order_model).not_to have_received(:all)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(relation).not_to have_received(:limit)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'keeps a real array scope column ending in a scope suffix allowed' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['amount_gt > ?', 100]
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:where).with('amount_gt > ?', 100)
+      expect(connection).to have_received(:select_all)
+    end
+
+    it 'refuses an EAV value column used as a suffixed Hash scope key before building a relation' do
+      allow(connection).to receive(:select_all)
+
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => { 'amount_gt' => 100 }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(order_model).not_to have_received(:all)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(relation).not_to have_received(:limit)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses an EAV value column used as an array scope before building a relation' do
+      allow(connection).to receive(:select_all)
+
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['amount > ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(order_model).not_to have_received(:all)
+      expect(relation).not_to have_received(:select)
+      expect(relation).not_to have_received(:where)
+      expect(relation).not_to have_received(:limit)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses an EAV value column used for ordering before building a relation' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'order' => { 'amount' => 'asc' }
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/EAV value column 'amount'/i)
+      expect(order_model).not_to have_received(:all)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses an ordinary redacted column used for grouping before building a relation' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'group_by' => ['user_id']
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'user_id' is redacted/i)
+      expect(order_model).not_to have_received(:all)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'keeps EAV key predicates allowed' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => %w[status amount],
+                                           'scope' => { 'status' => 'paid' },
+                                           'having' => { 'status' => 'paid' }
+                                         }
+                                       })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:where).with({ 'status' => 'paid' })
+      expect(relation).to have_received(:having).with({ 'status' => 'paid' })
+      expect(connection).to have_received(:select_all)
     end
   end
 end

@@ -10,6 +10,18 @@ RSpec.describe Woods::Watch::Status do
 
   after { FileUtils.rm_rf(output_dir) }
 
+  # The one artifact with a documented cross-boundary consumer: host-side
+  # worktree hooks read watch_status.json through a bind mount, so it must
+  # be world-readable (O1). Everything else Woods writes stays at 0600.
+  describe 'status file visibility' do
+    it 'writes watch_status.json world-readable by design' do
+      described_class.new(output_dir: output_dir).write(state: :running)
+
+      path = File.join(output_dir, described_class::FILENAME)
+      expect(File.stat(path).mode & 0o777).to eq(0o644)
+    end
+  end
+
   # The injected clock exists so a spec can drive staleness without sleeping
   # for a quarter of an hour. Reading the left-hand side of the comparison from
   # `Time.now` regardless made it a no-op for the one thing it is for.

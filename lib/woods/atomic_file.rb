@@ -19,10 +19,17 @@ module Woods
 
     # Atomically write +content+ to +path+, creating parent directories.
     #
+    # Permissions are explicit per artifact (O1): the default is the
+    # restrictive 0600 Tempfile already uses, and only an artifact with a
+    # documented cross-boundary consumer passes a wider mode (today exactly
+    # one: the watch daemon's +watch_status.json+, read by host-side hooks
+    # through a bind mount).
+    #
     # @param path [String, Pathname] destination path
     # @param content [String] file content
+    # @param mode [Integer] permissions for the written file (default 0600)
     # @return [void]
-    def write(path, content)
+    def write(path, content, mode: 0o600)
       path = path.to_s
       FileUtils.mkdir_p(File.dirname(path))
       tmp = Tempfile.new('.woods-', File.dirname(path))
@@ -33,6 +40,9 @@ module Woods
       tmp.flush
       tmp.fsync
       tmp.close
+      # Chmod the temp file so the destination is born with its final
+      # permissions — never observed more open or more closed in between.
+      File.chmod(mode, tmp.path)
       File.rename(tmp.path, path)
       fsync_directory(File.dirname(path))
     rescue StandardError

@@ -2,6 +2,8 @@
 
 require 'spec_helper'
 require 'woods/extractors/source_nesting'
+require 'fileutils'
+require 'tmpdir'
 
 RSpec.describe Woods::Extractors::SourceNesting do
   # Create a test class that includes the module so we can call its methods.
@@ -212,6 +214,450 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
     it 'returns nil for empty source' do
       expect(scanner.qualified_first_class_name('')).to be_nil
+    end
+  end
+
+  # ── #governed_class_name ─────────────────────────────────────────────
+
+  describe '#governed_class_name' do
+    it 'resolves a class nested in class namespaces to the file-named constant' do
+      # G-1: the source-derived parser returns at the first class
+      # declaration, so `module Domain; class Container; class Parser`
+      # named the unit Domain::Container — the wrapper, not the file's
+      # constant. Zeitwerk governs the expected name for a managed path;
+      # every wrapper sibling then collided on one identifier and same-type
+      # dedup silently dropped all but one.
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+              def call(input)
+                input.parse
+              end
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/parser.rb', source))
+        .to eq('Domain::Container::Parser')
+    end
+
+    it 'resolves a module declared inside class namespaces' do
+      source = <<~RUBY
+        module Domain
+          class Container
+            module Formats
+              NAMES = %w[json xml].freeze
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/formats.rb', source))
+        .to eq('Domain::Container::Formats')
+    end
+
+    it 'gives sibling wrapper files distinct identifiers' do
+      parser = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+      renderer = <<~RUBY
+        module Domain
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/parser.rb', parser))
+        .to eq('Domain::Container::Parser')
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/renderer.rb', renderer))
+        .to eq('Domain::Container::Renderer')
+    end
+
+    it 'matches a compact declaration inside wrappers' do
+      source = <<~RUBY
+        module Domain
+          class Container::Parser
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/domain/container/parser.rb', source))
+        .to eq('Domain::Container::Parser')
+    end
+
+    it 'resolves a conventional top-level file to its own constant' do
+      source = <<~RUBY
+        class CheckoutService
+          def call(order); end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/checkout_service.rb', source))
+        .to eq('CheckoutService')
+    end
+
+    it 'returns nil when no declaration matches the managed constant' do
+      # Unconventional source under a managed path: the caller falls back to
+      # the source parser, preserving pre-#G-1 behavior.
+      source = <<~RUBY
+        class PaymentService
+          def call; end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/payment.rb', source)).to be_nil
+    end
+
+    it 'returns nil for a path outside any managed app/ root' do
+      source = <<~RUBY
+        module External
+          class Analytics
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/lib/external/analytics.rb', source)).to be_nil
+    end
+
+    it 'governs a copied-app file under the active root when the autoloader belongs elsewhere' do
+      # Multi-worktree/copy scenario: the loader singleton reports the boot
+      # root's directories while extraction names files under a repointed
+      # active root. The root-relative `app/<kind>/` shape governs those.
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to eq('Domain::Container::Parser')
+    end
+
+    it 'uses the foreign loader expected path for copied roots with custom inflections' do
+      Dir.mktmpdir('woods_source_nesting') do |tmp|
+        boot_root = File.join(tmp, 'boot')
+        active_root = File.join(tmp, 'active')
+        boot_services = File.join(boot_root, 'app/services')
+        mapped_path = File.join(boot_services, 'api/container/parser.rb')
+        FileUtils.mkdir_p(File.dirname(mapped_path))
+        File.write(mapped_path, '')
+
+        loader = double('loader', dirs: [boot_services])
+        allow(loader).to receive(:cpath_expected_at) do |path|
+          case path
+          when mapped_path then 'API::Container::Parser'
+          end
+        end
+        stub_const('Rails', double('Rails', root: active_root,
+                                            autoloaders: double('autoloaders', main: loader)))
+        source = <<~RUBY
+          module API
+            class Container
+              class Parser
+              end
+            end
+          end
+        RUBY
+
+        expect(scanner.governed_class_name(File.join(active_root, 'app/services/api/container/parser.rb'), source))
+          .to eq('API::Container::Parser')
+      end
+    end
+
+    it 'selects the foreign loader root whose mapped file exists when an earlier candidate is absent' do
+      Dir.mktmpdir('woods_source_nesting') do |tmp|
+        boot_root = File.join(tmp, 'boot')
+        active_root = File.join(tmp, 'active')
+        engine_services = File.join(boot_root, 'engine/app/services')
+        main_services = File.join(boot_root, 'main/app/services')
+        mapped_path = File.join(main_services, 'api/container/parser.rb')
+        FileUtils.mkdir_p(File.dirname(mapped_path))
+        File.write(mapped_path, '')
+
+        loader = double('loader', dirs: [engine_services, main_services])
+        allow(loader).to receive(:cpath_expected_at) do |path|
+          raise "unexpected mapped path #{path}" unless path == mapped_path
+
+          'API::Container::Parser'
+        end
+        stub_const('Rails', double('Rails', root: active_root,
+                                            autoloaders: double('autoloaders', main: loader)))
+        source = <<~RUBY
+          module API
+            class Container
+              class Parser
+              end
+            end
+          end
+        RUBY
+
+        expect(scanner.governed_class_name(File.join(active_root, 'app/services/api/container/parser.rb'), source))
+          .to eq('API::Container::Parser')
+      end
+    end
+
+    it 'preserves a foreign loader non-claim for an existing mapped file' do
+      Dir.mktmpdir('woods_source_nesting') do |tmp|
+        boot_root = File.join(tmp, 'boot')
+        active_root = File.join(tmp, 'active')
+        boot_services = File.join(boot_root, 'app/services')
+        mapped_path = File.join(boot_services, 'api/container/parser.rb')
+        FileUtils.mkdir_p(File.dirname(mapped_path))
+        File.write(mapped_path, '')
+
+        loader = double('loader', dirs: [boot_services])
+        allow(loader).to receive(:cpath_expected_at).with(mapped_path).and_return(nil)
+        stub_const('Rails', double('Rails', root: active_root,
+                                            autoloaders: double('autoloaders', main: loader)))
+        source = <<~RUBY
+          module API
+            class Container
+              class Parser
+              end
+            end
+          end
+        RUBY
+
+        expect(scanner.governed_class_name(File.join(active_root, 'app/services/api/container/parser.rb'), source))
+          .to be_nil
+      end
+    end
+
+    it 'uses the foreign loader inflector for copied-only files' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) do |basename, _abspath|
+        basename == 'api' ? 'API' : basename.split('_').map(&:capitalize).join
+      end
+      loader = double('loader', dirs: ['/boot/root/app/services'], inflector: inflector)
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/renderer.rb', source))
+        .to eq('API::Container::Renderer')
+    end
+
+    it 'leaves copied-only files unmanaged when multiple foreign roots match' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) do |basename, _abspath|
+        basename == 'api' ? 'API' : basename.split('_').map(&:capitalize).join
+      end
+      loader = double('loader', dirs: ['/boot/root/app/services', '/boot/engine/app/services'], inflector: inflector)
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/renderer.rb', source))
+        .to be_nil
+    end
+
+    it 'leaves copied-only files unmanaged when the matching loader root has a custom namespace' do
+      namespace = Module.new
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      allow(loader).to receive(:dirs).with(namespaces: true).and_return('/boot/root/app/services' => namespace)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Renderer
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/renderer.rb', source))
+        .to be_nil
+    end
+
+    it 'leaves copied-only files unmanaged when the mapped path would pass through a collapsed directory' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) do |basename, _abspath|
+        basename == 'api' ? 'API' : basename.split('_').map(&:capitalize).join
+      end
+      loader = double('loader', dirs: ['/boot/root/app/services'], inflector: inflector)
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      allow(loader).to receive(:__collapse?) do |path|
+        path == '/boot/root/app/services/actions'
+      end
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Parser
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/actions/api/parser.rb', source))
+        .to be_nil
+    end
+
+    it 'leaves copied-only files unmanaged when an intermediate directory is a loader root' do
+      inflector = double('inflector')
+      allow(inflector).to receive(:camelize) { |basename, _abspath| basename.capitalize }
+      loader = double(
+        'loader',
+        dirs: ['/boot/root/app/services', '/boot/root/app/services/concerns'],
+        inflector: inflector
+      )
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Concerns
+          class Auditable
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/concerns/auditable.rb', source))
+        .to be_nil
+    end
+
+    it 'stays unmanaged outside both the autoloader roots and the active root' do
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module External
+          class Analytics
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/elsewhere/lib/external/analytics.rb', source)).to be_nil
+    end
+
+    it 'stays unmanaged for a non-app path under the active root' do
+      loader = double('loader', dirs: ['/boot/root/app/services'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module External
+          class Analytics
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/lib/external/analytics.rb', source)).to be_nil
+    end
+
+    it 'preserves the autoloader authority when its roots belong to the active root' do
+      # The loader roots are under the active root: this is the app's own
+      # loader, and a file it does not claim (deliberately excluded from
+      # autoloading) must stay unmanaged — the source parser decides, not
+      # the root-relative shape.
+      loader = double('loader', dirs: ['/active/root/app/models'])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to be_nil
+    end
+
+    it 'stays unmanaged when the loader reports an empty authoritative set' do
+      loader = double('loader', dirs: [])
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to be_nil
+    end
+
+    it 'takes the expected constant from the active loader when it owns the root' do
+      # Finding 2: a custom Zeitwerk inflection (`api => API`) means the
+      # loader expects API::Container::Parser while the local camelizer
+      # derives Api::Container::Parser. The governed lookup must follow the
+      # loader's own answer, or both wrapper siblings fall back and the
+      # collision guard aborts extraction.
+      loader = double('loader', dirs: ['/active/root/app/services'])
+      allow(loader).to receive(:cpath_expected_at) do |path|
+        case path
+        when %r{/api/container/parser\.rb\z}   then 'API::Container::Parser'
+        when %r{/api/container/renderer\.rb\z} then 'API::Container::Renderer'
+        end
+      end
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module API
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/api/container/parser.rb', source))
+        .to eq('API::Container::Parser')
+    end
+
+    it 'stays unmanaged when the loader that owns the root expects nothing for the file' do
+      # A loader decline (ignored path, non-derivable name) is authoritative
+      # for its own tree: the local camelizer must not rescue it.
+      loader = double('loader', dirs: ['/active/root/app/services'])
+      allow(loader).to receive(:cpath_expected_at).and_return(nil)
+      stub_const('Rails', double('Rails', root: '/active/root',
+                                          autoloaders: double('autoloaders', main: loader)))
+      source = <<~RUBY
+        module Domain
+          class Container
+            class Parser
+            end
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/active/root/app/services/domain/container/parser.rb', source))
+        .to be_nil
     end
   end
 

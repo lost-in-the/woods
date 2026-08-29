@@ -98,10 +98,14 @@ module Woods
       #   (e.g., "policies", "validators", "(?:services|interactors|operations|commands|use_cases)")
       # @return [String] The class name
       def extract_class_name(file_path, source, dir_prefix)
-        # Position-aware (SourceNesting, #174): `module Admin; class Foo`
-        # names Admin::Foo, and a helper module nested inside the class
-        # does not leak into the identifier.
-        qualified_first_class_name(source) ||
+        # Zeitwerk-governed naming first (G-1): a file under a managed
+        # autoload path is named for the constant its path spells, so
+        # `module Domain; class Container; class Parser` names the file's
+        # Parser, not the wrapper. Position-aware (SourceNesting, #174):
+        # `module Admin; class Foo` names Admin::Foo, and a helper module
+        # nested inside the class does not leak into the identifier.
+        governed_class_name(file_path, source) ||
+          qualified_first_class_name(source) ||
           file_path.sub("#{Rails.root}/", '').sub(%r{^app/#{dir_prefix}/}, '').sub('.rb', '').camelize
       end
 

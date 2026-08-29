@@ -24,6 +24,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Errno::ECONNRESET`. Persistent HTTP connections dropped on transport errors
   are closed promptly instead of waiting for GC.
 
+- **A truncated vector dump now refuses to load instead of corrupting search (M10).**
+  `vectors.bin` with a valid header but a short float payload used to unpack with nil
+  padding: the nil-floated vectors loaded into the live store, crashed search with
+  `TypeError`, and re-published as zeros on the next dump. Loading now raises
+  `Woods::MCP::UnsupportedArtifact` pointing at the file; the remedy is a re-run of
+  `woods:embed`.
+- **Every atomic dump write now fsyncs its directory (M11).** The vector and metadata
+  snapshotters and the index artifact writer skipped the containing-directory fsync
+  `AtomicFile` performs, so a crash after the rename could leave a directory entry that
+  a reboot drops — a "complete" generation that vanishes. The class contract that the
+  dump directory is fully fsynced before the `latest` pointer flips now holds on every
+  write path.
+- **File permissions are explicit per artifact (O1).** `AtomicFile.write` takes a `mode:`
+  parameter defaulting to the restrictive 0600 Tempfile already used. The one artifact
+  with a cross-boundary consumer — the watch daemon's `watch_status.json`, read by
+  host-side hooks through a bind mount — is written 0644 by design.
+- **A second writer on the metadata SQLite database no longer raises
+  `SQLite3::BusyException` immediately (O2).** The connection now sets a busy timeout at
+  open and retries a contended write a bounded number of times, mirroring the temporal
+  snapshot store.
+- **Re-capturing an unchanged HEAD computes diff stats against real history (L20).**
+  Both temporal stores resolved "previous" to the snapshot being captured, so the
+  re-capture diffed against itself and zeroed every stat. Previous now excludes the SHA
+  being captured.
+- **Storing metadata without a type key raises instead of writing an empty type (L22).**
+  The SQLite metadata adapter coerced an absent key to `""` in the column that backs
+  `find_by_type`; it now raises `ArgumentError`.
+
+- **Select aliasing no longer defeats console redaction.** `console_query` accepted
+  `select: ["password_digest AS note"]`; the positional redactor masks by output
+  header name, so the aliased column returned plaintext. Three select shapes are
+  now refused: an alias over a `console_redacted_columns` column, an aggregate over
+  one (aliased or bare), and an alias over either column of a
+  `console_redacted_key_values` pair. Direct, unaliased selection of a redacted
+  column is unchanged and stays masked. Aggregates over either column of a
+  `console_redacted_key_values` pair are also refused: an aggregate such as
+  `MAX(amount)` over the rows a sensitive key selects reads the redacted EAV value
+  itself. Selecting an EAV value column without its paired key column is refused
+  as well — the positional rule needs both headers, so a lone value column
+  returned plaintext.
+- **`console_query`'s having no longer leaks protected values.** `having` accepted
+  aggregates over redacted or EAV-protected columns (`MAX(amount) > ?`) and bare
+  predicates on redacted columns or EAV value columns; repeated guesses revealed
+  the protected value from whether a row was returned. The same protected-column
+  refusal used for `select` aggregates now runs on the having template and hash
+  keys before any query executes. Structured scope predicates now apply the same
+  rule to redacted columns and EAV value columns while preserving EAV key-column
+  predicates.
+- **Tier 1 and raw-SQL redaction shapes now fail closed.** `console_sample`,
+  `console_find`, `console_pluck`, and `console_recent` refuse an EAV value column
+  unless its paired key column is selected too; `console_aggregate` refuses either
+  EAV pair column. Structured order/group inputs and legacy multi-bind scope arrays
+  now apply the protected-predicate guard. `console_sql` accepts a protected
+  identifier only as a direct, unaliased outer select column; aliases, aggregates,
+  predicates, CTE shapes, and unpaired EAV values are rejected before execution.
+- **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
+  check anchored its match to the statement leader, so
+  `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
+  passed validation and PostgreSQL executed the DELETE. Every `AS (...)` body in
+  the statement is now inspected. A CTE list attached to top-level DML
+  (`WITH a AS (SELECT 1) DELETE FROM users RETURNING *`) is also rejected; DELETE
+  and UPDATE previously validated because the statement prefix is WITH and neither
+  keyword is a body keyword (only the INSERT variant tripped a check, incidentally
+  via INTO).
+- **Row-lock clauses are rejected.** `SELECT ... FOR UPDATE`, `FOR NO KEY UPDATE`,
+  `FOR SHARE`, `FOR KEY SHARE` (with `NOWAIT`/`SKIP LOCKED`), and MySQL
+  `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration
+  of the rolled-back transaction. The check is adapter-aware: `console_sql`
+  validates with the active adapter's dialect (MySQL and PostgreSQL quote/comment
+  grammars differ; MySQL double-quoted strings/backtick identifiers and PostgreSQL
+  quoted identifiers/E-strings are tracked faithfully), while scanning
+  both normalizations when the adapter is unknown, and every view is checked under
+  both MySQL executable-comment (`/*!...*/`) semantics — `#` comments and
+  version-guarded comments can no longer split a lock clause apart.
+
+- **Index MCP reads no longer break under a C/US-ASCII host locale.** The
+  Index Server read manifest.json, per-type `_index.json` files, and
+  SUMMARY.md with bare `Pathname#read`, which tags the bytes with the host's
+  default external encoding. Under a C locale that tag is US-ASCII, so any
+  non-ASCII content in an index artifact (a branch like `feature/café`, a
+  unit identifier, summary prose) made `JSON.parse` raise
+  `Encoding::InvalidByteSequenceError`, surfacing search, lookup,
+  dependencies, dependents, framework, and recent_changes results as
+  misleading `corrupt_artifact` errors and degrading structure and
+  `woods_status`. All `IndexReader` artifact reads now go through one
+  UTF-8-forcing binary read (the mode unit loading already used), so an
+  index is read correctly regardless of host locale. No re-index needed.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
@@ -118,6 +206,18 @@ derive unit identifiers, which changes the index format's observable contract.
   is implied — no on-disk artifact format changed.
 
 ### Fixed
+
+- **Wrapper-nested classes no longer collide on one identifier.** A file under
+  a managed autoload path is now named for the constant its path spells
+  (Zeitwerk-governed naming): `app/services/domain/container/parser.rb`
+  declaring `module Domain; class Container; class Parser` indexes as
+  `Domain::Container::Parser` instead of the wrapper `Domain::Container`.
+  Previously every sibling under the same wrapper indexed as the wrapper and
+  same-type dedup silently dropped all but one. The source parser remains the
+  fallback for unmanaged or unconventional paths, and extraction now aborts
+  naming both file paths when one type+identifier is still derived from two
+  different files. **Re-extract after upgrading** — embeddings, exports, and
+  saved queries keyed by the old identifiers need regeneration.
 
 - **Console stdio setup now explains production token validation.** Stdio clients do
   not send the HTTP bearer token, but Rails still requires a 32-character-or-longer
