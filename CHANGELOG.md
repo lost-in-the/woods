@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Select aliasing no longer defeats console redaction.** `console_query` accepted
+  `select: ["password_digest AS note"]`; the positional redactor masks by output
+  header name, so the aliased column returned plaintext. Three select shapes are
+  now refused: an alias over a `console_redacted_columns` column, an aggregate over
+  one (aliased or bare), and an alias over either column of a
+  `console_redacted_key_values` pair. Direct, unaliased selection of a redacted
+  column is unchanged and stays masked. Aggregates over either column of a
+  `console_redacted_key_values` pair are also refused: an aggregate such as
+  `MAX(amount)` over the rows a sensitive key selects reads the redacted EAV value
+  itself. Selecting an EAV value column without its paired key column is refused
+  as well — the positional rule needs both headers, so a lone value column
+  returned plaintext.
+- **`console_query`'s having no longer leaks protected values.** `having` accepted
+  aggregates over redacted or EAV-protected columns (`MAX(amount) > ?`) and bare
+  predicates on redacted columns or EAV value columns; repeated guesses revealed
+  the protected value from whether a row was returned. The same protected-column
+  refusal used for `select` aggregates now runs on the having template and hash
+  keys before any query executes. Structured scope predicates now apply the same
+  rule to redacted columns and EAV value columns while preserving EAV key-column
+  predicates.
+- **Tier 1 and raw-SQL redaction shapes now fail closed.** `console_sample`,
+  `console_find`, `console_pluck`, and `console_recent` refuse an EAV value column
+  unless its paired key column is selected too; `console_aggregate` refuses either
+  EAV pair column. Structured order/group inputs and legacy multi-bind scope arrays
+  now apply the protected-predicate guard. `console_sql` accepts a protected
+  identifier only as a direct, unaliased outer select column; aliases, aggregates,
+  predicates, CTE shapes, and unpaired EAV values are rejected before execution.
+- **A writable CTE past the first WITH entry no longer validates.** The writable-CTE
+  check anchored its match to the statement leader, so
+  `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`
+  passed validation and PostgreSQL executed the DELETE. Every `AS (...)` body in
+  the statement is now inspected. A CTE list attached to top-level DML
+  (`WITH a AS (SELECT 1) DELETE FROM users RETURNING *`) is also rejected; DELETE
+  and UPDATE previously validated because the statement prefix is WITH and neither
+  keyword is a body keyword (only the INSERT variant tripped a check, incidentally
+  via INTO).
+- **Row-lock clauses are rejected.** `SELECT ... FOR UPDATE`, `FOR NO KEY UPDATE`,
+  `FOR SHARE`, `FOR KEY SHARE` (with `NOWAIT`/`SKIP LOCKED`), and MySQL
+  `LOCK IN SHARE MODE` validated as reads but took live row locks for the duration
+  of the rolled-back transaction. The check is adapter-aware: `console_sql`
+  validates with the active adapter's dialect (MySQL and PostgreSQL quote/comment
+  grammars differ; MySQL double-quoted strings/backtick identifiers and PostgreSQL
+  quoted identifiers/E-strings are tracked faithfully), while scanning
+  both normalizations when the adapter is unknown, and every view is checked under
+  both MySQL executable-comment (`/*!...*/`) semantics — `#` comments and
+  version-guarded comments can no longer split a lock clause apart.
+
 - **Index MCP reads no longer break under a C/US-ASCII host locale.** The
   Index Server read manifest.json, per-type `_index.json` files, and
   SUMMARY.md with bare `Pathname#read`, which tags the bytes with the host's

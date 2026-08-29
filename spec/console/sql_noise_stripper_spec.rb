@@ -156,4 +156,26 @@ RSpec.describe Woods::Console::SqlNoiseStripper do
       end
     end
   end
+
+  describe '.strip_noise quoted spans' do
+    it 'does not treat # inside a MySQL double-quoted string as a comment' do
+      sql = 'SELECT "a#b" FROM users FOR UPDATE'
+      expect(described_class.strip_noise(sql, dialect: :mysql)).to eq("SELECT '' FROM users FOR UPDATE")
+    end
+
+    it 'does not treat # inside a MySQL backtick identifier as a comment' do
+      sql = 'SELECT `a#b` FROM users FOR UPDATE'
+      expect(described_class.strip_noise(sql, dialect: :mysql)).to eq(sql)
+    end
+
+    it 'does not treat a block marker inside a PostgreSQL quoted identifier as a comment' do
+      sql = 'SELECT "a/*b" FROM users FOR UPDATE'
+      expect(described_class.strip_noise(sql, dialect: :postgres)).to eq(sql)
+    end
+
+    it 'strips a PostgreSQL E-string with a backslash-escaped quote' do
+      sql = "SELECT E'customer\\'s request for update'"
+      expect(described_class.strip_noise(sql, dialect: :postgres)).to eq("SELECT E''")
+    end
+  end
 end

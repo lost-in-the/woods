@@ -24,7 +24,7 @@ module Woods
     #   SqlNoiseStripper.strip_literals("SELECT 'it\\'s ok' FROM t", dialect: :mysql)
     #   # => "SELECT '' FROM t"
     #
-    module SqlNoiseStripper
+    module SqlNoiseStripper # rubocop:disable Metrics/ModuleLength
       # Strips SQL line comments (`-- ...`) and block comments (`/* ... */`).
       # Line comments are stripped to (but not including) the newline so that
       # newline-separated statement structure is preserved for callers that
@@ -133,12 +133,37 @@ module Woods
           ch = sql[i]
 
           if ch == "'"
-            close = single_quote_end(sql, i, mysql: mysql)
+            close = single_quote_end(sql, i, backslash_escapes: mysql || postgres_escape_string?(sql, i))
             if close
               out << "''"
               i = close
             else
               # Unterminated literal — never under-detect; keep the char.
+              out << ch
+              i += 1
+            end
+          elsif ch == '"'
+            close = quoted_span_end(sql, i, quote: '"', backslash_escapes: mysql)
+            if close
+              # MySQL parses double quotes as strings unless ANSI_QUOTES is
+              # enabled. Treating them as literals prevents a `#` inside the
+              # value from hiding live SQL. PostgreSQL uses them for
+              # identifiers, which must remain visible to table/column scans.
+              out << double_quote_replacement(sql, i, close, mysql: mysql)
+              i = close
+            else
+              out << ch
+              i += 1
+            end
+          elsif mysql && ch == '`'
+            close = quoted_span_end(sql, i, quote: '`', backslash_escapes: true)
+            if close
+              # Backticks delimit identifiers. Preserve the token for table
+              # and protected-column scans while shielding comment markers
+              # inside it from the noise scanner.
+              out << sql[i...close]
+              i = close
+            else
               out << ch
               i += 1
             end
@@ -212,24 +237,51 @@ module Woods
       # (MySQL only) escapes. Returns nil when the literal is unterminated.
       #
       # @api private
-      def self.single_quote_end(sql, start, mysql:)
+      def self.single_quote_end(sql, start, backslash_escapes:)
+        quoted_span_end(sql, start, quote: "'", backslash_escapes: backslash_escapes)
+      end
+      private_class_method :single_quote_end
+
+      def self.double_quote_replacement(sql, start, close, mysql:)
+        mysql ? "''" : sql[start...close]
+      end
+      private_class_method :double_quote_replacement
+
+      # Return the index just past a quoted span. Doubled delimiters escape
+      # themselves in every supported dialect; MySQL strings/identifiers and
+      # PostgreSQL E-strings additionally honor backslash escapes.
+      #
+      # @api private
+      def self.quoted_span_end(sql, start, quote:, backslash_escapes:)
         i = start + 1
         len = sql.length
         while i < len
           c = sql[i]
-          if mysql && c == '\\'
+          if backslash_escapes && c == '\\'
             i += 2
-          elsif c == "'"
-            return i + 1 unless sql[i + 1] == "'" # closing quote
+          elsif c == quote
+            return i + 1 unless sql[i + 1] == quote # closing delimiter
 
-            i += 2 # doubled-quote escape — literal continues
+            i += 2 # doubled-delimiter escape — span continues
           else
             i += 1
           end
         end
         nil
       end
-      private_class_method :single_quote_end
-    end
+      private_class_method :quoted_span_end
+
+      # PostgreSQL E'...' strings opt into C-style backslash escapes. The E
+      # must begin a token; an identifier ending in e immediately before a
+      # quote is not an escape-string prefix.
+      #
+      # @api private
+      def self.postgres_escape_string?(sql, quote_index)
+        return false unless quote_index.positive? && sql[quote_index - 1].match?(/[eE]/)
+
+        quote_index < 2 || !sql[quote_index - 2].match?(/[A-Za-z0-9_$]/)
+      end
+      private_class_method :postgres_escape_string?
+    end # rubocop:enable Metrics/ModuleLength
   end
 end
