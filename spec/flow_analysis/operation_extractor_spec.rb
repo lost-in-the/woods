@@ -154,6 +154,44 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       expect(cond[:else_ops].size).to be >= 1
     end
 
+    # L2. The parser compacted [condition, then, else], so a literal `nil`
+    # condition dropped out and `children[1]` became the *else* body, which
+    # handle_conditional then reported as then_ops.
+    it 'keeps branch attribution when the condition is literal nil' do
+      source = <<~RUBY
+        def decide
+          if nil
+            NullWorker.perform_async
+          else
+            RealWorker.perform_async
+          end
+        end
+      RUBY
+
+      cond = extract_method_ops(source, 'decide').find { |o| o[:type] == :conditional }
+      expect(cond).not_to be_nil
+
+      expect(cond[:then_ops].map { |o| o[:target] }).to eq(['NullWorker'])
+      expect(cond[:else_ops].map { |o| o[:target] }).to eq(['RealWorker'])
+    end
+
+    it 'keeps else-branch attribution when the then branch is absent' do
+      source = <<~RUBY
+        def decide
+          if flag_set?
+          else
+            ElseWorker.perform_async
+          end
+        end
+      RUBY
+
+      cond = extract_method_ops(source, 'decide').find { |o| o[:type] == :conditional }
+      expect(cond).not_to be_nil
+
+      expect(cond[:then_ops]).to be_empty
+      expect(cond[:else_ops].map { |o| o[:target] }).to eq(['ElseWorker'])
+    end
+
     # #216 / B-103. `handle_case` walked every child, so a call in the
     # predicate — the thing being switched *on* — was reported as an operation
     # performed inside a branch, and the condition was the entire multi-line
