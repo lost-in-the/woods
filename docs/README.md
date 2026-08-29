@@ -80,6 +80,6 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | v1-to-v2 migration | [UPGRADING_TO_2.md](UPGRADING_TO_2.md) |
 | Failure diagnosis | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | Contributor policy | [CONTRIBUTING.md](../CONTRIBUTING.md) |
-| Coding-agent repository instructions | [AGENTS.md](https://github.com/lost-in-the/woods/blob/v2.0.0/AGENTS.md) |
+| Coding-agent repository instructions | [AGENTS.md](https://github.com/lost-in-the/woods/blob/main/AGENTS.md) |
 
 The current public surface is generated from 34 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.

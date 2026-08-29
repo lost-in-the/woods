@@ -1064,18 +1064,69 @@ module Woods
     end
 
     # Remove duplicate units (same identifier) within each type, keeping the first occurrence.
-    # Duplicates arise when multiple extractors produce the same unit (e.g., engine-mounted
-    # routes duplicating app routes). Without dedup, downstream phases would produce inflated
-    # counts, duplicate _index.json entries, and last-writer-wins file overwrites.
+    # Duplicates arise when the same identifier is legitimately re-derived from the same
+    # source (e.g., engine-mounted routes duplicating app routes: both carry no file path).
+    # Without dedup, downstream phases would produce inflated counts, duplicate
+    # _index.json entries, and last-writer-wins file overwrites.
+    #
+    # A duplicate derived from a DIFFERENT file is not a duplicate — it is two distinct
+    # real-world constants collapsing onto one identifier (finding G-1: wrapper-named
+    # sources all indexed as the wrapper class). Only one could ever be indexed; the
+    # other silently vanished. That is unrepresentable — `variants:` carries cross-type
+    # graph identity only — so extraction aborts with both files named.
     def deduplicate_results
       @results.each do |type, units|
-        deduped = units.uniq(&:identifier)
-        dropped = units.size - deduped.size
-
-        Rails.logger.warn "[Woods] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
-
-        @results[type] = deduped
+        @results[type] = deduplicate_type_units(type, units)
       end
+    end
+
+    # First-occurrence dedup for one type, fail-closed on cross-file collisions.
+    #
+    # A retained identifier remembers its source file. A later unit with the
+    # same identifier and the same file (or the same absence of one — runtime
+    # and engine units carry nil) is the legitimate re-derivation {#deduplicate_results}
+    # documents and is dropped. A later unit from a different file raises
+    # {Woods::ExtractionError} listing both paths.
+    #
+    # @param type [Symbol] Result type, for the log line and error message
+    # @param units [Array<ExtractedUnit>]
+    # @return [Array<ExtractedUnit>] Deduplicated units, first occurrence order
+    # @raise [Woods::ExtractionError] when one type+identifier is derived
+    #   from two different files
+    def deduplicate_type_units(type, units)
+      deduped = []
+      dropped = 0
+      retained_paths = {}
+
+      units.each do |unit|
+        if retained_paths.key?(unit.identifier)
+          prior_path = retained_paths[unit.identifier]
+          if unit.file_path != prior_path
+            raise Woods::ExtractionError, same_type_collision_message(type, unit, prior_path)
+          end
+
+          dropped += 1
+          next
+        end
+
+        retained_paths[unit.identifier] = unit.file_path
+        deduped << unit
+      end
+
+      Rails.logger.warn "[Woods] Deduplicated #{type}: dropped #{dropped} duplicate(s)" if dropped.positive?
+
+      deduped
+    end
+
+    # @param type [Symbol]
+    # @param unit [ExtractedUnit] The colliding (later) unit
+    # @param prior_path [String, nil] File path of the retained unit
+    # @return [String]
+    def same_type_collision_message(type, unit, prior_path)
+      "same-type identifier collision: #{type.to_s.singularize} '#{unit.identifier}' derived from " \
+        "two different sources ('#{prior_path || 'no file'}' and '#{unit.file_path || 'no file'}'); " \
+        'only one unit could ever be indexed, so extraction aborted — either merge the ' \
+        'declarations into one file or split them into distinct constants'
     end
 
     # ──────────────────────────────────────────────────────────────────────

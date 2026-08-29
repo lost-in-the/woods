@@ -79,7 +79,7 @@ module Woods
       # @param file_path [String] File path
       # @return [String] Fully-qualified class name
       def detect_class_name(source, file_path)
-        qualified = qualified_first_class_name(source)
+        qualified = governed_class_name(file_path, source) || qualified_first_class_name(source)
         return qualified if qualified
 
         relative = file_path.sub("#{Rails.root}/", '')

@@ -83,6 +83,13 @@ RSpec.configure do |config|
   # home. Release CI opts in on the Ruby floor and latest lanes.
   config.filter_run_excluding(packaged_gem: true) unless ENV['WOODS_RUN_PACKAGE_SMOKE']
 
+  # Packaged-gem boot smoke: the same artifact installed into an isolated gem
+  # home, `require 'woods'` proven to resolve to the installed gem, and one
+  # packaged executable booted through a JSON-RPC initialize. Cheap enough for
+  # every PR (ci.yml package-smoke); the heavyweight :packaged_gem suite above
+  # stays release-gated. A separate tag because that gate is all-or-nothing.
+  config.filter_run_excluding(package_install: true) unless ENV['WOODS_RUN_PACKAGE_INSTALL']
+
   # Booted-app specs (spec/integration/booted_extraction_spec.rb) boot a real
   # Rails app in-process and require full Rails (activerecord + actionpack),
   # which the default unit Gemfile doesn't bundle. Excluded from the default

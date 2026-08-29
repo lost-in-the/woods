@@ -56,6 +56,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both MySQL executable-comment (`/*!...*/`) semantics — `#` comments and
   version-guarded comments can no longer split a lock clause apart.
 
+- **Index MCP reads no longer break under a C/US-ASCII host locale.** The
+  Index Server read manifest.json, per-type `_index.json` files, and
+  SUMMARY.md with bare `Pathname#read`, which tags the bytes with the host's
+  default external encoding. Under a C locale that tag is US-ASCII, so any
+  non-ASCII content in an index artifact (a branch like `feature/café`, a
+  unit identifier, summary prose) made `JSON.parse` raise
+  `Encoding::InvalidByteSequenceError`, surfacing search, lookup,
+  dependencies, dependents, framework, and recent_changes results as
+  misleading `corrupt_artifact` errors and degrading structure and
+  `woods_status`. All `IndexReader` artifact reads now go through one
+  UTF-8-forcing binary read (the mode unit loading already used), so an
+  index is read correctly regardless of host locale. No re-index needed.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
@@ -150,6 +163,18 @@ derive unit identifiers, which changes the index format's observable contract.
   is implied — no on-disk artifact format changed.
 
 ### Fixed
+
+- **Wrapper-nested classes no longer collide on one identifier.** A file under
+  a managed autoload path is now named for the constant its path spells
+  (Zeitwerk-governed naming): `app/services/domain/container/parser.rb`
+  declaring `module Domain; class Container; class Parser` indexes as
+  `Domain::Container::Parser` instead of the wrapper `Domain::Container`.
+  Previously every sibling under the same wrapper indexed as the wrapper and
+  same-type dedup silently dropped all but one. The source parser remains the
+  fallback for unmanaged or unconventional paths, and extraction now aborts
+  naming both file paths when one type+identifier is still derived from two
+  different files. **Re-extract after upgrading** — embeddings, exports, and
+  saved queries keyed by the old identifiers need regeneration.
 
 - **Console stdio setup now explains production token validation.** Stdio clients do
   not send the HTTP bearer token, but Rails still requires a 32-character-or-longer

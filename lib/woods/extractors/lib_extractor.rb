@@ -124,8 +124,14 @@ module Woods
       def infer_class_name(file_path, source)
         return nil if source.strip.empty?
 
-        # Class definition — enclosing modules joined by position
-        qualified = qualified_first_class_name(source)
+        # Class definition — Zeitwerk-governed naming first (G-1), then the
+        # position-aware nesting scan, which qualifies the first `class`
+        # declaration with the modules actually open at that position — a
+        # helper module nested inside the class, or a sibling module that
+        # closed before the class opened, no longer pollutes the identifier
+        # (#174). lib/ files are typically unmanaged, so the governed lookup
+        # returns nil and the source scan decides.
+        qualified = governed_class_name(file_path, source) || qualified_first_class_name(source)
         return qualified if qualified
 
         # Module-only file — the outer module chain

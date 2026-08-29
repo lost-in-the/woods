@@ -450,6 +450,37 @@ RSpec.describe Woods::Extractors::ServiceExtractor do
       units = described_class.new.extract_all
       expect(units.map(&:identifier)).to contain_exactly('Billing::Payment', 'Legacy::Payment')
     end
+
+    it 'names a class wrapped in class namespaces by its file-named constant' do
+      # G-1: both wrapper siblings indexed as Domain::Container and same-type
+      # dedup silently dropped one. The managed constant path resolves the
+      # innermost (file-named) declaration instead.
+      create_file('app/services/domain/container/parser.rb', <<~RUBY)
+        module Domain
+          class Container
+            class Parser
+              def call(input)
+                input.parse
+              end
+            end
+          end
+        end
+      RUBY
+      create_file('app/services/domain/container/renderer.rb', <<~RUBY)
+        module Domain
+          class Container
+            class Renderer
+              def call(template)
+                template.render
+              end
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('Domain::Container::Parser', 'Domain::Container::Renderer')
+    end
   end
 
   # ── Service Type Inference ───────────────────────────────────────────
