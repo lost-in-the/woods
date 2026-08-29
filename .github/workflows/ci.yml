@@ -83,6 +83,12 @@ jobs:
       - name: Run incremental equivalence harness
         run: bundle exec rspec spec/integration/incremental_equivalence_spec.rb
 
+      # Incremental flow-artifact refresh (M3): annotations, delta flow
+      # precompute, and the dedicated flow-artifact sweep, with the
+      # precompute_flows gate on. Own process — boots its own dummy app.
+      - name: Run incremental flow artifacts
+        run: bundle exec rspec spec/extractors/flow_incremental_spec.rb
+
       # Watch daemon against a real booted app (#164 phase 2). Own process for
       # the same reason as the two above — each boots its own Rails app.
       - name: Run watch daemon integration

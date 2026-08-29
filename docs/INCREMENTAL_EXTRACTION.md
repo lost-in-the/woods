@@ -15,8 +15,10 @@ Background: [#164](https://github.com/lost-in-the/woods/issues/164).
 
 Indistinguishable means: the same unit identifiers, the same per-unit JSON
 content, the same `_index.json` per type, the same graph nodes / edges /
-reverse edges / file map / type index / stats, PageRank recomputed, and the
-same manifest counts and `graph_analysis.json`.
+reverse edges / file map / type index / stats, PageRank recomputed, the
+same manifest counts and `graph_analysis.json` — and, when flow
+precomputation is enabled, the same `flows/flow_index.json`, the same
+flow documents, and the same flow annotations on controller units.
 
 Three differences are tolerated, and nothing else:
 
@@ -64,16 +66,22 @@ step before it.
    directories with its constant unchanged still looks known when step 4 runs,
    so it is not re-extracted, and step 6 then removes it for its vanished old
    path. This pass re-adds it in the same run instead of waiting for some later
-   run to notice. It skips everything step 6 pruned (`except:`), because
+   run to notice. It skips everything else step 6 pruned (`except:`), because
    without a reload a constant outlives the file that defined it, otherwise
    deleting `app/models/user.rb` would prune `User` only for this pass to find
    it still in `ActiveRecord::Base.descendants` and re-register it against a
-   path nothing can ever remove again. Idempotent when nothing was pruned.
+   path nothing can ever remove again. What separates the two shapes is the
+   filesystem: a pruned identifier is re-added only when a still-existing file
+   in the change set actually declares its class — a moved file qualifies, a
+   deleted one (and an unrelated addition in the same batch) does not.
+   Idempotent when nothing was pruned.
 
 Then the second pass: `dependents` and `metadata.git` are refreshed on every
 touched unit (the incremental equivalents of full extraction's phases 2 and 4),
-type indexes are regenerated, and the graph, `graph_analysis.json` and the
-manifest are written.
+type indexes are regenerated, the graph, `graph_analysis.json` and the
+manifest are written, and — with flow precomputation enabled — the run's
+controller delta gets the same flow treatment a full run gives (see
+[Flow artifacts](#flow-artifacts)).
 
 A run that changed nothing **does not rewrite the manifest**. The manifest
 timestamp drives `woods_status.staleness_seconds`, and touching it after a no-op
@@ -195,6 +203,38 @@ discovery set.
 - Only paths under `Rails.root` are considered either way: framework units point
   at gem paths, and an index restored from a CI artifact can carry paths
   produced under a different root.
+
+## Flow artifacts
+
+Everything in this section is gated on `precompute_flows` (default false).
+The family has three parts: `flows/flow_index.json` (entry point → relative
+document path), one document per controller action, and
+`metadata[:flow_paths]` on the controller units.
+
+A full extraction computes all three in one pass. An incremental run computes
+them for its **delta**:
+
+- **Re-extracted controllers** get their `metadata[:flow_paths]` back, their
+  flow documents are re-assembled from the units on disk, and their entries
+  replace whatever the previous index held for them — so an action removed
+  from a re-extracted controller leaves the index even though the file still
+  exists.
+- **Controllers the run pruned** (deleted or renamed) leave the index
+  entirely.
+- **Untouched controllers' entries carry forward** from the previous
+  generation, which payload seeding hardlinks into the run's payload
+  directory.
+
+After the index is rewritten, a **dedicated flow-artifact sweep** removes
+every `flows/` document no index entry references. It validates against
+`flow_index.json` and is deliberately separate from the unit sweep: flows/
+holds neither units nor an `_index.json`, so the unit sweep's in-memory
+contract does not describe it. The sweep skips when the index is missing or
+does not parse — with nothing to validate against, deleting every document
+would be worse than keeping orphans, and the next full extraction rebuilds
+the family. `woods:validate` validates the family by the same reference rule
+(missing or malformed documents are errors), and never demands `_index.json`
+from `flows/`.
 
 ## Refreshing one extractor on demand
 
