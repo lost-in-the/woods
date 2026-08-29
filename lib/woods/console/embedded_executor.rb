@@ -1405,7 +1405,12 @@ module Woods
         unsafe_projection = expressions.any? do |expression|
           sql_identifier_referenced?(expression, column) && direct_sql_column_name(expression) != column
         end
-        !selected.include?(column) || unsafe_projection || sql_identifier_referenced?(tail, column)
+        unsafe_tail = protected_sql_predicate_column?(column) && sql_identifier_referenced?(tail, column)
+        !selected.include?(column) || unsafe_projection || unsafe_tail
+      end
+
+      def protected_sql_predicate_column?(column)
+        @safe_context.redacted_columns.include?(column) || redacted_eav_value_columns.include?(column)
       end
 
       def orphan_eav_sql_value(selected)

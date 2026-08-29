@@ -1502,6 +1502,27 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         stub_const('User', user_model)
       end
 
+      it 'allows console_sql to select an EAV pair while filtering by its non-secret key' do
+        allow(connection).to receive(:select_all).and_return(
+          double('result', columns: %w[email name], rows: [['secret@example.test', 'plaintext']])
+        )
+        read_executor = described_class.new(
+          model_validator: validator,
+          safe_context: safe_context,
+          connection: connection,
+          read_tools_enabled: true
+        )
+        sql = "SELECT email, name FROM users WHERE email = 'secret@example.test'"
+
+        response = read_executor.send_request({
+                                                'tool' => 'sql',
+                                                'params' => { 'sql' => sql }
+                                              })
+
+        expect(response['ok']).to be true
+        expect(connection).to have_received(:select_all)
+      end
+
       %w[sample pluck recent].each do |tool|
         it "refuses an orphan EAV value selection in console_#{tool}" do
           expect(user_model).not_to receive(:all)
