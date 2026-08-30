@@ -147,9 +147,20 @@ RSpec.describe Woods::Resilience::IndexValidator do
         expect(report.errors).to include(a_string_matching(/flow_index\.json: invalid JSON/))
       end
 
-      it 'does not validate flows at all when there is no flow index' do
+      it 'reports a populated flow family whose flow_index.json is missing' do
         File.delete(File.join(tmp_dir, 'flows', 'flow_index.json'))
         File.write(File.join(tmp_dir, 'flows', 'Orphaned.json'), '{ ok }')
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        # A populated family with no index is corruption, not an absence:
+        # the index is what defines which documents are live.
+        expect(report.errors).to include(a_string_matching(/populated.*flow_index\.json is missing/))
+      end
+
+      it 'leaves a genuinely empty flows/ directory alone' do
+        File.delete(File.join(tmp_dir, 'flows', 'flow_index.json'))
+        File.delete(File.join(tmp_dir, 'flows', 'PostsController_create.json'))
 
         report = described_class.new(index_dir: tmp_dir).validate
 
@@ -173,6 +184,25 @@ RSpec.describe Woods::Resilience::IndexValidator do
         report = described_class.new(index_dir: tmp_dir).validate
 
         expect(report.errors).to be_empty
+      end
+    end
+
+    context 'when the type-directory allowlist cannot be derived' do
+      # The allowlist comes from the shared extraction contract. A
+      # derivation failure used to degrade to a silently empty allowlist,
+      # which disabled every structural type-directory check instead of
+      # saying so.
+      before do
+        write_unit_file('models', 'User.json')
+        allow(described_class).to receive(:unit_type_directories)
+          .and_raise(LoadError, 'cannot load the extraction contract')
+      end
+
+      it 'reports the derivation failure instead of silently disabling checks' do
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report.errors).to include(a_string_matching(/unit-type directory allowlist/))
+        expect(report.valid?).to be false
       end
     end
 

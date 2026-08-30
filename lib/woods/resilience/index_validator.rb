@@ -45,6 +45,23 @@ module Woods
       #   @return [Array<String>] fatal integrity issues
       ValidationReport = Struct.new(:valid?, :warnings, :errors, keyword_init: true)
 
+      # The shared unit-type-directory contract, loadable without Rails:
+      # exactly the directories extraction publishes unit types into,
+      # derived from `Extractor::EXTRACTORS`. `woods/extractor` loads clean
+      # without a booted Rails app (the unit suite proves it), so this stays
+      # a plain require. A failure raises to the caller — it must convert
+      # the failure into a validation error rather than degrade to a
+      # silently empty allowlist, which would disable every structural
+      # type-directory check without saying so.
+      #
+      # @return [Array<String>]
+      # @raise [StandardError] when the extraction contract cannot be loaded
+      def self.unit_type_directories
+        require_relative '../extractor' unless defined?(Woods::Extractor::EXTRACTORS)
+
+        Woods::Extractor::EXTRACTORS.keys.map(&:to_s).freeze
+      end
+
       # @param index_dir [String] Path to the codebase index output directory
       # @param app_root [String, nil] the host application root; when given,
       #   a unit whose +file_path+ resolves neither as written nor under it
@@ -177,14 +194,27 @@ module Woods
       # validation with "Missing _index.json in flows/".
       #
       # @param errors [Array<String>] accumulated errors; appended to if the
-      #   payload directory named by the published generation isn't on disk
+      #   payload directory named by the published generation isn't on disk,
+      #   or the shared type-directory allowlist cannot be derived (a
+      #   silently empty allowlist would disable every structural
+      #   type-directory check without saying so)
       # @return [Array<String>] absolute paths to type directories
       def payload_type_dirs(errors)
         payload = payload_dir
+        allowlist = begin
+          type_directory_allowlist
+        rescue StandardError, ScriptError => e
+          # ScriptError too: a require failure surfaces as LoadError, which
+          # `rescue StandardError` does not catch.
+          errors << "Could not derive the unit-type directory allowlist " \
+                    "(#{e.class}: #{e.message}); structural checks disabled"
+          return []
+        end
+
         Dir.children(payload).filter_map do |name|
           full_path = File.join(payload, name)
           next unless File.directory?(full_path)
-          next unless unit_type_directory?(name)
+          next unless allowlist.include?(name)
 
           full_path
         end
@@ -207,36 +237,38 @@ module Woods
       # The shared allowlist: exactly the directories extraction publishes
       # unit types into, derived from `Extractor::EXTRACTORS` so the two
       # cannot drift. Required lazily — {IndexValidator} deliberately loads
-      # without Rails, and `woods/extractor` also loads clean, but a failure
-      # degrades to "no allowlist" (no structural type-directory pass)
-      # rather than to a crash. The manifest-driven checks in
-      # {#validate_against_manifest} still run either way.
+      # without Rails, and `woods/extractor` also loads clean. A derivation
+      # failure RAISES: {#payload_type_dirs} converts it to a validation
+      # error rather than degrading to a silently empty allowlist.
       #
       # `flows/` is deliberately absent: it holds `flow_index.json` and
       # per-flow documents, which {#validate_flow_artifacts} owns.
       #
       # @return [Array<String>]
       def type_directory_allowlist
-        require_relative '../extractor' unless defined?(Woods::Extractor::EXTRACTORS)
-
-        @type_directory_allowlist ||= Woods::Extractor::EXTRACTORS.keys.map(&:to_s).freeze
-      rescue StandardError
-        []
+        @type_directory_allowlist ||= self.class.unit_type_directories
       end
 
       # Validate the flows/ artifact family (G-2): `flow_index.json` parses,
       # and every entry points at a flow document that exists and parses.
+      #
       # A payload from a run that never enabled flow precomputation has no
-      # flows directory at all; a flows directory with no index has nothing
-      # to validate entries against, so it is left alone.
+      # flows directory at all, and an empty one holds nothing — both are
+      # absences. A POPULATED family with no index is corruption: the index
+      # is what defines which documents are live, so documents without it
+      # are unaccounted artifacts and are reported, not accepted.
       #
       # @param errors [Array<String>] accumulated errors
       def validate_flow_artifacts(errors)
         flows_dir = File.join(payload_dir, 'flows')
         return unless File.directory?(flows_dir)
+        return if Dir.children(flows_dir).empty?
 
         index_path = File.join(flows_dir, 'flow_index.json')
-        return unless File.exist?(index_path)
+        unless File.exist?(index_path)
+          errors << 'flows/ is populated but flow_index.json is missing'
+          return
+        end
 
         index = parse_artifact(index_path, 'flows/flow_index.json', errors)
         return unless index.is_a?(Hash)
