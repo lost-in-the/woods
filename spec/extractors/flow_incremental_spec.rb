@@ -322,4 +322,106 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
       [File.basename(path), JSON.parse(File.read(path))]
     end
   end
+
+  # ── Fail-closed publication ─────────────────────────────────────────────
+  #
+  # A failure anywhere in the incremental flow refresh must abort
+  # publication before the generation is bumped: the preceding generation
+  # stays resolved and readable, and the run's payload directory is left
+  # inert (nothing points at it; the next run's PayloadStore#create empties
+  # it). Reload the dummy controller to touch it: re-opening adds no
+  # methods, so later examples are unaffected.
+
+  def generation_bytes(index_dir)
+    File.read(File.join(index_dir, 'generation.json'))
+  end
+
+  it 'aborts publication when the previous flow_index.json is corrupt' do
+    index_dir = extract_all_to_tmp
+    before_bytes = generation_bytes(index_dir)
+
+    # Corrupt the published generation's index in place: the incremental
+    # run seeds its payload from it via hardlinks, so the run reads the
+    # corruption. The corruption is the injection — what fail-closed
+    # guarantees is that publication does not advance over it.
+    File.write(File.join(payload_of(index_dir), 'flows', 'flow_index.json'), '{ corrupt')
+
+    load app_path('app/controllers/posts_controller.rb')
+    expect do
+      Woods::Extractor.new(output_dir: index_dir)
+                      .extract_changed(['app/controllers/posts_controller.rb'])
+    end.to raise_error(Woods::ExtractionError, /flow_index\.json/)
+
+    expect(generation_bytes(index_dir)).to eq(before_bytes)
+
+    # The preceding generation still resolves: its manifest and graph are
+    # intact and readable.
+    payload = payload_of(index_dir)
+    expect { JSON.parse(File.read(File.join(payload, 'manifest.json'))) }.not_to raise_error
+    expect { JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))) }.not_to raise_error
+  end
+
+  it 'aborts publication when the flow index write fails' do
+    index_dir = extract_all_to_tmp
+    before_bytes = generation_bytes(index_dir)
+
+    failed = false
+    allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+      if !failed && path.to_s.end_with?('flow_index.json')
+        failed = true
+        raise Woods::ExtractionError, 'disk full'
+      end
+      original.call(path, content)
+    end
+
+    load app_path('app/controllers/posts_controller.rb')
+    expect do
+      Woods::Extractor.new(output_dir: index_dir)
+                      .extract_changed(['app/controllers/posts_controller.rb'])
+    end.to raise_error(Woods::ExtractionError, /disk full/)
+
+    expect(generation_bytes(index_dir)).to eq(before_bytes)
+  end
+
+  it 'aborts publication when the controller annotation write fails' do
+    index_dir = extract_all_to_tmp
+    before_bytes = generation_bytes(index_dir)
+
+    # The annotation patch is this run's only controller JSON write whose
+    # serialized content carries metadata.flow_paths.
+    allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+      if path.to_s.include?('/controllers/') && content.to_s.include?('"flow_paths"')
+        raise Woods::ExtractionError, 'disk full'
+      end
+
+      original.call(path, content)
+    end
+
+    load app_path('app/controllers/posts_controller.rb')
+    expect do
+      Woods::Extractor.new(output_dir: index_dir)
+                      .extract_changed(['app/controllers/posts_controller.rb'])
+    end.to raise_error(Woods::ExtractionError, /disk full/)
+
+    expect(generation_bytes(index_dir)).to eq(before_bytes)
+  end
+
+  it 'aborts publication when one action fails to assemble' do
+    index_dir = extract_all_to_tmp
+    before_bytes = generation_bytes(index_dir)
+
+    # A per-action skip would publish an index missing that entry — the
+    # missing-entry hazard. The delta path fails closed instead.
+    assembler = instance_double(Woods::FlowAssembler)
+    allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
+    allow(assembler).to receive(:assemble).and_raise(StandardError, 'broken route table')
+
+    load app_path('app/controllers/posts_controller.rb')
+    expect do
+      Woods::Extractor.new(output_dir: index_dir)
+                      .extract_changed(['app/controllers/posts_controller.rb'])
+    end.to raise_error(Woods::ExtractionError, /broken route table/)
+
+    expect(generation_bytes(index_dir)).to eq(before_bytes)
+  end
 end

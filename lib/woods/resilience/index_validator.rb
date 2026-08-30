@@ -201,15 +201,8 @@ module Woods
       # @return [Array<String>] absolute paths to type directories
       def payload_type_dirs(errors)
         payload = payload_dir
-        allowlist = begin
-          type_directory_allowlist
-        rescue StandardError, ScriptError => e
-          # ScriptError too: a require failure surfaces as LoadError, which
-          # `rescue StandardError` does not catch.
-          errors << "Could not derive the unit-type directory allowlist " \
-                    "(#{e.class}: #{e.message}); structural checks disabled"
-          return []
-        end
+        allowlist = derive_type_directory_allowlist(errors)
+        return [] if allowlist.nil?
 
         Dir.children(payload).filter_map do |name|
           full_path = File.join(payload, name)
@@ -226,6 +219,22 @@ module Woods
         # crash for its caller to catch.
         errors << "Payload directory does not exist: #{payload}"
         []
+      end
+
+      # The allowlist, or nil — with a validation error recorded — when the
+      # shared contract cannot be derived. A silently empty allowlist would
+      # disable every structural type-directory check without saying so.
+      #
+      # @param errors [Array<String>] accumulated errors
+      # @return [Array<String>, nil]
+      def derive_type_directory_allowlist(errors)
+        type_directory_allowlist
+      rescue StandardError, ScriptError => e
+        # ScriptError too: a require failure surfaces as LoadError, which
+        # `rescue StandardError` does not catch.
+        errors << 'Could not derive the unit-type directory allowlist ' \
+                  "(#{e.class}: #{e.message}); structural checks disabled"
+        nil
       end
 
       # @param name [String] directory basename under the payload
@@ -262,7 +271,7 @@ module Woods
       def validate_flow_artifacts(errors)
         flows_dir = File.join(payload_dir, 'flows')
         return unless File.directory?(flows_dir)
-        return if Dir.children(flows_dir).empty?
+        return if Dir.empty?(flows_dir)
 
         index_path = File.join(flows_dir, 'flow_index.json')
         unless File.exist?(index_path)

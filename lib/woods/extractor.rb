@@ -1196,11 +1196,26 @@ module Woods
     # refresh (whose routes cascade rewrites controllers wholesale) get it,
     # and so a no-op run — which returns before this — leaves flows alone.
     #
+    # Skip rule: the refresh participates whenever the gate is on and
+    # something is touched. A genuinely absent family — no flows/ directory,
+    # or an empty one — skips: there is nothing to carry forward, publication
+    # proceeds, and the next full extraction with the gate on builds the
+    # family. Once the family holds ANY artifact it is authoritative: a
+    # missing flow_index.json among documents, a corrupt one, a failed
+    # rehydration, write, patch, sweep, or type-index regeneration raises,
+    # and the raise propagates out of {#finalize_incremental_run} BEFORE
+    # {#publish_generation} — no generation bump, the preceding generation
+    # stays resolved and readable. ( woods:validate applies the same rule
+    # for a populated family without an index.)
+    #
     # @param touched [Set<String>] identifiers added, re-extracted, or removed
     # @return [void]
+    # @raise [Woods::ExtractionError] when authoritative flow state is
+    #   missing or corrupt, or a flow-family write fails
     def refresh_incremental_flows(touched)
       return unless Woods.configuration.precompute_flows
       return if touched.empty?
+      return unless flow_family_present?
 
       controllers_dir = payload_dir.join('controllers')
       reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
@@ -1220,10 +1235,22 @@ module Woods
       # index regeneration; the index carries estimated_tokens, which the
       # flow_paths are part of — a full run builds its index from the
       # annotated in-memory units, so the incremental one re-derives it from
-      # the annotated files to match.
+      # the annotated files to match. A failure here raises like every
+      # other refresh failure.
       regenerate_type_index(:controllers) if annotations.any?
-    rescue StandardError => e
-      Rails.logger.error "[Woods] Incremental flow refresh failed: #{e.message}"
+    end
+
+    # Does the run's seeded payload hold a flow family at all? An absent
+    # family (no flows/ directory, or an empty one) is a genuine absence —
+    # typically an index built while the gate was off — and skips the
+    # refresh rather than publishing a delta-only index.
+    #
+    # @return [Boolean]
+    def flow_family_present?
+      flows_dir = payload_dir.join('flows')
+      return false unless flows_dir.directory?
+
+      !Dir[flows_dir.join('*.json')].empty?
     end
 
     # Controller identifiers that hold entries in the previous generation's
@@ -1231,16 +1258,20 @@ module Woods
     # with no index entries has no documents to sweep and no annotation to
     # clear.
     #
+    # The read is authoritative ({#flow_family_present?} guaranteed the
+    # family holds artifacts): a missing index among documents, or a corrupt
+    # one, raises so publication aborts.
+    #
     # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when the index is missing or corrupt
     def previous_flow_index_controllers
       index_path = payload_dir.join('flows', 'flow_index.json')
-      return Set.new unless index_path.exist?
+      raise Woods::ExtractionError, 'flows/ is populated but flow_index.json is missing' unless index_path.exist?
 
       JSON.parse(AtomicFile.read(index_path))
           .keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first }
-    rescue StandardError => e
-      Rails.logger.warn "[Woods] Could not read previous flow_index.json: #{e.message}"
-      Set.new
+    rescue JSON::ParserError => e
+      raise Woods::ExtractionError, "previous flow_index.json does not parse: #{e.message}"
     end
 
     # Rehydrate one unit from its payload JSON for the incremental flow
@@ -1250,6 +1281,8 @@ module Woods
     # @param type_key [Symbol] extractor key naming the payload directory
     # @param identifier [String]
     # @return [ExtractedUnit, nil]
+    # @raise [Woods::ExtractionError] when the unit JSON does not parse —
+    #   skipping it would publish annotations against stale state
     def unit_from_payload(type_key, identifier)
       path = payload_dir.join(type_key.to_s, collision_safe_filename(identifier))
       return unless File.exist?(path)
@@ -1264,15 +1297,15 @@ module Woods
       unit.source_code = data['source_code']
       unit
     rescue JSON::ParserError => e
-      Rails.logger.warn "[Woods] Could not rehydrate #{identifier} for flow refresh: #{e.message}"
-      nil
+      raise Woods::ExtractionError, "could not rehydrate #{identifier} for flow refresh: #{e.message}"
     end
 
     # Write metadata[:flow_paths] into the re-extracted controllers' unit
     # JSON — the incremental counterpart of {#rewrite_flow_annotated_units}.
     # A controller with no flows this run loses any annotation a previous
     # run had written, which is what a full run would have produced for the
-    # same tree. Read-compare-write, like {#rewrite_unit_json_of_type}.
+    # same tree. Read-compare-write, like {#rewrite_unit_json_of_type}; a
+    # read or write failure raises so publication aborts.
     #
     # @param annotations [Hash{String => Hash{String => String}}] from
     #   {FlowPrecomputer#recompute_delta}
@@ -1295,8 +1328,6 @@ module Woods
 
         AtomicFile.write(path, json_serialize(data))
       end
-    rescue StandardError => e
-      Rails.logger.error "[Woods] Could not patch flow annotations: #{e.message}"
     end
 
     # Remove flows/ documents no entry of flow_index.json references.
@@ -1309,40 +1340,43 @@ module Woods
     # (G-2). Before this, a controller deleted or renamed incrementally left
     # its flow documents behind forever.
     #
-    # Skipped when the index is missing or does not parse: with nothing to
-    # validate against, deleting every document would be the one outcome
-    # worse than keeping orphans, and the next full extraction with flow
-    # precomputation on rebuilds the whole family.
+    # Reconciled skip rule: a genuinely empty directory is an absence and is
+    # skipped; a populated one whose index is missing, or an index that does
+    # not parse, is corruption and raises — with nothing to validate
+    # against, deleting every document would be the one outcome worse than
+    # keeping orphans. Failures raise so the incremental caller aborts
+    # publication.
     #
     # @return [void]
+    # @raise [Woods::ExtractionError] when authoritative flow state is
+    #   missing or corrupt
     def sweep_orphaned_flow_files
       flows_dir = payload_dir.join('flows')
       return unless flows_dir.directory?
 
       index_path = flows_dir.join('flow_index.json')
-      return unless index_path.exist?
+      unless index_path.exist?
+        return if Dir[flows_dir.join('*.json')].empty?
 
-      referenced = parse_flow_index_for_sweep(index_path)
-      return if referenced.nil?
+        raise Woods::ExtractionError, 'flows/ is populated but flow_index.json is missing'
+      end
 
-      keep = referenced.to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json'
+      keep = parse_flow_index_for_sweep(index_path)
+             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json'
       orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
       return if orphans.empty?
 
       orphans.each { |file| FileUtils.rm_f(file) }
       Rails.logger.info "[Woods] Swept #{orphans.size} orphaned flow file(s)"
-    rescue StandardError => e
-      Rails.logger.error "[Woods] Orphaned-flow sweep failed: #{e.message}"
     end
 
     # @param index_path [Pathname]
-    # @return [Array<String>, nil] the referenced document paths, or nil
-    #   when the index does not parse (the caller then skips the sweep)
+    # @return [Array<String>] the referenced document paths
+    # @raise [Woods::ExtractionError] when the index does not parse
     def parse_flow_index_for_sweep(index_path)
       JSON.parse(AtomicFile.read(index_path)).values
     rescue JSON::ParserError => e
-      Rails.logger.warn "[Woods] Orphaned-flow sweep skipped: flow_index.json does not parse (#{e.message})"
-      nil
+      raise Woods::ExtractionError, "flow_index.json does not parse: #{e.message}"
     end
 
     # ──────────────────────────────────────────────────────────────────────
