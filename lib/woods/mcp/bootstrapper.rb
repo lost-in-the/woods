@@ -430,7 +430,12 @@ module Woods
                 'stores. Populate the durable backend via the extraction write path instead.'
         end
 
-        graph = Woods::DependencyGraph.from_h(JSON.parse(graph_json.read))
+        # AtomicFile.read, never a bare Pathname#read (H1): a bare read tags
+        # content with Encoding.default_external, and under LANG=C a graph
+        # holding any non-ASCII identifier raised
+        # Encoding::InvalidByteSequenceError — a locale bug that the M6
+        # degraded-state honesty turned into a full retrieval outage.
+        graph = Woods::DependencyGraph.from_h(JSON.parse(Woods::AtomicFile.read(graph_json)))
         Woods::Storage::GraphStore::Memory.new(graph)
       rescue Woods::Storage::InapplicableBackend
         raise

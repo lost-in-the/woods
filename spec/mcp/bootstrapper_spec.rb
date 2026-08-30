@@ -517,6 +517,127 @@ RSpec.describe Woods::MCP::Bootstrapper do
     end
   end
 
+  describe 'graph hydration under a C locale (encoding regression)' do
+    # hydrated_graph_store read dependency_graph.json with a bare
+    # Pathname#read, which tags content with Encoding.default_external.
+    # Under LANG=C (US-ASCII), one non-ASCII identifier raised
+    # Encoding::InvalidByteSequenceError: the graph hydrated empty. Since the
+    # M6 fix records hydration failures and codebase_retrieve refuses all
+    # queries when any exists, that locale bug had become a complete
+    # semantic-retrieval outage. Index artifact reads go through
+    # Woods::AtomicFile.read (the H1 contract, #247) — mirroring
+    # spec/mcp/index_reader_encoding_spec.rb for locale-forcing mechanics.
+    let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before do
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+      allow(Woods::MCP::ProviderProbe).to receive(:reachable!).and_return(true)
+    end
+
+    def write_non_ascii_graph(dir)
+      graph = {
+        'nodes' => {
+          'Café' => { 'type' => 'model', 'file_path' => 'app/models/café.rb', 'namespace' => nil }
+        },
+        'edges' => {},
+        'reverse' => {},
+        'file_map' => {}
+      }
+      File.write(File.join(dir, 'dependency_graph.json'), JSON.generate(graph))
+    end
+
+    # Emulates a C-locale host: bare reads tag artifact bytes US-ASCII.
+    # Restores the previous default external encoding in ensure. Mirrors
+    # the helper in spec/mcp/index_reader_encoding_spec.rb.
+    def in_us_ascii_locale
+      previous = Encoding.default_external
+      Encoding.default_external = Encoding::US_ASCII
+      yield
+    ensure
+      Encoding.default_external = previous
+    end
+
+    it 'hydrates a non-ASCII graph without recording a hydration failure under US-ASCII' do
+      Dir.mktmpdir do |dir|
+        write_non_ascii_graph(dir)
+
+        retriever, state = nil
+        in_us_ascii_locale do
+          retriever, state = described_class.build_retriever(index_dir: dir)
+        end
+
+        expect(retriever).not_to be_nil
+        expect(state.hydration_failed?).to be(false)
+        expect(state.status).to eq(:hydrated)
+        expect(retriever.graph_store.graph.node_exists?('Café')).to be(true)
+      end
+    end
+
+    it 'does not refuse codebase_retrieve with the degraded gate under US-ASCII' do
+      Dir.mktmpdir do |dir|
+        write_non_ascii_graph(dir)
+        # Server.build constructs an IndexReader, which wants a manifest.
+        File.write(File.join(dir, 'manifest.json'), JSON.generate(
+                                                      'extracted_at' => '2026-08-30T00:00:00Z',
+                                                      'counts' => {}, 'total_units' => 0, 'total_chunks' => 0
+                                                    ))
+
+        retriever, state = nil
+        in_us_ascii_locale do
+          retriever, state = described_class.build_retriever(index_dir: dir)
+        end
+
+        clean_result = Woods::Retriever::RetrievalResult.new(
+          context: '## Café (model)', sources: [{ identifier: 'Café', type: :model }],
+          classification: nil, strategy: :vector, tokens_used: 10, budget: 8000,
+          trace: nil, type_rank_context: nil
+        )
+        allow(retriever).to receive(:retrieve).and_return(clean_result)
+        server = Woods::MCP::Server.build(
+          index_dir: dir, retriever: retriever, bootstrap_state: state, response_format: :json
+        )
+
+        tools = server.instance_variable_get(:@tools)
+        response = tools['codebase_retrieve'].call(query: 'café', server_context: {})
+
+        # The success shape: the pipeline ran and returned context — no
+        # degraded_index refusal, no isError. (Success responses carry no
+        # meta at all.)
+        expect(response.error?).to be(false)
+        expect(response.content.first[:text]).to include('Café')
+      end
+    end
+
+    it 'still parses the same non-ASCII fixture under the default UTF-8 encoding (H1 contract intact)' do
+      Dir.mktmpdir do |dir|
+        write_non_ascii_graph(dir)
+
+        retriever, state = described_class.build_retriever(index_dir: dir)
+
+        expect(state.hydration_failed?).to be(false)
+        expect(state.status).to eq(:hydrated)
+        expect(retriever.graph_store.graph.node_exists?('Café')).to be(true)
+      end
+    end
+  end
+
   describe 'failure-mode: config-invalid errors from ConfigResolver' do
     # ConfigResolver raises typed BootstrapError subclasses for config-shape
     # problems. build_retriever must not swallow them.
