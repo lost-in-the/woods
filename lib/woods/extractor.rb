@@ -71,6 +71,7 @@ module Woods
   #
   class Extractor
     include FilenameUtils
+    include Extractors::SourceNesting
 
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
@@ -2212,20 +2213,28 @@ module Woods
       touched
     end
 
-    # Pruned class-based identifiers the tree still defines, and that the
+    # Pruned class-based identifiers the tree still governs, and that the
     # second reconciliation pass may therefore re-add.
     #
     # The class-based *move* shape — the file moved, the constant did not
     # (M1) — prunes the unit for the vanished old path while the class stays
-    # in the discovery set, and the move target is an existing file that
-    # still declares it, so re-adding produces exactly the unit a full
-    # extraction of the same tree produces. The *deletion* shape must stay
-    # pruned: without a reload a constant outlives the file that defined it,
-    # so liveness alone proves nothing. The discriminator is the filesystem —
-    # an identifier is re-addable only when one of the change set's
-    # still-existing Ruby files under `app/` declares its class. An unrelated
-    # addition in the same batch does not resurrect a deleted model, because
-    # the added file does not declare it.
+    # in the discovery set; the move target is a changed file the active
+    # loader governs for exactly that constant, so re-adding produces the
+    # unit a full extraction produces. The *deletion* shape must stay
+    # pruned: without a reload a constant outlives the file that defined
+    # it, so liveness alone proves nothing.
+    #
+    # Identity is loader-derived, not textual: {SourceNesting#
+    # governed_class_name} returns the constant path the active Zeitwerk
+    # loader expects the changed file to define (its inflector, ignores,
+    # and root namespaces decide, via +cpath_expected_at+), gated on the
+    # file actually declaring it. A loader non-claim — an unmanaged or
+    # declined path — is authoritative and re-adds nothing, exactly the
+    # governed-naming contract. That kills the two resurrection shapes a
+    # demodulized class-name regex allowed: a changed file declaring
+    # `Public::User` no longer resurrects a pruned `Admin::User`, and a
+    # file whose comments or string literals mention `class User` no
+    # longer resurrects anything.
     #
     # @param pruned [Set<String>] identifiers removed by {#prune_vanished_units}
     # @param change_set [ChangeSet]
@@ -2234,12 +2243,8 @@ module Woods
       readdable = Set.new
       return readdable if pruned.empty?
 
-      defining_sources = change_set.existing_paths.filter_map do |path|
-        next unless path.to_s.end_with?('.rb') && path.to_s.start_with?("#{Rails.root}/app/")
-
-        File.read(path)
-      end
-      return readdable if defining_sources.empty?
+      claimed = changed_governed_names(change_set)
+      return readdable if claimed.empty?
 
       CLASS_BASED_DISCOVERY.each_key do |key|
         extractor = extractor_for(key)
@@ -2247,9 +2252,8 @@ module Woods
 
         extractor.discoverable_classes.each do |klass|
           next if klass.name.nil? || !pruned.include?(klass.name)
-          next unless defining_sources.any? { |source| declares_class?(source, klass) }
 
-          readdable.add(klass.name)
+          readdable.add(klass.name) if claimed.include?(klass.name)
         end
       end
 
@@ -2262,16 +2266,21 @@ module Woods
       Set.new
     end
 
-    # Does this source declare the class? Mirrors ModelExtractor's class
-    # declaration pattern: both `class Name` and a namespaced
-    # `class Nesting::Name`, in or out of a wrapping module, while a nested
-    # `class Name::Inner` does not claim the parent.
+    # Governed constant names of the change set's still-existing Ruby
+    # files. The shared governed-naming helper consults the active Zeitwerk
+    # loader and returns nil for anything it does not claim, so unmanaged
+    # paths (anything outside the loader's roots, under an old Zeitwerk
+    # without +cpath_expected_at+, or a declined file) contribute nothing.
     #
-    # @param source [String]
-    # @param klass [Class]
-    # @return [Boolean]
-    def declares_class?(source, klass)
-      source.match?(/class\s+(?:[\w:]+::)?#{Regexp.escape(klass.name.demodulize)}\b(?!::)/)
+    # @param change_set [ChangeSet]
+    # @return [Set<String>] governed constant names of changed files
+    def changed_governed_names(change_set)
+      change_set.existing_paths.filter_map do |path|
+        path = path.to_s
+        next unless path.end_with?('.rb')
+
+        governed_class_name(path, File.read(path))
+      end.compact.to_set
     end
 
     def add_discovered_classes(key, spec, discovered, known, excluded, affected_types)
