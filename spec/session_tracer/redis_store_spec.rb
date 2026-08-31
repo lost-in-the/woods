@@ -371,16 +371,6 @@ RSpec.describe Woods::SessionTracer::RedisStore do
     # member. The hook below forces exactly that interleaving
     # deterministically: writer A's complete record runs inside writer B's
     # migration window (between B's SMEMBERS and B's DEL). On the fixed
-    # shape there is no Ruby-side member read or DEL at all (the script is
-    # atomic server-side), so the hook is never called and the two records
-    # are simply sequential.
-    # Review finding: the pre-fix migration was three separate commands
-    # (SMEMBERS, DEL, re-ZADD) driven from Ruby, so two writers racing a
-    # legacy index could interleave: writer A converted the key between
-    # writer B's SMEMBERS and B's DEL, and B's DEL erased A's just-written
-    # member. The hook below forces exactly that interleaving
-    # deterministically: writer A's complete record runs inside writer B's
-    # migration window (between B's SMEMBERS and B's DEL). On the fixed
     # shape there is no Ruby-side member read or DEL in the index path at
     # all (the script is atomic server-side), so the hook never fires and
     # writer A records sequentially instead.

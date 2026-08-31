@@ -1019,13 +1019,14 @@ RSpec.describe Woods::MCP::IndexReader do
       failing_reader = described_class.new(fixture_dir)
       allow(failing_reader).to receive(:find_unit).and_raise(IOError, 'disk gone')
 
-      original = Regexp.const_defined?(:TimeoutError) ? Regexp::TimeoutError : nil
-      Regexp.send(:remove_const, :TimeoutError) if original
+      has_timeout_error = Regexp.const_defined?(:TimeoutError, false)
+      original = Regexp.const_get(:TimeoutError, false) if has_timeout_error
+      Regexp.send(:remove_const, :TimeoutError) if has_timeout_error
       begin
         expect { failing_reader.search('Post', fields: %w[source_code]) }
           .to raise_error(IOError, /disk gone/)
       ensure
-        Regexp.const_set(:TimeoutError, original) if original
+        Regexp.const_set(:TimeoutError, original) if has_timeout_error
       end
     end
 
