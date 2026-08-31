@@ -117,6 +117,9 @@ jobs:
           gem install --no-document rspec -v '~> 3.13'
           gem install --no-document rails -v '${{ matrix.rails }}'
           gem install --no-document sqlite3 -v '${{ matrix.sqlite3 }}'
+          # The official MCP client's HTTP transport loads Faraday lazily
+          # (test-only; the packaged server itself needs no Faraday).
+          gem install --no-document faraday -v '~> 2.0'
           gem install --no-document "dist/${{ needs.release-context.outputs.gem-name }}"
       - name: Test the installed artifact outside the repository load path
         env:

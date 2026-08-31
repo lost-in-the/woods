@@ -1813,6 +1813,19 @@
     "status": "resolved"
   },
   {
+    "id": "B-129",
+    "title": "First woods_status call blocks on a synchronous update-check probe",
+    "severity": "low",
+    "category": "refactor",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/update_check.rb",
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "The update-check registry probe runs synchronously on the first woods_status call, adding a registry round trip (~1.5s worst case) to that response. Behavior is correct today, only slower; version semantics are already fixed by the merged update-check correctness work. Deferred from the v2.0 remediation plan (P7 / PR-7b): the async move is thread-lifecycle risk (probe on a bounded background thread, shutdown joins or abandons without hanging the exe, first call returns cached-or-unknown immediately, probe failure falls back to cached and self-heals on cache expiry) for a latency-only win. Rollback/current-correctness: current synchronous behavior is correct and stays the documented behavior until this lands; any future implementation reverts to it cleanly with no data, protocol, or format impact.",
+    "status": "open"
+  },
+  {
     "id": "B-130",
     "title": "Runner-driven incremental extraction can read stale loaded constants",
     "severity": "low",
