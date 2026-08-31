@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'pathname'
 require 'tmpdir'
 require 'fileutils'
+require 'open3'
 require 'woods/extractor'
 
 RSpec.describe Woods::Extractor do
@@ -657,6 +658,26 @@ RSpec.describe Woods::Extractor do
 
       result = extractor.send(:batch_git_data, file_paths)
       expect(result.size).to eq(1100)
+    end
+  end
+
+  describe 'git command rooting' do
+    def run_command(dir, *args)
+      output, status = Open3.capture2e(*args, chdir: dir)
+      raise "command failed: #{args.join(' ')}\n#{output}" unless status.success?
+
+      output.strip
+    end
+
+    it 'runs enrichment commands against Rails.root rather than the process working directory' do
+      run_command(tmpdir, 'git', 'init', '--quiet', '--initial-branch', 'app-root')
+
+      actual_root = Pathname.new(extractor.send(:run_git, 'rev-parse', '--show-toplevel')).realpath
+      expect(actual_root).to eq(Pathname.new(tmpdir).realpath)
+    end
+
+    it 'does not treat the process repository as Rails.root git metadata' do
+      expect(extractor.send(:git_available?)).to be(false)
     end
   end
 

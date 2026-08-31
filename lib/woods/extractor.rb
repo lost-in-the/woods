@@ -1539,7 +1539,9 @@ module Woods
       return @git_available if defined?(@git_available)
 
       @git_available = begin
-        _, status = Open3.capture2('git', 'rev-parse', '--git-dir')
+        _output, _error, status = Open3.capture3(
+          'git', '-C', Rails.root.to_s, 'rev-parse', '--git-dir'
+        )
         status.success?
       rescue StandardError
         false
@@ -1551,7 +1553,7 @@ module Woods
     # @param args [Array<String>] Git command arguments
     # @return [String] Command output (empty string on failure)
     def run_git(*args)
-      output, status = Open3.capture2('git', *args)
+      output, _error, status = Open3.capture3('git', '-C', Rails.root.to_s, *args)
       status.success? ? output.strip : ''
     rescue StandardError
       ''

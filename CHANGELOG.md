@@ -68,6 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Best-effort Git provenance and file-history probes are now quiet and rooted
+  at the extracted application.** Expected failures in source copies without a
+  `.git` directory no longer emit `fatal: not a git repository` on stderr, and
+  extraction launched from another checkout can no longer attach that
+  checkout's branch or file history to the Rails application.
+
 - **Reloading the Index MCP server no longer opens an empty-store window, and a
   failed reload no longer leaves a misaligned index (M7).** The `reload` tool
   refreshed the live in-memory vector and metadata stores with `clear!` followed by

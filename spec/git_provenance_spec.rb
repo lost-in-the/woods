@@ -4,6 +4,8 @@ require 'spec_helper'
 require 'tmpdir'
 require 'open3'
 require 'fileutils'
+require 'json'
+require 'rbconfig'
 require 'woods/git_provenance'
 
 RSpec.describe Woods::GitProvenance do
@@ -26,6 +28,18 @@ RSpec.describe Woods::GitProvenance do
     raise "command failed: #{args.join(' ')}\n#{out}" unless status.success?
 
     out.strip
+  end
+
+  def provenance_subprocess(root, branch: nil, sha: nil)
+    script = <<~RUBY
+      require 'json'
+      require 'woods/git_provenance'
+
+      env = { 'GIT_BRANCH' => ARGV[1], 'GIT_SHA' => ARGV[2] }.compact
+      print JSON.generate(Woods::GitProvenance.new(root: ARGV.fetch(0), env: env).to_h)
+    RUBY
+    lib_dir = File.expand_path('../lib', __dir__)
+    Open3.capture3(RbConfig.ruby, '-I', lib_dir, '-e', script, root, branch.to_s, sha.to_s)
   end
 
   describe '#branch / #sha in a normal checkout' do
@@ -94,6 +108,18 @@ RSpec.describe Woods::GitProvenance do
         expect(provenance.sha).to eq('unknown')
       end
     end
+
+    it 'does not leak git diagnostics while refusing stale fallback values' do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, '.git'), "gitdir: /nonexistent/host/path/.git/worktrees/wt\n")
+
+        stdout, stderr, status = provenance_subprocess(dir, branch: 'stale', sha: 'deadbeef')
+
+        expect(status).to be_success
+        expect(JSON.parse(stdout)).to eq('git_branch' => 'unknown', 'git_sha' => 'unknown')
+        expect(stderr).to eq('')
+      end
+    end
   end
 
   describe '#branch / #sha when the checkout is not a git working tree' do
@@ -134,13 +160,23 @@ RSpec.describe Woods::GitProvenance do
         expect(provenance.sha).to eq('unknown')
       end
     end
+
+    it 'does not leak expected rev-parse failures to stderr' do
+      Dir.mktmpdir do |dir|
+        stdout, stderr, status = provenance_subprocess(dir)
+
+        expect(status).to be_success
+        expect(JSON.parse(stdout)).to eq('git_branch' => 'unknown', 'git_sha' => 'unknown')
+        expect(stderr).to eq('')
+      end
+    end
   end
 
   describe '#branch / #sha when git is unavailable' do
     before do
       # Force both rev-parse and the binary probe to fail, simulating an
       # environment with no usable git.
-      allow(Open3).to receive(:capture2).and_raise(Errno::ENOENT)
+      allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT)
     end
 
     it 'honours GIT_BRANCH/GIT_SHA env vars as the documented no-git fallback' do
