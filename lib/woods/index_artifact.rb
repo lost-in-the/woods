@@ -76,7 +76,13 @@ module Woods
     def latest_dump_path
       return nil unless latest_pointer_path.exist?
 
-      dirname = latest_pointer_path.read.strip
+      # AtomicFile.read, never a bare Pathname#read (H1): the pointer sits on
+      # the load_or_empty path of both snapshotters, and a bare read tags its
+      # content with Encoding.default_external. The pointer content is
+      # generated (a strftime dirname), so ASCII by construction — the guard
+      # keeps the pattern out of the artifact-read surface rather than fixing
+      # an observed failure.
+      dirname = Woods::AtomicFile.read(latest_pointer_path).strip
       return nil if dirname.empty?
 
       dir = dumps_root.join(dirname)

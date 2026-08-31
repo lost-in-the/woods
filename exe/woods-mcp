@@ -37,7 +37,11 @@ begin
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
   retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
   snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
-rescue Woods::MCP::BootstrapError => e
+# ConfigurationError is caught alongside BootstrapError so an unusable
+# embedding configuration (e.g. a provider wired without its required
+# credential) surfaces as the one-line operator message instead of a raw
+# backtrace (M9).
+rescue Woods::MCP::BootstrapError, Woods::ConfigurationError => e
   warn "[woods-mcp] #{e.class.name.split('::').last}: #{e.message}"
   warn "[woods-mcp] details: #{e.details.inspect}" if e.respond_to?(:details) && !e.details.empty?
   exit 2

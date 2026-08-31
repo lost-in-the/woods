@@ -41,12 +41,39 @@ module Woods
       #   {Woods.configuration}.
       attr_accessor :resolved_config
 
+      # Store-hydration soft failures recorded during boot, keyed by store
+      # component (+:vector+, +:metadata+, +:graph+) with the exception that
+      # caused each. A recorded failure leaves the retriever serving empty
+      # stores; {#hydration_failed?} is the signal +woods_status+ and
+      # +codebase_retrieve+ use to stop presenting that as healthy (M6).
+      attr_reader :hydration_failures
+
       def initialize
         @status = :initializing
         @reason = nil
         @hydrated_at = nil
         @degraded_since = nil
         @resolved_config = nil
+        @hydration_failures = {}
+      end
+
+      # Record a store-hydration soft failure. Kept separately from {#reason}
+      # so a provider-unreachable degradation and a hydration degradation can
+      # coexist without overwriting each other's evidence.
+      #
+      # @param component [Symbol, String] which store failed to hydrate
+      # @param error [Exception] the rescued hydration error
+      # @return [self]
+      def record_hydration_failure(component, error)
+        @hydration_failures[component.to_sym] = error
+        self
+      end
+
+      # Did any store fail to hydrate at boot?
+      #
+      # @return [Boolean]
+      def hydration_failed?
+        !@hydration_failures.empty?
       end
 
       # Transition to a new status.
@@ -87,6 +114,9 @@ module Woods
         h[:reason] = "#{@reason.class}: #{@reason.message}" if @reason
         h[:hydrated_at] = @hydrated_at.iso8601 if @hydrated_at
         h[:degraded_since] = @degraded_since.iso8601 if @degraded_since
+        if hydration_failed?
+          h[:hydration_failures] = @hydration_failures.transform_values { |e| "#{e.class}: #{e.message}" }
+        end
         h
       end
     end

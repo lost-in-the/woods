@@ -248,6 +248,36 @@ RSpec.describe 'MCP CLI integration' do
           expect(utf8(err)).to match(/WOODS_REQUIRE_INDEX/)
         end
       end
+
+      # M9: an empty-but-set OPENAI_API_KEY is not a credential. Before the
+      # blank-key guard, autodetect wired :openai with api_key: "" (skipping
+      # the Ollama probe a missing key gets), Builder raised a raw
+      # Woods::ConfigurationError, and the top-level rescue — keyed on
+      # BootstrapError only — let it escape as a backtrace crash. The key
+      # must behave as absent: pattern-only boot, no crash.
+      it 'boots pattern-only when OPENAI_API_KEY is set to an empty string' do
+        Dir.mktmpdir do |dir|
+          FileUtils.touch(File.join(dir, 'manifest.json'))
+          env = {
+            'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
+            'OPENAI_API_KEY' => '',
+            'OLLAMA_BASE_URL' => 'http://127.0.0.1:19999'
+          }
+          stdin, stdout, stderr, wait_thr = Open3.popen3(env, 'bundle', 'exec', 'ruby', ruby_bin, dir)
+          sleep 2
+          booted = wait_thr.alive?
+          Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
+          wait_thr.join(5)
+          err = utf8(stderr.read)
+          stdin.close
+          stdout.close
+          stderr.close
+
+          expect(booted).to be(true)
+          expect(err).not_to include('ConfigurationError')
+          expect(err).not_to match(/from .+\.rb:\d+:in/) # backtrace frame
+        end
+      end
     end
   end
 end

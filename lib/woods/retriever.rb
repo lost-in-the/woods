@@ -100,6 +100,25 @@ module Woods
     RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace,
                                  :type_rank_context, keyword_init: true)
 
+    # Raised when a metadata-store access fails during retrieval (M8). One
+    # shared typed error for every store call site: the retriever used to
+    # swallow these into misleading answers — +types:+ queries reported
+    # +:absent+, the rank-within-type fallback short-circuited to empty, and
+    # exclusion filtering silently no-op'd, each presenting a broken store as
+    # a clean empty result. Raising here lets the MCP server map the failure
+    # to tool-visible degraded metadata instead.
+    class StoreError < Error
+      # @return [String] which store failed (e.g. +"metadata"+)
+      attr_reader :store
+
+      # @param message [String] includes the underlying error class and message
+      # @param store [Symbol, String] the failing store component
+      def initialize(message, store: :metadata)
+        super(message)
+        @store = store.to_s
+      end
+    end
+
     # Unit types queried for the structural context overview.
     STRUCTURAL_TYPES = %w[model controller service job mailer component graphql].freeze
 
@@ -304,8 +323,11 @@ module Woods
       # (type resolves to '', which +excluded+ never contains).
       lookup_id = candidate.identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
       type_from_hash(@metadata_store.find(lookup_id)) || ''
-    rescue StandardError
-      ''
+    rescue StandardError => e
+      # M8: a failed lookup must not read as "type is ''" — that silently
+      # disables exclusion filtering. Raise the shared typed store error.
+      raise StoreError,
+            "metadata store lookup failed while resolving a candidate type: #{e.class}: #{e.message}"
     end
 
     def type_from_hash(hash)
@@ -457,8 +479,11 @@ module Woods
 
     def total_of_type(type)
       @metadata_store.find_by_type(type).size
-    rescue StandardError
-      nil
+    rescue StandardError => e
+      # M8: a failed count must not read as zero — that reports :absent for
+      # a type that may exist and short-circuits the within-type fallback.
+      raise StoreError,
+            "metadata store count failed for type #{type.inspect}: #{e.class}: #{e.message}"
     end
 
     # Append a compact markdown summary of +type_rank_context+ to the
