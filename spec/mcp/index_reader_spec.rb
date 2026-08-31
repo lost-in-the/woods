@@ -1008,4 +1008,48 @@ RSpec.describe Woods::MCP::IndexReader do
       watchdog.kill
     end
   end
+
+  # ── one graph parse per generation (P6) ──────────────────────────────
+
+  describe 'one graph parse per generation' do
+    # P6. dependency_graph and raw_graph_data each parsed
+    # dependency_graph.json independently, so a generation that touched both
+    # (traversals use the raw hash; pagerank tools use the graph) held two
+    # parsed copies of the same large file. from_h is non-mutating on its
+    # input, so one parse can feed both. The parse counts below fail on the
+    # pre-fix shape.
+    let(:fresh_reader) { described_class.new(fixture_dir) }
+
+    def counted_graph_parses
+      calls = Hash.new(0)
+      allow_any_instance_of(described_class).to receive(:parse_json).and_wrap_original do |method, filename|
+        calls[filename] += 1
+        method.call(filename)
+      end
+      calls
+    end
+
+    it 'parses dependency_graph.json once for both accessors' do
+      calls = counted_graph_parses
+
+      graph = fresh_reader.dependency_graph
+      raw = fresh_reader.raw_graph_data
+
+      expect(graph).to be_a(Woods::DependencyGraph)
+      expect(graph.dependencies_of('Comment')).to include('Post')
+      expect(raw).to include('nodes')
+      expect(calls['dependency_graph.json']).to eq(1)
+    end
+
+    it 'parses once per generation across a reload' do
+      calls = counted_graph_parses
+
+      fresh_reader.dependency_graph
+      fresh_reader.raw_graph_data
+      fresh_reader.reload!
+      fresh_reader.dependency_graph
+
+      expect(calls['dependency_graph.json']).to eq(2)
+    end
+  end
 end

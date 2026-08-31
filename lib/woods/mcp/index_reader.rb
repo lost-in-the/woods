@@ -302,10 +302,7 @@ module Woods
       # @return [Woods::DependencyGraph] Graph loaded from disk
       def dependency_graph
         ensure_fresh!
-        @dependency_graph ||= begin
-          data = parse_json('dependency_graph.json')
-          Woods::DependencyGraph.from_h(data)
-        end
+        @dependency_graph ||= Woods::DependencyGraph.from_h(raw_graph_data)
       end
 
       # @return [Hash] Parsed graph_analysis.json
@@ -629,6 +626,11 @@ module Woods
       end
 
       # @return [Hash] Raw dependency graph data from JSON
+      #
+      # The single parse point for dependency_graph.json per generation
+      # (audit P6): {#dependency_graph} builds the typed graph from this
+      # same hash (DependencyGraph.from_h does not mutate its input), so a
+      # generation that touches both accessors holds one parsed copy.
       def raw_graph_data
         ensure_fresh!
         @raw_graph_data ||= parse_json('dependency_graph.json')
