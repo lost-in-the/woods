@@ -132,5 +132,55 @@ module Woods
         'provider unreachable'
       end
     end
+
+    # Raised when an MCP +reload+ transaction cannot complete (M7). Deliberately
+    # a sibling of {BootstrapError}, not a child: this describes a runtime
+    # reload attempt, not boot state. The transaction is all-or-nothing —
+    # when this is raised, the reader caches and the retriever's store bundle
+    # were NOT touched and the previous generation is still being served.
+    #
+    # The exception carries the payload of the reload-phase degraded condition:
+    # the generation still being served, and the store component(s) whose
+    # refresh failed. The +reload+ tool maps it to a +degraded_index+ tool
+    # error with +phase: 'reload'+, and {BootstrapState#record_reload_failure}
+    # persists the same shape for +woods_status+.
+    #
+    # @example Raising from the reload transaction
+    #   raise Woods::MCP::ReloadDegraded.new(
+    #     "vector hydration failed: IOError: dump vanished",
+    #     generation: served_marker.number, stores: [:vector], error: e
+    #   )
+    class ReloadDegraded < Woods::Error
+      # @return [Integer] the generation number still being served
+      attr_reader :generation
+
+      # @return [Array<String>] store component(s) whose refresh failed
+      #   (subset of +vector+, +metadata+, +graph+; all three when the
+      #   failure is not attributable to one component)
+      attr_reader :stores
+
+      # @return [Exception, nil] the underlying error, when the failure was
+      #   caused by one
+      attr_reader :cause_error
+
+      # @param message [String]
+      # @param generation [Integer] generation still being served
+      # @param stores [Array<Symbol, String>] failing store component(s)
+      # @param error [Exception, nil] underlying cause
+      def initialize(message, generation:, stores:, error: nil)
+        super(message)
+        @generation = generation
+        @stores = Array(stores).map(&:to_s)
+        @cause_error = error
+      end
+    end
+
+    # The generation recheck inside a reload transaction failed: the on-disk
+    # generation moved while candidate stores were being built off-side, so
+    # the built bundle is stale. Swapping it would pair reader state from one
+    # generation with stores from another. Nothing is swapped; the next
+    # +reload+ invocation is the recovery path (it rebuilds candidates
+    # against the fresh generation).
+    class ReloadGenerationMoved < ReloadDegraded; end
   end
 end

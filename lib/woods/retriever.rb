@@ -122,15 +122,33 @@ module Woods
     # Unit types queried for the structural context overview.
     STRUCTURAL_TYPES = %w[model controller service job mailer component graphql].freeze
 
-    # Direct handles to the injected stores. The sub-components
-    # ({Retrieval::SearchExecutor}, {Retrieval::Ranker},
-    # {Retrieval::ContextAssembler}) hold their own references too, but those
-    # are implementation details — callers that want to mutate store contents
-    # (e.g. the MCP +reload+ tool) read through these accessors. All three
-    # refer to the same Ruby objects the sub-components were initialised with,
-    # so in-place +#clear!+ + +#bulk_load+ propagates through the entire
-    # pipeline without re-instantiating sub-components.
-    attr_reader :vector_store, :metadata_store, :graph_store
+    # Immutable retrieval pipeline captured per store bundle. Every component
+    # that references a store lives here, so swapping the bundle is ONE
+    # assignment: {#swap_stores!} replaces +@pipeline+ and every query
+    # resolves the pipeline once at the top of {#retrieve}. An in-flight query
+    # keeps the struct it resolved and finishes entirely against the old
+    # stores; a new query sees only the complete new bundle (M7 — build-then-
+    # swap, never clear!+bulk_load on live stores).
+    Pipeline = Struct.new(:executor, :ranker, :assembler,
+                          :vector_store, :metadata_store, :graph_store,
+                          keyword_init: true)
+    private_constant :Pipeline
+
+    # The live store handles. These delegate to the current pipeline —
+    # callers that want store contents read through these accessors, exactly
+    # as before; the difference is that a swap retires the old store objects
+    # instead of mutating them in place.
+    def vector_store   = @pipeline.vector_store
+    def metadata_store = @pipeline.metadata_store
+    def graph_store    = @pipeline.graph_store
+
+    # Read-only view of the current store bundle and the components wired to
+    # it (executor, ranker, assembler). Diagnostics/specs used to poke
+    # +@executor+/-style ivars directly; this is the supported equivalent.
+    # The reload transaction swaps the whole struct via {#swap_stores!}.
+    #
+    # @return [Pipeline]
+    attr_reader :pipeline
 
     # @param vector_store [Storage::VectorStore::Interface] Vector store adapter
     # @param metadata_store [Storage::MetadataStore::Interface] Metadata store adapter
@@ -138,30 +156,59 @@ module Woods
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
     def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil)
-      @vector_store = vector_store
-      @metadata_store = metadata_store
-      @graph_store = graph_store
+      @embedding_provider = embedding_provider
       @formatter = formatter
-
       @classifier = Retrieval::QueryClassifier.new
-      @executor = Retrieval::SearchExecutor.new(
+      @pipeline = build_pipeline(vector_store: vector_store,
+                                 metadata_store: metadata_store,
+                                 graph_store: graph_store)
+    end
+
+    # Replace the store bundle atomically (M7).
+    #
+    # Builds a complete new pipeline from +stores+ (fresh executor, ranker and
+    # assembler — a fresh ranker also carries no memoized PageRank from the
+    # retired graph) and swaps it in with a single assignment. Queries already
+    # running resolved the old pipeline and finish against the old stores;
+    # queries started afterwards resolve the new bundle. No query can observe
+    # an empty or half-swapped store set, because no store is ever mutated in
+    # place.
+    #
+    # Called by the MCP reload transaction AFTER its candidate stores passed
+    # the generation recheck, under the exclusive swap lock.
+    #
+    # @param vector_store [Storage::VectorStore::Interface]
+    # @param metadata_store [Storage::MetadataStore::Interface]
+    # @param graph_store [Storage::GraphStore::Interface]
+    # @return [self]
+    def swap_stores!(vector_store:, metadata_store:, graph_store:)
+      @pipeline = build_pipeline(vector_store: vector_store,
+                                 metadata_store: metadata_store,
+                                 graph_store: graph_store)
+      self
+    end
+
+    # Build one immutable pipeline around a store bundle.
+    def build_pipeline(vector_store:, metadata_store:, graph_store:)
+      Pipeline.new(
+        executor: Retrieval::SearchExecutor.new(
+          vector_store: vector_store,
+          metadata_store: metadata_store,
+          graph_store: graph_store,
+          embedding_provider: @embedding_provider
+        ),
+        ranker: Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store),
+        assembler: Retrieval::ContextAssembler.new(
+          metadata_store: metadata_store,
+          chars_per_token: infer_chars_per_token(@embedding_provider),
+          token_counter: infer_token_counter(@embedding_provider)
+        ),
         vector_store: vector_store,
         metadata_store: metadata_store,
-        graph_store: graph_store,
-        embedding_provider: embedding_provider
-      )
-      @ranker = Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store)
-      # Match truncation sizing to the embedding provider's tokenizer so
-      # Ollama-indexed corpora (ratio ~1.5) don't get over-truncated by
-      # an OpenAI-sized default (4.0). Unknown/missing providers fall
-      # back to the OpenAI-friendly default.
-      chars_per_token = infer_chars_per_token(embedding_provider)
-      @assembler = Retrieval::ContextAssembler.new(
-        metadata_store: metadata_store,
-        chars_per_token: chars_per_token,
-        token_counter: infer_token_counter(embedding_provider)
+        graph_store: graph_store
       )
     end
+    private :build_pipeline
 
     # Infer the chars-per-token ratio from an embedding provider's model.
     # Ollama WordPiece-style tokenizers (nomic-embed-text, bge-*,
@@ -246,19 +293,24 @@ module Woods
     def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
       validate_query!(query)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      # One atomic read of the bundle reference: everything this query does
+      # from here on — execution, ranking, filtering, assembly — stays on the
+      # SAME store set even if a reload swaps the pipeline mid-flight (M7).
+      pipeline = @pipeline
       classification = @classifier.classify(query)
-      execution_result = @executor.execute(query: query, classification: classification)
-      ranked = @ranker.rank(execution_result.candidates, classification: classification)
+      execution_result = pipeline.executor.execute(query: query, classification: classification)
+      ranked = pipeline.ranker.rank(execution_result.candidates, classification: classification)
 
       type_list = normalize_type_list(types)
-      filtered, fallback_ran = apply_type_filter(
-        ranked, query, classification, types: types, type_list: type_list, exclude_types: exclude_types
-      )
+      filtered, fallback_ran = apply_type_filter(pipeline, ranked, query, classification,
+                                                 types: types, type_list: type_list,
+                                                 exclude_types: exclude_types)
       type_rank_context = if type_list
-                            build_type_rank_context(ranked, type_list, filtered, fallback_ran: fallback_ran)
+                            build_type_rank_context(ranked, pipeline.metadata_store, type_list, filtered,
+                                                    fallback_ran: fallback_ran)
                           end
 
-      assembled = assemble_context(filtered, classification, budget)
+      assembled = assemble_context(pipeline, filtered, classification, budget)
       trace = build_trace(classification, execution_result, filtered, assembled, start_time)
 
       build_result(
@@ -291,18 +343,20 @@ module Woods
     # filter still works on graph-expansion candidates that carry no
     # vector-store metadata.
     #
+    # @param pipeline [Pipeline] the store bundle this query resolved (M7:
+    #   every store access in the query flows from this snapshot)
     # @param candidates [Array<Candidate>]
     # @param types [Array<String, Symbol>, nil]
     # @param exclude_types [Array<String, Symbol>, nil]
     # @return [Array<Candidate>]
-    def filter_by_type(candidates, types:, exclude_types:)
+    def filter_by_type(pipeline, candidates, types:, exclude_types:)
       allowed = normalize_type_list(types)
-      return candidates.select { |c| allowed.include?(candidate_type(c)) } if allowed
+      return candidates.select { |c| allowed.include?(candidate_type(pipeline, c)) } if allowed
 
       # DEFAULT_EXCLUDE_TYPES is always non-empty, so `excluded` here can
       # never be empty — no early-return-candidates-unchanged branch exists.
       excluded = (normalize_type_list(exclude_types) || Set.new) | DEFAULT_EXCLUDE_TYPES.to_set
-      candidates.reject { |c| excluded.include?(candidate_type(c)) }
+      candidates.reject { |c| excluded.include?(candidate_type(pipeline, c)) }
     end
 
     def normalize_type_list(list)
@@ -311,7 +365,7 @@ module Woods
       list.to_set(&:to_s)
     end
 
-    def candidate_type(candidate)
+    def candidate_type(pipeline, candidate)
       inline = type_from_hash(candidate.metadata)
       return inline if inline
 
@@ -322,7 +376,7 @@ module Woods
       # missed lookup would let the candidate past the default-exclude
       # (type resolves to '', which +excluded+ never contains).
       lookup_id = candidate.identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
-      type_from_hash(@metadata_store.find(lookup_id)) || ''
+      type_from_hash(pipeline.metadata_store.find(lookup_id)) || ''
     rescue StandardError => e
       # M8: a failed lookup must not read as "type is ''" — that silently
       # disables exclusion filtering. Raise the shared typed store error.
@@ -339,14 +393,15 @@ module Woods
 
     # Assemble token-budgeted context from ranked candidates.
     #
+    # @param pipeline [Pipeline] the resolved store bundle
     # @param ranked [Array<Candidate>] Ranked search candidates
     # @param classification [QueryClassifier::Classification] Query classification
     # @return [AssembledContext]
-    def assemble_context(ranked, classification, budget)
-      @assembler.assemble(
+    def assemble_context(pipeline, ranked, classification, budget)
+      pipeline.assembler.assemble(
         candidates: ranked,
         classification: classification,
-        structural_context: build_structural_context,
+        structural_context: build_structural_context(pipeline.metadata_store),
         budget: budget
       )
     end
@@ -378,11 +433,11 @@ module Woods
     # passed a type filter and the global top-K had no candidate of the
     # requested type(s). Returns +[filtered, fallback_ran]+ — the second
     # element drives the :source field on type_rank_context.
-    def apply_type_filter(ranked, query, classification, types:, type_list:, exclude_types:)
-      filtered = filter_by_type(ranked, types: types, exclude_types: exclude_types)
+    def apply_type_filter(pipeline, ranked, query, classification, types:, type_list:, exclude_types:)
+      filtered = filter_by_type(pipeline, ranked, types: types, exclude_types: exclude_types)
       return [filtered, false] unless type_list && filtered.empty?
 
-      [within_type_fallback(query, classification, type_list, exclude_types), true]
+      [within_type_fallback(pipeline, query, classification, type_list, exclude_types), true]
     end
 
     # Rank-within-type fallback query. Pushes the explicit type filter
@@ -400,16 +455,16 @@ module Woods
     # Short-circuits to an empty Array when every requested type has
     # zero units in the index — there is nothing for the fallback to
     # find, so we skip the extra vector search.
-    def within_type_fallback(query, classification, type_list, exclude_types)
+    def within_type_fallback(pipeline, query, classification, type_list, exclude_types)
       type_array = type_list.to_a
-      return [] if type_array.all? { |t| total_of_type(t).to_i.zero? }
+      return [] if type_array.all? { |t| total_of_type(pipeline.metadata_store, t).to_i.zero? }
 
-      fallback = @executor.execute(
+      fallback = pipeline.executor.execute(
         query: query, classification: classification,
         type_filter: type_array, strategy: :vector
       )
-      ranked = @ranker.rank(fallback.candidates, classification: classification)
-      filter_by_type(ranked, types: type_array, exclude_types: exclude_types)
+      ranked = pipeline.ranker.rank(fallback.candidates, classification: classification)
+      filter_by_type(pipeline, ranked, types: type_array, exclude_types: exclude_types)
     end
 
     def build_trace(classification, execution_result, filtered, assembled, start_time)
@@ -436,6 +491,8 @@ module Woods
     # see the RetrievalResult docstring for the four-value enum.
     #
     # @param ranked [Array<Candidate>]
+    # @param metadata_store [Storage::MetadataStore::Interface] the resolved
+    #   bundle's metadata store (M7)
     # @param type_list [Set<String>]
     # @param filtered [Array<Candidate>] The post-fallback candidate list
     #   {#retrieve} is about to assemble — used to confirm the fallback
@@ -443,16 +500,16 @@ module Woods
     #   fallback ran.
     # @param fallback_ran [Boolean] Whether rank-within-type fallback ran
     # @return [Hash{String => Hash}]
-    def build_type_rank_context(ranked, type_list, filtered, fallback_ran:)
+    def build_type_rank_context(ranked, metadata_store, type_list, filtered, fallback_ran:)
       global_k = ranked.size
       type_list.to_h do |type|
-        match_index = ranked.index { |c| candidate_type(c) == type }
+        match_index = ranked.index { |c| candidate_type_from(metadata_store, c) == type }
         top_rank = match_index ? match_index + 1 : nil
-        total = total_of_type(type)
+        total = total_of_type(metadata_store, type)
         [
           type,
           {
-            source: type_source(top_rank, total, filtered, type, fallback_ran: fallback_ran),
+            source: type_source(top_rank, total, metadata_store, filtered, type, fallback_ran: fallback_ran),
             top_of_type_global_rank: top_rank,
             global_k: global_k,
             total_of_type: total
@@ -469,21 +526,38 @@ module Woods
     # +types: %w[service mailer]+) can run and surface candidates for only
     # some of the requested types, and the type(s) it missed are
     # +:outside_top_k+, not falsely reported as a weak fallback match.
-    def type_source(top_rank, total, filtered, type, fallback_ran:)
+    def type_source(top_rank, total, metadata_store, filtered, type, fallback_ran:)
       return :in_top_k if top_rank
       return :absent if total.to_i.zero?
-      return :within_type_fallback if fallback_ran && filtered.any? { |c| candidate_type(c) == type }
+      return :within_type_fallback if fallback_ran && filtered.any? do |c|
+        candidate_type_from(metadata_store, c) == type
+      end
 
       :outside_top_k
     end
 
-    def total_of_type(type)
-      @metadata_store.find_by_type(type).size
+    def total_of_type(metadata_store, type)
+      metadata_store.find_by_type(type).size
     rescue StandardError => e
       # M8: a failed count must not read as zero — that reports :absent for
       # a type that may exist and short-circuits the within-type fallback.
       raise StoreError,
             "metadata store count failed for type #{type.inspect}: #{e.class}: #{e.message}"
+    end
+
+    # Chunk-suffix-stripping candidate-type probe against an explicit
+    # metadata store. Same lookup rules as {#candidate_type}; takes the
+    # store as an argument so a caller holding a resolved bundle snapshot
+    # (M7) probes the generation it started on.
+    def candidate_type_from(metadata_store, candidate)
+      inline = type_from_hash(candidate.metadata)
+      return inline if inline
+
+      lookup_id = candidate.identifier.to_s.sub(CHUNK_SUFFIX_PATTERN, '')
+      type_from_hash(metadata_store.find(lookup_id)) || ''
+    rescue StandardError => e
+      raise StoreError,
+            "metadata store lookup failed while resolving a candidate type: #{e.class}: #{e.message}"
     end
 
     # Append a compact markdown summary of +type_rank_context+ to the
@@ -516,13 +590,15 @@ module Woods
     # spot the searchable-entries vs unit-count discrepancy know which
     # tool carries the canonical unit totals (issue #105).
     #
+    # @param metadata_store [Storage::MetadataStore::Interface] the resolved
+    #   bundle's metadata store (M7)
     # @return [String, nil] Overview string, or nil if the store is empty or on error
-    def build_structural_context
-      total = @metadata_store.count
+    def build_structural_context(metadata_store)
+      total = metadata_store.count
       return nil if total.zero?
 
       type_counts = STRUCTURAL_TYPES.filter_map do |type|
-        count = @metadata_store.find_by_type(type).size
+        count = metadata_store.find_by_type(type).size
         "#{count} #{type} entries" if count.positive?
       end
 

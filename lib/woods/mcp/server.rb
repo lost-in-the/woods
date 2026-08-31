@@ -15,6 +15,7 @@ require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'bootstrap_state'
+require_relative 'errors'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'protocol_policy'
@@ -156,7 +157,7 @@ module Woods
           define_pagerank_tool(server, reader, respond, renderer)
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
-          define_reload_tool(server, reader, respond, retriever_reloader)
+          define_reload_tool(server, reader, respond, respond_err, retriever_reloader, bootstrap_state)
           define_retrieve_tool(server, retriever, respond, respond_err, bootstrap_state)
           define_trace_flow_tool(server, reader, respond, respond_err, renderer)
           # Conditionally register collaborator-dependent tools. Historically
@@ -735,31 +736,77 @@ module Woods
           end
         end
 
-        def define_reload_tool(server, reader, respond, retriever_reloader)
+        def define_reload_tool(server, reader, respond, respond_err, retriever_reloader, bootstrap_state)
           server.define_tool(
             name: 'reload',
             description: 'Reload extraction data from disk. Use after re-running extraction or woods:embed to pick ' \
                          'up changes without restarting the server. Refreshes the JSON index (manifest, dependency ' \
                          'graph, unit cache) AND re-hydrates the retriever\'s in-memory vector/metadata/graph ' \
-                         'stores from the latest dumps. Durable backends (pgvector, Qdrant) are auto-refreshed ' \
-                         'externally — their counts in the response reflect the read-through state.',
+                         'stores from the latest dumps. The refresh is transactional (build-then-swap): candidate ' \
+                         'stores are built off-side, and on any failure nothing is swapped — the previous ' \
+                         'generation keeps being served and a degraded_index error names it. Durable backends ' \
+                         '(pgvector, Qdrant) are auto-refreshed externally — their counts in the response reflect ' \
+                         'the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
-            reader.with_exclusive_reload do |manifest|
+            if retriever_reloader
+              counts = begin
+                retriever_reloader.call(reader)
+              rescue Woods::MCP::ReloadDegraded => e
+                reason = "#{e.class}: #{e.message}"
+                bootstrap_state&.record_reload_failure(generation: e.generation, stores: e.stores, reason: reason)
+                next respond_err.call(
+                  "Reload failed; nothing was swapped. Generation #{e.generation} is still being served: " \
+                  "#{reason} Fix the underlying store or index issue, then invoke reload again.",
+                  code: :degraded_index,
+                  tool: 'reload',
+                  degraded: true,
+                  phase: 'reload',
+                  generation: e.generation,
+                  stores: e.stores,
+                  reason: reason
+                )
+              rescue StandardError => e
+                # A foreign error from a custom reloader leaves the reader and
+                # stores untouched too (the transaction is all-or-nothing), so
+                # it maps to the same reload-phase degraded shape with best-
+                # effort fields.
+                generation = reader.loaded_generation || 0
+                reason = "#{e.class}: #{e.message}"
+                bootstrap_state&.record_reload_failure(generation: generation,
+                                                       stores: %w[vector metadata graph], reason: reason)
+                next respond_err.call(
+                  "Reload failed; nothing was swapped. Generation #{generation} is still being served: " \
+                  "#{reason} Fix the underlying store or index issue, then invoke reload again.",
+                  code: :degraded_index,
+                  tool: 'reload',
+                  degraded: true,
+                  phase: 'reload',
+                  generation: generation,
+                  stores: %w[vector metadata graph],
+                  reason: reason
+                )
+              end
+
+              manifest = reader.manifest
               payload = {
                 reloaded: true,
                 extracted_at: manifest['extracted_at'],
                 total_units: manifest['total_units'],
-                counts: manifest['counts']
+                counts: manifest['counts'],
+                retriever: counts
               }
-              if retriever_reloader
-                begin
-                  payload[:retriever] = retriever_reloader.call
-                rescue StandardError => e
-                  payload[:retriever] = { error: "#{e.class}: #{e.message}" }
-                end
-              end
               respond.call(JSON.pretty_generate(payload))
+            else
+              reader.with_exclusive_reload do |manifest|
+                payload = {
+                  reloaded: true,
+                  extracted_at: manifest['extracted_at'],
+                  total_units: manifest['total_units'],
+                  counts: manifest['counts']
+                }
+                respond.call(JSON.pretty_generate(payload))
+              end
             end
           end
         end

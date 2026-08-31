@@ -187,12 +187,33 @@ module Woods
       # @return [Object] the block's value
       # @raise [ThreadError] when upgrading a pin or nesting an exclusive reload
       def with_exclusive_reload
+        with_exclusive_generation do
+          reload!
+          yield manifest
+        end
+      end
+
+      # Hold the exclusive generation lock WITHOUT refreshing anything.
+      #
+      # This is the swap lock the reload transaction (M7) acquires after its
+      # candidate stores are built off-side. Inside the block the caller
+      # rechecks the generation and then swaps atomically; the reader's own
+      # caches are reloaded by the caller ONLY after the recheck passes, so a
+      # failed recheck leaves the previous fully aligned generation untouched.
+      # {#with_exclusive_reload} is this lock plus the unconditional reload.
+      #
+      # Waiters follow the same rules as {#with_exclusive_reload}: in-flight
+      # pins finish before the block runs, and new pins wait while it is held.
+      #
+      # @yield no arguments
+      # @return [Object] the block's value
+      # @raise [ThreadError] when upgrading a pin or nesting an exclusive lock
+      def with_exclusive_generation
         thread = Thread.current
         acquire_exclusive_generation(thread)
 
         begin
-          reload!
-          yield manifest
+          yield
         ensure
           release_exclusive_generation(thread)
         end

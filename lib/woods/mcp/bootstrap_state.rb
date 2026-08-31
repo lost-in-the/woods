@@ -48,6 +48,17 @@ module Woods
       # +codebase_retrieve+ use to stop presenting that as healthy (M6).
       attr_reader :hydration_failures
 
+      # Reload-phase degraded condition (M7), or +nil+. Shape:
+      # +{ phase: 'reload', generation:, stores:, reason: }+ — the generation
+      # still being served, the store component(s) whose refresh failed, and
+      # the formatted reason. Deliberately separate from {#hydration_failures}
+      # and from +status+: a failed reload leaves the PREVIOUS fully aligned
+      # generation being served, so the boot degraded state must not flip and
+      # +codebase_retrieve+ must keep answering from the still-healthy old
+      # stores. +woods_status+ exposes this additively; a successful reload
+      # clears it.
+      attr_reader :reload_failure
+
       def initialize
         @status = :initializing
         @reason = nil
@@ -55,6 +66,7 @@ module Woods
         @degraded_since = nil
         @resolved_config = nil
         @hydration_failures = {}
+        @reload_failure = nil
       end
 
       # Record a store-hydration soft failure. Kept separately from {#reason}
@@ -74,6 +86,40 @@ module Woods
       # @return [Boolean]
       def hydration_failed?
         !@hydration_failures.empty?
+      end
+
+      # Record a failed reload attempt (M7). The reload transaction is
+      # all-or-nothing: the failure means the previous generation is still
+      # being served, which is what +generation+ names.
+      #
+      # @param generation [Integer] generation still being served
+      # @param stores [Array<Symbol, String>] store component(s) whose
+      #   refresh failed
+      # @param reason [String] formatted failure reason (+Class: message+)
+      # @return [self]
+      def record_reload_failure(generation:, stores:, reason:)
+        @reload_failure = {
+          phase: 'reload',
+          generation: generation,
+          stores: Array(stores).map(&:to_s),
+          reason: reason
+        }
+        self
+      end
+
+      # Clear the reload-phase degraded condition after a successful reload.
+      #
+      # @return [self]
+      def clear_reload_failure!
+        @reload_failure = nil
+        self
+      end
+
+      # Did the most recent reload attempt fail? Cleared by the next success.
+      #
+      # @return [Boolean]
+      def reload_failed?
+        !@reload_failure.nil?
       end
 
       # Transition to a new status.
@@ -117,6 +163,7 @@ module Woods
         if hydration_failed?
           h[:hydration_failures] = @hydration_failures.transform_values { |e| "#{e.class}: #{e.message}" }
         end
+        h[:reload_failure] = @reload_failure.dup if @reload_failure
         h
       end
     end
