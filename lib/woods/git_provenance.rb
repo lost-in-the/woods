@@ -78,7 +78,7 @@ module Woods
     #
     # @return [String] stripped output, or empty string on any failure
     def rev_parse(*args)
-      out, status = Open3.capture2('git', '-C', @root, 'rev-parse', *args)
+      out, _err, status = Open3.capture3('git', '-C', @root, 'rev-parse', *args)
       status.success? ? out.strip : ''
     rescue StandardError
       ''
@@ -103,7 +103,7 @@ module Woods
       return @git_available if defined?(@git_available)
 
       @git_available = begin
-        _out, status = Open3.capture2('git', '--version')
+        _out, _err, status = Open3.capture3('git', '--version')
         status.success?
       rescue StandardError
         false

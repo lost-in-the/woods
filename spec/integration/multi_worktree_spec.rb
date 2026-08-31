@@ -18,8 +18,9 @@ require 'timeout'
 # is the part CI does not cover (recorded in docs/WATCH_DAEMON.md). The two
 # halves that can be covered are:
 #
-# * **Here:** six real worktrees, each with a real extraction against its own
-#   root and its own index, then concurrent readers across all of them.
+# * **Here:** six isolated Rails roots representing worktree checkouts, each
+#   with a real extraction against its own root and its own index, then
+#   concurrent readers across all of them.
 #   Proves per-worktree correctness, disjointness, validate-green, and that
 #   many readers converge without coordination.
 # * **spec/watch/multi_instance_spec.rb:** genuinely concurrent daemon cycles,
