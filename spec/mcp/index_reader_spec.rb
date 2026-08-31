@@ -965,4 +965,142 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(reader.raw_graph_data).to include('nodes')
     end
   end
+
+  # ── bounded user regex (P5) ──────────────────────────────────────────
+
+  describe 'bounded user search regex' do
+    # P5. search compiles the query as a raw Ruby regex with no time bound,
+    # so a pattern with catastrophic backtracking stalled the single stdio
+    # dispatch thread indefinitely. The compiled pattern now carries a
+    # per-match wall-clock limit (Ruby 3.2+); the pin below fails on the
+    # pre-fix shape, where no limit is recorded.
+    it 'compiles the user pattern with a per-match time limit' do
+      unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+        skip('per-pattern Regexp timeouts need Ruby 3.2+')
+      end
+
+      compiled = reader.send(:compile_search_pattern, '(a+)+')
+
+      expect(compiled.timeout).to eq(described_class::SEARCH_PATTERN_TIMEOUT)
+    end
+
+    it 'compiles the escaped fallback with the same per-match time limit' do
+      unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+        skip('per-pattern Regexp timeouts need Ruby 3.2+')
+      end
+
+      compiled = reader.send(:compile_search_pattern, '(invalid[')
+
+      expect(compiled.timeout).to eq(described_class::SEARCH_PATTERN_TIMEOUT)
+    end
+
+    it 'returns a bounded response for a pathological pattern' do
+      watchdog = Thread.new do
+        sleep 10
+        warn 'search did not return within 10s'
+        exit! 1
+      end
+
+      result = reader.search('(a+)+x', fields: %w[identifier source_code])
+
+      expect(result).to include(:results)
+      expect(result[:results]).to be_an(Array)
+      watchdog.kill
+    end
+
+    # Review finding: `rescue Regexp::TimeoutError` names a constant that
+    # does not exist before Ruby 3.2, and Ruby resolves rescue-class
+    # expressions lazily, when an exception actually occurs. On Ruby
+    # 3.0/3.1 any *other* failure inside the search block therefore
+    # surfaced as `NameError: uninitialized constant Regexp::TimeoutError`,
+    # masking the original error. The removal below simulates that absence
+    # on newer Rubies (where it is the standing condition on 3.0/3.1).
+    it 'propagates unrelated phase-two failures instead of masking them' do
+      failing_reader = described_class.new(fixture_dir)
+      allow(failing_reader).to receive(:find_unit).and_raise(IOError, 'disk gone')
+
+      has_timeout_error = Regexp.const_defined?(:TimeoutError, false)
+      original = Regexp.const_get(:TimeoutError, false) if has_timeout_error
+      Regexp.send(:remove_const, :TimeoutError) if has_timeout_error
+      begin
+        expect { failing_reader.search('Post', fields: %w[source_code]) }
+          .to raise_error(IOError, /disk gone/)
+      ensure
+        Regexp.const_set(:TimeoutError, original) if has_timeout_error
+      end
+    end
+
+    it 'does not name Regexp::TimeoutError in a rescue clause' do
+      source = File.read(File.expand_path('../../lib/woods/mcp/index_reader.rb', __dir__))
+
+      expect(source).not_to match(/rescue[^\n]*Regexp::TimeoutError/)
+    end
+  end
+
+  # ── one graph parse per generation (P6) ──────────────────────────────
+
+  describe 'one graph parse per generation' do
+    # P6. dependency_graph and raw_graph_data each parsed
+    # dependency_graph.json independently, so a generation that touched both
+    # (traversals use the raw hash; pagerank tools use the graph) held two
+    # parsed copies of the same large file. from_h is non-mutating on its
+    # input, so one parse can feed both. The parse counts below fail on the
+    # pre-fix shape.
+    let(:fresh_reader) { described_class.new(fixture_dir) }
+
+    def counted_graph_parses
+      calls = Hash.new(0)
+      allow_any_instance_of(described_class).to receive(:parse_json).and_wrap_original do |method, filename|
+        calls[filename] += 1
+        method.call(filename)
+      end
+      calls
+    end
+
+    it 'parses dependency_graph.json once for both accessors' do
+      calls = counted_graph_parses
+
+      graph = fresh_reader.dependency_graph
+      raw = fresh_reader.raw_graph_data
+
+      expect(graph).to be_a(Woods::DependencyGraph)
+      expect(graph.dependencies_of('Comment')).to include('Post')
+      expect(raw).to include('nodes')
+      expect(calls['dependency_graph.json']).to eq(1)
+    end
+
+    it 'parses once per generation across a reload' do
+      calls = counted_graph_parses
+
+      fresh_reader.dependency_graph
+      fresh_reader.raw_graph_data
+      fresh_reader.reload!
+      fresh_reader.dependency_graph
+
+      expect(calls['dependency_graph.json']).to eq(2)
+    end
+
+    # Review finding: raw_graph_data is shared state for the whole
+    # generation (dependency_graph builds from the same hash), so a public
+    # mutation of a nested edge reached the internal copy and corrupted the
+    # typed graph. The parsed structure is deep-frozen at parse time before
+    # the memo publishes it.
+    it 'refuses nested mutation and keeps the typed graph unchanged' do
+      raw = fresh_reader.raw_graph_data
+
+      expect { raw['edges']['Comment'] << 'Injected' }.to raise_error(FrozenError)
+      expect { raw['nodes']['Comment']['type'] = 'service' }.to raise_error(FrozenError)
+      expect(fresh_reader.raw_graph_data['edges']['Comment']).to eq(['Post'])
+      expect(fresh_reader.dependency_graph.dependencies_of('Comment')).to eq(['Post'])
+    end
+
+    it 'still parses dependency_graph.json once per generation under freeze' do
+      calls = counted_graph_parses
+
+      fresh_reader.raw_graph_data
+      fresh_reader.dependency_graph
+
+      expect(calls['dependency_graph.json']).to eq(1)
+    end
+  end
 end

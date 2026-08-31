@@ -6,6 +6,11 @@ require 'open3'
 require 'rbconfig'
 require 'woods/session_tracer/redis_store'
 
+# Mirrors the redis client's type-refusal errors (Redis::CommandError /
+# Redis::WrongTypeError, depending on gem generation). Named with the Redis
+# prefix so the store's client-error class check matches.
+class RedisTestCommandError < StandardError; end
+
 # Minimal in-memory Redis mock for unit testing.
 # Implements only the subset of Redis commands used by RedisStore.
 class MockRedis
@@ -65,6 +70,66 @@ class MockRedis
   def del(key)
     @data.delete(key)
     1
+  end
+
+  # ── sorted-set commands (session recency index) ──────────────────────
+
+  # rubocop:disable-next Naming/PredicateMethod
+  def zadd(key, score, member)
+    ensure_zset(key)
+    (@data[key] ||= {})[member] = score.to_f
+    true
+  end
+
+  def zrange(key, start, stop)
+    ensure_zset(key)
+    members = (@data[key] || {}).sort_by { |member, score| [score, member] }.map(&:first)
+    stop = members.size - 1 if stop == -1
+    members[start..stop] || []
+  end
+
+  def zrem(key, member)
+    ensure_zset(key)
+    (@data[key] || {}).delete(member)
+    1
+  end
+
+  def zcard(key)
+    ensure_zset(key)
+    (@data[key] || {}).size
+  end
+
+  # Emulates the store's recency-index script — the only script the suite
+  # sends — as a single step: type check, legacy-member transfer, insertion.
+  # The live-Redis spec exercises the real Lua against a real server.
+  def eval(script, keys: [], argv: [])
+    unless script == Woods::SessionTracer::RedisStore::INDEX_UPDATE_SCRIPT
+      raise ArgumentError, 'MockRedis only implements the Woods recency-index script'
+    end
+
+    key = keys.fetch(0)
+    score = argv.fetch(0).to_f
+    member = argv.fetch(1)
+
+    case @data[key]
+    when Array
+      legacy = @data.delete(key)
+      @data[key] = {}
+      legacy.each { |m| @data[key][m] = 0.0 }
+    when nil
+      @data[key] = {}
+    end
+    @data[key][member] = score
+    1
+  end
+
+  # A set is an Array here and a zset a Hash, mirroring how the real server
+  # refuses cross-type commands.
+  def ensure_zset(key)
+    existing = @data[key]
+    return if existing.nil? || existing.is_a?(Hash)
+
+    raise RedisTestCommandError, 'WRONGTYPE Operation against a key holding the wrong kind of value'
   end
 end
 
@@ -250,6 +315,92 @@ RSpec.describe Woods::SessionTracer::RedisStore do
 
       expect { store.record('sess1', cyclic) }.to raise_error(JSON::NestingError)
       expect(redis).not_to have_received(:rpush)
+    end
+  end
+
+  describe 'recency zset index (P4)' do
+    # P4. prune_sessions read every candidate session's history to order
+    # them, so once max_sessions was reached every record re-read all of
+    # them. The index is now a recency ZSET scored by the request's own
+    # timestamp; eviction order is unchanged and histories are never
+    # re-read for eviction. The lrange count below fails on the pre-fix
+    # shape, where prune called read() for every session.
+    it 'evicts overflow without reading session histories' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      bounded.record('one', request_data)
+      bounded.record('two', request_data)
+
+      allow(redis).to receive(:lrange).and_call_original
+      bounded.record('three', request_data)
+
+      expect(redis).not_to have_received(:lrange)
+      expect(bounded.sessions(limit: 10).map { |s| s['session_id'] }).to contain_exactly('two', 'three')
+    end
+
+    it 'scores the index by the request timestamp, so eviction matches last-request order' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      bounded.record('newest', request_data.merge('timestamp' => '2026-02-13T12:00:00Z'))
+      bounded.record('oldest', request_data.merge('timestamp' => '2026-02-13T09:00:00Z'))
+      bounded.record('middle', request_data.merge('timestamp' => '2026-02-13T10:00:00Z'))
+
+      expect(bounded.read('oldest')).to eq([])
+      expect(bounded.read('middle').size).to eq(1)
+      expect(bounded.read('newest').size).to eq(1)
+    end
+
+    it 'falls back to write time when the request carries no parseable timestamp' do
+      store.record('no_ts', { 'controller' => 'OrdersController' })
+
+      expect(store.sessions.first['session_id']).to eq('no_ts')
+    end
+
+    it 'migrates a legacy set-based session index on first record' do
+      redis.sadd(described_class::SESSIONS_KEY, 'legacy')
+      store.record('fresh', request_data)
+
+      expect(store.sessions.map { |s| s['session_id'] }).to eq(['fresh'])
+
+      store.record('fresh', request_data.merge('action' => 'create'))
+      expect(store.sessions.size).to eq(1)
+    end
+
+    # Review finding: the pre-fix migration was three separate commands
+    # (SMEMBERS, DEL, re-ZADD) driven from Ruby, so two writers racing a
+    # legacy index could interleave: writer A converted the key between
+    # writer B's SMEMBERS and B's DEL, and B's DEL erased A's just-written
+    # member. The hook below forces exactly that interleaving
+    # deterministically: writer A's complete record runs inside writer B's
+    # migration window (between B's SMEMBERS and B's DEL). On the fixed
+    # shape there is no Ruby-side member read or DEL in the index path at
+    # all (the script is atomic server-side), so the hook never fires and
+    # writer A records sequentially instead.
+    it 'keeps both writers indexed, with no orphaned list, when their migrations interleave' do
+      redis.sadd(described_class::SESSIONS_KEY, 'legacy')
+      store_a = described_class.new(redis: redis)
+      store_b = described_class.new(redis: redis)
+
+      del_calls = 0
+      allow(redis).to receive(:del).and_wrap_original do |method, key|
+        del_calls += 1
+        store_a.record('one', request_data) if del_calls == 1
+        method.call(key)
+      end
+
+      store_b.record('two', request_data)
+      store_a.record('one', request_data) if del_calls.zero?
+
+      indexed = redis.zrange(described_class::SESSIONS_KEY, 0, -1)
+      expect(indexed).to contain_exactly('legacy', 'one', 'two')
+      expect(store_b.read('two').size).to eq(1)
+      expect(store_a.read('one').size).to eq(1)
+
+      session_lists = redis.data.keys.select { |key| key.start_with?(described_class::KEY_PREFIX) }
+      session_list_ids = session_lists.map do |key|
+        encoded = key.delete_prefix(described_class::KEY_PREFIX)
+        encoded.start_with?('b64.') ? Base64.urlsafe_decode64(encoded.delete_prefix('b64.')) : encoded
+      end
+      expect(session_list_ids).not_to be_empty
+      expect(indexed).to include(*session_list_ids)
     end
   end
 end

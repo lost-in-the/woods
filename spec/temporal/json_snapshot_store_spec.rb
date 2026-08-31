@@ -369,4 +369,90 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
       expect(result.last[:git_sha]).to eq('aaa1111')
     end
   end
+
+  # ── retention (P8) ────────────────────────────────────────────────
+
+  describe 'retention' do
+    # P8. One snapshot file per SHA was never pruned, so a long-lived repo
+    # grew snapshots/ unboundedly and every unit_history call materialized
+    # all of them. Retention now matches the payload store: keep the newest
+    # N by extracted_at. The file-count assertions below fail on the
+    # pre-fix shape.
+    let(:units) do
+      [{ identifier: 'User', type: 'model', source_hash: 'h1', metadata_hash: 'm1', dependencies_hash: 'd1' }]
+    end
+
+    def manifest_for(sha, extracted_at)
+      {
+        'git_sha' => sha,
+        'git_branch' => 'main',
+        'extracted_at' => extracted_at,
+        'rails_version' => '8.1.0',
+        'ruby_version' => '3.3.0',
+        'total_units' => 1,
+        'counts' => { 'models' => 1 },
+        'gemfile_lock_sha' => 'lock_hash_1',
+        'schema_sha' => 'schema_hash_1'
+      }
+    end
+
+    def capture_series(count, dir: tmpdir)
+      count.times do |i|
+        sha = format('%06x', i)
+        captured_at = format('2026-01-%02dT10:00:00Z', i + 1)
+        described_class.new(dir: dir).capture(manifest_for(sha, captured_at), units)
+      end
+    end
+
+    it 'keeps only the newest snapshots by default' do
+      capture_series(4)
+
+      remaining = Dir.children(File.join(tmpdir, 'snapshots')).sort
+      expect(remaining).to eq(%w[000001.json 000002.json 000003.json])
+      expect(store.list.size).to eq(3)
+    end
+
+    it 'honors WOODS_PAYLOAD_RETENTION like the payload store' do
+      ENV['WOODS_PAYLOAD_RETENTION'] = '2'
+      capture_series(3)
+    ensure
+      ENV.delete('WOODS_PAYLOAD_RETENTION')
+
+      remaining = Dir.children(File.join(tmpdir, 'snapshots')).sort
+      expect(remaining).to eq(%w[000001.json 000002.json])
+    end
+
+    # Review finding: first(overflow) was applied before rejecting the
+    # protected SHA, so a newly captured snapshot with an older or tied
+    # extracted_at occupied the victim slice, got rejected as protected, and
+    # no replacement victim was selected — three files remained at
+    # retention 2.
+    it 'holds the bound when the captured snapshot has an older extracted_at' do
+      store = described_class.new(dir: tmpdir, retention: 2)
+      store.capture(manifest_for('aaa111', '2026-02-01T10:00:00Z'), units)
+      store.capture(manifest_for('bbb222', '2026-02-02T10:00:00Z'), units)
+      store.capture(manifest_for('ccc333', '2026-01-15T10:00:00Z'), units)
+
+      remaining = Dir.children(File.join(tmpdir, 'snapshots')).sort
+      expect(remaining).to eq(%w[bbb222.json ccc333.json])
+      expect(File.exist?(File.join(tmpdir, 'snapshots', 'ccc333.json'))).to be true
+    end
+
+    it 'answers history questions across pruned snapshots without error' do
+      capture_series(4)
+
+      expect(store.diff('000000', '000003')).to eq(added: [], modified: [], deleted: [])
+      expect(store.unit_history('User').map { |entry| entry[:git_sha] }).to eq(%w[000003 000002 000001])
+    end
+
+    it 'keeps every snapshot when the explicit retention exceeds the count' do
+      4.times do |i|
+        sha = format('%06x', i)
+        captured_at = format('2026-01-%02dT10:00:00Z', i + 1)
+        described_class.new(dir: tmpdir, retention: 5).capture(manifest_for(sha, captured_at), units)
+      end
+
+      expect(Dir.children(File.join(tmpdir, 'snapshots')).size).to eq(4)
+    end
+  end
 end

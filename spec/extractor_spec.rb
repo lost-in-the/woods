@@ -635,6 +635,29 @@ RSpec.describe Woods::Extractor do
 
       extractor.send(:batch_git_data, file_paths)
     end
+
+    # P9d. Many units share one file_path, so the collected file_paths sent
+    # to batch_git_data carried duplicates and each 500-path pathspec batch
+    # repeated paths other batches also sent. The result is keyed by
+    # relative path, so deduplicating is invisible to the output; the
+    # slice count below fails on the pre-fix shape (2200 entries).
+    it 'deduplicates repeated file paths before slicing' do
+      require 'active_support'
+      require 'active_support/core_ext/numeric/time'
+
+      file_paths = (1..1100).flat_map { |i| [File.join(tmpdir, "file_#{i}.rb")] * 2 }
+
+      allow(extractor).to receive(:parse_git_log_output)
+      allow(extractor).to receive(:build_file_metadata).and_return({})
+
+      fake_now = Time.new(2024, 1, 1, 0, 0, 0, '+00:00')
+      allow(Time).to receive(:current).and_return(fake_now)
+
+      expect(extractor).to receive(:run_git).exactly(3).times.and_return('')
+
+      result = extractor.send(:batch_git_data, file_paths)
+      expect(result.size).to eq(1100)
+    end
   end
 
   # ── re_extract_unit ───────────────────────────────────────────────────

@@ -1209,4 +1209,52 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(described_class.new.discoverable_classes).to eq([user_type])
     end
   end
+
+  # ── One scan for model-call constants (P9c) ──────────────────────────
+
+  describe 'model-call dependency scan' do
+    let(:extractor) { described_class.new }
+
+    let(:type_source) do
+      String.new(<<~RUBY)
+        module Types
+          class OrderType < BaseObject
+            field :customer, CustomerType, null: false
+
+            def customer_records
+              Customer.find(@object.customer_id)
+            end
+
+            def invoices
+              Invoice.where(paid: false)
+            end
+          end
+        end
+      RUBY
+    end
+
+    it 'emits model dependencies for constants followed by model calls, in scan order' do
+      deps = extractor.send(:extract_dependencies, type_source, 'Types::OtherType')
+
+      model_targets = deps.select { |d| d[:type] == :model }.map { |d| d[:target] }
+      expect(model_targets).to eq(%w[Customer Invoice])
+    end
+
+    # P9c. The follow-up check ran one full-source match? per unique
+    # capitalized constant; the constants that are actually followed by a
+    # model call are now collected by one combined scan. Emitted
+    # dependencies are unchanged; the match? count below fails on the
+    # pre-fix shape.
+    it 'checks constant follow-ups without per-constant source scans' do
+      match_calls = 0
+      allow(type_source).to receive(:match?).and_wrap_original do |method, *args|
+        match_calls += 1
+        method.call(*args)
+      end
+
+      extractor.send(:extract_dependencies, type_source, 'Types::OtherType')
+
+      expect(match_calls).to eq(0)
+    end
+  end
 end
