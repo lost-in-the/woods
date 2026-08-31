@@ -270,7 +270,7 @@ RSpec.describe Woods::FlowPrecomputer do
       expect(result).to eq({})
     end
 
-    it 'handles FlowAssembler errors gracefully per action' do
+    it 'raises when one action fails to assemble instead of publishing a partial index' do
       controller = make_unit(
         type: :controller,
         identifier: 'BadController',
@@ -310,11 +310,11 @@ RSpec.describe Woods::FlowPrecomputer do
       stub_const('Rails', double('Rails', logger: logger))
 
       precomputer = described_class.new(units: [controller], graph: graph, output_dir: output_dir)
-      result = precomputer.precompute
 
-      # Should still have the ok action
-      expect(result).to have_key('BadController#ok')
-      expect(result).not_to have_key('BadController#broken')
+      # A per-action skip would publish an index missing that entry while
+      # the extraction continues — the full path is fail closed like the
+      # incremental one, so the caller aborts before publishing.
+      expect { precomputer.precompute }.to raise_error(Woods::ExtractionError, /parse error/)
     end
   end
 

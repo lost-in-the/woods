@@ -436,6 +436,17 @@ module Woods
       # earlier assembled every flow from absent (fresh output dir) or
       # stale (previous run's) data. precompute_flows re-writes the
       # controller units it annotates with metadata[:flow_paths].
+      #
+      # Fail closed (M3 review round 3): a failure anywhere in the family —
+      # assembly, index write, annotation rewrite, sweep — raises and aborts
+      # the run here, BEFORE the graph, manifest, snapshot, and generation
+      # publish below. The previously published generation stays resolved
+      # and readable; the aborted run's payload directory is left
+      # unreachable for the next run's PayloadStore#create to reclaim.
+      # Publishing a partial flow index, stale prior flow artifacts
+      # alongside a new graph, or half-rewritten annotations would violate
+      # the atomic-generation and full/incremental-equivalence contracts;
+      # being opt-in does not excuse it.
       if Woods.configuration.precompute_flows
         Rails.logger.info '[Woods] Precomputing request flows...'
         precompute_flows
@@ -1141,6 +1152,14 @@ module Woods
     # Flow Precomputation
     # ──────────────────────────────────────────────────────────────────────
 
+    # Full-path counterpart of {#refresh_incremental_flows}: assemble every
+    # controller's flows, annotate the in-memory units, rewrite them, and
+    # sweep orphans. Failure-closed — any error raises to {#extract_all},
+    # which aborts before write_manifest/publish_generation, so a partial
+    # flow index or half-rewritten annotations can never be published.
+    #
+    # @return [void]
+    # @raise [Woods::ExtractionError] when any flow-family step fails
     def precompute_flows
       all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: payload_dir.to_s)
@@ -1148,8 +1167,6 @@ module Woods
       rewrite_flow_annotated_units
       sweep_orphaned_flow_files
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
-    rescue StandardError => e
-      Rails.logger.error "[Woods] Flow precomputation failed: #{e.message}"
     end
 
     # Precompute runs after write_results (FlowAssembler reads unit JSON

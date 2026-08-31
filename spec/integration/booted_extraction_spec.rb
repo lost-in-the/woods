@@ -213,4 +213,111 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       expect(File.binread(File.join(@vault_dir, 'models/Post.md'))).to eq(before_bytes)
     end
   end
+
+  # Full-path flow precomputation is fail closed: a failure anywhere in the
+  # flow family must abort the extraction before publish_generation, leaving
+  # the previously published generation resolved, readable, and byte-identical.
+  # The aborted run's payload directory (gen-N+1) stays on disk but
+  # unreachable — nothing points at it, and the next run's PayloadStore#create
+  # empties that same unbumped-generation-numbered directory before writing
+  # into it again. Kept separate from spec/extractors/flow_incremental_spec
+  # per the established assertion separation.
+  describe 'flow precomputation (full path, fail closed)' do
+    before(:all) do
+      @flow_dir = Dir.mktmpdir('woods_flow_full')
+      Woods.configuration.precompute_flows = true
+      Woods::Extractor.new(output_dir: @flow_dir).extract_all
+    end
+
+    after(:all) do
+      Woods.configuration.precompute_flows = false
+      FileUtils.rm_rf(@flow_dir) if @flow_dir
+    end
+
+    def flow_payload_dir
+      Woods::Generation.new(output_dir: @flow_dir).payload_dir.to_s
+    end
+
+    def generation_bytes
+      File.read(File.join(@flow_dir, 'generation.json'))
+    end
+
+    def flow_snapshot
+      flows = File.join(flow_payload_dir, 'flows')
+      Dir[File.join(flows, '*.json')].to_h { |p| [File.basename(p), File.read(p)] }
+    end
+
+    def full_extract
+      Woods::Extractor.new(output_dir: @flow_dir).extract_all
+    end
+
+    it 'aborts publication when one action fails to assemble' do
+      before_bytes = generation_bytes
+
+      assembler = instance_double(Woods::FlowAssembler)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
+      allow(assembler).to receive(:assemble).and_raise(StandardError, 'broken route table')
+
+      expect { full_extract }.to raise_error(Woods::ExtractionError, /broken route table/)
+
+      expect(generation_bytes).to eq(before_bytes)
+    end
+
+    it 'aborts publication when the flow index write fails' do
+      before_bytes = generation_bytes
+
+      failed = false
+      allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+        if !failed && path.to_s.end_with?('flow_index.json')
+          failed = true
+          raise Woods::ExtractionError, 'disk full'
+        end
+        original.call(path, content)
+      end
+
+      expect { full_extract }.to raise_error(Woods::ExtractionError, /disk full/)
+
+      expect(generation_bytes).to eq(before_bytes)
+    end
+
+    it 'aborts publication when the controller annotation write fails' do
+      before_bytes = generation_bytes
+
+      # The annotation rewrite is the run's only controller JSON write whose
+      # serialized content carries metadata.flow_paths.
+      allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+        if path.to_s.include?('/controllers/') && content.to_s.include?('"flow_paths"')
+          raise Woods::ExtractionError, 'disk full'
+        end
+
+        original.call(path, content)
+      end
+
+      expect { full_extract }.to raise_error(Woods::ExtractionError, /disk full/)
+
+      expect(generation_bytes).to eq(before_bytes)
+    end
+
+    it 'leaves the previously published generation readable and unchanged' do
+      before_bytes = generation_bytes
+      before_flows = flow_snapshot
+      before_manifest = File.read(File.join(flow_payload_dir, 'manifest.json'))
+      before_graph = File.read(File.join(flow_payload_dir, 'dependency_graph.json'))
+
+      allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+        raise Woods::ExtractionError, 'disk full' if path.to_s.end_with?('flow_index.json')
+
+        original.call(path, content)
+      end
+
+      expect { full_extract }.to raise_error(Woods::ExtractionError, /disk full/)
+
+      # Read through the published generation pointer, mirroring the
+      # incremental injections' assertion shape.
+      expect(generation_bytes).to eq(before_bytes)
+      expect(flow_snapshot).to eq(before_flows)
+      expect(File.read(File.join(flow_payload_dir, 'manifest.json'))).to eq(before_manifest)
+      expect(File.read(File.join(flow_payload_dir, 'dependency_graph.json'))).to eq(before_graph)
+    end
+  end
 end

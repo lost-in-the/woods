@@ -45,8 +45,15 @@ module Woods
 
     # Pre-compute flow documents for all controller actions.
     #
+    # Assembly is fail closed (M3 review round 3): a per-action failure
+    # raises instead of skipping the entry, so a partial index — missing
+    # entries alongside a freshly written graph — is never written and the
+    # caller aborts before publishing. The full extraction path shares this
+    # contract with the incremental delta.
+    #
     # @return [Hash{String => String}] Map of entry_point to output_dir-relative
     #   flow file path (e.g. "flows/OrdersController_create.json")
+    # @raise [Woods::ExtractionError] when any action fails to assemble
     def precompute
       FileUtils.mkdir_p(@flows_dir)
 
@@ -54,7 +61,7 @@ module Woods
       flow_map = {}
 
       controller_units.each do |unit|
-        entries, unit_flow_paths = assemble_controller_unit(assembler, unit)
+        entries, unit_flow_paths = assemble_controller_unit(assembler, unit, fail_closed: true)
         flow_map.merge!(entries)
         unit.metadata[:flow_paths] = unit_flow_paths if unit_flow_paths.any?
       end
