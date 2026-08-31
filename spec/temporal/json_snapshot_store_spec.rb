@@ -422,6 +422,22 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
       expect(remaining).to eq(%w[000001.json 000002.json])
     end
 
+    # Review finding: first(overflow) was applied before rejecting the
+    # protected SHA, so a newly captured snapshot with an older or tied
+    # extracted_at occupied the victim slice, got rejected as protected, and
+    # no replacement victim was selected — three files remained at
+    # retention 2.
+    it 'holds the bound when the captured snapshot has an older extracted_at' do
+      store = described_class.new(dir: tmpdir, retention: 2)
+      store.capture(manifest_for('aaa111', '2026-02-01T10:00:00Z'), units)
+      store.capture(manifest_for('bbb222', '2026-02-02T10:00:00Z'), units)
+      store.capture(manifest_for('ccc333', '2026-01-15T10:00:00Z'), units)
+
+      remaining = Dir.children(File.join(tmpdir, 'snapshots')).sort
+      expect(remaining).to eq(%w[bbb222.json ccc333.json])
+      expect(File.exist?(File.join(tmpdir, 'snapshots', 'ccc333.json'))).to be true
+    end
+
     it 'answers history questions across pruned snapshots without error' do
       capture_series(4)
 

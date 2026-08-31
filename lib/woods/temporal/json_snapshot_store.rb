@@ -145,16 +145,20 @@ module Woods
       end
 
       # Oldest `overflow` snapshots by extracted_at, never the protected one.
+      # The protected SHA is rejected before sorting and slicing: it is
+      # captured last, so its extracted_at can tie or precede older entries,
+      # and letting it occupy the victim slice would leave the store one file
+      # over its bound with no replacement victim selected.
       #
       # @param summaries [Array<Hash>]
       # @param overflow [Integer]
       # @param protect [String] git SHA of the just-captured snapshot
       # @return [Array<String>]
       def retention_victims(summaries, overflow, protect)
-        summaries.sort_by { |s| s[:extracted_at] || '' }
+        summaries.reject { |summary| summary[:git_sha] == protect }
+                 .sort_by { |summary| summary[:extracted_at] || '' }
                  .first(overflow)
-                 .map { |s| s[:git_sha] }
-                 .reject { |sha| sha == protect }
+                 .map { |summary| summary[:git_sha] }
       end
 
       def mget(hash, key)
