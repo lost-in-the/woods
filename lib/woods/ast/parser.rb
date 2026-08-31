@@ -337,7 +337,12 @@ module Woods
 
         Node.new(
           type: :if,
-          children: [condition, then_body, else_body].compact,
+          # Positional: [condition, then, else]. NO compact — a missing slot
+          # must stay a nil hole. A literal `nil` condition converts to nil
+          # (the NilNode mapping below), and compacting shifted the else body
+          # into children[1], which handle_conditional reported as then_ops
+          # (L2). Every consumer guards with `is_a?(Ast::Node)`.
+          children: [condition, then_body, else_body],
           line: line_for_prism(prism_node),
           end_line: end_line_for_prism(prism_node),
           source: condition_source
@@ -529,7 +534,9 @@ module Woods
           else_body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
           Node.new(
             type: :if,
-            children: [condition, then_body, else_body].compact,
+            # Positional [condition, then, else] with nil holes — see the
+            # Prism branch of convert_prism_if (L2).
+            children: [condition, then_body, else_body],
             line: parser_node.loc.line,
             end_line: parser_node.loc.expression&.last_line,
             source: condition_source

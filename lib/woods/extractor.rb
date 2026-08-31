@@ -71,6 +71,7 @@ module Woods
   #
   class Extractor
     include FilenameUtils
+    include Extractors::SourceNesting
 
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
@@ -435,6 +436,17 @@ module Woods
       # earlier assembled every flow from absent (fresh output dir) or
       # stale (previous run's) data. precompute_flows re-writes the
       # controller units it annotates with metadata[:flow_paths].
+      #
+      # Fail closed (M3 review round 3): a failure anywhere in the family —
+      # assembly, index write, annotation rewrite, sweep — raises and aborts
+      # the run here, BEFORE the graph, manifest, snapshot, and generation
+      # publish below. The previously published generation stays resolved
+      # and readable; the aborted run's payload directory is left
+      # unreachable for the next run's PayloadStore#create to reclaim.
+      # Publishing a partial flow index, stale prior flow artifacts
+      # alongside a new graph, or half-rewritten annotations would violate
+      # the atomic-generation and full/incremental-equivalence contracts;
+      # being opt-in does not excuse it.
       if Woods.configuration.precompute_flows
         Rails.logger.info '[Woods] Precomputing request flows...'
         precompute_flows
@@ -504,21 +516,27 @@ module Woods
       # Reconcile once more, because pruning can un-know a class the first pass
       # skipped. A class-based file moved between autoload directories with its
       # constant unchanged is still registered under the old path when
-      # reconciliation runs, so it looks known and is not re-extracted; the prune
-      # that follows then removes it for its vanished path. One pass leaves the
-      # unit missing until some later run happens to notice — this pass closes it
-      # in the same run. Idempotent when nothing was pruned: the discovery set is
-      # compared against the graph, so an already-registered class is skipped.
+      # reconciliation runs, so it looks known and is not re-extracted; the
+      # prune that follows then removes it for its vanished path. This pass
+      # re-adds it in the same run (M1) instead of leaving the unit missing
+      # until some later run happens to notice. Idempotent when nothing was
+      # pruned: the discovery set is compared against the graph, so an
+      # already-registered class is skipped.
       #
-      # `except:` is what keeps it from undoing a *deletion*. Without a reload,
-      # a constant outlives the file that defined it — so deleting
-      # `app/models/user.rb` prunes `User` and then this pass finds `User` still
-      # in `ActiveRecord::Base.descendants` and re-registers it against a path
-      # that no longer exists. From then on nothing can remove it: the sweep
-      # excludes class-based units and no future change set names that path
-      # again. A resident daemon processing a batch before its reload hits this
-      # every time.
-      touched.merge(reconcile_class_based_types(affected_types, except: pruned))
+      # But not everything pruning removed may come back. `except:` keeps the
+      # *deletion* shape pruned: without a reload, a constant outlives the file
+      # that defined it — so deleting `app/models/user.rb` prunes `User`, and
+      # this pass finds `User` still in `ActiveRecord::Base.descendants`.
+      # Re-registering it would pin the unit to a path that no longer exists,
+      # and nothing could ever remove it: the sweep excludes class-based units
+      # and no future change set names that path again. A resident daemon
+      # processing a batch before its reload hits this every time. What
+      # separates the two shapes is the filesystem — only pruned identifiers
+      # that a still-existing file in the change set actually declares are
+      # re-addable. See {#readdable_pruned_classes}.
+      touched.merge(reconcile_class_based_types(
+                      affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
+                    ))
 
       finalize_incremental_unit_json(affected_types)
 
@@ -647,6 +665,7 @@ module Woods
       end
 
       write_incremental_graph_analysis
+      refresh_incremental_flows(touched)
       write_manifest(incremental: true)
       write_structural_summary
       publish_generation(reason)
@@ -1133,14 +1152,21 @@ module Woods
     # Flow Precomputation
     # ──────────────────────────────────────────────────────────────────────
 
+    # Full-path counterpart of {#refresh_incremental_flows}: assemble every
+    # controller's flows, annotate the in-memory units, rewrite them, and
+    # sweep orphans. Failure-closed — any error raises to {#extract_all},
+    # which aborts before write_manifest/publish_generation, so a partial
+    # flow index or half-rewritten annotations can never be published.
+    #
+    # @return [void]
+    # @raise [Woods::ExtractionError] when any flow-family step fails
     def precompute_flows
       all_units = @results.values.flatten(1)
       precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: payload_dir.to_s)
       flow_map = precomputer.precompute
       rewrite_flow_annotated_units
+      sweep_orphaned_flow_files
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
-    rescue StandardError => e
-      Rails.logger.error "[Woods] Flow precomputation failed: #{e.message}"
     end
 
     # Precompute runs after write_results (FlowAssembler reads unit JSON
@@ -1171,6 +1197,203 @@ module Woods
           json_serialize(type_index_entries(units))
         )
       end
+    end
+
+    # Incremental counterpart of Phase 5.5 (M3): the run's controller delta
+    # gets the same flow annotations a full run would give it, flow
+    # documents and flow_index.json are refreshed for the touched
+    # controllers while untouched controllers' entries carry forward, and
+    # flows/ documents no entry references are swept. Without this, a
+    # controller re-extracted incrementally lost metadata[:flow_paths],
+    # flow_index.json described pre-change routes, and flows/ files for
+    # deleted or renamed controllers persisted across every generation —
+    # seeded forward by PAYLOAD_DIRS.
+    #
+    # Runs inside {#finalize_incremental_run} so both extract_changed and
+    # refresh (whose routes cascade rewrites controllers wholesale) get it,
+    # and so a no-op run — which returns before this — leaves flows alone.
+    #
+    # Skip rule: the refresh participates whenever the gate is on and
+    # something is touched. A genuinely absent family — no flows/ directory,
+    # or an empty one — skips: there is nothing to carry forward, publication
+    # proceeds, and the next full extraction with the gate on builds the
+    # family. Once the family holds ANY artifact it is authoritative: a
+    # missing flow_index.json among documents, a corrupt one, a failed
+    # rehydration, write, patch, sweep, or type-index regeneration raises,
+    # and the raise propagates out of {#finalize_incremental_run} BEFORE
+    # {#publish_generation} — no generation bump, the preceding generation
+    # stays resolved and readable. ( woods:validate applies the same rule
+    # for a populated family without an index.)
+    #
+    # @param touched [Set<String>] identifiers added, re-extracted, or removed
+    # @return [void]
+    # @raise [Woods::ExtractionError] when authoritative flow state is
+    #   missing or corrupt, or a flow-family write fails
+    def refresh_incremental_flows(touched)
+      return unless Woods.configuration.precompute_flows
+      return if touched.empty?
+      return unless flow_family_present?
+
+      controllers_dir = payload_dir.join('controllers')
+      reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
+      removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
+      return if reextracted.empty? && removed.empty?
+
+      Rails.logger.info "[Woods] Refreshing flows for #{reextracted.size} controller(s), " \
+                        "#{removed.size} removed..."
+      precomputer = FlowPrecomputer.new(units: [], graph: @dependency_graph, output_dir: payload_dir.to_s)
+      annotations = precomputer.recompute_delta(
+        touched_units: reextracted.filter_map { |id| unit_from_payload(:controllers, id) },
+        removed_identifiers: removed.to_a
+      )
+      patch_flow_annotations(annotations)
+      sweep_orphaned_flow_files
+      # The annotation patch changed controller JSON after the run's type
+      # index regeneration; the index carries estimated_tokens, which the
+      # flow_paths are part of — a full run builds its index from the
+      # annotated in-memory units, so the incremental one re-derives it from
+      # the annotated files to match. A failure here raises like every
+      # other refresh failure.
+      regenerate_type_index(:controllers) if annotations.any?
+    end
+
+    # Does the run's seeded payload hold a flow family at all? An absent
+    # family (no flows/ directory, or an empty one) is a genuine absence —
+    # typically an index built while the gate was off — and skips the
+    # refresh rather than publishing a delta-only index.
+    #
+    # @return [Boolean]
+    def flow_family_present?
+      flows_dir = payload_dir.join('flows')
+      return false unless flows_dir.directory?
+
+      !Dir[flows_dir.join('*.json')].empty?
+    end
+
+    # Controller identifiers that hold entries in the previous generation's
+    # flow_index.json. Only these can be flow-removed this run: a controller
+    # with no index entries has no documents to sweep and no annotation to
+    # clear.
+    #
+    # The read is authoritative ({#flow_family_present?} guaranteed the
+    # family holds artifacts): a missing index among documents, or a corrupt
+    # one, raises so publication aborts.
+    #
+    # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when the index is missing or corrupt
+    def previous_flow_index_controllers
+      index_path = payload_dir.join('flows', 'flow_index.json')
+      raise Woods::ExtractionError, 'flows/ is populated but flow_index.json is missing' unless index_path.exist?
+
+      JSON.parse(AtomicFile.read(index_path))
+          .keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first }
+    rescue JSON::ParserError => e
+      raise Woods::ExtractionError, "previous flow_index.json does not parse: #{e.message}"
+    end
+
+    # Rehydrate one unit from its payload JSON for the incremental flow
+    # pass. FlowPrecomputer only needs the identifier and the actions
+    # metadata; the source lives on disk, where FlowAssembler reads it.
+    #
+    # @param type_key [Symbol] extractor key naming the payload directory
+    # @param identifier [String]
+    # @return [ExtractedUnit, nil]
+    # @raise [Woods::ExtractionError] when the unit JSON does not parse —
+    #   skipping it would publish annotations against stale state
+    def unit_from_payload(type_key, identifier)
+      path = payload_dir.join(type_key.to_s, collision_safe_filename(identifier))
+      return unless File.exist?(path)
+
+      data = JSON.parse(AtomicFile.read(path))
+      unit = ExtractedUnit.new(
+        type: data['type'],
+        identifier: data['identifier'] || identifier,
+        file_path: data['file_path']
+      )
+      unit.metadata = data['metadata'] || {}
+      unit.source_code = data['source_code']
+      unit
+    rescue JSON::ParserError => e
+      raise Woods::ExtractionError, "could not rehydrate #{identifier} for flow refresh: #{e.message}"
+    end
+
+    # Write metadata[:flow_paths] into the re-extracted controllers' unit
+    # JSON — the incremental counterpart of {#rewrite_flow_annotated_units}.
+    # A controller with no flows this run loses any annotation a previous
+    # run had written, which is what a full run would have produced for the
+    # same tree. Read-compare-write, like {#rewrite_unit_json_of_type}; a
+    # read or write failure raises so publication aborts.
+    #
+    # @param annotations [Hash{String => Hash{String => String}}] from
+    #   {FlowPrecomputer#recompute_delta}
+    # @return [void]
+    def patch_flow_annotations(annotations)
+      annotations.each do |identifier, flow_paths|
+        path = payload_dir.join('controllers', collision_safe_filename(identifier))
+        next unless File.exist?(path)
+
+        data = JSON.parse(AtomicFile.read(path))
+        before = JSON.generate(data)
+
+        metadata = (data['metadata'] ||= {})
+        if flow_paths.any?
+          metadata['flow_paths'] = flow_paths
+        else
+          metadata.delete('flow_paths')
+        end
+        next if JSON.generate(data) == before
+
+        AtomicFile.write(path, json_serialize(data))
+      end
+    end
+
+    # Remove flows/ documents no entry of flow_index.json references.
+    #
+    # Deliberately NOT part of {#sweep_orphaned_unit_files}: that sweep
+    # deletes per-type unit files no in-memory unit accounts for, while
+    # flows/ holds neither units nor an _index.json. The flow family is
+    # defined by flow_index.json's references, and this validates against
+    # exactly those (M3) — the same artifact the validator treats separately
+    # (G-2). Before this, a controller deleted or renamed incrementally left
+    # its flow documents behind forever.
+    #
+    # Reconciled skip rule: a genuinely empty directory is an absence and is
+    # skipped; a populated one whose index is missing, or an index that does
+    # not parse, is corruption and raises — with nothing to validate
+    # against, deleting every document would be the one outcome worse than
+    # keeping orphans. Failures raise so the incremental caller aborts
+    # publication.
+    #
+    # @return [void]
+    # @raise [Woods::ExtractionError] when authoritative flow state is
+    #   missing or corrupt
+    def sweep_orphaned_flow_files
+      flows_dir = payload_dir.join('flows')
+      return unless flows_dir.directory?
+
+      index_path = flows_dir.join('flow_index.json')
+      unless index_path.exist?
+        return if Dir[flows_dir.join('*.json')].empty?
+
+        raise Woods::ExtractionError, 'flows/ is populated but flow_index.json is missing'
+      end
+
+      keep = parse_flow_index_for_sweep(index_path)
+             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json'
+      orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
+      return if orphans.empty?
+
+      orphans.each { |file| FileUtils.rm_f(file) }
+      Rails.logger.info "[Woods] Swept #{orphans.size} orphaned flow file(s)"
+    end
+
+    # @param index_path [Pathname]
+    # @return [Array<String>] the referenced document paths
+    # @raise [Woods::ExtractionError] when the index does not parse
+    def parse_flow_index_for_sweep(index_path)
+      JSON.parse(AtomicFile.read(index_path)).values
+    rescue JSON::ParserError => e
+      raise Woods::ExtractionError, "flow_index.json does not parse: #{e.message}"
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2041,6 +2264,76 @@ module Woods
       touched
     end
 
+    # Pruned class-based identifiers the tree still governs, and that the
+    # second reconciliation pass may therefore re-add.
+    #
+    # The class-based *move* shape — the file moved, the constant did not
+    # (M1) — prunes the unit for the vanished old path while the class stays
+    # in the discovery set; the move target is a changed file the active
+    # loader governs for exactly that constant, so re-adding produces the
+    # unit a full extraction produces. The *deletion* shape must stay
+    # pruned: without a reload a constant outlives the file that defined
+    # it, so liveness alone proves nothing.
+    #
+    # Identity is loader-derived, not textual: {SourceNesting#
+    # governed_class_name} returns the constant path the active Zeitwerk
+    # loader expects the changed file to define (its inflector, ignores,
+    # and root namespaces decide, via +cpath_expected_at+), gated on the
+    # file actually declaring it. A loader non-claim — an unmanaged or
+    # declined path — is authoritative and re-adds nothing, exactly the
+    # governed-naming contract. That kills the two resurrection shapes a
+    # demodulized class-name regex allowed: a changed file declaring
+    # `Public::User` no longer resurrects a pruned `Admin::User`, and a
+    # file whose comments or string literals mention `class User` no
+    # longer resurrects anything.
+    #
+    # @param pruned [Set<String>] identifiers removed by {#prune_vanished_units}
+    # @param change_set [ChangeSet]
+    # @return [Set<String>] identifiers safe to re-add this run
+    def readdable_pruned_classes(pruned, change_set)
+      readdable = Set.new
+      return readdable if pruned.empty?
+
+      claimed = changed_governed_names(change_set)
+      return readdable if claimed.empty?
+
+      CLASS_BASED_DISCOVERY.each_key do |key|
+        extractor = extractor_for(key)
+        next unless extractor.respond_to?(:discoverable_classes)
+
+        extractor.discoverable_classes.each do |klass|
+          next if klass.name.nil? || !pruned.include?(klass.name)
+
+          readdable.add(klass.name) if claimed.include?(klass.name)
+        end
+      end
+
+      readdable
+    rescue StandardError => e
+      # A failure here must not turn a deletion into a resurrection: the
+      # empty set keeps every pruned identifier excluded, which is the
+      # pre-M1 behavior.
+      Rails.logger.warn "[Woods] Could not determine re-addable pruned classes: #{e.message}"
+      Set.new
+    end
+
+    # Governed constant names of the change set's still-existing Ruby
+    # files. The shared governed-naming helper consults the active Zeitwerk
+    # loader and returns nil for anything it does not claim, so unmanaged
+    # paths (anything outside the loader's roots, under an old Zeitwerk
+    # without +cpath_expected_at+, or a declined file) contribute nothing.
+    #
+    # @param change_set [ChangeSet]
+    # @return [Set<String>] governed constant names of changed files
+    def changed_governed_names(change_set)
+      change_set.existing_paths.filter_map do |path|
+        path = path.to_s
+        next unless path.end_with?('.rb')
+
+        governed_class_name(path, File.read(path))
+      end.compact.to_set
+    end
+
     def add_discovered_classes(key, spec, discovered, known, excluded, affected_types)
       new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
       return Set.new if new_classes.empty?
@@ -2312,12 +2605,16 @@ module Woods
     # that derives its path from a constant name rather than from a file it was
     # read out of. Class-based types have always been excluded for that reason.
     #
-    # GraphQL joins them (#167): `source_file_for_class` falls back to
-    # `app/graphql/<underscored>.rb` when it cannot resolve a source location,
-    # and a runtime-defined type — the exact case #167 exists to index — has no
-    # such file. Without this the sweep pruned those units in the *same run*
-    # that added them, and `reconcile_class_based_types(..., except: pruned)`
-    # then refused to re-add them, so #167's target case never survived.
+    # Today the predicate keys on {CLASS_BASED} and nothing else (L4): the six
+    # class-based families — models, controllers, components, view components,
+    # mailers, channels. GRAPHQL_TYPES are deliberately NOT spared. An earlier
+    # version of this comment narrated GraphQL units being spared through a
+    # `source_file_for_class` convention-path fallback, but that fallback now
+    # returns nil rather than fabricating a convention path
+    # (`graphql_extractor.rb`), a runtime-defined GraphQL unit registers no
+    # path at all ({DependencyGraph#register} skips nil), and the static file
+    # pass records the real file it read — so the sweep's own bounds decide,
+    # and this predicate has no say in GraphQL either way.
     #
     # The original case: on Rails < 7.1 `ActiveRecord::SchemaMigration` and
     # `InternalMetadata` are real `ActiveRecord::Base` descendants a full
@@ -2328,9 +2625,11 @@ module Woods
     # never infers it.
     #
     # KNOWN COST (B-070 / #171): this keys on unit *type*, but the property is
-    # per-unit — GRAPHQL_TYPES is also true of units the static file pass
-    # produced, whose path is a real file. So a deleted `app/graphql/**.rb`
-    # survives an unnamed-path sweep. Named-path deletion still works, so
+    # per-unit — CLASS_BASED is also true of units whose recorded path has
+    # since been moved elsewhere, which is exactly the move shape
+    # {#readdable_pruned_classes} exists to re-add in the same run. For
+    # deletions the cost stays: a class-based unit whose file is gone survives
+    # an unnamed-path sweep. Named-path deletion still works, so
     # `woods:incremental` on a git diff is unaffected; the exposed caller is the
     # daemon's catch-up, which runs an empty change set precisely because
     # deletions leave no mtime.
@@ -2347,15 +2646,14 @@ module Woods
     # 2. *Let the sweep prune GraphQL and rely on the reconciler's addition half
     #    to re-add whatever the schema still holds.* This is what `except: pruned`
     #    exists to prevent (see the comment at its call site): without a reload a
-    #    constant outlives its deleted file, and the schema attachment survives in
-    #    memory too, so the re-add resurrects the deleted unit against a path that
-    #    no longer exists — permanently, since the sweep then spares it.
+    #    constant outlives its deleted file, and the re-add resurrects the deleted
+    #    unit against a path that no longer exists — permanently, since the sweep
+    #    then spares it.
     #
     # What would actually work is provenance: record at extraction time whether a
-    # source file existed for the unit (`extract_from_runtime_type` already knows
-    # — it falls back to a convention path only when `File.exist?` fails) and
-    # spare only the units that never had one. That needs the graph node to carry
-    # the flag, so it is a serialization change rather than a predicate tweak.
+    # source file existed for the unit and spare only the units that never had
+    # one. That needs the graph node to carry the flag, so it is a serialization
+    # change rather than a predicate tweak.
     #
     # @param type [Symbol, nil] the unit type the caller is about to remove
     # @return [Boolean]

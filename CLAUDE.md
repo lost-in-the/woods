@@ -306,7 +306,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - `extract_dependencies` in every extractor must include `:via`. See `model_extractor` for reference values.
 - `CallbackAnalyzer` is regex-based, not AST. Proc and lambda callbacks are skipped.
 - `BehavioralProfile` guards every config read with `respond_to?`/`defined?`; a missing section yields `nil`.
-- `FlowPrecomputer` is gated by `precompute_flows` (default false). Per-action errors are rescued.
+- `FlowPrecomputer` is gated by `precompute_flows` (default false). Per-action errors are **not** rescued: both the full path and the incremental delta assemble fail closed, and any flow-family failure aborts the run before the generation publish.
 
 ### Incremental extraction
 

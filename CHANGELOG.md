@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Incremental extraction no longer misses a class-based unit whose file
+  moved with its constant unchanged (M1).** Moving `app/models/tag.rb` to
+  `app/services/tag.rb` without renaming `Tag` pruned the model for the
+  vanished old path, and the second reconciliation pass refused to re-add
+  it, so one generation served an index with the unit missing until the
+  next run. The pass now re-adds pruned class-based identifiers the active
+  Zeitwerk loader still governs a changed file for — the constant path
+  `cpath_expected_at` derives (its inflector, ignores, and root namespaces
+  decide), gated on the file declaring it; a loader non-claim is
+  authoritative, so an unmanaged path re-adds nothing. Another namespace's
+  same-named file and a file that only mentions the class in a comment or
+  string literal resurrect nothing; deletions (including deletions batched
+  with unrelated additions) stay pruned exactly as before.
+- **Incremental runs now refresh the flow artifact family, and both paths
+  fail closed (M3).** With `precompute_flows` enabled, a controller
+  re-extracted incrementally lost `metadata[:flow_paths]`,
+  `flow_index.json` kept describing pre-change routes, and `flows/`
+  documents for deleted or renamed controllers persisted across every
+  generation. Incremental runs now recompute the run's controller delta,
+  carry untouched controllers' entries forward, and sweep `flows/`
+  documents nothing references through a dedicated flow-artifact sweep
+  (separate from the unit sweep). Full and incremental extractions of the
+  same tree produce equivalent flow artifacts. A failure anywhere in the
+  family on either path — assembly, index write, annotation rewrite, or
+  sweep — now aborts before the generation publish, so a partial flow
+  index, stale prior flow artifacts alongside a new graph, or
+  half-rewritten annotations can never be published; the preceding
+  generation stays resolved and readable.
+- **`woods:validate` no longer fails every flow-enabled index (G-2).** The
+  validator treated `flows/` as a unit-type directory and demanded
+  `_index.json` from it, so any index published with flow precomputation
+  on reported "Missing _index.json in flows/". Type directories are now
+  bounded by a shared allowlist derived from `Extractor::EXTRACTORS`, and
+  the flow family is validated by its own rule: `flow_index.json` must
+  parse and every entry must point at a flow document that exists and
+  parses, with missing or malformed artifacts reported accurately.
+- **Multi-line `strong params` declarations are captured (M2).** The
+  `permit(...)`/`expect(...)` capture regexes could not cross newlines, so
+  the common multi-line style produced an empty `metadata[:permitted_params]`.
+- **A half-loaded model no longer aborts the models phase (L1).**
+  `ModelExtractor.discoverable_classes` called `abstract_class?` unguarded;
+  a descendant that raises on it (possible under the NameError fallback)
+  escaped the scan and failed the whole extraction. The call is guarded the
+  same way `ModelNameCache` already guarded its twin, keeping the class and
+  letting per-class extraction handle failures.
+- **`if nil` no longer misattributes conditional branches in flow analysis
+  (L2).** The AST normalized `if` children with a `compact` that dropped a
+  literal `nil` condition, so the else body landed in `then_ops`. `if`
+  children are positional now; missing slots stay nil.
 - **A hydration failure at boot no longer reports `:hydrated` over empty stores (M6).**
   A corrupt or unreadable dump left the in-memory vector/metadata stores empty behind
   only a stderr warning while `woods_status` reported a healthy `:hydrated` — a server

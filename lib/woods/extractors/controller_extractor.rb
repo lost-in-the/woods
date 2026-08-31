@@ -575,7 +575,11 @@ module Woods
         # a negative lookahead on `def` so a method with no permit call
         # (e.g. `filter_params; params.fetch(:f); end`) never lets the scan
         # run into the *next* method's body and misattribute its params.
-        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.require\(:(\w+)\)\.permit\((.*?)\)/) do |method, model, permitted|
+        # The /m flag plus a [\s\S] capture let the permit list cross
+        # newlines — the common style in large controllers (M2); without
+        # them `permit(` followed by a newline matched nothing and
+        # permitted_params came back empty.
+        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.require\(:(\w+)\)\.permit\(([\s\S]*?)\)/m) do |method, model, permitted|
           params[method] = {
             model: model,
             permitted: permitted.scan(/:(\w+)/).flatten
@@ -583,8 +587,8 @@ module Woods
         end
 
         # Rails 8's params.expect(post: [:title, :body]) replacement for
-        # require(...).permit(...).
-        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.expect\(\s*(\w+):\s*\[(.*?)\]\s*\)/) do |method, model, permitted|
+        # require(...).permit(...). Same multi-line capture as above (M2).
+        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.expect\(\s*(\w+):\s*\[([\s\S]*?)\]\s*\)/m) do |method, model, permitted|
           params[method] ||= {
             model: model,
             permitted: permitted.scan(/:(\w+)/).flatten

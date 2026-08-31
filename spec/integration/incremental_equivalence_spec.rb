@@ -400,6 +400,175 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'class-based move-shape (M1)' do
+    # A model file moved with its constant unchanged: the first
+    # reconciliation pass sees the class as known, the prune removes it for
+    # the vanished old path, and the second pass used to refuse to re-add
+    # it (`except: pruned`) — one generation served an index with the model
+    # missing. The moved file still defines the class, which is what makes
+    # a re-add safe: without it (a plain deletion), the constant outlives
+    # its file and must stay pruned.
+    it 're-adds a model whose file moved across autoload roots with its constant unchanged after ONE run' do
+      write_file('app/models/tag.rb', <<~RUBY)
+        class Tag < ApplicationRecord
+          self.table_name = 'posts'
+        end
+      RUBY
+      load app_path('app/models/tag.rb')
+
+      index_dir = run_sequence([
+                                 lambda {
+                                   move_file('app/models/tag.rb', 'app/services/tag.rb')
+                                   %w[app/models/tag.rb app/services/tag.rb]
+                                 }
+                               ])
+
+      # Typed identity across the move: the re-added unit stays a model, and
+      # the moved file dispatches to the services extractor as its own unit —
+      # same identifier, distinct graph nodes.
+      index = index_snapshot(index_dir)
+      expect(index['models'].map { |e| e['identifier'] }).to include('Tag')
+      expect(index['models'].count { |e| e['identifier'] == 'Tag' }).to eq(1)
+      expect(index['services'].map { |e| e['identifier'] }).to include('Tag')
+    end
+
+    it 'does not resurrect a deleted namespaced model from another namespace\'s added file' do
+      index_dir = Dir.mktmpdir('woods_diff_resurrect')
+      (@scratch_dirs ||= []) << index_dir
+      write_file('app/models/admin/user.rb', <<~RUBY)
+        module Admin
+          class User < ApplicationRecord
+            self.table_name = 'posts'
+          end
+        end
+      RUBY
+      load app_path('app/models/admin/user.rb')
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      delete_file('app/models/admin/user.rb')
+      write_file('app/models/public/user.rb', <<~RUBY)
+        module Public
+          class User < ApplicationRecord
+            self.table_name = 'posts'
+          end
+        end
+      RUBY
+      load app_path('app/models/public/user.rb')
+
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(
+        %w[app/models/admin/user.rb app/models/public/user.rb]
+      )
+
+      # Deletion without a reload cannot be compared against an in-process
+      # full extraction (the deleted constant is still a descendant), so
+      # this asserts the maintained index directly: Admin::User stays
+      # pruned, the added Public::User is indexed.
+      identifiers = index_snapshot(index_dir)['models'].map { |e| e['identifier'] }
+      expect(identifiers).not_to include('Admin::User')
+      expect(identifiers).to include('Public::User')
+    end
+
+    it 'does not resurrect a deleted model from a changed file that only mentions it' do
+      index_dir = Dir.mktmpdir('woods_diff_mention')
+      (@scratch_dirs ||= []) << index_dir
+      write_file('app/models/user.rb', <<~RUBY)
+        class User < ApplicationRecord
+          self.table_name = 'posts'
+        end
+      RUBY
+      load app_path('app/models/user.rb')
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      delete_file('app/models/user.rb')
+      write_file('app/models/notes.rb', <<~RUBY)
+        # class User was removed; see the changelog entry
+        class Notes
+          REMOVED = 'class User'
+        end
+      RUBY
+
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(
+        %w[app/models/user.rb app/models/notes.rb]
+      )
+
+      # The mention file is governed for Notes; loader identity, not a
+      # textual class-name match, is what gates the re-add.
+      identifiers = index_snapshot(index_dir)['models'].map { |e| e['identifier'] }
+      expect(identifiers).not_to include('User')
+    end
+
+    # The moved/deleted classes stay in descendants for the rest of the
+    # process and resolve to their in-tree files — fold them into the
+    # pristine tree so the runtime and the filesystem keep agreeing in
+    # every later example.
+    after do
+      %w[app/services/tag.rb app/models/admin/user.rb app/models/public/user.rb
+         app/models/user.rb app/models/notes.rb].each do |relative|
+        created = app_path(relative)
+        next unless File.exist?(created)
+
+        pristine = File.join(@pristine_root, relative)
+        FileUtils.mkdir_p(File.dirname(pristine))
+        FileUtils.cp(created, pristine)
+      end
+    end
+  end
+
+  # ── Flow artifacts (M3) ──────────────────────────────────────────────────
+
+  # With precompute_flows on, the flow family — flow_index.json, every flow
+  # document, and the annotated controller units — is part of the equivalence
+  # contract. IndexComparison excludes flows/ from the unit set and compares
+  # it as its own snapshot (modulo the flow documents' generated_at stamp).
+  describe 'flow artifacts' do
+    around do |example|
+      Woods.configuration.precompute_flows = true
+      example.run
+    ensure
+      Woods.configuration.precompute_flows = false
+    end
+
+    it 'keeps flow artifacts equivalent to a full extraction as controllers change' do
+      run_sequence([
+                     lambda {
+                       write_file('app/controllers/things_controller.rb', <<~RUBY)
+                         class ThingsController < ApplicationController
+                           def index
+                             @things = Post.recent
+                           end
+                         end
+                       RUBY
+                       load app_path('app/controllers/things_controller.rb')
+                       'app/controllers/things_controller.rb'
+                     },
+                     lambda {
+                       write_file('app/controllers/things_controller.rb', <<~RUBY)
+                         class ThingsController < ApplicationController
+                           def index
+                             @things = Post.recent
+                           end
+
+                           def show
+                             @thing = Post.find(params[:id])
+                           end
+                         end
+                       RUBY
+                       load app_path('app/controllers/things_controller.rb')
+                       'app/controllers/things_controller.rb'
+                     }
+                   ])
+    end
+
+    # ThingsController stays in the controller descendants for the rest of
+    # the process and resolves to this file. Fold it into the pristine tree
+    # so the runtime and the filesystem keep agreeing in every later
+    # example.
+    after do
+      created = app_path('app/controllers/things_controller.rb')
+      FileUtils.cp(created, File.join(@pristine_root, 'app/controllers/things_controller.rb')) if File.exist?(created)
+    end
+  end
+
   # ── Targeted refresh (phase 1) ───────────────────────────────────────────
 
   describe 'Extractor#refresh' do
