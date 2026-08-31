@@ -442,4 +442,69 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(parsed['identifier']).to eq('order.completed')
     end
   end
+
+  # ── One read per file per run (P2) ───────────────────────────────────
+
+  describe 'one read per file per run' do
+    # A file that publishes two events (or publishes one and subscribes
+    # another) was re-read once per event in pass 2 (build_unit ->
+    # load_source_files), on top of the pass-1 scan_file read. The units
+    # themselves are unchanged either way; the read-count assertion below
+    # fails on the pre-fix shape.
+    let(:bus_source) do
+      <<~RUBY
+        class OrderBus
+          def ship
+            OrderService.new.dispatch(@order)
+            ActiveSupport::Notifications.instrument("order.shipped", order: @order)
+            ActiveSupport::Notifications.instrument("order.paid", order: @order)
+          end
+        end
+      RUBY
+    end
+
+    let(:listener_source) do
+      <<~RUBY
+        class OrderListener
+          ActiveSupport::Notifications.subscribe("order.shipped") { |*args| ShippingJob.perform_later(args) }
+          ActiveSupport::Notifications.subscribe("order.paid") { |*args| }
+        end
+      RUBY
+    end
+
+    before do
+      @bus_path = create_file('app/services/order_bus.rb', bus_source)
+      @listener_path = create_file('app/listeners/order_listener.rb', listener_source)
+    end
+
+    def counts_per_path
+      counts = Hash.new(0)
+      allow(File).to receive(:read).and_wrap_original do |method, path|
+        counts[path.to_s] += 1
+        method.call(path)
+      end
+      counts
+    end
+
+    it 'builds both shared-file events with dependencies from the combined source' do
+      units = described_class.new.extract_all
+      by_name = units.to_h { |unit| [unit.identifier, unit] }
+
+      expect(units.size).to eq(2)
+      expect(by_name['order.shipped'].metadata[:publishers]).to eq([@bus_path])
+      expect(by_name['order.shipped'].metadata[:subscribers]).to eq([@listener_path])
+      expect(by_name['order.paid'].metadata[:publishers]).to eq([@bus_path])
+      expect(by_name['order.shipped'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
+      expect(by_name['order.paid'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
+    end
+
+    it 'reads each shared file once for the whole run' do
+      counts = counts_per_path
+
+      described_class.new.extract_all
+
+      expect(counts[@bus_path]).to eq(1)
+      expect(counts[@listener_path]).to eq(1)
+    end
+  end
 end

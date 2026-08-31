@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **Controller and mailer chunk extraction parses each file once, not once per
+  action (P1).** `AstSourceExtraction#extract_action_source` re-read and re-parsed
+  the defining file for every action, so a 30-action controller cost 30 reads and
+  30 parses of one source file. The defining file is now read and parsed once per
+  extractor instance and every action is answered from that parse; per-action
+  chunk output is byte-identical.
+
+- **Event extraction reads each file once per run (P2).** `EventExtractor`
+  re-read every publisher/subscriber file for every event that referenced it
+  (once per event in pass 2, on top of the pass-1 scan), so a widely-shared file
+  was read once per event. Both passes now share one read per path per run.
+
+- **Rake task extraction reads and parses each `.rake` file once per run
+  (P9a).** `all_definitions` — the sibling-definition index built on the first
+  `sibling_definitions` call — re-read and re-parsed every `.rake` file the main
+  extraction path had just handled. Both paths now share a memoized read+parse.
+
+- **GraphQL model-reference scanning makes one pass per type file (P9c).** The
+  constant follow-up check ran one full-source scan per unique capitalized
+  constant; one combined scan now collects the constants followed by a model
+  call. Emitted dependencies are unchanged.
+
+- **Git metadata batching sends each pathspec once (P9d).** Multi-unit files
+  repeated their path in every 500-path git log batch; `batch_git_data` now
+  deduplicates before slicing. Output is keyed by relative path and unchanged.
+
+- **User search regexes are time-bounded (P5).** `search` compiled the query as
+  a raw Ruby regex with no time limit, so a pattern with catastrophic
+  backtracking could stall the dispatch thread indefinitely. On Ruby 3.2+ the
+  compiled pattern carries a 1s per-match limit; an overrun aborts the scan
+  into a partial response with a note instead of hanging. Invalid patterns
+  still fall back to an escaped literal match.
+
+- **`dependency_graph.json` parses once per generation (P6).** The Index
+  Server's `dependency_graph` and `raw_graph_data` each parsed the same file,
+  holding two copies of a large graph per generation; the typed graph now
+  builds from the single raw parse.
+
+- **JSON temporal snapshots are pruned by retention (P8).** `snapshots/`
+  wrote one file per SHA and never pruned, growing unboundedly on long-lived
+  repos. Capture now keeps the newest `WOODS_PAYLOAD_RETENTION` snapshots
+  (default 3, same variable and default as payload retention), and the bound
+  holds even when the just-captured snapshot's timestamp ties or precedes
+  older entries; `diff` and `unit_history` beyond the retention window
+  return empty.
+
+- **Redis session-tracer eviction uses a recency ZSET (P4).** `prune_sessions`
+  read every candidate session's history on every record once `max_sessions`
+  was reached (up to 1000 session reads per request). The `woods:sessions`
+  index is now a ZSET scored by each request's timestamp, so eviction touches
+  a bounded window and never reads session histories. A legacy SET index from
+  a previous version migrates automatically on the first record through a
+  single atomic server-side script, so concurrent writers racing the legacy
+  index cannot erase each other's members or fail mid-migration; eviction
+  order (oldest last request) is unchanged. Adds a live-Redis contract spec
+  (`spec/session_tracer/redis_store_live_spec.rb`, `WOODS_RUN_LIVE_BACKENDS=1`).
+
 ### Fixed
 
 - **Best-effort Git provenance and file-history probes are now quiet and rooted

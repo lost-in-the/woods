@@ -1837,5 +1837,29 @@
     ],
     "description": "Driving extract_changed directly from a `rails runner` produced units whose source_code was current but whose loaded constants (and therefore metadata such as resolved actions) were stale, even when the boot postdated the edit: runner_command.rb wraps the script in Rails.application.executor.wrap, and prepare_incremental_run's safe_eager_load! behaves differently under it than under a rake boot. The documented CLI invocation (CHANGED_FILES + bin/rails woods:incremental) is correct; the gem's own flow_incremental_spec.rb works around the same hazard in-process by force-loading the edited file. Found while writing the testbed flows smoke. Disposition: document the CLI path as the supported incremental invocation, or make runner-driven incremental reload constants before extraction; investigation needed before choosing.",
     "status": "open"
-  }
+  },
+{
+  "id": "B-131",
+  "title": "Factory units embed the full file source; an N-factory file is stored N times",
+  "severity": "low",
+  "category": "refactor",
+  "layer": "extraction",
+  "files": [
+    "lib/woods/extractors/factory_extractor.rb"
+  ],
+  "description": "Each factory unit's source_code embeds the entire factory file source (build_source_annotation), so a file defining N factories serializes that source N times in payloads. The audit flagged this as a storage item (v2-prerelease-audit P9b); PR-8 owned the item but deferred it because every available fix is a behavior or format change, and PR-8 was scoped to behavior-preserving refactors. The extractor already reads each file once and shares one String across the N units, so the remaining cost is on-disk duplication only. The decision needed: (a) slice per-factory source (parse_factories tracks open_depth; add end-line capture, scope source_code to the factory block) - changes unit source_code bytes, source_hash, search phase-2 matching, and forces a one-time re-embed of every factory unit; or (b) deduplicate identical source strings in the payload store (content-addressed segments) - an artifact-format change with reader compatibility and schema-version implications. Compatibility implications: option (a) changes generated artifact content and retrieval behavior (a query matching text in a sibling factory's block would no longer match that factory's unit); option (b) changes the payload layout and requires a version-gated reader path. Acceptance criteria: a chosen option documented here or in a superseding note; for (a), extracted-identifier AND source-hash before/after comparison attached for review plus one-time re-embed accounting; for (b), payload schema version bump, reader compatibility for old payloads, and round-trip validation; either way, factory_extractor specs updated to pin the new source_code contract and the audit's storage item closed.",
+  "status": "open"
+},
+{
+  "id": "B-132",
+  "title": "recent_changes loads every unit file in scope per call",
+  "severity": "low",
+  "category": "refactor",
+  "layer": "mcp",
+  "files": [
+    "lib/woods/mcp/index_reader.rb"
+  ],
+  "description": "The recent_changes tool resolves git modification dates by loading unit files per index entry, O(total units) file reads per tool call against a 50-entry LRU, on indexes with thousands of units (v2-prerelease-audit P3). PR-8 deferred it: a correct fix needs an artifact-format design first, not a refactor. Candidate designs: digest-based short-circuit keyed off data already in the per-type index entries (skip loading units whose index-level digest is unchanged), or a payload-store bulk read that materializes git metadata in one pass. Compatibility implications: any new index-side field (e.g. a per-entry git digest) is an artifact-format addition that older readers must ignore and older indexes must tolerate; the tool response shape must stay identical. Acceptance criteria: a chosen design documented in the payload/index format docs; the tool response shape unchanged; a latency bound demonstrated on a large index (thousands of units) before/after; functional index_reader specs plus a new perf bound pinning the no-regression; no mixed-generation reads introduced.",
+  "status": "open"
+}
 ]
