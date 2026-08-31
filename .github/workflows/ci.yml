@@ -47,6 +47,11 @@ jobs:
   # can't share a process with it (hence the :booted_app tag + the solo run here).
   # Pairs are explicit to exclude invalid Ruby x Rails combinations (e.g. Rails
   # 6.0 only on Ruby 3.0; Rails 7.2 needs >= 3.1; Rails 8.0 and 8.1 need >= 3.2).
+  # Every pair runs every integration file on every PR. The randomized
+  # incremental-equivalence depth is full on the oldest, baseline, and newest
+  # representative pairs, and smoke-depth on the other PR rows. Merged-main and
+  # version-tag runs override every row back to the full 60-operation/3-seed
+  # profile, preserving the release evidence at the exact candidate commit.
   rails-matrix:
     name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
@@ -54,15 +59,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { ruby: '3.0', rails: '6.0' }
-          - { ruby: '3.0', rails: '6.1' }
-          - { ruby: '3.1', rails: '7.0' }
-          - { ruby: '3.2', rails: '7.1' }
-          - { ruby: '3.3', rails: '7.2' }
-          - { ruby: '3.3', rails: '8.0' }
-          - { ruby: '3.4', rails: '8.1' }
-          - { ruby: '4.0', rails: '8.0' }
-          - { ruby: '4.0', rails: '8.1' }
+          - { ruby: '3.0', rails: '6.0', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
+          - { ruby: '3.0', rails: '6.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.1', rails: '7.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.2', rails: '7.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.3', rails: '7.2', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
+          - { ruby: '3.3', rails: '8.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.4', rails: '8.1', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
+          - { ruby: '4.0', rails: '8.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '4.0', rails: '8.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
@@ -81,6 +86,9 @@ jobs:
       # extraction at every step. Runs in its own process — like the spec
       # above, it boots the dummy app and can't share one.
       - name: Run incremental equivalence harness
+        env:
+          WOODS_DIFF_OPS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_ops || '60' }}
+          WOODS_DIFF_SEEDS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}
         run: bundle exec rspec spec/integration/incremental_equivalence_spec.rb
 
       # Incremental flow-artifact refresh (M3): annotations, delta flow
