@@ -346,6 +346,14 @@ module Woods
       # Override with WOODS_SEARCH_MAX_SCAN env var.
       DEFAULT_SEARCH_MAX_SCAN = 500
 
+      # Wall-clock budget for a single match against the user-supplied search
+      # pattern (audit P5). The query is compiled as a raw Ruby regex; a
+      # pattern with catastrophic backtracking would otherwise stall the
+      # dispatch thread indefinitely. Ruby 3.2+ can enforce a per-match limit
+      # at the engine level (Regexp.new(timeout:)); on older Rubies the
+      # pattern compiles without one and this constant is unused.
+      SEARCH_PATTERN_TIMEOUT = 1.0
+
       # Search units by case-insensitive pattern.
       #
       # Phase 1: match identifiers from index files (cheap).
@@ -408,85 +416,90 @@ module Woods
         phase2_scanned = 0
         partial = false
 
-        dirs = if types
-                 types.filter_map { |t| TYPE_TO_DIR[t] }
-               else
-                 TYPE_DIRS
-               end
+        begin
+          dirs = if types
+                   types.filter_map { |t| TYPE_TO_DIR[t] }
+                 else
+                   TYPE_DIRS
+                 end
 
-        # Phase 2 candidates are collected per-dir and then scanned in
-        # round-robin across dirs. Exhausting the per-run scan cap linearly
-        # down TYPE_DIRS order would starve later types (`concerns` at pos
-        # 13, `test_mappings` at pos 31) on any codebase where the earlier
-        # dirs together exceed max_scan entries. Interleaving guarantees
-        # every type contributes to the scanned set.
-        phase2_queues = {}
+          # Phase 2 candidates are collected per-dir and then scanned in
+          # round-robin across dirs. Exhausting the per-run scan cap linearly
+          # down TYPE_DIRS order would starve later types (`concerns` at pos
+          # 13, `test_mappings` at pos 31) on any codebase where the earlier
+          # dirs together exceed max_scan entries. Interleaving guarantees
+          # every type contributes to the scanned set.
+          phase2_queues = {}
 
-        dirs.each do |dir|
-          type_name = DIR_TO_TYPE[dir]
-          entries = read_index(dir)
+          dirs.each do |dir|
+            type_name = DIR_TO_TYPE[dir]
+            entries = read_index(dir)
 
-          # Broad-match detection: warn when pattern matches >50% of dir entries
-          if entries.size > 1
-            matching_count = entries.count do |e|
-              identifier_passes_filters?(e['identifier'], pattern, prefix, suffix)
-            end
-            if matching_count > entries.size / 2.0
-              notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
-            end
-          end
-
-          entries.each do |entry|
-            id = entry['identifier']
-            next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
-
-            # Phase 1: identifier matching (still in-order per dir)
-            if fields.include?('identifier') && pattern.match?(id)
-              next if results.size >= limit
-
-              results << { identifier: id, type: type_name, match_field: 'identifier' }
-              next
-            end
-
-            # Phase 2 is only reached when the caller opted into deeper fields.
-            next unless fields.include?('metadata') || fields.include?('source_code')
-
-            (phase2_queues[dir] ||= []) << [type_name, id]
-          end
-        end
-
-        if results.size < limit && phase2_queues.any?
-          queues = phase2_queues.values.map(&:dup)
-          catch(:phase2_done) do
-            loop do
-              progressed = false
-              queues.each do |queue|
-                next if queue.empty?
-
-                throw :phase2_done if results.size >= limit
-
-                if phase2_scanned >= max_scan
-                  partial = true
-                  throw :phase2_done
-                end
-
-                type_name, id = queue.shift
-                progressed = true
-
-                unit = find_unit(id)
-                next unless unit
-
-                phase2_scanned += 1
-
-                if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
-                  results << { identifier: id, type: type_name, match_field: 'source_code' }
-                elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
-                  results << { identifier: id, type: type_name, match_field: 'metadata' }
-                end
+            # Broad-match detection: warn when pattern matches >50% of dir entries
+            if entries.size > 1
+              matching_count = entries.count do |e|
+                identifier_passes_filters?(e['identifier'], pattern, prefix, suffix)
               end
-              break unless progressed
+              if matching_count > entries.size / 2.0
+                notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
+              end
+            end
+
+            entries.each do |entry|
+              id = entry['identifier']
+              next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
+
+              # Phase 1: identifier matching (still in-order per dir)
+              if fields.include?('identifier') && pattern.match?(id)
+                next if results.size >= limit
+
+                results << { identifier: id, type: type_name, match_field: 'identifier' }
+                next
+              end
+
+              # Phase 2 is only reached when the caller opted into deeper fields.
+              next unless fields.include?('metadata') || fields.include?('source_code')
+
+              (phase2_queues[dir] ||= []) << [type_name, id]
             end
           end
+
+          if results.size < limit && phase2_queues.any?
+            queues = phase2_queues.values.map(&:dup)
+            catch(:phase2_done) do
+              loop do
+                progressed = false
+                queues.each do |queue|
+                  next if queue.empty?
+
+                  throw :phase2_done if results.size >= limit
+
+                  if phase2_scanned >= max_scan
+                    partial = true
+                    throw :phase2_done
+                  end
+
+                  type_name, id = queue.shift
+                  progressed = true
+
+                  unit = find_unit(id)
+                  next unless unit
+
+                  phase2_scanned += 1
+
+                  if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
+                    results << { identifier: id, type: type_name, match_field: 'source_code' }
+                  elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
+                    results << { identifier: id, type: type_name, match_field: 'metadata' }
+                  end
+                end
+                break unless progressed
+              end
+            end
+          end
+        rescue Regexp::TimeoutError
+          notes << "search aborted: the pattern exceeded the #{SEARCH_PATTERN_TIMEOUT}s per-match limit"
+          partial = true
         end
 
         response = { results: results.first(limit) }
@@ -772,12 +785,28 @@ module Woods
       # literal match (with a :note field added by callers) when the pattern is
       # invalid.
       #
+      # The compiled pattern carries the {SEARCH_PATTERN_TIMEOUT} per-match
+      # wall-clock limit on Ruby 3.2+: a pattern with catastrophic
+      # backtracking raises Regexp::TimeoutError on its first overrun instead
+      # of stalling the dispatch thread indefinitely, which {#search_within_pin}
+      # converts into a partial response.
+      #
       # @param query [String] Raw regex pattern
       # @return [Regexp] Compiled case-insensitive pattern
       def compile_search_pattern(query)
-        Regexp.new(query, Regexp::IGNORECASE)
+        compile_case_insensitive_pattern(query)
       rescue RegexpError
-        Regexp.new(Regexp.escape(query), Regexp::IGNORECASE)
+        compile_case_insensitive_pattern(Regexp.escape(query))
+      end
+
+      # @param pattern [String] Regex source (already escaped when falling back)
+      # @return [Regexp]
+      def compile_case_insensitive_pattern(pattern)
+        if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+          Regexp.new(pattern, Regexp::IGNORECASE, timeout: SEARCH_PATTERN_TIMEOUT)
+        else
+          Regexp.new(pattern, Regexp::IGNORECASE)
+        end
       end
 
       # A cheap stand-in for "has the generation file been rewritten?", so the

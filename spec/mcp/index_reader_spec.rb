@@ -965,4 +965,47 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(reader.raw_graph_data).to include('nodes')
     end
   end
+
+  # ── bounded user regex (P5) ──────────────────────────────────────────
+
+  describe 'bounded user search regex' do
+    # P5. search compiles the query as a raw Ruby regex with no time bound,
+    # so a pattern with catastrophic backtracking stalled the single stdio
+    # dispatch thread indefinitely. The compiled pattern now carries a
+    # per-match wall-clock limit (Ruby 3.2+); the pin below fails on the
+    # pre-fix shape, where no limit is recorded.
+    it 'compiles the user pattern with a per-match time limit' do
+      unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+        skip('per-pattern Regexp timeouts need Ruby 3.2+')
+      end
+
+      compiled = reader.send(:compile_search_pattern, '(a+)+')
+
+      expect(compiled.timeout).to eq(described_class::SEARCH_PATTERN_TIMEOUT)
+    end
+
+    it 'compiles the escaped fallback with the same per-match time limit' do
+      unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+        skip('per-pattern Regexp timeouts need Ruby 3.2+')
+      end
+
+      compiled = reader.send(:compile_search_pattern, '(invalid[')
+
+      expect(compiled.timeout).to eq(described_class::SEARCH_PATTERN_TIMEOUT)
+    end
+
+    it 'returns a bounded response for a pathological pattern' do
+      watchdog = Thread.new do
+        sleep 10
+        warn 'search did not return within 10s'
+        exit! 1
+      end
+
+      result = reader.search('(a+)+x', fields: %w[identifier source_code])
+
+      expect(result).to include(:results)
+      expect(result[:results]).to be_an(Array)
+      watchdog.kill
+    end
+  end
 end
