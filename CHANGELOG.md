@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that answered everything with nothing. The boot status is now derived from store
   health (`:degraded` plus a per-store `hydration_failures` report), and
   `codebase_retrieve` answers with a typed `degraded_index` error naming the affected
-  stores instead of a clean empty result.
+  stores instead of a clean empty result. Graph hydration reads through the
+  encoding-safe atomic-file path, so a non-ASCII index stays healthy under `LANG=C`.
 - **A metadata-store failure no longer produces misleading retrieval answers (M8).**
   Store errors were swallowed at three call sites: `types:` queries reported `:absent`
   for types that exist, the rank-within-type fallback short-circuited to empty, and
