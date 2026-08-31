@@ -494,7 +494,9 @@ module Woods
               end
             end
           end
-        rescue Regexp::TimeoutError
+        rescue StandardError => e
+          raise unless regexp_timeout_error?(e)
+
           notes << "search aborted: the pattern exceeded the #{SEARCH_PATTERN_TIMEOUT}s per-match limit"
           partial = true
         end
@@ -817,6 +819,22 @@ module Woods
         else
           Regexp.new(pattern, Regexp::IGNORECASE)
         end
+      end
+
+      # Is this the engine-level per-match timeout, Regexp::TimeoutError?
+      #
+      # The constant does not exist before Ruby 3.2, and Ruby resolves
+      # rescue-class expressions lazily, when an exception occurs — naming
+      # the constant in a rescue clause turned any *other* in-block failure
+      # into `NameError: uninitialized constant Regexp::TimeoutError` on
+      # Ruby 3.0/3.1, masking the original error. Rescue StandardError and
+      # recognize the timeout through a defined? check instead; everything
+      # else is re-raised unchanged.
+      #
+      # @param error [StandardError]
+      # @return [Boolean]
+      def regexp_timeout_error?(error)
+        defined?(Regexp::TimeoutError) && error.is_a?(Regexp::TimeoutError)
       end
 
       # A cheap stand-in for "has the generation file been rewritten?", so the

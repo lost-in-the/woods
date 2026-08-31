@@ -1007,6 +1007,33 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(result[:results]).to be_an(Array)
       watchdog.kill
     end
+
+    # Review finding: `rescue Regexp::TimeoutError` names a constant that
+    # does not exist before Ruby 3.2, and Ruby resolves rescue-class
+    # expressions lazily, when an exception actually occurs. On Ruby
+    # 3.0/3.1 any *other* failure inside the search block therefore
+    # surfaced as `NameError: uninitialized constant Regexp::TimeoutError`,
+    # masking the original error. The removal below simulates that absence
+    # on newer Rubies (where it is the standing condition on 3.0/3.1).
+    it 'propagates unrelated phase-two failures instead of masking them' do
+      failing_reader = described_class.new(fixture_dir)
+      allow(failing_reader).to receive(:find_unit).and_raise(IOError, 'disk gone')
+
+      original = Regexp.const_defined?(:TimeoutError) ? Regexp::TimeoutError : nil
+      Regexp.send(:remove_const, :TimeoutError) if original
+      begin
+        expect { failing_reader.search('Post', fields: %w[source_code]) }
+          .to raise_error(IOError, /disk gone/)
+      ensure
+        Regexp.const_set(:TimeoutError, original) if original
+      end
+    end
+
+    it 'does not name Regexp::TimeoutError in a rescue clause' do
+      source = File.read(File.expand_path('../../lib/woods/mcp/index_reader.rb', __dir__))
+
+      expect(source).not_to match(/rescue[^\n]*Regexp::TimeoutError/)
+    end
   end
 
   # ── one graph parse per generation (P6) ──────────────────────────────
