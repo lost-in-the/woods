@@ -5,6 +5,7 @@ require 'time'
 require 'digest'
 require 'fileutils'
 require_relative '../atomic_file'
+require_relative '../payload_store'
 
 module Woods
   module Temporal
@@ -13,6 +14,11 @@ module Woods
     # Stores snapshots as individual JSON files in a `snapshots/` subdirectory
     # of the index output directory. Each file is named by git SHA and contains
     # manifest metadata plus per-unit content hashes.
+    #
+    # Retention matches the payload store (audit P8): capture prunes the
+    # oldest snapshots beyond the configured count, keyed off the same
+    # WOODS_PAYLOAD_RETENTION env var. Old histories answering `diff` and
+    # `unit_history` beyond the retention window degrade to empty.
     #
     # Implements the same public interface as SnapshotStore so the MCP server
     # tools work identically.
@@ -24,8 +30,9 @@ module Woods
     #   store.diff("abc123", "def456") # => { added: [...], modified: [...], deleted: [...] }
     #
     class JsonSnapshotStore # rubocop:disable Metrics/ClassLength
-      def initialize(dir:)
+      def initialize(dir:, retention: nil)
         @dir = File.join(dir, 'snapshots')
+        @retention = resolve_retention(retention)
         FileUtils.mkdir_p(@dir)
       end
 
@@ -51,6 +58,7 @@ module Woods
         end
 
         write_snapshot(git_sha, snapshot)
+        prune_snapshots(protect: git_sha)
         snapshot.except(:units)
       end
 
@@ -102,6 +110,52 @@ module Woods
       end
 
       private
+
+      # Resolve the retention count: an explicit positive value wins, then
+      # the WOODS_PAYLOAD_RETENTION env var the payload store honors, then
+      # the payload store's default.
+      #
+      # @param retention [Integer, nil]
+      # @return [Integer]
+      def resolve_retention(retention)
+        return retention if retention.is_a?(Integer) && retention.positive?
+
+        value = ENV.fetch('WOODS_PAYLOAD_RETENTION', nil).to_i
+        value.positive? ? value : PayloadStore::DEFAULT_RETENTION
+      end
+
+      # Delete snapshots beyond the retention count, oldest by extracted_at
+      # first. +protect+ names the snapshot just captured; it is the newest
+      # anyway, and a tie on extracted_at must not delete it.
+      #
+      # Failures are non-fatal: retention is housekeeping, and a failed
+      # prune leaves the store growing as it did before rather than
+      # breaking capture.
+      #
+      # @param protect [String] git SHA of the just-captured snapshot
+      # @return [void]
+      def prune_snapshots(protect:)
+        summaries = load_all_summaries
+        overflow = summaries.size - @retention
+        return unless overflow.positive?
+
+        retention_victims(summaries, overflow, protect).each { |sha| FileUtils.rm_f(snapshot_path(sha)) }
+      rescue StandardError => e
+        warn "[Woods] Snapshot retention failed: #{e.message}"
+      end
+
+      # Oldest `overflow` snapshots by extracted_at, never the protected one.
+      #
+      # @param summaries [Array<Hash>]
+      # @param overflow [Integer]
+      # @param protect [String] git SHA of the just-captured snapshot
+      # @return [Array<String>]
+      def retention_victims(summaries, overflow, protect)
+        summaries.sort_by { |s| s[:extracted_at] || '' }
+                 .first(overflow)
+                 .map { |s| s[:git_sha] }
+                 .reject { |sha| sha == protect }
+      end
 
       def mget(hash, key)
         hash[key] || hash[key.to_sym]
