@@ -99,6 +99,38 @@ RSpec.describe Woods::SessionTracer::RedisStore, :live_backends do
       expect(summaries).to include("run-#{run_id}-fresh")
     end
 
+    # Two writers racing a legacy index through real concurrent
+    # connections: the atomic script guarantees every member survives any
+    # interleaving, so run the pair repeatedly.
+    it 'survives a two-client migration race with every session indexed' do
+      5.times do |attempt|
+        key = described_class::SESSIONS_KEY
+        redis.del(key)
+        redis.sadd(key, "run-#{run_id}-legacy-#{attempt}")
+        redis.del("woods:session:run-#{run_id}-legacy-#{attempt}")
+
+        store_a = described_class.new(redis: Redis.new(url: redis_url))
+        store_b = described_class.new(redis: Redis.new(url: redis_url))
+        id_a = "run-#{run_id}-a#{attempt}"
+        id_b = "run-#{run_id}-b#{attempt}"
+
+        threads = [
+          Thread.new { store_a.record(id_a, request_data) },
+          Thread.new { store_b.record(id_b, request_data) }
+        ]
+        threads.each(&:join)
+
+        indexed = redis.zrange(key, 0, -1)
+        expect(indexed).to include("run-#{run_id}-legacy-#{attempt}", id_a, id_b)
+        expect(store_a.read(id_a).size).to eq(1)
+        expect(store_b.read(id_b).size).to eq(1)
+
+        store_a.clear(id_a)
+        store_b.clear(id_b)
+        store_a.clear("run-#{run_id}-legacy-#{attempt}")
+      end
+    end
+
     it 'clears a single session and the whole index' do
       store.record("run-#{run_id}-a", request_data)
       store.record("run-#{run_id}-b", request_data)

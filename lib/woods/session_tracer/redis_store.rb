@@ -24,10 +24,31 @@ module Woods
     class RedisStore < Store
       KEY_PREFIX = 'woods:session:'
       # Recency index: ZSET of session_id => last-request epoch. Was a SET
-      # before the zset migration; old deployments migrate on first record.
+      # before the zset migration; legacy deployments migrate through the
+      # atomic script below.
       SESSIONS_KEY = 'woods:sessions'
       DEFAULT_MAX_SESSIONS = 1_000
       DEFAULT_MAX_REQUESTS = 1_000
+
+      # Recency-index update for one record, executed server-side as one
+      # atomic step: type check, legacy SET transfer, insertion of the
+      # current member. Redis runs a script without interleaving, so two
+      # writers racing a legacy index can neither observe the SET with one
+      # writer and erase the other's members, nor fail with WRONGTYPE after
+      # the other converted; a writer arriving on an already-converted (or
+      # fresh) key takes the plain ZADD path of the same script.
+      INDEX_UPDATE_SCRIPT = <<~LUA
+        local kind = redis.call('TYPE', KEYS[1]).ok
+        if kind == 'set' then
+          local legacy = redis.call('SMEMBERS', KEYS[1])
+          redis.call('DEL', KEYS[1])
+          for _, member in ipairs(legacy) do
+            redis.call('ZADD', KEYS[1], 0, member)
+          end
+        end
+        redis.call('ZADD', KEYS[1], tonumber(ARGV[1]), ARGV[2])
+        return 1
+      LUA
 
       # @param redis [Redis] A Redis client instance
       # @param ttl [Integer, nil] Time-to-live in seconds for session keys (nil = no expiry)
@@ -128,19 +149,14 @@ module Woods
 
       # Record the session in the recency index, scored by the request's own
       # timestamp so eviction order matches the last-request ordering
-      # {#sessions} reports. A legacy SET index from a pre-zset deployment
-      # is migrated on the first record.
+      # {#sessions} reports. The whole update — a legacy SET migration
+      # included — runs as one atomic script (see {INDEX_UPDATE_SCRIPT}).
       #
       # @param session_id [String]
       # @param request_data [Hash]
       # @return [void]
       def index_session(session_id, request_data)
-        @redis.zadd(SESSIONS_KEY, recency_score(request_data), session_id)
-      rescue StandardError => e
-        raise unless wrongtype_error?(e)
-
-        migrate_session_index
-        @redis.zadd(SESSIONS_KEY, recency_score(request_data), session_id)
+        @redis.eval(INDEX_UPDATE_SCRIPT, keys: [SESSIONS_KEY], argv: [recency_score(request_data), session_id])
       end
 
       # @param request_data [Hash]
@@ -150,29 +166,6 @@ module Woods
         timestamp.is_a?(String) ? Time.iso8601(timestamp).to_f : Time.now.to_f
       rescue ArgumentError
         Time.now.to_f
-      end
-
-      # Rebuild the index as a ZSET from a legacy SET's members. Members
-      # score 0 (oldest) so they evict before known-recent sessions; their
-      # true recency is unrecoverable.
-      #
-      # @return [void]
-      def migrate_session_index
-        legacy = @redis.smembers(SESSIONS_KEY)
-        @redis.del(SESSIONS_KEY)
-        legacy.each { |id| @redis.zadd(SESSIONS_KEY, 0.0, id) }
-      end
-
-      # The redis client raises type-refusal errors as
-      # Redis::CommandError / Redis::WrongTypeError (or their RedisClient::
-      # twins depending on gem generation); match the class family plus the
-      # server's WRONGTYPE reply rather than hard-requiring one error class.
-      #
-      # @param error [StandardError]
-      # @return [Boolean]
-      def wrongtype_error?(error)
-        error.class.name.to_s.start_with?('Redis', 'RedisClient') &&
-          error.message.to_s.include?('WRONGTYPE')
       end
 
       # Evict the oldest sessions once the recency index overflows

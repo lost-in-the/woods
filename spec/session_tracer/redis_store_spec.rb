@@ -99,6 +99,30 @@ class MockRedis
     (@data[key] || {}).size
   end
 
+  # Emulates the store's recency-index script — the only script the suite
+  # sends — as a single step: type check, legacy-member transfer, insertion.
+  # The live-Redis spec exercises the real Lua against a real server.
+  def eval(script, keys: [], argv: [])
+    unless script == Woods::SessionTracer::RedisStore::INDEX_UPDATE_SCRIPT
+      raise ArgumentError, 'MockRedis only implements the Woods recency-index script'
+    end
+
+    key = keys.fetch(0)
+    score = argv.fetch(0).to_f
+    member = argv.fetch(1)
+
+    case @data[key]
+    when Array
+      legacy = @data.delete(key)
+      @data[key] = {}
+      legacy.each { |m| @data[key][m] = 0.0 }
+    when nil
+      @data[key] = {}
+    end
+    @data[key][member] = score
+    1
+  end
+
   # A set is an Array here and a zset a Hash, mirroring how the real server
   # refuses cross-type commands.
   def ensure_zset(key)
@@ -338,6 +362,55 @@ RSpec.describe Woods::SessionTracer::RedisStore do
 
       store.record('fresh', request_data.merge('action' => 'create'))
       expect(store.sessions.size).to eq(1)
+    end
+
+    # Review finding: the pre-fix migration was three separate commands
+    # (SMEMBERS, DEL, re-ZADD) driven from Ruby, so two writers racing a
+    # legacy index could interleave: writer A converted the key between
+    # writer B's SMEMBERS and B's DEL, and B's DEL erased A's just-written
+    # member. The hook below forces exactly that interleaving
+    # deterministically: writer A's complete record runs inside writer B's
+    # migration window (between B's SMEMBERS and B's DEL). On the fixed
+    # shape there is no Ruby-side member read or DEL at all (the script is
+    # atomic server-side), so the hook is never called and the two records
+    # are simply sequential.
+    # Review finding: the pre-fix migration was three separate commands
+    # (SMEMBERS, DEL, re-ZADD) driven from Ruby, so two writers racing a
+    # legacy index could interleave: writer A converted the key between
+    # writer B's SMEMBERS and B's DEL, and B's DEL erased A's just-written
+    # member. The hook below forces exactly that interleaving
+    # deterministically: writer A's complete record runs inside writer B's
+    # migration window (between B's SMEMBERS and B's DEL). On the fixed
+    # shape there is no Ruby-side member read or DEL in the index path at
+    # all (the script is atomic server-side), so the hook never fires and
+    # writer A records sequentially instead.
+    it 'keeps both writers indexed, with no orphaned list, when their migrations interleave' do
+      redis.sadd(described_class::SESSIONS_KEY, 'legacy')
+      store_a = described_class.new(redis: redis)
+      store_b = described_class.new(redis: redis)
+
+      del_calls = 0
+      allow(redis).to receive(:del).and_wrap_original do |method, key|
+        del_calls += 1
+        store_a.record('one', request_data) if del_calls == 1
+        method.call(key)
+      end
+
+      store_b.record('two', request_data)
+      store_a.record('one', request_data) if del_calls.zero?
+
+      indexed = redis.zrange(described_class::SESSIONS_KEY, 0, -1)
+      expect(indexed).to contain_exactly('legacy', 'one', 'two')
+      expect(store_b.read('two').size).to eq(1)
+      expect(store_a.read('one').size).to eq(1)
+
+      session_lists = redis.data.keys.select { |key| key.start_with?(described_class::KEY_PREFIX) }
+      session_list_ids = session_lists.map do |key|
+        encoded = key.delete_prefix(described_class::KEY_PREFIX)
+        encoded.start_with?('b64.') ? Base64.urlsafe_decode64(encoded.delete_prefix('b64.')) : encoded
+      end
+      expect(session_list_ids).not_to be_empty
+      expect(indexed).to include(*session_list_ids)
     end
   end
 end
