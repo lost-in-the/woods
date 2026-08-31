@@ -122,6 +122,14 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 
 The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
 
+Structural reads can use a read-only index mount. The `reload` tool is different:
+its transactional in-memory retrieval refresh takes the same on-disk writer lock as
+extraction and embedding, so the MCP process needs write access to the index
+directory. If it cannot acquire or create that lock, reload returns a typed degraded
+error and continues serving the previous aligned generation; it never swaps in a
+partial or empty replacement. Grant write access for live reloads, or restart the MCP
+process after publishing a new embedded index.
+
 ### Conditional Index capabilities
 
 The Ruby server builder contains 15 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, and Notion sync. They register only when their required collaborators or configuration are wired.

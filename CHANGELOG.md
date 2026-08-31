@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Reloading the Index MCP server no longer opens an empty-store window, and a
+  failed reload no longer leaves a misaligned index (M7).** The `reload` tool
+  refreshed the live in-memory vector and metadata stores with `clear!` followed by
+  `bulk_load`, so a concurrent `codebase_retrieve` could search an empty or
+  half-loaded store (and the reader's caches were reloaded even when store
+  hydration failed, pairing one generation's JSON index with another's vectors).
+  The reload is now a transaction: candidate stores are built off-side against one
+  captured generation marker and one captured promoted-dump identity, reading
+  exclusively from those captured locations (config from the captured dump's
+  embedded snapshot, vector/metadata from the captured dump directory, the graph
+  from the captured payload), so a concurrent promotion can never mix vector and
+  metadata halves from two dumps. Any candidate failure leaves the previous fully
+  aligned generation untouched — the old retriever keeps answering and a distinct
+  reload-phase `degraded_index` condition (with `phase: 'reload'` naming the
+  generation still being served) is reported on the `reload` tool response and
+  additively through `woods_status` (`bootstrap.reload_failure`), without flipping
+  the boot degraded state. The commit acquires the same on-disk extraction
+  PipelineLock every writer uses before rechecking both identities, so a writer
+  cannot publish between the recheck and the one-assignment store-bundle swap; a
+  promoted dump missing any required vector or metadata component also fails
+  closed without replacing the healthy live bundle. Because the reload transaction
+  takes the shared on-disk writer lock, the MCP process needs write access to the
+  index directory when using `reload`. A
+  generation movement fails the attempt with `ReloadGenerationMoved` and a
+  promoted-dump movement (an embed promotes without bumping the generation file)
+  with `ReloadDumpMoved` — the next `reload` is the recovery path. A successful
+  reload clears the condition.
+
 - **Incremental extraction no longer misses a class-based unit whose file
   moved with its constant unchanged (M1).** Moving `app/models/tag.rb` to
   `app/services/tag.rb` without renaming `Tag` pruned the model for the

@@ -342,9 +342,8 @@ RSpec.describe Woods::MCP::Bootstrapper do
           # the SearchExecutor it composes — if the Bootstrapper fed a
           # hydrated store through, it lives here. This is the key
           # assertion: dumps on disk → retriever sees them.
-          executor = retriever.instance_variable_get(:@executor)
-          vs = executor.instance_variable_get(:@vector_store)
-          ms = retriever.instance_variable_get(:@metadata_store)
+          vs = retriever.vector_store
+          ms = retriever.metadata_store
 
           expect(vs.count).to eq(2)
           expect(ms.count).to eq(2)
@@ -885,12 +884,23 @@ RSpec.describe Woods::MCP::Bootstrapper do
 
       artifact = Woods::IndexArtifact.new(dir)
       resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration)
-      dump_dir = artifact.new_dump_dir
+      dump_dir = unique_dump_dir(artifact)
 
       Woods::Storage::Snapshotter::Vector.dump(source_vs, artifact, dump_dir, resolved_config: resolved)
       Woods::Storage::Snapshotter::Metadata.dump(source_ms, artifact, dump_dir, resolved_config: resolved)
       artifact.write_config(resolved.to_snapshot_json)
       artifact.promote(dump_dir)
+    end
+
+    # Uniquifier: two artifacts written within the same second (e.g. a
+    # reload spec booting, then re-dumping) must not collide on the
+    # timestamped dump directory name that new_dump_dir would produce.
+    def unique_dump_dir(artifact)
+      dump_dir = artifact.dumps_root.join(
+        "#{Time.now.utc.strftime('%Y-%m-%dT%H-%M-%SZ')}-#{rand(1_000_000)}"
+      )
+      FileUtils.mkdir_p(dump_dir)
+      dump_dir
     end
 
     it 'vector entries survive with empty metadata hashes when metadata store is empty' do
@@ -910,8 +920,7 @@ RSpec.describe Woods::MCP::Bootstrapper do
         retriever, = described_class.build_retriever(index_dir: dir)
         expect(retriever).not_to be_nil
 
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
         expect(vs.count).to eq(5)
       end
     end
@@ -938,8 +947,7 @@ RSpec.describe Woods::MCP::Bootstrapper do
         )
 
         retriever, = described_class.build_retriever(index_dir: dir)
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         # The back-fill writes the SYMBOL-keyed filter subset the Indexer's
         # live embed path writes ({ type:, identifier:, file_path: }) — not
@@ -1010,10 +1018,13 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
-    it 'invalidates the Ranker pagerank memo on reload (stale PageRank after replace_graph)' do
-      # reload_stores! swaps the graph inside the shared GraphStore wrapper
-      # via replace_graph; the Ranker's rank-percentile map is memoized from
-      # the OLD graph and must be dropped alongside the context cache.
+    it 'serves retrieval from a FRESH pipeline after reload (no stale memos or store references)' do
+      # reload_stores! used to mutate the live stores in place and had to
+      # invalidate the Ranker's memoized PageRank after replace_graph. The
+      # transactional reload swaps a whole new pipeline instead: a fresh
+      # ranker (no memo from the retired graph) and fresh stores, so the
+      # reload outcome is pinned functionally — the reloaded retriever
+      # searches the NEW dump and no longer sees the old contents.
       Dir.mktmpdir do |dir|
         write_artifact(
           dir,
@@ -1022,13 +1033,19 @@ RSpec.describe Woods::MCP::Bootstrapper do
         )
 
         retriever, = described_class.build_retriever(index_dir: dir)
-        ranker = retriever.instance_variable_get(:@ranker)
-        expect(ranker).to be_a(Woods::Retrieval::Ranker)
+        old_vector_store = retriever.vector_store
 
-        allow(ranker).to receive(:invalidate_pagerank_cache!).and_call_original
+        write_artifact(
+          dir,
+          vector_entries: [['Invoice', [0.0, 1.0, 0.0, 0.0], {}]],
+          metadata_entries: [['Invoice', { 'type' => 'model' }]]
+        )
         described_class.reload_stores!(retriever, index_dir: dir)
 
-        expect(ranker).to have_received(:invalidate_pagerank_cache!)
+        expect(retriever.vector_store).not_to be(old_vector_store)
+        expect(retriever.vector_store.count).to eq(1)
+        expect(retriever.vector_store.search([0.0, 1.0, 0.0, 0.0], limit: 5).map(&:id)).to eq(%w[Invoice])
+        expect(retriever.metadata_store.count).to eq(1)
       end
     end
 
@@ -1051,8 +1068,7 @@ RSpec.describe Woods::MCP::Bootstrapper do
         expect { described_class.build_retriever(index_dir: dir) }.not_to raise_error
 
         retriever, = described_class.build_retriever(index_dir: dir)
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         # All 3 vector entries survive
         expect(vs.count).to eq(3)
@@ -1095,7 +1111,13 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end.not_to raise_error
     end
 
-    it 'is reachable via populate_reloaded_vector_metadata on a retriever holding a durable store' do
+    it 'is reachable from the reload transaction on a retriever holding a durable store (B-108)' do
+      # B-108 regression: the reload path used to guard the back-fill with a
+      # bare respond_to?(:each_entry), which the Interface stubs answer true
+      # to, and crashed with NotImplementedError (a ScriptError) mid-reload.
+      # The transactional reload now resolves the back-fill on the candidate
+      # stores through the same implements_own? guard, and a retriever whose
+      # live vector store is durable takes the all-or-nothing no-op.
       durable_vs = durable_vector_store_class.new
       retriever = instance_double(
         Woods::Retriever,
@@ -1104,8 +1126,15 @@ RSpec.describe Woods::MCP::Bootstrapper do
       )
 
       expect do
-        described_class.send(:populate_reloaded_vector_metadata, retriever)
+        described_class.send(:populate_vector_metadata, durable_vs,
+                             instance_double(Woods::Storage::MetadataStore::InMemory, find: {}))
       end.not_to raise_error
+
+      Dir.mktmpdir do |dir|
+        expect(described_class.reload_stores!(retriever, index_dir: dir)).to eq(
+          vectors: 0, metadata: 0, graph: 0
+        )
+      end
     end
   end
 

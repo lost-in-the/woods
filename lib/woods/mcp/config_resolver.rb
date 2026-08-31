@@ -61,6 +61,11 @@ module Woods
       #   in the deprecated auto-detect path. Defaults to {.ollama_reachable?} on
       #   this module. Callers may pass a different probe to facilitate testing
       #   without touching global state.
+      # @param stored_config [Woods::ResolvedConfig, nil] a pre-captured stored
+      #   config to reconcile against INSTEAD of re-reading +artifact+ (M7: the
+      #   reload transaction captures the config from the dump identity it
+      #   pinned, so a concurrent promotion cannot change it mid-build). Nil
+      #   keeps the default behavior of reading the artifact.
       # @return [Array(Woods::Configuration, Symbol)] tuple of +[config, source]+
       #   where +source+ is one of +:snapshot+, +:host_config+, +:autodetect+,
       #   or +:none+. The config is the same object passed in, possibly mutated.
@@ -72,8 +77,8 @@ module Woods
       #   dimensions disagree.
       # @raise [Woods::MCP::ConfigMismatch] when stored and live provider
       #   class/model disagree.
-      def self.resolve(config, artifact:, env: ENV, ollama_probe: nil)
-        stored = read_stored_config(artifact)
+      def self.resolve(config, artifact:, env: ENV, ollama_probe: nil, stored_config: :not_given)
+        stored = stored_config == :not_given ? read_stored_config(artifact) : stored_config
 
         if stored
           [apply_stored_config(config, stored, artifact: artifact, env: env), :snapshot]

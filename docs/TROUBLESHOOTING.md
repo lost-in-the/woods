@@ -220,14 +220,19 @@ bundle exec rake woods:embed          # writes woods.json + vector dumps
 
 - `phase: "boot"` — a dump failed to hydrate at startup (corrupt or unreadable `vectors.bin` / `metadata.msgpack`), so the affected in-memory store is empty. Before this guidance existed, the server reported a healthy boot and answered every query with empty results as if they were legitimate.
 - `phase: "query"` — the metadata store failed while serving (storage outage, permissions). The typed `Woods::Retriever::StoreError` is mapped to the same degraded payload.
+- `phase: "reload"` — a `reload` attempt failed (M7). Candidate stores are built off-side from one captured generation marker and one captured promoted-dump identity, and a candidate that cannot hydrate aborts the whole transaction: nothing is swapped, the reader keeps the previous generation, and the old retriever keeps answering queries. The reload tool answers with a `degraded_index` error carrying `phase: "reload"`, the `generation:` still being served, and the `stores:` whose refresh failed; `woods_status` exposes the same condition additively as `bootstrap.reload_failure`. This is distinct from the boot `degraded` state — the old stores are healthy, so `codebase_retrieve` keeps working while the condition is visible.
 
 The `stores:` field names what is affected (`vector`, `metadata`, `graph`) and `reason:` carries the underlying error.
 
 **Fix:**
 
-1. Read `reason:` from the error payload, or call `woods_status` and read `bootstrap.reason` / `bootstrap.hydration_failures`.
+1. Read `reason:` from the error payload, or call `woods_status` and read `bootstrap.reason` / `bootstrap.hydration_failures`. For a `reload` failure, read `bootstrap.reload_failure` instead — its `generation` field names the generation still being served.
 2. For a `boot` failure: confirm the index directory is readable, re-run `bundle exec rake woods:embed` if the dump may be corrupt, then restart the MCP server.
 3. For a `query` failure: check the backing metadata store (the SQLite database in the index directory, or your remote vector backend) for availability and permissions.
+4. For a `reload` failure: no restart is needed — the server is serving the previous complete generation. Fix the underlying issue the `reason:` names (a corrupt or missing dump usually means re-running `woods:embed`), then invoke `reload` again. A successful reload swaps the new bundle in and clears the condition (`bootstrap.reload_failure` disappears from `woods_status`). Three reasons resolve on their own:
+   - `promoted dump changed during reload` — an embed published while the reload was building candidates. Invoke `reload` again once the writer finishes.
+   - `index generation moved during reload` — same, for a unit-index publication. Invoke `reload` again.
+   - `could not acquire the extraction writer lock` — a writer held the extraction PipelineLock for the whole wait. Invoke `reload` again once the writer finishes. The reload needs write access to the index directory for this lock, same as every writer.
 
 ---
 

@@ -505,22 +505,35 @@ RSpec.describe Woods::MCP::Server do
       response = call_tool(server_with_reloader, 'reload')
       data = parse_response(response)
 
-      expect(reloader).to have_received(:call)
+      expect(reloader).to have_received(:call).with(an_instance_of(Woods::MCP::IndexReader))
       expect(data['retriever']).to include('vectors' => 100, 'metadata' => 100, 'graph' => 1)
     end
 
-    it 'reports the reloader error instead of raising when re-hydration fails' do
+    it 'answers a failed reload with the reload-phase degraded condition instead of a success payload' do
+      # M7: the reload transaction is all-or-nothing. A failure means the
+      # reader caches and the store bundle were NOT touched — the previous
+      # generation is still being served — so the response is a typed
+      # degraded_index error naming that generation, not a success with an
+      # error hash inside.
       reloader = double('reloader')
-      allow(reloader).to receive(:call).and_raise(StandardError, 'dump missing')
+      allow(reloader).to receive(:call).and_raise(Woods::MCP::ReloadDegraded.new(
+                                                    'vector store refresh failed: RuntimeError: dump missing',
+                                                    generation: 3, stores: [:vector]
+                                                  ))
 
       server_with_reloader = described_class.build(
         index_dir: fixture_dir, response_format: :json, retriever_reloader: reloader
       )
 
       response = call_tool(server_with_reloader, 'reload')
-      data = parse_response(response)
-      expect(data['reloaded']).to be true
-      expect(data['retriever']['error']).to include('dump missing')
+      expect(response.error?).to be(true)
+      expect(response.meta[:error_code]).to eq(:degraded_index)
+      expect(response.meta[:degraded]).to be(true)
+      expect(response.meta[:phase]).to eq('reload')
+      expect(response.meta[:generation]).to eq(3)
+      expect(response.meta[:stores]).to eq(%w[vector])
+      expect(response_text(response)).to include('Generation 3 is still being served')
+      expect(response_text(response)).to include('dump missing')
     end
   end
 

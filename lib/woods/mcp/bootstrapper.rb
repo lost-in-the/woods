@@ -177,148 +177,370 @@ module Woods
 
       # Refresh a live retriever's in-memory stores from the latest dumps on
       # disk. Used by the MCP +reload+ tool so agents can pick up a fresh embed
-      # run without restarting the process. The retriever instance is preserved
-      # (tool closures kept their reference) — only the stores are mutated.
+      # run without restarting the process.
+      #
+      # The transaction is build-then-swap (M7) — the old +clear!+ +
+      # +bulk_load+ on the LIVE stores left an empty or half-loaded window a
+      # concurrent reader could observe:
+      #
+      #   1. Capture ONCE, before any candidate work: the served generation
+      #      marker AND the promoted dump identity (+dumps/latest+). Every
+      #      candidate then hydrates EXCLUSIVELY from those captured
+      #      locations — config from the captured dump's embedded snapshot,
+      #      vector/metadata from the captured dump directory, the graph from
+      #      the captured marker's payload — never from whatever is on disk
+      #      mid-build.
+      #   2. If ANY candidate fails: the reader is not reloaded and no store
+      #      is swapped — the previous fully aligned generation stays served,
+      #      the old retriever keeps answering, and a DISTINCT reload-phase
+      #      degraded condition is recorded on +state+ (never the boot
+      #      degraded state, which describes the old stores). Raised as
+      #      {Woods::MCP::ReloadDegraded}.
+      #   3. Commit: acquire the SAME on-disk PipelineLock every writer uses
+      #      (bounded poll; a reload must not queue behind a long extraction),
+      #      THEN the reader's exclusive generation lock, THEN recheck BOTH
+      #      identities. A generation movement raises
+      #      {Woods::MCP::ReloadGenerationMoved}; a promoted-dump movement
+      #      raises {Woods::MCP::ReloadDumpMoved} (an embed promotes without
+      #      bumping the generation file, so the dump identity is rechecked
+      #      separately). The writer lock is held through reader alignment and
+      #      the single Pipeline assignment — no publication can interleave
+      #      between recheck and swap — and released AFTER the reader lock.
+      #   4. A successful reload clears the reload-failure condition.
+      #
+      # Deterministic-interleaving hooks (M7 specs): +hooks+ carries optional
+      # callables — +after_vector_candidate:+ (post-vector, pre-metadata
+      # hydration), +after_pipeline_lock:+ (writer lock held, reader lock not
+      # yet taken), +before_swap:+ (both rechecks passed, Pipeline assignment
+      # imminent), +after_swap:+ (bundle swapped). Production passes nil.
       #
       # No-op when:
       #   - +retriever+ is nil (no embedding provider configured)
-      #   - stores are durable (pgvector / Qdrant auto-refresh externally)
+      #   - the live stores are durable (pgvector / Qdrant auto-refresh
+      #     externally) — a partial all-or-nothing swap would mix backends
       #   - +woods.json+ is absent (Shape-1 deployments don't use Snapshotter)
       #
-      # @param retriever [Woods::Retriever, nil]
+      # @param retriever [Woods::Retriever, Cache::CachedRetriever, nil]
       # @param index_dir [String, Pathname]
+      # @param reader [Woods::MCP::IndexReader, nil] when given, the commit
+      #   phase runs under the reader's exclusive generation lock and the
+      #   reader's caches are reloaded alongside the swap
+      # @param state [Woods::MCP::BootstrapState, nil] records the reload
+      #   -phase degraded condition and its recovery
+      # @param hooks [Hash, nil] optional deterministic-interleaving hooks
       # @return [Hash] Stats — +{ vectors:, metadata:, graph: }+ record counts
-      # @raise [Woods::MCP::BootstrapError] surfaced from ConfigResolver / Snapshotter
-      def self.reload_stores!(retriever, index_dir:)
-        return { vectors: 0, metadata: 0, graph: 0 } unless retriever
+      # @raise [Woods::MCP::ReloadDegraded] the transaction aborted; nothing
+      #   was swapped and the generation named by the error is still served
+      def self.reload_stores!(retriever, index_dir:, reader: nil, state: nil, hooks: nil)
+        zero_counts = { vectors: 0, metadata: 0, graph: 0 }
+        return zero_counts unless retriever
+
+        target = swap_target(retriever)
+        return zero_counts unless target
 
         artifact = build_artifact(index_dir)
-        config, _source = ConfigResolver.resolve(Woods.configuration,
-                                                 artifact: artifact,
-                                                 ollama_probe: method(:ollama_reachable?))
+        return zero_counts unless artifact
+
+        generation = Woods::Generation.new(output_dir: artifact.output_dir)
+
+        # CAPTURE ONCE — the identities every candidate and the commit recheck
+        # are anchored to. Nothing downstream re-reads a live pointer until
+        # the commit recheck itself.
+        served = generation.current
+        captured_dump = artifact.latest_dump_path
+
+        begin
+          config, _source = ConfigResolver.resolve(
+            Woods.configuration,
+            artifact: artifact,
+            ollama_probe: method(:ollama_reachable?),
+            stored_config: captured_stored_config(artifact, captured_dump)
+          )
+        rescue StandardError => e
+          raise ReloadDegraded.new(
+            'reload could not resolve the index configuration; the previous generation is still ' \
+            "being served: #{e.class}: #{e.message}",
+            generation: served.number, stores: %w[vector metadata graph], error: e
+          )
+        end
         resolved = build_resolved_config(config)
 
-        vectors_count = refill_in_memory_vector_store(retriever, config, resolved, artifact)
-        metadata_count = refill_in_memory_metadata_store(retriever, config, resolved, artifact)
-        graph_count = refill_in_memory_graph_store(retriever, config, artifact)
+        return zero_counts unless refreshable_stores?(target)
 
-        # Re-run the vector-metadata back-fill against the refreshed live
-        # stores. The WVF1 dump persists id + floats only, so the vectors
-        # just bulk-loaded carry EMPTY metadata hashes — without this,
-        # every type-filtered search returns nothing until the process
-        # restarts (the boot path back-fills; reload must too). Runs after
-        # BOTH refills so the lookup hits the fresh metadata, not the old.
-        populate_reloaded_vector_metadata(retriever)
+        # Phase 1: candidates off-side, exclusively from the captured locations.
+        candidates = build_reload_candidates(config, resolved, artifact, served, captured_dump, hooks)
+        return zero_counts unless candidates
 
-        # The Ranker memoizes a rank-percentile map computed from the graph
-        # store's PageRank; replace_graph swapped the graph underneath it,
-        # so drop the memo alongside the context cache.
-        invalidate_ranker_pagerank!(retriever)
-
-        # Context-cache entries from the previous embed run no longer agree
-        # with the refreshed stores. Drop them so the next codebase_retrieve
-        # call goes through the full pipeline with the new data. Embedding
-        # caches (query → vector) survive — that mapping is deterministic
-        # for a given provider+model.
-        retriever.invalidate_context_cache! if retriever.respond_to?(:invalidate_context_cache!)
-
-        { vectors: vectors_count, metadata: metadata_count, graph: graph_count }
+        # Phase 2: writer lock, reader lock, recheck both identities, swap.
+        commit_reload!(target, candidates, artifact: artifact, generation: generation,
+                                           served: served, captured_dump: captured_dump, reader: reader,
+                                           retriever: retriever, state: state, hooks: hooks)
+      rescue Woods::MCP::ReloadDegraded => e
+        state&.record_reload_failure(generation: e.generation, stores: e.stores,
+                                     reason: "#{e.class}: #{e.message}")
+        raise
       end
 
-      # Back-fill filter metadata on the retriever's LIVE stores after a
-      # reload. Same contract as the boot-path call in
-      # {.build_retriever_from_config} — no-op unless both stores are
-      # in-memory shapes ({.populate_vector_metadata} guards the interfaces).
-      #
-      # @param retriever [Woods::Retriever, Cache::CachedRetriever]
-      # @return [void]
-      def self.populate_reloaded_vector_metadata(retriever)
-        vs = retriever.respond_to?(:vector_store) ? retriever.vector_store : nil
-        ms = retriever.respond_to?(:metadata_store) ? retriever.metadata_store : nil
-        populate_vector_metadata(vs, ms) if vs && ms
+      # The stored config snapshot anchored at the CAPTURED dump (M7): the
+      # embedded +woods.json+ inside that dump directory, falling back to the
+      # root file for dumps that predate embedded configs — the same
+      # preference order as {IndexArtifact#read_config}, but pinned to the
+      # captured identity instead of re-reading the +latest+ pointer. Nil when
+      # neither exists, which resolves the same way a missing snapshot does.
+      def self.captured_stored_config(artifact, captured_dump)
+        return nil unless captured_dump
+
+        embedded = artifact.dump_config_path(captured_dump)
+        if embedded.exist?
+          ResolvedConfig.from_hash(JSON.parse(embedded.read(encoding: Encoding::UTF_8)))
+        elsif artifact.config_path.exist?
+          ResolvedConfig.from_hash(JSON.parse(artifact.config_path.read(encoding: Encoding::UTF_8)))
+        end
       end
-      private_class_method :populate_reloaded_vector_metadata
+      private_class_method :captured_stored_config
 
-      # Reach the Ranker inside the (possibly cache-wrapped) retriever and
-      # drop its memoized PageRank map ({Retrieval::Ranker#invalidate_pagerank_cache!}).
-      #
-      # Neither Retriever nor CachedRetriever exposes a public +ranker+
-      # reader today, so this prefers one when present (future-proofing)
-      # and otherwise walks the known ivar layout: +@retriever+ on the
-      # cache wrapper, +@ranker+ on the retriever. Every probe is guarded —
-      # an unknown retriever shape degrades to a no-op rather than raising
-      # mid-reload.
-      #
-      # @param retriever [Woods::Retriever, Cache::CachedRetriever]
-      # @return [void]
-      def self.invalidate_ranker_pagerank!(retriever)
-        ranker = extract_ranker(retriever)
-        ranker.invalidate_pagerank_cache! if ranker.respond_to?(:invalidate_pagerank_cache!)
+      # Reach the swappable retriever inside a (possibly cache-wrapped)
+      # retriever. {Cache::CachedRetriever} keeps the real one in +@retriever+
+      # and nothing else wraps today; the guarded ivar probe degrades to nil
+      # on an unknown shape rather than raising mid-reload. Same rationale as
+      # the retired +extract_ranker+ helper this replaces.
+      def self.swap_target(retriever)
+        return retriever if retriever.respond_to?(:swap_stores!)
+
+        inner = (retriever.instance_variable_get(:@retriever) if retriever.instance_variable_defined?(:@retriever))
+        inner if inner.respond_to?(:swap_stores!)
       end
-      private_class_method :invalidate_ranker_pagerank!
+      private_class_method :swap_target
 
-      # Resolve the Ranker instance from a retriever or cache wrapper.
+      # Can this retriever's vector AND metadata stores both be refreshed
+      # here? In-memory stores expose +clear!+/+bulk_load+; durable backends
+      # (pgvector, Qdrant) don't implement +clear!+ — they're refreshed
+      # externally. The transaction is all-or-nothing, so a shape that can't
+      # refresh both takes the no-op rather than a partial swap.
+      def self.refreshable_stores?(target)
+        vs = target.vector_store
+        ms = target.metadata_store
+        vs.respond_to?(:clear!) && vs.respond_to?(:bulk_load) &&
+          ms.respond_to?(:clear!) && ms.respond_to?(:bulk_load)
+      end
+      private_class_method :refreshable_stores?
+
+      # Immutable candidate bundle built off-side. +graph_store+ is nil when
+      # the index carries no +dependency_graph.json+ (the live graph is kept).
+      ReloadCandidates = Struct.new(:vector_store, :metadata_store, :graph_store,
+                                    :vector_count, :metadata_count, :graph_count,
+                                    keyword_init: true)
+      private_constant :ReloadCandidates
+
+      # Build every candidate store against the CAPTURED identities. Any
+      # failure raises {Woods::MCP::ReloadDegraded} naming the failing
+      # component; nothing has been swapped at this point.
       #
-      # @param target [Object]
-      # @return [Retrieval::Ranker, nil]
-      def self.extract_ranker(target)
-        return nil if target.nil?
-        return target.ranker if target.respond_to?(:ranker)
+      # Vector and metadata candidates must both exist (the transaction never
+      # half-swaps); a nil graph candidate means "keep the live graph".
+      def self.build_reload_candidates(config, resolved, artifact, served, captured_dump, hooks)
+        vector = reload_vector_candidate(config, resolved, captured_dump, served)
+        return nil unless vector
 
-        if target.instance_variable_defined?(:@retriever)
-          return extract_ranker(target.instance_variable_get(:@retriever))
+        run_hook(hooks, :after_vector_candidate)
+
+        metadata = reload_metadata_candidate(config, resolved, captured_dump, served)
+        return nil unless metadata
+
+        graph = reload_graph_candidate(config, artifact, served)
+
+        # Back-fill the candidate vector store's per-entry metadata from the
+        # candidate metadata store, OFF-SIDE before the swap. The WVF1 dump
+        # persists id + floats only — without this, every type-filtered
+        # search returns nothing after a reload (the boot path back-fills;
+        # reload must too). Same contract as the boot-path call in
+        # {.build_retriever_from_config}.
+        populate_vector_metadata(vector, metadata)
+
+        ReloadCandidates.new(
+          vector_store: vector, metadata_store: metadata, graph_store: graph,
+          vector_count: vector.count, metadata_count: metadata.count,
+          graph_count: graph ? 1 : 0
+        )
+      end
+      private_class_method :build_reload_candidates
+
+      def self.reload_vector_candidate(config, resolved, captured_dump, served)
+        return nil unless config.vector_store == :in_memory
+
+        Woods::Storage::Snapshotter::Vector.load_dump_dir(
+          captured_dump, resolved_config: resolved, required: true
+        )
+      rescue StandardError => e
+        raise ReloadDegraded.new(
+          "vector store refresh failed: #{e.class}: #{e.message}",
+          generation: served.number, stores: [:vector], error: e
+        )
+      end
+      private_class_method :reload_vector_candidate
+
+      def self.reload_metadata_candidate(config, resolved, captured_dump, served)
+        return nil unless config.metadata_store == :in_memory
+
+        Woods::Storage::Snapshotter::Metadata.load_dump_dir(
+          captured_dump, resolved_config: resolved, required: true
+        )
+      rescue StandardError => e
+        raise ReloadDegraded.new(
+          "metadata store refresh failed: #{e.class}: #{e.message}",
+          generation: served.number, stores: [:metadata], error: e
+        )
+      end
+      private_class_method :reload_metadata_candidate
+
+      def self.reload_graph_candidate(config, artifact, served)
+        hydrated_graph_store(config, artifact, nil, strict: true, marker: served)
+      rescue StandardError => e
+        raise ReloadDegraded.new(
+          "graph store refresh failed: #{e.class}: #{e.message}",
+          generation: served.number, stores: [:graph], error: e
+        )
+      end
+      private_class_method :reload_graph_candidate
+
+      # Commit phase: acquire the SAME on-disk PipelineLock every extraction /
+      # embed writer uses (bounded poll — a reload must not queue behind a
+      # long extraction), THEN the reader's exclusive generation lock, THEN
+      # recheck BOTH captured identities. The writer lock is held through the
+      # reader alignment and the one-assignment Pipeline swap and released
+      # AFTER the reader lock, so no writer publication can interleave between
+      # recheck and swap.
+      def self.commit_reload!(target, candidates, artifact:, generation:, served:,
+                              captured_dump:, reader:, retriever:, state:, hooks:)
+        lock = reload_extraction_lock(artifact.output_dir)
+        unless acquire_writer_lock_briefly(lock)
+          raise ReloadDegraded.new(
+            'reload could not acquire the extraction writer lock; a writer is actively ' \
+            'publishing. Nothing was swapped and the previous generation is still being ' \
+            'served — invoke reload again once the writer finishes.',
+            generation: served.number, stores: %w[vector metadata graph]
+          )
         end
 
-        target.instance_variable_defined?(:@ranker) ? target.instance_variable_get(:@ranker) : nil
+        begin
+          run_hook(hooks, :after_pipeline_lock)
+
+          body = lambda do
+            # Recheck BOTH captured identities under the writer lock. An embed
+            # promotes without bumping the generation file, so the dump
+            # identity needs its own check — the generation marker alone
+            # would bless a bundle whose halves hydrate from two dumps.
+            current = generation.current
+            unless same_generation_marker?(served, current)
+              raise ReloadGenerationMoved.new(
+                "index generation moved during reload (captured #{served.number}, now #{current.number}); " \
+                'nothing was swapped and the previous generation is still being served — invoke reload again',
+                generation: served.number, stores: %w[vector metadata graph]
+              )
+            end
+            current_dump = artifact.latest_dump_path
+            unless same_dump_identity?(captured_dump, current_dump)
+              raise ReloadDumpMoved.new(
+                "promoted dump changed during reload (captured #{captured_dump}, now #{current_dump}); " \
+                'nothing was swapped and the previous generation is still being served — invoke reload again',
+                generation: served.number, stores: %w[vector metadata graph]
+              )
+            end
+
+            run_hook(hooks, :before_swap)
+
+            target.swap_stores!(
+              vector_store: candidates.vector_store,
+              metadata_store: candidates.metadata_store,
+              graph_store: candidates.graph_store || target.graph_store
+            )
+
+            # Align the reader caches with the swapped bundle — the retired
+            # generation's unit caches, identifier map and graph must not leak
+            # into responses describing the new one.
+            reader&.reload!
+
+            # Context-cache entries from the previous embed run no longer agree
+            # with the refreshed stores. Drop them so the next codebase_retrieve
+            # call goes through the full pipeline with the new data. Embedding
+            # caches (query → vector) survive — that mapping is deterministic
+            # for a given provider+model. The Ranker needs no memo invalidation:
+            # the swapped pipeline carries a FRESH ranker with no memoized
+            # PageRank from the retired graph.
+            retriever.invalidate_context_cache! if retriever.respond_to?(:invalidate_context_cache!)
+
+            # Successful recovery clears the reload-phase degraded condition.
+            state&.clear_reload_failure!
+
+            run_hook(hooks, :after_swap)
+
+            { vectors: candidates.vector_count, metadata: candidates.metadata_count,
+              graph: candidates.graph_count }
+          end
+
+          reader ? reader.with_exclusive_generation(&body) : body.call
+        ensure
+          # Release order: the reader lock (the block above) first, then the
+          # writer lock.
+          lock.release
+        end
       end
-      private_class_method :extract_ranker
+      private_class_method :commit_reload!
 
-      # Retriever (and CachedRetriever) expose public +vector_store+ /
-      # +metadata_store+ / +graph_store+ readers so this helper never pokes
-      # private state. Durable backends don't implement +clear!+/+bulk_load+
-      # — they return 0 silently because they're already refreshed externally.
-      def self.refill_in_memory_vector_store(retriever, config, resolved, artifact)
-        vs = retriever.respond_to?(:vector_store) ? retriever.vector_store : nil
-        return 0 unless vs.respond_to?(:clear!) && vs.respond_to?(:bulk_load)
+      # The same lock every other writer against this index uses — rake
+      # extract/incremental/embed and the watch daemon all build it from the
+      # daemon's constants (keep in agreement with
+      # {Woods::MCP::Server.build_extraction_lock} and the rake helper).
+      def self.reload_extraction_lock(output_dir)
+        require 'woods/coordination/pipeline_lock'
+        require 'woods/watch/daemon'
 
-        fresh = hydrated_vector_store(config, resolved, artifact)
-        return 0 unless fresh
-
-        vs.clear!
-        vs.bulk_load(fresh.each_entry.map { |id, vec, meta| { id: id, vector: vec, metadata: meta } })
-        vs.respond_to?(:count) ? vs.count : 0
+        Woods::Coordination::PipelineLock.new(
+          lock_dir: output_dir.to_s,
+          name: Woods::Watch::Daemon::LOCK_NAME,
+          stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
+        )
       end
-      private_class_method :refill_in_memory_vector_store
+      private_class_method :reload_extraction_lock
 
-      def self.refill_in_memory_metadata_store(retriever, config, resolved, artifact)
-        ms = retriever.respond_to?(:metadata_store) ? retriever.metadata_store : nil
-        return 0 unless ms.respond_to?(:clear!) && ms.respond_to?(:bulk_load)
+      # Poll for the writer lock briefly. Monotonic, so a clock adjustment
+      # mid-wait cannot stretch or shrink the window. Bounded because a reload
+      # must not queue behind a full extraction; a busy writer fails the
+      # attempt with a typed retryable error instead.
+      WRITER_LOCK_WAIT = 2.0 # seconds — mirrors Server::PIPELINE_LOCK_WAIT
 
-        fresh = hydrated_metadata_store(config, resolved, artifact)
-        return 0 unless fresh
-
-        ms.clear!
-        ms.bulk_load(fresh.each_entry)
-        ms.respond_to?(:count) ? ms.count : 0
+      def self.acquire_writer_lock_briefly(lock)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WRITER_LOCK_WAIT
+        acquired = lock.acquire
+        until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          sleep 0.1
+          acquired = lock.acquire
+        end
+        acquired
       end
-      private_class_method :refill_in_memory_metadata_store
+      private_class_method :acquire_writer_lock_briefly
 
-      # GraphStore::Memory doesn't expose a +clear!+/+bulk_load+ pair today
-      # — a fresh run hands it an entirely new DependencyGraph from disk.
-      # Swap the inner graph via +replace_graph+ so SearchExecutor / Ranker /
-      # MCP tools keep their references to the same wrapper and see the new
-      # graph (no closure references break).
-      def self.refill_in_memory_graph_store(retriever, config, artifact)
-        gs = retriever.respond_to?(:graph_store) ? retriever.graph_store : nil
-        return 0 unless gs.respond_to?(:replace_graph)
-
-        fresh = hydrated_graph_store(config, artifact)
-        return 0 if fresh.nil?
-
-        gs.replace_graph(fresh.graph)
-        1
+      def self.run_hook(hooks, name)
+        hooks&.fetch(name, nil)&.call
       end
-      private_class_method :refill_in_memory_graph_store
+      private_class_method :run_hook
+
+      # Token comparison, number fallback — mirrors IndexReader's
+      # same_generation? rule (two collapsed bumps share a number but not a
+      # token; pre-token generation files are told apart by number only).
+      def self.same_generation_marker?(captured, current)
+        return captured.number == current.number if captured.token.nil? || current.token.nil?
+
+        captured.token == current.token
+      end
+      private_class_method :same_generation_marker?
+
+      # The promoted-dump identity: the resolved +dumps/latest+ path captured
+      # before candidate construction, compared against a fresh pointer read.
+      def self.same_dump_identity?(captured_dump, current_dump)
+        captured_dump.to_s == current_dump.to_s
+      end
+      private_class_method :same_dump_identity?
 
       # Check whether Ollama is reachable at the configured base URL.
       #
@@ -409,14 +631,22 @@ module Woods
       #
       # @param config [Woods::Configuration]
       # @param artifact [Woods::IndexArtifact, nil]
+      # @param strict [Boolean] when true (reload candidate path), a soft
+      #   failure RAISES instead of degrading to an empty store — a reload
+      #   must never swap a good live store for an empty candidate (M7)
+      # @param marker [Woods::Generation::Marker, nil] resolve the payload
+      #   through THIS generation marker instead of the currently published
+      #   one (M7: the reload transaction reads the payload of the marker it
+      #   captured, so a concurrent publish cannot mix a graph from another
+      #   generation into the candidate bundle)
       # @return [Woods::Storage::GraphStore::Memory, nil]
       # @raise [Woods::Storage::InapplicableBackend] if the configured
       #   graph_store reports +durable? => true+
-      def self.hydrated_graph_store(config, artifact, state = nil)
+      def self.hydrated_graph_store(config, artifact, state = nil, strict: false, marker: nil)
         return nil unless artifact
 
         generation = Woods::Generation.new(output_dir: artifact.output_dir)
-        graph_json = generation.payload_dir(generation.current).join('dependency_graph.json')
+        graph_json = generation.payload_dir(marker || generation.current).join('dependency_graph.json')
         return nil unless graph_json.exist?
 
         require_relative '../dependency_graph'
@@ -440,6 +670,8 @@ module Woods
       rescue Woods::Storage::InapplicableBackend
         raise
       rescue StandardError => e
+        raise if strict
+
         warn "[woods-mcp] graph hydration failed (#{e.class}: #{e.message}); starting with empty store"
         state&.record_hydration_failure(:graph, e)
         nil
@@ -541,8 +773,10 @@ module Woods
       #
       # A soft failure (transient I/O, corrupt dump) records the error on
       # +state+ so the boot status reflects store health instead of reporting
-      # :hydrated over empty stores (M6).
-      def self.hydrated_vector_store(config, resolved, artifact, state = nil)
+      # :hydrated over empty stores (M6). With +strict:+ (reload candidate
+      # path) a soft failure raises instead — a reload must never swap a
+      # good live store for an empty candidate (M7).
+      def self.hydrated_vector_store(config, resolved, artifact, state = nil, strict: false)
         return nil unless artifact && resolved
         return nil unless config.vector_store == :in_memory
 
@@ -553,13 +787,15 @@ module Woods
         # not a transient I/O issue. Operators must see these.
         raise
       rescue StandardError => e
+        raise if strict
+
         warn "[woods-mcp] vector hydration failed (#{e.class}: #{e.message}); starting with empty store"
         state&.record_hydration_failure(:vector, e)
         nil
       end
       private_class_method :hydrated_vector_store
 
-      def self.hydrated_metadata_store(config, resolved, artifact, state = nil)
+      def self.hydrated_metadata_store(config, resolved, artifact, state = nil, strict: false)
         return nil unless artifact && resolved
         return nil unless config.metadata_store == :in_memory
 
@@ -567,6 +803,8 @@ module Woods
       rescue Woods::MCP::BootstrapError, ArgumentError
         raise
       rescue StandardError => e
+        raise if strict
+
         warn "[woods-mcp] metadata hydration failed (#{e.class}: #{e.message}); starting with empty store"
         state&.record_hydration_failure(:metadata, e)
         nil
