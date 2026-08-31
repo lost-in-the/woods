@@ -16,18 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   half-loaded store (and the reader's caches were reloaded even when store
   hydration failed, pairing one generation's JSON index with another's vectors).
   The reload is now a transaction: candidate stores are built off-side against one
-  captured generation, any candidate failure leaves the previous fully aligned
-  generation untouched — the old retriever keeps answering and a distinct
+  captured generation marker and one captured promoted-dump identity, reading
+  exclusively from those captured locations (config from the captured dump's
+  embedded snapshot, vector/metadata from the captured dump directory, the graph
+  from the captured payload), so a concurrent promotion can never mix vector and
+  metadata halves from two dumps. Any candidate failure leaves the previous fully
+  aligned generation untouched — the old retriever keeps answering and a distinct
   reload-phase `degraded_index` condition (with `phase: 'reload'` naming the
   generation still being served) is reported on the `reload` tool response and
   additively through `woods_status` (`bootstrap.reload_failure`), without flipping
-  the boot degraded state — and on success the new store bundle is swapped in with
-  one atomic assignment under the exclusive generation lock after rechecking the
-  generation, so in-flight readers finish against the old stores and no reader
-  ever observes empty or mixed stores. A successful reload clears the condition;
-  a generation that moved during candidate construction fails the attempt with
-  `ReloadGenerationMoved` rather than swapping a stale bundle, and the next
-  `reload` is the recovery path.
+  the boot degraded state. The commit acquires the same on-disk extraction
+  PipelineLock every writer uses before rechecking both identities, so a writer
+  cannot publish between the recheck and the one-assignment store-bundle swap; a
+  generation movement fails the attempt with `ReloadGenerationMoved` and a
+  promoted-dump movement (an embed promotes without bumping the generation file)
+  with `ReloadDumpMoved` — the next `reload` is the recovery path. A successful
+  reload clears the condition.
 
 - **Incremental extraction no longer misses a class-based unit whose file
   moved with its constant unchanged (M1).** Moving `app/models/tag.rb` to
