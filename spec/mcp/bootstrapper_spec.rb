@@ -5,6 +5,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'woods'
 require 'woods/mcp/bootstrapper'
+require 'woods/mcp/server'
 
 RSpec.describe Woods::MCP::Bootstrapper do
   describe '.resolve_index_dir' do
@@ -424,6 +425,219 @@ RSpec.describe Woods::MCP::Bootstrapper do
     end
   end
 
+  describe 'M6: hydration failure must not report :hydrated' do
+    # A hydration soft-failure used to leave empty stores behind only a
+    # stderr warning while probe_and_mark_state marked :hydrated on provider
+    # reachability alone: a "healthy" server that answers everything with
+    # nothing. The state must be derived from store health, and
+    # codebase_retrieve must return typed degraded metadata instead of a
+    # clean empty result.
+    let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before do
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+      # Isolate the hydration signal: the provider is fine, the store is not.
+      allow(Woods::MCP::ProviderProbe).to receive(:reachable!).and_return(true)
+    end
+
+    it 'marks :degraded with the hydration error when metadata hydration fails' do
+      allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+        RuntimeError, 'simulated I/O error'
+      )
+      Dir.mktmpdir do |dir|
+        retriever, state = nil
+        expect do
+          retriever, state = described_class.build_retriever(index_dir: dir)
+        end.to output(/metadata hydration failed/).to_stderr
+
+        expect(retriever).not_to be_nil
+        expect(state.status).to eq(:degraded)
+        expect(state.status).not_to eq(:hydrated)
+        expect(state.hydration_failed?).to be(true)
+        expect(state.reason.message).to include('simulated I/O error')
+      end
+    end
+
+    it 'marks :degraded with the hydration error when vector hydration fails' do
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(
+        RuntimeError, 'simulated dump corruption'
+      )
+      Dir.mktmpdir do |dir|
+        retriever, state = described_class.build_retriever(index_dir: dir)
+
+        expect(retriever).not_to be_nil
+        expect(state.status).to eq(:degraded)
+        expect(state.hydration_failed?).to be(true)
+        expect(state.reason.message).to include('simulated dump corruption')
+      end
+    end
+
+    it 'keeps :hydrated when every store hydrates cleanly' do
+      Dir.mktmpdir do |dir|
+        _retriever, state = described_class.build_retriever(index_dir: dir)
+
+        expect(state.status).to eq(:hydrated)
+        expect(state.hydration_failed?).to be(false)
+      end
+    end
+
+    it 'surfaces typed degraded metadata through codebase_retrieve instead of a clean empty result' do
+      allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+        RuntimeError, 'simulated I/O error'
+      )
+      retriever, state = described_class.build_retriever(index_dir: fixture_dir)
+      server = Woods::MCP::Server.build(
+        index_dir: fixture_dir, retriever: retriever, bootstrap_state: state, response_format: :json
+      )
+
+      tools = server.instance_variable_get(:@tools)
+      response = tools['codebase_retrieve'].call(query: 'How does authentication work?', server_context: {})
+
+      expect(response.error?).to be(true)
+      expect(response.meta[:error_code]).to eq(:degraded_index)
+      expect(response.meta[:degraded]).to be(true)
+      expect(response.content.first[:text]).to include('degraded')
+    end
+  end
+
+  describe 'graph hydration under a C locale (encoding regression)' do
+    # hydrated_graph_store read dependency_graph.json with a bare
+    # Pathname#read, which tags content with Encoding.default_external.
+    # Under LANG=C (US-ASCII), one non-ASCII identifier raised
+    # Encoding::InvalidByteSequenceError: the graph hydrated empty. Since the
+    # M6 fix records hydration failures and codebase_retrieve refuses all
+    # queries when any exists, that locale bug had become a complete
+    # semantic-retrieval outage. Index artifact reads go through
+    # Woods::AtomicFile.read (the H1 contract, #247) — mirroring
+    # spec/mcp/index_reader_encoding_spec.rb for locale-forcing mechanics.
+    let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
+
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      ENV.delete('WOODS_ALLOW_AUTODETECT')
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before do
+      Woods.configuration.vector_store = :in_memory
+      Woods.configuration.metadata_store = :in_memory
+      Woods.configuration.graph_store = :in_memory
+      Woods.configuration.embedding_provider = :ollama
+      Woods.configuration.embedding_options = {
+        host: 'http://127.0.0.1:19999',
+        model: 'nomic-embed-text',
+        dimension: 4
+      }
+      allow(Woods::MCP::ProviderProbe).to receive(:reachable!).and_return(true)
+    end
+
+    def write_non_ascii_graph(dir)
+      graph = {
+        'nodes' => {
+          'Café' => { 'type' => 'model', 'file_path' => 'app/models/café.rb', 'namespace' => nil }
+        },
+        'edges' => {},
+        'reverse' => {},
+        'file_map' => {}
+      }
+      File.write(File.join(dir, 'dependency_graph.json'), JSON.generate(graph))
+    end
+
+    # Emulates a C-locale host: bare reads tag artifact bytes US-ASCII.
+    # Restores the previous default external encoding in ensure. Mirrors
+    # the helper in spec/mcp/index_reader_encoding_spec.rb.
+    def in_us_ascii_locale
+      previous = Encoding.default_external
+      Encoding.default_external = Encoding::US_ASCII
+      yield
+    ensure
+      Encoding.default_external = previous
+    end
+
+    it 'hydrates a non-ASCII graph without recording a hydration failure under US-ASCII' do
+      Dir.mktmpdir do |dir|
+        write_non_ascii_graph(dir)
+
+        retriever, state = nil
+        in_us_ascii_locale do
+          retriever, state = described_class.build_retriever(index_dir: dir)
+        end
+
+        expect(retriever).not_to be_nil
+        expect(state.hydration_failed?).to be(false)
+        expect(state.status).to eq(:hydrated)
+        expect(retriever.graph_store.graph.node_exists?('Café')).to be(true)
+      end
+    end
+
+    it 'does not refuse codebase_retrieve with the degraded gate under US-ASCII' do
+      Dir.mktmpdir do |dir|
+        write_non_ascii_graph(dir)
+        # Server.build constructs an IndexReader, which wants a manifest.
+        File.write(File.join(dir, 'manifest.json'), JSON.generate(
+                                                      'extracted_at' => '2026-08-30T00:00:00Z',
+                                                      'counts' => {}, 'total_units' => 0, 'total_chunks' => 0
+                                                    ))
+
+        retriever, state = nil
+        in_us_ascii_locale do
+          retriever, state = described_class.build_retriever(index_dir: dir)
+        end
+
+        clean_result = Woods::Retriever::RetrievalResult.new(
+          context: '## Café (model)', sources: [{ identifier: 'Café', type: :model }],
+          classification: nil, strategy: :vector, tokens_used: 10, budget: 8000,
+          trace: nil, type_rank_context: nil
+        )
+        allow(retriever).to receive(:retrieve).and_return(clean_result)
+        server = Woods::MCP::Server.build(
+          index_dir: dir, retriever: retriever, bootstrap_state: state, response_format: :json
+        )
+
+        tools = server.instance_variable_get(:@tools)
+        response = tools['codebase_retrieve'].call(query: 'café', server_context: {})
+
+        # The success shape: the pipeline ran and returned context — no
+        # degraded_index refusal, no isError. (Success responses carry no
+        # meta at all.)
+        expect(response.error?).to be(false)
+        expect(response.content.first[:text]).to include('Café')
+      end
+    end
+
+    it 'still parses the same non-ASCII fixture under the default UTF-8 encoding (H1 contract intact)' do
+      Dir.mktmpdir do |dir|
+        write_non_ascii_graph(dir)
+
+        retriever, state = described_class.build_retriever(index_dir: dir)
+
+        expect(state.hydration_failed?).to be(false)
+        expect(state.status).to eq(:hydrated)
+        expect(retriever.graph_store.graph.node_exists?('Café')).to be(true)
+      end
+    end
+  end
+
   describe 'failure-mode: config-invalid errors from ConfigResolver' do
     # ConfigResolver raises typed BootstrapError subclasses for config-shape
     # problems. build_retriever must not swallow them.
@@ -435,6 +649,20 @@ RSpec.describe Woods::MCP::Bootstrapper do
       example.run
     ensure
       Woods.configuration = original
+    end
+
+    it 'raises the typed Woods::ConfigurationError when the host provider is unusable (M9)' do
+      # A host initializer that sets :openai without a usable api_key cannot
+      # be auto-resolved. The raise is typed so the top-level rescue in
+      # exe/woods-mcp (BootstrapError, ConfigurationError) prints the
+      # one-line operator message instead of a raw backtrace.
+      Woods.configuration.embedding_provider = :openai
+      Woods.configuration.embedding_options = { api_key: '' }
+
+      Dir.mktmpdir do |dir|
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::ConfigurationError, /api_key/)
+      end
     end
 
     it 'propagates UnsupportedArtifact when woods.json has a future schema_version' do

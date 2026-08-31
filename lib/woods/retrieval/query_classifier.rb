@@ -25,8 +25,12 @@ module Woods
 
       # Intent patterns — order matters (first match wins)
       INTENT_PATTERNS = {
-        locate: /\b(where|find|which file|locate|look for|search for)\b/i,
+        # :trace is checked BEFORE :locate: a query like "find who calls X"
+        # matches both patterns ("find" vs "who calls"), and the tracing
+        # intent is the one the agent means. :locate first misrouted these
+        # to keyword/direct location handling, skipping graph-based tracing.
         trace: /\b(trace|follow|track|call(s|ed by)|depends on|used by|who calls|what calls)\b/i,
+        locate: /\b(where|find|which file|locate|look for|search for)\b/i,
         debug: /\b(bug|error|fix|broken|failing|wrong|issue|problem|crash|exception)\b/i,
         implement: /\b(implement|add|create|build|write|make|generate)\b/i,
         compare: /\b(compare|difference|vs|versus|between|contrast)\b/i,

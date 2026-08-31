@@ -394,6 +394,40 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
     end
 
+    context 'no woods.json, no host provider, OPENAI_API_KEY set to an empty string (M9)' do
+      # An empty-but-set key is NOT a credential. Wiring :openai with
+      # api_key: "" skips the Ollama probe a missing key gets, then dies
+      # at Builder time with a raw ConfigurationError. A blank key must
+      # behave exactly like an absent one.
+      it 'treats the key as absent and lets the Ollama probe proceed' do
+        Dir.mktmpdir do |dir|
+          artifact = Woods::IndexArtifact.new(dir)
+          env = { 'OPENAI_API_KEY' => '' }
+          probe = -> { false }
+          allow(probe).to receive(:call).and_call_original
+          config, source = described_class.resolve(blank_config,
+                                                   artifact: artifact,
+                                                   env: env,
+                                                   ollama_probe: probe)
+          expect(config.embedding_provider).to be_nil
+          expect(source).to eq(:autodetect)
+          expect(probe).to have_received(:call)
+        end
+      end
+
+      it 'falls through to :ollama when Ollama is reachable' do
+        Dir.mktmpdir do |dir|
+          artifact = Woods::IndexArtifact.new(dir)
+          env = { 'OPENAI_API_KEY' => '   ' }
+          config, = described_class.resolve(blank_config,
+                                            artifact: artifact,
+                                            env: env,
+                                            ollama_probe: -> { true })
+          expect(config.embedding_provider).to eq(:ollama)
+        end
+      end
+    end
+
     context 'no woods.json, no host provider, Ollama reachable' do
       it 'auto-detects :ollama by default (no opt-in flag required)' do
         Dir.mktmpdir do |dir|

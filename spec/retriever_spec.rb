@@ -749,4 +749,68 @@ RSpec.describe Woods::Retriever do
       expect(result).to be_nil
     end
   end
+
+  # ── M8: metadata-store failures must not become misleading answers ──
+
+  describe 'metadata-store failure behavior (M8)' do
+    # A store failure used to be swallowed three ways at once: total_of_type
+    # rescued to nil (read as zero → :absent and a short-circuited fallback),
+    # candidate_type rescued to '' (silently disabling exclusion filtering),
+    # and the whole query came back as a clean empty result. All three now
+    # raise one shared typed store error the MCP server maps to tool-visible
+    # degraded metadata.
+    it 'raises the shared store error when the type count fails on a types: query' do
+      allow(metadata_store).to receive(:find_by_type).and_raise(RuntimeError, 'store offline')
+
+      expect { retriever.retrieve('auth', types: %w[model]) }
+        .to raise_error(Woods::Retriever::StoreError, /store offline/)
+    end
+
+    it 'stops reporting :absent for a failed store — the count failure raises instead' do
+      # Candidates are all :service; the requested :mailer count fails.
+      # Pre-fix this returned a clean result with source: :absent and
+      # total_of_type: nil — "the type does not exist" — from a broken store.
+      allow(metadata_store).to receive(:find_by_type).with('mailer').and_raise(
+        RuntimeError, 'store offline'
+      )
+      allow(metadata_store).to receive(:find_by_type).with('service').and_return([])
+
+      expect { retriever.retrieve('auth', types: %w[mailer]) }
+        .to raise_error(Woods::Retriever::StoreError, /mailer/)
+    end
+
+    it 'does not run the within-type fallback on a failed count' do
+      # The fallback short-circuits to [] when every requested type reports
+      # zero — a failed count must raise, not read as zero.
+      allow(metadata_store).to receive(:find_by_type).and_raise(RuntimeError, 'store offline')
+      allow(executor_double).to receive(:execute).and_return(execution_result)
+
+      expect { retriever.retrieve('auth', types: %w[model]) }
+        .to raise_error(Woods::Retriever::StoreError)
+      expect(executor_double).not_to have_received(:execute)
+        .with(hash_including(strategy: :vector))
+    end
+
+    it 'raises rather than silently disabling exclusion filtering when candidate lookups fail' do
+      # Graph-expansion candidates carry no inline metadata; the exclusion
+      # filter resolves their type via the metadata store. A store failure
+      # used to resolve to '' and let every candidate past the default
+      # test_mapping exclusion.
+      bare_candidate = Woods::Retrieval::SearchExecutor::Candidate.new(
+        identifier: 'Orphan', score: 0.5, source: :graph_expansion, metadata: {}
+      )
+      allow(ranker_double).to receive(:rank).and_return([bare_candidate])
+      allow(metadata_store).to receive(:find).and_raise(RuntimeError, 'store offline')
+
+      expect { retriever.retrieve('orphan') }
+        .to raise_error(Woods::Retriever::StoreError, /store offline/)
+    end
+
+    it 'carries the failing store name for tool-visible metadata' do
+      allow(metadata_store).to receive(:find_by_type).and_raise(RuntimeError, 'store offline')
+
+      expect { retriever.retrieve('auth', types: %w[model]) }
+        .to raise_error(Woods::Retriever::StoreError) { |e| expect(e.store).to eq('metadata') }
+    end
+  end
 end

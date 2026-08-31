@@ -14,6 +14,7 @@ require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
+require_relative 'bootstrap_state'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'protocol_policy'
@@ -156,7 +157,7 @@ module Woods
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
           define_reload_tool(server, reader, respond, retriever_reloader)
-          define_retrieve_tool(server, retriever, respond, respond_err)
+          define_retrieve_tool(server, retriever, respond, respond_err, bootstrap_state)
           define_trace_flow_tool(server, reader, respond, respond_err, renderer)
           # Conditionally register collaborator-dependent tools. Historically
           # all 15 stubs were registered unconditionally and returned
@@ -763,10 +764,11 @@ module Woods
           end
         end
 
-        def define_retrieve_tool(server, retriever, respond, respond_err)
+        def define_retrieve_tool(server, retriever, respond, respond_err, bootstrap_state = nil)
           coerce_int = method(:coerce_integer)
           coerce = method(:coerce_array)
           stale_check = method(:stale_index_result?)
+          degraded_response = method(:degraded_retrieval_response)
           server.define_tool(
             name: 'codebase_retrieve',
             description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
@@ -827,13 +829,38 @@ module Woods
             budget = coerce_int.call(budget)
             types = coerce.call(types)
             exclude_types = coerce.call(exclude_types)
-            if retriever
-              result = retriever.retrieve(
-                query,
-                budget: budget || 8000,
-                types: types,
-                exclude_types: exclude_types
+            # M6: a hydration failure at boot left the in-memory stores
+            # empty. Every query would come back as a clean empty result —
+            # indistinguishable from "no matches" — so surface the degraded
+            # state as typed metadata instead of answering with nothing.
+            if bootstrap_state&.hydration_failed?
+              failures = bootstrap_state.hydration_failures
+              next degraded_response.call(
+                respond_err,
+                reason: failures.values.map { |e| "#{e.class}: #{e.message}" }.join('; '),
+                stores: failures.keys.map(&:to_s),
+                phase: 'boot'
               )
+            end
+            if retriever
+              begin
+                result = retriever.retrieve(
+                  query,
+                  budget: budget || 8000,
+                  types: types,
+                  exclude_types: exclude_types
+                )
+              rescue Woods::Retriever::StoreError => e
+                # M8: a metadata-store failure mid-query must not surface as
+                # a raw raise through the tool boundary (or as the misleading
+                # :absent / empty answers the retriever used to produce).
+                next degraded_response.call(
+                  respond_err,
+                  reason: e.message,
+                  stores: [e.store],
+                  phase: 'query'
+                )
+              end
               if stale_check.call(result)
                 next respond_err.call(
                   'The vector index appears stale: matches were found but their source data is ' \
@@ -875,6 +902,32 @@ module Woods
           trace.ranked_count.to_i.positive? &&
             trace.skipped_missing_metadata.to_i.positive? &&
             Array(result.sources).empty?
+        end
+
+        # Typed degraded-metadata response for codebase_retrieve (M6/M8). A
+        # degraded retriever must never answer with a clean empty result: the
+        # response is a tool error carrying the machine-readable degraded
+        # marker, which stores are affected, and the underlying reason.
+        #
+        # @param respond_err [Method] the tool error-response builder
+        # @param reason [String] human-readable failure summary
+        # @param stores [Array<String>] affected store component names
+        # @param phase [String] 'boot' (hydration failure) or 'query'
+        #   (store failure at query time)
+        # @return [MCP::Tool::Response]
+        def degraded_retrieval_response(respond_err, reason:, stores:, phase:)
+          respond_err.call(
+            "Semantic search is degraded: #{reason}. The affected store(s) return no data, so " \
+            'queries would come back empty — this is NOT "no results". ' \
+            'Run `woods_status` for the bootstrap report, re-run `woods:embed` if the index is stale, ' \
+            'and restart the server once the store is loadable.',
+            code: :degraded_index,
+            tool: 'codebase_retrieve',
+            degraded: true,
+            phase: phase,
+            stores: stores,
+            reason: reason
+          )
         end
 
         def define_trace_flow_tool(server, reader, respond, respond_err, renderer)
@@ -1273,49 +1326,63 @@ module Woods
         # @return [Hash, MCP::Tool::Response]
         def run_pipeline_in_background(kind:, tool:, lock:, task_store:, respond:, respond_err:, runner:, started:,
                                        started_message:)
-          task = create_pipeline_task(task_store, tool)
-          started.call
+          # Ownership of the on-disk lock transfers to the background thread
+          # the moment Thread.new succeeds — its ensure releases it when the
+          # run finishes. Before that point (guard failures, started hook),
+          # THIS method owns the lock and must release it on the way out
+          # (L6): the rescue below covers only SystemCallError/IOError, so a
+          # guard bug raising anything else used to leak the on-disk lock
+          # and block every later writer until the stale window expired.
+          handoff = false
+          begin
+            task = create_pipeline_task(task_store, tool)
+            started.call
 
-          Thread.new do
-            # Heartbeat, like the rake writers: a full run on a large host can
-            # outlive the lock's stale window, and an untouched lock would be
-            # retired by the next contender mid-run — recreating the two-writer
-            # clobber.
-            if lock
-              Woods::Coordination::LockHeartbeat.run(lock) { runner.call }
-            else
-              runner.call
+            Thread.new do
+              # Heartbeat, like the rake writers: a full run on a large host can
+              # outlive the lock's stale window, and an untouched lock would be
+              # retired by the next contender mid-run — recreating the two-writer
+              # clobber.
+              if lock
+                Woods::Coordination::LockHeartbeat.run(lock) { runner.call }
+              else
+                runner.call
+              end
+              task_store&.complete!(task.id, result: pipeline_task_result(tool)) if task
+            rescue StandardError, ScriptError => e
+              # ScriptError (SyntaxError, LoadError) is not a StandardError, and
+              # +runner.call+ can lazily +require_relative+ the extractor — a
+              # half-typed file must degrade this background thread, not kill it
+              # silently while the task record sits at "working" until pid-death
+              # (see the "rescue ScriptError anywhere a reload can happen" rule).
+              logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+              logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
+              # Recording the failure is the half that was missing: previously the
+              # error reached a log the agent cannot read, and the tool had
+              # already reported success.
+              task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+            ensure
+              lock&.release
+              Woods::MCP::Server.send(:pipeline_finish, kind)
             end
-            task_store&.complete!(task.id, result: pipeline_task_result(tool)) if task
-          rescue StandardError, ScriptError => e
-            # ScriptError (SyntaxError, LoadError) is not a StandardError, and
-            # +runner.call+ can lazily +require_relative+ the extractor — a
-            # half-typed file must degrade this background thread, not kill it
-            # silently while the task record sits at "working" until pid-death
-            # (see the "rescue ScriptError anywhere a reload can happen" rule).
-            logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-            logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
-            # Recording the failure is the half that was missing: previously the
-            # error reached a log the agent cannot read, and the tool had
-            # already reported success.
-            task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+            handoff = true
+
+            return Tasks::Extension.create_task_result(task) if task
+
+            respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
+          rescue SystemCallError, IOError => e
+            respond_err.call(
+              'The task could not be durably recorded, so the pipeline was not started.',
+              code: :task_store_unavailable,
+              tool: tool,
+              exception: e.class.name
+            )
           ensure
-            lock&.release
-            Woods::MCP::Server.send(:pipeline_finish, kind)
+            unless handoff
+              lock&.release
+              Woods::MCP::Server.send(:pipeline_finish, kind)
+            end
           end
-
-          return Tasks::Extension.create_task_result(task) if task
-
-          respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
-        rescue SystemCallError, IOError => e
-          lock&.release
-          Woods::MCP::Server.send(:pipeline_finish, kind)
-          respond_err.call(
-            'The task could not be durably recorded, so the pipeline was not started.',
-            code: :task_store_unavailable,
-            tool: tool,
-            exception: e.class.name
-          )
         end
 
         # Mint a task record, or return nil to take the legacy path.

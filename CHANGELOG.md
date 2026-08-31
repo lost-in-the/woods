@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A hydration failure at boot no longer reports `:hydrated` over empty stores (M6).**
+  A corrupt or unreadable dump left the in-memory vector/metadata stores empty behind
+  only a stderr warning while `woods_status` reported a healthy `:hydrated` — a server
+  that answered everything with nothing. The boot status is now derived from store
+  health (`:degraded` plus a per-store `hydration_failures` report), and
+  `codebase_retrieve` answers with a typed `degraded_index` error naming the affected
+  stores instead of a clean empty result. Graph hydration reads through the
+  encoding-safe atomic-file path, so a non-ASCII index stays healthy under `LANG=C`.
+- **A metadata-store failure no longer produces misleading retrieval answers (M8).**
+  Store errors were swallowed at three call sites: `types:` queries reported `:absent`
+  for types that exist, the rank-within-type fallback short-circuited to empty, and
+  exclusion filtering silently no-op'd. All store accesses now raise the shared
+  `Woods::Retriever::StoreError`, which `codebase_retrieve` maps to the same typed
+  degraded metadata instead of raising through the tool boundary.
+- **A set-but-empty `OPENAI_API_KEY` behaves as absent (M9).** The truthiness check
+  wired the OpenAI provider with a blank key, skipped the Ollama fallback a missing key
+  gets, and then crashed boot with a raw backtrace. Blank keys now fall through to the
+  Ollama probe (pattern-only when nothing is usable), and both executables catch
+  `Woods::ConfigurationError` in their bootstrap rescue so an unusable embedding
+  configuration prints the one-line operator message.
+- **A non-`SystemCallError` guard failure no longer leaks the pipeline lock (L6).**
+  `pipeline_extract`/`pipeline_embed` released the on-disk lock only for
+  `SystemCallError`/`IOError` from the task-durability guard; any other raise blocked
+  every later writer until the stale window expired. The release is now `ensure`-based
+  for every pre-handoff exit path.
+- **"find who calls X" routes to graph tracing (L8).** The query classifier's
+  first-match ordering sent mixed locate/trace queries to keyword location handling;
+  the `:trace` intent pattern now runs before `:locate`.
+
 - **`woods_status` no longer reports a stale registry version alongside a newer
   install.** When the installed gem is ahead of RubyGems (for example while
   testing an unreleased release), `server.update.latest_version` now reports the

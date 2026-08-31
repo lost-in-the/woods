@@ -212,6 +212,25 @@ bundle exec rake woods:embed          # writes woods.json + vector dumps
 
 ---
 
+### `codebase_retrieve` reports degraded semantic search
+
+**Symptom:** `codebase_retrieve` answers with a tool error carrying `error_code: degraded_index` ("Semantic search is degraded…") instead of results, and never with a silently empty context. `woods_status` shows `bootstrap.status: "degraded"`, often with a `hydration_failures` report.
+
+**Cause:** The retriever is not healthy, and the server refuses to disguise that as "no matches". Two phases are distinguished in the error metadata:
+
+- `phase: "boot"` — a dump failed to hydrate at startup (corrupt or unreadable `vectors.bin` / `metadata.msgpack`), so the affected in-memory store is empty. Before this guidance existed, the server reported a healthy boot and answered every query with empty results as if they were legitimate.
+- `phase: "query"` — the metadata store failed while serving (storage outage, permissions). The typed `Woods::Retriever::StoreError` is mapped to the same degraded payload.
+
+The `stores:` field names what is affected (`vector`, `metadata`, `graph`) and `reason:` carries the underlying error.
+
+**Fix:**
+
+1. Read `reason:` from the error payload, or call `woods_status` and read `bootstrap.reason` / `bootstrap.hydration_failures`.
+2. For a `boot` failure: confirm the index directory is readable, re-run `bundle exec rake woods:embed` if the dump may be corrupt, then restart the MCP server.
+3. For a `query` failure: check the backing metadata store (the SQLite database in the index directory, or your remote vector backend) for availability and permissions.
+
+---
+
 ### No tools appear in the MCP client
 
 **Symptom:** The MCP client connects but shows no tools, or the server exits immediately.
