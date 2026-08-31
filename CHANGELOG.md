@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Reloading the Index MCP server no longer opens an empty-store window, and a
+  failed reload no longer leaves a misaligned index (M7).** The `reload` tool
+  refreshed the live in-memory vector and metadata stores with `clear!` followed by
+  `bulk_load`, so a concurrent `codebase_retrieve` could search an empty or
+  half-loaded store (and the reader's caches were reloaded even when store
+  hydration failed, pairing one generation's JSON index with another's vectors).
+  The reload is now a transaction: candidate stores are built off-side against one
+  captured generation, any candidate failure leaves the previous fully aligned
+  generation untouched — the old retriever keeps answering and a distinct
+  reload-phase `degraded_index` condition (with `phase: 'reload'` naming the
+  generation still being served) is reported on the `reload` tool response and
+  additively through `woods_status` (`bootstrap.reload_failure`), without flipping
+  the boot degraded state — and on success the new store bundle is swapped in with
+  one atomic assignment under the exclusive generation lock after rechecking the
+  generation, so in-flight readers finish against the old stores and no reader
+  ever observes empty or mixed stores. A successful reload clears the condition;
+  a generation that moved during candidate construction fails the attempt with
+  `ReloadGenerationMoved` rather than swapping a stale bundle, and the next
+  `reload` is the recovery path.
+
 - **Incremental extraction no longer misses a class-based unit whose file
   moved with its constant unchanged (M1).** Moving `app/models/tag.rb` to
   `app/services/tag.rb` without renaming `Tag` pruned the model for the
