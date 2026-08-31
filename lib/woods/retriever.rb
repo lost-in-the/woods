@@ -150,6 +150,15 @@ module Woods
     # @return [Pipeline]
     attr_reader :pipeline
 
+    # Optional callback invoked with the pipeline struct the moment
+    # {#retrieve} resolves it, before any pipeline work runs. Nil in
+    # production. Observability seam for the reload transaction's old-or-new
+    # guarantee (M7): a test can block an in-flight query AFTER it captured
+    # the old bundle but BEFORE the swap lands, deterministically.
+    #
+    # @return [Proc, nil]
+    attr_accessor :pipeline_observer
+
     # @param vector_store [Storage::VectorStore::Interface] Vector store adapter
     # @param metadata_store [Storage::MetadataStore::Interface] Metadata store adapter
     # @param graph_store [Storage::GraphStore::Interface] Graph store adapter
@@ -297,6 +306,7 @@ module Woods
       # from here on — execution, ranking, filtering, assembly — stays on the
       # SAME store set even if a reload swaps the pipeline mid-flight (M7).
       pipeline = @pipeline
+      @pipeline_observer&.call(pipeline)
       classification = @classifier.classify(query)
       execution_result = pipeline.executor.execute(query: query, classification: classification)
       ranked = pipeline.ranker.rank(execution_result.candidates, classification: classification)
@@ -305,10 +315,8 @@ module Woods
       filtered, fallback_ran = apply_type_filter(pipeline, ranked, query, classification,
                                                  types: types, type_list: type_list,
                                                  exclude_types: exclude_types)
-      type_rank_context = if type_list
-                            build_type_rank_context(ranked, pipeline.metadata_store, type_list, filtered,
-                                                    fallback_ran: fallback_ran)
-                          end
+      type_rank_context = build_type_rank_context_for(ranked, pipeline, type_list, filtered,
+                                                      fallback_ran: fallback_ran)
 
       assembled = assemble_context(pipeline, filtered, classification, budget)
       trace = build_trace(classification, execution_result, filtered, assembled, start_time)
@@ -478,6 +486,21 @@ module Woods
         elapsed_ms: elapsed_ms,
         skipped_missing_metadata: assembled.skipped_missing_metadata.to_i
       )
+    end
+
+    # Per-type rank metadata for +types:+ queries; nil on unfiltered queries.
+    #
+    # @param ranked [Array<Candidate>]
+    # @param pipeline [Pipeline] the resolved store bundle (M7)
+    # @param type_list [Set<String>, nil]
+    # @param filtered [Array<Candidate>] The post-fallback candidate list
+    # @param fallback_ran [Boolean] Whether rank-within-type fallback ran
+    # @return [Hash{String => Hash}, nil]
+    def build_type_rank_context_for(ranked, pipeline, type_list, filtered, fallback_ran:)
+      return nil unless type_list
+
+      build_type_rank_context(ranked, pipeline.metadata_store, type_list, filtered,
+                              fallback_ran: fallback_ran)
     end
 
     # Build per-type rank metadata from the unfiltered global ranked list.

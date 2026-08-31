@@ -182,5 +182,15 @@ module Woods
     # +reload+ invocation is the recovery path (it rebuilds candidates
     # against the fresh generation).
     class ReloadGenerationMoved < ReloadDegraded; end
+
+    # The promoted-dump recheck inside a reload transaction failed. The embed
+    # path's commit point ({IndexArtifact#promote}, which flips +dumps/latest+)
+    # does not bump the generation file, so an embed-only publication moves
+    # the dump identity WITHOUT moving the generation marker — this recheck is
+    # the only thing standing between a reload and a bundle whose vector and
+    # metadata halves were hydrated from two different dumps. Nothing is
+    # swapped; the next +reload+ re-captures and rebuilds against whatever is
+    # promoted by then.
+    class ReloadDumpMoved < ReloadDegraded; end
   end
 end

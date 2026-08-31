@@ -59,8 +59,24 @@ module Woods
         # @return [Woods::Storage::MetadataStore::InMemory]
         # @raise [Woods::MCP::UnsupportedArtifact] if magic is wrong or schema_version
         #   exceeds {MAX_SUPPORTED_SCHEMA_VERSION}
-        def self.load_or_empty(artifact, resolved_config: nil) # rubocop:disable Lint/UnusedMethodArgument
-          dump_path = dump_file_path(artifact)
+        def self.load_or_empty(artifact, resolved_config: nil)
+          load_dump_dir(artifact.latest_dump_path, resolved_config: resolved_config)
+        end
+
+        # Load from an EXPLICIT dump directory — the reload transaction's
+        # capture seam (M7). Candidates must hydrate from the dump identity
+        # captured before candidate construction, never from whatever
+        # +dumps/latest+ points at mid-build. Same missing-file semantics as
+        # {load_or_empty}: a nil directory or an absent dump file yields an
+        # empty store, and a corrupt dump raises typed errors.
+        #
+        # @param dump_dir [Pathname, String, nil] an explicit dump directory
+        # @param resolved_config [Object, nil] reserved for future validation
+        # @return [Woods::Storage::MetadataStore::InMemory]
+        # @raise [Woods::MCP::UnsupportedArtifact] if magic is wrong or schema_version
+        #   exceeds {MAX_SUPPORTED_SCHEMA_VERSION}
+        def self.load_dump_dir(dump_dir, resolved_config: nil) # rubocop:disable Lint/UnusedMethodArgument
+          dump_path = dump_dir.nil? ? nil : Pathname.new(dump_dir.to_s).join(FILENAME)
           return MetadataStore::InMemory.new unless dump_path&.exist?
 
           store = MetadataStore::InMemory.new
