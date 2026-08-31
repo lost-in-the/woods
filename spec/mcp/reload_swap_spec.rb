@@ -120,6 +120,37 @@ RSpec.describe 'Index MCP transactional store reload' do
       expect(failure['reason']).to include('vectors.bin unreadable')
       expect(status.dig('bootstrap', 'status')).not_to eq('degraded')
     end
+
+    %w[vectors.bin vectors.idx metadata.msgpack].each do |component|
+      it "refuses a promoted dump missing #{component} without changing the live pipeline" do
+        server
+        old_pipeline = retriever.pipeline
+        old_vector_store = retriever.vector_store
+        old_metadata_store = retriever.metadata_store
+        old_identifier_map = reader.send(:identifier_map)
+        dump_dir = Woods::IndexArtifact.new(index_dir).latest_dump_path
+        FileUtils.rm_f(dump_dir.join(component))
+
+        response = call_tool('reload')
+
+        expect(response.error?).to be(true)
+        expect(response.meta[:error_code]).to eq(:degraded_index)
+        expect(response.meta[:phase]).to eq('reload')
+        expect(response.meta[:generation]).to eq(1)
+        expect(response.meta[:reason]).to include(component)
+        expect(response.meta[:stores]).to eq(component == 'metadata.msgpack' ? %w[metadata] : %w[vector])
+
+        expect(retriever.pipeline).to be(old_pipeline)
+        expect(retriever.vector_store).to be(old_vector_store)
+        expect(retriever.metadata_store).to be(old_metadata_store)
+        expect(reader.send(:identifier_map)).to be(old_identifier_map)
+
+        retrieval = call_tool('codebase_retrieve', query: 'AlphaUnit model')
+        expect(retrieval.error?).to be(false)
+        expect(response_text(retrieval)).to include('AlphaUnit')
+        expect(state.reload_failure).to include(phase: 'reload', generation: 1)
+      end
+    end
   end
 
   describe 'successful recovery' do

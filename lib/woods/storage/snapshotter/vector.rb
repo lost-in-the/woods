@@ -52,25 +52,42 @@ module Woods
         # captured before candidate construction, never from whatever
         # +dumps/latest+ points at mid-build; +load_or_empty+ re-reads the
         # +latest+ pointer on every call and would mix halves from two dumps.
-        # Same no-dump / missing-files semantics as {load_or_empty}: a nil
+        # By default this preserves {load_or_empty}'s boot semantics: a nil
         # directory or a directory without the dump files yields an empty
-        # store, and a corrupt dump raises typed errors.
+        # store. Reload transactions pass +required: true+ so a partially
+        # promoted dump fails closed instead of replacing a healthy store with
+        # an empty one.
         #
         # @param dump_dir [Pathname, String, nil] an explicit dump directory
         # @param resolved_config [#dimension, nil] used for dimension validation
+        # @param required [Boolean] raise when the directory or either dump file is absent
         # @return [Woods::Storage::VectorStore::InMemory]
+        # @raise [Woods::MCP::MissingArtifact] when +required+ and a dump component is absent
         # @raise [Woods::MCP::UnsupportedArtifact] if magic or schema_version is invalid
         # @raise [Woods::MCP::DimensionMismatch] if stored dimension ≠ +resolved_config.dimension+
-        def self.load_dump_dir(dump_dir, resolved_config: nil)
-          return VectorStore::InMemory.new if dump_dir.nil?
+        def self.load_dump_dir(dump_dir, resolved_config: nil, required: false)
+          return missing_dump_store(required, []) if dump_dir.nil?
 
           dump_dir = Pathname.new(dump_dir.to_s)
           bin_path = dump_dir.join('vectors.bin')
           idx_path = dump_dir.join('vectors.idx')
-          return VectorStore::InMemory.new unless bin_path.exist? && idx_path.exist?
+          missing = [bin_path, idx_path].reject(&:exist?)
+          return missing_dump_store(required, missing) if missing.any?
 
           load_from(bin_path, idx_path, resolved_config)
         end
+
+        def self.missing_dump_store(required, paths)
+          return VectorStore::InMemory.new unless required
+
+          message = if paths.empty?
+                      'No promoted vector dump is available'
+                    else
+                      "Required vector dump component is missing: #{paths.join(', ')}"
+                    end
+          raise Woods::MCP::MissingArtifact.new(message, details: { paths: paths.map(&:to_s) })
+        end
+        private_class_method :missing_dump_store
 
         # Writes +vectors.bin+ and +vectors.idx+ into +dump_dir+ atomically.
         #

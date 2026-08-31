@@ -368,7 +368,9 @@ module Woods
       def self.reload_vector_candidate(config, resolved, captured_dump, served)
         return nil unless config.vector_store == :in_memory
 
-        Woods::Storage::Snapshotter::Vector.load_dump_dir(captured_dump, resolved_config: resolved)
+        Woods::Storage::Snapshotter::Vector.load_dump_dir(
+          captured_dump, resolved_config: resolved, required: true
+        )
       rescue StandardError => e
         raise ReloadDegraded.new(
           "vector store refresh failed: #{e.class}: #{e.message}",
@@ -380,7 +382,9 @@ module Woods
       def self.reload_metadata_candidate(config, resolved, captured_dump, served)
         return nil unless config.metadata_store == :in_memory
 
-        Woods::Storage::Snapshotter::Metadata.load_dump_dir(captured_dump, resolved_config: resolved)
+        Woods::Storage::Snapshotter::Metadata.load_dump_dir(
+          captured_dump, resolved_config: resolved, required: true
+        )
       rescue StandardError => e
         raise ReloadDegraded.new(
           "metadata store refresh failed: #{e.class}: #{e.message}",

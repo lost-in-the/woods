@@ -49,6 +49,8 @@ When Woods is installed only in Docker, prefer running the server through the ap
 
 Use a host-side bundle only after verifying Ruby, the application bundle, and the index are available on the host. Always pass the path visible to the process that runs `woods-mcp`.
 
+A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
+
 ## Shape 2: Index plus authorized Console
 
 After explicit authorization, enable the live-data master switch in the Rails initializer. The process exits while it remains false:

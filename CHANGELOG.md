@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the boot degraded state. The commit acquires the same on-disk extraction
   PipelineLock every writer uses before rechecking both identities, so a writer
   cannot publish between the recheck and the one-assignment store-bundle swap; a
+  promoted dump missing any required vector or metadata component also fails
+  closed without replacing the healthy live bundle. Because the reload transaction
+  takes the shared on-disk writer lock, the MCP process needs write access to the
+  index directory when using `reload`. A
   generation movement fails the attempt with `ReloadGenerationMoved` and a
   promoted-dump movement (an embed promotes without bumping the generation file)
   with `ReloadDumpMoved` — the next `reload` is the recovery path. A successful
