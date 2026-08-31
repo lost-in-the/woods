@@ -670,7 +670,7 @@ RSpec.describe Woods::Retriever do
       allow(metadata_store).to receive(:find_by_type).with('component').and_return(Array.new(4))
       allow(metadata_store).to receive(:find_by_type).with('graphql').and_return(Array.new(6))
 
-      result = retriever.send(:build_structural_context)
+      result = retriever.send(:build_structural_context, metadata_store)
 
       expect(result).to include('Codebase: 42 searchable entries')
     end
@@ -685,7 +685,7 @@ RSpec.describe Woods::Retriever do
       allow(metadata_store).to receive(:find_by_type).with('component').and_return([])
       allow(metadata_store).to receive(:find_by_type).with('graphql').and_return([])
 
-      result = retriever.send(:build_structural_context)
+      result = retriever.send(:build_structural_context, metadata_store)
 
       expect(result).to include('10 model entries')
       expect(result).to include('5 controller entries')
@@ -708,7 +708,7 @@ RSpec.describe Woods::Retriever do
       allow(metadata_store).to receive(:find_by_type).with('component').and_return([])
       allow(metadata_store).to receive(:find_by_type).with('graphql').and_return([])
 
-      result = retriever.send(:build_structural_context)
+      result = retriever.send(:build_structural_context, metadata_store)
 
       expect(result).to include('structure')
       expect(result).to match(/unit\s+counts?/i)
@@ -724,7 +724,7 @@ RSpec.describe Woods::Retriever do
       allow(metadata_store).to receive(:find_by_type).with('component').and_return([])
       allow(metadata_store).to receive(:find_by_type).with('graphql').and_return([])
 
-      result = retriever.send(:build_structural_context)
+      result = retriever.send(:build_structural_context, metadata_store)
 
       expect(result).not_to include('services')
       expect(result).not_to include('jobs')
@@ -736,7 +736,7 @@ RSpec.describe Woods::Retriever do
     it 'returns nil when total count is zero' do
       allow(metadata_store).to receive(:count).and_return(0)
 
-      result = retriever.send(:build_structural_context)
+      result = retriever.send(:build_structural_context, metadata_store)
 
       expect(result).to be_nil
     end
@@ -744,7 +744,7 @@ RSpec.describe Woods::Retriever do
     it 'returns nil on error' do
       allow(metadata_store).to receive(:count).and_raise(StandardError, 'db connection failed')
 
-      result = retriever.send(:build_structural_context)
+      result = retriever.send(:build_structural_context, metadata_store)
 
       expect(result).to be_nil
     end

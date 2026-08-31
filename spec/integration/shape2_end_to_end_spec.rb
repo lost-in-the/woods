@@ -143,8 +143,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
 
         expect(retriever).not_to be_nil
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
         expect(vs.count).to eq(3),
                             'vector store should have 3 entries after boot; ' \
                             'got 0 — Bootstrapper did not hydrate from the dump (Bug 1)'
@@ -159,7 +158,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
 
-        ms = retriever.instance_variable_get(:@metadata_store)
+        ms = retriever.metadata_store
         expect(ms.count).to eq(3),
                             'metadata store should have 3 entries after boot; ' \
                             'got 0 — Bootstrapper did not hydrate from the dump (Bug 1)'
@@ -216,8 +215,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         # If Ollama.new succeeded, the retriever exposes a provider that is
         # an Ollama instance (not a nil or a stub).
         expect(retriever).not_to be_nil
-        executor = retriever.instance_variable_get(:@executor)
-        provider = executor.instance_variable_get(:@embedding_provider)
+        provider = retriever.pipeline.executor.instance_variable_get(:@embedding_provider)
         # Unwrap CachedEmbeddingProvider if present.
         provider = provider.instance_variable_get(:@provider) if provider.respond_to?(:instance_variable_get) &&
                                                                  provider.instance_variable_get(:@provider)
@@ -240,8 +238,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         configure_woods_for_shape2(dir)
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         results = vs.search(vec_foo, limit: 3, filters: {})
         expect(results).not_to be_empty,
@@ -257,8 +254,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         configure_woods_for_shape2(dir)
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         model_results = vs.search(vec_foo, limit: 10, filters: { 'type' => 'model' })
         expect(model_results.map(&:id)).to contain_exactly('Foo', 'Baz'),
@@ -274,8 +270,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         configure_woods_for_shape2(dir)
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         service_results = vs.search(vec_bar, limit: 10, filters: { 'type' => 'service' })
         expect(service_results.map(&:id)).to eq(['Bar']),
@@ -291,8 +286,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         configure_woods_for_shape2(dir)
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         admin_results = vs.search(vec_foo, limit: 10, filters: { 'namespace' => 'Admin' })
         expect(admin_results.map(&:id)).to contain_exactly('Foo', 'Bar'),
@@ -319,8 +313,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
         # Degraded is expected since the Ollama URL is unreachable.
         expect(%i[hydrated degraded]).to include(state.status)
 
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         # Query with vec_bar — Bar should be closest (dot product 1.0).
         results = vs.search(vec_bar, limit: 2, filters: {})
@@ -550,8 +543,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
                                  'Bootstrapper returned nil — round-trip from Indexer to Bootstrapper failed'
         expect(%i[hydrated degraded]).to include(state.status)
 
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
         expect(vs.count).to eq(2),
                             "expected 2 vectors from Indexer dump, got #{vs.count}"
       end
@@ -672,8 +664,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
 
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
         expect(vs.count).to eq(3),
                             'vector store should have 3 entries loaded from dump via standalone boot; ' \
                             "got #{vs.count}"
@@ -690,8 +681,7 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
 
         retriever, _state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
 
-        executor = retriever.instance_variable_get(:@executor)
-        vs = executor.instance_variable_get(:@vector_store)
+        vs = retriever.vector_store
 
         model_results = vs.search(vec_foo, limit: 10, filters: { 'type' => 'model' })
         expect(model_results.map(&:id)).to contain_exactly('Foo', 'Baz'),

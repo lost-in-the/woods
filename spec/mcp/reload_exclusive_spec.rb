@@ -19,18 +19,31 @@ RSpec.describe 'Index MCP exclusive reload contract' do
   let(:finish_reloader) { Queue.new }
   let(:retriever_reloader) do
     Class.new do
-      def initialize(entered, finish)
+      def initialize(entered, finish, reader, commit_entered, commit_release)
         @entered = entered
         @finish = finish
+        @reader = reader
+        @commit_entered = commit_entered
+        @commit_release = commit_release
       end
 
-      def call
+      # Mimic the real transaction shape (M7): candidate build WITHOUT the
+      # exclusive lock, then the commit phase under it. The commit section
+      # signals entry and blocks until released, so specs can hold the
+      # exclusive lock open deterministically.
+      def call(_reader)
         @entered << true
         @finish.pop
-        { vectors: 22, metadata: 22, graph: 1 }
+        @reader.with_exclusive_generation do
+          @commit_entered << true
+          @commit_release.pop
+          { vectors: 22, metadata: 22, graph: 1 }
+        end
       end
-    end.new(reloader_entered, finish_reloader)
+    end.new(reloader_entered, finish_reloader, reader, commit_entered, commit_release)
   end
+  let(:commit_entered) { Queue.new }
+  let(:commit_release) { Queue.new }
   let(:server) do
     allow(Woods::MCP::IndexReader).to receive(:new).with(index_dir).and_return(reader)
     Woods::MCP::Server.build(
@@ -101,38 +114,55 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     end
     active_entered.pop
 
-    # Proves the reload thread reached the lock attempt (not merely that it
-    # hasn't been scheduled yet), then a bounded non-completion plus
-    # `reloader_entered` still empty proves it's blocked specifically on the
-    # exclusive lock, not just slow: no sleep duration to get wrong.
-    reload_attempted = Queue.new
-    allow(reader).to receive(:with_exclusive_reload).and_wrap_original do |original, *args, &block|
-      reload_attempted << true
+    # The transactional reload (M7) builds candidate stores WITHOUT the
+    # exclusive lock, then commits under it. Prove each phase separately:
+    # the build phase entered (reloader_entered), the commit phase reached
+    # the exclusive lock attempt (swap_attempted), and a bounded
+    # non-completion proves the commit is blocked specifically on the pin —
+    # no sleep duration to get wrong.
+    swap_attempted = Queue.new
+    allow(reader).to receive(:with_exclusive_generation).and_wrap_original do |original, *args, &block|
+      swap_attempted << true
       original.call(*args, &block)
     end
 
     reload = Thread.new { dispatch_tool('reload') }
-    Timeout.timeout(1) { reload_attempted.pop }
-    waited_for_tool = !reload.join(0.05) && reloader_entered.empty?
+    reloader_entered.pop
+    finish_reloader << true
+    Timeout.timeout(1) { swap_attempted.pop }
+    waited_for_tool = !reload.join(0.05)
 
     release_active << true
     active_response = active.value
-    reloader_entered.pop
-    finish_reloader << true
+    commit_release << true
     reload_response = reload.value
 
     expect(waited_for_tool).to be(true)
     expect(active_response.dig('structuredContent', 'data', 'manifest', 'total_units')).to eq(1)
     expect(reload_response.dig('structuredContent', 'data', 'reloaded')).to be(true)
+    expect(reload_response.dig('structuredContent', 'data', 'retriever', 'vectors')).to eq(22)
   ensure
-    release_active << true if active&.alive?
     finish_reloader << true if reload&.alive?
+    release_active << true if active&.alive?
+    commit_release << true if reload&.alive?
     [active, reload].compact.each { |thread| thread.join(1) }
   end
 
   it 'keeps a later production tool behind an active reload' do
+    # The commit phase holds the exclusive generation lock; a structure tool
+    # dispatched while it is held must wait for it.
+    swap_attempted = Queue.new
+    allow(reader).to receive(:with_exclusive_generation).and_wrap_original do |original, *args, &block|
+      swap_attempted << true
+      original.call(*args, &block)
+    end
+
     reload = Thread.new { dispatch_tool('reload') }
     reloader_entered.pop
+    finish_reloader << true
+    Timeout.timeout(1) { swap_attempted.pop }
+    Timeout.timeout(1) { commit_entered.pop }
+
     later_entered = Queue.new
     original_manifest = reader.method(:manifest)
     allow(reader).to receive(:manifest) do
@@ -156,7 +186,7 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     completed_early = later.join(0.05)
     entered_during_reload = completed_early || !later_entered.empty?
 
-    finish_reloader << true
+    commit_release << true
     reload_response = reload.value
     later_response = later.value
 
@@ -165,6 +195,7 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     expect(later_response.dig('structuredContent', 'data', 'manifest', 'total_units')).to eq(1)
   ensure
     finish_reloader << true if reload&.alive?
+    commit_release << true if reload&.alive?
     [reload, later].compact.each { |thread| thread.join(1) }
   end
 
@@ -202,12 +233,14 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     reload = Thread.new { dispatch_tool('reload') }
     entered_after_failure = !Timeout.timeout(1) { reloader_entered.pop }.nil?
     finish_reloader << true
+    commit_release << true
 
     expect(failed).to have_key('error')
     expect(entered_after_failure).to be(true)
     expect(reload.value.dig('structuredContent', 'data', 'reloaded')).to be(true)
   ensure
     finish_reloader << true if reload&.alive?
+    commit_release << true if reload&.alive?
     reload&.join(1)
   end
 
@@ -353,13 +386,13 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       original.call(*arguments)
     end
 
-    # Captured once, outside the loop: with_exclusive_reload is only wrapped
-    # a single time, so each iteration's reload_attempted signal comes from
-    # the real underlying call, not from a stub layered over the previous
-    # iteration's stub.
-    reload_attempted = Queue.new
-    allow(reader).to receive(:with_exclusive_reload).and_wrap_original do |original, *args, &block|
-      reload_attempted << true
+    # Captured once, outside the loop: the exclusive-generation wrap is only
+    # added a single time, so each iteration's swap_attempted signal comes
+    # from the real underlying call, not from a stub layered over the
+    # previous iteration's stub.
+    swap_attempted = Queue.new
+    allow(reader).to receive(:with_exclusive_generation).and_wrap_original do |original, *args, &block|
+      swap_attempted << true
       original.call(*args, &block)
     end
 
@@ -374,18 +407,20 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       end
       serialization_entered.pop
       reload = Thread.new { dispatch_tool('reload') }
-      Timeout.timeout(1) { reload_attempted.pop }
-      reload_waited = !reload.join(0.05) && reloader_entered.empty?
+      reloader_entered.pop
+      finish_reloader << true
+      Timeout.timeout(1) { swap_attempted.pop }
+      reload_waited = !reload.join(0.05)
 
       release_serialization << true
       resource.value
-      reloader_entered.pop
-      finish_reloader << true
+      commit_release << true
       reload.value
       reload_waited
     ensure
       release_serialization << true if resource&.alive?
       finish_reloader << true if reload&.alive?
+      commit_release << true if reload&.alive?
       [resource, reload].compact.each { |thread| thread.join(1) }
     end
 

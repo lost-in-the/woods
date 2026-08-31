@@ -165,4 +165,51 @@ RSpec.describe Woods::MCP::BootstrapState do
       end
     end
   end
+
+  # M7: the reload-phase degraded condition is deliberately separate from the
+  # boot machinery — a failed reload leaves the previous aligned generation
+  # served, so the boot status must not flip and hydration_failures must stay
+  # empty.
+  describe 'reload-failure condition' do
+    it 'is absent by default' do
+      expect(state.reload_failure).to be_nil
+      expect(state.reload_failed?).to be(false)
+      expect(state.to_h).not_to have_key(:reload_failure)
+    end
+
+    it 'records the pinned reload-phase payload shape' do
+      state.record_reload_failure(generation: 7, stores: [:vector], reason: 'RuntimeError: dump truncated')
+
+      expect(state.reload_failed?).to be(true)
+      expect(state.reload_failure).to eq(
+        phase: 'reload',
+        generation: 7,
+        stores: %w[vector],
+        reason: 'RuntimeError: dump truncated'
+      )
+    end
+
+    it 'exposes the condition additively in to_h without touching boot state' do
+      state.mark(:hydrated)
+      state.record_reload_failure(generation: 7, stores: %w[vector metadata], reason: 'RuntimeError: offline')
+
+      expect(state.to_h[:reload_failure]).to include(phase: 'reload', generation: 7)
+      expect(state.to_h[:status]).to eq(:hydrated)
+      expect(state.hydration_failures).to be_empty
+    end
+
+    it 'normalizes store names to strings' do
+      state.record_reload_failure(generation: 7, stores: %w[metadata], reason: 'x')
+      expect(state.reload_failure[:stores]).to eq(%w[metadata])
+    end
+
+    it 'clears on recovery' do
+      state.record_reload_failure(generation: 7, stores: [:vector], reason: 'x')
+      state.clear_reload_failure!
+
+      expect(state.reload_failed?).to be(false)
+      expect(state.reload_failure).to be_nil
+      expect(state.to_h).not_to have_key(:reload_failure)
+    end
+  end
 end
