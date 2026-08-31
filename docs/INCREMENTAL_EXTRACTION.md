@@ -70,10 +70,15 @@ step before it.
    without a reload a constant outlives the file that defined it, otherwise
    deleting `app/models/user.rb` would prune `User` only for this pass to find
    it still in `ActiveRecord::Base.descendants` and re-register it against a
-   path nothing can ever remove again. What separates the two shapes is the
-   filesystem: a pruned identifier is re-added only when a still-existing file
-   in the change set actually declares its class — a moved file qualifies, a
-   deleted one (and an unrelated addition in the same batch) does not.
+   path nothing can ever remove again. What separates the two shapes is
+   loader-derived constant identity, not a textual class-name match: a pruned
+   identifier is re-added only when the active Zeitwerk loader governs a
+   changed file for exactly that constant (`cpath_expected_at` — the loader's
+   inflector, ignores, and root namespaces decide — and the file declares it).
+   A loader non-claim is authoritative: an unmanaged or declined path re-adds
+   nothing. So a moved file whose governed constant matches qualifies, while
+   another namespace's same-demodulized file, a mention in a comment or
+   string literal, and an unrelated addition in the same batch do not.
    Idempotent when nothing was pruned.
 
 Then the second pass: `dependents` and `metadata.git` are refreshed on every
@@ -229,12 +234,17 @@ After the index is rewritten, a **dedicated flow-artifact sweep** removes
 every `flows/` document no index entry references. It validates against
 `flow_index.json` and is deliberately separate from the unit sweep: flows/
 holds neither units nor an `_index.json`, so the unit sweep's in-memory
-contract does not describe it. The sweep skips when the index is missing or
-does not parse — with nothing to validate against, deleting every document
-would be worse than keeping orphans, and the next full extraction rebuilds
-the family. `woods:validate` validates the family by the same reference rule
-(missing or malformed documents are errors), and never demands `_index.json`
-from `flows/`.
+contract does not describe it. The whole refresh is **fail closed**: a
+genuinely absent family (no `flows/` directory, or an empty one — typically
+an index built while the gate was off) skips the refresh, but a family that
+holds any artifact is authoritative. A missing `flow_index.json` among
+documents, a corrupt one, a failed rehydration, write, patch, or sweep
+raises, and the raise aborts the run **before** the generation publish —
+no generation bump, the preceding generation stays resolved and readable.
+`woods:validate` applies the same corruption rule (a populated family
+without its index is an error) and never demands `_index.json` from
+`flows/`. The full extraction path is fail closed too: `precompute_flows`
+raises before the manifest and generation publish.
 
 ## Refreshing one extractor on demand
 
