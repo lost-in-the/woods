@@ -19,29 +19,33 @@ RSpec.describe 'Index MCP exclusive reload contract' do
   let(:finish_reloader) { Queue.new }
   let(:retriever_reloader) do
     Class.new do
-      def initialize(entered, finish, reader, commit_entered, commit_release)
+      def initialize(entered, finish, reader, swap_attempted, commit_entered, commit_release)
         @entered = entered
         @finish = finish
         @reader = reader
+        @swap_attempted = swap_attempted
         @commit_entered = commit_entered
         @commit_release = commit_release
       end
 
       # Mimic the real transaction shape (M7): candidate build WITHOUT the
-      # exclusive lock, then the commit phase under it. The commit section
-      # signals entry and blocks until released, so specs can hold the
-      # exclusive lock open deterministically.
+      # exclusive lock, then the commit phase under it. The signals are owned
+      # by this double (an explicit spec seam) rather than by wrapping reader
+      # methods, and the commit section blocks until released so specs can
+      # hold the exclusive lock open deterministically.
       def call(_reader)
         @entered << true
         @finish.pop
+        @swap_attempted << true
         @reader.with_exclusive_generation do
           @commit_entered << true
           @commit_release.pop
           { vectors: 22, metadata: 22, graph: 1 }
         end
       end
-    end.new(reloader_entered, finish_reloader, reader, commit_entered, commit_release)
+    end.new(reloader_entered, finish_reloader, reader, swap_attempted, commit_entered, commit_release)
   end
+  let(:swap_attempted) { Queue.new }
   let(:commit_entered) { Queue.new }
   let(:commit_release) { Queue.new }
   let(:server) do
@@ -119,12 +123,8 @@ RSpec.describe 'Index MCP exclusive reload contract' do
     # the build phase entered (reloader_entered), the commit phase reached
     # the exclusive lock attempt (swap_attempted), and a bounded
     # non-completion proves the commit is blocked specifically on the pin —
-    # no sleep duration to get wrong.
-    swap_attempted = Queue.new
-    allow(reader).to receive(:with_exclusive_generation).and_wrap_original do |original, *args, &block|
-      swap_attempted << true
-      original.call(*args, &block)
-    end
+    # no sleep duration to get wrong. The signal comes from the reloader
+    # double itself, which owns the seam (no reader method wrapping).
 
     reload = Thread.new { dispatch_tool('reload') }
     reloader_entered.pop
@@ -150,12 +150,8 @@ RSpec.describe 'Index MCP exclusive reload contract' do
 
   it 'keeps a later production tool behind an active reload' do
     # The commit phase holds the exclusive generation lock; a structure tool
-    # dispatched while it is held must wait for it.
-    swap_attempted = Queue.new
-    allow(reader).to receive(:with_exclusive_generation).and_wrap_original do |original, *args, &block|
-      swap_attempted << true
-      original.call(*args, &block)
-    end
+    # dispatched while it is held must wait for it. The swap_attempted signal
+    # comes from the reloader double itself.
 
     reload = Thread.new { dispatch_tool('reload') }
     reloader_entered.pop
@@ -388,13 +384,8 @@ RSpec.describe 'Index MCP exclusive reload contract' do
 
     # Captured once, outside the loop: the exclusive-generation wrap is only
     # added a single time, so each iteration's swap_attempted signal comes
-    # from the real underlying call, not from a stub layered over the
+    # from the reloader double's own seam, not from a stub layered over the
     # previous iteration's stub.
-    swap_attempted = Queue.new
-    allow(reader).to receive(:with_exclusive_generation).and_wrap_original do |original, *args, &block|
-      swap_attempted << true
-      original.call(*args, &block)
-    end
 
     waited = ['codebase://manifest', 'codebase://unit/Post'].map do |uri|
       serialization_entered = Queue.new

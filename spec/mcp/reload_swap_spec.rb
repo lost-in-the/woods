@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'json'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 
 require 'woods'
 require 'woods/embedding/fake'
@@ -12,6 +13,8 @@ require 'woods/index_artifact'
 require 'woods/storage/snapshotter'
 require 'woods/storage/vector_store'
 require 'woods/storage/metadata_store'
+require 'woods/coordination/pipeline_lock'
+require 'woods/watch/daemon'
 require 'woods/mcp/bootstrapper'
 require 'woods/mcp/bootstrap_state'
 require 'woods/mcp/index_reader'
@@ -21,18 +24,28 @@ require 'woods/mcp/errors'
 # M7 / PR-6b: the MCP +reload+ tool used to +clear!+ then +bulk_load+ the live
 # retriever stores, so a concurrent reader could observe an empty or half-loaded
 # store window. The lifecycle contract is build-then-swap: candidate stores are
-# built off-side against ONE captured generation, any candidate failure leaves
-# the previous aligned generation served (with a DISTINCT reload-phase degraded
-# condition), and success performs one atomic store-bundle swap under the
-# exclusive generation lock after rechecking the generation.
+# built off-side against ONE captured (generation marker, promoted dump
+# identity) pair, read exclusively from those captured locations; any candidate
+# failure or identity movement leaves the previous aligned generation served
+# (with a DISTINCT reload-phase degraded condition); and the commit holds the
+# extraction PipelineLock across the recheck and the one-assignment store
+# bundle swap, so no writer publication can interleave between recheck and
+# swap.
 RSpec.describe 'Index MCP transactional store reload' do
   let(:index_dir) { Dir.mktmpdir('woods-mcp-reload-swap') }
   let(:generation) { Woods::Generation.new(output_dir: index_dir) }
   let(:state) { Woods::MCP::BootstrapState.new }
   let(:reader) { Woods::MCP::IndexReader.new(index_dir) }
   let(:retriever) { Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir).first }
+  # Deterministic-interleaving hooks reach the transaction through this slot:
+  # the reload tool's reloader callable is the production path, and the tool
+  # passes no hooks itself, so the spec swaps them in via the closure.
+  let(:reload_hooks) { {} }
   let(:reloader) do
-    ->(rdr) { Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir, reader: rdr, state: state) }
+    lambda do |rdr|
+      Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir, reader: rdr,
+                                                         state: state, hooks: reload_hooks[:current])
+    end
   end
   let(:server) do
     allow(Woods::MCP::IndexReader).to receive(:new).with(index_dir).and_return(reader)
@@ -49,11 +62,8 @@ RSpec.describe 'Index MCP transactional store reload' do
     Woods.configuration.embedding_provider = :fake
     Woods.configuration.embedding_options = { dims: 4 }
 
-    write_artifact(vector_entries: [['AlphaUnit', [1.0, 0.0, 0.0, 0.0], {}]],
-                   metadata_entries: [
-                     ['AlphaUnit', { 'type' => 'model', 'identifier' => 'AlphaUnit',
-                                     'file_path' => 'app/models/alpha_unit.rb' }]
-                   ])
+    write_artifact(identifier: 'AlphaUnit', type: 'model', vector: [1.0, 0.0, 0.0, 0.0],
+                   file_path: 'app/models/alpha_unit.rb')
     write_manifest
     generation.bump!(reason: 'initial')
   end
@@ -66,7 +76,7 @@ RSpec.describe 'Index MCP transactional store reload' do
       old_vector_store = retriever.vector_store
       old_identifier_map = reader.send(:identifier_map)
 
-      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty)
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_dump_dir)
         .and_raise(RuntimeError, 'vectors.bin truncated')
 
       response = call_tool('reload')
@@ -96,7 +106,7 @@ RSpec.describe 'Index MCP transactional store reload' do
 
     it 'exposes the reload condition additively through woods_status' do
       server
-      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty)
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_dump_dir)
         .and_raise(RuntimeError, 'vectors.bin unreadable')
       call_tool('reload')
 
@@ -116,17 +126,14 @@ RSpec.describe 'Index MCP transactional store reload' do
     it 'swaps atomically and clears the reload-failure condition' do
       server
       old_vector_store = retriever.vector_store
-      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty)
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_dump_dir)
         .and_raise(RuntimeError, 'vectors.bin truncated')
       call_tool('reload')
       expect(state.reload_failed?).to be(true)
 
-      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_call_original
-      write_artifact(vector_entries: [['BetaUnit', [0.0, 1.0, 0.0, 0.0], {}]],
-                     metadata_entries: [
-                       ['BetaUnit', { 'type' => 'service', 'identifier' => 'BetaUnit',
-                                      'file_path' => 'app/services/beta_unit.rb' }]
-                     ])
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_dump_dir).and_call_original
+      write_artifact(identifier: 'BetaUnit', type: 'service', vector: [0.0, 1.0, 0.0, 0.0],
+                     file_path: 'app/services/beta_unit.rb')
 
       response = call_tool('reload')
 
@@ -144,63 +151,60 @@ RSpec.describe 'Index MCP transactional store reload' do
   end
 
   describe 'old-or-new, never empty' do
-    it 'lets an in-flight reader finish against the old bundle while the swap lands' do
+    it 'lets an in-flight retrieve finish entirely on the old bundle while the swap lands' do
       server
       old_vector_store = retriever.vector_store
-      query_vector = [1.0, 0.0, 0.0, 0.0]
+      # Dump-only publication (embed promotes without touching the JSON payload
+      # generation): the new dump is what a reload should pick up.
+      write_artifact(identifier: 'BetaUnit', type: 'service', vector: [0.9, 0.1, 0.0, 0.0],
+                     file_path: 'app/services/beta_unit.rb')
 
-      write_artifact(vector_entries: [['BetaUnit', [0.9, 0.1, 0.0, 0.0], {}]],
-                     metadata_entries: [
-                       ['BetaUnit', { 'type' => 'model', 'identifier' => 'BetaUnit',
-                                      'file_path' => 'app/models/beta_unit.rb' }]
-                     ])
-
-      swap_entered = Queue.new
-      reader_resolved = Queue.new
+      resolved_old = Queue.new
       release_reader = Queue.new
-      allow(old_vector_store).to receive(:search).and_wrap_original do |original, *args, **kwargs|
-        reader_resolved << true
+      retriever.pipeline_observer = lambda do |_pipeline|
+        resolved_old << true
         release_reader.pop
-        original.call(*args, **kwargs)
-      end
-      allow_any_instance_of(Woods::Retriever).to receive(:swap_stores!).and_wrap_original do |original, **kwargs|
-        swap_entered << true
-        reader_resolved.pop
-        result = original.call(**kwargs)
-        release_reader << true
-        result
       end
 
-      reload_thread = Thread.new { call_tool('reload') }
-      Timeout.timeout(5) { swap_entered.pop }
+      reload_thread = Thread.new do
+        reload_hooks[:current] = {
+          before_swap: -> { resolved_old.pop },
+          after_swap: -> { release_reader << true }
+        }
+        reloader.call(reader)
+      end
 
-      reader_thread = Thread.new { old_vector_store.search(query_vector, limit: 5) }
+      # The ACTUAL production retrieval path: retrieve resolves the old bundle,
+      # signals through the observer, and blocks until the swap has landed.
+      result = retriever.retrieve('AlphaUnit model')
+      reload_result = reload_thread.value
 
-      reload_response = reload_thread.value
-      results = reader_thread.value
+      # The in-flight response is ENTIRELY old: every unit from the old dump,
+      # nothing from the new one.
+      expect(result.context).to include('AlphaUnit')
+      expect(result.context).not_to include('BetaUnit')
+      expect(result.sources.map { |s| s[:identifier] }).to all(eq('AlphaUnit'))
 
-      # The reader entered mid-swap and completed on its resolved snapshot:
-      # complete old state — never empty, never mixed with the new bundle.
-      expect(results.map(&:id)).to eq(%w[AlphaUnit])
-      expect(reload_response.error?).to be(false)
+      expect(reload_result).to include(vectors: 1, metadata: 1)
 
-      # New readers see the complete new bundle.
-      expect(retriever.vector_store).not_to be(old_vector_store)
-      expect(retriever.vector_store.search(query_vector, limit: 5).map(&:id)).to eq(%w[BetaUnit])
+      # The retired bundle is untouched (in-flight readers finish against it).
+      expect(old_vector_store.search([1.0, 0.0, 0.0, 0.0], limit: 5).map(&:id)).to eq(%w[AlphaUnit])
+
+      # A subsequent response is ENTIRELY new.
+      retriever.pipeline_observer = nil
+      second = retriever.retrieve('BetaUnit service')
+      expect(second.context).to include('BetaUnit')
+      expect(second.context).not_to include('AlphaUnit')
     end
   end
 
   describe 'generation movement during candidate construction' do
     it 'refuses to swap the stale bundle and reports the served generation' do
       server
+      old_pipeline = retriever.pipeline
       old_vector_store = retriever.vector_store
       old_identifier_map = reader.send(:identifier_map)
-
-      allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty)
-        .and_wrap_original do |original, *args, **kwargs|
-        generation.bump!(reason: 'concurrent publish')
-        original.call(*args, **kwargs)
-      end
+      reload_hooks[:current] = { after_vector_candidate: -> { generation.bump!(reason: 'concurrent publish') } }
 
       response = call_tool('reload')
 
@@ -212,6 +216,7 @@ RSpec.describe 'Index MCP transactional store reload' do
       expect(response.meta[:reason]).to include('generation')
 
       # The stale bundle was NOT swapped; the served generation is retained.
+      expect(retriever.pipeline).to be(old_pipeline)
       expect(retriever.vector_store).to be(old_vector_store)
       expect(reader.send(:identifier_map)).to be(old_identifier_map)
       expect(state.reload_failure[:generation]).to eq(1)
@@ -223,17 +228,127 @@ RSpec.describe 'Index MCP transactional store reload' do
     end
   end
 
-  def write_artifact(vector_entries:, metadata_entries:)
+  describe 'promoted dump identity' do
+    it 'refuses to mix halves from two dumps when dumps/latest moves between hydrations' do
+      server
+      old_pipeline = retriever.pipeline
+      old_vector_store = retriever.vector_store
+      captured_dump = Woods::IndexArtifact.new(index_dir).latest_dump_path
+      reload_hooks[:current] = {
+        # The writer promotes a second dump AFTER the vector candidate
+        # hydrated but BEFORE the metadata candidate. Compatible dimensions:
+        # only the identity recheck can tell the halves apart.
+        after_vector_candidate: lambda do
+          write_artifact(identifier: 'BetaUnit', type: 'service', vector: [0.0, 1.0, 0.0, 0.0],
+                         file_path: 'app/services/beta_unit.rb')
+        end
+      }
+
+      reload_error = nil
+      Thread.new do
+        reloader.call(reader)
+      rescue StandardError => e
+        reload_error = e
+      end.join(10)
+
+      expect(reload_error).to be_a(Woods::MCP::ReloadDumpMoved)
+      expect(reload_error.generation).to eq(1)
+      expect(reload_error.stores).to eq(%w[vector metadata graph])
+
+      # Nothing swapped, nothing mixed: the old pipeline and stores are exactly
+      # the objects that were serving before the attempt.
+      expect(retriever.pipeline).to be(old_pipeline)
+      expect(retriever.vector_store).to be(old_vector_store)
+      expect(retriever.vector_store.search([1.0, 0.0, 0.0, 0.0], limit: 5).map(&:id)).to eq(%w[AlphaUnit])
+      expect(state.reload_failure[:reason]).to include('dump')
+      expect(Woods::IndexArtifact.new(index_dir).latest_dump_path.to_s).not_to eq(captured_dump.to_s)
+    end
+  end
+
+  describe 'writer publication against the commit window' do
+    it 'blocks a writer until the commit finishes, then serves the new generation on the next reload' do
+      server
+      old_pipeline = retriever.pipeline
+      captured_dump = Woods::IndexArtifact.new(index_dir).latest_dump_path
+
+      lock_held = Queue.new
+      release_reload = Queue.new
+      reload_hooks[:current] = {
+        after_pipeline_lock: lambda {
+          lock_held << true
+          release_reload.pop
+        }
+      }
+      reload_thread = Thread.new { reloader.call(reader) }
+      Timeout.timeout(5) { lock_held.pop }
+
+      writer_attempting = Queue.new
+      writer_published = Queue.new
+      writer = Thread.new do
+        Woods::IndexArtifact.new(index_dir)
+        lock = Woods::Coordination::PipelineLock.new(
+          lock_dir: index_dir, name: Woods::Watch::Daemon::LOCK_NAME,
+          stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
+        )
+        writer_attempting << true
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        acquired = lock.acquire
+        until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+          sleep 0.05
+          acquired = lock.acquire
+        end
+        next unless acquired
+
+        begin
+          write_artifact(identifier: 'BetaUnit', type: 'service', vector: [0.0, 1.0, 0.0, 0.0],
+                         file_path: 'app/services/beta_unit.rb')
+          Woods::Generation.new(output_dir: index_dir).bump!(reason: 'writer publish')
+        ensure
+          lock.release
+        end
+        writer_published << true
+      end
+      Timeout.timeout(5) { writer_attempting.pop }
+
+      # The reload holds the extraction PipelineLock across the recheck and the
+      # swap, so the writer's publication CANNOT interleave into that window.
+      writer_blocked = !writer.join(0.3)
+      expect(writer_blocked).to be(true)
+      expect(Woods::IndexArtifact.new(index_dir).latest_dump_path.to_s).to eq(captured_dump.to_s)
+
+      # Commit lands on the captured identity, then the lock releases and the
+      # blocked writer publishes.
+      release_reload << true
+      reload_result = reload_thread.value
+      expect(reload_result).to include(vectors: 1, metadata: 1)
+      expect(retriever.pipeline).not_to be(old_pipeline)
+      expect(retriever.vector_store.search([1.0, 0.0, 0.0, 0.0], limit: 5).map(&:id)).to eq(%w[AlphaUnit])
+      Timeout.timeout(5) { writer_published.pop }
+
+      # A LATER reload sees the moved identity: it re-captures, rebuilds
+      # candidates from the new dump, and swaps to it.
+      reload_hooks[:current] = nil
+      reloader.call(reader)
+      expect(retriever.vector_store.search([0.0, 1.0, 0.0, 0.0], limit: 5).map(&:id)).to eq(%w[BetaUnit])
+    ensure
+      release_reload << true
+      reload_thread&.join(5)
+      writer&.join(5)
+    end
+  end
+
+  def write_artifact(identifier:, type:, vector:, file_path:)
     source_vs = Woods::Storage::VectorStore::InMemory.new
-    vector_entries.each { |id, vec, meta| source_vs.store(id, vec, meta || {}) }
+    source_vs.store(identifier, vector, {})
 
     source_ms = Woods::Storage::MetadataStore::InMemory.new
-    metadata_entries.each { |id, meta| source_ms.store(id, meta) }
+    source_ms.store(identifier, { 'type' => type, 'identifier' => identifier, 'file_path' => file_path })
 
     artifact = Woods::IndexArtifact.new(index_dir)
     provider = Woods::Builder.new(Woods.configuration).build_embedding_provider
     resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration, provider: provider)
     dump_dir = artifact.dumps_root.join("dump-#{Process.pid}-#{rand(1_000_000)}")
+    FileUtils.mkdir_p(dump_dir)
 
     Woods::Storage::Snapshotter::Vector.dump(source_vs, artifact, dump_dir, resolved_config: resolved)
     Woods::Storage::Snapshotter::Metadata.dump(source_ms, artifact, dump_dir, resolved_config: resolved)
