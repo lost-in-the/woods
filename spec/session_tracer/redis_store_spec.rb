@@ -6,6 +6,11 @@ require 'open3'
 require 'rbconfig'
 require 'woods/session_tracer/redis_store'
 
+# Mirrors the redis client's type-refusal errors (Redis::CommandError /
+# Redis::WrongTypeError, depending on gem generation). Named with the Redis
+# prefix so the store's client-error class check matches.
+class RedisTestCommandError < StandardError; end
+
 # Minimal in-memory Redis mock for unit testing.
 # Implements only the subset of Redis commands used by RedisStore.
 class MockRedis
@@ -65,6 +70,42 @@ class MockRedis
   def del(key)
     @data.delete(key)
     1
+  end
+
+  # ── sorted-set commands (session recency index) ──────────────────────
+
+  # rubocop:disable-next Naming/PredicateMethod
+  def zadd(key, score, member)
+    ensure_zset(key)
+    (@data[key] ||= {})[member] = score.to_f
+    true
+  end
+
+  def zrange(key, start, stop)
+    ensure_zset(key)
+    members = (@data[key] || {}).sort_by { |member, score| [score, member] }.map(&:first)
+    stop = members.size - 1 if stop == -1
+    members[start..stop] || []
+  end
+
+  def zrem(key, member)
+    ensure_zset(key)
+    (@data[key] || {}).delete(member)
+    1
+  end
+
+  def zcard(key)
+    ensure_zset(key)
+    (@data[key] || {}).size
+  end
+
+  # A set is an Array here and a zset a Hash, mirroring how the real server
+  # refuses cross-type commands.
+  def ensure_zset(key)
+    existing = @data[key]
+    return if existing.nil? || existing.is_a?(Hash)
+
+    raise RedisTestCommandError, 'WRONGTYPE Operation against a key holding the wrong kind of value'
   end
 end
 
@@ -250,6 +291,53 @@ RSpec.describe Woods::SessionTracer::RedisStore do
 
       expect { store.record('sess1', cyclic) }.to raise_error(JSON::NestingError)
       expect(redis).not_to have_received(:rpush)
+    end
+  end
+
+  describe 'recency zset index (P4)' do
+    # P4. prune_sessions read every candidate session's history to order
+    # them, so once max_sessions was reached every record re-read all of
+    # them. The index is now a recency ZSET scored by the request's own
+    # timestamp; eviction order is unchanged and histories are never
+    # re-read for eviction. The lrange count below fails on the pre-fix
+    # shape, where prune called read() for every session.
+    it 'evicts overflow without reading session histories' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      bounded.record('one', request_data)
+      bounded.record('two', request_data)
+
+      allow(redis).to receive(:lrange).and_call_original
+      bounded.record('three', request_data)
+
+      expect(redis).not_to have_received(:lrange)
+      expect(bounded.sessions(limit: 10).map { |s| s['session_id'] }).to contain_exactly('two', 'three')
+    end
+
+    it 'scores the index by the request timestamp, so eviction matches last-request order' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      bounded.record('newest', request_data.merge('timestamp' => '2026-02-13T12:00:00Z'))
+      bounded.record('oldest', request_data.merge('timestamp' => '2026-02-13T09:00:00Z'))
+      bounded.record('middle', request_data.merge('timestamp' => '2026-02-13T10:00:00Z'))
+
+      expect(bounded.read('oldest')).to eq([])
+      expect(bounded.read('middle').size).to eq(1)
+      expect(bounded.read('newest').size).to eq(1)
+    end
+
+    it 'falls back to write time when the request carries no parseable timestamp' do
+      store.record('no_ts', { 'controller' => 'OrdersController' })
+
+      expect(store.sessions.first['session_id']).to eq('no_ts')
+    end
+
+    it 'migrates a legacy set-based session index on first record' do
+      redis.sadd(described_class::SESSIONS_KEY, 'legacy')
+      store.record('fresh', request_data)
+
+      expect(store.sessions.map { |s| s['session_id'] }).to eq(['fresh'])
+
+      store.record('fresh', request_data.merge('action' => 'create'))
+      expect(store.sessions.size).to eq(1)
     end
   end
 end
