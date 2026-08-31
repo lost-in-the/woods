@@ -631,6 +631,13 @@ module Woods
       # (audit P6): {#dependency_graph} builds the typed graph from this
       # same hash (DependencyGraph.from_h does not mutate its input), so a
       # generation that touches both accessors holds one parsed copy.
+      #
+      # CONTRACT: the returned hash (and everything nested in it) is SHARED
+      # state across every accessor and consumer for this generation. Treat
+      # it as read-only: mutating it corrupts {#dependency_graph} and the
+      # memoized edge normalization. Every current consumer (server graph
+      # tools, obsidian exporter, internal normalizers) is verified
+      # read-only; a new consumer that needs to mutate must deep-dup first.
       def raw_graph_data
         ensure_fresh!
         @raw_graph_data ||= parse_json('dependency_graph.json')
