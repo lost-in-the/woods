@@ -827,15 +827,29 @@ module Woods
           deps << { type: :model, target: model_ref, via: :code_reference }
         end
 
-        source.scan(/\b([A-Z][a-z][a-zA-Z]*)\b/).flatten.uniq.each do |const_ref|
+        # The per-constant follow-up check used to run one full-source scan
+        # for every unique capitalized constant (audit P9c). One combined
+        # scan collects the constants that are actually followed by a model
+        # call; only the exact word at a position can match (each candidate
+        # is a maximal word in this source and `\.` must immediately follow),
+        # so the collected set is identical. Candidate order drives emission
+        # below, unchanged.
+        candidates = source.scan(/\b([A-Z][a-z][a-zA-Z]*)\b/).flatten.uniq
+        model_callers = if candidates.empty?
+                          {}
+                        else
+                          source.scan(
+                            /\b(#{candidates.map { |c| Regexp.escape(c) }.join('|')})\.(?:find|where|find_by|create|new|first|last|all)\b/
+                          ).flatten.to_h { |const| [const, true] }
+                        end
+
+        candidates.each do |const_ref|
           if const_ref.match?(/\A(Types|Mutations|Resolvers|GraphQL|Base|String|Integer|Float|Boolean|Array|Hash|Set|Struct|Module|Class|Object|ID|Int|ISO8601)\z/)
             next
           end
           next if deps.any? { |d| d[:target] == const_ref }
 
-          if source.match?(/\b#{Regexp.escape(const_ref)}\.(?:find|where|find_by|create|new|first|last|all)\b/)
-            deps << { type: :model, target: const_ref, via: :code_reference }
-          end
+          deps << { type: :model, target: const_ref, via: :code_reference } if model_callers.key?(const_ref)
         end
 
         deps.concat(scan_service_dependencies(source))

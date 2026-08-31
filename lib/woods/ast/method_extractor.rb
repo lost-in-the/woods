@@ -57,6 +57,25 @@ module Woods
         # Fallback: extract by line range
         extract_source_span(source, node.line, node.end_line)
       end
+
+      # Extract the raw source text of every instance-method definition,
+      # keyed by method name — one parse answers every query (P1).
+      #
+      # A name defined more than once keeps its first definition, matching
+      # {#extract_method_source}'s first-match lookup, so
+      # `extract_method_sources(source)[name]` is byte-identical to
+      # `extract_method_source(source, name)` for every name.
+      #
+      # @param source [String] Ruby source code
+      # @return [Hash{String => String}] method name => source text
+      def extract_method_sources(source)
+        root = @parser.parse(source)
+        root.find_all(:def).each_with_object({}) do |node, map|
+          next if map.key?(node.method_name)
+
+          map[node.method_name] = node.source || extract_source_span(source, node.line, node.end_line)
+        end
+      end
     end
   end
 end

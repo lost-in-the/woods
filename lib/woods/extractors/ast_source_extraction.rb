@@ -35,11 +35,29 @@ module Woods
         file, _line = source_location
         return nil unless File.exist?(file)
 
-        source = File.read(file)
-        Ast::MethodExtractor.new.extract_method_source(source, action.to_s)
+        action_sources_for(file)[action.to_s]
       rescue StandardError => e
         Rails.logger.debug("Could not extract action source for #{klass}##{action}: #{e.message}")
         nil
+      end
+
+      # Every instance-method source in one file, keyed by method name — read
+      # and parsed once per file per extractor instance (audit P1).
+      #
+      # {#build_action_chunks} in the including extractors calls
+      # {#extract_action_source} once per action, so a 30-action controller
+      # previously read and re-parsed its own source 30 times. The parse
+      # result is a pure function of the file's bytes, so answering every
+      # action from one parse is byte-identical to parsing per action.
+      #
+      # A file whose source fails to parse stays uncached (the `||=` never
+      # assigns), so each action retries it and rescues exactly as before.
+      #
+      # @param file [String] Absolute path of the defining file
+      # @return [Hash{String => String, nil}] method name => source text
+      def action_sources_for(file)
+        (@action_sources ||= {})[file] ||=
+          Ast::MethodExtractor.new.extract_method_sources(File.read(file))
       end
     end
   end

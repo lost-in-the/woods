@@ -1559,13 +1559,18 @@ module Woods
 
     # Batch-fetch git data for all file paths in two git commands.
     #
+    # Duplicate paths are collapsed before slicing (audit P9d): many units
+    # share one file_path, and duplicates only repeat a pathspec another
+    # batch also sent. The result is keyed by relative path, so the output
+    # is identical.
+    #
     # @param file_paths [Array<String>] Absolute file paths
     # @return [Hash{String => Hash}] Keyed by relative path
     def batch_git_data(file_paths)
       return {} if file_paths.empty?
 
       root = "#{Rails.root}/"
-      relative_paths = file_paths.map { |f| f.sub(root, '') }
+      relative_paths = file_paths.map { |f| f.sub(root, '') }.uniq
       result = {}
       relative_paths.each { |rp| result[rp] = {} }
 

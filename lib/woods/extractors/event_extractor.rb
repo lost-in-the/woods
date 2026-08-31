@@ -57,7 +57,12 @@ module Woods
       # @param event_map [Hash] Mutable map of event_name => {publishers:, subscribers:, pattern:}
       # @return [void]
       def scan_file(file_path, event_map)
-        source = File.read(file_path)
+        source = cached_source(file_path)
+        unless source
+          Rails.logger.error("Failed to scan #{file_path} for events: file unreadable")
+          return
+        end
+
         scan_active_support_notifications(source, file_path, event_map)
         scan_wisper_patterns(source, file_path, event_map)
       rescue StandardError => e
@@ -200,11 +205,30 @@ module Woods
       # @param file_paths [Array<String>] File paths to read
       # @return [String] Combined source
       def load_source_files(file_paths)
-        file_paths.filter_map do |path|
+        file_paths.filter_map { |path| cached_source(path) }.join("\n")
+      end
+
+      # One read per distinct path per extractor instance (audit P2).
+      #
+      # Pass 2 ({#build_unit}) recombines the same publisher/subscriber files
+      # for every event that references them, so a widely-shared file was
+      # re-read once per event on top of the pass-1 {#scan_file} read. The
+      # bytes cannot change mid-run, so the first read answers the rest.
+      #
+      # A failed read is memoized as nil, matching the per-event skip it
+      # produced before; the output is identical either way.
+      #
+      # @param path [String] File path
+      # @return [String, nil] File contents, or nil when unreadable
+      def cached_source(path)
+        cache = (@source_files ||= {})
+        return cache[path] if cache.key?(path)
+
+        cache[path] = begin
           File.read(path)
         rescue StandardError
           nil
-        end.join("\n")
+        end
       end
 
       # Build annotated source annotation for the event unit.

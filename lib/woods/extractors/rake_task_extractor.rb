@@ -53,14 +53,16 @@ module Woods
       def extract_rake_file(file_path)
         return [] unless file_path.to_s.end_with?('.rake')
 
-        source = File.read(file_path)
-        tasks = parse_tasks(source)
+        data = rake_file_data(file_path.to_s)
+        return [] unless data
+
+        tasks = data[:tasks]
         Rails.logger.debug("Woods: no rake tasks parsed from #{file_path}") if tasks.empty?
 
         tasks.filter_map do |task_data|
           next if excluded_namespace?(task_data[:full_name])
 
-          build_unit(task_data, file_path, source, sibling_definitions(task_data[:full_name], file_path))
+          build_unit(task_data, file_path, data[:source], sibling_definitions(task_data[:full_name], file_path))
         end
       rescue StandardError => e
         Rails.logger.error("Failed to extract rake tasks from #{file_path}: #{e.message}")
@@ -73,6 +75,27 @@ module Woods
         find_files_in_directories(@directories, '**/*.rake').map(&:to_s).sort
       end
 
+      # One read and one parse per .rake file per extractor instance (audit
+      # P9a). {#extract_rake_file} and {#all_definitions} both need every
+      # file's source and tasks; the sibling index used to re-read and
+      # re-parse all of them on its first access. The bytes cannot change
+      # mid-run, so the first read/parse answers both paths.
+      #
+      # A file that fails to read or parse is memoized as nil: it produced no
+      # definitions and no units before either.
+      #
+      # @param file [String] Absolute path of the .rake file
+      # @return [Hash{Symbol => String, Array<Hash>}, nil] `{ source:, tasks: }`
+      def rake_file_data(file)
+        (@rake_file_data ||= {})[file] ||= begin
+          source = File.read(file)
+          { source: source, tasks: parse_tasks(source) }
+        end
+      rescue StandardError => e
+        Rails.logger.error("Failed to scan rake tasks in #{file}: #{e.message}")
+        nil
+      end
+
       # Every definition of every task across the rake directories, keyed by
       # full name (B-126). Rake merges a task reopened in two files into one
       # task, so the index does the same: one unit whose source carries every
@@ -82,12 +105,12 @@ module Woods
       # @return [Hash{String => Array<Hash>}] `{ full_name => [{ file:, task:, source: }] }`
       def all_definitions
         @all_definitions ||= rake_files.each_with_object(Hash.new { |h, k| h[k] = [] }) do |file, index|
-          source = File.read(file)
-          parse_tasks(source).each do |task_data|
-            index[task_data[:full_name]] << { file: file, task: task_data, source: source }
+          data = rake_file_data(file)
+          next unless data
+
+          data[:tasks].each do |task_data|
+            index[task_data[:full_name]] << { file: file, task: task_data, source: data[:source] }
           end
-        rescue StandardError => e
-          Rails.logger.error("Failed to scan rake tasks in #{file}: #{e.message}")
         end
       end
 

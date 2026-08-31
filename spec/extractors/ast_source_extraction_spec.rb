@@ -96,4 +96,36 @@ RSpec.describe Woods::Extractors::AstSourceExtraction do
 
     expect(extract(sample_class, :index)).to be_nil
   end
+
+  describe 'one parse per file' do
+    # P1. build_action_chunks calls extract_action_source once per action, so
+    # a file that defines N actions was read and re-parsed N times. The
+    # extraction result must be byte-identical either way; this pins the
+    # structural contract, and the parse-count assertion below fails on the
+    # pre-fix shape (two actions in one file => two parses).
+    it 'extracts two actions from one file identically to single-action extraction' do
+      index_source = extract(sample_class, :index)
+      show_source = extract(sample_class, :show)
+
+      expect(index_source).to include('def index')
+      expect(index_source).to include("'index body'")
+      expect(index_source).not_to include('def show')
+      expect(show_source).to include('def show')
+      expect(show_source).to include("'show body'")
+      expect(show_source).not_to include('def index')
+    end
+
+    it 'parses the defining file once for two actions from the same file' do
+      parse_count = 0
+      allow_any_instance_of(Woods::Ast::Parser).to receive(:parse).and_wrap_original do |method, source|
+        parse_count += 1
+        method.call(source)
+      end
+
+      extract(sample_class, :index)
+      extract(sample_class, :show)
+
+      expect(parse_count).to eq(1)
+    end
+  end
 end

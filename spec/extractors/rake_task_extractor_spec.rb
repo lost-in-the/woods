@@ -63,6 +63,32 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(from_b.source_code).to eq(from_a.source_code)
       expect(from_b.metadata[:defined_in]).to eq(from_a.metadata[:defined_in])
     end
+
+    # P9a. extract_rake_file reads and parses each file, and the first
+    # sibling_definitions call triggers all_definitions, which re-read and
+    # re-parsed every .rake file. Output is identical either way; the read
+    # and parse counts below fail on the pre-fix shape.
+    it 'reads and parses each .rake file once per run' do
+      reads = Hash.new(0)
+      allow(File).to receive(:read).and_wrap_original do |method, path|
+        reads[path.to_s] += 1
+        method.call(path)
+      end
+      parses = 0
+      allow_any_instance_of(described_class).to receive(:parse_tasks).and_wrap_original do |method, source|
+        parses += 1
+        method.call(source)
+      end
+
+      units = described_class.new.extract_all
+
+      seed_unit = units.find { |u| u.identifier == 'db:seed' }
+      expect(seed_unit.metadata[:defined_in]).to eq(%w[lib/tasks/a_seed.rake lib/tasks/b_seed.rake])
+
+      expect(parses).to eq(2)
+      expect(reads[File.join(tmp_dir, 'lib/tasks/a_seed.rake')]).to eq(1)
+      expect(reads[File.join(tmp_dir, 'lib/tasks/b_seed.rake')]).to eq(1)
+    end
   end
 
   # ── extract_all ──────────────────────────────────────────────────────
