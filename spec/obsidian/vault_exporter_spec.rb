@@ -19,7 +19,23 @@ RSpec.describe Woods::Obsidian::VaultExporter do
     end
   end
 
+  # The reader publishes raw_graph_data deep-frozen; mirror that here.
+  def deep_freeze(value)
+    case value
+    when Hash then value.each do |key, item|
+      deep_freeze(key)
+      deep_freeze(item)
+    end.freeze
+    when Array then value.each { |item| deep_freeze(item) }.freeze
+    else value.freeze
+    end
+  end
+
   let(:graph) do
+    # The real reader deep-freezes raw_graph_data before publishing it (the
+    # typed graph shares the same hash), so the double publishes a frozen
+    # fixture too: any mutation the exporter performs is a bug this spec
+    # must catch, not a fixture artifact.
     {
       'nodes' => {
         'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb' },
@@ -33,7 +49,7 @@ RSpec.describe Woods::Obsidian::VaultExporter do
       },
       'reverse' => { 'Account' => ['User'], 'User' => ['UsersController'] },
       'pagerank' => { 'User' => 0.5, 'Account' => 0.3, 'UsersController' => 0.1 }
-    }
+    }.then { |fixture| deep_freeze(fixture) }
   end
 
   let(:analysis) do
@@ -64,6 +80,26 @@ RSpec.describe Woods::Obsidian::VaultExporter do
       allow(r).to receive(:list_units).and_return(index_entries)
       allow(r).to receive(:find_unit) { |id| units[id] }
     end
+  end
+
+  # A reader double publishing a *different* (still frozen) graph shape, for
+  # examples that need a graph the shared fixture does not carry.
+  def reader_for(graph_fixture, find_unit: nil, list_units: nil)
+    instance_double(Woods::MCP::IndexReader).tap do |r|
+      allow(r).to receive(:raw_graph_data).and_return(graph_fixture)
+      allow(r).to receive(:graph_analysis).and_return(analysis)
+      allow(r).to receive(:list_units).and_return(list_units || index_entries)
+      allow(r).to receive(:find_unit) { |id| find_unit ? find_unit.call(id) : units[id] }
+    end
+  end
+
+  # The shared graph fixture is frozen (the real reader publishes
+  # raw_graph_data deep-frozen), so variants are built on an unfrozen copy
+  # and re-frozen, never by mutating the fixture.
+  def frozen_graph_variant
+    copy = Marshal.load(Marshal.dump(graph))
+    yield copy
+    deep_freeze(copy)
   end
 
   def exporter(**overrides)
@@ -122,11 +158,14 @@ RSpec.describe Woods::Obsidian::VaultExporter do
     end
 
     it 'skips a graph node that has no unit file on disk (counts it as skipped, links nowhere)' do
-      graph['nodes']['Ghost'] = { 'type' => 'model' }
-      allow(reader).to receive(:find_unit) { |id| id == 'Ghost' ? nil : units[id] }
-      allow(reader).to receive(:list_units).and_return(index_entries + [{ 'identifier' => 'Ghost' }])
+      variant = frozen_graph_variant { |g| g['nodes']['Ghost'] = { 'type' => 'model' } }
+      ghost_reader = reader_for(
+        variant,
+        find_unit: ->(id) { id == 'Ghost' ? nil : units[id] },
+        list_units: index_entries + [{ 'identifier' => 'Ghost' }]
+      )
 
-      stats = exporter.export_all
+      stats = exporter(reader: ghost_reader).export_all
       expect(File).not_to exist(File.join(@vault, 'models/Ghost.md'))
       expect(stats[:skipped]).to be >= 1
       expect(Dir.glob(File.join(@vault, '**/*.md')).map do |f|
@@ -148,11 +187,14 @@ RSpec.describe Woods::Obsidian::VaultExporter do
     end
 
     it 'dedupes duplicate graph edges so a note renders one bullet per target/via' do
-      graph['edges']['User'] = [
-        { 'target' => 'Account', 'via' => 'belongs_to' },
-        { 'target' => 'Account', 'via' => 'belongs_to' }
-      ]
-      exporter.export_all
+      variant = frozen_graph_variant do |g|
+        g['edges']['User'] = [
+          { 'target' => 'Account', 'via' => 'belongs_to' },
+          { 'target' => 'Account', 'via' => 'belongs_to' }
+        ]
+      end
+
+      exporter(reader: reader_for(variant)).export_all
       note = read_vault('models/User.md')
       expect(note.scan('[[models/Account|Account]] — *belongs_to*').size).to eq(1)
       expect(frontmatter('models/User.md')['dependency_count']).to eq(1)
@@ -273,11 +315,11 @@ RSpec.describe Woods::Obsidian::VaultExporter do
 
   describe 'path traversal safety' do
     it 'sanitizes an unknown node type used as a fallback directory so a note stays inside the vault' do
-      graph['nodes']['Evil'] = { 'type' => '../../escape' }
+      variant = frozen_graph_variant { |g| g['nodes']['Evil'] = { 'type' => '../../escape' } }
       units['Evil'] = { 'identifier' => 'Evil', 'type' => '../../escape', 'metadata' => {} }
-      allow(reader).to receive(:list_units).and_return(index_entries + [{ 'identifier' => 'Evil' }])
+      evil_reader = reader_for(variant, list_units: index_entries + [{ 'identifier' => 'Evil' }])
 
-      exporter.export_all
+      exporter(reader: evil_reader).export_all
 
       parent = File.dirname(@vault)
       expect(Dir.glob(File.join(parent, '*')).map { |f| File.basename(f) }).to eq(['vault'])

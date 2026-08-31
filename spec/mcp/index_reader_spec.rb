@@ -1051,5 +1051,28 @@ RSpec.describe Woods::MCP::IndexReader do
 
       expect(calls['dependency_graph.json']).to eq(2)
     end
+
+    # Review finding: raw_graph_data is shared state for the whole
+    # generation (dependency_graph builds from the same hash), so a public
+    # mutation of a nested edge reached the internal copy and corrupted the
+    # typed graph. The parsed structure is deep-frozen at parse time before
+    # the memo publishes it.
+    it 'refuses nested mutation and keeps the typed graph unchanged' do
+      raw = fresh_reader.raw_graph_data
+
+      expect { raw['edges']['Comment'] << 'Injected' }.to raise_error(FrozenError)
+      expect { raw['nodes']['Comment']['type'] = 'service' }.to raise_error(FrozenError)
+      expect(fresh_reader.raw_graph_data['edges']['Comment']).to eq(['Post'])
+      expect(fresh_reader.dependency_graph.dependencies_of('Comment')).to eq(['Post'])
+    end
+
+    it 'still parses dependency_graph.json once per generation under freeze' do
+      calls = counted_graph_parses
+
+      fresh_reader.raw_graph_data
+      fresh_reader.dependency_graph
+
+      expect(calls['dependency_graph.json']).to eq(1)
+    end
   end
 end

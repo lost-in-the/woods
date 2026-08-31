@@ -632,15 +632,16 @@ module Woods
       # same hash (DependencyGraph.from_h does not mutate its input), so a
       # generation that touches both accessors holds one parsed copy.
       #
-      # CONTRACT: the returned hash (and everything nested in it) is SHARED
-      # state across every accessor and consumer for this generation. Treat
-      # it as read-only: mutating it corrupts {#dependency_graph} and the
-      # memoized edge normalization. Every current consumer (server graph
-      # tools, obsidian exporter, internal normalizers) is verified
-      # read-only; a new consumer that needs to mutate must deep-dup first.
+      # The parsed structure is deep-frozen before the memo publishes it.
+      # It is shared state for the whole generation — the typed graph, the
+      # memoized edge normalization, traversal, and the server graph tools
+      # all read from it — so a caller mutation of a nested edge or node
+      # would reach the internal copy and corrupt every later read. Frozen
+      # at parse time, not lazily, so even the first accessor's returned
+      # value is immutable.
       def raw_graph_data
         ensure_fresh!
-        @raw_graph_data ||= parse_json('dependency_graph.json')
+        @raw_graph_data ||= deep_freeze_json(parse_json('dependency_graph.json'))
       end
 
       private
@@ -1025,6 +1026,28 @@ module Woods
       def parse_json(filename)
         path = current_payload_dir.join(filename)
         JSON.parse(read_utf8(path))
+      end
+
+      # Deep-freeze a parsed JSON structure (hashes, arrays, and the strings
+      # and primitives inside them) so a shared parse result cannot be
+      # mutated through any reference.
+      #
+      # JSON.parse(..., freeze: true) would do this natively, but that
+      # keyword needs json >= 2.7.0 while the supported floor (Ruby 3.0)
+      # bundles json 2.5 — a host app on the floor would get ArgumentError
+      # from this path. A small recursive walk is version-independent.
+      #
+      # @param value [Object]
+      # @return [Object] the same structure, frozen
+      def deep_freeze_json(value)
+        case value
+        when Hash then value.each do |key, item|
+          deep_freeze_json(key)
+          deep_freeze_json(item)
+        end.freeze
+        when Array then value.each { |item| deep_freeze_json(item) }.freeze
+        else value.freeze
+        end
       end
 
       # BFS traversal in either direction.
