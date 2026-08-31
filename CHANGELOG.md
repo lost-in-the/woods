@@ -50,15 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **JSON temporal snapshots are pruned by retention (P8).** `snapshots/`
   wrote one file per SHA and never pruned, growing unboundedly on long-lived
   repos. Capture now keeps the newest `WOODS_PAYLOAD_RETENTION` snapshots
-  (default 3, same variable and default as payload retention); `diff` and
-  `unit_history` beyond the retention window return empty.
+  (default 3, same variable and default as payload retention), and the bound
+  holds even when the just-captured snapshot's timestamp ties or precedes
+  older entries; `diff` and `unit_history` beyond the retention window
+  return empty.
 
 - **Redis session-tracer eviction uses a recency ZSET (P4).** `prune_sessions`
   read every candidate session's history on every record once `max_sessions`
   was reached (up to 1000 session reads per request). The `woods:sessions`
   index is now a ZSET scored by each request's timestamp, so eviction touches
   a bounded window and never reads session histories. A legacy SET index from
-  a previous version migrates automatically on the first record; eviction
+  a previous version migrates automatically on the first record through a
+  single atomic server-side script, so concurrent writers racing the legacy
+  index cannot erase each other's members or fail mid-migration; eviction
   order (oldest last request) is unchanged. Adds a live-Redis contract spec
   (`spec/session_tracer/redis_store_live_spec.rb`, `WOODS_RUN_LIVE_BACKENDS=1`).
 
