@@ -94,6 +94,10 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(store.search('nonexistent-token', fields: ['description'])).to be_empty
       end
 
+      it 'returns nothing when the caller supplies no searchable fields' do
+        expect(store.search('billing', fields: [])).to be_empty
+      end
+
       # `updated_at` is a store-managed timestamp, not caller-supplied data —
       # SQLite's `data` column never includes it, so a whole-record query that
       # only matched the timestamp used to return every record on InMemory
@@ -287,6 +291,13 @@ RSpec.describe Woods::Storage::MetadataStore do
 
         expect { store.search('x', fields: ["a') OR 1=1 --"]) }
           .to raise_error(ArgumentError, /Invalid search field/)
+      end
+
+      it 'executes no SQL when the searchable field list is empty' do
+        db = store.instance_variable_get(:@db)
+        expect(db).not_to receive(:execute)
+
+        expect(store.search('x', fields: [])).to be_empty
       end
     end
 

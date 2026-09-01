@@ -194,6 +194,26 @@ namespace :woods do
     nil
   end
 
+  # The root containing the Rakefile that loaded this task file.
+  #
+  # `woods:watch_status` intentionally avoids Rails boot, so it cannot ask
+  # `Rails.root` for the conventional output path. `Dir.pwd` is not a stable
+  # substitute: `rake -f /app/Rakefile` and worktree launchers may invoke the
+  # task from somewhere else. Rake retains the selected Rakefile even when it
+  # does not chdir, which gives the same application root without loading the
+  # environment.
+  #
+  # @return [String] absolute directory containing the active Rakefile
+  def woods_task_root
+    rakefile = Rake.application.rakefile
+    return Rake.application.original_dir if rakefile.nil? || rakefile.empty?
+
+    # Rake may keep this relative (`Rakefile`) after searching upward from a
+    # nested invocation. At task execution its cwd is the directory it loaded
+    # that relative file from. An explicit absolute `-f` is already complete.
+    File.dirname(File.expand_path(rakefile))
+  end
+
   # Changed paths across a git range, for `woods:incremental`'s CI branches.
   #
   # `git diff --name-only` split on lines corrupted three things at once: a
@@ -325,7 +345,11 @@ namespace :woods do
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    results = woods_with_extraction_lock(output_dir) { extractor.extract_all }
+    results = woods_with_extraction_lock(output_dir) do
+      extracted = extractor.extract_all
+      extractor.raise_on_publication_failure!
+      extracted
+    end
 
     puts
     puts 'Extraction complete!'
@@ -383,7 +407,11 @@ namespace :woods do
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    affected = woods_with_extraction_lock(output_dir) { extractor.extract_changed(changed_files) }
+    affected = woods_with_extraction_lock(output_dir) do
+      extracted = extractor.extract_changed(changed_files)
+      extractor.raise_on_publication_failure!
+      extracted
+    end
 
     puts
     puts "Re-extracted #{affected.size} affected units."
@@ -463,7 +491,7 @@ namespace :woods do
     require 'woods/watch/status'
     require 'json'
 
-    output_dir = ENV.fetch('WOODS_OUTPUT') { File.join(Dir.pwd, 'tmp/woods') }
+    output_dir = ENV.fetch('WOODS_OUTPUT') { File.join(woods_task_root, 'tmp/woods') }
     status = Woods::Watch::Status.new(output_dir: output_dir)
 
     puts JSON.pretty_generate(status.read)
@@ -500,7 +528,11 @@ namespace :woods do
     # clobbered state is fresh. Atomic writes do not help: each write is
     # individually intact, the *set* is not. So it serializes like the others.
     begin
-      result = woods_with_extraction_lock(output_dir) { extractor.refresh(*keys) }
+      result = woods_with_extraction_lock(output_dir) do
+        refreshed = extractor.refresh(*keys)
+        extractor.raise_on_publication_failure!
+        refreshed
+      end
     rescue ArgumentError => e
       puts "ERROR: #{e.message}"
       puts "Known extractors: #{Woods::Extractor::EXTRACTORS.keys.sort.join(', ')}"
@@ -532,7 +564,11 @@ namespace :woods do
     # regardless of `include_framework_sources` — an explicit invocation is
     # the escape hatch the knob deliberately leaves open.
     extractor = Woods::Extractor.new(output_dir: output_dir)
-    result = woods_with_extraction_lock(output_dir) { extractor.refresh(:rails_source) }
+    result = woods_with_extraction_lock(output_dir) do
+      refreshed = extractor.refresh(:rails_source)
+      extractor.raise_on_publication_failure!
+      refreshed
+    end
 
     puts "Extracted #{result[:touched].size} framework source unit(s)."
     puts "Output: #{Pathname.new(output_dir).join('rails_source')}"

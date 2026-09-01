@@ -1872,7 +1872,7 @@
     "lib/woods/storage/metadata_store.rb"
   ],
   "description": "MetadataStore::InMemory#search(query, fields: []) returns [], but SQLite joins the empty condition list into `WHERE ` and raises SQLite3::SQLException: incomplete input. Verified on current main during the v2 prerelease audit tail. Normalize an empty fields list to the adapter-independent empty result before touching either backing store, and add the case to the shared hardened-search contract so external adapters inherit an explicit semantic requirement.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-134",
@@ -1886,7 +1886,7 @@
     "lib/woods/index_artifact.rb"
   ],
   "description": "IndexArtifact#promote resolves symlinks before enforcing that a dump is inside dumps_root, but both Snapshotter dump validators use expand_path only. A dump_dir symlink located under dumps_root can therefore target an external directory and the vector or metadata writer will place files there. Normal Woods-created dump directories are not symlinks, so this requires a tampered output tree or a custom caller. Reuse one realpath-and-boundary validator for promotion and both writers; regressions must cover a symlinked child and the existing macOS /tmp alias case.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-135",
@@ -1898,7 +1898,7 @@
     "lib/woods/temporal/json_snapshot_store.rb"
   ],
   "description": "JsonSnapshotStore#list and history scans warn and skip malformed JSON files, while #find parses the same file without handling JSON::ParserError. A corrupt retained snapshot therefore changes from an omitted entry during discovery to a raw parser exception when requested directly. Choose and document one fail-closed public posture (typed corrupt-artifact error, or warn-and-return nil) and apply it consistently to find, diff, and scan paths with a deliberately truncated snapshot regression.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-136",
@@ -1912,7 +1912,7 @@
     "lib/woods/generation.rb"
   ],
   "description": "IndexReader pins prevent in-process cache invalidation, but writer-side PayloadStore retention has no cross-process reader lease. A sufficiently long request pinned to generation N can outlive three later publishes; pruning then removes payloads/gen-N while the request still holds that path. Already-cached artifacts survive, but a later uncached unit or graph read sees ENOENT and may be rendered as corrupt_artifact. Decide between leases, open-file/materialization pinning, or a documented retention/request-duration bound; acceptance requires a writer/read-process test proving a pinned request stays readable while retention advances.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-137",
@@ -1925,8 +1925,8 @@
     "lib/tasks/woods.rake",
     "lib/woods/watch/daemon.rb"
   ],
-  "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure.",
-  "status": "open"
+  "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure. RESOLVED: Extractor records a typed publication error and exposes raise_on_publication_failure!; all one-shot extraction tasks call it before success output, while Watch::Daemon retains its unchanged-generation degraded recovery path. Task subprocess specs pin non-zero exits and the extractor regression pins prior-generation readability.",
+  "status": "resolved"
 },
 {
   "id": "B-138",
@@ -1937,8 +1937,8 @@
   "files": [
     "lib/tasks/woods.rake"
   ],
-  "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root.",
-  "status": "open"
+  "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root. RESOLVED: the no-boot task derives its conventional tmp/woods path from Rake.application.rakefile, with original_dir only as the programmatic-load fallback. A subprocess invokes an absolute -f Rakefile from a different cwd and proves the live status is found without loading Rails.",
+  "status": "resolved"
 },
 {
   "id": "B-139",

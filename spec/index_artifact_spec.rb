@@ -163,6 +163,22 @@ RSpec.describe Woods::IndexArtifact do
     end
   end
 
+  describe '#validate_dump_dir!' do
+    it 'accepts a dump reached through a symlinked alias of the artifact root' do
+      real_root = Pathname.new(Dir.mktmpdir)
+      alias_parent = Pathname.new(Dir.mktmpdir)
+      alias_root = alias_parent.join('woods-alias')
+      File.symlink(real_root, alias_root)
+      aliased_artifact = described_class.new(alias_root)
+      dump_dir = aliased_artifact.new_dump_dir
+
+      expect(aliased_artifact.validate_dump_dir!(dump_dir)).to eq(dump_dir)
+    ensure
+      FileUtils.remove_entry(alias_parent) if alias_parent&.exist?
+      FileUtils.remove_entry(real_root) if real_root&.exist?
+    end
+  end
+
   describe '#promote' do
     let(:dump_dir) { artifact.new_dump_dir(now: Time.utc(2026, 4, 23, 3, 42, 17)) }
 
@@ -205,6 +221,13 @@ RSpec.describe Woods::IndexArtifact do
       expect { artifact.promote(outside) }.to raise_error(ArgumentError, /dumps_root/)
     ensure
       FileUtils.rm_rf(outside.to_s) if outside
+    end
+
+    it 'rejects dumps_root itself rather than writing a self-referential pointer' do
+      artifact.dumps_root.mkpath
+
+      expect { artifact.promote(artifact.dumps_root) }.to raise_error(ArgumentError, /dumps_root/)
+      expect(artifact.latest_pointer_path).not_to exist
     end
 
     it 'raises ArgumentError for a sibling directory whose name merely prefixes with dumps_root' do

@@ -405,6 +405,17 @@ N+1 next to a unit from N. An index written before this existed (or a
 third-party writer that still writes flat) has no `payload` key, and every
 reader falls back to the index root unchanged.
 
+Retention does not invalidate an in-flight read. While
+`IndexReader#with_pinned_generation` serves a payload, it holds a shared
+advisory lock on that generation's `manifest.json`; pruning takes an exclusive
+non-blocking lock on the same file and skips a busy generation. This works
+across Index MCP and extraction processes without reader-created lease files,
+so read-only index mounts remain sufficient for ordinary tools and a crashed
+reader leaves no stale lease. A skipped directory can temporarily exceed
+`WOODS_PAYLOAD_RETENTION` and is reconsidered by the next successful publish.
+The protocol relies on the same filesystem advisory-lock support as Woods'
+pipeline coordination.
+
 A **full** extraction (`Extractor#extract_all`) degrades to a flat publish if
 it can't open a fresh payload directory, the write set is the whole app, so a
 flat publish is still a complete index. An **incremental** run
@@ -458,7 +469,7 @@ and a hook-triggered `woods:incremental`. They share the existing file-based
 | Situation | Behaviour |
 |---|---|
 | Daemon cycle while another writer holds the lock | Daemon yields, publishes a `contended` degraded status, and **carries its paths into the next cycle** so nothing is lost |
-| Manual `woods:extract` / `woods:incremental` | Waits up to `LOCK_STALE_TIMEOUT` (600 s; override with `WOODS_LOCK_WAIT`) for the lock, then **exits non-zero** rather than proceeding unlocked, a storm-triggered `extract_all` can hold the lock for minutes on a large host, and two concurrent writers rewrite the dependency graph from divergent copies, so the loser's work is silently discarded under a generation that says "fresh" |
+| Manual `woods:extract` / `woods:incremental` / `woods:refresh` (including `woods:extract_framework`) | Waits up to `LOCK_STALE_TIMEOUT` (600 s; override with `WOODS_LOCK_WAIT`) for the lock, then **exits non-zero** rather than proceeding unlocked. It also exits non-zero with a typed error when the final generation marker cannot be published; the previous generation remains readable. A storm-triggered `extract_all` can hold the lock for minutes on a large host, and two concurrent writers rewrite the dependency graph from divergent copies, so the loser's work is silently discarded under a generation that says "fresh" |
 | Hook sync on a tree a daemon is already watching | Skips entirely: the daemon has already seen those changes. `WOODS_IGNORE_WATCH=1` overrides |
 
 A hook can check cheaply:
@@ -466,6 +477,12 @@ A hook can check cheaply:
 ```bash
 bundle exec rake woods:watch_status || start_the_daemon   # exit 0 = alive
 ```
+
+The check does not boot Rails. Without `WOODS_OUTPUT`, it resolves
+`tmp/woods/watch_status.json` relative to the active Rakefile, not the
+launcher's current directory, so `rake -f /app/Rakefile woods:watch_status`
+and worktree-manager invocations inspect the same per-app status. Set
+`WOODS_OUTPUT` when the daemon uses a non-default index directory.
 
 Liveness needs three things to agree, each ruling out a different way the
 status file lies: a state a live daemon writes, a pid that still exists (a

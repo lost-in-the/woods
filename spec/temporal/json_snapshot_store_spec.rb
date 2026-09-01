@@ -106,6 +106,22 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
       result = store.unit_history('User')
       expect(result.size).to eq(1)
     end
+
+    it 'warns and returns nil when find targets a truncated snapshot' do
+      store
+      File.write(File.join(tmpdir, 'snapshots', 'aaa1111.json'), '{"git_sha":"aaa1111"')
+
+      expect { expect(store.find('aaa1111')).to be_nil }
+        .to output(/Skipping corrupt snapshot aaa1111\.json/).to_stderr
+    end
+
+    it 'warns and returns an empty diff when either requested snapshot is truncated' do
+      store.capture(manifest_v2, units_v2)
+      File.write(File.join(tmpdir, 'snapshots', 'aaa1111.json'), '{"git_sha":"aaa1111"')
+
+      expect { expect(store.diff('aaa1111', 'bbb2222')).to eq(added: [], modified: [], deleted: []) }
+        .to output(/Skipping corrupt snapshot aaa1111\.json/).to_stderr
+    end
   end
 
   # ── capture ────────────────────────────────────────────────────────

@@ -128,6 +128,19 @@ module Woods
     #
     # @param keep [Integer] how many payload generations to retain
     # @param protect [Integer] the currently published generation number
+    # A reader pins a payload by holding a shared advisory lock on its
+    # +manifest.json+. Retention takes the same file's exclusive lock without
+    # waiting and skips the generation when another process is still reading
+    # it. The operating system releases the shared lock if a reader crashes,
+    # so there are no PID leases to expire and no stale marker to guess at.
+    # The next publish retries every skipped generation normally.
+    #
+    # The manifest is the lock target rather than a reader-created sidecar so
+    # the Index MCP remains a read-only consumer and payloads written before
+    # this protocol remain protectable. Each published generation has its own
+    # manifest inode: writers replace a cloned manifest through AtomicFile
+    # before publishing, preserving generation-local lock identity.
+    #
     # @return [Array<Integer>] the generation numbers removed
     def prune(keep:, protect:)
       return [] unless root.directory?
@@ -165,10 +178,29 @@ module Woods
     # @param pairs [Array<Array(Integer, Pathname)>]
     # @return [Array<Integer>] the generation numbers removed
     def remove_generation_dirs(pairs)
-      pairs.map do |number, dir|
-        FileUtils.rm_rf(dir.to_s)
-        number
+      pairs.filter_map { |number, dir| remove_generation_dir(number, dir) }
+    end
+
+    # @return [Integer, nil] the removed generation, or nil while pinned
+    def remove_generation_dir(number, dir)
+      manifest = dir.join('manifest.json')
+      return remove_unlocked_generation(number, dir) unless manifest.file?
+
+      File.open(manifest.to_s, File::RDONLY) do |file|
+        return nil unless file.flock(File::LOCK_EX | File::LOCK_NB)
+
+        remove_unlocked_generation(number, dir)
       end
+    rescue Errno::ENOENT
+      # An incomplete/orphaned payload has no readable contract a reader can
+      # pin. Retention still owns and may remove that directory.
+      remove_unlocked_generation(number, dir)
+    end
+
+    # @return [Integer]
+    def remove_unlocked_generation(number, dir)
+      FileUtils.rm_rf(dir.to_s)
+      number
     end
 
     # @return [Array<Array(Integer, Pathname)>]

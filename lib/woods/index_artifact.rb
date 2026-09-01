@@ -147,6 +147,35 @@ module Woods
       dir
     end
 
+    # Validate that an existing dump directory resolves beneath
+    # {#dumps_root}. Both paths are resolved through realpath before the
+    # boundary comparison, so a symlinked alias of the artifact root remains
+    # valid while a child symlink escaping the root is rejected.
+    #
+    # This is the shared write/promotion boundary for the Snapshotter pair and
+    # {#promote}; keeping it here prevents their path policies from drifting.
+    #
+    # @param dump_dir [Pathname, String] existing dump directory to validate
+    # @param allow_root [Boolean] whether +dumps_root+ itself is an accepted target
+    # @return [Pathname] the caller-supplied path as a Pathname
+    # @raise [ArgumentError] if the path does not exist or resolves outside dumps_root
+    def validate_dump_dir!(dump_dir, allow_root: false)
+      target = Pathname.new(dump_dir.to_s)
+      root = dumps_root
+      target_real = target.exist? ? target.realpath.to_s : ''
+      root_real = root.exist? ? root.realpath.to_s : root.expand_path.to_s
+      contained = target_real.start_with?("#{root_real}#{File::SEPARATOR}")
+      contained ||= allow_root && target_real == root_real
+
+      unless target.exist? && contained
+        raise ArgumentError,
+              'dump_dir must exist inside dumps_root. ' \
+              "Got: #{dump_dir.inspect}, dumps_root: #{dumps_root}"
+      end
+
+      target
+    end
+
     # Atomically flips the +latest+ pointer to the given dump directory.
     #
     # Uses a temp file + +File.rename+ so a crash mid-flip leaves the previous
@@ -157,20 +186,7 @@ module Woods
     # @return [void]
     # @raise [ArgumentError] if +dump_dir+ does not exist or is outside +dumps_root+
     def promote(dump_dir)
-      target = Pathname.new(dump_dir.to_s)
-      root_real = dumps_root.expand_path.to_s
-      target_real = target.exist? ? target.realpath.to_s : ''
-      # Resolve symlinks on both sides before comparing (handles macOS /tmp → /private/var)
-      root_resolved = Pathname.new(root_real).exist? ? Pathname.new(root_real).realpath.to_s : root_real
-      # Prefix must end at a path boundary — a bare start_with? would accept
-      # sibling directories like "dumps-backup" or "dumpsevil", and the
-      # basename-only pointer written below would then name a directory that
-      # doesn't exist under dumps_root.
-      unless target.exist? && target_real.start_with?("#{root_resolved}#{File::SEPARATOR}")
-        raise ArgumentError,
-              'dump_dir must exist inside dumps_root. ' \
-              "Got: #{dump_dir.inspect}, dumps_root: #{dumps_root}"
-      end
+      target = validate_dump_dir!(dump_dir)
 
       atomic_write(latest_pointer_path, target.basename.to_s)
     end

@@ -72,6 +72,7 @@ module Woods
         @loaded_generation = nil
         @loaded_token = nil
         @generation_signature = nil
+        @payload_retention_pin = nil
         # The directory the loaded generation's payload lives in. nil until a
         # generation naming a payload is loaded; {#payload_dir} then falls back
         # to the index root, which is every flat/pre-pointer index.
@@ -166,6 +167,7 @@ module Woods
           else
             wait_for_generation_access(thread)
             refresh_if_stale if @auto_refresh && @pin_depth.zero?
+            acquire_payload_retention_pin if @pin_depth.zero?
             @pin_depth += 1
             @pin_owners[thread] += 1
           end
@@ -663,8 +665,64 @@ module Woods
           @pin_depth -= 1
           @pin_owners[thread] -= 1
           @pin_owners.delete(thread) if @pin_owners[thread].zero?
-          @freshness_condition.broadcast if @pin_depth.zero?
+          if @pin_depth.zero?
+            release_payload_retention_pin
+            @freshness_condition.broadcast
+          end
         end
+      end
+
+      # Keep the immutable payload backing a pinned read on disk across
+      # processes. The in-memory pin counters above coordinate threads that
+      # share this reader, but a writer in another process cannot see them and
+      # retention could otherwise remove the loaded generation before a later
+      # artifact in the same request was opened.
+      #
+      # The reader opens the generation's existing manifest read-only and
+      # takes a shared advisory lock. PayloadStore takes an exclusive,
+      # non-blocking lock on the same inode before pruning. Re-reading the
+      # generation after acquiring closes both races around the lock: if a
+      # publish landed first we adopt it and retry, and if pruning landed first
+      # the manifest open (or the directory check) fails and we retry from the
+      # new published pointer.
+      #
+      # @return [void]
+      def acquire_payload_retention_pin
+        loop do
+          expected_dir = current_payload_dir
+          return if expected_dir == @index_dir
+
+          # Intentionally outlives this method; the last overlapping pin
+          # closes it in #release_payload_retention_pin.
+          file = File.open( # rubocop:disable Style/FileOpen
+            expected_dir.join('manifest.json').to_s, File::RDONLY
+          )
+          file.flock(File::LOCK_SH)
+          marker = @generation.current
+          resolved = resolve_payload_dir(marker)
+          marker_still_matches = marker.number.zero? || (same_generation?(marker) && resolved == expected_dir)
+          if marker_still_matches && expected_dir.directory?
+            @payload_retention_pin = file
+            return
+          end
+
+          file.flock(File::LOCK_UN)
+          file.close
+          load_generation(marker) unless marker.number.zero?
+        rescue Errno::ENOENT
+          file&.close unless file&.closed?
+          marker = @generation.current
+          load_generation(marker) unless marker.number.zero?
+        end
+      end
+
+      # @return [void]
+      def release_payload_retention_pin
+        @payload_retention_pin&.flock(File::LOCK_UN)
+        @payload_retention_pin&.close
+        @payload_retention_pin = nil
+      rescue IOError, SystemCallError
+        @payload_retention_pin = nil
       end
 
       def acquire_exclusive_generation(thread)
@@ -706,6 +764,15 @@ module Woods
         marker = @generation.current
         return nil if marker.number.zero? || same_generation?(marker)
 
+        load_generation(marker)
+      end
+
+      # Adopt one already-read marker as the reader's loaded generation.
+      # Callers hold @freshness_mutex.
+      #
+      # @param marker [Woods::Generation::Marker]
+      # @return [void]
+      def load_generation(marker)
         reload!
         @payload_dir = resolve_payload_dir(marker)
         @loaded_token = marker.token

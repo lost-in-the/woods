@@ -242,6 +242,96 @@ RSpec.describe 'Publication atomicity', type: :integration do
       expect(reader.manifest['total_units']).to eq(2)
     end
 
+    it 'keeps the loaded payload pinned while the generation marker is temporarily corrupt' do
+      publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
+      reader = Woods::MCP::IndexReader.new(dir)
+      reader.manifest
+      File.write(File.join(dir, Woods::Generation::FILENAME), 'not json')
+
+      result = Timeout.timeout(1) do
+        reader.with_pinned_generation { reader.find_unit('Post')['source_code'] }
+      end
+
+      expect(result).to eq('v1')
+    end
+
+    it 'keeps a generation readable while another process has it pinned' do
+      publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
+      entered_read, entered_write = IO.pipe
+      release_read, release_write = IO.pipe
+      result_read, result_write = IO.pipe
+      child_script = <<~'RUBY'
+        begin
+          require 'woods/mcp/index_reader'
+          dir, entered_fd, release_fd, result_fd = ARGV
+          entered = IO.for_fd(entered_fd.to_i)
+          release = IO.for_fd(release_fd.to_i)
+          result = IO.for_fd(result_fd.to_i)
+          reader = Woods::MCP::IndexReader.new(dir)
+          reader.with_pinned_generation do
+            entered.write('1')
+            entered.close
+            release.read(1)
+            result.write(reader.find_unit('Post')['source_code'])
+            result.close
+            # Bypass Ruby ensure blocks to model a crashed reader. The kernel
+            # must still release the advisory lock so retention can reclaim it.
+            exit! 0
+          end
+        rescue StandardError => e
+          result.write("ERROR: #{e.class}: #{e.message}")
+          result.close
+          exit! 1
+        end
+      RUBY
+      lib_dir = File.expand_path('../../lib', __dir__)
+      child = Process.spawn(
+        RbConfig.ruby, "-I#{lib_dir}", '-e', child_script,
+        dir, entered_write.fileno.to_s, release_read.fileno.to_s, result_write.fileno.to_s,
+        entered_write => entered_write, release_read => release_read, result_write => result_write
+      )
+
+      entered_write.close
+      release_read.close
+      result_write.close
+      expect(entered_read.read(1)).to eq('1')
+
+      store = Woods::PayloadStore.new(dir)
+      (2..4).each do |number|
+        publish("gen-#{number}", number: number, total_units: number, post_body: "v#{number}")
+        store.prune(keep: 3, protect: number)
+      end
+
+      expect(store.path_for(1)).to be_directory
+      release_write.write('1')
+      release_write.close
+      expect(result_read.read).to eq('v1')
+      _pid, status = Process.wait2(child)
+      child = nil
+      expect(status).to be_success
+
+      store.prune(keep: 3, protect: 4)
+      expect(store.path_for(1)).not_to exist
+    ensure
+      [entered_read, entered_write, release_read, release_write, result_read, result_write].compact.each do |io|
+        io.close unless io.closed?
+      rescue IOError
+        nil
+      end
+      if child
+        begin
+          Process.kill('KILL', child)
+        rescue Errno::ESRCH
+          nil
+        end
+        begin
+          Process.wait(child)
+        rescue Errno::ECHILD
+          nil
+        end
+      end
+    end
+
     # Writing generation N+1's payload cannot disturb generation N, because
     # every writer renames a fresh tempfile over the path rather than editing
     # the inode a hardlinked clone shares.

@@ -356,6 +356,7 @@ module Woods
       @dependency_graph = DependencyGraph.new
       @results = {}
       @extractors = {}
+      @publication_error = nil
     end
 
     # Where this run reads and writes payload artifacts.
@@ -602,6 +603,23 @@ module Woods
       { types: known, touched: touched.to_a, unknown: unknown }
     end
 
+    # Raise when the most recent extraction run wrote a payload but could not
+    # publish its generation marker.
+    #
+    # The extractor records this failure instead of raising immediately so
+    # the resident watch daemon can keep its recoverable posture: it detects
+    # the unchanged generation, reports degraded, and carries the paths into
+    # a later cycle. One-shot callers have no later cycle, so the rake tasks
+    # call this method before reporting success and receive a typed non-zero
+    # failure instead of claiming an unreachable payload was published.
+    #
+    # @return [void]
+    # @raise [Woods::ExtractionError] when the generation marker could not be
+    #   published; the previously published generation remains active
+    def raise_on_publication_failure!
+      raise @publication_error if @publication_error
+    end
+
     private
 
     # Load the persisted graph and reset the per-run bookkeeping that the
@@ -700,7 +718,12 @@ module Woods
       # nothing either. Error, not warn — and `Watch::Daemon` cross-checks that
       # the number actually moved so the daemon reports degraded rather than
       # running.
-      Rails.logger.error "[Woods] Could not publish generation: #{e.message}"
+      @publication_error = Woods::ExtractionError.new(
+        "Could not publish generation for #{@output_dir} (#{e.class}: #{e.message}); " \
+        'the previous generation remains active'
+      )
+      Rails.logger.error "[Woods] #{@publication_error.message}"
+      nil
     end
 
     # Open the payload directory this run publishes into, seeded from the
@@ -735,6 +758,7 @@ module Woods
     # @raise [Woods::ExtractionError] when `strict` and a payload-born index's
     #   payload directory could not be opened for this run
     def begin_payload!(strict: false)
+      @publication_error = nil
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
       @payload_dir = @payload_store.create(@payload_generation)

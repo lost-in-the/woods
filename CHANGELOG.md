@@ -70,6 +70,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Metadata searches with `fields: []` now return an empty result on every
+  backend (B-133).** The SQLite adapter previously emitted an incomplete
+  `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
+  before touching their backing store when no fields are searchable.
+
+- **Snapshot dump writers reject symlink escapes before writing (B-134).**
+  Vector dumps, metadata dumps, and promotion now share the same realpath-aware
+  `dumps_root` boundary check. A legitimate symlinked alias of the artifact
+  root remains supported, while a child symlink targeting another directory
+  cannot receive snapshot files.
+
+- **Corrupt JSON temporal snapshots are consistently treated as absent
+  (B-135).** Direct `find` now follows the existing list/history posture by
+  warning and returning `nil`; `diff` warns and returns an empty result when a
+  requested snapshot is truncated, rather than leaking `JSON::ParserError`.
+
+- **Payload retention preserves generations pinned by readers in other
+  processes.** `IndexReader#with_pinned_generation` previously coordinated
+  only threads sharing one reader object. A long MCP request could remain on
+  generation N while three quick extraction publishes advanced retention far
+  enough to delete `payloads/gen-N/`; an artifact first opened later in the
+  request then failed with `ENOENT`. Pinned readers now hold a shared advisory
+  lock on that generation's manifest, and retention skips any payload whose
+  manifest cannot immediately take the exclusive lock. The operating system
+  releases the lock on normal exit or a crash, and a later publish reclaims
+  the skipped payload.
+
+- **One-shot extraction tasks fail when their generation marker cannot be
+  published.** `woods:extract`, `woods:incremental`, `woods:refresh`, and the
+  `woods:extract_framework` compatibility task no longer print success and
+  exit 0 after writing a payload that readers cannot reach. They now raise a
+  typed `Woods::ExtractionError` while the previous generation stays active.
+  The resident watch daemon keeps its existing recoverable behavior: it
+  reports degraded and carries the paths into a later cycle.
+
+- **`woods:watch_status` resolves its conventional index beside the active
+  Rakefile, not the caller's current directory.** Cheap hook checks still do
+  not boot Rails, but `rake -f /app/Rakefile woods:watch_status` now reads
+  `/app/tmp/woods/watch_status.json` even when a worktree manager launches it
+  elsewhere. `WOODS_OUTPUT` continues to override the conventional path.
+
 - **`console_sql` rejects `INSERT`, `UPDATE`, and `DELETE` written as bare
   keywords mid-statement.** The forbidden-body keyword scan anchored every
   keyword to statement-leader positions only (start of the SQL, or after

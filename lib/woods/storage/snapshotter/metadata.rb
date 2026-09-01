@@ -120,7 +120,7 @@ module Woods
         # @raise [ArgumentError] if +dump_dir+ is not under +artifact.dumps_root+
         def self.dump(store, artifact, dump_dir, resolved_config: nil) # rubocop:disable Lint/UnusedMethodArgument
           validate_store!(store)
-          validate_dump_dir!(artifact, dump_dir)
+          artifact.validate_dump_dir!(dump_dir, allow_root: true)
           target = Pathname.new(dump_dir.to_s).join(FILENAME)
           target.dirname.mkpath
           write_atomic(target, store)
@@ -188,16 +188,6 @@ module Woods
 
             raise InapplicableBackend,
                   "backend #{store.class} is already durable — Snapshotter should not have been invoked"
-          end
-
-          def validate_dump_dir!(artifact, dump_dir)
-            dump_path = Pathname.new(dump_dir.to_s).expand_path
-            root = artifact.dumps_root.expand_path
-
-            return if dump_path.to_s.start_with?("#{root}/") || dump_path == root
-
-            raise ArgumentError,
-                  "dump_dir #{dump_path} is not under artifact.dumps_root #{root}"
           end
         end
       end

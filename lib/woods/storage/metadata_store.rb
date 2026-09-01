@@ -99,6 +99,8 @@ module Woods
         # - Field names are validated against {SEARCH_FIELD_NAME} by every
         #   adapter, so a hostile name raises the same ArgumentError
         #   everywhere.
+        # - **An empty `fields` list matches nothing.** Adapters return an
+        #   empty result before querying their backing store.
         #
         # @param query [String] Text to search for
         # @param fields [Array<String>, nil] Specific fields to search (nil = all)
@@ -222,6 +224,8 @@ module Woods
         # @raise [ArgumentError] if a field name fails {SEARCH_FIELD_NAME}
         def search(query, fields: nil)
           fields = validate_search_fields!(fields)
+          return [] if fields == []
+
           # Case-insensitive, matching the SQLite adapter's `LIKE` (see the
           # contract note on {Interface#search}). This used to be a
           # case-sensitive `String#include?`, so the same query returned
@@ -398,6 +402,8 @@ module Woods
         # @raise [ArgumentError] if a field name fails the whitelist
         def search(query, fields: nil)
           fields = validate_search_fields!(fields)
+          return [] if fields == []
+
           pattern = "%#{escape_like(query)}%"
           if fields
             conditions = fields.map { "json_extract(data, '$.#{_1}') LIKE ? ESCAPE '\\'" }.join(' OR ')
