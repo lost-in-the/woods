@@ -153,6 +153,78 @@ RSpec.describe 'Index MCP transactional store reload' do
     end
   end
 
+  describe 'store-type divergence between live target and captured dump (M2)' do
+    # Each component is valid alone: the live target is refreshable
+    # (in-memory), and the captured dump is a complete, valid pgvector/qdrant
+    # dump. But the captured dump's embedded config names a store type the
+    # live target cannot refresh, so every candidate builder returns nil and
+    # the transaction used to answer `reloaded: true` with zero counts while
+    # NOTHING was swapped and no degraded condition was recorded. A
+    # store-type divergence is a degraded reload, not an empty success.
+
+    it 'records a reload degraded condition instead of reporting an empty success' do
+      server
+      old_pipeline = retriever.pipeline
+      old_vector_store = retriever.vector_store
+      old_metadata_store = retriever.metadata_store
+      old_identifier_map = reader.send(:identifier_map)
+
+      # Re-embed with a durable vector store configured and promote: the dump
+      # is well-formed, but its embedded woods.json names a store type this
+      # process (booted in-memory) cannot refresh.
+      write_artifact(identifier: 'BetaUnit', type: 'service', vector: [0.0, 1.0, 0.0, 0.0],
+                     file_path: 'app/services/beta_unit.rb')
+      diverge_latest_dump_vector_store('qdrant')
+
+      # The standalone-boot path: with no host provider configured, the
+      # reload-time resolver adopts the captured dump's store types.
+      Woods.configuration.embedding_provider = nil
+      stub_qdrant_env
+
+      response = call_tool('reload')
+
+      expect(response.error?).to be(true)
+      expect(response.meta[:error_code]).to eq(:degraded_index)
+      expect(response.meta[:degraded]).to be(true)
+      expect(response.meta[:phase]).to eq('reload')
+      expect(response.meta[:generation]).to eq(1)
+      expect(response.meta[:stores]).to eq(%w[vector])
+      expect(response.meta[:reason]).to include('qdrant')
+      expect(response.meta[:reason]).to include('InMemory')
+      expect(response.meta[:reason]).to include('nothing was swapped')
+
+      # Nothing swapped: the previous aligned generation is still served.
+      expect(retriever.pipeline).to be(old_pipeline)
+      expect(retriever.vector_store).to be(old_vector_store)
+      expect(retriever.metadata_store).to be(old_metadata_store)
+      expect(reader.send(:identifier_map)).to be(old_identifier_map)
+
+      # The DISTINCT reload-phase condition, additively through woods_status.
+      expect(state.reload_failed?).to be(true)
+      status = parse_response(call_tool('woods_status'))
+      failure = status.dig('bootstrap', 'reload_failure')
+      expect(failure).to include('phase' => 'reload', 'generation' => 1, 'stores' => %w[vector])
+      expect(failure['reason']).to include('qdrant')
+
+      # The old retriever still answers queries.
+      retrieval = call_tool('codebase_retrieve', query: 'AlphaUnit model')
+      expect(retrieval.error?).to be(false)
+      expect(response_text(retrieval)).to include('AlphaUnit')
+    end
+
+    it 'keeps a genuine empty dump a successful zero-count reload (no divergence)' do
+      server
+      write_empty_dump
+
+      response = call_tool('reload')
+
+      data = parse_response(response)
+      expect(data['reloaded']).to be(true)
+      expect(data['retriever']).to include('vectors' => 0, 'metadata' => 0, 'graph' => 0)
+      expect(state.reload_failed?).to be(false)
+    end
+  end
+
   describe 'successful recovery' do
     it 'swaps atomically and clears the reload-failure condition' do
       server
@@ -384,6 +456,39 @@ RSpec.describe 'Index MCP transactional store reload' do
     Woods::Storage::Snapshotter::Vector.dump(source_vs, artifact, dump_dir, resolved_config: resolved)
     Woods::Storage::Snapshotter::Metadata.dump(source_ms, artifact, dump_dir, resolved_config: resolved)
     artifact.write_config(resolved.to_snapshot_json)
+    artifact.promote(dump_dir)
+  end
+
+  # Rewrite the promoted dump's embedded woods.json so it names a store type
+  # the live in-memory process cannot refresh — a re-embed that ran with a
+  # different store configuration (M2).
+  def diverge_latest_dump_vector_store(store_type)
+    artifact = Woods::IndexArtifact.new(index_dir)
+    provider = Woods::Builder.new(Woods.configuration).build_embedding_provider
+    resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration, provider: provider)
+    snapshot = resolved.to_snapshot_json
+    snapshot['stores']['vector_store'] = store_type
+    artifact.write_dump_config(artifact.latest_dump_path, snapshot)
+  end
+
+  def stub_qdrant_env
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with('WOODS_QDRANT_URL').and_return('http://127.0.0.1:1')
+    allow(ENV).to receive(:[]).with('WOODS_QDRANT_COLLECTION').and_return('woods_m2_test')
+  end
+
+  def write_empty_dump
+    artifact = Woods::IndexArtifact.new(index_dir)
+    provider = Woods::Builder.new(Woods.configuration).build_embedding_provider
+    resolved = Woods::ResolvedConfig.from_configuration(Woods.configuration, provider: provider)
+    dump_dir = artifact.dumps_root.join("dump-#{Process.pid}-#{rand(1_000_000)}")
+    FileUtils.mkdir_p(dump_dir)
+
+    Woods::Storage::Snapshotter::Vector.dump(Woods::Storage::VectorStore::InMemory.new, artifact, dump_dir,
+                                             resolved_config: resolved)
+    Woods::Storage::Snapshotter::Metadata.dump(Woods::Storage::MetadataStore::InMemory.new, artifact, dump_dir,
+                                               resolved_config: resolved)
+    artifact.write_dump_config(dump_dir, resolved.to_snapshot_json)
     artifact.promote(dump_dir)
   end
 

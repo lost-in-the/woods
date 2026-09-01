@@ -68,6 +68,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Index MCP `reload` tool no longer reports an empty success when the promoted dump's
+  store configuration diverges from the live server (M2).** The live retriever was in-memory
+  and the captured dump was complete and valid, but when the dump's embedded `woods.json`
+  named a store type the live target cannot refresh (a re-embed ran with pgvector or Qdrant
+  configured and promoted over the dump the server hydrated from), the reload-time resolver
+  adopted the dump's store types, every candidate builder returned nil, and the tool answered
+  `reloaded: true` with zero counts while nothing was swapped and no degraded condition was
+  recorded. That divergence is now a degraded reload: the `reload` tool responds with the
+  reload-phase `degraded_index` error naming both store types and the honest state (nothing
+  was swapped, the previous generation is still served), and the condition surfaces additively
+  through `woods_status` (`bootstrap.reload_failure`). A genuine empty dump still reloads
+  successfully with zero counts.
+
 - **Vector dump hydration fails closed on a truncated or mismatched `vectors.idx` (M3).** The
   idx parser read each record's length, id, and offset with no end-of-file guard: a dump
   truncated mid-record hydrated a garbage short id silently, an idx holding more records than
