@@ -11,31 +11,6 @@ require 'tmpdir'
 require 'timeout'
 require 'woods/mcp/tasks/store'
 
-# rspec-retry is not bundled, so `retry:` metadata is honored by this local
-# hook: it re-runs an example only on the exact failure signature that
-# random-order full-suite runs have shown intermittently ("Timed out waiting
-# for server response") — any other failure still fails immediately. This is
-# CI-stabilization pending evidence from the captured-stderr diagnostics in
-# the stdio examples below; no cause is claimed. The mechanism mirrors
-# rspec-retry's: clear the recorded exception, re-run the example, and let
-# the final attempt's outcome stand.
-RSpec.configure do |config|
-  config.around :each, :retry do |example|
-    attempts = 1 + (example.metadata[:retry] || 0)
-    count = 0
-    loop do
-      count += 1
-      example.example.instance_variable_set(:@exception, nil)
-      example.run
-      error = example.exception
-      break if error.nil?
-      break unless error.is_a?(MCP::Client::RequestHandlerError) &&
-                   error.message.include?('Timed out waiting for server response')
-      break if count >= attempts
-    end
-  end
-end
-
 # The official transport drains the child's stderr through a background
 # thread that discards every chunk it reads, so a timeout failure carries no
 # child context. This subclass mirrors Stdio#start with one addition: each
@@ -113,6 +88,11 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
   # error, or a copy carrying whatever the spec transport captured, so the
   # next timeout failure is diagnosable. Every other error passes through
   # untouched.
+  # A read timeout surfaces as RequestHandlerError with no child context: the
+  # official transport discards stderr as it drains it. Returns the same
+  # error, or a copy carrying whatever the spec transport captured, so the
+  # timeout failure is diagnosable from the logs. Every other error passes
+  # through untouched.
   def with_child_stderr_context(error, transport)
     return error unless error.message.include?('Timed out waiting for server response')
     return error unless transport.respond_to?(:captured_stderr_text)
@@ -129,17 +109,17 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
     augmented
   end
 
-  # CI-stabilization pending evidence: random-order full-suite runs have
-  # intermittently failed this and the Tasks example below with
-  # RequestHandlerError "Timed out waiting for server response", while the
-  # same examples pass isolated (multiple seeds and formatters), in defined
-  # order, in the 242-file complement, and under synthetic load. The timeout
-  # here mirrors the HTTP examples' 30s budget, and retry: 1 — honored by the
-  # local hook at the top of this file — is a stopgap until the
-  # captured-stderr diagnostics make the next failure deterministic. No cause
-  # is claimed. The malformed-frame example below still proves the spawn/reap
-  # contract unconditionally, without retry.
-  it 'drives packaged woods-mcp in modern mode and reaps it on EOF', retry: 1 do
+  # Evidence path for the intermittent full-suite flake: random-order runs
+  # have failed this and the Tasks example below with RequestHandlerError
+  # "Timed out waiting for server response", while the same examples pass
+  # isolated (multiple seeds and formatters), in defined order, in the
+  # 242-file complement, and under synthetic load. The timeout here mirrors
+  # the HTTP examples' 30s budget. On a timeout the example fails once with
+  # the child's captured stderr appended to the failure message —
+  # deterministic, visible in CI logs, with no rerun to hide the evidence.
+  # No cause is claimed. The malformed-frame example below still proves the
+  # spawn/reap contract unconditionally.
+  it 'drives packaged woods-mcp in modern mode and reaps it on EOF' do
     transport = StdioCapturingStderr.new(
       command: 'bundle',
       args: ['exec', 'ruby', 'exe/woods-mcp', fixture_dir],
@@ -168,9 +148,9 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
     transport&.close
   end
 
-  # Same CI-stabilization as the example above: one retry, on the observed
-  # timeout signature only, pending evidence.
-  it 'drives modern Tasks methods through the official transport metadata path', retry: 1 do
+  # Same evidence path as the example above: on timeout the example fails
+  # once with the child's captured stderr appended to the failure message.
+  it 'drives modern Tasks methods through the official transport metadata path' do
     Dir.mktmpdir('woods-ruby-client-tasks') do |index_dir|
       FileUtils.cp_r(File.join(fixture_dir, '.'), index_dir)
       task = Woods::MCP::Tasks::Store.new(index_dir).create!(tool: 'pipeline_extract')
@@ -211,6 +191,34 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
     ensure
       transport&.close
     end
+  end
+
+  # Regression guard for the evidence path: a timeout through the capturing
+  # transport must surface the child's stderr in the failure message. The
+  # child streams a known marker on stderr and never answers stdout, so a
+  # short read_timeout forces the same timeout signature the two contract
+  # examples arm diagnostics for, at a fraction of their budget.
+  it 'surfaces captured child stderr when a read times out' do
+    transport = StdioCapturingStderr.new(
+      command: RbConfig.ruby,
+      args: ['-e', 'loop { warn "WOODS_STDERR_MARKER"; sleep 0.05 }'],
+      env: { 'PATH' => ENV.fetch('PATH') },
+      read_timeout: 2
+    )
+    client = MCP::Client.new(transport: transport)
+
+    failure = nil
+    begin
+      client.connect(client_info: client_info, protocol_version: protocol_version, mode: :modern)
+    rescue MCP::Client::RequestHandlerError => e
+      failure = with_child_stderr_context(e, transport)
+    ensure
+      transport.close
+    end
+
+    expect(failure).to be_a(MCP::Client::RequestHandlerError)
+    expect(failure.message).to include('Timed out waiting for server response')
+    expect(failure.message).to include('WOODS_STDERR_MARKER')
   end
 
   def send_custom_request(transport, id, method, params)
