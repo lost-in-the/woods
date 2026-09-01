@@ -104,6 +104,14 @@ module Woods
       # first via #strip.
       ONLY_PREFIX = /\AONLY\s+/i
 
+      # Matches a MySQL executable comment (`/*!...*/` or the version-guarded
+      # `/*!NNNNN...*/`), capturing the body. Mirrors
+      # SqlValidator::EXECUTABLE_COMMENT_PATTERN — {SqlNoiseStripper}
+      # deliberately leaves these markers in place because their meaning is
+      # version-dependent; .executable_comment_views scans both of their
+      # possible semantics.
+      EXECUTABLE_COMMENT_PATTERN = %r{/\*!(?:\d{5})?(.*?)\*/}m
+
       # Matches the standalone SQL `TABLE name` statement (PostgreSQL, and
       # MySQL 8.0.19+) — shorthand for `SELECT * FROM name`. It appears as a
       # full statement, inside a CTE body (`WITH x AS (TABLE blocked) ...`),
@@ -142,6 +150,10 @@ module Woods
       # into one literal, hiding `blocked` from the gate while PostgreSQL
       # genuinely reads that table.
       #
+      # MySQL executable comments (`/*! ... */`) are scanned under both of
+      # their possible semantics (see .executable_comment_views) so a table
+      # hidden at FROM/JOIN/subquery lead position is still surfaced.
+      #
       # @param sql [String, nil] the SQL string to scan
       # @return [Array<String>] identifiers in first-encounter order, deduplicated
       def self.identifiers_in(sql)
@@ -150,9 +162,11 @@ module Woods
         results = []
         %i[postgres mysql].each do |dialect|
           stripped = strip_noise(sql, dialect: dialect)
-          collect_join_identifiers(stripped, results)
-          collect_from_identifiers(stripped, results)
-          collect_table_statement_identifiers(stripped, results)
+          executable_comment_views(stripped).each do |view|
+            collect_join_identifiers(view, results)
+            collect_from_identifiers(view, results)
+            collect_table_statement_identifiers(view, results)
+          end
         end
         results.uniq
       end
@@ -166,6 +180,31 @@ module Woods
         SqlNoiseStripper.strip_noise(sql, dialect: dialect)
       end
       private_class_method :strip_noise
+
+      # @api private
+      # Every view of the stripped SQL the FROM/JOIN scans must consider for
+      # MySQL executable comments (`/*! ... */`). {SqlNoiseStripper} leaves
+      # these forms in place because MySQL executes their body, but the lead
+      # grammars (FROM_CLAUSE/LEAD_IDENT/JOIN_REFERENCE) cannot start on a
+      # comment marker, so `SELECT * FROM /*!authorizations*/` surfaced no
+      # identifier and a blocked table slipped past TableGate. Each view
+      # interprets the form under one of its two possible semantics, mirroring
+      # SqlValidator#lock_clause_views: the whole construct replaced by its
+      # body (version guard satisfied — the body executes in place) and the
+      # whole construct dropped (guard unsatisfied — the form is inert
+      # whitespace). The stripped text itself is always scanned too: it keeps
+      # the preserved-form behavior the post-comma executable-comment shape
+      # relies on, and no comment body is ever hidden from the union.
+      #
+      # Over-detection on PostgreSQL (where the `/*!` form is a syntax error)
+      # is acceptable: the gate may reject more than a server would execute,
+      # never less.
+      def self.executable_comment_views(stripped)
+        [stripped,
+         stripped.gsub(EXECUTABLE_COMMENT_PATTERN) { Regexp.last_match[1] },
+         stripped.gsub(EXECUTABLE_COMMENT_PATTERN, ' ')]
+      end
+      private_class_method :executable_comment_views
 
       # @api private
       def self.collect_join_identifiers(sql, results)

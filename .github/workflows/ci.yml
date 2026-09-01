@@ -185,6 +185,7 @@ jobs:
           spec/integration/live_backends_spec.rb
           spec/integration/solid_cache_compatibility_spec.rb
           spec/cache/redis_cache_store_live_spec.rb
+          spec/session_tracer/redis_store_live_spec.rb
 
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with

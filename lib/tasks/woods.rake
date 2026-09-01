@@ -206,14 +206,86 @@ namespace :woods do
   # into a separate `A <new>` and `D <old>` record rather than one `R` record
   # naming both.
   #
+  # The diff is rooted at the extracted application (`git -C Rails.root`),
+  # consistent with {Woods::GitProvenance} (#262): extraction launched from
+  # another checkout must not diff that checkout's history.
+  #
+  # The child status is carried out, not discarded (M1): `Open3.capture2`
+  # turned an unresolvable range — a GitLab zero-SHA, an unfetched GitHub base
+  # ref, garbage — into an empty change set the caller could not tell apart
+  # from "nothing changed", and `woods:incremental` exited 0 over a sync that
+  # never ran.
+  #
   # @param range [String] a git diff range/revision expression
-  # @return [Array<String>] changed paths, both halves of any rename included
-  def woods_changed_paths_for_range(range)
+  # @param root [Pathname, String] repository root the diff runs against
+  # @return [Array(Array<String>, String, nil)] the changed paths (both halves
+  #   of any rename included), or nil paths plus a human-readable failure when
+  #   the range could not be resolved
+  def woods_changed_paths_for_range(range, root: Rails.root)
     require 'open3'
-    output, = Open3.capture2(
-      'git', '-c', 'core.quotePath=false', 'diff', '--name-status', '-z', '--no-renames', range
+    output, error, status = Open3.capture3(
+      'git', '-C', root.to_s, '-c', 'core.quotePath=false',
+      'diff', '--name-status', '-z', '--no-renames', range
     )
-    woods_parse_git_diff_name_status(output)
+    return [woods_parse_git_diff_name_status(output), nil] if status.success?
+
+    [nil, "#{error.strip} (git exited #{status.exitstatus})"]
+  end
+
+  # The changed-path set `woods:incremental` will process, or a stand-down.
+  #
+  # An explicit `CHANGED_FILES` list bypasses git entirely. Otherwise the
+  # range comes from the CI environment (GitLab's before-SHA, GitHub's base
+  # ref) or defaults to the last commit.
+  #
+  # A failed range is a decision, not a skip (M1): the changed-file set is
+  # unknown, so silently extracting nothing would exit 0 over work that never
+  # happened and leave CI drift unbounded. When a `:running` daemon maintains
+  # the index, its start-up catch-up covers whatever changed, so standing down
+  # with a printed reason is safe; a degraded daemon covers nothing, so the
+  # run fails like any other uncovered case. The decision runs BEFORE the
+  # task's empty-range exit — a failed range must never be mistaken for an
+  # empty one.
+  #
+  # @param output_dir [Pathname, String] index directory, for daemon coverage
+  # @return [Array<String>] changed paths
+  def woods_incremental_changed_paths(output_dir)
+    explicit = ENV.fetch('CHANGED_FILES', nil)
+    return explicit.split(',').map(&:strip) if explicit
+
+    range = woods_incremental_range
+    changed_files, failure = woods_changed_paths_for_range(range)
+    return changed_files unless failure
+
+    if woods_daemon_coverage(output_dir) == :running
+      puts "Could not resolve the git diff range #{range.inspect} (#{failure})."
+      puts 'A watch daemon is maintaining this index, so its catch-up covers the changed paths — standing down.'
+      puts 'To extract now anyway, repair or provide the range (check the CI env refs),'
+      puts 'set CHANGED_FILES explicitly, or run a full woods:extract.'
+      exit 0
+    end
+
+    warn "ERROR: could not resolve the git diff range #{range.inspect}: #{failure}"
+    warn 'The changed-file set is unknown, so incremental extraction would silently index nothing.'
+    warn 'Fix the range (a zero SHA or an unfetched base ref resolve to nothing), or run a full woods:extract.'
+    exit 1
+  end
+
+  # The git range `woods:incremental` diffs, from the CI environment or the
+  # last-commit default.
+  #
+  # @return [String]
+  def woods_incremental_range
+    if ENV['CI_COMMIT_BEFORE_SHA']
+      # GitLab CI
+      "#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}"
+    elsif ENV['GITHUB_BASE_REF']
+      # GitHub Actions PR
+      "origin/#{ENV['GITHUB_BASE_REF']}...HEAD"
+    else
+      # Default: changes since last commit
+      'HEAD~1'
+    end
   end
 
   # Parse NUL-delimited `git diff --name-status -z --no-renames` output.
@@ -276,22 +348,11 @@ namespace :woods do
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
-    # Determine changed files from CI environment or git
-    require 'open3'
-
-    changed_files = if ENV['CHANGED_FILES']
-                      # Explicit list from CI
-                      ENV['CHANGED_FILES'].split(',').map(&:strip)
-                    elsif ENV['CI_COMMIT_BEFORE_SHA']
-                      # GitLab CI
-                      woods_changed_paths_for_range("#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}")
-                    elsif ENV['GITHUB_BASE_REF']
-                      # GitHub Actions PR
-                      woods_changed_paths_for_range("origin/#{ENV['GITHUB_BASE_REF']}...HEAD")
-                    else
-                      # Default: changes since last commit
-                      woods_changed_paths_for_range('HEAD~1')
-                    end
+    # Determine changed files from CI environment or git. A failed range is
+    # decided here too — stand down under a covering daemon, or fail loudly —
+    # BEFORE the empty-range exit below can mistake it for "nothing changed"
+    # (M1).
+    changed_files = woods_incremental_changed_paths(output_dir)
 
     # Filter to paths that imply extraction work. The rule set lives in
     # PathDispatcher alongside the dispatch itself — a second hand-maintained

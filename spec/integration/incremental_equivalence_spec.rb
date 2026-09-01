@@ -374,6 +374,43 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── SUMMARY.md totals (M4) ───────────────────────────────────────────────
+  #
+  # An incremental run used to ship the seeded previous generation's
+  # SUMMARY.md unchanged — write_structural_summary returned early on the
+  # always-empty @results — so the totals a reader saw went stale the moment
+  # the run added or removed units. The summary is now derived from the same
+  # persisted type indexes the manifest counts, and the oracle compares the
+  # two in every index it sees.
+  describe 'SUMMARY.md totals (M4)' do
+    def summary_totals(dir)
+      content = File.read(File.join(payload_dir(dir), 'SUMMARY.md'))
+      content.match(/^Units: (\d+) \| Chunks: (\d+)/).captures.map(&:to_i)
+    end
+
+    it 'matches the manifest after an incremental run adds and removes units' do
+      index_dir = Dir.mktmpdir('woods_diff_summary')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      write_file('app/services/summary_service.rb', service_source('SummaryService'))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/services/summary_service.rb'])
+
+      manifest = read_json(index_dir, 'manifest.json')
+      units, chunks = summary_totals(index_dir)
+      expect(units).to eq(manifest['total_units'])
+      expect(chunks).to eq(manifest['total_chunks'])
+
+      delete_file('app/services/summary_service.rb')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/services/summary_service.rb'])
+
+      manifest = read_json(index_dir, 'manifest.json')
+      units, chunks = summary_totals(index_dir)
+      expect(units).to eq(manifest['total_units'])
+      expect(chunks).to eq(manifest['total_chunks'])
+    end
+  end
+
   describe 'class-based additions' do
     it 'indexes a service class the file dispatcher and the descendant scan both see' do
       # The reconciliation path keys on live descendants, so the class has to

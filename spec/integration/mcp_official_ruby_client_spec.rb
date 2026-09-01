@@ -11,6 +11,50 @@ require 'tmpdir'
 require 'timeout'
 require 'woods/mcp/tasks/store'
 
+# The official transport drains the child's stderr through a background
+# thread that discards every chunk it reads, so a timeout failure carries no
+# child context. This subclass mirrors Stdio#start with one addition: each
+# drained chunk is teed into a spec-local buffer that the timeout diagnostics
+# below read. Mirroring start (rather than wrapping it) is what lets the tee
+# exist from the first drained byte.
+class StdioCapturingStderr < MCP::Client::Stdio
+  def start
+    raise 'MCP::Client::Stdio already started' if @started
+
+    @stdin, @stdout, @stderr, @wait_thread = Open3.popen3(@env || {}, @command, *@args)
+    @stdout.set_encoding('UTF-8')
+    @stdin.set_encoding('UTF-8')
+    @captured_stderr = String.new(encoding: Encoding::UTF_8)
+    @stderr_capture_mutex = Mutex.new
+    drain_server_stderr
+    @started = true
+  rescue Errno::ENOENT, Errno::EACCES, Errno::ENOEXEC => e
+    raise MCP::Client::RequestHandlerError.new(
+      "Failed to spawn server process: #{e.message}", {},
+      error_type: :internal_error, original_error: e
+    )
+  end
+
+  def captured_stderr_text
+    @stderr_capture_mutex.synchronize { @captured_stderr.dup }
+  end
+
+  private
+
+  def drain_server_stderr
+    @stderr_thread = Thread.new do
+      loop do
+        chunk = @stderr.readpartial(STDERR_READ_SIZE)
+        @stderr_capture_mutex.synchronize do
+          @captured_stderr << chunk.force_encoding(Encoding::UTF_8)
+        end
+      end
+    rescue IOError
+      nil
+    end
+  end
+end
+
 RSpec.describe 'MCP executable contract with the official Ruby client' do
   gem_root = File.expand_path('../..', __dir__)
   fixture_dir = File.join(gem_root, 'spec/fixtures/woods')
@@ -39,8 +83,44 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
     expect(response.dig('result', 'structuredContent', 'text')).to include('Post')
   end
 
+  # A read timeout surfaces as RequestHandlerError with no child context: the
+  # official transport discards stderr as it drains it. Returns the same
+  # error, or a copy carrying whatever the spec transport captured, so the
+  # next timeout failure is diagnosable. Every other error passes through
+  # untouched.
+  # A read timeout surfaces as RequestHandlerError with no child context: the
+  # official transport discards stderr as it drains it. Returns the same
+  # error, or a copy carrying whatever the spec transport captured, so the
+  # timeout failure is diagnosable from the logs. Every other error passes
+  # through untouched.
+  def with_child_stderr_context(error, transport)
+    return error unless error.message.include?('Timed out waiting for server response')
+    return error unless transport.respond_to?(:captured_stderr_text)
+
+    stderr = transport.captured_stderr_text.strip
+    diagnostic = stderr.empty? ? '(child stderr was empty)' : stderr
+    augmented = error.class.new(
+      "#{error.message}\nchild stderr captured by the spec transport:\n#{diagnostic}",
+      error.request,
+      error_type: error.error_type,
+      original_error: error.original_error
+    )
+    augmented.set_backtrace(error.backtrace)
+    augmented
+  end
+
+  # Evidence path for the intermittent full-suite flake: random-order runs
+  # have failed this and the Tasks example below with RequestHandlerError
+  # "Timed out waiting for server response", while the same examples pass
+  # isolated (multiple seeds and formatters), in defined order, in the
+  # 242-file complement, and under synthetic load. The timeout here mirrors
+  # the HTTP examples' 30s budget. On a timeout the example fails once with
+  # the child's captured stderr appended to the failure message —
+  # deterministic, visible in CI logs, with no rerun to hide the evidence.
+  # No cause is claimed. The malformed-frame example below still proves the
+  # spawn/reap contract unconditionally.
   it 'drives packaged woods-mcp in modern mode and reaps it on EOF' do
-    transport = MCP::Client::Stdio.new(
+    transport = StdioCapturingStderr.new(
       command: 'bundle',
       args: ['exec', 'ruby', 'exe/woods-mcp', fixture_dir],
       env: {
@@ -48,7 +128,7 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
         'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
         'BUNDLE_PATH' => ENV.fetch('BUNDLE_PATH', nil)
       }.compact,
-      read_timeout: 10
+      read_timeout: 30
     )
     client = MCP::Client.new(transport: transport)
 
@@ -62,15 +142,19 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
 
     transport.close
     expect(wait_thread).not_to be_alive
+  rescue MCP::Client::RequestHandlerError => e
+    raise with_child_stderr_context(e, transport)
   ensure
     transport&.close
   end
 
+  # Same evidence path as the example above: on timeout the example fails
+  # once with the child's captured stderr appended to the failure message.
   it 'drives modern Tasks methods through the official transport metadata path' do
     Dir.mktmpdir('woods-ruby-client-tasks') do |index_dir|
       FileUtils.cp_r(File.join(fixture_dir, '.'), index_dir)
       task = Woods::MCP::Tasks::Store.new(index_dir).create!(tool: 'pipeline_extract')
-      transport = MCP::Client::Stdio.new(
+      transport = StdioCapturingStderr.new(
         command: 'bundle',
         args: ['exec', 'ruby', 'exe/woods-mcp', index_dir],
         env: {
@@ -78,7 +162,7 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
           'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
           'BUNDLE_PATH' => ENV.fetch('BUNDLE_PATH', nil)
         }.compact,
-        read_timeout: 10
+        read_timeout: 30
       )
       client = MCP::Client.new(transport: transport)
       capabilities = { extensions: { 'io.modelcontextprotocol/tasks' => {} } }
@@ -102,9 +186,39 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
         'code' => -32_601,
         'data' => 'Task cancellation is not supported by Woods.'
       )
+    rescue MCP::Client::RequestHandlerError => e
+      raise with_child_stderr_context(e, transport)
     ensure
       transport&.close
     end
+  end
+
+  # Regression guard for the evidence path: a timeout through the capturing
+  # transport must surface the child's stderr in the failure message. The
+  # child streams a known marker on stderr and never answers stdout, so a
+  # short read_timeout forces the same timeout signature the two contract
+  # examples arm diagnostics for, at a fraction of their budget.
+  it 'surfaces captured child stderr when a read times out' do
+    transport = StdioCapturingStderr.new(
+      command: RbConfig.ruby,
+      args: ['-e', 'loop { warn "WOODS_STDERR_MARKER"; sleep 0.05 }'],
+      env: { 'PATH' => ENV.fetch('PATH') },
+      read_timeout: 2
+    )
+    client = MCP::Client.new(transport: transport)
+
+    failure = nil
+    begin
+      client.connect(client_info: client_info, protocol_version: protocol_version, mode: :modern)
+    rescue MCP::Client::RequestHandlerError => e
+      failure = with_child_stderr_context(e, transport)
+    ensure
+      transport.close
+    end
+
+    expect(failure).to be_a(MCP::Client::RequestHandlerError)
+    expect(failure.message).to include('Timed out waiting for server response')
+    expect(failure.message).to include('WOODS_STDERR_MARKER')
   end
 
   def send_custom_request(transport, id, method, params)

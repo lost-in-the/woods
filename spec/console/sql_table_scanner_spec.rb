@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'woods'
 require 'woods/console/sql_table_scanner'
+require 'woods/console/server'
 
 RSpec.describe Woods::Console::SqlTableScanner do
   describe '.identifiers_in' do
@@ -357,5 +358,98 @@ RSpec.describe Woods::Console::SqlTableScanner do
         expect(identifiers).to include('users', 'orders', 'order_items', 'products')
       end
     end
+
+    context 'with a MySQL executable comment leading a FROM clause (must not hide FROM)' do
+      # MySQL executes the body of /*! ... */ in place, so the table is live.
+      # The noise stripper deliberately preserves the form, but the FROM
+      # lead grammar cannot start on a comment marker — audit finding H1.
+      let(:sql) { 'SELECT * FROM /*!authorizations*/' }
+
+      it 'surfaces the table inside the executable comment' do
+        expect(identifiers).to include('authorizations')
+      end
+    end
+
+    context 'with a version-guarded executable comment before the FROM table' do
+      let(:sql) { 'SELECT * FROM /*!99999*/ authorizations' }
+
+      it 'surfaces the table following the executable comment' do
+        expect(identifiers).to include('authorizations')
+      end
+    end
+
+    context 'with a MySQL executable comment as a JOIN target' do
+      let(:sql) { 'SELECT * FROM users JOIN /*!authorizations*/ a ON 1=1' }
+
+      it 'surfaces the joined table inside the executable comment' do
+        expect(identifiers).to include('authorizations')
+      end
+    end
+
+    context 'with an executable comment hiding a FROM-clause subquery table' do
+      let(:sql) { 'SELECT * FROM (SELECT * FROM /*!authorizations*/) t' }
+
+      it 'surfaces the table inside the subquery' do
+        expect(identifiers).to include('authorizations')
+      end
+    end
+  end
+end
+
+# Audit finding H1, end to end: a blocked table hidden behind a MySQL
+# executable comment must be refused through the real dispatch pipeline
+# (build_embedded → DispatchPipeline → TableGate → EmbeddedExecutor) before
+# any SQL reaches the connection.
+RSpec.describe 'TableGate vs MySQL executable comments through the console_sql pipeline' do
+  let(:stub_connection) do
+    double('connection', adapter_name: 'MySQL2').tap do |conn|
+      allow(conn).to receive(:transaction) do |&block|
+        block.call
+      rescue ActiveRecord::Rollback
+        nil
+      end
+      allow(conn).to receive(:execute)
+      allow(conn).to receive(:select_value).and_return('0')
+      allow(conn).to receive(:select_all).and_return(
+        double('result', columns: %w[id], rows: [[1]])
+      )
+    end
+  end
+
+  around do |example|
+    previous = Woods.configuration
+    Woods.configuration = Woods::Configuration.new
+    Woods.configuration.console_blocked_tables = %w[authorizations]
+    example.run
+  ensure
+    Woods.configuration = previous
+  end
+
+  def call_console_sql(sql)
+    server = Woods::Console::Server.build_embedded(
+      model_validator: Woods::Console::ModelValidator.new(registry: {}),
+      safe_context: Woods::Console::SafeContext.new(connection: stub_connection),
+      connection: stub_connection,
+      read_tools_enabled: true,
+      model_tables: {}
+    )
+    tools = server.instance_variable_get(:@tools)
+    tools.fetch('console_sql').call(sql: sql, server_context: {})
+  end
+
+  it 'refuses a blocked table behind an executable comment without executing' do
+    response = call_console_sql('SELECT * FROM /*!authorizations*/')
+
+    expect(response).to be_error
+    expect(response.content.first[:text]).to include("table 'authorizations'")
+    expect(stub_connection).not_to have_received(:select_all)
+  end
+
+  it 'refuses a blocked table behind a version-guarded executable comment without executing' do
+    response = call_console_sql('SELECT * FROM /*!99999*/ authorizations')
+
+    expect(response).to be_error
+    expect(response.content.first[:text]).to include("table 'authorizations'")
+    expect(stub_connection).not_to have_received(:select_all)
   end
 end

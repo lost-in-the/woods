@@ -26,8 +26,9 @@ require 'woods/generation'
 #    are forgiven.
 #
 # Everything else — unit sets, unit content, `_index.json`, graph nodes,
-# edges, reverse edges, file map, type index, stats, PageRank scores, and
-# manifest counts — must match exactly.
+# edges, reverse edges, file map, type index, stats, PageRank scores, manifest
+# counts, and SUMMARY.md's totals against the manifest of the same index —
+# must match exactly.
 #
 # Flow artifacts (`flows/flow_index.json` and every document it lives beside)
 # are compared too, once the run enables flow precomputation: flow documents
@@ -50,7 +51,9 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       graph_differences(incremental_dir, full_dir) +
       manifest_differences(incremental_dir, full_dir) +
       analysis_differences(incremental_dir, full_dir) +
-      flow_differences(incremental_dir, full_dir)
+      flow_differences(incremental_dir, full_dir) +
+      summary_differences(incremental_dir) +
+      summary_differences(full_dir)
   end
 
   def unit_differences(incremental_dir, full_dir)
@@ -105,6 +108,40 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     return [] if incremental == full
 
     ["manifest: #{brief(hash_delta(incremental, full))}"]
+  end
+
+  # SUMMARY.md's totals against the manifest of the SAME index (M4).
+  #
+  # Compared per directory rather than incremental-vs-full: the summary
+  # carries a `Generated:` stamp, so the two runs' files never match
+  # byte-for-byte, while the invariant that must hold in every published
+  # index is narrower — the totals a reader sees in SUMMARY.md are the totals
+  # the manifest published. An incremental run used to ship the seeded
+  # previous generation's summary unchanged, so its totals went stale the
+  # moment the run added or removed units; this check is what keeps that
+  # drift from hiding again.
+  #
+  # Categories is deliberately not compared: the manifest's counts hash may
+  # carry types with zero units that the summary's category count excludes,
+  # on both paths, for both runs.
+  #
+  # @param dir [String] index directory
+  # @return [Array<String>] differences; empty means the summary agrees
+  def summary_differences(dir)
+    manifest = read_json(dir, 'manifest.json')
+    return [] unless manifest
+
+    path = File.join(payload_dir(dir), 'SUMMARY.md')
+    return ['SUMMARY.md is missing but manifest.json is present'] unless File.exist?(path)
+
+    match = File.read(path).match(/^Units: (\d+) \| Chunks: (\d+) \| Categories: \d+$/)
+    return ['SUMMARY.md has no totals line'] unless match
+
+    units, chunks = match.captures.map(&:to_i)
+    return [] if units == manifest['total_units'] && chunks == manifest['total_chunks']
+
+    ["SUMMARY.md totals (Units: #{units}, Chunks: #{chunks}) disagree with manifest.json " \
+     "(total_units: #{manifest['total_units']}, total_chunks: #{manifest['total_chunks']})"]
   end
 
   def analysis_differences(incremental_dir, full_dir)
