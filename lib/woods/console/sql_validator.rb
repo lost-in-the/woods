@@ -275,13 +275,19 @@ module Woods
       # {FORBIDDEN_BODY_REGEXES} stays leader-anchored for the full
       # {FORBIDDEN_KEYWORDS} set because words like `do`, `lock`, `release`,
       # `handler` are plausible bare column names (`WHERE do = 1` is a read,
-      # not a write). The DML set cannot hide behind that argument: INSERT,
-      # UPDATE, DELETE, and MERGE are reserved words on every supported
-      # backend, so a bare occurrence inside an allowed statement is never
-      # an identifier — it is a mid-body write (e.g.
-      # `SELECT 1 UPDATE posts SET status = 10`) that used to pass
-      # validation and fail as an adapter-level syntax error instead of a
-      # typed refusal at this boundary.
+      # not a write). INSERT, UPDATE, and DELETE cannot hide behind that
+      # argument: they are reserved words on every supported backend, so a
+      # bare occurrence inside an allowed statement is never an identifier —
+      # it is a mid-body write (e.g. `SELECT 1 UPDATE posts SET status = 10`)
+      # that used to pass validation and fail as an adapter-level syntax
+      # error instead of a typed refusal at this boundary.
+      #
+      # MERGE is deliberately NOT in this set: SQLite permits an unquoted
+      # `merge` column, so body-level MERGE scanning would false-positive on
+      # ordinary selects like `SELECT merge FROM posts`. MERGE statements
+      # stay covered where they are actually statements: the allowed-prefix
+      # rule (MERGE is in {FORBIDDEN_KEYWORDS}, checked at statement start)
+      # and {WITH_ATTACHED_DML_PATTERN} for the WITH-attached shape.
       #
       # Scanned against the noise-stripped SQL ({SqlNoiseStripper}), so
       # literal content never triggers (`SELECT 'update' AS word` is a
@@ -289,7 +295,7 @@ module Woods
       # (`updated_at`, `last_update`) accepted. Multi-word lock clauses
       # (`FOR UPDATE`) keep their dedicated earlier check, so its message
       # still wins over this one.
-      DML_BODY_KEYWORDS = %w[INSERT UPDATE DELETE MERGE].freeze
+      DML_BODY_KEYWORDS = %w[INSERT UPDATE DELETE].freeze
 
       # Frozen map of DML body keyword => regex matching the keyword as a
       # bare token anywhere. Used by {#check_forbidden_keywords_in_body!}.

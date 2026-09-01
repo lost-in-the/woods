@@ -521,6 +521,19 @@ RSpec.describe Woods::Console::SqlValidator do
       expect { validator.validate!('SELECT 1 FOR UPDATE') }
         .to raise_error(Woods::Console::SqlValidationError, /row-lock clauses/i)
     end
+
+    # MERGE is deliberately absent from the anywhere-in-body keyword set:
+    # SQLite permits an unquoted `merge` column, so body-level MERGE
+    # scanning would false-positive on ordinary selects like these. The
+    # default no-dialect validator is the lane SQLite hosts run under
+    # (unknown adapter -> conservative postgres+mysql union).
+    it 'accepts an unquoted merge column in the outer SELECT' do
+      expect { validator.validate!('SELECT merge FROM posts') }.not_to raise_error
+    end
+
+    it 'accepts an unquoted merge column inside a select list' do
+      expect { validator.validate!('SELECT id, merge, title FROM posts') }.not_to raise_error
+    end
   end
 
   describe 'function allowlist (read-only policy)' do

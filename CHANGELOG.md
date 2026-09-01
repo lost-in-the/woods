@@ -68,21 +68,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`console_sql` rejects DML keywords written mid-statement instead of passing
-  them to the adapter.** The forbidden-body keyword scan anchored `UPDATE`,
-  `DELETE`, `INSERT`, and `MERGE` to statement-leader positions only (start of
-  the SQL, or after `;`/a comment boundary), so a statement like
-  `SELECT 1 UPDATE posts SET status = 10` passed validation and failed as an
-  adapter-level syntax error instead of a typed refusal. Those four keywords are
-  reserved words on every supported backend and can never be bare identifiers,
-  so the validator now also rejects them as bare tokens anywhere in the
-  noise-stripped statement body: literal content never triggers
-  (`SELECT 'update' AS word`, `WHERE title = 'UPDATE me'` stay accepted),
-  identifier-shaped column names stay accepted (`updated_at`, `last_update`),
-  and row-lock clauses keep their dedicated earlier check, so
-  `SELECT 1 FOR UPDATE` still reports the lock-clause message. Non-DML keywords
-  that are plausible column names (`do`, `lock`, `release`) keep the
-  leader-anchored rule unchanged.
+- **`console_sql` rejects `INSERT`, `UPDATE`, and `DELETE` written as bare
+  keywords mid-statement.** The forbidden-body keyword scan anchored every
+  keyword to statement-leader positions only (start of the SQL, or after
+  `;`/a comment boundary), so a statement like `SELECT 1 UPDATE posts SET
+  status = 10` passed validation and failed as an adapter-level syntax error
+  instead of a typed refusal. Those three keywords are reserved words on every
+  supported backend and can never be bare identifiers, so the validator now
+  also rejects them as bare tokens anywhere in the noise-stripped statement
+  body. `MERGE` is deliberately excluded from that scan: SQLite permits an
+  unquoted `merge` column, so body-level MERGE scanning would reject ordinary
+  selects like `SELECT merge FROM posts`; MERGE statements remain covered by
+  the allowed-prefix rule and the WITH-attached-DML check. Literal content
+  never triggers (`SELECT 'update' AS word`, `WHERE title = 'UPDATE me'` stay
+  accepted), identifier-shaped column names stay accepted (`updated_at`,
+  `last_update`, `merge`), and row-lock clauses keep their dedicated earlier
+  check, so `SELECT 1 FOR UPDATE` still reports the lock-clause message.
+  Non-DML keywords that are plausible column names (`do`, `lock`, `release`)
+  keep the leader-anchored rule unchanged.
 
 - **`console_query` placeholder scopes accept table-qualified columns the same
   way the public path does.** A `["posts.status = ?", 10]` scope passed the
