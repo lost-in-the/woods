@@ -981,6 +981,150 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── replace_type_wholesale fails closed after durable writes (M8) ────
+  #
+  # The rescue in `replace_type_wholesale` used to swallow every failure.
+  # register_and_write registers a unit's graph node BEFORE writing its JSON,
+  # and the removal half rm_f's the file BEFORE dropping the graph node, so a
+  # raise mid-replacement left the in-memory graph and the payload directory
+  # disagreeing — and the run went on to publish a generation whose
+  # dependency_graph.json held nodes with no unit file (dependencies and
+  # dependents reported found:true while lookup returned nil). The rescue now
+  # re-raises once the replacement has registered, written, or removed
+  # anything, so the run aborts before publication and the preceding
+  # generation stays resolved — the same fail-closed posture the flow family
+  # uses. A failure that landed nothing is still swallowed.
+  describe '#replace_type_wholesale fail-closed (M8)' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+
+    before do
+      require 'woods'
+      require 'active_support'
+      require 'active_support/core_ext/numeric/time'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+      allow(extractor).to receive(:safe_eager_load!)
+      allow(Rails).to receive(:version).and_return('8.1.0')
+    end
+
+    after { Woods.configuration = @original_config }
+
+    def route_unit(identifier)
+      Woods::ExtractedUnit.new(type: :route, identifier: identifier, file_path: 'config/routes.rb')
+    end
+
+    def stub_extractors(key, units)
+      cascaded = described_class::ROUTE_CONSUMER_EXTRACTORS.to_h do |consumer|
+        [consumer, double(new: double("#{consumer}Extractor", extract_all: []))]
+      end
+      stubbed = cascaded.merge(key => double(new: double("#{key}Extractor", extract_all: units)))
+      stub_const('Woods::Extractor::EXTRACTORS', described_class::EXTRACTORS.merge(stubbed))
+    end
+
+    # A published generation whose payload holds one route unit, its type
+    # index, and the matching graph — the state an incremental run seeds from.
+    def seed_published_generation
+      payload = File.join(output_dir, 'payloads', 'gen-1')
+      routes_dir = File.join(payload, 'routes')
+      FileUtils.mkdir_p(routes_dir)
+
+      graph = Woods::DependencyGraph.new
+      graph.register(route_unit('GET /old'))
+      File.write(File.join(payload, 'dependency_graph.json'), JSON.generate(graph.to_h))
+
+      filename = extractor.send(:collision_safe_filename, 'GET /old')
+      File.write(File.join(routes_dir, "#{filename}.json"),
+                 JSON.generate('identifier' => 'GET /old', 'type' => 'route',
+                               'file_path' => 'config/routes.rb', 'namespace' => nil, 'chunks' => []))
+      File.write(File.join(routes_dir, '_index.json'),
+                 JSON.generate([{ 'identifier' => 'GET /old', 'file_path' => 'config/routes.rb',
+                                  'namespace' => nil, 'estimated_tokens' => 4, 'chunk_count' => 0 }]))
+      File.write(File.join(output_dir, 'generation.json'), JSON.generate(generation_marker))
+    end
+
+    def generation_marker
+      {
+        'number' => 1, 'token' => 'seed', 'updated_at' => Time.now.utc.iso8601,
+        'reason' => 'full', 'payload' => 'payloads/gen-1'
+      }
+    end
+
+    def published_payload
+      Woods::Generation.new(output_dir: output_dir).payload_dir.to_s
+    end
+
+    def published_graph_nodes
+      JSON.parse(File.read(File.join(published_payload, 'dependency_graph.json')))['nodes'].keys
+    end
+
+    def published_index_identifiers
+      Dir[File.join(published_payload, '*', '_index.json')].flat_map do |path|
+        JSON.parse(File.read(path)).map { |entry| entry['identifier'] }
+      end
+    end
+
+    it 'aborts the run before publication when a wholesale write fails mid-loop' do
+      seed_published_generation
+      stub_extractors(:routes, [route_unit('GET /a'), route_unit('GET /b')])
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new(['SomeService']))
+      allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json)
+      # The second unit's graph node registers, then its JSON write fails —
+      # ENOSPC is the canonical mid-loop case.
+      writes = 0
+      allow(extractor).to receive(:write_unit_file).and_wrap_original do |original, path, unit|
+        writes += 1
+        raise Errno::ENOSPC, 'simulated disk full' if writes == 2
+
+        original.call(path, unit)
+      end
+
+      before_generation = Woods::Generation.new(output_dir: output_dir).current.number
+
+      expect { extractor.extract_changed(['config/routes.rb']) }
+        .to raise_error(Woods::ExtractionError, /routes/)
+
+      # The preceding generation stays resolved: no bump, no phantom node.
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(before_generation)
+      expect(published_graph_nodes - published_index_identifiers).to be_empty
+    end
+
+    it 'still swallows a failure that landed nothing, so the run learns nothing rather than dying' do
+      failing = double('RoutesExtractor')
+      allow(failing).to receive(:extract_all).and_raise(StandardError, 'route table exploded')
+      cascaded = described_class::ROUTE_CONSUMER_EXTRACTORS.to_h do |consumer|
+        [consumer, double(new: double("#{consumer}Extractor", extract_all: []))]
+      end
+      stubbed = cascaded.merge(routes: double(new: failing))
+      stub_const('Woods::Extractor::EXTRACTORS', described_class::EXTRACTORS.merge(stubbed))
+
+      result = nil
+      expect { result = extractor.send(:replace_type_wholesale, :routes, Set.new) }.not_to raise_error
+      expect(result).to eq(Set.new)
+    end
+
+    it 're-raises when the removal half deleted a unit file before failing' do
+      controllers_dir = File.join(output_dir, 'controllers')
+      FileUtils.mkdir_p(controllers_dir)
+      File.write(File.join(controllers_dir, 'GoneController.json'), '{"identifier":"GoneController"}')
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :controller, identifier: 'GoneController', file_path: nil)
+      )
+      extractor.instance_variable_set(:@incremental_extractors,
+                                      { controllers: double('ControllersExtractor', extract_all: []) })
+      extractor.instance_variable_set(:@eager_load_complete, true)
+      # Isolate the removal window: nothing registers or writes, the stale
+      # unit's file is rm_f'd, and only then does the graph drop fail.
+      allow(extractor).to receive(:register_and_write).and_return(Set.new)
+      allow(extractor.dependency_graph).to receive(:remove).and_raise(StandardError, 'graph corrupted mid-removal')
+
+      expect { extractor.send(:replace_type_wholesale, :controllers, Set.new) }
+        .to raise_error(Woods::ExtractionError, /controllers/)
+    end
+  end
+
   # ── rails_source as a whole-app extractor (#169) ─────────────────────
 
   # Framework sources were only ever written by `woods:extract_framework`,

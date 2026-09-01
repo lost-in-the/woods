@@ -283,6 +283,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8-forcing binary read (the mode unit loading already used), so an
   index is read correctly regardless of host locale. No re-index needed.
 
+- **A failed wholesale re-run can no longer publish a graph with phantom
+  units (M8).** `replace_type_wholesale`'s rescue swallowed every failure.
+  Because a unit's graph node is registered before its JSON is written, and
+  the removal half deletes the JSON before dropping the graph node, a raise
+  in either window (a full disk, a serialization error) left the in-memory
+  graph and the payload directory disagreeing — and the run went on to
+  publish a generation whose `dependency_graph.json` held nodes with no unit
+  file, so `dependencies`/`dependents` reported `found: true` while lookup
+  returned nothing. The rescue now re-raises (as `Woods::ExtractionError`)
+  once the replacement has registered, written, or removed anything, so the
+  run aborts before publication and the previous generation stays resolved;
+  a failure that landed nothing is still swallowed, as before.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes

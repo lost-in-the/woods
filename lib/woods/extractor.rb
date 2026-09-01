@@ -2448,9 +2448,25 @@ module Woods
     # subject to the same eager-load gate the reconciler applies, see
     # {#remove_replaced_units}.
     #
+    # Fail closed (M8): the rescue exists so a re-run that learned nothing —
+    # `extract_all` itself raising — costs the run nothing. It must not swallow
+    # a failure that lands AFTER the replacement started mutating state a
+    # published generation would carry: {#register_and_write} registers the
+    # graph node before writing the unit file, and {#remove_unit_of_type} rm_f's
+    # the file before dropping the graph node, so a raise in either window
+    # leaves the graph and the payload directory disagreeing. Swallowed, the run
+    # went on to publish a generation whose dependency_graph.json held nodes
+    # with no unit file — `dependencies`/`dependents` reported `found: true`
+    # while lookup returned nil. The counter from {#note_wholesale_mutation}
+    # turns any such failure into a re-raise: the run aborts before
+    # {#publish_generation}, and the preceding generation stays resolved, the
+    # same posture the flow family takes on the full path.
+    #
     # @param key [Symbol] extractor key
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers written or removed
+    # @raise [Woods::ExtractionError] when the replacement failed after
+    #   mutating durable state
     def replace_type_wholesale(key, affected_types)
       extractor = extractor_for(key)
       return Set.new unless extractor.respond_to?(:extract_all)
@@ -2458,11 +2474,36 @@ module Woods
       units = Array(extractor.extract_all).compact.uniq(&:identifier)
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
+      @wholesale_mutations = 0
       touched = register_and_write(key, units, affected_types)
       touched.merge(remove_replaced_units(key, units, affected_types))
     rescue StandardError => e
+      if @wholesale_mutations.to_i.positive?
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          Wholesale re-run of #{key} failed after this run had already
+          registered, written, or removed #{@wholesale_mutations} unit
+          artifact(s) (#{e.class}: #{e.message}). Continuing would publish a
+          generation whose dependency graph disagrees with the unit files on
+          disk, so the run aborts before publication and the previous
+          generation stays resolved.
+        MSG
+      end
+
       Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
       Set.new
+    end
+
+    # Record that the in-flight wholesale replacement mutated state a
+    # published generation would carry: a graph registration (the node ships
+    # with the run's graph write), a unit-file write, or a unit-file removal.
+    # {#replace_type_wholesale} resets the counter per key and re-raises from
+    # its rescue when it is non-zero. Increments from non-wholesale callers of
+    # {#register_and_write} are inert: nothing reads the counter outside that
+    # rescue, and the counter is reset immediately before it can accrue again.
+    #
+    # @return [void]
+    def note_wholesale_mutation
+      @wholesale_mutations = @wholesale_mutations.to_i + 1
     end
 
     # The removal half of a wholesale replacement: drop every unit of `key`'s
@@ -2690,6 +2731,9 @@ module Woods
       units.each_with_object(Set.new) do |unit, written|
         mark_dependents_dirty(unit.identifier)
         @dependency_graph.register(unit)
+        # The node ships with the run's graph write; a failure before its file
+        # lands would publish it as a phantom. See {#note_wholesale_mutation}.
+        note_wholesale_mutation
         mark_dependents_dirty(unit.identifier)
 
         unit.file_path = normalize_file_path(unit.file_path)
@@ -2738,6 +2782,9 @@ module Woods
         affected_types&.add(extractor_key)
         path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
         FileUtils.rm_f(path)
+        # The file is gone; a failure before the graph node drops would
+        # publish it as a phantom. See {#note_wholesale_mutation}.
+        note_wholesale_mutation
       end
 
       @dependency_graph.remove(identifier, type: type)
