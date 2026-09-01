@@ -298,7 +298,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transport context (`SafeContext#with_redaction_policy`), preserving its
   pool, timeout, and rolled-back transaction while applying the configured
   policy, and passes that one context to both the executor and the response
-  renderer. Render-side masking behavior is unchanged.
+  renderer. The policy comes from the kwargs when supplied and otherwise from
+  the lists the supplied context itself carries — a context that carries its
+  own redaction lists now renders through the same policy-complete context
+  instead of losing its renderer. When redaction is effectively configured
+  but the supplied context cannot derive a policy-complete context,
+  construction fails closed with a `ConfigurationError` rather than leaving
+  the renderer disabled. Render-side masking behavior is unchanged.
 
 - **TableGate catches blocked tables hidden in MySQL executable comments at
   FROM, JOIN, and subquery lead position.** The noise stripper deliberately

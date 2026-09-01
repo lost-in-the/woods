@@ -215,49 +215,61 @@ module Woods
         # transaction. Building a second, render-only SafeContext for the
         # redaction lists left the executor's context without the policy, so
         # every executor-side redaction-oracle refusal was dead on the real
-        # transports. When redaction is configured, derive ONE
-        # policy-complete context from the transport context
-        # ({SafeContext#with_redaction_policy} — same pool/timeout/transaction
-        # behavior, plus the configured lists) and hand that single context to
-        # both the executor and the response renderer.
+        # transports. Whenever redaction is EFFECTIVELY configured — the
+        # kwargs when either is supplied, otherwise the lists the supplied
+        # context itself carries — derive ONE policy-complete context from
+        # the transport context ({SafeContext#with_redaction_policy} — same
+        # pool/timeout/transaction behavior, plus the effective lists) and
+        # hand that single context to both the executor and the response
+        # renderer. The executor refuses oracle shapes; the renderer masks
+        # the direct unaliased selections that remain permitted.
         #
-        # - Both kwargs empty: the caller's context passes through untouched
-        #   and the render context stays nil (NullResponseContext) — exactly
-        #   the previous wiring.
-        # - A duck-typed context that cannot carry the derivation: fall back
-        #   to the previous split (executor: caller's context, render:
-        #   synthetic policy context).
+        # Fails closed ({Woods::ConfigurationError}) when redaction is
+        # effectively configured but the supplied object cannot derive a
+        # policy-complete context: the previous silent split wiring left the
+        # renderer disabled while the executor still ran the policy. When
+        # nothing is effectively configured — no kwargs, and a context that
+        # cannot be inspected — the caller's context passes through
+        # untouched and the render context stays nil (NullResponseContext).
         #
         # @param safe_context [SafeContext, nil] Transport-provided Layer 3
         # @param redacted_columns [Array<String>]
         # @param redacted_key_values [Array<Hash>]
         # @return [Array(SafeContext, SafeContext, nil)] executor and render contexts
         def policy_contexts(safe_context, redacted_columns, redacted_key_values)
-          return [safe_context, nil] unless redacted_columns.any? || redacted_key_values.any?
+          configured_columns, configured_key_values = effective_policy(
+            safe_context, redacted_columns, redacted_key_values
+          )
+          return [safe_context, nil] unless configured_columns.any? || configured_key_values.any?
           unless safe_context.respond_to?(:with_redaction_policy)
-            return [safe_context, build_safe_context(redacted_columns, redacted_key_values)]
+            raise Woods::ConfigurationError,
+                  'Console redaction is configured, but the supplied SafeContext cannot derive a ' \
+                  'policy-complete context (SafeContext#with_redaction_policy). Construction fails ' \
+                  'closed: the executor would run with the policy while the renderer stays disabled.'
           end
 
           derived = safe_context.with_redaction_policy(
-            redacted_columns: redacted_columns,
-            redacted_key_values: redacted_key_values
+            redacted_columns: configured_columns,
+            redacted_key_values: configured_key_values
           )
           [derived, derived]
         end
 
-        # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
+        # The effective redaction policy: the kwargs when either is supplied
+        # (the documented configuration surface), otherwise the lists the
+        # supplied context itself carries. Returns empty lists when no kwargs
+        # were supplied and the context cannot be inspected (nil, or a
+        # duck-typed object without the redacted_* readers) — nothing is
+        # effectively configured, so construction proceeds with the caller's
+        # context untouched.
         #
-        # @param redacted_columns [Array<String>]
-        # @param redacted_key_values [Array<Hash>]
-        # @return [SafeContext, nil]
-        def build_safe_context(redacted_columns, redacted_key_values)
-          return nil unless redacted_columns.any? || redacted_key_values.any?
+        # @return [Array(Array, Array)] [columns, key_values]
+        def effective_policy(safe_context, redacted_columns, redacted_key_values)
+          return [redacted_columns, redacted_key_values] if redacted_columns.any? || redacted_key_values.any?
+          return [[], []] unless safe_context.respond_to?(:redacted_columns) &&
+                                 safe_context.respond_to?(:redacted_key_values)
 
-          SafeContext.new(
-            connection: nil,
-            redacted_columns: redacted_columns,
-            redacted_key_values: redacted_key_values
-          )
+          [Array(safe_context.redacted_columns), Array(safe_context.redacted_key_values)]
         end
 
         # Bundle the three response-safety layers into a ResponseContext the

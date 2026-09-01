@@ -1018,3 +1018,122 @@ RSpec.describe 'Console MCP transport wiring applies the redaction policy to the
     include_examples 'wired redaction-oracle refusals'
   end
 end
+
+# Audit finding B1, round 2: a transport SafeContext that carries its own
+# redaction lists must drive the renderer through the SAME policy-complete
+# context as the executor. The executor refuses oracle shapes, but direct
+# unaliased protected-column and paired-EAV selections are intentionally
+# permitted and depend entirely on render-time masking — with the renderer
+# disabled they return plaintext. Construction must also fail closed when
+# redaction is effectively configured but the supplied context cannot derive
+# a policy-complete context, instead of silently splitting the wiring.
+RSpec.describe 'Console MCP transport wiring applies a caller-carried redaction policy', :booted_app do
+  let(:validator) do
+    Woods::Console::ModelValidator.new(
+      registry: { 'Post' => %w[created_at id status title updated_at] }
+    )
+  end
+  let(:stub_connection) do
+    double('connection', adapter_name: 'SQLite').tap do |conn|
+      allow(conn).to receive(:transaction) do |&block|
+        block.call
+      rescue ActiveRecord::Rollback
+        nil
+      end
+      allow(conn).to receive(:execute)
+    end
+  end
+
+  before do
+    @original_context_format = Woods.configuration.context_format
+    Woods.configuration.context_format = :json
+  end
+
+  after do
+    Woods.configuration.context_format = @original_context_format
+  end
+
+  def build_with_carried_lists
+    Woods::Console::Server.build_embedded(
+      model_validator: validator,
+      safe_context: Woods::Console::SafeContext.new(
+        connection: stub_connection,
+        redacted_columns: %w[status],
+        redacted_key_values: [ConsoleContractMatrixRuntime::SETTINGS_EAV]
+      ),
+      read_tools_enabled: true,
+      model_tables: { 'Post' => 'posts' },
+      model_reflections: {}
+    )
+  end
+
+  def tools_call(server, name, arguments)
+    request = JSON.generate(
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: name, arguments: arguments }
+    )
+    JSON.parse(server.handle_json(request))
+  end
+
+  def rendered_result(response)
+    text = response.dig('result', 'content', 0, 'text')
+    expect(response.dig('result', 'isError')).to be(false),
+                                                 "expected a successful payload, got an error: #{text}"
+    JSON.parse(text)
+  end
+
+  it 'masks a direct unaliased protected-column select through the shared context' do
+    allow(stub_connection).to receive(:select_all).and_return(
+      double('result', columns: %w[status], rows: [[10]])
+    )
+
+    response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT status FROM posts')
+    text = response.dig('result', 'content', 0, 'text')
+
+    expect(rendered_result(response).fetch('rows')).to eq([['[REDACTED]']])
+    expect(text).not_to include('10')
+  end
+
+  it 'masks a paired EAV selection through the shared context' do
+    allow(stub_connection).to receive(:select_all).and_return(
+      double('result', columns: %w[key value], rows: [%w[legacy_api_token tok_plain_secret]])
+    )
+
+    response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT key, value FROM settings')
+    text = response.dig('result', 'content', 0, 'text')
+
+    expect(rendered_result(response).fetch('rows')).to eq([['legacy_api_token', '[REDACTED]']])
+    expect(text).not_to include('tok_plain_secret')
+  end
+
+  it 'fails closed when the kwargs configure redaction but the context cannot derive a policy' do
+    non_derivable = double('non-derivable context')
+
+    expect do
+      Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: non_derivable,
+        redacted_columns: %w[status]
+      )
+    end.to raise_error(Woods::ConfigurationError, /policy/)
+  end
+
+  it 'fails closed when only the carried lists configure redaction and the context cannot derive a policy' do
+    non_derivable = double('non-derivable context', redacted_columns: %w[status], redacted_key_values: [])
+
+    expect do
+      Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: non_derivable
+      )
+    end.to raise_error(Woods::ConfigurationError, /policy/)
+  end
+
+  it 'still constructs when nothing is configured and the context cannot be inspected' do
+    opaque = double('opaque context')
+
+    expect(
+      Woods::Console::Server.build_embedded(model_validator: validator, safe_context: opaque)
+    ).to be_a(MCP::Server)
+  end
+end

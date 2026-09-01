@@ -17,10 +17,6 @@ RSpec.describe Woods::Console::Server do
   end
 
   describe 'redaction via SafeContext' do
-    it 'builds successfully when no redacted_columns configured' do
-      expect(described_class.send(:build_safe_context, [], [])).to be_nil
-    end
-
     it 'applies SafeContext redaction to Hash results' do
       safe_ctx = Woods::Console::SafeContext.new(
         connection: nil,
