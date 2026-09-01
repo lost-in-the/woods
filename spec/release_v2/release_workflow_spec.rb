@@ -163,6 +163,12 @@ RSpec.describe 'release workflow contract' do
     end
   end
 
+  it 'runs the session-tracer live-Redis spec in the live-backends lane' do
+    live_backends = ci.fetch('jobs').fetch('live-backends')
+
+    expect(run_commands(live_backends)).to include('spec/session_tracer/redis_store_live_spec.rb')
+  end
+
   it 'confines candidate checkout and execution to a secret-free read-only package job' do
     jobs = release.fetch('jobs')
     package_test = jobs.fetch('package-test')

@@ -324,6 +324,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`git -C Rails.root`), consistent with the provenance rooting, so it can no
   longer diff whatever checkout the process happened to start in.
 
+### Testing
+
+- **The live-Redis session-tracer contract spec now runs in CI (M6).** The
+  `spec/session_tracer/redis_store_live_spec.rb` suite from the P4 eviction
+  rework was gated on `WOODS_RUN_LIVE_BACKENDS=1` but appeared in no CI
+  job's rspec run, so its six examples (including the two-client Lua
+  migration race) never executed anywhere. The `live-backends` job now
+  lists it; that job already provides the ephemeral `redis` client install,
+  the redis service, and `WOODS_REDIS_URL`.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
