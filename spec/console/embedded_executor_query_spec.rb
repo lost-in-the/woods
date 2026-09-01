@@ -364,6 +364,42 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
     end
   end
 
+  describe 'qualified placeholder scope (public/executor parity)' do
+    # The public console_query path accepts `["table.column = ?", bind]` for
+    # the queried model's own table. The executor must accept it too, even
+    # when its ModelValidator carries no table_names mapping to resolve the
+    # qualifier: own-table qualification is the bare-column contract plus a
+    # qualifier that cannot name a foreign table.
+    let(:unmapped_validator) { Woods::Console::ModelValidator.new(registry: registry) }
+    subject(:unmapped_executor) do
+      described_class.new(
+        model_validator: unmapped_validator,
+        safe_context: safe_context,
+        connection: connection,
+        read_tools_enabled: true
+      )
+    end
+
+    before do
+      allow(order_model).to receive(:table_name).and_return('orders')
+    end
+
+    it 'executes an own-table qualified placeholder scope exactly like the bare form' do
+      response = unmapped_executor.send_request({
+                                                  'tool' => 'query',
+                                                  'params' => {
+                                                    'model' => 'Order',
+                                                    'select' => ['status'],
+                                                    'scope' => ['orders.status = ?', 'paid']
+                                                  }
+                                                })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:where).with('orders.status = ?', 'paid')
+      expect(response['result']['rows']).to eq([['paid', 500], ['pending', 200]])
+    end
+  end
+
   describe 'limit validation' do
     it 'rejects a limit above 10_000 before querying' do
       response = executor.send_request({
@@ -871,6 +907,76 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
       expect(relation).to have_received(:where).with({ 'status' => 'paid' })
       expect(relation).to have_received(:having).with({ 'status' => 'paid' })
       expect(connection).to have_received(:select_all)
+    end
+  end
+
+  context 'when a qualified placeholder scope names a protected column' do
+    let(:registry) do
+      { 'Order' => %w[id status amount user_id created_at],
+        'User' => %w[id email password_digest] }
+    end
+    let(:table_names) { { 'Order' => 'orders', 'User' => 'users' } }
+    let(:redacted_columns) { %w[amount password_digest] }
+
+    before do
+      allow(order_model).to receive(:table_name).and_return('orders')
+    end
+
+    it 'refuses an own-table qualified redacted column with the typed redaction message' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['orders.amount = ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'amount' is redacted/i)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a foreign-table qualified redacted column with the typed redaction message' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['users.password_digest = ?', 'x']
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'password_digest' is redacted/i)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+  end
+
+  context 'when the validator has no table_names mapping (fail-closed resolver)' do
+    let(:table_names) { {} }
+    let(:redacted_columns) { %w[amount] }
+
+    before do
+      allow(order_model).to receive(:table_name).and_return('orders')
+    end
+
+    it 'still refuses an own-table qualified redacted column with the typed redaction message' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['orders.amount = ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'amount' is redacted/i)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
     end
   end
 end

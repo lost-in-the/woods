@@ -84,6 +84,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that are plausible column names (`do`, `lock`, `release`) keep the
   leader-anchored rule unchanged.
 
+- **`console_query` placeholder scopes accept table-qualified columns the same
+  way the public path does.** A `["posts.status = ?", 10]` scope passed the
+  public schema but was refused at execution with
+  `Unknown table 'posts'. Cannot validate qualified column 'posts.status'.`
+  whenever the executor's ModelValidator had no model-to-table mapping to
+  resolve the qualifier. The query scope path now resolves a `table.column`
+  reference whose table is the queried model's own table against that model's
+  own columns, so own-table qualification behaves exactly like the bare-column
+  form. Redaction stays strict: a qualified reference to a redacted column
+  (own table or foreign table) still refuses with the typed redaction message,
+  and any other qualified table still resolves through the fail-closed
+  table-column check.
+
 - **Best-effort Git provenance and file-history probes are now quiet and rooted
   at the extracted application.** Expected failures in source copies without a
   `.git` directory no longer emit `fatal: not a git repository` on stderr, and
