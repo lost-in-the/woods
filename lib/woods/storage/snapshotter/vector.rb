@@ -117,7 +117,9 @@ module Woods
             validate_schema_version!(header[:schema_version], bin_path)
             validate_dimension_if_present!(header, resolved_config, bin_path)
             floats = read_float_blob(bin_data, header, data_offset, bin_path)
-            hydrate_store(parse_idx(idx_path), floats, header[:dimension])
+            ids = parse_idx(idx_path)
+            validate_idx_count!(ids.size, header[:vector_count], idx_path, bin_path)
+            hydrate_store(ids, floats, header[:dimension])
           end
 
           # A valid header over a truncated float payload used to unpack
@@ -171,7 +173,14 @@ module Woods
             pairs = []
             pos = 0
             while pos < idx_data.bytesize
+              # Fail closed on truncation (M3), the same contract as the bin
+              # side's float-blob guard: a record that would read past EOF is
+              # an interrupted dump, and byteslice would otherwise pad it into
+              # a garbage (short) id that silently hydrates.
+              raise_truncated(idx_path, idx_data.bytesize, pos + 4) if idx_data.bytesize - pos < 4
               id_len = idx_data.byteslice(pos, 4).unpack1('L<')
+              record_end = pos + 4 + id_len + 8
+              raise_truncated(idx_path, idx_data.bytesize, record_end) if idx_data.bytesize < record_end
               pos += 4
               # The idx format stores ids as UTF-8 bytes (build_idx writes
               # id.encode('UTF-8').b), but byteslice on a binread buffer
@@ -185,6 +194,25 @@ module Woods
               pairs << id
             end
             pairs
+          end
+
+          # The idx record count and the bin header's vector_count describe
+          # the same dump; the idx maps ids onto the blob the header counts.
+          # When the halves disagree, hydration either crashed with a bare
+          # NoMethodError (idx longer: nil vectors reach InMemory#store) or
+          # silently served fewer vectors than the dump claims (idx shorter).
+          # Promotion ordering makes live exposure post-promotion-corruption-
+          # only, but the fail-closed-with-typed-error contract is the
+          # file's own standard — a mismatched dump is an interrupted or
+          # corrupted dump, never one to hydrate from.
+          def validate_idx_count!(idx_count, bin_count, idx_path, bin_path)
+            return if idx_count == bin_count
+
+            raise Woods::MCP::UnsupportedArtifact.new(
+              "#{idx_path}: vectors.idx holds #{idx_count} id records but #{bin_path} header declares " \
+              "#{bin_count} vectors — dump halves disagree; re-run woods:embed",
+              details: { path: idx_path.to_s, idx_count: idx_count, bin_vector_count: bin_count }
+            )
           end
 
           def hydrate_store(ids, floats, dim)

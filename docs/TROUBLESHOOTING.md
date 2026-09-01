@@ -147,6 +147,22 @@ bundle exec rake woods:extract
 
 ---
 
+### `woods:incremental` exits 1 with "could not resolve the git diff range"
+
+**Symptom:** A CI job fails with `ERROR: could not resolve the git diff range "..."` instead of indexing.
+
+**Cause:** The range git was asked to diff does not resolve in the checkout: a GitLab `CI_COMMIT_BEFORE_SHA` of all zeros (new branch), a GitHub base ref that was never fetched, a shallow clone with no `HEAD~1`, or a typo'd revision. This used to read as "no relevant files changed" and the task exited 0 while the sync never ran; it now fails closed, because a green job hiding a skipped sync lets index drift grow unbounded. The one stand-down: a *running* watch daemon maintaining the same index exits 0 with a printed reason, since its start-up catch-up covers the changes. A degraded daemon covers nothing and still exits 1.
+
+**Fix:** Repair or provide the range (fetch the base ref, e.g. `fetch-depth: 2` or more, or correct the CI environment variables), set `CHANGED_FILES` explicitly to bypass range resolution, or run a full extraction:
+
+```bash
+bundle exec rake woods:extract
+```
+
+Note `WOODS_IGNORE_WATCH=1` removes daemon coverage rather than bypassing the failure — an unresolved range then exits 1. The full exit-behavior table lives in [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains).
+
+---
+
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
 
 **Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct, only the provenance metadata is off.

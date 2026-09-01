@@ -195,7 +195,11 @@ module Woods
       #      the old retriever keeps answering, and a DISTINCT reload-phase
       #      degraded condition is recorded on +state+ (never the boot
       #      degraded state, which describes the old stores). Raised as
-      #      {Woods::MCP::ReloadDegraded}.
+      #      {Woods::MCP::ReloadDegraded}. The same fail-closed rule applies
+      #      before any candidate work when the captured dump's embedded
+      #      config names store types the refreshable live target cannot
+      #      refresh (a re-embed switched stores): that divergence must never
+      #      surface as an empty success (M2).
       #   3. Commit: acquire the SAME on-disk PipelineLock every writer uses
       #      (bounded poll; a reload must not queue behind a long extraction),
       #      THEN the reader's exclusive generation lock, THEN recheck BOTH
@@ -267,6 +271,12 @@ module Woods
 
         return zero_counts unless refreshable_stores?(target)
 
+        # A captured dump whose embedded config names store types the
+        # refreshable live target cannot refresh cannot be turned into
+        # candidates at all — fail closed with the reload-phase degraded
+        # condition instead of an empty success (M2).
+        assert_dump_stores_refreshable!(target, config, served)
+
         # Phase 1: candidates off-side, exclusively from the captured locations.
         candidates = build_reload_candidates(config, resolved, artifact, served, captured_dump, hooks)
         return zero_counts unless candidates
@@ -324,6 +334,41 @@ module Woods
           ms.respond_to?(:clear!) && ms.respond_to?(:bulk_load)
       end
       private_class_method :refreshable_stores?
+
+      # The captured dump's embedded config and the refreshable live target
+      # must agree on store types (M2). Each is valid alone: the live target
+      # is refreshable (in-memory), and the dump is complete and valid. But
+      # when a re-embed ran with a different store configuration and promoted
+      # over the dump this process hydrated from, the reload-time resolver
+      # adopts the dump's store types, every candidate builder returns nil,
+      # and the transaction used to answer +reloaded: true+ with zero counts
+      # while NOTHING was swapped and no degraded condition was recorded —
+      # each component fine, the combination a misaligned-state success.
+      # Zero counts with a genuine empty dump stays legitimate; store-type
+      # divergence is a degraded reload: the reload-phase condition names
+      # both sides of the mismatch and the honest state, nothing swaps, and
+      # the previous generation keeps being served.
+      def self.assert_dump_stores_refreshable!(target, config, served)
+        divergent = {
+          vector: config.vector_store,
+          metadata: config.metadata_store
+        }.reject { |_, dump_type| dump_type == :in_memory }
+        return if divergent.empty?
+
+        detail = divergent.map do |component, dump_type|
+          live_store = component == :vector ? target.vector_store : target.metadata_store
+          "the promoted dump declares #{component}_store=#{dump_type.inspect} but the live retriever " \
+            "serves a #{live_store.class} #{component} store"
+        end.join('; ')
+
+        raise ReloadDegraded.new(
+          "reload aborted: #{detail}; nothing was swapped and the previous generation is still " \
+          'being served — restart woods-mcp to adopt the dump\'s store configuration, or re-run ' \
+          'woods:embed with the store configuration this server was started with',
+          generation: served.number, stores: divergent.keys
+        )
+      end
+      private_class_method :assert_dump_stores_refreshable!
 
       # Immutable candidate bundle built off-side. +graph_store+ is nil when
       # the index carries no +dependency_graph.json+ (the live graph is kept).

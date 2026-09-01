@@ -68,6 +68,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Index MCP `reload` tool no longer reports an empty success when the promoted dump's
+  store configuration diverges from the live server (M2).** The live retriever was in-memory
+  and the captured dump was complete and valid, but when the dump's embedded `woods.json`
+  named a store type the live target cannot refresh (a re-embed ran with pgvector or Qdrant
+  configured and promoted over the dump the server hydrated from), the reload-time resolver
+  adopted the dump's store types, every candidate builder returned nil, and the tool answered
+  `reloaded: true` with zero counts while nothing was swapped and no degraded condition was
+  recorded. That divergence is now a degraded reload: the `reload` tool responds with the
+  reload-phase `degraded_index` error naming both store types and the honest state (nothing
+  was swapped, the previous generation is still served), and the condition surfaces additively
+  through `woods_status` (`bootstrap.reload_failure`). A genuine empty dump still reloads
+  successfully with zero counts.
+
+- **Vector dump hydration fails closed on a truncated or mismatched `vectors.idx` (M3).** The
+  idx parser read each record's length, id, and offset with no end-of-file guard: a dump
+  truncated mid-record hydrated a garbage short id silently, an idx holding more records than
+  the float blob crashed hydration with a bare `NoMethodError`, and an idx holding fewer
+  silently hydrated fewer vectors than the dump header claims. Parsing now raises the same
+  typed `UnsupportedArtifact` the bin side raises for a truncated float payload when a record
+  would read past EOF, and the idx record count is cross-checked against the header's
+  `vector_count` after parsing, naming both counts and prompting a re-run of `woods:embed` on
+  mismatch.
+
 - **Best-effort Git provenance and file-history probes are now quiet and rooted
   at the extracted application.** Expected failures in source copies without a
   `.git` directory no longer emit `fatal: not a git repository` on stderr, and
@@ -320,6 +343,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scanned, so the post-comma shape keeps working; on PostgreSQL the `/*!`
   form is a syntax error, so extra detections there are over-detection by
   design.
+
+- **A failed wholesale re-run can no longer publish a graph with phantom
+  units (M8).** `replace_type_wholesale`'s rescue swallowed every failure.
+  A unit's graph node is registered before its JSON is written, the removal
+  half deletes the JSON before dropping the graph node, and registration
+  itself mutates the graph before it can fail (a malformed dependency raises
+  after the node is already inserted) — so a raise in any of those windows
+  (a full disk, a serialization error, a malformed unit) left the in-memory
+  graph and the payload directory disagreeing, and the run went on to
+  publish a generation whose `dependency_graph.json` held nodes with no unit
+  file, so `dependencies`/`dependents` reported `found: true` while lookup
+  returned nothing. The rescue now re-raises (as `Woods::ExtractionError`)
+  once the replacement has begun to register, write, or remove anything —
+  the marker is placed before each mutation, so a failure inside one cannot
+  slip past it — and the run aborts before publication, leaving the
+  previous generation resolved. A failure that landed nothing is still
+  swallowed, as before.
+
+- **Incremental runs no longer ship the previous generation's SUMMARY.md
+  (M4).** `write_structural_summary` returned early because an incremental
+  run holds no units in memory, so the hardlinked summary of the last full
+  extraction was served unchanged — its `Units:`/`Chunks:` totals went stale
+  the first time a run added or removed a unit. The summary is now derived on
+  the incremental path from the same persisted per-type `_index.json` files
+  the manifest counts, so the two artifacts agree; the `Generated:` stamp
+  still names the moment the summary was written. The equivalence oracle now
+  also compares SUMMARY.md's totals against the manifest of the same index,
+  so this drift can no longer hide.
+
+- **`woods:incremental` no longer exits 0 over a git range it cannot resolve
+  (M1).** The diff helper discarded git's exit status, so an unresolvable
+  range — a GitLab zero-SHA, an unfetched GitHub base ref, garbage — read as
+  "no relevant files changed" and the task exited 0 while the sync never ran;
+  the degraded-daemon extract-anyway branch was unreachable. The helper now
+  carries the failure out and the task decides in order: a resolvable range
+  behaves as before; a failed range stands down with a printed reason (exit
+  0) only when a running watch daemon maintains the index, and otherwise
+  fails with an actionable error naming the range (exit 1, like the
+  lock-timeout abort). The diff is also rooted at the extracted application
+  (`git -C Rails.root`), consistent with the provenance rooting, so it can no
+  longer diff whatever checkout the process happened to start in.
+
+### Testing
+
+- **The live-Redis session-tracer contract spec now runs in CI (M6).** The
+  `spec/session_tracer/redis_store_live_spec.rb` suite from the P4 eviction
+  rework was gated on `WOODS_RUN_LIVE_BACKENDS=1` but appeared in no CI
+  job's rspec run, so its six examples (including the two-client Lua
+  migration race) never executed anywhere. The `live-backends` job now
+  lists it; that job already provides the ephemeral `redis` client install,
+  the redis service, and `WOODS_REDIS_URL`.
 
 ## [2.0.0] - 2026-08-20
 

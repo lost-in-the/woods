@@ -1923,36 +1923,39 @@ module Woods
     # category with count and top-5 namespace breakdown, rather than enumerating
     # every unit. Per-unit detail is available in the per-category _index.json files.
     #
+    # The full path derives its numbers from the in-memory results. An
+    # incremental run holds only changed units in memory, so it derives the
+    # same shape from the persisted per-type _index.json files — the same
+    # source {#persisted_counts} feeds the manifest from, which is what keeps
+    # SUMMARY.md's totals agreeing with manifest.json. (M4: the hardlinked
+    # previous generation's summary this path used to leave in place carried
+    # stale totals after any run that added or removed units.) The `Generated:`
+    # stamp keeps its meaning either way: it names the moment the summary was
+    # written.
+    #
     # @return [void]
     def write_structural_summary
-      return if @results.empty?
+      stats = @results.empty? ? persisted_summary_stats : results_summary_stats
+      return unless stats
 
-      total_units    = @results.values.sum(&:size)
+      total_units    = stats.sum { |_, s| s[:count] }
       # Matches the manifest's count (`write_manifest`/`persisted_counts`
-      # both sum `u.chunks.size` directly) — the previous `[size, 1].max`
+      # both sum chunk counts directly) — the previous `[size, 1].max`
       # floor made SUMMARY.md disagree with manifest.json for every
       # unchunked unit.
-      total_chunks   = @results.sum { |_, units| units.sum { |u| u.chunks.size } }
-      category_count = @results.count { |_, units| units.any? }
+      total_chunks   = stats.sum { |_, s| s[:chunks] }
 
       summary = []
       summary << '# Codebase Index Summary'
       summary << "Generated: #{Time.current.iso8601}"
       summary << "Rails #{Rails.version} / Ruby #{RUBY_VERSION}"
-      summary << "Units: #{total_units} | Chunks: #{total_chunks} | Categories: #{category_count}"
+      summary << "Units: #{total_units} | Chunks: #{total_chunks} | Categories: #{stats.size}"
       summary << ''
 
-      @results.each do |type, units|
-        next if units.empty?
+      stats.each do |type, s|
+        summary << "## #{type.to_s.titleize} (#{s[:count]})"
 
-        summary << "## #{type.to_s.titleize} (#{units.size})"
-
-        ns_counts = units
-                    .group_by { |u| u.namespace.nil? || u.namespace.empty? ? '(root)' : u.namespace }
-                    .transform_values(&:size)
-                    .sort_by { |_, count| -count }
-                    .first(5)
-
+        ns_counts = s[:namespaces].sort_by { |_, count| -count }.first(5)
         ns_parts = ns_counts.map { |ns, count| "#{ns} #{count}" }
         summary << "Namespaces: #{ns_parts.join(', ')}" unless ns_parts.empty?
         summary << ''
@@ -1982,6 +1985,63 @@ module Woods
         payload_dir.join('SUMMARY.md'),
         summary.join("\n")
       )
+    end
+
+    # Per-type `{ count:, chunks:, namespaces: }` for {#write_structural_summary},
+    # derived from the in-memory results a full extraction holds.
+    #
+    # @return [Hash{Symbol => Hash}]
+    def results_summary_stats
+      @results.each_with_object({}) do |(type, units), stats|
+        next if units.empty?
+
+        stats[type] = {
+          count: units.size,
+          chunks: units.sum { |u| u.chunks.size },
+          namespaces: namespace_histogram(units.map(&:namespace))
+        }
+      end
+    end
+
+    # The incremental path's counterpart to {#results_summary_stats}: the same
+    # shape read back from the persisted per-type _index.json files, the source
+    # {#persisted_counts} uses for the manifest — so the two artifacts cannot
+    # disagree about totals. Sorted for determinism, since the glob order is
+    # the filesystem's.
+    #
+    # @return [Hash{Symbol => Hash}, nil] nil when the payload holds no type
+    #   indexes at all, so a bare index writes no summary — matching the full
+    #   path's early return when it extracted nothing
+    def persisted_summary_stats
+      stats = {}
+
+      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
+        entries = JSON.parse(AtomicFile.read(index_path))
+        next if entries.empty?
+
+        stats[File.basename(File.dirname(index_path)).to_sym] = {
+          count: entries.size,
+          chunks: entries.sum { |e| e['chunk_count'].to_i },
+          namespaces: namespace_histogram(entries.map { |e| e['namespace'] })
+        }
+      rescue JSON::ParserError => e
+        # Same posture as {#persisted_counts}: an unreadable index drops that
+        # type from the manifest and the summary alike, so the two still agree.
+        type = File.basename(File.dirname(index_path))
+        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in summary totals: #{e.message}")
+      end
+
+      stats.empty? ? nil : stats
+    end
+
+    # Group namespaces for a SUMMARY.md section: a missing or empty namespace
+    # is the root, everything else counts as-is.
+    #
+    # @param namespaces [Array<String, nil>]
+    # @return [Hash{String => Integer}]
+    def namespace_histogram(namespaces)
+      namespaces.group_by { |ns| ns.nil? || ns.empty? ? '(root)' : ns }
+                .transform_values(&:size)
     end
 
     def regenerate_type_index(type_key)
@@ -2448,21 +2508,80 @@ module Woods
     # subject to the same eager-load gate the reconciler applies, see
     # {#remove_replaced_units}.
     #
+    # Fail closed (M8): the rescue exists so a re-run that learned nothing —
+    # `extract_all` itself raising — costs the run nothing. It must not swallow
+    # a failure that lands AFTER the replacement started mutating state a
+    # published generation would carry: {#register_and_write} registers the
+    # graph node before writing the unit file, and {#remove_unit_of_type} rm_f's
+    # the file before dropping the graph node, so a raise in either window
+    # leaves the graph and the payload directory disagreeing. Swallowed, the run
+    # went on to publish a generation whose dependency_graph.json held nodes
+    # with no unit file — `dependencies`/`dependents` reported `found: true`
+    # while lookup returned nil. The counter from {#note_wholesale_mutation}
+    # turns any such failure into a re-raise: the run aborts before
+    # {#publish_generation}, and the preceding generation stays resolved, the
+    # same posture the flow family takes on the full path.
+    #
+    # Two counter rules make that decision sound. The marker is placed BEFORE
+    # each mutation, because registration itself can fail mid-mutation (a
+    # malformed dependency raises after the node is inserted) and a rm_f can
+    # fail part-way; a marker placed after the fact would miss the window it
+    # exists for, at the cost of a conservative abort when the marked mutation
+    # then fails before changing anything. And the counter is reset BEFORE
+    # `extract_all`, not after: {#register_and_write} is shared with the
+    # reconcile paths that run earlier in the same pass, and one of those
+    # leaving the counter positive must not turn a later, mutation-free
+    # wholesale failure into an abort — only the current key's wholesale pass
+    # contributes to the decision.
+    #
     # @param key [Symbol] extractor key
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers written or removed
+    # @raise [Woods::ExtractionError] when the replacement failed after
+    #   mutating durable state
     def replace_type_wholesale(key, affected_types)
       extractor = extractor_for(key)
       return Set.new unless extractor.respond_to?(:extract_all)
 
+      @wholesale_mutations = 0
       units = Array(extractor.extract_all).compact.uniq(&:identifier)
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
       touched = register_and_write(key, units, affected_types)
       touched.merge(remove_replaced_units(key, units, affected_types))
     rescue StandardError => e
+      if @wholesale_mutations.to_i.positive?
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          Wholesale re-run of #{key} failed after this run had already
+          registered, written, or removed #{@wholesale_mutations} unit
+          artifact(s) (#{e.class}: #{e.message}). Continuing would publish a
+          generation whose dependency graph disagrees with the unit files on
+          disk, so the run aborts before publication and the previous
+          generation stays resolved.
+        MSG
+      end
+
       Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
       Set.new
+    end
+
+    # Record that the in-flight wholesale replacement is about to mutate state
+    # a published generation would carry: a graph registration, a unit-file
+    # write, or a unit-file removal. Callers mark BEFORE mutating — register
+    # itself can raise mid-mutation (a malformed dependency raises after the
+    # node is inserted), so a marker placed after the fact can miss the very
+    # window it exists for. The cost is a conservative abort when the marked
+    # mutation then fails before changing anything; that direction is safe.
+    # {#replace_type_wholesale} resets the counter to 0 before `extract_all` —
+    # so only the current key's wholesale pass contributes, never the earlier
+    # reconcile passes that share {#register_and_write} — and re-raises from
+    # its rescue when the count is non-zero. Increments from non-wholesale
+    # callers of {#register_and_write} are inert outside that window: nothing
+    # reads the counter between resets.
+    #
+    # @return [void]
+    def note_wholesale_mutation
+      @wholesale_mutations = @wholesale_mutations.to_i + 1
     end
 
     # The removal half of a wholesale replacement: drop every unit of `key`'s
@@ -2689,6 +2808,14 @@ module Woods
 
       units.each_with_object(Set.new) do |unit, written|
         mark_dependents_dirty(unit.identifier)
+        # Marked BEFORE registration: DependencyGraph#register inserts the
+        # node before it iterates the unit's dependencies, so a malformed
+        # dependency raises with the graph already mutated — a marker placed
+        # after the call would never run, and the phantom would ship. The
+        # cost of this ordering is a conservative abort when registration
+        # fails before mutating anything; that is the safe direction to err
+        # in. See {#note_wholesale_mutation}.
+        note_wholesale_mutation
         @dependency_graph.register(unit)
         mark_dependents_dirty(unit.identifier)
 
@@ -2737,6 +2864,11 @@ module Woods
       if extractor_key
         affected_types&.add(extractor_key)
         path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
+        # Marked BEFORE the removal, same ordering as the write half: a
+        # rm_f that fails part-way (or a failure immediately after it) must
+        # not leave the counter at zero while the file is already gone. See
+        # {#note_wholesale_mutation}.
+        note_wholesale_mutation
         FileUtils.rm_f(path)
       end
 

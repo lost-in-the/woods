@@ -994,6 +994,10 @@ RSpec.describe Woods::MCP::IndexReader do
       expect(compiled.timeout).to eq(described_class::SEARCH_PATTERN_TIMEOUT)
     end
 
+    # The fixture is far too small for `(a+)+x` to overrun the per-match
+    # budget, so this real-pattern run proves only that the call completes
+    # in bounded shape. The behavioral guarantee lives in the two
+    # injected-pattern examples below, which trip the abort deterministically.
     it 'returns a bounded response for a pathological pattern' do
       watchdog = Thread.new do
         sleep 10
@@ -1003,9 +1007,59 @@ RSpec.describe Woods::MCP::IndexReader do
 
       result = reader.search('(a+)+x', fields: %w[identifier source_code])
 
-      expect(result).to include(:results)
       expect(result[:results]).to be_an(Array)
+      expect(result[:results].size).to be <= 20
       watchdog.kill
+    end
+
+    # The pre-P5 shape passed every :partial assertion because the fixture is
+    # too small for a real pattern to overrun the budget. These two examples
+    # inject a stand-in compiled pattern, so the timeout is tripped (or not)
+    # by construction rather than by wall clock.
+    def with_regexp_timeout_error_class
+      pre_existing = Regexp.const_defined?(:TimeoutError, false)
+      Regexp.const_set(:TimeoutError, Class.new(StandardError)) unless pre_existing
+      yield Regexp.const_get(:TimeoutError, false)
+    ensure
+      Regexp.send(:remove_const, :TimeoutError) unless pre_existing
+    end
+
+    def pattern_raising_timeout_on_source(timeout_class)
+      pattern = Object.new
+      pattern.define_singleton_method(:match?) do |text|
+        raise timeout_class if text.include?("\n")
+
+        text.match?(/post/i)
+      end
+      pattern
+    end
+
+    it 'aborts into a partial response when a match exceeds the per-match limit' do
+      with_regexp_timeout_error_class do |timeout_class|
+        aborting_reader = described_class.new(fixture_dir)
+        allow(aborting_reader).to receive(:compile_search_pattern)
+          .and_return(pattern_raising_timeout_on_source(timeout_class))
+
+        result = aborting_reader.search('Post', fields: %w[identifier source_code])
+
+        expect(result[:partial]).to be(true)
+        expect(result[:note]).to eq(
+          "search aborted: the pattern exceeded the #{described_class::SEARCH_PATTERN_TIMEOUT}s per-match limit"
+        )
+        # Results gathered before the abort survive, still bounded by limit.
+        expect(result[:results].map { |r| r[:identifier] })
+          .to contain_exactly('Post', 'PostsController', 'PostDecorator')
+        expect(result[:results]).to all(include(match_field: 'identifier'))
+      end
+    end
+
+    it 'propagates non-timeout failures from a match attempt instead of answering partially' do
+      pattern = Object.new
+      pattern.define_singleton_method(:match?) { |_text| raise IOError, 'disk gone' }
+      allow(reader).to receive(:compile_search_pattern).and_return(pattern)
+
+      expect { reader.search('Post', fields: %w[identifier source_code]) }
+        .to raise_error(IOError, /disk gone/)
     end
 
     # Review finding: `rescue Regexp::TimeoutError` names a constant that
