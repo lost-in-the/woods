@@ -307,6 +307,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also compares SUMMARY.md's totals against the manifest of the same index,
   so this drift can no longer hide.
 
+- **`woods:incremental` no longer exits 0 over a git range it cannot resolve
+  (M1).** The diff helper discarded git's exit status, so an unresolvable
+  range — a GitLab zero-SHA, an unfetched GitHub base ref, garbage — read as
+  "no relevant files changed" and the task exited 0 while the sync never ran;
+  the degraded-daemon extract-anyway branch was unreachable. The helper now
+  carries the failure out and the task decides in order: a resolvable range
+  behaves as before; a failed range stands down with a printed reason (exit
+  0) only when a running watch daemon maintains the index, and otherwise
+  fails with an actionable error naming the range (exit 1, like the
+  lock-timeout abort). The diff is also rooted at the extracted application
+  (`git -C Rails.root`), consistent with the provenance rooting, so it can no
+  longer diff whatever checkout the process happened to start in.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
