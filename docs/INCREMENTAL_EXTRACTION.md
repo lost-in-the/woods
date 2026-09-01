@@ -380,10 +380,10 @@ owns the definition of "the two indexes agree" and documents every exclusion.
   file removes its unit. A caller using the lower-level incremental API without
   the watcher must ensure the Rails runtime has been reloaded first.
 - **Identifier identity is typed.** Units of different types that share an
-  identifier remain separate graph nodes. Two source files that redefine the
-  same Ruby constant can still tie-break differently between full and
-  incremental extraction (B-063); that source tree is already ambiguous, and
-  the differential harness avoids it.
+  identifier remain separate graph nodes. Two source files that produce the
+  same type+identifier are not representable; full extraction fails closed
+  with both source paths instead of publishing a glob-order tie-break (resolved
+  B-063). Same-file re-derivation remains a legitimate deduplication case.
 - **Class-based units are never swept**: see [Deletion](#deletion) above for
   why (the `SchemaMigration`/`InternalMetadata` convention-path case).
   Deleting a class-based unit therefore requires either the caller naming the

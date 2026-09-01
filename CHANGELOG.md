@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`dependency_graph.json` parses once per generation (P6).** The Index
   Server's `dependency_graph` and `raw_graph_data` each parsed the same file,
   holding two copies of a large graph per generation; the typed graph now
-  builds from the single raw parse.
+  builds from the single raw parse. Because `raw_graph_data` exposes that
+  shared parsed object, Woods recursively freezes it before publication so a
+  caller cannot mutate nested nodes or edges and corrupt later graph reads.
 
 - **JSON temporal snapshots are pruned by retention (P8).** `snapshots/`
   wrote one file per SHA and never pruned, growing unboundedly on long-lived

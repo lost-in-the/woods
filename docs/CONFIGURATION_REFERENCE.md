@@ -204,6 +204,43 @@ it. The `_index.json` manifest under `output_dir` is the durable
 metadata for the index MCP server, so this is a reasonable default
 for hosts that don't bundle `sqlite3`.
 
+## Retrieval Cache Options
+
+The optional cache wraps both embedding-provider calls and assembled retrieval
+contexts. It is disabled by default and is separate from the Index Server's
+tool-result `_meta` cache hint.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `cache_enabled` | Boolean | `false` | Enable embedding and retrieval-context caching in retrievers built by `Woods::Builder`. |
+| `cache_store` | Symbol or `Woods::Cache::CacheStore` | `nil` | Cache backend: `:memory`, `:redis`, `:solid_cache`, or an already-constructed cache-store instance. Must be set when caching is enabled. |
+| `cache_options` | Hash | `{}` | Backend constructor options and optional TTL overrides; see below. |
+
+```ruby
+# Process-local bounded cache
+config.cache_enabled = true
+config.cache_store = :memory
+config.cache_options = {
+  max_entries: 500,
+  ttl: { embeddings: 86_400, context: 900 }
+}
+
+# Redis-backed cache
+config.cache_store = :redis
+config.cache_options = {
+  redis: Redis.new(url: ENV.fetch('REDIS_URL')),
+  default_ttl: 3_600,
+  ttl: { embeddings: 86_400, context: 900 }
+}
+```
+
+`:solid_cache` uses the same shape with `cache:` set to an
+`ActiveSupport::Cache::Store`-compatible instance. `default_ttl` applies at the
+Redis/Solid Cache store layer when a write supplies no TTL. The `ttl:` hash
+overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
+(15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
+`default_ttl` because each wrapper write supplies its domain TTL.
+
 ## Deployment Shapes
 
 Woods supports three deployment shapes, pick the preset that matches yours.
@@ -289,6 +326,7 @@ end
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `session_tracer_enabled` | Boolean | `false` | Enable session tracing middleware |
+| `session_tracer_allow_production` | Boolean | `false` | Explicitly allow session tracing in `Rails.env.production?`. Without this opt-in, the Railtie warns and leaves the tracer disabled even when `session_tracer_enabled` is true. Review trace contents, retention, and access controls before enabling it. |
 | `session_store` | Object | `nil` | Store backend: `FileStore`, `RedisStore`, or `SolidCacheStore` |
 | `session_id_proc` | Proc | `nil` | Custom proc to extract session ID from requests |
 | `session_exclude_paths` | Array&lt;String&gt; | `[]` | Path patterns to exclude from tracing |
@@ -407,11 +445,19 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain, and — when the JSON snapshot store is in use — how many temporal snapshots (`snapshots/`) to keep. |
 | `WOODS_MCP_CACHE_TTL_MS` | `10000` | Cache TTL advertised in tool result `_meta`. `0` disables caching. |
 | `WOODS_NO_UPDATE_CHECK` | unset | Set to `"1"` to skip the `woods_status` RubyGems version check. |
+| `XDG_CACHE_HOME` | `~/.cache` | Base directory for the best-effort update-check cache (`$XDG_CACHE_HOME/woods/update_check.json`). An unset or empty value uses `~/.cache`; if the home directory cannot be resolved, Woods falls back to the system temporary directory. |
 | `OPENAI_API_KEY` | n/a | When set and no embedding provider is configured, the server auto-enables OpenAI-backed semantic search with in-memory stores. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Probed (`GET /api/tags`, 500ms timeout) when no embedding provider is configured. A reachable instance auto-enables local semantic search. |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
 | `WOODS_QDRANT_URL`, `WOODS_QDRANT_COLLECTION`, `WOODS_QDRANT_API_KEY` | n/a | Override/require Qdrant connection settings when a pgvector/Qdrant-backed index is served outside its host application (no `Woods.configuration` available). |
 | `WOODS_PG_URL` | n/a | Required when a pgvector-backed index is served outside its host application. |
+
+### Rake tasks
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MAX_DEPTH` | `5` | Maximum dependency traversal depth for `woods:flow[EntryPoint]`. Parsed as an integer. |
+| `FORMAT` | `markdown` | Output format for `woods:flow[EntryPoint]`. Set to `json` for pretty-printed JSON; every other value uses Markdown. |
 
 ### HTTP transport (`woods-mcp-http`)
 
