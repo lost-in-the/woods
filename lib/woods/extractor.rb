@@ -2553,9 +2553,13 @@ module Woods
       Set.new
     end
 
-    # Record that the in-flight wholesale replacement mutated state a
-    # published generation would carry: a graph registration (the node ships
-    # with the run's graph write), a unit-file write, or a unit-file removal.
+    # Record that the in-flight wholesale replacement is about to mutate state
+    # a published generation would carry: a graph registration, a unit-file
+    # write, or a unit-file removal. Callers mark BEFORE mutating — register
+    # itself can raise mid-mutation (a malformed dependency raises after the
+    # node is inserted), so a marker placed after the fact can miss the very
+    # window it exists for. The cost is a conservative abort when the marked
+    # mutation then fails before changing anything; that direction is safe.
     # {#replace_type_wholesale} resets the counter per key and re-raises from
     # its rescue when it is non-zero. Increments from non-wholesale callers of
     # {#register_and_write} are inert: nothing reads the counter outside that
@@ -2790,10 +2794,15 @@ module Woods
 
       units.each_with_object(Set.new) do |unit, written|
         mark_dependents_dirty(unit.identifier)
-        @dependency_graph.register(unit)
-        # The node ships with the run's graph write; a failure before its file
-        # lands would publish it as a phantom. See {#note_wholesale_mutation}.
+        # Marked BEFORE registration: DependencyGraph#register inserts the
+        # node before it iterates the unit's dependencies, so a malformed
+        # dependency raises with the graph already mutated — a marker placed
+        # after the call would never run, and the phantom would ship. The
+        # cost of this ordering is a conservative abort when registration
+        # fails before mutating anything; that is the safe direction to err
+        # in. See {#note_wholesale_mutation}.
         note_wholesale_mutation
+        @dependency_graph.register(unit)
         mark_dependents_dirty(unit.identifier)
 
         unit.file_path = normalize_file_path(unit.file_path)
@@ -2841,10 +2850,12 @@ module Woods
       if extractor_key
         affected_types&.add(extractor_key)
         path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
-        FileUtils.rm_f(path)
-        # The file is gone; a failure before the graph node drops would
-        # publish it as a phantom. See {#note_wholesale_mutation}.
+        # Marked BEFORE the removal, same ordering as the write half: a
+        # rm_f that fails part-way (or a failure immediately after it) must
+        # not leave the counter at zero while the file is already gone. See
+        # {#note_wholesale_mutation}.
         note_wholesale_mutation
+        FileUtils.rm_f(path)
       end
 
       @dependency_graph.remove(identifier, type: type)

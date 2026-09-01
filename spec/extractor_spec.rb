@@ -1091,6 +1091,39 @@ RSpec.describe Woods::Extractor do
       expect(published_graph_nodes - published_index_identifiers).to be_empty
     end
 
+    # DependencyGraph#register inserts the node before it iterates the unit's
+    # dependencies, so a malformed dependency raises AFTER the graph already
+    # holds the new node — the same phantom window as a failed unit-file
+    # write, but inside register itself, before the round-1 marker (placed
+    # after the register call) ever runs. The marker therefore has to sit
+    # BEFORE registration: a conservative abort is fine, a swallowed
+    # half-registration is not.
+    it 'aborts before publication when registration itself fails mid-mutation' do
+      seed_published_generation
+      malformed = route_unit('GET /broken')
+      malformed.dependencies = [nil]
+      stub_extractors(:routes, [malformed])
+      allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new(['SomeService']))
+      allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json)
+
+      generation_path = File.join(output_dir, 'generation.json')
+      before_marker = File.binread(generation_path)
+
+      expect { extractor.extract_changed(['config/routes.rb']) }
+        .to raise_error(Woods::ExtractionError, /routes/)
+
+      # The preceding generation stays resolved: the marker is byte-unchanged,
+      # and its graph and type index remain readable and complete.
+      expect(File.binread(generation_path)).to eq(before_marker)
+      payload = Woods::Generation.new(output_dir: output_dir).payload_dir.to_s
+      graph = JSON.parse(File.read(File.join(payload, 'dependency_graph.json')))
+      expect(graph['nodes'].keys).to eq(['GET /old'])
+      index = JSON.parse(File.read(File.join(payload, 'routes', '_index.json')))
+      expect(index.map { |entry| entry['identifier'] }).to eq(['GET /old'])
+    end
+
     it 'still swallows a failure that landed nothing, so the run learns nothing rather than dying' do
       failing = double('RoutesExtractor')
       allow(failing).to receive(:extract_all).and_raise(StandardError, 'route table exploded')

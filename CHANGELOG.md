@@ -285,16 +285,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A failed wholesale re-run can no longer publish a graph with phantom
   units (M8).** `replace_type_wholesale`'s rescue swallowed every failure.
-  Because a unit's graph node is registered before its JSON is written, and
-  the removal half deletes the JSON before dropping the graph node, a raise
-  in either window (a full disk, a serialization error) left the in-memory
-  graph and the payload directory disagreeing — and the run went on to
+  A unit's graph node is registered before its JSON is written, the removal
+  half deletes the JSON before dropping the graph node, and registration
+  itself mutates the graph before it can fail (a malformed dependency raises
+  after the node is already inserted) — so a raise in any of those windows
+  (a full disk, a serialization error, a malformed unit) left the in-memory
+  graph and the payload directory disagreeing, and the run went on to
   publish a generation whose `dependency_graph.json` held nodes with no unit
   file, so `dependencies`/`dependents` reported `found: true` while lookup
   returned nothing. The rescue now re-raises (as `Woods::ExtractionError`)
-  once the replacement has registered, written, or removed anything, so the
-  run aborts before publication and the previous generation stays resolved;
-  a failure that landed nothing is still swallowed, as before.
+  once the replacement has begun to register, write, or remove anything —
+  the marker is placed before each mutation, so a failure inside one cannot
+  slip past it — and the run aborts before publication, leaving the
+  previous generation resolved. A failure that landed nothing is still
+  swallowed, as before.
 
 - **Incremental runs no longer ship the previous generation's SUMMARY.md
   (M4).** `write_structural_summary` returned early because an incremental
