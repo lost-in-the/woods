@@ -149,6 +149,32 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
           .to raise_error(ArgumentError, /dumps_root/)
       end
     end
+
+    it 'preserves support for writing directly into artifact.dumps_root' do
+      artifact.dumps_root.mkpath
+      store = Woods::Storage::VectorStore::InMemory.new
+
+      expect { described_class.dump(store, artifact, artifact.dumps_root) }.not_to raise_error
+      expect(artifact.dumps_root.join('vectors.bin')).to exist
+      expect(artifact.dumps_root.join('vectors.idx')).to exist
+    end
+
+    context 'when an in-root dump_dir symlink resolves outside dumps_root' do
+      let(:store) { Woods::Storage::VectorStore::InMemory.new }
+      let(:outside_dir) { Pathname.new(Dir.mktmpdir) }
+      let(:symlinked_dump_dir) do
+        artifact.dumps_root.mkpath
+        artifact.dumps_root.join('escaped').tap { |path| File.symlink(outside_dir, path) }
+      end
+
+      after { FileUtils.remove_entry(outside_dir) }
+
+      it 'rejects the target before writing vector artifacts outside the dump root' do
+        expect { described_class.dump(store, artifact, symlinked_dump_dir) }
+          .to raise_error(ArgumentError, /dumps_root/)
+        expect(outside_dir.children).to be_empty
+      end
+    end
   end
 
   # --- real serialization ---

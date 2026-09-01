@@ -1872,7 +1872,7 @@
     "lib/woods/storage/metadata_store.rb"
   ],
   "description": "MetadataStore::InMemory#search(query, fields: []) returns [], but SQLite joins the empty condition list into `WHERE ` and raises SQLite3::SQLException: incomplete input. Verified on current main during the v2 prerelease audit tail. Normalize an empty fields list to the adapter-independent empty result before touching either backing store, and add the case to the shared hardened-search contract so external adapters inherit an explicit semantic requirement.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-134",
@@ -1886,7 +1886,7 @@
     "lib/woods/index_artifact.rb"
   ],
   "description": "IndexArtifact#promote resolves symlinks before enforcing that a dump is inside dumps_root, but both Snapshotter dump validators use expand_path only. A dump_dir symlink located under dumps_root can therefore target an external directory and the vector or metadata writer will place files there. Normal Woods-created dump directories are not symlinks, so this requires a tampered output tree or a custom caller. Reuse one realpath-and-boundary validator for promotion and both writers; regressions must cover a symlinked child and the existing macOS /tmp alias case.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-135",
@@ -1898,7 +1898,7 @@
     "lib/woods/temporal/json_snapshot_store.rb"
   ],
   "description": "JsonSnapshotStore#list and history scans warn and skip malformed JSON files, while #find parses the same file without handling JSON::ParserError. A corrupt retained snapshot therefore changes from an omitted entry during discovery to a raw parser exception when requested directly. Choose and document one fail-closed public posture (typed corrupt-artifact error, or warn-and-return nil) and apply it consistently to find, diff, and scan paths with a deliberately truncated snapshot regression.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-136",

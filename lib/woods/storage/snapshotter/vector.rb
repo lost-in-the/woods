@@ -100,7 +100,7 @@ module Woods
         # @raise [ArgumentError] if +dump_dir+ is not under +artifact.dumps_root+
         def self.dump(store, artifact, dump_dir, resolved_config: nil)
           validate_store!(store)
-          validate_dump_dir!(artifact, Pathname.new(dump_dir.to_s))
+          artifact.validate_dump_dir!(dump_dir, allow_root: true)
           model_name = resolved_config.respond_to?(:model_name) ? resolved_config.model_name.to_s : ''
           entries = store.each_entry.to_a
           write_bin_and_idx(Pathname.new(dump_dir.to_s), entries, Woods::VERSION, model_name)
@@ -341,15 +341,6 @@ module Woods
             return true unless defined?(VectorStore::Interface)
 
             object.method(method_name).owner != VectorStore::Interface
-          end
-
-          def validate_dump_dir!(artifact, dump_path)
-            expanded = dump_path.expand_path
-            root = artifact.dumps_root.expand_path
-            return if expanded.to_s.start_with?("#{root}/") || expanded == root
-
-            raise ArgumentError,
-                  "dump_dir #{expanded} is not under artifact.dumps_root #{root}"
           end
         end
       end

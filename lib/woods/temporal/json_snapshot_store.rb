@@ -22,6 +22,9 @@ module Woods
     #
     # Implements the same public interface as SnapshotStore so the MCP server
     # tools work identically.
+    # Malformed retained snapshots are warned about and treated as absent:
+    # +find+ returns nil, +diff+ returns an empty result, and history/list scans
+    # omit the corrupt file.
     #
     # @example
     #   store = JsonSnapshotStore.new(dir: '/app/tmp/woods')
@@ -72,7 +75,9 @@ module Woods
         path = snapshot_path(git_sha)
         return nil unless File.exist?(path)
 
-        data = JSON.parse(AtomicFile.read(path))
+        data = read_snapshot(path)
+        return nil unless data
+
         symbolize_snapshot(data).except(:units)
       end
 
@@ -247,26 +252,29 @@ module Woods
         path = snapshot_path(git_sha)
         return nil unless File.exist?(path)
 
-        symbolize_snapshot(JSON.parse(AtomicFile.read(path)))
+        data = read_snapshot(path)
+        data && symbolize_snapshot(data)
       end
 
       def load_all_summaries
         Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
-          data = JSON.parse(AtomicFile.read(path))
-          symbolize_snapshot(data).except(:units)
-        rescue JSON::ParserError => e
-          warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
-          nil
+          data = read_snapshot(path)
+          symbolize_snapshot(data).except(:units) if data
         end
       end
 
       def load_all_with_units
         Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
-          symbolize_snapshot(JSON.parse(AtomicFile.read(path)))
-        rescue JSON::ParserError => e
-          warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
-          nil
+          data = read_snapshot(path)
+          symbolize_snapshot(data) if data
         end
+      end
+
+      def read_snapshot(path)
+        JSON.parse(AtomicFile.read(path))
+      rescue JSON::ParserError => e
+        warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+        nil
       end
 
       # @param exclude_sha [String, nil] SHA to leave out of the result

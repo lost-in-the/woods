@@ -70,6 +70,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Metadata searches with `fields: []` now return an empty result on every
+  backend (B-133).** The SQLite adapter previously emitted an incomplete
+  `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
+  before touching their backing store when no fields are searchable.
+
+- **Snapshot dump writers reject symlink escapes before writing (B-134).**
+  Vector dumps, metadata dumps, and promotion now share the same realpath-aware
+  `dumps_root` boundary check. A legitimate symlinked alias of the artifact
+  root remains supported, while a child symlink targeting another directory
+  cannot receive snapshot files.
+
+- **Corrupt JSON temporal snapshots are consistently treated as absent
+  (B-135).** Direct `find` now follows the existing list/history posture by
+  warning and returning `nil`; `diff` warns and returns an empty result when a
+  requested snapshot is truncated, rather than leaking `JSON::ParserError`.
+
 - **`console_sql` rejects `INSERT`, `UPDATE`, and `DELETE` written as bare
   keywords mid-statement.** The forbidden-body keyword scan anchored every
   keyword to statement-leader positions only (start of the SQL, or after
