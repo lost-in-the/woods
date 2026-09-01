@@ -817,7 +817,7 @@
       "lib/woods/resilience/circuit_breaker.rb",
       "lib/woods/mcp/bootstrapper.rb"
     ],
-    "description": "HTTP transport concurrent-handler unsynchronized IndexReader cache + lazy pipeline mutex init; Notion/Unblocked POST retry on read-timeout duplicates; Retry-After to_f zeros HTTP-date form; CircuitBreaker half-open unlimited probes + reset on overlap; bootstrapper/reload string-keyed vector metadata vs symbol-keyed search filters. Tracked in GH #150. PARTIAL (PR #151): FIXED the pipeline-lock mutex race (eager init), Retry-After (shared Woods::RetryAfter helper, both clients), and CircuitBreaker (single half-open probe + success_threshold). REMAINING: IndexReader cache guard, POST-retry idempotency, bootstrap/reload key-form normalization.",
+    "description": "HTTP transport concurrent-handler unsynchronized IndexReader cache + lazy pipeline mutex init; Notion/Unblocked POST retry on read-timeout duplicates; Retry-After to_f zeros HTTP-date form; CircuitBreaker half-open unlimited probes + reset on overlap; bootstrapper/reload string-keyed vector metadata vs symbol-keyed search filters. Tracked in GH #150. RESOLVED: the pipeline mutex initializes eagerly; IndexReader serializes shared cache bookkeeping; Woods::RetryAfter handles delta-seconds and HTTP-date values; CircuitBreaker admits one half-open probe and preserves overlapping failures; non-idempotent export POSTs do not retry ambiguous outcomes; and boot/reload vector metadata is normalized for indifferent filter matching.",
     "status": "resolved",
     "depends_on": []
   },
@@ -846,8 +846,8 @@
     "files": [
       "lib/woods/extractor.rb"
     ],
-    "description": "When two source files yield units with the same identifier, full extraction keeps the first by glob order (deduplicate_results' uniq(&:identifier)) while the incremental path keeps whichever was written last. The tree is already broken in that state (Ruby would be redefining a constant), so this is a tie-break inconsistency rather than data loss, but it means full and incremental disagree. Surfaced by the #164 differential harness.",
-    "status": "open",
+    "description": "When two source files yielded units of the same type with the same identifier, full extraction kept the first by glob order while incremental extraction could retain a different writer. The source tree is already ambiguous in that state, and the index cannot represent both units. RESOLVED by G-1: per-type deduplication now records the retained source path and raises Woods::ExtractionError when a later unit derives the same type+identifier from a different file. Same-file re-derivation remains a legitimate deduplication case. Full extraction therefore fails closed instead of publishing a tie-break that can disagree with incremental extraction.",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -1860,6 +1860,96 @@
     "lib/woods/mcp/index_reader.rb"
   ],
   "description": "The recent_changes tool resolves git modification dates by loading unit files per index entry, O(total units) file reads per tool call against a 50-entry LRU, on indexes with thousands of units (v2-prerelease-audit P3). PR-8 deferred it: a correct fix needs an artifact-format design first, not a refactor. Candidate designs: digest-based short-circuit keyed off data already in the per-type index entries (skip loading units whose index-level digest is unchanged), or a payload-store bulk read that materializes git metadata in one pass. Compatibility implications: any new index-side field (e.g. a per-entry git digest) is an artifact-format addition that older readers must ignore and older indexes must tolerate; the tool response shape must stay identical. Acceptance criteria: a chosen design documented in the payload/index format docs; the tool response shape unchanged; a latency bound demonstrated on a large index (thousands of units) before/after; functional index_reader specs plus a new perf bound pinning the no-regression; no mixed-generation reads introduced.",
+  "status": "open"
+},
+{
+  "id": "B-133",
+  "title": "MetadataStore::SQLite search with an empty fields list raises raw SQL error",
+  "severity": "low",
+  "category": "code-bug",
+  "layer": "storage",
+  "files": [
+    "lib/woods/storage/metadata_store.rb"
+  ],
+  "description": "MetadataStore::InMemory#search(query, fields: []) returns [], but SQLite joins the empty condition list into `WHERE ` and raises SQLite3::SQLException: incomplete input. Verified on current main during the v2 prerelease audit tail. Normalize an empty fields list to the adapter-independent empty result before touching either backing store, and add the case to the shared hardened-search contract so external adapters inherit an explicit semantic requirement.",
+  "status": "open"
+},
+{
+  "id": "B-134",
+  "title": "Snapshot dump writers can follow an in-root symlink outside dumps_root",
+  "severity": "low",
+  "category": "code-bug",
+  "layer": "storage",
+  "files": [
+    "lib/woods/storage/snapshotter/vector.rb",
+    "lib/woods/storage/snapshotter/metadata.rb",
+    "lib/woods/index_artifact.rb"
+  ],
+  "description": "IndexArtifact#promote resolves symlinks before enforcing that a dump is inside dumps_root, but both Snapshotter dump validators use expand_path only. A dump_dir symlink located under dumps_root can therefore target an external directory and the vector or metadata writer will place files there. Normal Woods-created dump directories are not symlinks, so this requires a tampered output tree or a custom caller. Reuse one realpath-and-boundary validator for promotion and both writers; regressions must cover a symlinked child and the existing macOS /tmp alias case.",
+  "status": "open"
+},
+{
+  "id": "B-135",
+  "title": "JsonSnapshotStore find raises on a corrupt snapshot that list skips",
+  "severity": "low",
+  "category": "code-bug",
+  "layer": "storage",
+  "files": [
+    "lib/woods/temporal/json_snapshot_store.rb"
+  ],
+  "description": "JsonSnapshotStore#list and history scans warn and skip malformed JSON files, while #find parses the same file without handling JSON::ParserError. A corrupt retained snapshot therefore changes from an omitted entry during discovery to a raw parser exception when requested directly. Choose and document one fail-closed public posture (typed corrupt-artifact error, or warn-and-return nil) and apply it consistently to find, diff, and scan paths with a deliberately truncated snapshot regression.",
+  "status": "open"
+},
+{
+  "id": "B-136",
+  "title": "Payload retention can remove a generation still pinned by a reader process",
+  "severity": "low",
+  "category": "design-gap",
+  "layer": "mcp",
+  "files": [
+    "lib/woods/payload_store.rb",
+    "lib/woods/mcp/index_reader.rb",
+    "lib/woods/generation.rb"
+  ],
+  "description": "IndexReader pins prevent in-process cache invalidation, but writer-side PayloadStore retention has no cross-process reader lease. A sufficiently long request pinned to generation N can outlive three later publishes; pruning then removes payloads/gen-N while the request still holds that path. Already-cached artifacts survive, but a later uncached unit or graph read sees ENOENT and may be rendered as corrupt_artifact. Decide between leases, open-file/materialization pinning, or a documented retention/request-duration bound; acceptance requires a writer/read-process test proving a pinned request stays readable while retention advances.",
+  "status": "open"
+},
+{
+  "id": "B-137",
+  "title": "Manual extraction tasks exit successfully when generation publication fails",
+  "severity": "low",
+  "category": "code-bug",
+  "layer": "extraction",
+  "files": [
+    "lib/woods/extractor.rb",
+    "lib/tasks/woods.rake",
+    "lib/woods/watch/daemon.rb"
+  ],
+  "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure.",
+  "status": "open"
+},
+{
+  "id": "B-138",
+  "title": "woods:watch_status default output path depends on the caller's cwd",
+  "severity": "low",
+  "category": "code-bug",
+  "layer": "infrastructure",
+  "files": [
+    "lib/tasks/woods.rake"
+  ],
+  "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root.",
+  "status": "open"
+},
+{
+  "id": "B-139",
+  "title": "Official-client stdio examples intermittently timed out in full-suite runs",
+  "severity": "medium",
+  "category": "test-gap",
+  "layer": "mcp",
+  "files": [
+    "spec/integration/mcp_official_ruby_client_spec.rb"
+  ],
+  "description": "M7 monitoring item, mitigated and currently non-release-blocking. Two official-client stdio examples historically exceeded their 10s read timeout only in randomized full-suite runs. The failure has not reproduced across 30 targeted runs, 12 concurrent processes, the complete suite at seed 41729, or nine subsequent green CI runs, so no root cause is claimed. The timeout is now 30s and a timeout fails once with the child stderr appended; there is no retry that could hide the evidence. Acceptance: on the next captured timeout, record the full-suite seed, request method, captured child stderr, mcp gem and Ruby versions, and runner load; then identify the root cause and add a deterministic regression before changing production or transport code.",
   "status": "open"
 }
 ]

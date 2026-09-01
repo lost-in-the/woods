@@ -86,11 +86,6 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
   # A read timeout surfaces as RequestHandlerError with no child context: the
   # official transport discards stderr as it drains it. Returns the same
   # error, or a copy carrying whatever the spec transport captured, so the
-  # next timeout failure is diagnosable. Every other error passes through
-  # untouched.
-  # A read timeout surfaces as RequestHandlerError with no child context: the
-  # official transport discards stderr as it drains it. Returns the same
-  # error, or a copy carrying whatever the spec transport captured, so the
   # timeout failure is diagnosable from the logs. Every other error passes
   # through untouched.
   def with_child_stderr_context(error, transport)
