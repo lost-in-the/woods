@@ -1138,6 +1138,41 @@ RSpec.describe Woods::Extractor do
       expect(result).to eq(Set.new)
     end
 
+    # The counter must be reset BEFORE extract_all: register_and_write is
+    # shared with the reconcile paths that run earlier in the same pass, and
+    # one of those leaving the counter positive must not turn a later,
+    # mutation-free wholesale failure into an abort.
+    it 'does not inherit an earlier reconcile pass\'s count when the wholesale extractor fails before mutating' do
+      seed_published_generation
+      service_unit = Woods::ExtractedUnit.new(type: :service, identifier: 'RealService',
+                                              file_path: 'app/services/real_service.rb')
+      # The earlier reconciliation registers and writes through the same
+      # shared register_and_write the wholesale pass uses — exactly how the
+      # stale count accrues in a real run.
+      allow(extractor).to receive(:reconcile_changed_paths) do |_change_set, affected_types|
+        extractor.send(:register_and_write, :services, [service_unit], affected_types)
+      end
+      allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
+      allow(extractor).to receive(:prune_vanished_units).and_return(Set.new)
+      allow(extractor).to receive(:finalize_incremental_unit_json)
+      raising = double('RoutesExtractor')
+      allow(raising).to receive(:extract_all).and_raise(StandardError, 'route table exploded')
+      cascaded = described_class::ROUTE_CONSUMER_EXTRACTORS.to_h do |consumer|
+        [consumer, double(new: double("#{consumer}Extractor", extract_all: []))]
+      end
+      stub_const('Woods::Extractor::EXTRACTORS',
+                 described_class::EXTRACTORS.merge(cascaded.merge(routes: double(new: raising))))
+
+      result = nil
+      expect { result = extractor.extract_changed(['config/routes.rb']) }.not_to raise_error
+
+      # The rescue swallowed as designed: the reconcile work survives, the
+      # run completes, and it publishes a consistent generation.
+      expect(result).to include('RealService')
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(2)
+      expect(published_graph_nodes - published_index_identifiers).to be_empty
+    end
+
     it 're-raises when the removal half deleted a unit file before failing' do
       controllers_dir = File.join(output_dir, 'controllers')
       FileUtils.mkdir_p(controllers_dir)

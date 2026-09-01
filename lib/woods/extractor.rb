@@ -2522,6 +2522,18 @@ module Woods
     # {#publish_generation}, and the preceding generation stays resolved, the
     # same posture the flow family takes on the full path.
     #
+    # Two counter rules make that decision sound. The marker is placed BEFORE
+    # each mutation, because registration itself can fail mid-mutation (a
+    # malformed dependency raises after the node is inserted) and a rm_f can
+    # fail part-way; a marker placed after the fact would miss the window it
+    # exists for, at the cost of a conservative abort when the marked mutation
+    # then fails before changing anything. And the counter is reset BEFORE
+    # `extract_all`, not after: {#register_and_write} is shared with the
+    # reconcile paths that run earlier in the same pass, and one of those
+    # leaving the counter positive must not turn a later, mutation-free
+    # wholesale failure into an abort — only the current key's wholesale pass
+    # contributes to the decision.
+    #
     # @param key [Symbol] extractor key
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers written or removed
@@ -2531,10 +2543,10 @@ module Woods
       extractor = extractor_for(key)
       return Set.new unless extractor.respond_to?(:extract_all)
 
+      @wholesale_mutations = 0
       units = Array(extractor.extract_all).compact.uniq(&:identifier)
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
-      @wholesale_mutations = 0
       touched = register_and_write(key, units, affected_types)
       touched.merge(remove_replaced_units(key, units, affected_types))
     rescue StandardError => e
@@ -2560,10 +2572,12 @@ module Woods
     # node is inserted), so a marker placed after the fact can miss the very
     # window it exists for. The cost is a conservative abort when the marked
     # mutation then fails before changing anything; that direction is safe.
-    # {#replace_type_wholesale} resets the counter per key and re-raises from
-    # its rescue when it is non-zero. Increments from non-wholesale callers of
-    # {#register_and_write} are inert: nothing reads the counter outside that
-    # rescue, and the counter is reset immediately before it can accrue again.
+    # {#replace_type_wholesale} resets the counter to 0 before `extract_all` —
+    # so only the current key's wholesale pass contributes, never the earlier
+    # reconcile passes that share {#register_and_write} — and re-raises from
+    # its rescue when the count is non-zero. Increments from non-wholesale
+    # callers of {#register_and_write} are inert outside that window: nothing
+    # reads the counter between resets.
     #
     # @return [void]
     def note_wholesale_mutation
