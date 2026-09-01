@@ -20,6 +20,17 @@ module ConsoleContractMatrixRuntime
     { 'id' => 3, 'title' => 'Gamma' }
   ].freeze
   POSITIONAL_ROWS = [[1, 'Alpha'], [2, 'Beta'], [3, 'Gamma']].freeze
+  # EAV redaction patterns for the transport-wiring examples: one settings
+  # shape (raw console_sql) and one mapped onto Post columns (structured
+  # console_query), so both oracle paths see a live pattern.
+  SETTINGS_EAV = {
+    key_column: 'key', value_column: 'value',
+    sensitive_keys: %w[legacy_api_token]
+  }.freeze
+  POST_EAV = {
+    key_column: 'status', value_column: 'title',
+    sensitive_keys: %w[Alpha]
+  }.freeze
   EXPECTED_RESULTS = {
     'console_count' => { 'count' => 3 },
     'console_sample' => { 'records' => RECORD_ROWS },
@@ -863,5 +874,266 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
 
     expect(text).to include('[REDACTED]')
     expect(text).not_to include(credential)
+  end
+end
+
+# Audit finding B1: the transport SafeContext (connection: or pool:) owns the
+# rolled-back transaction, the statement timeout, and the connection lease.
+# The configured redaction policy must ride on that same context so the
+# executor's redaction-oracle refusals fire on the real transports — not only
+# on the render-only SafeContext the server used to build for the renderer.
+# Every example here drives the real dispatch pipeline through
+# Server.build_embedded + handle_json with a stub connection recording
+# select_all; no executor stubs.
+RSpec.describe 'Console MCP transport wiring applies the redaction policy to the executor', :booted_app do
+  let(:validator) do
+    Woods::Console::ModelValidator.new(
+      registry: { 'Post' => %w[created_at id status title updated_at] }
+    )
+  end
+  let(:stub_connection) do
+    double('connection', adapter_name: 'SQLite').tap do |conn|
+      allow(conn).to receive(:transaction) do |&block|
+        block.call
+      rescue ActiveRecord::Rollback
+        nil
+      end
+      allow(conn).to receive(:execute)
+      allow(conn).to receive(:select_all).and_return(
+        double('result', columns: %w[value], rows: [['legacy_api_token']])
+      )
+    end
+  end
+  let(:stub_pool) do
+    double('pool').tap { |pool| allow(pool).to receive(:with_connection).and_yield(stub_connection) }
+  end
+
+  def tools_call(name, arguments)
+    request = JSON.generate(
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: name, arguments: arguments }
+    )
+    JSON.parse(server.handle_json(request))
+  end
+
+  def refusal_text(response)
+    text = response.dig('result', 'content', 0, 'text')
+    expect(response.dig('result', 'isError')).to be(true),
+                                                 "expected a refusal, got a successful payload: #{text}"
+    text
+  end
+
+  shared_examples 'wired redaction-oracle refusals' do
+    it 'refuses a console_sql unpaired EAV value select without executing' do
+      response = tools_call('console_sql', sql: "SELECT value FROM settings WHERE key='legacy_api_token'")
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a console_query unpaired EAV value select without executing' do
+      response = tools_call('console_query', model: 'Post', select: ['title'])
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a console_sql aggregate over the EAV value without executing' do
+      response = tools_call('console_sql', sql: 'SELECT MAX(value) AS m FROM settings')
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a structured aggregate over a redacted column without executing' do
+      response = tools_call('console_query', model: 'Post', select: ['MAX(status) AS m'])
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a console_query AS alias over a redacted column without executing' do
+      response = tools_call('console_query', model: 'Post', select: ['status AS total'])
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a console_query scope oracle on a redacted column without executing' do
+      response = tools_call('console_query', model: 'Post', select: ['id'], scope: { 'status_gt' => 5 })
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a console_recent order oracle on a redacted column without executing' do
+      response = tools_call('console_recent', model: 'Post', order_by: 'status', columns: ['id'])
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a console_find lookup oracle on a redacted column without executing' do
+      response = tools_call('console_find', model: 'Post', by: { 'status' => 10 })
+
+      expect(refusal_text(response)).to start_with('validation: Rejected:')
+      expect(stub_connection).not_to have_received(:select_all)
+    end
+  end
+
+  describe 'connection-style transport SafeContext (exe/woods-console shape)' do
+    let(:server) do
+      Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: Woods::Console::SafeContext.new(connection: stub_connection),
+        redacted_columns: %w[status],
+        redacted_key_values: [
+          ConsoleContractMatrixRuntime::SETTINGS_EAV, ConsoleContractMatrixRuntime::POST_EAV
+        ],
+        connection: stub_connection,
+        read_tools_enabled: true,
+        model_tables: { 'Post' => 'posts' },
+        model_reflections: {}
+      )
+    end
+
+    include_examples 'wired redaction-oracle refusals'
+  end
+
+  describe 'pool-style transport SafeContext (RackMiddleware shape)' do
+    let(:server) do
+      Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: Woods::Console::SafeContext.new(pool: stub_pool),
+        redacted_columns: %w[status],
+        redacted_key_values: [
+          ConsoleContractMatrixRuntime::SETTINGS_EAV, ConsoleContractMatrixRuntime::POST_EAV
+        ],
+        read_tools_enabled: true,
+        model_tables: { 'Post' => 'posts' },
+        model_reflections: {}
+      )
+    end
+
+    include_examples 'wired redaction-oracle refusals'
+  end
+end
+
+# Audit finding B1, round 2: a transport SafeContext that carries its own
+# redaction lists must drive the renderer through the SAME policy-complete
+# context as the executor. The executor refuses oracle shapes, but direct
+# unaliased protected-column and paired-EAV selections are intentionally
+# permitted and depend entirely on render-time masking — with the renderer
+# disabled they return plaintext. Construction must also fail closed when
+# redaction is effectively configured but the supplied context cannot derive
+# a policy-complete context, instead of silently splitting the wiring.
+RSpec.describe 'Console MCP transport wiring applies a caller-carried redaction policy', :booted_app do
+  let(:validator) do
+    Woods::Console::ModelValidator.new(
+      registry: { 'Post' => %w[created_at id status title updated_at] }
+    )
+  end
+  let(:stub_connection) do
+    double('connection', adapter_name: 'SQLite').tap do |conn|
+      allow(conn).to receive(:transaction) do |&block|
+        block.call
+      rescue ActiveRecord::Rollback
+        nil
+      end
+      allow(conn).to receive(:execute)
+    end
+  end
+
+  before do
+    @original_context_format = Woods.configuration.context_format
+    Woods.configuration.context_format = :json
+  end
+
+  after do
+    Woods.configuration.context_format = @original_context_format
+  end
+
+  def build_with_carried_lists
+    Woods::Console::Server.build_embedded(
+      model_validator: validator,
+      safe_context: Woods::Console::SafeContext.new(
+        connection: stub_connection,
+        redacted_columns: %w[status],
+        redacted_key_values: [ConsoleContractMatrixRuntime::SETTINGS_EAV]
+      ),
+      read_tools_enabled: true,
+      model_tables: { 'Post' => 'posts' },
+      model_reflections: {}
+    )
+  end
+
+  def tools_call(server, name, arguments)
+    request = JSON.generate(
+      jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: name, arguments: arguments }
+    )
+    JSON.parse(server.handle_json(request))
+  end
+
+  def rendered_result(response)
+    text = response.dig('result', 'content', 0, 'text')
+    expect(response.dig('result', 'isError')).to be(false),
+                                                 "expected a successful payload, got an error: #{text}"
+    JSON.parse(text)
+  end
+
+  it 'masks a direct unaliased protected-column select through the shared context' do
+    allow(stub_connection).to receive(:select_all).and_return(
+      double('result', columns: %w[status], rows: [[10]])
+    )
+
+    response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT status FROM posts')
+    text = response.dig('result', 'content', 0, 'text')
+
+    expect(rendered_result(response).fetch('rows')).to eq([['[REDACTED]']])
+    expect(text).not_to include('10')
+  end
+
+  it 'masks a paired EAV selection through the shared context' do
+    allow(stub_connection).to receive(:select_all).and_return(
+      double('result', columns: %w[key value], rows: [%w[legacy_api_token tok_plain_secret]])
+    )
+
+    response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT key, value FROM settings')
+    text = response.dig('result', 'content', 0, 'text')
+
+    expect(rendered_result(response).fetch('rows')).to eq([['legacy_api_token', '[REDACTED]']])
+    expect(text).not_to include('tok_plain_secret')
+  end
+
+  it 'fails closed when the kwargs configure redaction but the context cannot derive a policy' do
+    non_derivable = double('non-derivable context')
+
+    expect do
+      Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: non_derivable,
+        redacted_columns: %w[status]
+      )
+    end.to raise_error(Woods::ConfigurationError, /policy/)
+  end
+
+  it 'fails closed when only the carried lists configure redaction and the context cannot derive a policy' do
+    non_derivable = double('non-derivable context', redacted_columns: %w[status], redacted_key_values: [])
+
+    expect do
+      Woods::Console::Server.build_embedded(
+        model_validator: validator,
+        safe_context: non_derivable
+      )
+    end.to raise_error(Woods::ConfigurationError, /policy/)
+  end
+
+  it 'still constructs when nothing is configured and the context cannot be inspected' do
+    opaque = double('opaque context')
+
+    expect(
+      Woods::Console::Server.build_embedded(model_validator: validator, safe_context: opaque)
+    ).to be_a(MCP::Server)
   end
 end

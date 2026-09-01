@@ -144,8 +144,8 @@ module Woods
             legacy_options_present: unsafe_eval_confirmation || unsafe_eval_audit_log_path
           )
 
-          safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
-          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables,
+          safe_ctx, render_ctx = policy_contexts(safe_context, redacted_columns, redacted_key_values)
+          ctx = build_response_context(safe_ctx: render_ctx, model_tables: model_tables,
                                        model_reflections: model_reflections)
 
           # Wire the same TableGate into the executor so sql/query are blocked
@@ -153,7 +153,7 @@ module Woods
           # was only consulted on the render path, leaving the defense inert
           # for the sql and query tools).
           executor = EmbeddedExecutor.new(
-            model_validator: model_validator, safe_context: safe_context,
+            model_validator: model_validator, safe_context: safe_ctx,
             connection: connection, read_tools_enabled: read_tools_enabled,
             table_gate: ctx&.table_gate
           )
@@ -207,19 +207,69 @@ module Woods
           spec.input_schema
         end
 
-        # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
+        # Build the SafeContext (Layer 3) pair the embedded server runs on:
+        # [executor context, render context].
         #
+        # Audit finding B1: the transport-provided SafeContext owns the
+        # connection/pool, the statement timeout, and the rolled-back
+        # transaction. Building a second, render-only SafeContext for the
+        # redaction lists left the executor's context without the policy, so
+        # every executor-side redaction-oracle refusal was dead on the real
+        # transports. Whenever redaction is EFFECTIVELY configured — the
+        # kwargs when either is supplied, otherwise the lists the supplied
+        # context itself carries — derive ONE policy-complete context from
+        # the transport context ({SafeContext#with_redaction_policy} — same
+        # pool/timeout/transaction behavior, plus the effective lists) and
+        # hand that single context to both the executor and the response
+        # renderer. The executor refuses oracle shapes; the renderer masks
+        # the direct unaliased selections that remain permitted.
+        #
+        # Fails closed ({Woods::ConfigurationError}) when redaction is
+        # effectively configured but the supplied object cannot derive a
+        # policy-complete context: the previous silent split wiring left the
+        # renderer disabled while the executor still ran the policy. When
+        # nothing is effectively configured — no kwargs, and a context that
+        # cannot be inspected — the caller's context passes through
+        # untouched and the render context stays nil (NullResponseContext).
+        #
+        # @param safe_context [SafeContext, nil] Transport-provided Layer 3
         # @param redacted_columns [Array<String>]
         # @param redacted_key_values [Array<Hash>]
-        # @return [SafeContext, nil]
-        def build_safe_context(redacted_columns, redacted_key_values)
-          return nil unless redacted_columns.any? || redacted_key_values.any?
-
-          SafeContext.new(
-            connection: nil,
-            redacted_columns: redacted_columns,
-            redacted_key_values: redacted_key_values
+        # @return [Array(SafeContext, SafeContext, nil)] executor and render contexts
+        def policy_contexts(safe_context, redacted_columns, redacted_key_values)
+          configured_columns, configured_key_values = effective_policy(
+            safe_context, redacted_columns, redacted_key_values
           )
+          return [safe_context, nil] unless configured_columns.any? || configured_key_values.any?
+          unless safe_context.respond_to?(:with_redaction_policy)
+            raise Woods::ConfigurationError,
+                  'Console redaction is configured, but the supplied SafeContext cannot derive a ' \
+                  'policy-complete context (SafeContext#with_redaction_policy). Construction fails ' \
+                  'closed: the executor would run with the policy while the renderer stays disabled.'
+          end
+
+          derived = safe_context.with_redaction_policy(
+            redacted_columns: configured_columns,
+            redacted_key_values: configured_key_values
+          )
+          [derived, derived]
+        end
+
+        # The effective redaction policy: the kwargs when either is supplied
+        # (the documented configuration surface), otherwise the lists the
+        # supplied context itself carries. Returns empty lists when no kwargs
+        # were supplied and the context cannot be inspected (nil, or a
+        # duck-typed object without the redacted_* readers) — nothing is
+        # effectively configured, so construction proceeds with the caller's
+        # context untouched.
+        #
+        # @return [Array(Array, Array)] [columns, key_values]
+        def effective_policy(safe_context, redacted_columns, redacted_key_values)
+          return [redacted_columns, redacted_key_values] if redacted_columns.any? || redacted_key_values.any?
+          return [[], []] unless safe_context.respond_to?(:redacted_columns) &&
+                                 safe_context.respond_to?(:redacted_key_values)
+
+          [Array(safe_context.redacted_columns), Array(safe_context.redacted_key_values)]
         end
 
         # Bundle the three response-safety layers into a ResponseContext the

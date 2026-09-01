@@ -88,7 +88,7 @@ module Woods
     #     ]
     #   )
     #
-    class SafeContext
+    class SafeContext # rubocop:disable Metrics/ClassLength
       # Thread-local key that exposes the connection currently leased for
       # the in-flight #execute block. Handlers should prefer this over
       # acquiring their own connection so every request stays on a single
@@ -183,6 +183,24 @@ module Woods
           out[key] = @redacted_columns.include?(key) ? '[REDACTED]' : value
         end
         apply_key_value_redaction(redacted)
+      end
+
+      # Return a SafeContext that keeps THIS context's execution behavior —
+      # the same pool (or wrapped connection), statement timeout, and
+      # rolled-back transaction — with the given redaction policy applied,
+      # so the executor and the renderer can share one policy-complete
+      # context. A non-empty kwarg defines that list (the documented
+      # configuration surface); an empty kwarg preserves the list this
+      # context already carries, so spec-style wiring that configures
+      # lists on the context keeps working. See {initialize} for the
+      # kwarg shapes.
+      #
+      # @return [SafeContext]
+      def with_redaction_policy(redacted_columns: [], redacted_key_values: [])
+        policy_columns = redacted_columns.empty? ? @redacted_columns : redacted_columns
+        policy_key_values = redacted_key_values.empty? ? @redacted_key_values : redacted_key_values
+        SafeContext.new(pool: @pool, timeout_ms: @timeout_ms,
+                        redacted_columns: policy_columns, redacted_key_values: policy_key_values)
       end
 
       private

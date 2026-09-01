@@ -306,6 +306,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8-forcing binary read (the mode unit loading already used), so an
   index is read correctly regardless of host locale. No re-index needed.
 
+- **Console redaction-oracle refusals now fire on the real transports.**
+  `Server.build_embedded` handed the executor the transport-provided
+  SafeContext (connection/pool, statement timeout, rolled-back transaction)
+  while building a separate, render-only SafeContext for the configured
+  `console_redacted_columns`/`console_redacted_key_values`. The executor-side
+  refusals (redacted scope/filter keys, find locators, order keys, aggregates
+  and aliases over protected columns, unpaired EAV value selects, protected
+  raw-SQL usage) all read the executor's context, so on the
+  `exe/woods-console` and RackMiddleware wiring every one of them was dead: a
+  comparison, aggregate, sort, or unpaired-EAV read executed against the
+  database and returned plaintext before render-side redaction ever ran.
+  `build_embedded` now derives a single policy-complete SafeContext from the
+  transport context (`SafeContext#with_redaction_policy`), preserving its
+  pool, timeout, and rolled-back transaction while applying the configured
+  policy, and passes that one context to both the executor and the response
+  renderer. The policy comes from the kwargs when supplied and otherwise from
+  the lists the supplied context itself carries — a context that carries its
+  own redaction lists now renders through the same policy-complete context
+  instead of losing its renderer. When redaction is effectively configured
+  but the supplied context cannot derive a policy-complete context,
+  construction fails closed with a `ConfigurationError` rather than leaving
+  the renderer disabled. Render-side masking behavior is unchanged.
+
+- **TableGate catches blocked tables hidden in MySQL executable comments at
+  FROM, JOIN, and subquery lead position.** The noise stripper deliberately
+  preserves `/*! ... */` forms (MySQL executes their body), but the scanner's
+  FROM/JOIN lead grammars cannot start on a comment marker, so
+  `SELECT * FROM /*!authorizations*/`, `SELECT * FROM /*!99999*/
+  authorizations`, `users JOIN /*!authorizations*/ a ...`, and
+  `FROM (SELECT * FROM /*!authorizations*/) t` surfaced no identifier and the
+  blocked table executed. The scanner now scans two additional views of each
+  dialect's stripped text — every executable comment replaced by its body,
+  and the whole form dropped — mirroring SqlValidator's dual
+  executable-comment semantics for lock clauses. The preserved form is still
+  scanned, so the post-comma shape keeps working; on PostgreSQL the `/*!`
+  form is a syntax error, so extra detections there are over-detection by
+  design.
+
 - **A failed wholesale re-run can no longer publish a graph with phantom
   units (M8).** `replace_type_wholesale`'s rescue swallowed every failure.
   A unit's graph node is registered before its JSON is written, the removal
