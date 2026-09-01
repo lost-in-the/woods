@@ -283,6 +283,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8-forcing binary read (the mode unit loading already used), so an
   index is read correctly regardless of host locale. No re-index needed.
 
+### Testing
+
+- **The live-Redis session-tracer contract spec now runs in CI (M6).** The
+  `spec/session_tracer/redis_store_live_spec.rb` suite from the P4 eviction
+  rework was gated on `WOODS_RUN_LIVE_BACKENDS=1` but appeared in no CI
+  job's rspec run, so its six examples (including the two-client Lua
+  migration race) never executed anywhere. The `live-backends` job now
+  lists it; that job already provides the ephemeral `redis` client install,
+  the redis service, and `WOODS_REDIS_URL`.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
