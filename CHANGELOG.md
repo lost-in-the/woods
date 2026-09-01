@@ -68,6 +68,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Vector dump hydration fails closed on a truncated or mismatched `vectors.idx` (M3).** The
+  idx parser read each record's length, id, and offset with no end-of-file guard: a dump
+  truncated mid-record hydrated a garbage short id silently, an idx holding more records than
+  the float blob crashed hydration with a bare `NoMethodError`, and an idx holding fewer
+  silently hydrated fewer vectors than the dump header claims. Parsing now raises the same
+  typed `UnsupportedArtifact` the bin side raises for a truncated float payload when a record
+  would read past EOF, and the idx record count is cross-checked against the header's
+  `vector_count` after parsing, naming both counts and prompting a re-run of `woods:embed` on
+  mismatch.
+
 - **Best-effort Git provenance and file-history probes are now quiet and rooted
   at the extracted application.** Expected failures in source copies without a
   `.git` directory no longer emit `fatal: not a git repository` on stderr, and

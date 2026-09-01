@@ -691,6 +691,106 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
     end
   end
 
+  describe 'failure-mode: idx truncation and count cross-check (M3)' do
+    # vectors.idx and the vectors.bin float blob are two halves of one dump:
+    # the idx maps ids to blob offsets, the header counts what the blob
+    # holds. The bin side already raises typed UnsupportedArtifact for a
+    # truncated float payload (M10); the idx side must hold the same
+    # fail-closed contract. parse_idx used to read past EOF unguarded (a
+    # mid-record truncation produced garbage ids or an untyped unpack
+    # error) and nothing checked that the idx record count agrees with the
+    # header's vector_count — an idx longer than the bin crashed hydration
+    # with NoMethodError on nil.length, a shorter one silently hydrated
+    # fewer vectors than the dump claims. Promotion ordering makes live
+    # exposure post-promotion-corruption-only, but fail-closed-with-typed-
+    # error is this file's own standard.
+
+    let(:dump_dir) { artifact.new_dump_dir }
+    let(:dim) { 4 }
+
+    before { artifact.promote(dump_dir) }
+
+    def write_dump(count)
+      store = make_store((1..count).map { |i| ["u#{i}", Array.new(dim) { rand(-1.0..1.0) }] })
+      dump_dir.mkpath
+      described_class.dump(store, artifact, dump_dir)
+    end
+
+    def idx_record(id, offset)
+      id_bytes = id.encode('UTF-8').b
+      [id_bytes.bytesize].pack('L<') + id_bytes + [offset].pack('Q<')
+    end
+
+    def rewrite_idx(records)
+      File.binwrite(dump_dir.join('vectors.idx').to_s, records.join)
+    end
+
+    it 'raises UnsupportedArtifact when vectors.idx is truncated mid-record' do
+      write_dump(3)
+      idx_path = dump_dir.join('vectors.idx')
+      full = File.binread(idx_path.to_s)
+      # Cut into the last record: its length field survives, the id does not.
+      File.binwrite(idx_path.to_s, full.byteslice(0, full.bytesize - 9))
+
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /truncated/)
+    end
+
+    it 'raises UnsupportedArtifact when a record would read past EOF' do
+      write_dump(3)
+      idx_path = dump_dir.join('vectors.idx')
+      full = File.binread(idx_path.to_s)
+      # Corrupt the last record's length field to claim far more id bytes
+      # than the file holds.
+      corrupt = full.byteslice(0, full.bytesize - 10) + [0xFFFF_FFFF].pack('L<')
+      File.binwrite(idx_path.to_s, corrupt)
+
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /truncated/)
+    end
+
+    it 'raises UnsupportedArtifact naming both counts when the idx holds more records than the bin' do
+      write_dump(2)
+      rewrite_idx([idx_record('a', 28), idx_record('b', 44), idx_record('c', 60)])
+
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /holds 3 id records but .* declares 2 vectors/)
+    end
+
+    it 'raises UnsupportedArtifact naming both counts when the idx holds fewer records than the bin' do
+      write_dump(3)
+      rewrite_idx([idx_record('a', 28), idx_record('b', 44)])
+
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /holds 2 id records but .* declares 3 vectors/)
+    end
+
+    it 'the count-mismatch error names re-running woods:embed and both file paths' do
+      write_dump(2)
+      rewrite_idx([idx_record('a', 28)])
+
+      error = nil
+      begin
+        described_class.load_or_empty(artifact)
+      rescue Woods::MCP::UnsupportedArtifact => e
+        error = e
+      end
+
+      expect(error).not_to be_nil
+      expect(error.message).to include('re-run woods:embed')
+      expect(error.details[:idx_count]).to eq(1)
+      expect(error.details[:bin_vector_count]).to eq(2)
+      expect(error.details[:path].to_s).to end_with('vectors.idx')
+      expect(error.message).to include('vectors.bin')
+    end
+
+    it 'still loads an empty dump: zero idx records against a zero-vector header' do
+      write_dump(0)
+      loaded = described_class.load_or_empty(artifact)
+      expect(loaded.count).to eq(0)
+    end
+  end
+
   describe 'resolved_config integration' do
     let(:dim) { 4 }
     let(:config) { double('rc', dimension: dim, model_name: 'nomic-embed-text') }
