@@ -1923,36 +1923,39 @@ module Woods
     # category with count and top-5 namespace breakdown, rather than enumerating
     # every unit. Per-unit detail is available in the per-category _index.json files.
     #
+    # The full path derives its numbers from the in-memory results. An
+    # incremental run holds only changed units in memory, so it derives the
+    # same shape from the persisted per-type _index.json files — the same
+    # source {#persisted_counts} feeds the manifest from, which is what keeps
+    # SUMMARY.md's totals agreeing with manifest.json. (M4: the hardlinked
+    # previous generation's summary this path used to leave in place carried
+    # stale totals after any run that added or removed units.) The `Generated:`
+    # stamp keeps its meaning either way: it names the moment the summary was
+    # written.
+    #
     # @return [void]
     def write_structural_summary
-      return if @results.empty?
+      stats = @results.empty? ? persisted_summary_stats : results_summary_stats
+      return unless stats
 
-      total_units    = @results.values.sum(&:size)
+      total_units    = stats.sum { |_, s| s[:count] }
       # Matches the manifest's count (`write_manifest`/`persisted_counts`
-      # both sum `u.chunks.size` directly) — the previous `[size, 1].max`
+      # both sum chunk counts directly) — the previous `[size, 1].max`
       # floor made SUMMARY.md disagree with manifest.json for every
       # unchunked unit.
-      total_chunks   = @results.sum { |_, units| units.sum { |u| u.chunks.size } }
-      category_count = @results.count { |_, units| units.any? }
+      total_chunks   = stats.sum { |_, s| s[:chunks] }
 
       summary = []
       summary << '# Codebase Index Summary'
       summary << "Generated: #{Time.current.iso8601}"
       summary << "Rails #{Rails.version} / Ruby #{RUBY_VERSION}"
-      summary << "Units: #{total_units} | Chunks: #{total_chunks} | Categories: #{category_count}"
+      summary << "Units: #{total_units} | Chunks: #{total_chunks} | Categories: #{stats.size}"
       summary << ''
 
-      @results.each do |type, units|
-        next if units.empty?
+      stats.each do |type, s|
+        summary << "## #{type.to_s.titleize} (#{s[:count]})"
 
-        summary << "## #{type.to_s.titleize} (#{units.size})"
-
-        ns_counts = units
-                    .group_by { |u| u.namespace.nil? || u.namespace.empty? ? '(root)' : u.namespace }
-                    .transform_values(&:size)
-                    .sort_by { |_, count| -count }
-                    .first(5)
-
+        ns_counts = s[:namespaces].sort_by { |_, count| -count }.first(5)
         ns_parts = ns_counts.map { |ns, count| "#{ns} #{count}" }
         summary << "Namespaces: #{ns_parts.join(', ')}" unless ns_parts.empty?
         summary << ''
@@ -1982,6 +1985,63 @@ module Woods
         payload_dir.join('SUMMARY.md'),
         summary.join("\n")
       )
+    end
+
+    # Per-type `{ count:, chunks:, namespaces: }` for {#write_structural_summary},
+    # derived from the in-memory results a full extraction holds.
+    #
+    # @return [Hash{Symbol => Hash}]
+    def results_summary_stats
+      @results.each_with_object({}) do |(type, units), stats|
+        next if units.empty?
+
+        stats[type] = {
+          count: units.size,
+          chunks: units.sum { |u| u.chunks.size },
+          namespaces: namespace_histogram(units.map(&:namespace))
+        }
+      end
+    end
+
+    # The incremental path's counterpart to {#results_summary_stats}: the same
+    # shape read back from the persisted per-type _index.json files, the source
+    # {#persisted_counts} uses for the manifest — so the two artifacts cannot
+    # disagree about totals. Sorted for determinism, since the glob order is
+    # the filesystem's.
+    #
+    # @return [Hash{Symbol => Hash}, nil] nil when the payload holds no type
+    #   indexes at all, so a bare index writes no summary — matching the full
+    #   path's early return when it extracted nothing
+    def persisted_summary_stats
+      stats = {}
+
+      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
+        entries = JSON.parse(AtomicFile.read(index_path))
+        next if entries.empty?
+
+        stats[File.basename(File.dirname(index_path)).to_sym] = {
+          count: entries.size,
+          chunks: entries.sum { |e| e['chunk_count'].to_i },
+          namespaces: namespace_histogram(entries.map { |e| e['namespace'] })
+        }
+      rescue JSON::ParserError => e
+        # Same posture as {#persisted_counts}: an unreadable index drops that
+        # type from the manifest and the summary alike, so the two still agree.
+        type = File.basename(File.dirname(index_path))
+        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in summary totals: #{e.message}")
+      end
+
+      stats.empty? ? nil : stats
+    end
+
+    # Group namespaces for a SUMMARY.md section: a missing or empty namespace
+    # is the root, everything else counts as-is.
+    #
+    # @param namespaces [Array<String, nil>]
+    # @return [Hash{String => Integer}]
+    def namespace_histogram(namespaces)
+      namespaces.group_by { |ns| ns.nil? || ns.empty? ? '(root)' : ns }
+                .transform_values(&:size)
     end
 
     def regenerate_type_index(type_key)

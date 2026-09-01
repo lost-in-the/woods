@@ -296,6 +296,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run aborts before publication and the previous generation stays resolved;
   a failure that landed nothing is still swallowed, as before.
 
+- **Incremental runs no longer ship the previous generation's SUMMARY.md
+  (M4).** `write_structural_summary` returned early because an incremental
+  run holds no units in memory, so the hardlinked summary of the last full
+  extraction was served unchanged — its `Units:`/`Chunks:` totals went stale
+  the first time a run added or removed a unit. The summary is now derived on
+  the incremental path from the same persisted per-type `_index.json` files
+  the manifest counts, so the two artifacts agree; the `Generated:` stamp
+  still names the moment the summary was written. The equivalence oracle now
+  also compares SUMMARY.md's totals against the manifest of the same index,
+  so this drift can no longer hide.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes

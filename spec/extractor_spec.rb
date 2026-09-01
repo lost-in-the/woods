@@ -2207,11 +2207,61 @@ RSpec.describe Woods::Extractor do
       expect(content).not_to include('## Services')
     end
 
-    it 'returns early without writing when @results is empty' do
+    it 'returns early without writing when there is nothing to summarize' do
       extractor.instance_variable_set(:@results, {})
       extractor.send(:write_structural_summary)
 
       expect(File.exist?(File.join(output_dir, 'SUMMARY.md'))).to be false
+    end
+
+    # The incremental path holds no units in memory, so the summary used to
+    # return early here and the previous generation's hardlinked SUMMARY.md
+    # shipped with stale totals (M4). It must now be derived from the same
+    # source the manifest's persisted_counts uses — the per-type _index.json
+    # files on disk.
+    context 'on the incremental path, where @results stays empty (M4)' do
+      def seed_type_index(type, entries)
+        dir = File.join(output_dir, type)
+        FileUtils.mkdir_p(dir)
+        File.write(File.join(dir, '_index.json'), JSON.generate(entries))
+      end
+
+      before do
+        require 'woods'
+        extractor.instance_variable_set(:@results, {})
+        seed_type_index('models', [
+                          { 'identifier' => 'User', 'file_path' => 'app/models/user.rb', 'namespace' => nil,
+                            'estimated_tokens' => 10, 'chunk_count' => 2 },
+                          { 'identifier' => 'Post', 'file_path' => 'app/models/post.rb', 'namespace' => 'Admin::',
+                            'estimated_tokens' => 10, 'chunk_count' => 0 },
+                          { 'identifier' => 'Note', 'file_path' => 'app/models/note.rb', 'namespace' => 'Admin::',
+                            'estimated_tokens' => 10, 'chunk_count' => 1 }
+                        ])
+        seed_type_index('jobs', [
+                          { 'identifier' => 'SyncJob', 'file_path' => 'app/jobs/sync_job.rb', 'namespace' => nil,
+                            'estimated_tokens' => 10, 'chunk_count' => 1 }
+                        ])
+      end
+
+      it 'derives its totals and sections from the persisted type indexes' do
+        extractor.send(:write_structural_summary)
+        content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+        expect(content).to include('Units: 4 | Chunks: 4 | Categories: 2')
+        expect(content).to include('## Models (3)')
+        expect(content).to include('## Jobs (1)')
+        expect(content).to include('Namespaces: Admin:: 2, (root) 1')
+      end
+
+      it 'agrees with the manifest the incremental path writes' do
+        extractor.send(:write_manifest, incremental: true)
+        extractor.send(:write_structural_summary)
+
+        manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+        content = File.read(File.join(output_dir, 'SUMMARY.md'))
+
+        expect(content).to include("Units: #{manifest['total_units']} | Chunks: #{manifest['total_chunks']}")
+      end
     end
 
     it 'includes dependency overview section' do
