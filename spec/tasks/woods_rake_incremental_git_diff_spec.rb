@@ -33,6 +33,12 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     # commit.gpgsign=true hangs every commit below on a machine with a locked
     # agent. Pin the hermetic behaviour, same as spec/git_provenance_spec.rb.
     run(dir, 'git', 'config', 'commit.gpgsign', 'false')
+    # gc.autoDetach makes `git commit` spawn a background gc that keeps
+    # writing .git/objects after the command returns; the mktmpdir cleanup
+    # then races it and dies with Errno::ENOTEMPTY on loaded runners (CI,
+    # Ruby 3.2 job). Defuse the detach so every gc work happens inline.
+    run(dir, 'git', 'config', 'gc.autoDetach', 'false')
+    run(dir, 'git', 'config', 'gc.auto', '0')
   end
 
   it 'reaches both halves of a rename and an unescaped UTF-8 path' do
