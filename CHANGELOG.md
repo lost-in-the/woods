@@ -283,6 +283,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8-forcing binary read (the mode unit loading already used), so an
   index is read correctly regardless of host locale. No re-index needed.
 
+- **Console redaction-oracle refusals now fire on the real transports.**
+  `Server.build_embedded` handed the executor the transport-provided
+  SafeContext (connection/pool, statement timeout, rolled-back transaction)
+  while building a separate, render-only SafeContext for the configured
+  `console_redacted_columns`/`console_redacted_key_values`. The executor-side
+  refusals (redacted scope/filter keys, find locators, order keys, aggregates
+  and aliases over protected columns, unpaired EAV value selects, protected
+  raw-SQL usage) all read the executor's context, so on the
+  `exe/woods-console` and RackMiddleware wiring every one of them was dead: a
+  comparison, aggregate, sort, or unpaired-EAV read executed against the
+  database and returned plaintext before render-side redaction ever ran.
+  `build_embedded` now derives a single policy-complete SafeContext from the
+  transport context (`SafeContext#with_redaction_policy`), preserving its
+  pool, timeout, and rolled-back transaction while applying the configured
+  policy, and passes that one context to both the executor and the response
+  renderer. Render-side masking behavior is unchanged.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes

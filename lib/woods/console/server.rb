@@ -144,8 +144,8 @@ module Woods
             legacy_options_present: unsafe_eval_confirmation || unsafe_eval_audit_log_path
           )
 
-          safe_ctx = build_safe_context(redacted_columns, redacted_key_values)
-          ctx = build_response_context(safe_ctx: safe_ctx, model_tables: model_tables,
+          safe_ctx, render_ctx = policy_contexts(safe_context, redacted_columns, redacted_key_values)
+          ctx = build_response_context(safe_ctx: render_ctx, model_tables: model_tables,
                                        model_reflections: model_reflections)
 
           # Wire the same TableGate into the executor so sql/query are blocked
@@ -153,7 +153,7 @@ module Woods
           # was only consulted on the render path, leaving the defense inert
           # for the sql and query tools).
           executor = EmbeddedExecutor.new(
-            model_validator: model_validator, safe_context: safe_context,
+            model_validator: model_validator, safe_context: safe_ctx,
             connection: connection, read_tools_enabled: read_tools_enabled,
             table_gate: ctx&.table_gate
           )
@@ -205,6 +205,44 @@ module Woods
         # @return [Hash]
         def spec_schema(spec)
           spec.input_schema
+        end
+
+        # Build the SafeContext (Layer 3) pair the embedded server runs on:
+        # [executor context, render context].
+        #
+        # Audit finding B1: the transport-provided SafeContext owns the
+        # connection/pool, the statement timeout, and the rolled-back
+        # transaction. Building a second, render-only SafeContext for the
+        # redaction lists left the executor's context without the policy, so
+        # every executor-side redaction-oracle refusal was dead on the real
+        # transports. When redaction is configured, derive ONE
+        # policy-complete context from the transport context
+        # ({SafeContext#with_redaction_policy} — same pool/timeout/transaction
+        # behavior, plus the configured lists) and hand that single context to
+        # both the executor and the response renderer.
+        #
+        # - Both kwargs empty: the caller's context passes through untouched
+        #   and the render context stays nil (NullResponseContext) — exactly
+        #   the previous wiring.
+        # - A duck-typed context that cannot carry the derivation: fall back
+        #   to the previous split (executor: caller's context, render:
+        #   synthetic policy context).
+        #
+        # @param safe_context [SafeContext, nil] Transport-provided Layer 3
+        # @param redacted_columns [Array<String>]
+        # @param redacted_key_values [Array<Hash>]
+        # @return [Array(SafeContext, SafeContext, nil)] executor and render contexts
+        def policy_contexts(safe_context, redacted_columns, redacted_key_values)
+          return [safe_context, nil] unless redacted_columns.any? || redacted_key_values.any?
+          unless safe_context.respond_to?(:with_redaction_policy)
+            return [safe_context, build_safe_context(redacted_columns, redacted_key_values)]
+          end
+
+          derived = safe_context.with_redaction_policy(
+            redacted_columns: redacted_columns,
+            redacted_key_values: redacted_key_values
+          )
+          [derived, derived]
         end
 
         # Build a SafeContext (Layer 3) from redaction settings, or nil when nothing is configured.
