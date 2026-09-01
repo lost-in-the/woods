@@ -87,16 +87,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Non-DML keywords that are plausible column names (`do`, `lock`, `release`)
   keep the leader-anchored rule unchanged.
 
-- **`console_query` placeholder scopes accept table-qualified columns the same
-  way the public path does.** A `["posts.status = ?", 10]` scope passed the
-  public schema but was refused at execution with
+- **`console_query` placeholder scopes resolve table-qualified columns
+  case-insensitively, exactly like the public path.** A `["posts.status = ?",
+  10]` scope passed the public schema but was refused at execution with
   `Unknown table 'posts'. Cannot validate qualified column 'posts.status'.`
   whenever the executor's ModelValidator had no model-to-table mapping to
-  resolve the qualifier. The query scope path now resolves a `table.column`
-  reference whose table is the queried model's own table against that model's
-  own columns, so own-table qualification behaves exactly like the bare-column
-  form. Redaction stays strict: a qualified reference to a redacted column
-  (own table or foreign table) still refuses with the typed redaction message,
+  resolve the qualifier, and a case variant (`["Posts.status = ?", 10]`) was
+  refused even with the mapping. The query scope path now resolves a
+  `table.column` reference whose table matches the queried model's own table
+  (case-insensitively, matching unquoted SQL identifier semantics) against
+  that model's own columns, so own-table qualification behaves exactly like
+  the bare-column form. Redaction stays strict: a redacted column referenced
+  through any case variant (`Users.Password_Digest = ?`, `Orders.Amount = ?`,
+  bare `AMOUNT`) refuses with the typed redaction message — the refusal now
+  runs before column resolution and matches column names case-insensitively —
   and any other qualified table still resolves through the fail-closed
   table-column check.
 

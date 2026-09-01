@@ -619,10 +619,15 @@ module Woods
       # comparison, aggregate, or sort-order oracle before redaction ever
       # runs.
       #
+      # Matching is case-insensitive: unquoted SQL identifiers are
+      # case-insensitive, so a case variant of a redacted column (`AMOUNT`,
+      # `Password_Digest`) must get this typed refusal rather than fall
+      # through to an existence check.
+      #
       # @param column [String] bare column name (no schema/table qualifier)
       # @raise [ValidationError] if the column is on console_redacted_columns
       def refuse_redacted_column!(column)
-        return unless @safe_context.redacted_columns.include?(column.to_s)
+        return unless @safe_context.redacted_columns.any? { |name| name.to_s.casecmp?(column.to_s) }
 
         raise ValidationError,
               "Rejected: column '#{column}' is redacted (console_redacted_columns) and cannot be used " \
@@ -634,12 +639,15 @@ module Woods
       # the selector used to identify sensitive rows and remains a valid
       # predicate, while the value column is the secret-bearing field.
       #
+      # Both layers match case-insensitively (see {#refuse_redacted_column!}):
+      # a case variant of a protected column must keep the typed refusal.
+      #
       # @param column [String, Symbol] already-normalized bare or qualified column name
       # @raise [ValidationError] when the column is protected for predicates
       def refuse_protected_predicate_column!(column)
         base = base_column_name(column.to_s)
-        return refuse_redacted_column!(base) if @safe_context.redacted_columns.include?(base)
-        return unless redacted_eav_value_columns.include?(base)
+        return refuse_redacted_column!(base) if @safe_context.redacted_columns.any? { |name| name.to_s.casecmp?(base) }
+        return unless redacted_eav_value_columns.any? { |name| name.to_s.casecmp?(base) }
 
         raise ValidationError,
               "Rejected: EAV value column '#{base}' is redacted (console_redacted_key_values) and cannot " \
@@ -1179,8 +1187,13 @@ module Woods
         match = Server::QUERY_SCOPE_TEMPLATE_REGEXP.match(scope.first)
         raise ValidationError, "scope: unsupported SQL template #{scope.first.inspect}" unless match
 
-        validate_column_reference!(match[1], model_name, own_table: own_table_name(model))
+        # Redaction refusal runs BEFORE column resolution: a redacted column
+        # referenced through any case variant (`Users.Password_Digest = ?`)
+        # must get the typed redaction refusal, never a pass-through to the
+        # existence check (whose case-sensitive column lookup would report a
+        # generic "Unknown column" instead).
         refuse_protected_predicate_column!(match[1])
+        validate_column_reference!(match[1], model_name, own_table: own_table_name(model))
         scope
       end
 
@@ -1256,9 +1269,12 @@ module Woods
       # The table half must be a safe identifier and unblocked (TableGate)
       # before column ownership is resolved: +own_table+ (the queried
       # model's own table name) short-circuits resolution to that model's
-      # own columns, exactly like the bare form; the qualifier is compared,
-      # never looked up, so this cannot smuggle a foreign table and
-      # redaction still applies to the reference as a whole. Anything else
+      # own columns, exactly like the bare form; the qualifier is compared
+      # case-insensitively (unquoted SQL identifiers are case-insensitive)
+      # against that one table name, never looked up, so this cannot
+      # smuggle a foreign table and redaction still applies to the
+      # reference as a whole. The column half keeps ModelValidator's exact
+      # existence check, identical to the bare-column form. Anything else
       # resolves through {ModelValidator#validate_table_column!}, which
       # fails closed when the table side cannot be proven.
       #
@@ -1278,7 +1294,7 @@ module Woods
           raise ValidationError, e.message
         end
 
-        if own_table && table == own_table
+        if own_table && table.casecmp?(own_table)
           # TableGate only proves `table` isn't *blocked* — it says nothing
           # about whether `col` actually exists there. Validate ownership
           # against the real schema before this reference can reach SQL.

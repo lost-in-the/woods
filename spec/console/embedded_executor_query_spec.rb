@@ -398,6 +398,36 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool' do
       expect(relation).to have_received(:where).with('orders.status = ?', 'paid')
       expect(response['result']['rows']).to eq([['paid', 500], ['pending', 200]])
     end
+
+    it 'resolves a capitalized own-table qualifier like the lowercase form' do
+      response = unmapped_executor.send_request({
+                                                  'tool' => 'query',
+                                                  'params' => {
+                                                    'model' => 'Order',
+                                                    'select' => ['status'],
+                                                    'scope' => ['Orders.status = ?', 'paid']
+                                                  }
+                                                })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:where).with('Orders.status = ?', 'paid')
+      expect(response['result']['rows']).to eq([['paid', 500], ['pending', 200]])
+    end
+
+    it 'resolves an uppercase own-table qualifier like the lowercase form' do
+      response = unmapped_executor.send_request({
+                                                  'tool' => 'query',
+                                                  'params' => {
+                                                    'model' => 'Order',
+                                                    'select' => ['status'],
+                                                    'scope' => ['ORDERS.status = ?', 'paid']
+                                                  }
+                                                })
+
+      expect(response['ok']).to be true
+      expect(relation).to have_received(:where).with('ORDERS.status = ?', 'paid')
+      expect(response['result']['rows']).to eq([['paid', 500], ['pending', 200]])
+    end
   end
 
   describe 'limit validation' do
@@ -950,6 +980,54 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
 
       expect(response).to include('ok' => false, 'error_type' => 'validation')
       expect(response['error']).to match(/column 'password_digest' is redacted/i)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a case-variant own-table redacted column with the typed redaction message' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['Orders.Amount = ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'amount' is redacted/i)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a case-variant foreign-table redacted column with the typed redaction message' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['Users.Password_Digest = ?', 'x']
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'password_digest' is redacted/i)
+      expect(relation).not_to have_received(:where)
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'refuses a bare case-variant redacted column with the typed redaction message' do
+      response = executor.send_request({
+                                         'tool' => 'query',
+                                         'params' => {
+                                           'model' => 'Order',
+                                           'select' => ['status'],
+                                           'scope' => ['AMOUNT = ?', 100]
+                                         }
+                                       })
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/column 'amount' is redacted/i)
       expect(relation).not_to have_received(:where)
       expect(connection).not_to have_received(:select_all)
     end
