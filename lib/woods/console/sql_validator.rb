@@ -269,6 +269,40 @@ module Woods
         [kw, /(?:\A|[;\n])\s*#{kw}\b/i]
       end.freeze
 
+      # DML keywords that are additionally forbidden as bare tokens ANYWHERE
+      # in the statement body, not just at statement-leader positions.
+      #
+      # {FORBIDDEN_BODY_REGEXES} stays leader-anchored for the full
+      # {FORBIDDEN_KEYWORDS} set because words like `do`, `lock`, `release`,
+      # `handler` are plausible bare column names (`WHERE do = 1` is a read,
+      # not a write). INSERT, UPDATE, and DELETE cannot hide behind that
+      # argument: they are reserved words on every supported backend, so a
+      # bare occurrence inside an allowed statement is never an identifier —
+      # it is a mid-body write (e.g. `SELECT 1 UPDATE posts SET status = 10`)
+      # that used to pass validation and fail as an adapter-level syntax
+      # error instead of a typed refusal at this boundary.
+      #
+      # MERGE is deliberately NOT in this set: SQLite permits an unquoted
+      # `merge` column, so body-level MERGE scanning would false-positive on
+      # ordinary selects like `SELECT merge FROM posts`. MERGE statements
+      # stay covered where they are actually statements: the allowed-prefix
+      # rule (MERGE is in {FORBIDDEN_KEYWORDS}, checked at statement start)
+      # and {WITH_ATTACHED_DML_PATTERN} for the WITH-attached shape.
+      #
+      # Scanned against the noise-stripped SQL ({SqlNoiseStripper}), so
+      # literal content never triggers (`SELECT 'update' AS word` is a
+      # value, not a write), and `\b` keeps identifier-shaped column names
+      # (`updated_at`, `last_update`) accepted. Multi-word lock clauses
+      # (`FOR UPDATE`) keep their dedicated earlier check, so its message
+      # still wins over this one.
+      DML_BODY_KEYWORDS = %w[INSERT UPDATE DELETE].freeze
+
+      # Frozen map of DML body keyword => regex matching the keyword as a
+      # bare token anywhere. Used by {#check_forbidden_keywords_in_body!}.
+      DML_BODY_REGEXES = DML_BODY_KEYWORDS.to_h do |kw|
+        [kw, /\b#{kw}\b/i]
+      end.freeze
+
       # Frozen map of dangerous function name => regex matching a call to that function.
       # Used by {#check_dangerous_functions!}.
       DANGEROUS_FUNCTION_REGEXES = DANGEROUS_FUNCTIONS.to_h do |func|
@@ -542,9 +576,16 @@ module Woods
       # SQL, or right after a `;`/newline), so a column legitimately named
       # after a forbidden keyword (`WHERE do = 1`) is not misread as one.
       #
+      # The DML keywords ({DML_BODY_REGEXES}) are then matched as bare tokens
+      # across every dialect-normalized view ({#dml_body_views}): they are
+      # reserved words, so they can never be bare identifiers the way `do`
+      # or `lock` can. Runs after {#check_lock_clauses!} in {#validate!}, so
+      # a lock-clause statement (`SELECT 1 FOR UPDATE`) keeps its dedicated
+      # message.
+      #
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found as a
-      #   statement leader
+      #   statement leader, or a DML keyword anywhere in the body
       def check_forbidden_keywords_in_body!(sql)
         stripped = SqlNoiseStripper.strip_noise(sql)
 
@@ -553,6 +594,29 @@ module Woods
 
           raise SqlValidationError, "Rejected: #{keyword} statements are not allowed (found in SQL body)"
         end
+
+        dml_body_views(sql).each do |view|
+          DML_BODY_REGEXES.each do |keyword, pattern|
+            next unless view.match?(pattern)
+
+            raise SqlValidationError, "Rejected: #{keyword} statements are not allowed (found in SQL body)"
+          end
+        end
+      end
+
+      # Every dialect-normalized view of the SQL the DML body-token scan
+      # must consider, mirroring {#lock_clause_views}: with {#dialect} known,
+      # only that dialect's view (the server parses the statement one way, so
+      # a MySQL `\'` escape must hide prose from this scan); without it, both
+      # normalizations run as the conservative union. {SqlNoiseStripper}
+      # leaves MySQL executable comments (`/*!...*/`) visible in every view,
+      # so DML inside them stays detected.
+      #
+      # @param sql [String]
+      # @return [Array<String>]
+      def dml_body_views(sql)
+        dialects = dialect ? [dialect] : KNOWN_DIALECTS
+        dialects.map { |dialect_name| SqlNoiseStripper.strip_noise(sql, dialect: dialect_name) }
       end
     end
   end

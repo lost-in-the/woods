@@ -68,6 +68,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`console_sql` rejects `INSERT`, `UPDATE`, and `DELETE` written as bare
+  keywords mid-statement.** The forbidden-body keyword scan anchored every
+  keyword to statement-leader positions only (start of the SQL, or after
+  `;`/a comment boundary), so a statement like `SELECT 1 UPDATE posts SET
+  status = 10` passed validation and failed as an adapter-level syntax error
+  instead of a typed refusal. Those three keywords are reserved words on every
+  supported backend and can never be bare identifiers, so the validator now
+  also rejects them as bare tokens anywhere in the noise-stripped statement
+  body. `MERGE` is deliberately excluded from that scan: SQLite permits an
+  unquoted `merge` column, so body-level MERGE scanning would reject ordinary
+  selects like `SELECT merge FROM posts`; MERGE statements remain covered by
+  the allowed-prefix rule and the WITH-attached-DML check. Literal content
+  never triggers (`SELECT 'update' AS word`, `WHERE title = 'UPDATE me'` stay
+  accepted), identifier-shaped column names stay accepted (`updated_at`,
+  `last_update`, `merge`), and row-lock clauses keep their dedicated earlier
+  check, so `SELECT 1 FOR UPDATE` still reports the lock-clause message.
+  Non-DML keywords that are plausible column names (`do`, `lock`, `release`)
+  keep the leader-anchored rule unchanged.
+
+- **`console_query` placeholder scopes resolve table-qualified columns
+  case-insensitively, exactly like the public path.** A `["posts.status = ?",
+  10]` scope passed the public schema but was refused at execution with
+  `Unknown table 'posts'. Cannot validate qualified column 'posts.status'.`
+  whenever the executor's ModelValidator had no model-to-table mapping to
+  resolve the qualifier, and a case variant (`["Posts.status = ?", 10]`) was
+  refused even with the mapping. The query scope path now resolves a
+  `table.column` reference whose table matches the queried model's own table
+  (case-insensitively, matching unquoted SQL identifier semantics) against
+  that model's own columns, so own-table qualification behaves exactly like
+  the bare-column form. Redaction stays strict: a redacted column referenced
+  through any case variant (`Users.Password_Digest = ?`, `Orders.Amount = ?`,
+  bare `AMOUNT`) refuses with the typed redaction message — the refusal now
+  runs before column resolution and matches column names case-insensitively —
+  and any other qualified table still resolves through the fail-closed
+  table-column check.
+
 - **The Index MCP `reload` tool no longer reports an empty success when the promoted dump's
   store configuration diverges from the live server (M2).** The live retriever was in-memory
   and the captured dump was complete and valid, but when the dump's embedded `woods.json`

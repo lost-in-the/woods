@@ -619,10 +619,15 @@ module Woods
       # comparison, aggregate, or sort-order oracle before redaction ever
       # runs.
       #
+      # Matching is case-insensitive: unquoted SQL identifiers are
+      # case-insensitive, so a case variant of a redacted column (`AMOUNT`,
+      # `Password_Digest`) must get this typed refusal rather than fall
+      # through to an existence check.
+      #
       # @param column [String] bare column name (no schema/table qualifier)
       # @raise [ValidationError] if the column is on console_redacted_columns
       def refuse_redacted_column!(column)
-        return unless @safe_context.redacted_columns.include?(column.to_s)
+        return unless @safe_context.redacted_columns.any? { |name| name.to_s.casecmp?(column.to_s) }
 
         raise ValidationError,
               "Rejected: column '#{column}' is redacted (console_redacted_columns) and cannot be used " \
@@ -634,12 +639,15 @@ module Woods
       # the selector used to identify sensitive rows and remains a valid
       # predicate, while the value column is the secret-bearing field.
       #
+      # Both layers match case-insensitively (see {#refuse_redacted_column!}):
+      # a case variant of a protected column must keep the typed refusal.
+      #
       # @param column [String, Symbol] already-normalized bare or qualified column name
       # @raise [ValidationError] when the column is protected for predicates
       def refuse_protected_predicate_column!(column)
         base = base_column_name(column.to_s)
-        return refuse_redacted_column!(base) if @safe_context.redacted_columns.include?(base)
-        return unless redacted_eav_value_columns.include?(base)
+        return refuse_redacted_column!(base) if @safe_context.redacted_columns.any? { |name| name.to_s.casecmp?(base) }
+        return unless redacted_eav_value_columns.any? { |name| name.to_s.casecmp?(base) }
 
         raise ValidationError,
               "Rejected: EAV value column '#{base}' is redacted (console_redacted_key_values) and cannot " \
@@ -825,7 +833,7 @@ module Woods
         {
           select: params['select'] ? validated_select(params['select'], model_name) : nil,
           joins: validated_query_joins(model, params['joins']),
-          scope: params.key?('scope') ? validated_query_scope(params['scope'], model_name) : nil,
+          scope: params.key?('scope') ? validated_query_scope(params['scope'], model_name, model) : nil,
           group_by: params['group_by']&.any? ? validated_columns(params['group_by'], model_name) : nil,
           having: params['having'] ? validated_having(params['having'], model_name) : nil,
           order: params['order'] ? validated_order(params['order'], model_name) : nil
@@ -1150,10 +1158,16 @@ module Woods
       # intentionally narrower than the legacy Tier 1 executor form: exactly
       # one safe column comparison template and one bind value.
       def apply_query_scope(relation, scope, model_name)
-        apply_scope(relation, validated_query_scope(scope, model_name), model_name: model_name)
+        apply_scope(relation, validated_query_scope(scope, model_name, nil), model_name: model_name)
       end
 
-      def validated_query_scope(scope, model_name)
+      # Validate a console_query scope. +model+ is the already-resolved
+      # ActiveRecord class: its own table name lets a `table.column`
+      # placeholder scope validate the column against the model's own
+      # columns (public/executor parity) even when the ModelValidator
+      # carries no table_names mapping. A nil +model+ falls back to the
+      # strict qualified-reference resolution.
+      def validated_query_scope(scope, model_name, model)
         if scope.is_a?(Hash)
           validate_scope_columns!(scope, model_name)
           return scope
@@ -1173,9 +1187,26 @@ module Woods
         match = Server::QUERY_SCOPE_TEMPLATE_REGEXP.match(scope.first)
         raise ValidationError, "scope: unsupported SQL template #{scope.first.inspect}" unless match
 
-        validate_column_reference!(match[1], model_name)
+        # Redaction refusal runs BEFORE column resolution: a redacted column
+        # referenced through any case variant (`Users.Password_Digest = ?`)
+        # must get the typed redaction refusal, never a pass-through to the
+        # existence check (whose case-sensitive column lookup would report a
+        # generic "Unknown column" instead).
         refuse_protected_predicate_column!(match[1])
+        validate_column_reference!(match[1], model_name, own_table: own_table_name(model))
         scope
+      end
+
+      # The queried model's own table name, when resolvable. Test doubles
+      # may not implement `table_name`; a nil result keeps the strict
+      # qualified-reference resolution instead of the own-table shortcut.
+      #
+      # @param model [Class, nil]
+      # @return [String, nil]
+      def own_table_name(model)
+        return nil unless model.respond_to?(:table_name)
+
+        model.table_name.to_s
       end
 
       # Validate `order:` — only Hash `{col => :asc|:desc}` or bare column name.
@@ -1210,28 +1241,66 @@ module Woods
       # blocked-table reference into `select`/`order`/`having` via a
       # qualified column like `users.password_digest`. Bare columns validate
       # against the active model through ModelValidator.
-      def validate_column_reference!(column, model_name)
+      #
+      # +own_table+ is the queried model's own table name, supplied by the
+      # console_query scope path: a `table.column` reference whose table is
+      # the model's own table validates the column against that same model,
+      # exactly like the bare form. This cannot smuggle a foreign table
+      # (the qualifier is checked for equality, not looked up), so redaction
+      # and TableGate still apply to the reference as a whole. Any other
+      # qualified reference keeps the strict cross-table resolution through
+      # {ModelValidator#validate_table_column!}, which fails closed when the
+      # table side cannot be proven.
+      #
+      # @param column [String] bare or `table.column` reference
+      # @param model_name [String]
+      # @param own_table [String, nil] the queried model's own table name
+      def validate_column_reference!(column, model_name, own_table: nil)
         if column.include?('.')
-          table, col = column.split('.', 2)
-          unless safe_identifier?(table) && safe_identifier?(col)
-            raise ValidationError, "Rejected column reference: #{column.inspect}"
-          end
-
-          # Gate the table side through TableGate if one is configured.
-          begin
-            @table_gate&.check_table!(table)
-          rescue TableGateError => e
-            raise ValidationError, e.message
-          end
-
-          # TableGate only proves `table` isn't *blocked* — it says nothing
-          # about whether `col` actually exists there. Validate ownership
-          # against the real schema before this reference can reach SQL.
-          @model_validator.validate_table_column!(table, col)
+          validate_qualified_column_reference!(column, model_name, own_table)
         else
           raise ValidationError, "Rejected column reference: #{column.inspect}" unless safe_identifier?(column)
 
           @model_validator.validate_column!(model_name, column)
+        end
+      end
+
+      # The qualified `table.column` half of {#validate_column_reference!}.
+      # The table half must be a safe identifier and unblocked (TableGate)
+      # before column ownership is resolved: +own_table+ (the queried
+      # model's own table name) short-circuits resolution to that model's
+      # own columns, exactly like the bare form; the qualifier is compared
+      # case-insensitively (unquoted SQL identifiers are case-insensitive)
+      # against that one table name, never looked up, so this cannot
+      # smuggle a foreign table and redaction still applies to the
+      # reference as a whole. The column half keeps ModelValidator's exact
+      # existence check, identical to the bare-column form. Anything else
+      # resolves through {ModelValidator#validate_table_column!}, which
+      # fails closed when the table side cannot be proven.
+      #
+      # @param column [String] a `table.column` reference
+      # @param model_name [String]
+      # @param own_table [String, nil] the queried model's own table name
+      def validate_qualified_column_reference!(column, model_name, own_table)
+        table, col = column.split('.', 2)
+        unless safe_identifier?(table) && safe_identifier?(col)
+          raise ValidationError, "Rejected column reference: #{column.inspect}"
+        end
+
+        # Gate the table side through TableGate if one is configured.
+        begin
+          @table_gate&.check_table!(table)
+        rescue TableGateError => e
+          raise ValidationError, e.message
+        end
+
+        if own_table && table.casecmp?(own_table)
+          # TableGate only proves `table` isn't *blocked* — it says nothing
+          # about whether `col` actually exists there. Validate ownership
+          # against the real schema before this reference can reach SQL.
+          @model_validator.validate_column!(model_name, col)
+        else
+          @model_validator.validate_table_column!(table, col)
         end
       end
 

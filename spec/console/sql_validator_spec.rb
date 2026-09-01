@@ -491,6 +491,51 @@ RSpec.describe Woods::Console::SqlValidator do
     end
   end
 
+  describe 'forbidden DML keywords at statement-body positions' do
+    # FORBIDDEN_BODY_REGEXES anchors non-DML keywords to statement-leader
+    # positions because words like `do`/`lock`/`release` are plausible bare
+    # column names. DML keywords are reserved words: they can never be bare
+    # identifiers, so they are additionally rejected as bare tokens anywhere
+    # in the noise-stripped body — a mid-body `UPDATE` used to reach the
+    # adapter as a syntax failure instead of a typed validation refusal.
+    it 'rejects a DML keyword at a mid-body position with the body-keyword message' do
+      sql = 'SELECT 1 UPDATE posts SET status = 10'
+      expect { validator.validate!(sql) }
+        .to raise_error(Woods::Console::SqlValidationError,
+                        'Rejected: UPDATE statements are not allowed (found in SQL body)')
+    end
+
+    it 'accepts an updated_at predicate (identifier, not a keyword token)' do
+      expect { validator.validate!("SELECT * FROM posts WHERE updated_at > 'x'") }.not_to raise_error
+    end
+
+    it 'accepts a select-list alias over a literal containing update (noise stripped first)' do
+      expect { validator.validate!("SELECT 'update' AS word") }.not_to raise_error
+    end
+
+    it 'accepts a literal value containing UPDATE in a WHERE predicate' do
+      expect { validator.validate!("SELECT * FROM events WHERE title = 'UPDATE me'") }.not_to raise_error
+    end
+
+    it 'still rejects SELECT 1 FOR UPDATE via the lock-clause rule, not the body-keyword scan' do
+      expect { validator.validate!('SELECT 1 FOR UPDATE') }
+        .to raise_error(Woods::Console::SqlValidationError, /row-lock clauses/i)
+    end
+
+    # MERGE is deliberately absent from the anywhere-in-body keyword set:
+    # SQLite permits an unquoted `merge` column, so body-level MERGE
+    # scanning would false-positive on ordinary selects like these. The
+    # default no-dialect validator is the lane SQLite hosts run under
+    # (unknown adapter -> conservative postgres+mysql union).
+    it 'accepts an unquoted merge column in the outer SELECT' do
+      expect { validator.validate!('SELECT merge FROM posts') }.not_to raise_error
+    end
+
+    it 'accepts an unquoted merge column inside a select list' do
+      expect { validator.validate!('SELECT id, merge, title FROM posts') }.not_to raise_error
+    end
+  end
+
   describe 'function allowlist (read-only policy)' do
     context 'with rejected side-effecting functions' do
       it 'rejects pg_terminate_backend' do
