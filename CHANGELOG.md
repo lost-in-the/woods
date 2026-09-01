@@ -68,6 +68,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`console_sql` rejects DML keywords written mid-statement instead of passing
+  them to the adapter.** The forbidden-body keyword scan anchored `UPDATE`,
+  `DELETE`, `INSERT`, and `MERGE` to statement-leader positions only (start of
+  the SQL, or after `;`/a comment boundary), so a statement like
+  `SELECT 1 UPDATE posts SET status = 10` passed validation and failed as an
+  adapter-level syntax error instead of a typed refusal. Those four keywords are
+  reserved words on every supported backend and can never be bare identifiers,
+  so the validator now also rejects them as bare tokens anywhere in the
+  noise-stripped statement body: literal content never triggers
+  (`SELECT 'update' AS word`, `WHERE title = 'UPDATE me'` stay accepted),
+  identifier-shaped column names stay accepted (`updated_at`, `last_update`),
+  and row-lock clauses keep their dedicated earlier check, so
+  `SELECT 1 FOR UPDATE` still reports the lock-clause message. Non-DML keywords
+  that are plausible column names (`do`, `lock`, `release`) keep the
+  leader-anchored rule unchanged.
+
 - **Best-effort Git provenance and file-history probes are now quiet and rooted
   at the extracted application.** Expected failures in source copies without a
   `.git` directory no longer emit `fatal: not a git repository` on stderr, and
