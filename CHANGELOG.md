@@ -300,6 +300,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy, and passes that one context to both the executor and the response
   renderer. Render-side masking behavior is unchanged.
 
+- **TableGate catches blocked tables hidden in MySQL executable comments at
+  FROM, JOIN, and subquery lead position.** The noise stripper deliberately
+  preserves `/*! ... */` forms (MySQL executes their body), but the scanner's
+  FROM/JOIN lead grammars cannot start on a comment marker, so
+  `SELECT * FROM /*!authorizations*/`, `SELECT * FROM /*!99999*/
+  authorizations`, `users JOIN /*!authorizations*/ a ...`, and
+  `FROM (SELECT * FROM /*!authorizations*/) t` surfaced no identifier and the
+  blocked table executed. The scanner now scans two additional views of each
+  dialect's stripped text — every executable comment replaced by its body,
+  and the whole form dropped — mirroring SqlValidator's dual
+  executable-comment semantics for lock clauses. The preserved form is still
+  scanned, so the post-comma shape keeps working; on PostgreSQL the `/*!`
+  form is a syntax error, so extra detections there are over-detection by
+  design.
+
 ## [2.0.0] - 2026-08-20
 
 ### Upgrade Notes
