@@ -405,6 +405,17 @@ N+1 next to a unit from N. An index written before this existed (or a
 third-party writer that still writes flat) has no `payload` key, and every
 reader falls back to the index root unchanged.
 
+Retention does not invalidate an in-flight read. While
+`IndexReader#with_pinned_generation` serves a payload, it holds a shared
+advisory lock on that generation's `manifest.json`; pruning takes an exclusive
+non-blocking lock on the same file and skips a busy generation. This works
+across Index MCP and extraction processes without reader-created lease files,
+so read-only index mounts remain sufficient for ordinary tools and a crashed
+reader leaves no stale lease. A skipped directory can temporarily exceed
+`WOODS_PAYLOAD_RETENTION` and is reconsidered by the next successful publish.
+The protocol relies on the same filesystem advisory-lock support as Woods'
+pipeline coordination.
+
 A **full** extraction (`Extractor#extract_all`) degrades to a flat publish if
 it can't open a fresh payload directory, the write set is the whole app, so a
 flat publish is still a complete index. An **incremental** run

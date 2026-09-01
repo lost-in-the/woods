@@ -86,6 +86,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning and returning `nil`; `diff` warns and returns an empty result when a
   requested snapshot is truncated, rather than leaking `JSON::ParserError`.
 
+- **Payload retention preserves generations pinned by readers in other
+  processes.** `IndexReader#with_pinned_generation` previously coordinated
+  only threads sharing one reader object. A long MCP request could remain on
+  generation N while three quick extraction publishes advanced retention far
+  enough to delete `payloads/gen-N/`; an artifact first opened later in the
+  request then failed with `ENOENT`. Pinned readers now hold a shared advisory
+  lock on that generation's manifest, and retention skips any payload whose
+  manifest cannot immediately take the exclusive lock. The operating system
+  releases the lock on normal exit or a crash, and a later publish reclaims
+  the skipped payload.
+
 - **`console_sql` rejects `INSERT`, `UPDATE`, and `DELETE` written as bare
   keywords mid-statement.** The forbidden-body keyword scan anchored every
   keyword to statement-leader positions only (start of the SQL, or after

@@ -1912,7 +1912,7 @@
     "lib/woods/generation.rb"
   ],
   "description": "IndexReader pins prevent in-process cache invalidation, but writer-side PayloadStore retention has no cross-process reader lease. A sufficiently long request pinned to generation N can outlive three later publishes; pruning then removes payloads/gen-N while the request still holds that path. Already-cached artifacts survive, but a later uncached unit or graph read sees ENOENT and may be rendered as corrupt_artifact. Decide between leases, open-file/materialization pinning, or a documented retention/request-duration bound; acceptance requires a writer/read-process test proving a pinned request stays readable while retention advances.",
-  "status": "open"
+  "status": "resolved"
 },
 {
   "id": "B-137",
