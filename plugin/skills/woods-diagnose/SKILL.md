@@ -32,6 +32,12 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+If a one-shot extraction raises `Could not publish generation`, the candidate
+payload was written but never made visible; readers still serve the previous
+complete generation. Fix the named filesystem, permission, space, or mount
+failure and rerun the same task. Never edit `generation.json` or point a reader
+at the unreachable payload by hand.
+
 ## 3. Check the MCP process and path
 
 Compare the client config with the exact command, absolute `cwd`, bundle, and index path visible to that process. Run the configured executable manually to read stderr. For a host bundle:

@@ -1925,8 +1925,8 @@
     "lib/tasks/woods.rake",
     "lib/woods/watch/daemon.rb"
   ],
-  "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure.",
-  "status": "open"
+  "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure. RESOLVED: Extractor records a typed publication error and exposes raise_on_publication_failure!; all one-shot extraction tasks call it before success output, while Watch::Daemon retains its unchanged-generation degraded recovery path. Task subprocess specs pin non-zero exits and the extractor regression pins prior-generation readability.",
+  "status": "resolved"
 },
 {
   "id": "B-138",
@@ -1937,8 +1937,8 @@
   "files": [
     "lib/tasks/woods.rake"
   ],
-  "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root.",
-  "status": "open"
+  "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root. RESOLVED: the no-boot task derives its conventional tmp/woods path from Rake.application.rakefile, with original_dir only as the programmatic-load fallback. A subprocess invokes an absolute -f Rakefile from a different cwd and proves the live status is found without loading Rails.",
+  "status": "resolved"
 },
 {
   "id": "B-139",

@@ -97,6 +97,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   releases the lock on normal exit or a crash, and a later publish reclaims
   the skipped payload.
 
+- **One-shot extraction tasks fail when their generation marker cannot be
+  published.** `woods:extract`, `woods:incremental`, `woods:refresh`, and the
+  `woods:extract_framework` compatibility task no longer print success and
+  exit 0 after writing a payload that readers cannot reach. They now raise a
+  typed `Woods::ExtractionError` while the previous generation stays active.
+  The resident watch daemon keeps its existing recoverable behavior: it
+  reports degraded and carries the paths into a later cycle.
+
+- **`woods:watch_status` resolves its conventional index beside the active
+  Rakefile, not the caller's current directory.** Cheap hook checks still do
+  not boot Rails, but `rake -f /app/Rakefile woods:watch_status` now reads
+  `/app/tmp/woods/watch_status.json` even when a worktree manager launches it
+  elsewhere. `WOODS_OUTPUT` continues to override the conventional path.
+
 - **`console_sql` rejects `INSERT`, `UPDATE`, and `DELETE` written as bare
   keywords mid-statement.** The forbidden-body keyword scan anchored every
   keyword to statement-leader positions only (start of the SQL, or after

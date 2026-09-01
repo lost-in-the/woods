@@ -163,6 +163,27 @@ Note `WOODS_IGNORE_WATCH=1` removes daemon coverage rather than bypassing the fa
 
 ---
 
+### Extraction exits non-zero after "Could not publish generation"
+
+**Symptom:** `woods:extract`, `woods:incremental`, `woods:refresh`, or
+`woods:extract_framework` raises `Woods::ExtractionError` after writing its
+payload, with a message saying that the previous generation remains active.
+
+**Cause:** Woods writes a complete candidate payload first and commits it by
+atomically updating `generation.json` last. The marker write failed (commonly
+permissions, a read-only mount, no free space, or an unhealthy filesystem), so
+readers cannot safely discover the candidate payload. One-shot tasks fail
+instead of printing a false success; existing readers continue serving the
+previous complete generation.
+
+**Fix:** Correct the filesystem or mount problem named in the exception, then
+rerun the same task. Do not edit `generation.json` by hand or point readers at
+the unreachable payload. A resident `woods:watch` process handles the same
+failure differently: it reports `degraded`, carries the changed paths, and
+retries after a later filesystem event.
+
+---
+
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
 
 **Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct, only the provenance metadata is off.

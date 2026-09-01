@@ -44,6 +44,7 @@ RSpec.describe 'lib/tasks/woods.rake output_dir resolution' do
   it 'watch_status keeps its own no-boot default (documented exception)' do
     body = task_body('watch_status')
 
-    expect(body).to include("ENV.fetch('WOODS_OUTPUT') { File.join(Dir.pwd, 'tmp/woods') }")
+    expect(body).to include("ENV.fetch('WOODS_OUTPUT') { File.join(woods_task_root, 'tmp/woods') }")
+    expect(body).not_to include('Dir.pwd')
   end
 end

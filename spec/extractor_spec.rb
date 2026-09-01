@@ -24,6 +24,35 @@ RSpec.describe Woods::Extractor do
 
   let(:extractor) { described_class.new(output_dir: File.join(tmpdir, 'output')) }
 
+  describe '#raise_on_publication_failure!' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:generation) { Woods::Generation.new(output_dir: output_dir) }
+
+    before do
+      FileUtils.mkdir_p(output_dir)
+      payload = Woods::PayloadStore.new(output_dir).create(1)
+      File.write(payload.join('sentinel.json'), JSON.generate('generation' => 1))
+      generation.bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+    end
+
+    it 'raises a typed error while the previous generation stays readable after a failed publish' do
+      allow_any_instance_of(Woods::Generation).to receive(:bump!).and_raise(Errno::EACCES, 'read-only marker')
+
+      expect(extractor.send(:publish_generation, 'incremental')).to be_nil
+      expect { extractor.raise_on_publication_failure! }
+        .to raise_error(Woods::ExtractionError, /Could not publish generation.*EACCES.*read-only marker/)
+
+      marker = generation.current
+      expect(marker.number).to eq(1)
+      expect(JSON.parse(File.read(generation.payload_dir(marker).join('sentinel.json'))))
+        .to eq('generation' => 1)
+    end
+
+    it 'does not raise when no publication failure was recorded' do
+      expect { extractor.raise_on_publication_failure! }.not_to raise_error
+    end
+  end
+
   # ── safe_eager_load! ────────────────────────────────────────────────
 
   describe '#safe_eager_load!' do
