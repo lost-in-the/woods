@@ -283,6 +283,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UTF-8-forcing binary read (the mode unit loading already used), so an
   index is read correctly regardless of host locale. No re-index needed.
 
+- **A failed wholesale re-run can no longer publish a graph with phantom
+  units (M8).** `replace_type_wholesale`'s rescue swallowed every failure.
+  A unit's graph node is registered before its JSON is written, the removal
+  half deletes the JSON before dropping the graph node, and registration
+  itself mutates the graph before it can fail (a malformed dependency raises
+  after the node is already inserted) — so a raise in any of those windows
+  (a full disk, a serialization error, a malformed unit) left the in-memory
+  graph and the payload directory disagreeing, and the run went on to
+  publish a generation whose `dependency_graph.json` held nodes with no unit
+  file, so `dependencies`/`dependents` reported `found: true` while lookup
+  returned nothing. The rescue now re-raises (as `Woods::ExtractionError`)
+  once the replacement has begun to register, write, or remove anything —
+  the marker is placed before each mutation, so a failure inside one cannot
+  slip past it — and the run aborts before publication, leaving the
+  previous generation resolved. A failure that landed nothing is still
+  swallowed, as before.
+
+- **Incremental runs no longer ship the previous generation's SUMMARY.md
+  (M4).** `write_structural_summary` returned early because an incremental
+  run holds no units in memory, so the hardlinked summary of the last full
+  extraction was served unchanged — its `Units:`/`Chunks:` totals went stale
+  the first time a run added or removed a unit. The summary is now derived on
+  the incremental path from the same persisted per-type `_index.json` files
+  the manifest counts, so the two artifacts agree; the `Generated:` stamp
+  still names the moment the summary was written. The equivalence oracle now
+  also compares SUMMARY.md's totals against the manifest of the same index,
+  so this drift can no longer hide.
+
+- **`woods:incremental` no longer exits 0 over a git range it cannot resolve
+  (M1).** The diff helper discarded git's exit status, so an unresolvable
+  range — a GitLab zero-SHA, an unfetched GitHub base ref, garbage — read as
+  "no relevant files changed" and the task exited 0 while the sync never ran;
+  the degraded-daemon extract-anyway branch was unreachable. The helper now
+  carries the failure out and the task decides in order: a resolvable range
+  behaves as before; a failed range stands down with a printed reason (exit
+  0) only when a running watch daemon maintains the index, and otherwise
+  fails with an actionable error naming the range (exit 1, like the
+  lock-timeout abort). The diff is also rooted at the extracted application
+  (`git -C Rails.root`), consistent with the provenance rooting, so it can no
+  longer diff whatever checkout the process happened to start in.
+
 ### Testing
 
 - **The live-Redis session-tracer contract spec now runs in CI (M6).** The

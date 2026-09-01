@@ -433,7 +433,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. |
+| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. For `woods:incremental` this removes daemon coverage: a git range that fails to resolve then exits 1 instead of standing down (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains)). |
 | `WOODS_LOCK_WAIT` | `Watch::Daemon::LOCK_STALE_TIMEOUT` (600s) | How long a rake writer waits for `PipelineLock` before exiting non-zero. |
 | `WOODS_WATCH_POLL` | auto-detected | Set to `"1"`/`"0"` to force/disable polling mode (vs. `listen` gem, e.g. in a container without inotify). |
 | `WOODS_WATCH_DEBOUNCE` | `0.4` (seconds) | Delay before processing a batch of file-change events. |
@@ -446,7 +446,10 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for `woods:extract`/`woods:incremental`/`woods:watch` without editing the initializer. |
-| `RAILS_ENV`, `GITHUB_BASE_REF` | n/a | Read by `woods:incremental`'s changed-file detection in CI. |
+| `CHANGED_FILES` | unset | Comma-separated explicit changed-path list for `woods:incremental`; when set, git range resolution is skipped entirely. |
+| `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
+| `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
+| `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |
 
 ### Exporters
 
