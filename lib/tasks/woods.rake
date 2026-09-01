@@ -260,7 +260,8 @@ namespace :woods do
     if woods_daemon_coverage(output_dir) == :running
       puts "Could not resolve the git diff range #{range.inspect} (#{failure})."
       puts 'A watch daemon is maintaining this index, so its catch-up covers the changed paths — standing down.'
-      puts 'Set WOODS_IGNORE_WATCH=1 to extract anyway.'
+      puts 'To extract now anyway, repair or provide the range (check the CI env refs),'
+      puts 'set CHANGED_FILES explicitly, or run a full woods:extract.'
       exit 0
     end
 
