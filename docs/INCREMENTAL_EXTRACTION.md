@@ -38,6 +38,40 @@ This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
 forward run over run instead of being erased by the next full rebuild.
 
+## Exit behavior in CI chains
+
+The task decides what to do before it extracts, and the exit code is part of
+that decision — a green job that silently skipped the sync is exactly the
+failure a CI chain cannot afford:
+
+| Situation | Behavior |
+|---|---|
+| `CHANGED_FILES` is set | Used verbatim (comma-separated paths); git is not consulted. |
+| The git range resolves | Current behavior: extract the changed paths, or exit 0 with `No relevant files changed` when nothing relevant changed. |
+| The range fails **and** a `:running` watch daemon maintains the index | Stand down with a printed reason, exit 0 — the daemon's start-up catch-up covers whatever changed. |
+| The range fails otherwise | Actionable error naming the range, **exit 1**. |
+
+The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
+`origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default). An
+unresolvable range — a GitLab zero-SHA on a new branch, an unfetched base ref,
+a shallow clone with no `HEAD~1` — reads as "nothing changed" to git, which is
+why a failed range must not be mistaken for an empty one: the sync never ran,
+and CI drift would stay unbounded. A degraded daemon covers nothing, so it
+does not stand the run down. `WOODS_IGNORE_WATCH=1` removes daemon coverage
+too — with it set, a failed range exits 1.
+
+Recovery choices, in the order they are worth trying:
+
+1. Repair or provide the range: fetch the base ref (`fetch-depth: 2` or more),
+   or correct the CI environment variables that build it.
+2. Set `CHANGED_FILES` explicitly from your CI platform, bypassing git range
+   resolution entirely.
+3. Run a full `woods:extract` when the range cannot be repaired this run.
+
+The diff itself is rooted at the extracted application (`git -C Rails.root`),
+so it cannot read whatever checkout the process happened to start in — the
+same rooting rule the manifest's git provenance follows.
+
 ## What a run does, in order
 
 `Extractor#extract_changed` is order-sensitive; each step exists because of the
