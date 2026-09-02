@@ -25,6 +25,8 @@ bin/rubocop
 
 Create a branch from current `main`. Keep each pull request to one logical change and preserve unrelated formatting and refactors for separate work.
 
+`main` is the development branch: it holds work for the next release and can run ahead of the latest published gem. Releases are cut from version tags by the guarded workflow described in the documentation index's [release section](docs/README.md#at-release-cutting-the-200-tag); documentation matching a published gem lives on that release's tag.
+
 ## Understand the repository
 
 | Path | Responsibility |

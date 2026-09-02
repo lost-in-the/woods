@@ -79,6 +79,18 @@ Historical build-phase documents are not user guides. Source checkouts also cont
 
 `README.md`'s "What's new in 2.0" table and its upgrade checklist describe released behavior and stay as they are.
 
+### After the flip merges: tag and publish
+
+The flip commit lands on `main` through a reviewed pull request like any other change. `main` is the development branch — it holds work for the next release and can run ahead of the published gem — so a release is pinned by its tag, never by a branch:
+
+| Step | Command | What guards it |
+|---|---|---|
+| Tag the flip merge commit | `git tag v2.0.0 <merge-sha> && git push origin v2.0.0` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history, match `Woods::VERSION`, and match the dated `CHANGELOG.md` heading |
+| Trigger the release workflow | `gh api --method POST repos/lost-in-the/woods/dispatches -f event_type=release -F 'client_payload[tag]=v2.0.0' -F 'client_payload[ci_run_id]=<id>'` where `<id>` is the green CI run on the tagged SHA (requires Contents write) | `.github/workflows/release.yml` re-validates the named CI run through the API, verifies the artifact digest, and runs secret-free candidate package tests before publishing |
+| Verify publication | `gem info woods --remote` shows the new version; the README gem badge updates on its own | just before pushing, the workflow re-runs `script/verify-release-tag` so a tag that moved since validation aborts the publish |
+
+Nothing is published from a laptop: the workflow builds and pushes the gem from the validated CI artifact, so the bytes on RubyGems are the bytes CI tested.
+
 ## Canonical owners
 
 Use this map when changing behavior or documentation. Update the owner first; other pages should summarize and link instead of copying full instructions.

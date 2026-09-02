@@ -6,6 +6,14 @@
 
 **Give AI coding agents a runtime-accurate map of your Rails application.**
 
+[![Gem Version](https://img.shields.io/gem/v/woods)](https://rubygems.org/gems/woods)
+[![CI](https://github.com/lost-in-the/woods/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lost-in-the/woods/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
+
+> **Version 2.0.0 is the current release** — a major update from 1.x that changes index identifiers, the publication layout, and the MCP surface. Read [What's new in 2.0](#whats-new-in-20) and, if you run 1.x today, the [upgrade guide](docs/UPGRADING_TO_2.md) before updating; the full history is in the [CHANGELOG](CHANGELOG.md).
+>
+> `main` is the development branch and can run ahead of the latest published gem. Documentation matching a specific release lives on its tag ([v2.0.0](https://github.com/lost-in-the/woods/tree/v2.0.0)); the gem badge above always shows the latest published version.
+
 Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
 
 Woods 2.0 supports Ruby 3.0 or later and Rails 6.0 through 8.x. It connects AI coding tools and agents through MCP.
