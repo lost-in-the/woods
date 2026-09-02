@@ -133,6 +133,8 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
 - If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container.
 - A testbed container has no `.git` at the app root, so `capture_snapshot` sees an `"unknown"` SHA and returns early (#137) — `woods:extract` then never builds the snapshot store or runs the SQLite migrator. To exercise snapshot/migration paths in a variant, set `GIT_SHA` (honored exactly when there is no `.git`). A probe of those paths without it looks green while exercising nothing.
+- For the same reason, `woods:incremental` in a container exits 1 at changed-file-set resolution (a *git range* error) before ever reaching `prepare_incremental_run` — an exit-code-only probe of the incremental baseline guard is a false green. Supply `CHANGED_FILES=<paths>` so the run reaches the guard.
+- When byte-diffing unit JSON between two extractions, establish a full-vs-full control first: controllers with inline proc filters differ between any two processes (`Proc#inspect` embeds a memory address in the filter-chain annotation, B-167). Only differences beyond that control set are real divergence.
 
 See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
 
