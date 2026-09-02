@@ -32,7 +32,7 @@ jobs:
         with:
           # The latency bounds were derived on Ruby 3.3 (spec header), so this
           # lane pins that interpreter instead of spanning a matrix.
-          ruby-version: '3.3'
+          ruby-version: '3.4.10'
           bundler-cache: true
       - name: Run performance specs
         run: bundle exec rspec --tag perf spec/performance
