@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "4de8a9d213a1",
+  "strategy": "manual-commit",
+  "branch": "fix/rc-validation-findings",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "CHANGELOG.md",
+    "lib/woods/extractor.rb",
+    "lib/woods/extractors/job_extractor.rb",
+    "spec/dummy/app/jobs/application_job.rb",
+    "spec/dummy/app/models/billing/invoicing/reconciler.rb",
+    "spec/extractor_spec.rb",
+    "spec/integration/incremental_equivalence_spec.rb"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4d/e8a9d213a1/0/metadata.json",
+      "transcript": "/4d/e8a9d213a1/0/full.jsonl",
+      "compact_transcript": "/4d/e8a9d213a1/0/transcript.jsonl",
+      "content_hash": "/4d/e8a9d213a1/0/content_hash.txt",
+      "prompt": "/4d/e8a9d213a1/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3884,
+    "cache_creation_tokens": 197618,
+    "cache_read_tokens": 7618960,
+    "output_tokens": 72996,
+    "api_call_count": 47
+  }
+}
