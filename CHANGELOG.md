@@ -72,6 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **The distributed plugin gains a fourth skill and upgrade coverage.**
+  `woods-investigate` (plugin 2.1.0) triggers on audits, code reviews,
+  investigations, debugging, onboarding, and change-impact assessment,
+  distilling AGENT_GUIDE.md's tool-selection workflow so index consumption —
+  not just setup — has a skill. `woods-setup` now covers the 1.x→2.0 upgrade
+  path (clean re-index, no in-place durable-index upgrade, full re-embed) and
+  triggers on upgrades. Skill prose no longer hardcodes a patch-precise
+  version floor or a pinned MCP protocol date: the marketplace entry is the
+  authoritative minimum, and skills operate against the preflight-recorded
+  installed version.
+
 - **`woods-mcp-start` is described as what it is: a preflight wrapper (MCP-10).**
   It validates the index directory and published manifest, then `exec`s
   `woods-mcp`; there is no supervision and no restart loop. The "self-healing

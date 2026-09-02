@@ -13,7 +13,7 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
-This skill targets Woods 2.0.0 or later. Detect the MCP client, app root, host vs Docker Rails process, the filesystem context that contains the application bundle and index, and whether live-data access is actually required.
+This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Operate only against capabilities the recorded installed version provides. Detect the MCP client, app root, host vs Docker Rails process, the filesystem context that contains the application bundle and index, and whether live-data access is actually required.
 
 Default to Index-only. It reads generated code context and exposes 14 tools. Console MCP boots Rails and reads live data; ask before enabling it.
 
@@ -94,7 +94,7 @@ Require `console_mcp_enabled`, a strong token, allowed origins, TLS, and the Con
 
 ## Verify
 
-Reconnect through the client so it performs its supported MCP negotiation. Modern MCP 2026-07-28 clients use per-request metadata/discovery; legacy clients initialize first. Call `woods_status`, `search`, and `lookup`. For Console, inspect the registered list and call `console_status` only in the authorized environment.
+Reconnect through the client so it performs its supported MCP negotiation. Clients on current MCP protocol revisions use per-request metadata/discovery; older clients initialize first — the server supports both. Call `woods_status`, `search`, and `lookup`. For Console, inspect the registered list and call `console_status` only in the authorized environment.
 
 Do not use an isolated raw JSON-RPC request as proof of MCP health. Do not claim conditional Index or inventory-only Console schemas are callable.
 

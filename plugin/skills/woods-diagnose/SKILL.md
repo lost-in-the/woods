@@ -12,7 +12,7 @@ bundle info woods
 git status --short --branch
 ```
 
-This skill targets Woods 2.0.0 or later.
+This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Diagnose against capabilities the recorded installed version actually provides.
 
 ## 1. Check Rails
 

@@ -1,6 +1,6 @@
 ---
 name: woods-setup
-description: Use when installing or performing first-run configuration of Woods in a Rails application.
+description: Use when installing Woods in a Rails application, upgrading an existing Woods installation across a major version, or performing first-run configuration.
 ---
 
 # Woods setup
@@ -19,7 +19,7 @@ bundle info woods 2>/dev/null || true
 bundle exec rails runner 'puts Rails.application.class.name'
 ```
 
-This skill targets Woods 2.0.0 or later. Use the installed version's documentation when older. Determine host vs Docker execution, database adapter, migration policy, existing Woods config/tables, and which filesystem context contains the application bundle and `tmp/woods/`.
+This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Operate only against capabilities the recorded installed version provides, and for an older gem use the documentation on that version's tag. Determine host vs Docker execution, database adapter, migration policy, existing Woods config/tables, and which filesystem context contains the application bundle and `tmp/woods/`.
 
 ## Install and inspect
 
@@ -35,6 +35,12 @@ git diff -- config/initializers/woods.rb db/migrate
 The generator creates an initializer and a legacy application migration for `woods_units`, `woods_edges`, and `woods_embeddings`. Woods 2's shipped structural index and storage backends do not use those application tables. For a new default installation, propose removing the generated migration and obtain approval first. Keep or run it only when repository history proves an older/custom integration uses those tables, after normal migration authorization and conflict checks.
 
 Do not broadly update gems or overwrite existing configuration.
+
+## Upgrading from 1.x
+
+When the preflight records an installed 1.x version, this is an upgrade, not an install. Woods 2.0 changes observable index identifiers, the publication layout, vector-store reconciliation, and the supported MCP surface, so plan a clean re-index and follow the canonical runbook: [UPGRADING_TO_2.md](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md).
+
+Before changing the Gemfile: back up any shared or durable index and agree on a rollback window — never upgrade one in place. After `bundle update woods`, run a full `bin/rails woods:extract` (not incremental; the old index is not a valid baseline across the major), then `woods:validate`. With embeddings configured, re-embed from scratch into a store matching the configured model; expect identifier-level churn in anything that consumed 1.x identifiers (exports, saved queries, downstream tooling). Verify MCP clients against the new surface rather than assuming 1.x tool behavior.
 
 ## Extract and verify
 
