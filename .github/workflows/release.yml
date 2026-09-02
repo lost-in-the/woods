@@ -35,7 +35,7 @@ jobs:
       - name: Set up trusted Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '3.4.10'
       - name: Validate the named CI run through the GitHub API
         id: run
         env:
@@ -146,7 +146,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '3.4.10'
       - name: Download the tested release artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
