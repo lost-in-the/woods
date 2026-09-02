@@ -1,6 +1,6 @@
 ---
 name: woods-investigate
-description: Use when auditing, code-reviewing, investigating, debugging, onboarding onto, or assessing change impact in a Rails application where a Woods MCP server is connected. Query the index before broad file reading or grep.
+description: Answer codebase questions from the Woods index — search, lookup, dependency and dependents traversal, flow tracing, and graph analysis, with verification rules. Use when auditing, code-reviewing, investigating, debugging, onboarding onto, or assessing change impact in a Rails application where a Woods MCP server is connected; query the index before broad file reading or grep.
 ---
 
 # Woods investigation

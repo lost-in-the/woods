@@ -1,7 +1,7 @@
 {
   "name": "woods-plugin",
-  "description": "Woods user guides for Claude Code: set up, upgrade, configure MCP servers for, investigate codebases with, and diagnose the Woods Rails code-intelligence gem.",
-  "version": "2.1.0",
+  "description": "Woods user guides for Claude Code: set up, upgrade, configure MCP servers for, investigate codebases with, enable a repository's agents on, and diagnose the Woods Rails code-intelligence gem.",
+  "version": "2.2.0",
   "author": {
     "name": "lost-in-the"
   },

@@ -1,6 +1,6 @@
 ---
 name: woods-setup
-description: Use when installing Woods in a Rails application, upgrading an existing Woods installation across a major version, or performing first-run configuration.
+description: Install, upgrade, and first-run-configure the Woods Rails code-intelligence gem — Gemfile entry, generator, extraction, index verification, MCP registration, and the 1.x-to-2.x upgrade path. Use whenever a user wants Woods added to or upgraded in a Rails app, or asks for a runtime-accurate codebase index for AI tools, even without naming Woods' components.
 ---
 
 # Woods setup

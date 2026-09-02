@@ -1,6 +1,6 @@
 ---
 name: woods-diagnose
-description: Use when Woods extraction, index validation, MCP connection, semantic retrieval, storage, or Console access is failing or stale.
+description: Diagnose Woods failures layer by layer — Rails boot, published index, MCP process and path, semantic retrieval, Console — changing nothing until the failing layer is identified. Use when Woods extraction, index validation, an MCP connection, retrieval, storage, or Console access fails or looks stale, or when expected tools are missing from a connected server.
 ---
 
 # Woods diagnosis
