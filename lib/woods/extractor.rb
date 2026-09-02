@@ -1433,19 +1433,21 @@ module Woods
     def enrich_with_git_data
       return unless git_available?
 
-      # Collect all file paths that need git data
+      # Collect all file paths that need git data. Only app-owned paths under
+      # Rails.root qualify — see {#git_enrichable_path?}.
+      root = "#{Rails.root}/"
       file_paths = []
       @results.each do |type, units|
         next if %i[rails_source gem_source].include?(type)
 
         units.each do |unit|
-          file_paths << unit.file_path if unit.file_path && File.exist?(unit.file_path)
+          path = unit.file_path
+          file_paths << path if git_enrichable_path?(path, root)
         end
       end
 
       # Batch-fetch all git data in minimal subprocess calls
       git_data = batch_git_data(file_paths)
-      root = "#{Rails.root}/"
 
       # Assign results to units
       @results.each do |type, units|
@@ -1458,6 +1460,26 @@ module Woods
           unit.metadata[:git] = git_data[relative] if git_data[relative]
         end
       end
+    end
+
+    # Is this a path worth asking git about?
+    #
+    # A gem-owned unit (an engine model) carries its real path. Outside
+    # Rails.root, git refuses the whole `log` invocation when any pathspec is
+    # outside the repository — one gem path would erase the git metadata of
+    # the other 499 units in its 500-path batch. Inside Rails.root, a bundle
+    # vendored at `vendor/bundle` puts the same gem files under the root
+    # prefix, gitignored, so sending them is wasted pathspec work every run.
+    # Same exclusions as {Extractors::SharedUtilityMethods#app_source?}.
+    #
+    # @param path [String, nil] absolute file path
+    # @param root [String] Rails.root with a trailing separator
+    # @return [Boolean]
+    def git_enrichable_path?(path, root)
+      return false unless path&.start_with?(root)
+      return false if path.include?('/vendor/') || path.include?('/node_modules/')
+
+      File.exist?(path)
     end
 
     # Normalize all unit file_paths to relative paths (relative to Rails.root).

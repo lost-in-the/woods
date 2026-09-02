@@ -70,6 +70,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Gem-owned classes keep their real source path instead of a synthesized
+  app path.** `resolve_source_location` accepted only app-owned locations and
+  otherwise returned the caller's convention fallback, so an engine model such
+  as `ActiveStorage::Blob` indexed at `app/models/active_storage/blob.rb`, a
+  file that does not exist, with no class body in its source and a
+  `woods:validate` warning telling the operator to re-run extraction for a
+  path no extraction could produce. When nothing in the app defines the class
+  and its definition site exists on disk, that site is used. It stays absolute
+  through path normalization, `woods:validate` reports it as gem-owned, and git
+  enrichment skips paths outside `Rails.root` (git rejects a whole `log`
+  invocation when any pathspec is outside the repository) as well as vendored
+  `vendor/` and `node_modules/` paths under it (a bundle vendored inside the
+  app root is gitignored, so asking git about it is wasted work). Applies to every
+  class-based extractor sharing the helper: models, controllers, mailers, jobs,
+  serializers.
+
 - **Incremental runs no longer duplicate a class-discovered job under its
   enclosing class's identifier.** A job nested inside a non-job file (`class
   Billing::Invoicing::Reconciler; class RefreshJob < ApplicationJob`) is found

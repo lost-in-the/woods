@@ -66,7 +66,7 @@ Every unit carries:
 
 - **`identifier`**: unique key, usually the class name (`"User"`, `"OrdersController"`) or a descriptive string for non-class units (`"POST /orders"`)
 - **`type`**: what kind of thing this is (`:model`, `:controller`, `:service`, `:route`, etc.)
-- **`file_path`**: relative path from `Rails.root` (e.g., `"app/models/user.rb"`)
+- **`file_path`**: relative path from `Rails.root` (e.g., `"app/models/user.rb"`). Gem-owned units (engine models such as `ActiveStorage::Blob`, framework sources) keep their absolute gem path, since nothing under `Rails.root` defines them
 - **`source_code`**: the annotated source: for models this includes concerns inlined and schema prepended; for controllers this includes a route context header
 - **`metadata`**: type-specific structured data (associations, callbacks, actions, fields, etc.)
 - **`dependencies`**: forward edges: `[{ type:, target:, via: }]`
