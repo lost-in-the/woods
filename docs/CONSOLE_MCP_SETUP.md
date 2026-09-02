@@ -555,6 +555,7 @@ For `console_query`'s `select`, three expression shapes are additionally refused
 - **An `AS` alias over a redacted column** (`password_digest AS note`) — the value would return plaintext under a header no redaction rule matches.
 - **An aggregate over a redacted column, aliased or bare** (`SUM(salary)`, `SUM(salary) AS total`) — the aggregate itself is the secret's value. Aggregates over either column of a `console_redacted_key_values` pair are refused the same way.
 - **An `AS` alias over either column of a `console_redacted_key_values` pair** — the positional EAV rule resolves key/value columns by header name, so renaming either header disarms it.
+- **Any `AS` alias whose name collides with a protected header** (`id AS value` when `value` is an EAV value column) — the duplicate header could shadow the real column and steal its mask. Alias names are compared case-insensitively, matching unquoted SQL identifier folding.
 
 Direct, unaliased selection of a redacted column stays allowed: the output header keeps the column's real name, and the positional redactor masks the value as usual. For an EAV pair, the **value column is only accepted when its paired key column is selected directly too** (that is what lets the positional rule mask it); selecting the value column alone is refused across `console_query`, `console_sample`, `console_find`, `console_pluck`, and `console_recent`.
 

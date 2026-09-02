@@ -649,6 +649,63 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'query tool redaction guards on
       expect(relation).not_to have_received(:where)
       expect(connection).not_to have_received(:select_all)
     end
+
+    it 'rejects aliasing an unprotected column onto the EAV value header (CON-1)' do
+      response = send_query(['status', 'amount', 'id AS amount'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/alias 'amount'.*protected/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects aliasing an unprotected column onto the EAV key header (CON-1)' do
+      response = send_query(['status', 'amount', 'id AS status'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/alias 'status'.*protected/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects a case-variant alias onto the EAV value header (CON-1)' do
+      response = send_query(['status', 'amount', 'id AS AMOUNT'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/alias 'AMOUNT'.*protected/i)
+      expect(relation).not_to have_received(:select)
+    end
+  end
+
+  context 'when an alias collides with a console_redacted_columns header (CON-1)' do
+    let(:redacted_columns) { %w[amount] }
+
+    it 'rejects aliasing an unprotected column onto the redacted header' do
+      response = send_query(['id AS amount'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/alias 'amount'.*protected/i)
+      expect(relation).not_to have_received(:select)
+    end
+  end
+
+  context 'when the DB column case differs from the redaction entry (CON-3)' do
+    let(:registry) { { 'Order' => %w[id status Amount] } }
+    let(:redacted_columns) { %w[amount] }
+
+    it 'rejects an alias over the case-variant redacted column' do
+      response = send_query(['Amount AS note'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aliasing redacted column 'Amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
+
+    it 'rejects an aggregate over the case-variant redacted column' do
+      response = send_query(['SUM(Amount)'])
+
+      expect(response).to include('ok' => false, 'error_type' => 'validation')
+      expect(response['error']).to match(/aggregating redacted column 'Amount'/i)
+      expect(relation).not_to have_received(:select)
+    end
   end
 
   context 'when having references protected columns (PR-248 round-2 High 2)' do

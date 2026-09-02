@@ -112,17 +112,30 @@ module Woods
       # Resolve EAV patterns against a `columns` header into concrete index
       # pairs. A rule only fires when both key_column and value_column are
       # present in the header, and costs nothing per row otherwise.
+      #
+      # A duplicated key or value header (an `AS` alias can shadow the real
+      # column — CON-1) makes index attribution ambiguous: a last-index-wins
+      # lookup would let the shadow steal the mask from the secret. The
+      # executor refuses those selects up front; here, defense-in-depth
+      # fails toward masking — every cell under a value-named header is
+      # redacted unconditionally.
       def positional_kv_rules(columns, ctx)
         return [] unless columns.is_a?(Array)
 
-        index = columns.each_with_index.to_h { |name, idx| [name.to_s, idx] }
-        ctx.redacted_key_values.filter_map do |pattern|
-          key_idx = index[pattern['key_column']]
-          val_idx = index[pattern['value_column']]
-          next unless key_idx && val_idx
+        names = columns.map(&:to_s)
+        ctx.redacted_key_values.filter_map { |pattern| positional_kv_rule(names, pattern) }
+      end
 
-          { key_idx: key_idx, val_idx: val_idx, sensitive: pattern['sensitive_keys'] }
-        end
+      # One resolved rule for one EAV pattern, or nil when the header lacks
+      # either column. Unambiguous headers get the key/value index pair;
+      # duplicated headers get the unconditional mask list.
+      def positional_kv_rule(names, pattern)
+        key_idxs = names.each_index.select { |i| names[i] == pattern['key_column'] }
+        val_idxs = names.each_index.select { |i| names[i] == pattern['value_column'] }
+        return nil if key_idxs.empty? || val_idxs.empty?
+        return { mask_idxs: val_idxs } unless key_idxs.one? && val_idxs.one?
+
+        { key_idx: key_idxs.first, val_idx: val_idxs.first, sensitive: pattern['sensitive_keys'] }
       end
 
       # Redact positional row data using a precomputed plan. Handles both
@@ -140,7 +153,12 @@ module Woods
       def redact_row(row, plan)
         result = apply_mask(row, plan[:mask])
         plan[:kv_rules].each do |rule|
-          result[rule[:val_idx]] = '[REDACTED]' if rule[:sensitive].include?(row[rule[:key_idx]].to_s)
+          if rule[:mask_idxs]
+            # Ambiguous (duplicated) headers: mask every value-named cell.
+            rule[:mask_idxs].each { |idx| result[idx] = '[REDACTED]' }
+          elsif rule[:sensitive].include?(row[rule[:key_idx]].to_s)
+            result[rule[:val_idx]] = '[REDACTED]'
+          end
         end
         result
       end

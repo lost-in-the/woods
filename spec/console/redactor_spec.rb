@@ -276,6 +276,29 @@ RSpec.describe Woods::Console::Redactor do
         )
         expect(result['rows'][0]).to eq([1, 'alice'])
       end
+
+      it 'masks every value-named column when the value header is duplicated (CON-1 defense)' do
+        # An alias can shadow the real value column ("id AS value"); index
+        # resolution must not let the shadow steal the mask from the secret.
+        result = described_class.apply(
+          { 'columns' => %w[key value value],
+            'rows' => [['stripe_access_token', 'sk_live_123', 7], ['theme', 'dark', 8]] },
+          ctx
+        )
+        expect(result['rows'][0]).to eq(['stripe_access_token', '[REDACTED]', '[REDACTED]'])
+        expect(result['rows'][1]).to eq(['theme', '[REDACTED]', '[REDACTED]'])
+      end
+
+      it 'masks every value-named column when the key header is duplicated (CON-1 defense)' do
+        # A duplicated key header makes key attribution ambiguous, so no
+        # per-row sensitive-key match can be trusted; mask unconditionally.
+        result = described_class.apply(
+          { 'columns' => %w[key value key],
+            'rows' => [['stripe_access_token', 'sk_live_123', 7]] },
+          ctx
+        )
+        expect(result['rows'][0]).to eq(['stripe_access_token', '[REDACTED]', 7])
+      end
     end
 
     context 'with {records: [Hash]} shape' do
