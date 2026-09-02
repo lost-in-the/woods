@@ -23,10 +23,11 @@ module Woods
     # their qualified segments.
     #
     # The heuristic is regex-based, not an AST. Pathological constructs
-    # (heredocs containing keywords, `x = if ...` assignments, keywords inside
-    # string literals) can unbalance the depth count — the accepted house
-    # tradeoff, shared with RakeTaskExtractor: declarations and their +end+s
-    # pair up for conventionally formatted files.
+    # (heredocs containing keywords, keywords inside string literals) can
+    # unbalance the depth count — the accepted house tradeoff, shared with
+    # RakeTaskExtractor: declarations and their +end+s pair up for
+    # conventionally formatted files. Assignment-form conditionals
+    # (`x = if ...`) are counted; see {#block_opener?}.
     #
     # @example Qualifying the first class declaration
     #   qualified_first_class_name("module Billing\n  class Payment\n  end\nend")
@@ -169,16 +170,17 @@ module Woods
       # Check if a line opens a new block (do...end, def...end, etc.).
       #
       # Mirrors RakeTaskExtractor#block_opener? — the house pattern:
-      # +if+/+unless+ only count when they start the line (standalone form),
-      # not as trailing modifiers (e.g., `return if x`), and a line ending in
-      # +end+ closed whatever it opened.
+      # +if+/+unless+ count in statement position (leading the line, or
+      # directly after an assignment operator: `value = if x`), not as
+      # trailing modifiers (e.g., `return if x`, `value = 1 if x`), and a
+      # line ending in +end+ closed whatever it opened.
       #
       # @param stripped [String] Stripped line content
       # @return [Boolean]
       def block_opener?(stripped)
         return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
 
-        stripped.match?(/\A(if|unless)\b/)
+        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
       end
 
       private

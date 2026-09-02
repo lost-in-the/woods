@@ -244,7 +244,7 @@ module Woods
         return false if stripped.match?(/\Atransient\s+do/)
         return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
 
-        stripped.match?(/\A(if|unless)\b/)
+        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
       end
 
       # Build an ExtractedUnit from parsed factory data.

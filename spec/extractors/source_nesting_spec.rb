@@ -852,5 +852,53 @@ RSpec.describe Woods::Extractors::SourceNesting do
     it 'does not count a self-terminated definition as an opener' do
       expect(scanner.block_opener?('def call; end')).to be false
     end
+
+    it 'counts an assignment-form if as an opener' do
+      expect(scanner.block_opener?('value = if ready?')).to be true
+    end
+
+    it 'counts an or-assignment-form unless as an opener' do
+      expect(scanner.block_opener?('@memo ||= unless done?')).to be true
+    end
+
+    it 'does not count a trailing if modifier after an assignment as an opener' do
+      expect(scanner.block_opener?('value = 1 if ready?')).to be false
+    end
+
+    it 'does not count a self-balancing assignment-form conditional as an opener' do
+      expect(scanner.block_opener?('value = if a then b else c end')).to be false
+    end
+  end
+
+  # ── Assignment-form conditionals inside method bodies ────────────────
+
+  describe 'assignment-form multi-line conditionals' do
+    it 'keeps a sibling class qualified past an assignment-form if' do
+      # `value = if ready?` opens a construct whose line-leading `end` pops
+      # a frame, but the opener rule counted `if` only in line-leading
+      # position. The unbalanced `end`s then closed `Outer` early and the
+      # sibling class was reported as bare `Sibling`, so the governed
+      # comparison found no declaration matching the path's constant.
+      source = <<~RUBY
+        module Outer
+          class Helper
+            def compute
+              value = if ready?
+                1
+              else
+                2
+              end
+              value
+            end
+          end
+
+          class Sibling
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/outer/sibling.rb', source))
+        .to eq('Outer::Sibling')
+    end
   end
 end

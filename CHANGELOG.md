@@ -70,6 +70,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Assignment-form multi-line conditionals no longer unbalance depth
+  tracking.** `block_opener?` counted `if`/`unless` only in line-leading
+  position while `case`/`begin`/`do` matched anywhere, so
+  `value = if cond … end` popped a frame that was never pushed and closed
+  the enclosing construct one `end` early. In a `.rake` file every task
+  after the conditional lost its namespace prefix (wrong identifiers, a
+  public contract); in `SourceNesting` a sibling class after the
+  conditional lost its qualification (absorbed by governed naming for
+  conventional paths); in the factory parser the enclosing factory
+  completed early and attributes after the conditional were dropped.
+  `if`/`unless` now also count directly after an assignment operator
+  (`value = if x`, `@memo ||= unless y`), still excluding trailing
+  modifiers and self-balancing one-liners, in all three copies of the
+  rule (`RakeTaskExtractor`, `SourceNesting` — which
+  `StateMachineExtractor` shares — and `FactoryExtractor`);
+  `SemanticChunker` already counted assignment position. Surfaced by the
+  v2 downstream validation after the comment/string neutralization fix
+  removed a compensating miscount.
+
 - **An alias can no longer name a protected output header (CON-1).**
   `console_query` accepted `select: ["key", "value", "id AS value"]`; the
   duplicate header made the positional redactor mask the aliased cell and

@@ -355,15 +355,22 @@ module Woods
       end
 
       # Check if a line opens a new block (do...end or def...end).
-      # Note: if/unless only count as block openers when they start the line
-      # (standalone form), not as trailing modifiers (e.g., `return if x`).
+      #
+      # +if+/+unless+ count as block openers in statement position: leading
+      # the line, or directly after an assignment operator (`value = if x`,
+      # `@memo ||= unless y` — the {Woods::Chunking::SemanticChunker}
+      # precedent). Trailing modifiers (`return if x`, `value = 1 if x`)
+      # must not count, and a line whose opener closes on the same line
+      # (`x = if a then b end`) is self-balancing: its trailing `end` never
+      # matches the line-leading {END_LINE}, so counting it would push a
+      # frame nothing pops — the same `end` guard the keyword branch uses.
       #
       # @param stripped [String] Stripped line content
       # @return [Boolean]
       def block_opener?(stripped)
         return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
 
-        stripped.match?(/\A(if|unless)\b/)
+        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
       end
 
       # Check if a task name falls under an excluded namespace.

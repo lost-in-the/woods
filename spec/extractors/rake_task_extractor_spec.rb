@@ -738,6 +738,109 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     end
   end
 
+  # ── Assignment-form multi-line conditionals ─────────────────────────
+
+  describe 'assignment-form multi-line conditionals' do
+    # `value = if cond` opens a construct whose line-leading `end` pops a
+    # depth frame, but `block_opener?` counted `if`/`unless` only in
+    # line-leading position — the frame was never pushed, so that `end`
+    # closed the enclosing namespace one construct early and every task
+    # after it lost its prefix. `case`/`begin` matched anywhere on the
+    # line, so the same syntactic shape was counted for one keyword and
+    # not the other. Five-case matrix from the PR #276 downstream
+    # validation; every case expects `probe:alpha` and `probe:beta`.
+
+    def probe_identifiers(alpha_body)
+      path = create_file('lib/tasks/probe.rake', <<~RAKE)
+        namespace :probe do
+          task alpha: :environment do
+        #{alpha_body.gsub(/^/, '    ').chomp}
+          end
+
+          task beta: :environment do
+            puts 'beta'
+          end
+        end
+      RAKE
+      described_class.new.extract_rake_file(path).map(&:identifier)
+    end
+
+    it 'control: plain tasks keep the namespace' do
+      expect(probe_identifiers("puts 'alpha'")).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace across an assignment-form multi-line if' do
+      body = <<~RUBY
+        value = if ENV['MODE']
+          'special'
+        else
+          'plain'
+        end
+        puts value
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace across a comment containing a block keyword (EXTB-1)' do
+      body = <<~RUBY
+        # do not run this outside maintenance windows
+        puts 'alpha'
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace when the comment and the assignment-form if appear together' do
+      body = <<~RUBY
+        # do not run this outside maintenance windows
+        value = if ENV['MODE']
+          'special'
+        else
+          'plain'
+        end
+        puts value
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace across an assignment-form multi-line case' do
+      body = <<~RUBY
+        value = case ENV['MODE']
+                when 'a' then 'special'
+                else 'plain'
+                end
+        puts value
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the assignment-form conditional inside the task body' do
+      body = <<~RUBY
+        value = if ENV['MODE']
+          'special'
+        else
+          'plain'
+        end
+        puts value
+      RUBY
+      path = create_file('lib/tasks/probe.rake', <<~RAKE)
+        namespace :probe do
+          task alpha: :environment do
+        #{body.gsub(/^/, '    ').chomp}
+          end
+
+          task beta: :environment do
+            puts 'beta'
+          end
+        end
+      RAKE
+      alpha = described_class.new.extract_rake_file(path).find { |u| u.identifier == 'probe:alpha' }
+      expect(alpha.source_code).to include('else').and include('puts value')
+      # The task block is the 6 body lines through the conditional's `end`
+      # plus `puts value` — a truncated walk stops at 4.
+      expect(alpha.metadata[:source_lines]).to eq(6)
+    end
+  end
+
   # ── EXTB-9: quoted namespaced task dependencies ─────────────────────
 
   describe 'quoted task dependencies' do
