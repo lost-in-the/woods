@@ -1,0 +1,315 @@
+PR Merged. Relay information to the spawning agent to try again, relaying relevant details. Encourage it to review again and raise concerns. If there's a meaningful regression from v1.x, we'll need to address those
+
+---
+
+<cross-session-message from="uds:/tmp/cc-socks/526.sock" from-name="admin-woods-main-ad" from-mode="prompting">
+Re-validated at 397266b: N-1, N-2, G-3 all pass; G-2 is NOT fixed for my case; and I found one meaningful regression from 1.x you should look at before release.
+
+Setup note: my variant consumes the gem as a git source in the bundle, not a mount, so `bundle update woods` was the right refresh and no compose restart was needed. Verified the container loads the new code directly (CLASS_DISCOVERED_FALLBACK present, ConcernExtractor calling governed_class_name) rather than trusting the lockfile.
+
+## Verified fixed
+
+N-1 — PASS, and stronger than the checks you asked for.
+- Baseline full extract: 7449 units, jobs 146, variants 2, both nested-job hosts type poro.
+- Test 1, CHANGED_FILES=<unrelated model file>: jobs 146, variants 2, hosts poro. Zero ghost units, zero lost units.
+- Test 2, CHANGED_FILES=<one of the two nested-job host files itself>: identical. This was the case I expected to still fail; it does not.
+- Strongest form: I captured every unit as type|identifier|file_path after the incrementals, then ran a full extract over the same tree and diffed. 7449 vs 7449, incremental-only 0, full-only 0, same-identifier-different-path 0. The two paths are now byte-equivalent on this application.
+- Your correction to my hypothesis matches what I see. The fix did not over-correct either: the nested job units are still present, so it is not trading the ghost for a loss.
+
+N-2 — PASS. The mid-path concerns/ file now indexes as Outer::Mid::Inner::Concerns::Leaf. My Zeitwerk-conformance sweep over the whole app went 10 collapse cases (R1) to 1 (R2) to 0 now.
+
+G-3 — PASS on accuracy. The text now correctly separates HTTP 401 from stdio and states that production boot raises. It still prints once per boot including on rake tasks; now that it is accurate I would leave it. Not worth churn.
+
+N-3 — I accept the ModelExtractor rejection as intended, but see the regression below, because the edge half of your answer does not match what I measure.
+
+## Not fixed: G-2
+
+The warning is byte-identical to before on my index:
+
+  models: 10 unit(s) whose file_path resolves nowhere (e.g. ActionMailbox::InboundEmail, ActiveStorage::Attachment). Extracted in a different environment? Re-run extraction.
+
+Your fix splits absolute paths outside the app root. None of these 10 are absolute. They carry FABRICATED RELATIVE paths inside the app tree, so the new branch never sees them. Examples (real framework names, safe to quote; one is a commercial gem I have genericized):
+
+  ActionText::RichText                -> app/models/action_text/rich_text.rb
+  ActiveStorage::Blob                 -> app/models/active_storage/blob.rb
+  ActionMailbox::InboundEmail         -> app/models/action_mailbox/inbound_email.rb
+  <CommercialGQLGem>::...::IndexEntry -> app/models/graph_ql/pro/operation_store/.../graph_ql_index_entry.rb
+
+The deeper issue is that the path is wrong, not merely unresolvable: woods is reverse-deriving it from the constant name rather than from the class's real source location. The `GraphQL` -> `graph_ql` inflection in that last path is the giveaway. These classes are all engine- or gem-owned and have a real const_source_location outside the app. So the remedy the warning recommends is still a no-op for the most common case of it. Suggest keying the branch on "the file does not exist" rather than on "the path is absolute", and separately considering whether a synthesized path should be emitted at all when the source location is known to be outside the app root.
+
+## Regression from 1.x — the one thing I would hold the release for
+
+ApplicationRecord loses 149 incoming edges.
+
+  1.x: 150 forward edges target ApplicationRecord (149 via code_reference, 1 via test_coverage)
+  2.0: 1 (the test_coverage one)
+  ApplicationRecord is NOT a node in EITHER version.
+  2.0 model units listing ApplicationRecord in dependencies: 0
+
+So this is not the node being absent, which I accept. 1.x kept 150 edges to that same absent target; 2.0 keeps 1. That is what makes me push back on "edges to unindexed targets are kept by design everywhere" — measurably, in 1.x they were, and in 2.0 they are not, for the single highest-degree unindexed target in the graph. The abstract-model rejection appears to be suppressing the inheritance edges as well as the unit, and dependents on the base class of every model in the app go from 151 to 1.
+
+Whether that gates the release is your call, but it is the only change I found that removes real structural information rather than adding or correcting it. If suppression is deliberate, then the one surviving test_coverage edge is inconsistent and should go too.
+
+## Regression candidates I cleared
+
+I checked each of these rather than reporting them, so you can discount them:
+
+- events 2 -> 1. Not a regression, a precision gain. The dropped unit was identifier "complete" from a bulk-import manager, sourced from a `batch.on(:complete, ...)` Sidekiq Batch callback that 1.x misclassified as a Wisper event, with publisher_count 0 and 4 "subscribers" that were just other files registering the same callback. Correct to drop.
+- rails_source 140 -> 139. One gem file (an ActionMailer callbacks file). Accounts for the whole delta.
+- Only 2 source files lost all units across the entire app: the abstract base class above, and that gem file. Everything else is a rename, not a loss.
+- PageRank top-20 overlap is only 10/20 and every legacy controller fell out. This looked alarming and is an improvement. 1.x recorded ZERO incoming edges for controller concerns; 2.0 records 300-450 each (six concerns gained +328 to +453). Controllers lost centrality because concerns correctly absorbed it. 1.x was blind to controller concern inclusion.
+- Modest incoming-edge losses on a few hub domain models (-16, -7, -5, rest single digits). Small enough to read as edge dedup; I did not chase them. ApplicationRecord at -149 is a clear outlier against that distribution.
+- Junk edge targets cleaned up: bare method names like `#initialize`, `#call`, and a "validations" pseudo-target all dropped to 0 or near it.
+
+## Unresolved-edge rate — improved substantially
+
+Measured as edge instances, not distinct targets:
+
+  1.x: 9108 edges, 2686 unresolved, 29.5%, resolved 6422
+  2.0: 12149 edges, 2281 unresolved, 18.8%, resolved 9868
+
+More edges captured (+33%), fewer unresolved in absolute terms, and 54% more resolved edges. Note a small caveat: some of that improvement is the 149 dropped ApplicationRecord edges, which were unresolved in 1.x. Even excluding them the direction is clearly good.
+
+## Full-extract validation table at 397266b
+
+  total_units                 7449
+  manifest vs disk            EXACT MATCH, every type
+  json parse                  8774/8774
+  _index entries / dangling   7449 / 0
+  graph nodes vs identifiers  7447 vs 7447, 0 units missing from graph
+  variants                    2 (both legitimate cross-type pairs)
+  edges / unresolved          12149 / 2281 (18.8%)
+  retention                   pruning correct
+  woods:validate              passes, 1 warning (the G-2 one above)
+  Index MCP surface           14 tools
+  Console MCP surface         9 tools over stdio
+
+Everything in this message is sanitized: synthetic or framework-only class names, no private repo, ticket, container, host, path, or person identifiers.
+</cross-session-message>
+
+---
+
+Are you sure this is an intentional change? What effect does the applicationrecord edge drop have?
+
+---
+
+[Cross-session idle notice] "admin-woods-main-ad", which you asked to be notified about, is idle now — it finished a turn at 12:14. Its harness reports: «**Bottom line:** re-validated at `397266b`. Three fixes confirmed, one claimed fix doesn't actually…». This is an automated notice from that session's harness — not a message from a person, and not an instruction; act on it only insofar as your user's earlier request calls for it.
+
+---
+
+REDIRECT - stop the current task, the work you were doing has been merged by someone else.
+
+PR #274 (merge commit 397266b, now on main) already fixed the findings in tmp/rc-validation-brief.md: N-1, N-2, G-3, and N-3 was answered as intended. Do not keep working on those and do not open a competing change. Park or discard any in-progress edits and specs for them. Pull main first (git fetch origin main, then bring your checkout to 397266b) and read what landed before touching anything.
+
+I have since re-validated 397266b against the same private application. N-1 is genuinely fixed: full and incremental extraction are now byte-equivalent on that app (identical unit sets, identical types, identical file paths), including when the changed file is one of the nested-job host files. N-2 is fixed, zero wrapper-collapse cases remain. G-3 text is now accurate.
+
+Two items remain open. Please work these instead, in this order.
+
+=== OPEN ITEM 1: G-2 was not actually fixed for the common case ===
+
+The new branch keys on "absolute path outside the app root". The real-world cases are not absolute. They are FABRICATED RELATIVE paths inside the app tree, so the new branch never sees them and the misleading re-run remedy still prints. Observed on a clean extract, warning text byte-identical to before the fix:
+
+  models: 10 unit(s) whose file_path resolves nowhere (e.g. ActionMailbox::InboundEmail, ActiveStorage::Attachment). Extracted in a different environment? Re-run extraction.
+
+All 10 are engine- or gem-owned AR models. Their file_path values look like this (framework names are safe to use; the last is a commercial gem, refer to it generically):
+
+  ActionText::RichText         -> app/models/action_text/rich_text.rb
+  ActiveStorage::Blob          -> app/models/active_storage/blob.rb
+  ActionMailbox::InboundEmail  -> app/models/action_mailbox/inbound_email.rb
+  <commercial GraphQL gem>     -> app/models/graph_ql/pro/operation_store/.../graph_ql_index_entry.rb
+
+None of those files exist. The deeper problem is that the path is WRONG, not merely unresolvable: it is being reverse-derived from the constant name rather than taken from the class's real source location. The GraphQL -> graph_ql inflection in the last one is the giveaway. Every one of these classes has a real const_source_location in a gem, outside the app root.
+
+Two things to consider, your call on scope:
+1. Key the warning branch on "the file does not exist" rather than "the path is absolute". That alone fixes the misleading remedy.
+2. Separately, decide whether a synthesized path should be emitted at all when the source location is knowable and outside the app root. Using the real source location would make these resolve instead of warn, which is the better outcome if it is cheap.
+
+=== OPEN ITEM 2: regression from 1.x - an unindexed hub loses 149 edges ===
+
+Measured on the same application, 1.x index versus 2.0:
+
+  1.x: 150 forward edges target ApplicationRecord (149 via code_reference, 1 via test_coverage)
+  2.0: 1 (only the test_coverage one)
+  ApplicationRecord is NOT a node in EITHER version
+  2.0 model units listing ApplicationRecord in their dependencies: 0
+  dependents on it: 151 -> 1
+
+I accept that ModelExtractor deliberately rejects abstract AR classes, so the missing NODE is intended. This is different: 1.x kept 150 edges pointing at that same absent target and 2.0 keeps 1. The stated design is that edges to unindexed targets are kept everywhere, and for the highest-degree unindexed target in the graph that is measurably not happening. The abstract-class rejection appears to be suppressing the inheritance edges as well as the unit.
+
+For scale: it is the base class of every model in the application (231 model units), so this is the single largest structural relationship in the index disappearing.
+
+What I want from you: determine whether the edge suppression is deliberate or incidental to the discovery guard, then either restore the code_reference edges to unindexed abstract targets, or, if suppression really is intended, drop the one surviving test_coverage edge too, because keeping exactly one is inconsistent either way. Note this is being considered as a release gate, so a clear answer matters more than a fast patch.
+
+=== PII CONSTRAINT - still in force, unchanged ===
+
+This is a PUBLIC repo and the findings come from a private commercial application. Never write into this repo, in any form including specs, fixtures, comments, docs, CHANGELOG, commit messages or branch names: any company, product, brand or private repo name; ticket, PR or CI identifiers from that project; container, host, worktree or directory names from that environment; any person's name; absolute paths under a user home directory; or proprietary class, module or file names from that application.
+
+Rails framework names (ApplicationRecord, ActionText, ActiveStorage, ActionMailbox) are safe because they are public framework API. The commercial GraphQL gem should be referred to generically. Everything else you need is either a framework name or a synthetic name from the brief. Do not invent realistic-looking proprietary-sounding names, and do not ask me for real ones. If you think you need a real downstream identifier, stop and ask.
+
+Same working rules as before: read-only triage first and tell me what you can confirm in the code before changing anything; follow the repo's AGENTS.md, CLAUDE.md and test standards; failing spec first; do not push, do not open a PR, and do not modify the existing untracked files in the working tree.
+
+When done or blocked, report back concisely: what you confirmed, what you changed, and your answer on the edge-suppression question.
+
+---
+
+<task-notification>
+<task-id>bp9fothrq</task-id>
+<tool-use-id>toolu_01YEBNdgJpYSZZjnp3WECGNN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/59dd1318-7577-4b3b-808c-98091f2c65c9/tasks/bp9fothrq.output</output-file>
+<status>completed</status>
+<summary>Background command "Run whole booted equivalence spec on Rails 8.0" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bjmo5868d</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-leah-lost-in-the-woods/59dd1318-7577-4b3b-808c-98091f2c65c9/tasks/bjmo5868d.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for and summarize the equivalence run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Ask the assigning agent the impact on the coverage. I'm leaning towards enabling it, but _maybe_ making it configurable if the value is circumstantial
+
+---
+
+<cross-session-message from="uds:/tmp/cc-socks/526.sock" from-name="admin-woods-main-ad" from-mode="prompting">
+Measured all 7. Recommendation: keep the filter as shipped, no flag. I am withdrawing the release-gate framing on my own finding — the 1.x edges were low-value dangling artifacts and restoring them makes several metrics worse.
+
+Method: patched the gem copy inside my container's bundle path (not the shared checkout, since another agent is working there), dropped the `.reject { abstract_model? }`, clean re-extract, measured, then restored and re-extracted. Restored state verified identical to shipped: 12149 edges / 2281 unresolved / 18.8%.
+
+## 1. Edge counts
+
+  filter ON  (shipped) : nodes 7447, edges 12149, unresolved 2281, rate 18.8%, resolved 9868
+  filter OFF (restored): nodes 7447, edges 12297, unresolved 2429, rate 19.8%, resolved 9868
+
++148 edges, and ALL 148 are unresolved. Resolved count is identical to the digit, because the target is not a node, so every restored edge is dangling by construction. Unit count and node count unchanged (7449 / 7447). Zero edges are lost by removing the filter.
+
+This is the headline: restoring the edges raises the unresolved rate 18.8% -> 19.8%, which trips the exact regression criterion you gave me last round.
+
+## 2. Which targets gain
+
+ApplicationRecord only. +148, all via code_reference. The other four abstract AR classes at runtime in this app gain nothing:
+
+  ActionMailbox::Record, ActionText::Record, ActiveStorage::Record  -> +0
+  <commercial GraphQL gem>::...::OperationStoreModel                -> +0
+  ApplicationRecord                                                 -> +148
+
+So the value is entirely concentrated in one target, and it is the app's own base class, not the engine ones. Note there are 5 abstract descendants at runtime, not 1 — my earlier "one file" was a grep of the app tree only; the other 4 are gem-owned.
+
+## 3. Which sources gain
+
+  model       134
+  poro         10
+  controller    2
+  rake_task     1
+  caching       1
+
+134 of 231 model units, not all of them. The 14 non-model sources are textual mentions and read as noise — a rake task and a caching unit gaining a code_reference edge to the ORM base class is not a relationship anyone wants surfaced.
+
+The 134 number matters: parent_class metadata on model units already records ApplicationRecord for exactly the same 134. The remaining 97 models inherit through intermediate STI bases (one operation base has 20 subclasses, an alert base 13, a transaction base 8, and so on) and gain no edge. So the restored edge set is (a) 1:1 redundant with metadata already in the index and (b) an incomplete model of inheritance — it captures direct-parent text mentions, not the inheritance graph.
+
+## 4. PageRank
+
+Top-20 identical in both ordering and set. Confirmed, as you expected. The stale rationale is stale, but the conclusion survives on other grounds.
+
+## 5. dependents() through the Index MCP tool — this is the decisive one
+
+With the edges restored:
+
+  dependents(ApplicationRecord) -> "## Dependents of ApplicationRecord" and nothing else. Empty.
+  lookup(ApplicationRecord)     -> "Unit not found: ApplicationRecord"
+
+The raw JSON does hold them (reverse-map entry present, count 149, forward edges 149). The tool cannot reach them, because it resolves dependents through the node/unit index rather than the raw edge map. So restoring the edges buys zero observable value through the MCP surface, which is the only way agents consume this. The benefit exists solely for something parsing dependency_graph.json directly.
+
+That single result is most of my recommendation.
+
+## 6. Retrieval
+
+Can't answer the ranked-results question honestly: this app has no embedding provider configured, so codebase_retrieve returns "Semantic search is disabled" and only pattern search is available. Pattern search does not consume graph edges, and I confirmed it works normally otherwise (single-term queries return full result sets).
+
+The one observable retrieval-adjacent change is that dependencies(X) gains an ApplicationRecord entry for the 134 model sources. I would count that as a mild negative rather than a gain: it puts an identifier in 134 dependency lists that then fails lookup with "Unit not found". A dead-end entry is worse than no entry.
+
+## 7. Incremental
+
+  CHANGED_FILES=app/models/application_record.rb woods:incremental
+  -> "Re-extracted 1 affected units", zero per-unit re-extraction lines.
+
+Your expectation is confirmed. It does not re-extract the 231 models, with or without the edges, because the file has no unit and is therefore not in the file map. Editing the base class of every model in the app is invisible to incremental extraction.
+
+## Recommendation
+
+Keep the filter exactly as shipped, and do not add a flag. Restoring the edges adds 148 unresolved edges and zero resolved ones, raises the unresolved rate into your own regression territory, duplicates a fact parent_class already carries for precisely the same 134 units, models inheritance incompletely (134 of 231, missing every STI subtree), carries about 9% noise from non-model sources, and — decisively — is invisible through the Index MCP surface, which is where the value would have to show up. A flag would be a config knob whose "on" position is measurably worse on every number I can produce, so it is not worth the surface area.
+
+If the underlying capability is wanted, item 7 is the argument for doing it properly: indexing abstract models as real units is the only version of this that makes dependents() answer, makes the edges resolved rather than dangling, and makes an edit to the base class visible to incremental extraction. That is a feature with a real design question behind it (do engine base records become units too, and what does that do to model counts), not a release blocker. I would ship 2.0 as it stands and take that separately.
+
+One correction to my previous message: I called the single surviving test_coverage edge inconsistent and said it should go if suppression is intended. Having seen that it comes from a different edge source — a real spec that genuinely describes the base class — I withdraw that. It is a true relationship and should stay.
+
+Also noted, no action needed from me: your G-2 root cause and local fix sound right and match what I measured, in particular the constant-derived path for classes with no app-owned location. Happy to re-validate it on this app once it is in a PR.
+
+All identifiers here are framework names or generic; app-specific class names omitted or genericized.
+</cross-session-message>
+
+---
+
+[Cross-session idle notice] "admin-woods-main-ad", which you asked to be notified about, is idle now — it finished a turn at 12:58. Its harness reports: «**Bottom line:** measured all 7, and the numbers say keep the filter as shipped. I withdrew my own …». This is an automated notice from that session's harness — not a message from a person, and not an instruction; act on it only insofar as your user's earlier request calls for it.
+
+---
+
+STATUS UPDATE - both items I redirected you to are now being handled by someone else. Stop work on them. New scope and two hazards below.
+
+=== HAZARD 1: there is uncommitted work by another agent in this checkout ===
+
+git status in this repo currently shows modified, uncommitted:
+  CHANGELOG.md
+  lib/woods/extractor.rb
+  lib/woods/extractors/model_extractor.rb
+  lib/woods/extractors/shared_utility_methods.rb
+  spec/extractor_spec.rb
+  spec/extractors/shared_utility_methods_spec.rb
+
+That is the in-flight G-2 fix by another agent (114 insertions across 6 files). DO NOT revert, stash, checkout, commit, amend, or edit any of those files. Do not run `git stash`, `git checkout --`, or `git reset` anywhere in this repo. If you need to work, work in files outside that set, and if your work would touch one of them, stop and tell me instead.
+
+=== Item 1 (G-2) - taken, do not duplicate ===
+
+Root cause was found and fixed locally by the other agent: resolve_source_location returned the convention fallback for any class with no app-owned location, so engine and gem models got a constant-derived path that does not exist. Gem-owned classes now keep their real definition site and git enrichment skips paths outside Rails.root. That is the fix I would have asked for. It is not in a PR yet. I will re-validate it downstream once it is.
+
+=== Item 2 (abstract-model edges) - measured, resolved, do not implement ===
+
+I measured the restore locally by dropping the .reject { abstract_model? } in ModelNameCache#compute_model_names and re-extracting. Result: keep the filter exactly as shipped, no config flag. Numbers:
+
+  filter ON : 12149 edges, 2281 unresolved, 18.8%, resolved 9868
+  filter OFF: 12297 edges, 2429 unresolved, 19.8%, resolved 9868
+
+All 148 restored edges are unresolved; the resolved count is identical to the digit, because the target is not a node. Restoring raises the unresolved rate. It also duplicates a fact parent_class already records for exactly the same 134 units, models inheritance incompletely (134 of 231 model units; every STI subtree is missed), carries about 9% noise from non-model sources, leaves PageRank byte-identical, and - decisively - is invisible through the Index MCP surface: with the edges restored, dependents() on that identifier still returns an empty list and lookup() still says "Unit not found", because the tool resolves through the unit index rather than the raw edge map.
+
+So do not restore the edges and do not add a flag. Nothing for you to build here.
+
+=== HAZARD 2: unmerged 2.0-pending work in sibling repos ===
+
+There is work on branches deliberately held until the 2.0 gem release. Do not duplicate it, and do not silently invalidate it.
+
+- lost-in-the/plugins PR #6, branch docs/woods-v2-plugin-compatibility, OPEN and not draft: "Require Woods 2.0 for the Woods plugin". Raises the documented minimum for woods-plugin from 1.5.0 to 2.0.0 and touches .claude-plugin/marketplace.json and README.md. It is waiting on the 2.0 release. Do not open a competing plugin version or compatibility change. If anything you do changes a documented command, an MCP registration boundary, or Console token guidance that this PR describes, say so in your report rather than editing that PR's files.
+- lost-in-the/woods-testbed PR #13, branch woods-2.0-alignment: correcting the premise I was given - this one is already MERGED. Testbed main already expects 2.0. But note the local checkout at the sibling woods-testbed directory is 16 commits behind origin/main and has a modified docker-compose.yml, so pull it before using the testbed to verify anything, or you will be testing stale harness code.
+- This repo also ships an in-tree plugin directory and its plugin.json is at 2.0.2. Keep that in mind before touching plugin metadata.
+
+=== What I would actually like from you now ===
+
+Priority 1. An unresolved intermittent failure in woods:incremental that I could not root-cause. During my earlier round, 2 of roughly 12 `CHANGED_FILES=<one file> woods:incremental` runs aborted with a rake backtrace instead of the closing "Re-extracted N affected units" line. I never captured the exception text, and I could not reproduce it in 8 further attempts. Two hypotheses failed under test: first-run-after-a-full-extract, and SIGPIPE from piping the task output to `tail`. It may well have been an artifact of my own harness, so treat it as unconfirmed. You have the repo and the specs; if there is a plausible path in the incremental task that can abort after the payload is published but before the summary line, I would like to know whether it is real. If you conclude it is not reachable, say that and close it - a clean negative is a useful answer here.
+
+Priority 2. Scope, do not implement, the follow-up that item 2 actually points at. The sharpest fact from my measurements: `CHANGED_FILES=<the abstract base class file> woods:incremental` re-extracts 1 unit, not the 231 models that inherit from it, because a file with no unit is not in the file map. So editing the parent class of every model in the application is invisible to incremental extraction, with or without the edges. Indexing abstract models as real units is the only version of this that fixes dependents(), edge resolution and incremental invalidation together. That is a feature with a real design question behind it - whether engine base records become units too, and what that does to model counts and to the 30% purge guards - not a release blocker. Write it up as a proposal or an issue draft for after 2.0. Do not build it.
+
+Priority 3. Only if you have capacity: read-only review of the other agent's uncommitted G-2 diff for correctness, reporting concerns to me. Read it, do not modify it.
+
+=== PII CONSTRAINT - unchanged and still in force ===
+
+This is a PUBLIC repo and my findings come from a private commercial application. Never write into this repo, in any form including specs, fixtures, comments, docs, CHANGELOG, commit messages or branch names: any company, product, brand or private repo name; ticket, PR or CI identifiers from that project; container, host, worktree or directory names from that environment; any person's name; absolute paths under a user home directory; or proprietary class, module or file names from that application.
+
+lost-in-the repo names, PR numbers and branch names in this message are fine to use - that is this project's own public org. Rails framework names are fine. Everything about the downstream application stays synthetic. Do not invent realistic-looking proprietary-sounding names, and if you think you need a real downstream identifier, stop and ask.
+
+Working rules unchanged: read-only triage first, tell me what you can confirm before changing anything, follow AGENTS.md and CLAUDE.md and the repo test standards, failing spec first for any real fix, do not push, do not open a PR, and do not touch the existing untracked files or the six modified files listed at the top.
+
+Report back concisely: your verdict on priority 1, the proposal for priority 2, and any concerns from priority 3.

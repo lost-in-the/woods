@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "4c5076fd343c",
+  "strategy": "manual-commit",
+  "branch": "fix/gem-owned-source-paths",
+  "checkpoints_count": 10,
+  "files_touched": [
+    "CHANGELOG.md",
+    "lib/woods/extractor.rb",
+    "lib/woods/extractors/model_extractor.rb",
+    "lib/woods/extractors/shared_utility_methods.rb",
+    "spec/extractor_spec.rb",
+    "spec/extractors/shared_utility_methods_spec.rb"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4c/5076fd343c/0/metadata.json",
+      "transcript": "/4c/5076fd343c/0/full.jsonl",
+      "compact_transcript": "/4c/5076fd343c/0/transcript.jsonl",
+      "content_hash": "/4c/5076fd343c/0/content_hash.txt",
+      "prompt": "/4c/5076fd343c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2857,
+    "cache_creation_tokens": 87633,
+    "cache_read_tokens": 12763335,
+    "output_tokens": 52939,
+    "api_call_count": 45
+  }
+}

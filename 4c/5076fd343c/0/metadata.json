@@ -1,0 +1,226 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "4c5076fd343c",
+  "session_id": "59dd1318-7577-4b3b-808c-98091f2c65c9",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-02T17:10:12.372011Z",
+  "branch": "fix/gem-owned-source-paths",
+  "checkpoints_count": 10,
+  "save_step_count": 6,
+  "files_touched": [
+    "CHANGELOG.md",
+    "lib/woods/extractor.rb",
+    "lib/woods/extractors/model_extractor.rb",
+    "lib/woods/extractors/shared_utility_methods.rb",
+    "spec/extractor_spec.rb",
+    "spec/extractors/shared_utility_methods_spec.rb"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "b6b029aa8c94",
+  "checkpoint_transcript_start": 483,
+  "transcript_lines_at_start": 483,
+  "compact_transcript_start": 58,
+  "token_usage": {
+    "input_tokens": 2857,
+    "cache_creation_tokens": 87633,
+    "cache_read_tokens": 12763335,
+    "output_tokens": 52939,
+    "api_call_count": 45
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VmAEP577hjq7QBNmtSwnEr",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "superpowers:systematic-debugging"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "b6b029aa8c94",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 28,
+        "end": 29,
+        "entry_ids": [
+          "c05959ae-7d3b-4428-817d-b9ca18ab4e5b"
+        ],
+        "tool_use_id": "toolu_01VmAEP577hjq7QBNmtSwnEr"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VmAEP577hjq7QBNmtSwnEr"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: superpowers:systematic-debugging",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01GVagWnyMyGXPBixQM1y7tT",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "pr-description"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "b6b029aa8c94",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 433,
+        "end": 434,
+        "entry_ids": [
+          "79eafe9a-7a9e-4ba2-a8fb-64f50d0604bf"
+        ],
+        "tool_use_id": "toolu_01GVagWnyMyGXPBixQM1y7tT"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01GVagWnyMyGXPBixQM1y7tT"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: pr-description",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-02T17:10:12.269306Z",
+    "agent_lines": 114,
+    "agent_removed": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 114,
+    "total_lines_changed": 122,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 3233,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.json": 84,
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363,
+        "docs/self-analysis/v2-full-audit-prompt.md": 88,
+        "docs/self-analysis/v2-prerelease-audit/01-executive-summary.md": 41,
+        "docs/self-analysis/v2-prerelease-audit/02-contracts-verified.md": 98,
+        "docs/self-analysis/v2-prerelease-audit/03-high-findings.md": 122,
+        "docs/self-analysis/v2-prerelease-audit/04-medium-correctness.md": 210,
+        "docs/self-analysis/v2-prerelease-audit/05-medium-ops.md": 65,
+        "docs/self-analysis/v2-prerelease-audit/06-performance.md": 117,
+        "docs/self-analysis/v2-prerelease-audit/07-low-findings.md": 189,
+        "docs/self-analysis/v2-prerelease-audit/08-coverage-gaps.md": 138,
+        "docs/self-analysis/v2-prerelease-audit/09-doc-accuracy.md": 178,
+        "docs/self-analysis/v2-prerelease-audit/10-backlog-and-method.md": 78,
+        "docs/self-analysis/v2-prerelease-audit/11-release-candidate-findings.md": 232,
+        "docs/self-analysis/v2-prerelease-audit/12-remediation-plan.md": 620,
+        "docs/self-analysis/v2-prerelease-audit/README.md": 50
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 923,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2424,
+      "agent_lines_removed": 8,
+      "user_added_per_file": {
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 923,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2424,
+      "agent_lines_removed": 8,
+      "user_added_per_file": {
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 923,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2424,
+      "agent_lines_removed": 8,
+      "user_added_per_file": {
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 923,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2424,
+      "agent_lines_removed": 8,
+      "user_added_per_file": {
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 923,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2424,
+      "agent_lines_removed": 8,
+      "user_added_per_file": {
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    },
+    {
+      "checkpoint_number": 7,
+      "user_lines_added": 923,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2424,
+      "agent_lines_removed": 8,
+      "user_added_per_file": {
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    }
+  ]
+}
