@@ -70,6 +70,362 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An alias can no longer name a protected output header (CON-1).**
+  `console_query` accepted `select: ["key", "value", "id AS value"]`; the
+  duplicate header made the positional redactor mask the aliased cell and
+  return the real EAV secret in cleartext (`id AS key` disarmed masking
+  entirely). A fourth select refusal now rejects any `AS` alias whose name
+  collides with a `console_redacted_columns` or `console_redacted_key_values`
+  column, case-insensitively. Defense-in-depth: the positional redactor now
+  treats a duplicated key or value header as ambiguous and masks every cell
+  under a value-named header unconditionally instead of letting a
+  last-index-wins lookup pick the shadow. The alias/aggregate refusals also
+  compare configured column names case-insensitively (CON-3/R1-6), matching
+  the predicate-side refusals. `console_sql` was already immune (its
+  reference scan sees the alias token) and is unchanged.
+- **`woods:incremental` refuses to run without a baseline index (CORE-2).**
+  Against an output directory with no published generation and no dependency
+  graph — a failed CI cache restore, a typo'd `WOODS_OUTPUT`, a first run on
+  a fresh runner — `extract_changed` computed an empty blast radius over the
+  empty graph, dispatched only the diffed paths, and silently published a
+  near-empty index as generation 1 that nothing self-heals until a full
+  extraction. `prepare_incremental_run` now raises a typed
+  `Woods::ExtractionError` naming `woods:extract` (the task exits non-zero);
+  the watch daemon keeps its existing missing-generation → full-extraction
+  posture, and an embedding caller that already holds a populated in-memory
+  graph still runs. `woods:refresh` gets the same guard.
+- **Per-path prune skips by (identifier, type), not bare identifier
+  (CORE-1).** Two dispatch rules can claim one path (`app/policies` is
+  claimed by the policies and pundit_policies rules) and mint the same
+  identifier for different unit types; when an edit made one of them stop
+  producing, the surviving identifier shielded the stale sibling-type node
+  from the prune — a permanent full/incremental divergence. The #225 typed
+  discipline now covers `prune_path_leftovers` too.
+
+- Trailing `#` comments no longer steer `SourceNesting`'s depth tracking. A comment ending in the
+  word "end" (`module Api # rename at the end`) made the wrapper look self-terminated and dropped
+  the namespace from the identifier; a comment containing `do`/`for` opened a phantom frame that
+  swallowed a real `end` and leaked a closed wrapper onto a later top-level class (EXTA-1).
+- `SourceNesting` keeps non-ASCII constant names whole (`class Café` was captured as `Caf`) and
+  skips declarations inside `=begin`/`=end` block comments (EXTA-14).
+- `RakeTaskExtractor` no longer counts block keywords found in comments, string literals, or
+  heredoc bodies. A `# do not touch production` inside a task inflated depth with no matching
+  `end`, so later namespaces inherited a stale prefix (`other:third` indexed as
+  `cleanup:other:third`) and a task swallowed the next one's lines; a heredoc line reading
+  `end of the road` truncated a task body and lost its dependency edges (EXTB-1).
+- `FactoryExtractor` no longer reads block keywords inside attribute strings. Two of them in one
+  factory (`title { "things to do" }`, `note { "walk for a while" }`) left the factory unclosed at
+  EOF and the unit was dropped from the index entirely (EXTB-2).
+- `SemanticChunker`'s line-depth heuristic no longer treats `=begin`/`=end` as a block opener. Each
+  block comment added a permanent +1 to the depth count, so the enclosing method never closed and
+  every later method was appended to its chunk (STO-3).
+- A blockless AASM/`state_machines` `event :noop` is emitted immediately instead of being replaced
+  unseen by the next event, and event depth is clamped at zero so an unbalanced `end` can no longer
+  disable parsing for every event that follows (EXTB-17).
+- Service, job/worker, and mailer dependency edges keep their namespace. Since G-1 a namespaced
+  unit's identifier is fully qualified, so `Billing::ChargeService.call` recorded an edge to
+  `ChargeService` — matching no node, invisible to `dependents`, PageRank, and the incremental
+  blast radius (EXTA-2).
+- One shared enqueue pattern is now used by the dependency scanner, `JobExtractor`, and
+  `CallbackAnalyzer`, so all three agree: Sidekiq `*Worker` classes and
+  `SyncJob.set(wait: …).perform_later` chains produce `:job` edges everywhere (EXTA-4).
+- `CallbackAnalyzer` detects `self.col ||=`, `self.col +=` and the other operator-assignment forms
+  as column writes — `self.token ||= SecureRandom.uuid` reported none — and no longer reads
+  `self.col =~ /re/` as a write (EXTA-6).
+- `CallbackAnalyzer` neutralizes comments and string bodies before its regex scans, so
+  `logger.info "self.status = pending"` and a commented-out assignment no longer report a column
+  write (EXTA-8).
+- `EventExtractor` recognizes Wisper's canonical paren form `broadcast(:event, …)`; the
+  whitespace-only regex registered no publisher, and with no subscriber naming the event the event
+  unit did not exist at all (EXTB-3).
+- Quoted namespaced rake dependencies keep their namespace: `task deploy: 'assets:precompile'`
+  recorded `precompile` and pointed the edge at a task that does not exist (EXTB-9).
+- Whenever commands in single quotes are recognized: `runner 'CleanupJob.perform_later'` yielded
+  command type `:unknown`, no job class, and no `:job` edge (EXTB-12).
+- Environment-nested schedule YAML unwraps the section for the current `Rails.env` (falling back to
+  the first) instead of whichever environment happens to be listed first (EXTB-19).
+- `retry_config[:retry_on]` keeps namespaced error classes: `retry_on Net::OpenTimeout, wait: …,
+  attempts: …` recorded `Net` and lost both `wait` and `attempts` (EXTA-10).
+- A class-discovered job whose source cannot be resolved records a nil `file_path` instead of a
+  fabricated `app/jobs/<name>.rb`. The fabricated path entered the graph's `file_map` and the next
+  incremental run's safety-net sweep deleted a unit every full extraction emits — the B-070/#171
+  GraphQL shape, reproduced for jobs (EXTA-3).
+- GraphQL per-field complexity is attributed to the field that declares it; the match crossed
+  declarations, so a field with no complexity absorbed the next field's and the real owner lost it
+  (EXTB-8).
+- Strong-params capture accepts the fluent chain style — `params.require(:post)` with `.permit(…)`
+  on the following line, and the fully fluent `params` / `.require` / `.permit` form — which the
+  multi-line (M2) fix did not reach (EXTA-5 / R1-2).
+- `permitted_params` now lists every top-level key, hash-form keys included, and excludes nested
+  leaves: `permit(:title, tags: [], meta: {seo: [:keyword]})` yields `title, tags, meta` where it
+  used to yield `title, keyword` (EXTA-12 / R1-3).
+
+- **`unless` no longer inverts every flow document (EXTB-4).** `Prism::UnlessNode`
+  shared `convert_prism_if` and landed its body in the *then* slot, so
+  `woods:flow`, the precomputed `flows/*.json`, and the MCP flow tools stated the
+  opposite of what the code does for every `unless` — including the modifier form.
+  The parser now swaps the then/else slots for `unless`, which makes the emitted
+  `if <predicate>` reading exact; the parser-gem branch already normalized it that
+  way.
+- **Call arguments are walkable AST children (EXTB-5).** Arguments were flattened
+  to source text, so anything nested in an argument list was invisible to every
+  tree walker: `private def hidden; …; end` lost the whole method (no
+  `ruby_method` unit, no `extract_method_source`, no dataflow), and `foo(Bar.baz)`
+  never produced a `Bar.baz` call site. Argument nodes now become children,
+  appended after the receiver; the `arguments` text field is unchanged.
+- **Call sites in a block call's receiver chain are recorded (EXTB-16).**
+  `User.where(active: true).each { … }` recorded `each` but not `where`, while the
+  same chain without a block recorded both. `CallSiteExtractor`'s `:block` branch
+  now recurses into the send's own children, matching the non-block path.
+- **A predicate-less `case` keeps its first `when` branch (EXTB-15).** The
+  predicate slot is now positional (a nil hole when absent), mirroring the L2 fix
+  for `:if`. `handle_case`'s `drop(1)` used to consume the first branch and render
+  its condition as the literal word "when".
+- **`MermaidRenderer#render_dependency_map` renders edges again (EXTB-6).**
+  `DependencyGraph#to_h` has emitted `[{target:, via:}]` hashes since the via
+  migration; the renderer iterated them as bare targets, so `nodes.key?(hash)` was
+  always false and every edge was silently dropped — the committed
+  `docs/self-analysis/dependency-map.md` shipped ~2,400 nodes and zero
+  dependencies. Edges are normalized through `DependencyGraph.normalize_edges`
+  (legacy bare strings still load) and now carry `|via|` labels. The
+  `docs/self-analysis/` artifacts are regenerated.
+- **`GraphAnalyzer#domain_clusters` is order-free (EXTB-7).** Unnamespaced units
+  were assigned to clusters one at a time, each assignment mutating the target
+  before the next unit was scored, so a unit whose only connection was *another*
+  unnamespaced unit joined a cluster only when that other unit was registered
+  first — full and incremental runs register in different orders, so the MCP
+  `domain_clusters` tool could answer differently for identical trees. Assignment
+  now scores every pending unit against one pre-round membership snapshot and
+  applies the round together, iterating to a fixed point within
+  `ORPHAN_ASSIGNMENT_ROUNDS`. Closes the residual hole in the #216/B-103
+  determinism claim.
+- **`pagerank` survives a graph carrying edges for a node-less source
+  (EXTB-10).** `from_h` accepts (and `registered_types` relies on) that shape, but
+  `pagerank_step` read `scores[src]` for every reverse source and raised
+  `NoMethodError: undefined method '*' for nil` out of the incremental PageRank
+  refresh. A phantom source now contributes 0.0.
+- **`DependencyGraph#to_h` no longer hands out the live edge arrays (EXTB-11).**
+  The documented "returns a dup so callers can't pollute the cached hash" was
+  shallow: `to_h[:edges][id]` was the very Array `@edges` holds, so appending to it
+  changed what `dependencies_of` answered. Edge arrays are copied element-wise,
+  and each snapshot is detached from the memo.
+- **`change_table` columns are extracted from migrations (EXTB-18).**
+  `change_table :orders do |t| t.string :notes end` produced no `columns_added`
+  entry and left `orders` out of `tables_affected` (so no `:table_name` model
+  edge). `change_table` joins `TABLE_OPERATIONS` and the three block scanners
+  accept both openers.
+- **STI models sharing a table no longer churn the Notion Columns database
+  (EXP-1).** Column pages are titled by *table*, so two models emitted the same
+  `users.id` title with a different `Table` relation and a different content hash,
+  each run PATCHing the page back — two API calls per shared column, forever, with
+  the relation pointing at whichever model synced last. Columns are now grouped by
+  physical table before syncing: one page per physical column per run, validations
+  unioned, and the `Table` relation lists every owning model's page in a
+  deterministic order. The #149 distinct-table behavior is unchanged.
+- **Notion rich_text is truncated in UTF-16 code units (EXP-2).** Notion's 2000
+  limit counts UTF-16 units, not Ruby characters, so text containing non-BMP
+  characters (emoji in a header comment is enough) shipped payloads up to twice
+  the limit and the unit failed with `Notion API error 400` on *every* run.
+  Truncation now walks whole characters accumulating 1 or 2 units, never splitting
+  a surrogate pair.
+- **Notion "Last Schema Change" is the migration's date, not the extraction's
+  (EXP-3).** `latest_changes` keyed on `extracted_at`, which a full extraction
+  re-stamps for every unit — so every table read "changed today" and every Data
+  Models page was rewritten to say so. The migration's own `migration_version`
+  stamp (`%Y%m%d%H%M%S`, already in the same metadata hash) is preferred;
+  `extracted_at` remains the fallback when it is absent or unparseable.
+- **Exporters pin the index generation (EXP-5).** `IndexReader` self-refreshes on
+  every public accessor when the published generation moves and assigns pinning
+  responsibility to direct callers; none of the three exporters pinned, so an
+  extraction publishing mid-export produced a mixed-generation export (silently:
+  Notion column pages created with no `Table` relation, Obsidian's
+  "byte-identical across runs" contract broken, sweep and purge sets computed
+  against a mixture). `Notion::Exporter#sync_all`, `Unblocked::Exporter#sync_all`
+  and `Obsidian::VaultExporter#export_all` now run inside
+  `reader.with_pinned_generation` when the injected reader supports it.
+- **The Obsidian stale-note sweep survives glob metacharacters in the vault path
+  (EXP-6).** The vault path was interpolated into the glob pattern, so `[`, `]`,
+  `{`, `}`, `*` or `?` in a folder name (`my [work] vault`) made `managed_notes`
+  match nothing — the sweep saw zero managed notes and deleted nothing, forever.
+  The glob now runs with `base:` so the path is never pattern syntax.
+- **NameMapper re-checks its hashed candidate and sanitizes Windows device names
+  (EXP-9).** The collision-hash suffix was inserted into the taken set without
+  being re-checked, so a hash prefix colliding with an existing literal basename
+  put two notes at one path (last writer wins, one id lost from the inverse map);
+  the digest slice now widens until the basename is free. `CON`, `PRN`, `AUX`,
+  `NUL`, `COM1-9` and `LPT1-9` (any case) are prefixed, so a class named `Aux` no
+  longer produces a note Windows cannot create.
+- **A columns-only Notion configuration syncs its columns (EXP-11).** `sync_all`
+  required *both* database ids before running the column sync, so a columns-only
+  configuration returned all-zero stats in silence — indistinguishable from
+  breakage, and contradicting the documented "the other sync is skipped
+  gracefully". The sync now runs with no parent pages (`ColumnMapper` already
+  tolerates that) and says on stderr why the `Table` relation is missing.
+- **`context_completeness` is no longer recall under a second name (EXP-10).**
+  The evaluator passed `expected_units` as both the relevant and the required set,
+  so `mean_context_completeness == mean_recall` always and a threshold keyed on it
+  silently gated on recall. `QuerySet::Query` gains an optional `required_units`
+  annotation (loaded, saved, and validated as a subset of `expected_units`);
+  queries without it keep the previous value.
+- **`flow_document.rb` and `evaluation/report_generator.rb` load standalone
+  (EXTB-13, EXP-8).** Both named `Time#iso8601` (and `FileUtils` in the report
+  generator) without requiring them; only a transitive `require "woods"` masked it.
+  Missing requires added, with a subprocess smoke spec.
+
+- **`reload` no longer degrades an index that has never run `woods:embed` (MCP-1).**
+  A retriever-wired server with no promoted dump used `required: true` against a
+  nil dump, so `reload` aborted the transaction, answered `degraded_index`, and
+  stamped `bootstrap.reload_failure` into `woods_status` — clearable only by a
+  successful reload, which was impossible until an embed ran. Boot hydrates that
+  shape with `load_or_empty`; reload now agrees and answers a zero-count success.
+  A dump that IS promoted but incomplete still fails closed.
+- **`reload` refreshes the reader on every zero-count no-op (MCP-2).**
+  `Bootstrapper.reload_stores!`'s early returns (no retriever, no swap target, no
+  artifact, durable stores, no promoted dump) skipped `reader.reload!`. On a flat
+  (pre-2.0) index the reader never self-refreshes, so `reload` is its only
+  freshness path — and precisely there the tool reported `reloaded: true` with the
+  retired manifest. Every early return now runs the reader's exclusive reload
+  first. Both packaged executables always wire a reloader, so the tool's
+  non-reloader fallback was never the path in a shipped process; the spec that
+  covered it now exercises the real wiring.
+- **A raising pipeline-lock acquire no longer wedges `pipeline_extract` /
+  `pipeline_embed` for the life of the process (MCP-3).** On an index directory
+  the server cannot write (a read-only Docker mount), `PipelineLock#acquire`
+  raises `SystemCallError` instead of returning false. The raise escaped between
+  `pipeline_start` and the background hand-off, leaking the in-process in-flight
+  flag — every later call answered `already_running` — and reached `ToolContract`
+  as a nested `SystemCallError`, which relabeled it `corrupt_artifact` ("An Index
+  artifact is unavailable or malformed"), the wrong diagnosis for a permissions
+  failure. The window is now owned by one guarded region that answers a typed
+  `lock_unwritable` error and releases both the on-disk lock and the in-process
+  slot unless the run was handed off.
+- **An orphaned task from a producer this host cannot judge now expires (MCP-4).**
+  A `working` record whose `producer_identity` names a foreign boot id or pid
+  namespace was left alone forever — correct for a cross-machine producer over a
+  shared filesystem, wrong for the far more common reading of a boot-id mismatch
+  on the same store: this machine rebooted mid-run, so the producer is dead by
+  construction and the client polled `working` with no TTL backstop. Foreign
+  producers are now believed on age alone, up to
+  `Tasks::Store::FOREIGN_PRODUCER_GRACE_SECONDS` (24h from `updated_at`), then
+  resolved to `failed`. Younger foreign records are untouched.
+- **Bounded staleness under sustained overlapping requests (MCP-5).**
+  `IndexReader` only attempted a refresh when a pin arrived at depth 0, so on a
+  threaded transport with continuous traffic — several agents against one
+  `woods-mcp-http`, the deployment stateless mode exists for — the depth never
+  reached zero and a retired generation was served indefinitely, silently. A pin
+  arriving after the generation moved while pins are held now registers as a
+  refresh waiter: it gates new pin entries (the same way an exclusive reload
+  does), waits for the held pins to drain, refreshes, and admits the queue.
+  Nested pins and the reads of an already-held pin are exempt, so the drain
+  always completes.
+- **Store failures inside the retrieval pipeline surface as the typed store
+  error (MCP-6).** M8 wrapped the three lookups the Retriever performs itself,
+  but the store reads carrying most query traffic happen inside the pipeline
+  components (the ranker's and assembler's `find_batch`, every executor store
+  call). Those raised raw, so the SDK reported "Internal error calling tool
+  codebase_retrieve" or `ToolContract` relabeled an IO-flavored cause as
+  `corrupt_artifact`. The pipeline components now read through facades that
+  translate any store failure into `Woods::Retriever::StoreError` naming the
+  failing store, which `codebase_retrieve` already maps to
+  `degraded_index (phase: 'query')`. `build_structural_context` no longer
+  swallows a store failure to `nil` — the last swallow-to-empty on the query
+  path.
+- **A payload directory without its `manifest.json` degrades instead of hanging
+  (CORE-4).** The reader's retention-pin loop retried on `ENOENT` by reloading
+  the generation; with the pointer unchanged, every iteration took the identical
+  path with no sleep and no cap, spinning the request thread at 100% CPU. A
+  second consecutive `ENOENT` for the same expected directory now proceeds
+  unpinned, matching the flat-index branch.
+- **`search` rejects an unknown `fields` value (MCP-9).** `fields: ["sourcecode"]`
+  used to return a clean empty result with nothing saying the selector was
+  meaningless. The schema now enumerates `identifier`, `metadata`, `source_code`
+  and `ToolContract` enforces it.
+- **A whitespace-only `OPENAI_API_KEY` is treated as absent on the `woods.json`
+  path (R1-5).** The resolver-default path already stripped before deciding; the
+  stored-config path did not, so `OPENAI_API_KEY=" "` wired an OpenAI provider
+  with a blank key and failed per request instead of raising the one-line
+  `MissingCredential` message.
+
+- **Console MCP `console_sql` is validated once, with the host adapter's dialect.**
+  The registered tool handler pre-validated with a dialect-blind `SqlValidator.new`
+  (the conservative MySQL+PostgreSQL union) before the executor ever ran, so on a
+  MySQL host a statement like `WHERE body = 'customer\'s request for update'` was
+  rejected as a row-lock clause and the PR-248 dialect-aware acceptance path was
+  dead on both real transports. The handler now only builds the request; the
+  executor still raises `SqlValidationError` for anything it refuses, so no gate is
+  lost. (CON-2)
+- **Console audit log redacts before it truncates.** `AuditLogger` cut a >16 KiB
+  field at `MAX_FIELD_CHARS` and *then* ran the credential scanner, so a secret
+  straddling that boundary was split, no longer matched the scanner's
+  word-boundary-anchored patterns, and its cleartext prefix landed in the JSONL.
+  Redaction now runs over the whole value first. `#entries` also reads UTF-8
+  explicitly (the truncation notice itself carries a multibyte ellipsis). (CON-5)
+- **Unexpected exceptions inside the Console dispatch pipeline render as sanitized
+  tool errors.** `DispatchPipeline#call` rescued five known error classes; anything
+  else (a renderer `NoMethodError`, an encoding oddity, a handler defect) escaped
+  into the `mcp` gem's handling of a raising tool block, which can echo
+  `Class: message` to the client. Such failures now answer with the executor's
+  sanitized shape — the tool name only, details logged server-side via
+  `console.dispatch.unexpected_error` — still routed through the credential scan.
+  (prior-audit L9)
+- **`exe/woods-console` leases a database connection per request.** The stdio
+  server passed `SafeContext.new(connection: ActiveRecord::Base.connection)`,
+  pinning one connection for the process lifetime, so every tool call failed after
+  a failover or a `wait_timeout` recycle until the client restarted. It now passes
+  `pool:`, matching the HTTP path. (prior-audit L10)
+- **Console executor error text is credential-scanned before the `Rails.logger`
+  write.** The client response for an unexpected execution error was already
+  sanitized to the class name, but the log line carried the adapter's own message —
+  and PG/Mysql2 errors embed the rejected SQL and constraint literals, so a secret
+  in a WHERE clause reached the server log unscanned. (prior-audit L11)
+- **The missing-Console-token boot warning names the transport it applies to.**
+  "Console MCP requests will be refused (401) until one is set" has no transport
+  qualifier, but the 401 belongs to the HTTP stack; the stdio transport neither
+  sends nor consumes a bearer token. The warning now says so, and that a stdio-only
+  setup still works. The production raise is unchanged. (prior-audit G-3)
+- **Four more Woods JSONL/JSON readers no longer depend on the process locale.**
+  `Feedback::Store#all_entries`, `SessionTracer::FileStore` (history append, read,
+  and the legacy-file merge), and `Evaluation::QuerySet.load`/`#save` used bare
+  reads, so under `LANG=C` the first non-ASCII entry raised
+  `Encoding::CompatibilityError` and — because the poison line stays on disk while
+  writes keep succeeding — permanently took down `retrieval_explain`,
+  `retrieval_suggest`, GapDetector, and the `session_trace` MCP tool. All read
+  UTF-8 explicitly now, per the `AtomicFile.read` contract. (INF-3, R1-1, EXP-7)
+- **`woods:embed`, `woods:embed_incremental` and `woods:notion_sync` exit 1 when
+  they report errors.** They printed `Errors: N` and exited 0, so a revoked API
+  key, a full vector store, or a Notion 401 on every page left CI green while the
+  embedding index or the Notion database went stale. They now fail like their
+  siblings `woods:unblocked_sync` and `woods:obsidian`. (INF-4 / EXP-4)
+- **A missing `git` binary is a decision, not a crash, in `woods:incremental`.**
+  `Errno::ENOENT` out of `Open3.capture3` killed the task with a backtrace before
+  the tail-M1 decision matrix ran, so a daemon-covered tree that should have stood
+  down failed its hook instead. The helper now returns the same `[nil, failure]`
+  shape with `git unavailable: …`. (INF-12)
+- **`woods/session_tracer/redis_store` loaded standalone raises the documented
+  error.** Without `lib/woods.rb` loaded first, the missing-redis-gem guard raised
+  `NameError: uninitialized constant …SessionTracerError` instead of the actionable
+  "add `gem \"redis\"`" message. (INF-8)
+- **`woods/feedback/store` requires `time`.** `Time#iso8601` only exists after
+  `require 'time'`; in the MCP server process unrelated requires masked it, so a
+  narrow entry point got a `NoMethodError` from `record_rating`. (INF-9)
+
+- **STO-1**: A genuine pre-rename `codebase_index` database no longer wedges `Db::Migrator#migrate!` permanently. The legacy gem recorded applied versions in `codebase_index_schema_migrations`, which nothing renamed, so `ensure_table!` created an empty ledger, 001-005 re-ran against a live legacy database and 006's `ALTER TABLE codebase_units RENAME TO woods_units` then failed against the table 001 had just created — and failed identically on every later run. `SchemaVersion#ensure_table!` now adopts the legacy ledger first (guarded, idempotent; when both tables exist the `woods_` one wins and the legacy table is left in place with a warning). The spec fixture that recorded legacy versions in a table the legacy gem never had is corrected.
+- **STO-2**: Durable-store reconciliation no longer deletes non-Woods Qdrant points. A collection shared with another writer had every foreign point read as "vanished" on each `woods:embed`, and silently deleted whenever the vanished fraction stayed under the 30% purge guard. `Qdrant#each_id` now skips points with no `woods_identifier` payload (they are unattributable to Woods), and `Indexer#vanished_durable_identifiers` additionally ignores ids shaped like a canonical UUID or a native integer point id — shapes Woods never mints as an identifier.
+- **STO-4**: `Snapshotter::Metadata` raises the typed `Woods::MCP::UnsupportedArtifact` for a truncated or malformed `metadata.msgpack` and for a header missing or mistyping `schema_version`/`record_count`, instead of a raw `EOFError`/`NoMethodError`. Mirrors the M3/M10 guards the Vector twin already carried.
+- **STO-5**: `woods/storage/qdrant`, `woods/resilience/circuit_breaker` and `woods/cache/cache_middleware` load in isolation again. The first two were missing the repo's `class Error < StandardError; end unless defined?` shim; the third included `Embedding::Provider::Interface` without requiring it. `spec/load_order_spec.rb` grew a require-in-isolation sweep over the storage/cache/embedding entry files.
+- **STO-6**: `Builder` no longer crashes with `NoMethodError` when an injected embedding provider implements only `#embed`/`#embed_batch` and a durable vector store is configured with an explicit `vector_store_options[:dimensions]`. `vector_dimensions` is now probed like `safe_max_input_tokens` (`respond_to?` plus `rescue NotImplementedError`), which makes the documented "built without an embedding provider" fallback reachable.
+- **STO-8**: `MetadataStore::InMemory` and `MetadataStore::SQLite` agree on non-string values. InMemory now normalises stored metadata through the same JSON round-trip SQLite performs (symbol keys *and* values become strings, all the way down) and builds field-scoped search haystacks the way `json_extract` does, instead of leaking Ruby `Hash#to_s` syntax such as `=>` into the haystack. The shared "hardened search" examples grew hash/array-valued field queries and value round-trips; the spec that pinned InMemory's divergent symbol round-trip under a parity title is flipped.
+- **STO-9**: `MetadataStore::SQLite#store` rejects a blank `type` (`''` or whitespace) as well as a missing one — it fabricated exactly the empty type column L22 was fixed to prevent.
+- **STO-11**: The Indexer's prune guards use the `implements_own?` ownership check rather than `respond_to?(:delete)`, which was always true because `VectorStore::Interface` defines `#delete` as a raising stub (B-108). `reconcilable?` now requires an own `#delete` too, so an adapter that can be enumerated but not deleted from completes the run instead of raising `NotImplementedError` mid-sweep.
+- **STO-13**: `Util::UUID5.name_bytes` hashes an `ASCII-8BIT`-tagged name by its bytes instead of raising `Encoding::UndefinedConversionError` on high bytes. BINARY is "already bytes", not an encoding to transcode from — the method's own contract.
+- **STO-15**: The OpenAI provider's in-adapter retry rescues `Net::ReadTimeout`, matching Ollama. `Net::ReadTimeout` descends from `Timeout::Error`, not `IOError`, so a read timeout escaped both the retry and the `RequestError` typing.
+- **INF-1**: The watch daemon's polling fallback rebuilds the watcher with `ignored: ignored_directories`. Dropping it re-armed the output-directory feedback loop for any `WOODS_OUTPUT` under the root but outside the default ignore set — a daemon that never idles and re-extracts forever, on precisely the path a large tree reaches when listen cannot start.
+- **INF-2**: Carried-forward work is retried on its own thread rather than inline on the heartbeat thread. A retried storm used to starve the `PipelineLock` touch and the status re-stamp for its whole duration: past `LOCK_STALE_TIMEOUT` (600 s) a waiting writer retires the live lock (the two-writer clobber the lock exists to prevent), and past `Status::STALE_AFTER` (900 s) `woods:incremental` stops standing down. `drain`'s `try_lock` still bounds it to one drain at a time.
+- **INF-7**: `PipelineLock#acquire` unlinks the lock file it just created if the write fails (a full or read-only disk). The 0-byte remnant was fresh, unparseable (`:unknown` ownership for everyone) and never released, blocking every writer for the whole stale window — the artifact `#touch` was already fixed never to create.
+- **INF-10**: The daemon's startup watermark treats a generation whose payload directory no longer resolves as no index at all, so the existing no-watermark → storm → full-extraction path recovers a gutted index. Previously the surviving marker read as "index is current at startup" while every reader resolved to a rootward fallback holding nothing.
+- **INF-11**: `Daemon#release_claim` verifies ownership before deleting the startup claim, mirroring `reclaim_if_stale`'s snapshot-compare and `PipelineLock#release`. A daemon whose claim had been replaced deleted its *successor's* live claim at shutdown, letting a third starter in while the successor ran.
+- **CORE-6**: `Generation#payload_dir` bounds the payload pointer with a `realpath` comparison against the index root, mirroring `IndexArtifact#validate_dump_dir!` (B-134). `expand_path` is textual, so a symlink planted inside `payloads/` and pointing outside the index passed the check and every payload reader followed it. Flat-index, missing-directory and textual-escape fallbacks are unchanged.
+
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete
   `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
@@ -463,6 +819,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock-timeout abort). The diff is also rooted at the extracted application
   (`git -C Rails.root`), consistent with the provenance rooting, so it can no
   longer diff whatever checkout the process happened to start in.
+
+### Changed
+
+- New `Woods::Extractors::LineNeutralizer`: the quote-aware comment stripper (formerly private to
+  `SharedDependencyScanner`) plus string- and heredoc-blanking variants, shared by SourceNesting,
+  the rake and factory parsers, and CallbackAnalyzer.
+- New `Woods::Extractors::ReferencePatterns`: the namespace-capable service, mailer, and job-enqueue
+  regexes, shared by `SharedDependencyScanner`, `JobExtractor`, and `CallbackAnalyzer`.
+
+- **`FlowPrecomputer`'s `fail_closed:` switch is gone (EXTB-14).** Both callers
+  passed `true` and CLAUDE.md documents both paths as fail-closed, but the YARD
+  still promised the full path a "log-and-skip contract" and the
+  `Rails.logger.error` branch it described was dead code. Flow assembly now always
+  raises `Woods::ExtractionError` on a per-action failure.
+
+- **An unlisted integer tool parameter fails the server build with a named error
+  (MCP-8).** `ToolContract::INTEGER_BOUNDS.fetch` raised a bare
+  `KeyError: key not found: "count"` at `Server.build`, with no pointer to the
+  table that needs the entry. It now raises an `ArgumentError` naming the tool,
+  the property, and `INTEGER_BOUNDS`.
+
+- CI gains a `c-locale` job running the artifact-reader specs (`spec/mcp`,
+  `spec/feedback`, `spec/session_tracer`, `spec/evaluation`) under `LC_ALL=C`. The
+  runners default to a UTF-8 locale, so the whole encoding family could regress
+  with the suite green.
+- Three specs that simulate an unreadable/read-only path with `chmod` now skip as
+  root, where `chmod` is ineffective (`spec/operator/pipeline_guard_spec.rb` x2,
+  `spec/mcp/tasks/pipeline_tasks_spec.rb`).
+- `docs/backlog.json` gains B-140..B-163: the seven prior-audit deferred lows that
+  never received IDs (R2-2 — L3, L7, L12, L13, L14, L15, L21) plus seventeen
+  deferrals from this audit (CORE-3, CORE-5, EXTA-7, EXTA-9, EXTA-11, EXTA-13,
+  EXTA-15, CON-4, STO-7, STO-10, STO-14, INF-5, INF-6, INF-13, R2-4, R2-5, R2-6).
+
+- **STO-12**: Corrected the `Storage::Snapshotter` doc comment: `Snapshotter::Metadata.validate_store!` can use plain `respond_to?` only because `MetadataStore::Interface` defines neither `#each_entry` nor `#bulk_load` — adding either stub would silently convert the check into the B-108 bug. `spec/storage/snapshotter/vector_spec.rb`'s float-truncation tolerance block (which passed whether or not the load raised, stale since the M10 fix) now asserts the raise.
+
+### Documentation
+
+- **`woods-mcp-start` is described as what it is: a preflight wrapper (MCP-10).**
+  It validates the index directory and published manifest, then `exec`s
+  `woods-mcp`; there is no supervision and no restart loop. The "self-healing
+  MCP wrapper" description in the header comment and the CLAUDE.md architecture
+  table is gone. (`docs/MCP_SERVERS.md` and `docs/DOCKER_SETUP.md` already
+  described it accurately.)
+- **Reload documentation drift (MCP-7).** `Bootstrapper.populate_vector_metadata`
+  named `populate_reloaded_vector_metadata`, a method the M7 transaction removed;
+  `Ranker#invalidate_pagerank_cache!` claimed a bootstrapper caller that does not
+  exist (the transaction installs a fresh Ranker instead, deliberately). Both
+  comments now describe the current design; `invalidate_pagerank_cache!` is
+  re-documented as an API for direct embedders that repoint a Ranker's graph
+  store without rebuilding it.
 
 ### Testing
 
