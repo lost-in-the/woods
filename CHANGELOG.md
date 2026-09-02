@@ -70,6 +70,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Incremental runs no longer duplicate a class-discovered job under its
+  enclosing class's identifier.** A job nested inside a non-job file (`class
+  Billing::Invoicing::Reconciler; class RefreshJob < ApplicationJob`) is found
+  on the full path by the `ApplicationJob` descendant walk, with the model
+  file as its `file_path`. Blast-radius re-extraction only knew the unit's
+  type, took the file-based entry point, and Zeitwerk-governed naming then
+  correctly named the *file* for its outer constant — registering a second
+  `job` unit under the PORO's identifier that no full extraction emits. The
+  duplicate flipped the graph node's type, added a false `variants` entry,
+  and made `woods:incremental` and `woods:extract` disagree about the same
+  tree until the next full run. `Extractor#re_extracted_units` now falls back
+  to the class-based entry point when the file does not reproduce the unit,
+  and only for a class the extractor's own discovery would return
+  (`JobExtractor#discoverable_classes`). The booted equivalence lane pins the
+  shape with a nested-job fixture in `spec/dummy`.
+
+- **Concerns join the Zeitwerk-governed naming contract.** `ConcernExtractor`
+  was the one extractor still naming from the outer-module chain alone, which
+  stops at the first non-module line. A concern under a mid-path `concerns/`
+  segment (a real namespace, not an autoload root) with a one-line `class
+  SomeError < StandardError; end` declared above it indexed as the wrapper
+  (`Outer::Mid::Inner`) instead of `Outer::Mid::Inner::Concerns::Leaf`. The
+  governed name is tried first; the module-chain scan remains the fallback.
+
+- **The missing-token console warning names the transport it applies to.**
+  It claimed every Console MCP request would be refused with 401, but only
+  the HTTP transport carries the bearer check; an stdio console server lists
+  and executes every Tier 1 tool without a token. The warning now says HTTP
+  requests will be refused, that stdio does not check the token, and that
+  production boot will raise.
+
+- **`woods:validate` no longer tells you to re-run extraction for gem-owned
+  paths.** Engine models and framework sources carry absolute paths outside
+  the application tree, so under a different install prefix they resolve
+  nowhere by design and re-extraction cannot change that. They now get their
+  own warning without the no-op remedy; app-tree paths keep the original one.
+
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete
   `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop

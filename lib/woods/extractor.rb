@@ -217,6 +217,12 @@ module Woods
     # GraphQL types all use the same extractor method.
     GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
 
+    # File-based unit types the full path ALSO discovers by class, with the
+    # class-based entry point to re-extract them through. Re-extracting one
+    # of these by file is faithful only when the file names the unit; see
+    # {#re_extracted_units}.
+    CLASS_DISCOVERED_FALLBACK = { job: :extract_job_class }.freeze
+
     # Unit types each extractor owns — the inverse of {TYPE_TO_EXTRACTOR_KEY}.
     #
     # Wholesale replacement of an extractor's output has to know every type it
@@ -3098,10 +3104,40 @@ module Woods
         klass = constant_for_identifier(unit_id)
         klass && extractor.public_send(method, klass)
       elsif (method = FILE_BASED[type])
-        extract_file_based_unit(extractor, method, file_path, extractor_key)
+        units = Array(extract_file_based_unit(extractor, method, file_path, extractor_key)).compact
+        return units unless CLASS_DISCOVERED_FALLBACK.key?(type)
+        return units if units.any? { |unit| unit.identifier == unit_id }
+
+        re_extract_by_class(extractor, type, unit_id)
       elsif GRAPHQL_TYPES.include?(type)
         extractor.extract_graphql_file(file_path)
       end
+    end
+
+    # Re-extract a unit the full path discovered by class, not by file.
+    #
+    # Jobs are found two ways ({Extractors::JobExtractor#extract_all}): a scan
+    # of the job directories, then a descendant walk for every job class the
+    # scan did not name. A class-discovered job can live in a file whose
+    # governed constant is not the job — a job nested inside a model — so
+    # re-deriving it from that file names the enclosing class instead, and
+    # registered a second job unit under the PORO's identifier that no full
+    # extraction emits: the wrapper-naming collision, reached incrementally.
+    # When the file entry point does not reproduce the unit, the full path
+    # found it by class; do the same, and register nothing the file scan
+    # would not have produced there either.
+    #
+    # Only a class the extractor itself would discover qualifies. A stale
+    # pre-2.0 wrapper identifier can still constantize (to the wrapper class),
+    # and re-extracting *that* by class would pin the stale unit with fresh
+    # metadata; it stays as it is until a full extraction replaces it.
+    #
+    # @return [ExtractedUnit, nil]
+    def re_extract_by_class(extractor, type, unit_id)
+      klass = constant_for_identifier(unit_id)
+      return nil unless klass && extractor.discoverable_classes.include?(klass)
+
+      extractor.public_send(CLASS_DISCOVERED_FALLBACK[type], klass)
     end
 
     # @param unit_id [String]

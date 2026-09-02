@@ -402,6 +402,35 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.namespace).to eq('Gateway::Stripe')
     end
 
+    it 'names a concern for the constant its path spells when a one-line class interrupts the module chain' do
+      # `concerns/` here is a mid-path directory, not an autoload root, so it is
+      # a real namespace segment. The outer-module scan stops at the first
+      # non-module line — the one-line error class at depth 3 — and named
+      # this file for the wrapper (Outer::Mid::Inner). Zeitwerk-governed
+      # naming asks what constant the path spells and finds that declaration.
+      path = create_file('app/models/outer/mid/inner/concerns/leaf.rb', <<~RUBY)
+        module Outer
+          module Mid
+            module Inner
+              class MissingThingError < StandardError; end
+
+              module Concerns
+                module Leaf
+                  extend ActiveSupport::Concern
+
+                  def leaf?; end
+                end
+              end
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+      expect(unit.identifier).to eq('Outer::Mid::Inner::Concerns::Leaf')
+      expect(unit.namespace).to eq('Outer::Mid::Inner::Concerns')
+    end
+
     it 'qualifies a compact-form concern declaration' do
       path = create_file('app/models/concerns/billing/invoiceable.rb', <<~RUBY)
         module Billing::Invoiceable
