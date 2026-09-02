@@ -67,7 +67,7 @@ Historical build-phase documents are not user guides. Source checkouts also cont
 
 ### At release: cutting the 2.0.0 tag
 
-`main` documents an unreleased 2.0.0 while 1.6.1 is the published gem. Every claim that depends on that gap is wrapped in an HTML comment fence, so tagging is a search, not a re-read. Do all four steps in the release commit:
+> Executed for 2.0.0 on 2026-09-02 (the release-flip commit). Kept as the template for the next major: while `main` documents an unreleased version, wrap every claim that depends on that gap in a `v2-unreleased-note` HTML comment fence, so tagging is a search, not a re-read. Do all four steps in the release commit:
 
 | Step | What to change |
 |---|---|

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-02
+
 ### Performance
 
 - **Controller and mailer chunk extraction parses each file once, not once per
@@ -68,7 +70,609 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   order (oldest last request) is unchanged. Adds a live-Redis contract spec
   (`spec/session_tracer/redis_store_live_spec.rb`, `WOODS_RUN_LIVE_BACKENDS=1`).
 
+### Documentation
+
+- **`woods-mcp-start` is described as what it is: a preflight wrapper (MCP-10).**
+  It validates the index directory and published manifest, then `exec`s
+  `woods-mcp`; there is no supervision and no restart loop. The "self-healing
+  MCP wrapper" description in the header comment and the CLAUDE.md architecture
+  table is gone. (`docs/MCP_SERVERS.md` and `docs/DOCKER_SETUP.md` already
+  described it accurately.)
+- **Reload documentation drift (MCP-7).** `Bootstrapper.populate_vector_metadata`
+  named `populate_reloaded_vector_metadata`, a method the M7 transaction removed;
+  `Ranker#invalidate_pagerank_cache!` claimed a bootstrapper caller that does not
+  exist (the transaction installs a fresh Ranker instead, deliberately). Both
+  comments now describe the current design; `invalidate_pagerank_cache!` is
+  re-documented as an API for direct embedders that repoint a Ranker's graph
+  store without rebuilding it.
+- **The unreleased-2.0 story is legible from the repository root.** `README.md`
+  gains a version banner naming both the documented 2.0.0 line and the published
+  1.6.1 gem, a "What's new in 2.0" comparison table, and a compact upgrade
+  checklist; `docs/UPGRADING_TO_2.md` covers the Notion physical-column re-sync,
+  the new task exit codes, the incremental baseline guard, and `reload`'s
+  write-access requirement; every claim that expires at tag time is wrapped in a
+  `v2-unreleased-note` fence, listed in the new release note in `docs/README.md`.
+
+### Upgrade Notes
+
+This is a major release: the full-gem review (#210) corrected how several extractors
+derive unit identifiers, which changes the index format's observable contract.
+
+- **Unit identifiers have changed shape.** Namespaces are now derived correctly by a
+  position-aware nesting parser (#174), abstract-model and mixin-module artifacts no
+  longer leak into names, and GraphQL inner classes are no longer folded into
+  identifiers (#194). Concretely: a state machine that indexed as `Payment::aasm` is now
+  `Billing::Payment::aasm`; a service that indexed as bare `IssueInvoice` is now
+  `Billing::IssueInvoice`; concern units are no longer misnamed `ClassMethods`.
+  **Anything that cached the old identifiers will miss**: saved retrieval queries,
+  external notes, exported Notion pages and Unblocked documents, MCP clients holding
+  identifier lists.
+- **The remedy is one clean re-index**: `woods:clean` followed by `woods:extract`
+  (then `woods:embed` if you embed, and a re-export if you sync Notion/Obsidian/
+  Unblocked — the exporters reconcile renamed units as delete-plus-add).
+- **Durable vector stores are now reconciled against extraction output** (#211). The
+  first `woods:embed` / `woods:embed_incremental` after upgrading will **delete** vectors
+  for units the extraction no longer produces — including every unit the identifier
+  renames moved. Deleting more than 30% of the store (or purging into an empty load) is
+  refused with an explanation; `WOODS_ALLOW_PURGE=1` overrides after you've confirmed the
+  deletion is intentional. On a rename-heavy index, expect to need it once.
+- **An embedding-dimension mismatch now refuses to embed up front** (#214).
+  `woods:embed` compares the provider's dimension against what the store actually holds
+  (pgvector's column type, Qdrant's collection config) before embedding anything, raising
+  `Woods::MCP::DimensionMismatch` with both widths — instead of embedding everything and
+  failing per-row on insert. If you changed `embedding_model` at some point and it
+  "worked", this check may now surface the latent mismatch; the remedy is a full re-embed
+  into a store created at the new width.
+- **New environment variables**: `WOODS_ALLOW_PURGE` (override the vector purge guard,
+  above) and `WOODS_NOTION_FORCE` (bypass the Notion sync manifest for one run, forcing
+  a full re-push).
+
+### Added
+
+- **MCP 2026-07-28 support** (B-111–B-114). The gemspec now requires `mcp >= 1.2, < 2.0`,
+  the release that added the 2026-07-28 protocol revision.
+  - **Stateless Streamable HTTP by default.** `woods-mcp-http` no longer mints
+    `Mcp-Session-Id`, so restarting it (gem upgrade, machine sleep, worktree rebuild) is
+    invisible to connected clients instead of invalidating every session, and several
+    instances can serve one volume-mounted index without sticky routing. Set
+    `WOODS_MCP_HTTP_STATELESS=0` for a client that still needs sessions, the GET SSE
+    stream, or DELETE teardown — a transitional escape hatch, since all three are gone
+    from the specification.
+  - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
+    `pipeline_embed` return a durable task handle to clients that declare the extension:
+    poll with `tasks/get`. Cancellation is not advertised: `tasks/cancel` returns
+    `Method not found` because Woods cannot safely stop work already holding the
+    pipeline lock or prevent it from publishing. Records live on disk under
+    `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
+    mid-run can reconnect — even to a restarted server — and collect the result, and a
+    task whose owning process died resolves to `failed` instead of leaving an agent
+    polling forever. Clients that do not declare the extension get the previous
+    fire-and-forget behaviour, unchanged.
+  - **Cache hints and deterministic tool ordering.** List and read results carry
+    `ttlMs` (default 10s, `WOODS_MCP_CACHE_TTL_MS`) and `cacheScope: "private"`, and tools
+    are advertised in sorted order so a host with optional integrations wired presents the
+    same tool block as one without.
+  - **`server/discover`** is answered, advertising supported versions, capabilities and
+    the Tasks extension.
+
+### Changed
+
+- **Dead code removed.** The unwired formatting adapters (Claude, GPT, Generic),
+  console job/cache adapters, `StubBridge`, `HealthCheck`, `Instrumentation`,
+  `Notion::Mapper`, and a dozen spec-only methods are gone. `config.add_gem`
+  now warns like `config.extractors`: accepted, not implemented.
+- **Docs rewritten for readability**: shorter sentences, tables for
+  comparisons, no em-dashes, one owner per fact. The MCP 2026 handoff document
+  was folded into the strategy ADR.
+
+- **The packaged gem ships only user-facing files.** Internal release machinery
+  (`lib/tasks/release_v2.rake`, `lib/woods/release_v2/`) and non-user-facing
+  documentation subdirectories are excluded from the package; the repo keeps
+  them for CI. Historical build-phase design documents were removed from
+  `docs/` for the release and remain in git history.
+- **The Claude plugin releases with the gem.** `plugin.json` is 2.0.2.
+- **`config.extractors` warns when set.** The knob is accepted for forward
+  compatibility but extractor selection is not implemented; all extractors run.
+  Docs no longer teach it as a live setting. The unused `log_level` accessor
+  is removed.
+- **`woods-mcp-start` no longer pins the MCP protocol version.** It defaulted
+  `MCP_PROTOCOL_VERSION` to `2024-11-05` — the oldest revision there is — which silently
+  opted every user out of four protocol revisions. The SDK server is dual-era, answering
+  `initialize` for legacy clients while serving `server/discover` and per-request metadata
+  for modern ones, so the unpinned server is the *more* compatible one. The variable
+  remains as an escape hatch and now announces itself on stderr when set.
+  **No action required:** legacy clients keep working, and no re-extraction or re-embedding
+  is implied — no on-disk artifact format changed.
+
 ### Fixed
+
+- **Wrapper-nested classes no longer collide on one identifier.** A file under
+  a managed autoload path is now named for the constant its path spells
+  (Zeitwerk-governed naming): `app/services/domain/container/parser.rb`
+  declaring `module Domain; class Container; class Parser` indexes as
+  `Domain::Container::Parser` instead of the wrapper `Domain::Container`.
+  Previously every sibling under the same wrapper indexed as the wrapper and
+  same-type dedup silently dropped all but one. The source parser remains the
+  fallback for unmanaged or unconventional paths, and extraction now aborts
+  naming both file paths when one type+identifier is still derived from two
+  different files. **Re-extract after upgrading** — embeddings, exports, and
+  saved queries keyed by the old identifiers need regeneration.
+
+- **Console stdio setup now explains production token validation.** Stdio clients do
+  not send the HTTP bearer token, but Rails still requires a 32-character-or-longer
+  `console_mcp_token` at production boot whenever Console MCP is enabled. The upgrade,
+  direct, Docker, FAQ, and agent setup paths now state that boundary explicitly.
+
+- **Console SQL gate no longer has MySQL comment and dollar-quote blind spots.**
+  `SqlNoiseStripper` did not know `#` line comments or `/*! ... */` executable
+  comments (both live SQL on MySQL), and treated a `$` inside a PostgreSQL
+  identifier as a dollar-quote opener, so a blocked table could be hidden from
+  `TableGate`. The `TABLE name` statement form was never scanned at all. All
+  four are closed, with the `#` rule gated on the MySQL dialect.
+- **Redacted columns are refused as query inputs, not only masked on output.**
+  `console_aggregate(column:)`, scope keys (including `_matches`), `find(by:)`,
+  and `recent(order_by:)` accepted `console_redacted_columns`, which gave a
+  plaintext aggregate or a comparison oracle over a secret.
+- **The MySQL console timeout no longer leaks into the host's connection pool.**
+  `SET max_execution_time` is session-scoped and survives rollback; the prior
+  value is now read and restored in `ensure`.
+- **Console SQL validation stops rejecting columns named `do`, `start`,
+  `lock`, `release`, or `handler`.** Forbidden statement keywords now match only
+  at a statement-leader position. `EXPLAIN ANALYSE` (the PostgreSQL spelling) is
+  rejected like `ANALYZE`. `console_association_count` gates the rendered SQL, so
+  a blocked `through` table is refused.
+- **Long-running MCP tasks no longer expire the moment they complete.** Terminal
+  task ttl is measured from the terminal transition, not from creation. A task
+  minted under a different boot identity (a container) is left alone by a host
+  reader instead of being marked failed.
+- **Extractor accuracy batch.** `permitted_params` no longer leaks across method
+  bodies (and reads Rails 8 `params.expect`); GraphQL complexity is read from a
+  real match; per-file GraphQL classification agrees with the runtime pass;
+  `form_action` edges stop at `do`/`end`; `SourceNesting` pops on `end.freeze`;
+  `render :partial => 'x'` resolves the real partial; a rake task whose name
+  contains `do` no longer swallows its neighbours; inline-namespaced migrations
+  are extracted; mounted engines are unwrapped from `Mapper::Constraints` so
+  `mounted_path` is populated, and `Rails::Application` is no longer reported as
+  an engine.
+- **An empty vector dump no longer refuses to boot.** `woods:embed` over an empty
+  payload wrote `dimension = 0` and every later boot raised `DimensionMismatch`.
+- **Storage hardening.** Interface stubs are no longer probed with `respond_to?`
+  (B-108) in the retryable provider, builder, indexer, and ranker; Notion
+  read-only POSTs retry on a network failure; the watch daemon's stale-claim
+  reclaim checks the claim inode before removing it and falls back to an
+  exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
+  honours array filters like `#search`.
+- **Task orphan detection compares pid namespaces, not only boot ids.** Docker
+  on Linux shares the host kernel boot id, so a host reader could judge a
+  container's task by an unrelated host pid. The producer identity now carries
+  `/proc/<pid>/ns/pid`, and a task from another namespace is left alone.
+- **Daemon claim reclaim runs under an `flock`.** A byte comparison before the
+  delete still left a read-then-unlink window where two starters could both
+  end up as claim owners; the whole reclaim-and-create loop is now one
+  critical section on a sidecar lock file, released by the kernel on death.
+- **Snapshot capture retries a locked SQLite database.** SQLite skips the busy
+  handler in its deadlock-avoidance case, so two concurrent captures could
+  fail at `BEGIN IMMEDIATE` despite `busy_timeout`. Three bounded attempts.
+- **`woods:clean` and `woods:validate` no longer raise `NameError` in a host
+  app.** `woods.rake` reached `Woods::Generation` through the extractor, which
+  those tasks never load. Caught by every woods-testbed variant.
+- **The daemon's stale-claim race guard compares bytes, not the inode.** Linux
+  reuses a freed inode for the next file in the directory, so the inode check
+  let a just-replaced live claim be deleted. Failed on CI, passed on macOS.
+- **Routes that differ only by constraint are all indexed.** The identifier is
+  `VERB /path`, qualified by request constraints when the route has any:
+  `GET /users [subdomain=api]`, `GET /users [format=json]`, `constraint=proc`
+  for a callable. Routes that still collide are numbered in route order
+  (`GET /users #2`) instead of being dropped. Unconstrained routes keep their
+  old identifier; a constrained one changes, so the clean re-index above
+  covers it.
+- **A rake task reopened in two `.rake` files is one unit**, the way Rake sees
+  it: its source carries every definition, `metadata.defined_in` lists the
+  files, and a per-file incremental run produces the same merged unit as a
+  full run. Previously the second file overwrote the first.
+- **`woods:validate` and `Resilience::IndexValidator` are one implementation.**
+  The task now runs the class, which gained the task's manifest-count,
+  unit-file, file-path, and dependency-graph checks (`app_root:` opts into
+  the file-path check).
+- **`EXPLAIN (FORMAT JSON) SELECT` is accepted.** The option list was read as
+  a call to a function named `EXPLAIN`. `EXPLAIN ANALYZE` in any form is
+  still refused.
+- **Class names are position-aware in every file-scanning extractor.** Jobs,
+  serializers, decorators, policies, Pundit policies, managers, and validators
+  took the first `class` token in the file, so `module Billing; class ChargeJob`
+  indexed as bare `ChargeJob` (and the class-based second pass then added a
+  duplicate `Billing::ChargeJob`), while the decorator scanner joined every
+  `module` token, including helpers nested inside the class. All of them now
+  go through `SourceNesting#qualified_first_class_name` (#174).
+- **Policy `evaluated_models` no longer invents models from parameter syntax.**
+  `def initialize(order, user = nil, strict: false)` produced `Nil`, `Strict`,
+  and `False` model edges; only bare positional parameters are read now.
+- **The release gate requires the booted-extraction matrix.**
+  `script/validate-release-run` did not list the `rails-matrix` CI job, so a
+  red Rails 6.0 to 8.1 row could not block a release.
+- **Spec order no longer leaks a nil `Woods.configuration`.** Four spec files
+  nil it out in `after` hooks; `spec_helper` now restores whatever each example
+  started with, which fixes two seed-dependent failures in `extractor_spec`.
+
+- **Every MCP entry point boots a payload-layout index.** The #226 layout moved
+  `manifest.json` into `payloads/gen-<N>/`, but `woods-mcp`, `woods-mcp-http`,
+  `woods-mcp-start`, the retriever's graph hydration, and the operator status
+  reporter still looked for root-level artifacts: a fresh 2.0 extract was refused
+  at boot with "Run `rake woods:extract` first", the retriever's graph store
+  hydrated empty (silent loss of PageRank and graph expansion), and status read
+  `:not_extracted`. All five now resolve through the generation pointer, with the
+  legacy flat layout still accepted.
+- **MCP `reload` no longer crashes the stdio server on pgvector/Qdrant.** The
+  reload metadata backfill guarded on `respond_to?(:each_entry)`, which the
+  vector-store interface answers true for while raising `NotImplementedError`
+  (the B-108 anti-pattern); on stdio that unwound the transport loop and killed
+  the process. The guard is now an ownership check.
+- **Wholesale replacement prunes by `(identifier, type)`.** The #225 typed-graph
+  work missed one call site: a factories (or any wholesale) re-run removing a
+  vanished unit deleted every type sharing the identifier, so a same-named
+  Scenic view's node and JSON file vanished from the index until a full run.
+  Colliding identifiers also now serialize dependents on every sharing unit and
+  carry each type's own git metadata instead of one type's history.
+- **Incremental runs abort instead of publishing a collapsed index.** When
+  payload creation failed over a payload-born index, the degrade path published
+  a near-empty flat root and redirected readers to it. Incremental and refresh
+  runs now raise without bumping the generation; full runs keep the flat
+  fallback (their write set is complete). Payload seeding also gained the
+  cross-device copy fallback, and payload pruning survives a restarted
+  generation counter.
+- **Woods artifacts are read encoding-safely everywhere.** Twelve remaining bare
+  `File.read` sites (extractor incremental path, rake validate/stats/flow, the
+  index validator) crashed with `Encoding::InvalidByteSequenceError` under
+  `LANG=C` (the documented daemon container environment) on any multibyte byte.
+  All now use `AtomicFile.read`.
+- **Extraction-family rake tasks honor `config.output_dir`.** They hardcoded
+  `tmp/woods` while the embed and export families used the configured
+  directory, so a host that set `output_dir` split its index in two silently.
+- **The watch daemon captures files changed during startup catch-up.** The
+  watcher started only after catch-up finished, so a save during a long
+  catch-up extraction was lost until the next edit. The watcher now starts
+  first. A dead container daemon's startup claim also no longer blocks a
+  host-side daemon forever (host identity is compared before trusting pid
+  liveness), and a lock-release failure after a successful cycle no longer
+  relabels the cycle as a lock failure.
+- **Retrieval ranking and budgeting defects.** RRF source merging demoted
+  strong cross-source hits into the supporting section; the framework partition
+  never fired for real graph-expansion candidates; empty metadata could shadow
+  real metadata; `:within_type_fallback` was reported for types the fallback
+  never returned; an empty supporting section stranded ~35% of the token budget;
+  keyword scores encoded arbitrary database row order as the dominant ranking
+  signal. All fixed; keyword scores now derive from matched-field counts.
+- **Console SQL validation stops rejecting English.** Body keyword scans ran
+  over string literals, so `WHERE body = 'please update the record'` was refused
+  as an UPDATE; scans now run over noise-stripped SQL while comment-hidden
+  injections stay caught. `MERGE` joined the forbidden set, recursive writable
+  CTEs get the specific error, and the stdio transport passes the table map so
+  qualified `table.column` references validate like they do over HTTP.
+- **Exporter clients treat ambiguous 503s honestly.** A 503 for a
+  non-idempotent create (Notion `create_page`, Unblocked `create_collection`)
+  can arrive from an intermediary after the origin committed, so those now
+  raise the ambiguous-outcome error instead of retrying into a duplicate; 429
+  and idempotent requests retry as before. Notion's `query_all` gained the
+  nil-cursor loop guard, and the two clients' retry budgets now agree.
+- **Session tracer fairness and hygiene.** The Redis store evicted arbitrary
+  sessions at the cap (now oldest-first, matching the file store), and
+  client-controlled header values are escaped before landing in the
+  session-context document served to agents.
+- **Storage edge paths.** Dump-capability detection uses ownership checks
+  (typed `InapplicableBackend` instead of a bare `NotImplementedError`), the
+  in-memory metadata search no longer matches on injected timestamps, dump
+  pruning can never delete the just-promoted dump after a backward clock step,
+  and the tasks store sweeps corrupt records older than the TTL.
+- **A generation's payload is published atomically (#226).** `generation.json` was
+  bumped atomically and last, but it named the output root — a directory of
+  independently-written files — so a reader refreshing mid-publish could load a
+  unit from generation N+1 beside a manifest from N. Extraction now publishes
+  into `payloads/gen-<N>/` and names that directory from `generation.json`, so
+  the single atomic write of that file commits the whole payload; a reader sees
+  one generation whole, including artifacts it had not read yet. Incremental
+  runs seed their directory from the published one with hardlinks, so an
+  unchanged artifact costs a directory entry rather than a copy. Three
+  generations are retained by default (`WOODS_PAYLOAD_RETENTION`).
+  **This changes the on-disk layout.** No re-index is required — the first run
+  after upgrading publishes a payload and reading is unaffected, since every
+  Woods reader resolves the pointer — but anything outside Woods that reads
+  `tmp/woods/manifest.json`, `tmp/woods/dependency_graph.json` or
+  `tmp/woods/<type>/*.json` directly must now read `generation.json`, take its
+  `payload` value, and resolve relative to the index directory. Files left at
+  the root by a pre-2.0 run are stale from the first payload publish onward;
+  `woods:clean` removes them.
+- **Units of different types no longer collapse onto one graph node (#225).** A Scenic
+  view `reports` and a factory `reports` are two units and the index has always written
+  them to two files, but `DependencyGraph` keyed nodes on the bare identifier, so
+  registering the second destroyed the first's reverse edges, `file_map` entry and
+  `type_index` entry. Both now coexist as typed nodes. Deleting one type's source file
+  removes that type's node and its JSON only; incremental re-extraction, git enrichment
+  and the `dependents` rewrite fan out over every type an identifier names; and the MCP
+  traversal tools follow both units' edges and report `types` when an identifier is
+  ambiguous instead of picking one silently. **No re-index is required** — the persisted
+  graph is unchanged for any index with no shared identifier, and identifiers that are
+  shared add a `variants` array that older graphs simply do not carry.
+- **Release-hardening batch (2026-08-07, #211–#218, #220):**
+  - *Embedding durability:* every pgvector/Qdrant embed run crashed at the very end and
+    discarded its work — `Indexer#persistable?` asked `respond_to?(:each_entry)`, which
+    the storage interface answers true for by definition; it now asks which module owns
+    the method (B-108, #220). Durable stores are reconciled against extraction output on
+    full and incremental runs, with the purge guard shared with the dump path (#211).
+    Checkpoint hits on durable backends are verified against the store, so switching
+    `vector_store` from `:local` to pgvector/Qdrant no longer strands unchanged units
+    (#211). Qdrant mutating point operations pass `wait=true`, so a delete is readable
+    as deleted (#220). Dimension mismatches are detected before embedding, not per-row
+    after (#214).
+  - *Extraction fidelity:* blockless factories (`factory :admin, parent: :user`) are
+    extracted; abstract models no longer enter the model-name scan (which inflated
+    `ApplicationRecord`'s PageRank); `private def` methods are no longer reported
+    public; `EventExtractor` no longer mints phantom events from non-Wisper `.on(:sym)`
+    calls; `ManagerExtractor` resolves multi-word models (`order_item` → `OrderItem`,
+    not `Order_item`) (#215).
+  - *Flow/graph determinism:* `find_node_by_suffix` is memoized (was a full-graph scan
+    per call) and resolves ambiguous short names deterministically; `case` predicates
+    are no longer misattributed as branch operations; `domain_clusters` output no longer
+    depends on registration order; vector dumps record the embedding model in the WVF1
+    header (#216).
+  - *Export hardening:* the Unblocked client redacts its bearer token in error paths and
+    describes its per-run (not "daily") budget honestly; `Retry-After` is capped at 120s
+    in both export clients; Unblocked citations use the ref recorded in the manifest
+    rather than hardcoded `blob/main`, with path segments percent-encoded; Notion aborts
+    fast on 401/403 instead of spending the whole cold sync failing per-unit (#217).
+  - *Retrieval/observability residuals:* ranking signals no longer go neutral on chunked
+    corpora (the ranker now strips chunk suffixes like every other consumer); metadata
+    keyword search is case-insensitive on both adapters with the contract pinned by
+    shared examples; `IndexReader`'s LRU is thread-safe under the HTTP transport;
+    `GapDetector` counts queries, not keyword occurrences; `RedisStore#sessions` returns
+    recent sessions rather than arbitrary ones (#218).
+  - *MCP:* the `pipeline_extract` tool loads the extractor lazily, so it works in a
+    standalone `woods-mcp` process instead of dying in the background with
+    `NameError: uninitialized constant Woods::Extractor` (B-110).
+- **The evaluation harness is runnable** (#212). `woods:evaluate` existed on no host (its
+  rake file was never loaded by the railtie), called accessors that had never existed, and
+  no adapter implemented `all_identifiers` for the baselines. It now loads, builds stores
+  through the MCP bootstrapper so evaluation reads the same persisted index that semantic
+  search serves, and ships an offline end-to-end smoke on the `:fake` provider. The
+  ground-truth taxonomy now *is*
+  `QueryClassifier::INTENTS`/`SCOPES`, so annotations compare against what the pipeline
+  actually classified (#218's open item, closed here).
+
+- **Full-gem review batch (2026-07-30): 30 defects fixed** (#183–#209 and pre-existing
+  #149, #150, #169, #170, #174–#178; see each issue for the full analysis). Highlights,
+  grouped by blast radius:
+  - *Host-app safety:* enabling the documented console-MCP mode no longer 401s the entire
+    host application (guards are path-scoped, enablement is decided at request time), and
+    the enable flags now work from `config/initializers/woods.rb` (#183).
+  - *Retrieval correctness:* type-filtered `codebase_retrieve` no longer returns empty on
+    every booted server (symbol-keyed vector metadata on boot and reload, #150); the
+    weighted ranking layer actually ranks (live keyword signal, normalized RRF, assembler
+    honors ranked order, PageRank memo invalidated on reload, #185); classifier-derived
+    target types no longer hard-filter vector search on common English words (#184);
+    framework units are no longer duplicated across context sections (#186).
+  - *Extraction fidelity:* concern inlining works for compact-style class declarations and
+    concern-defined callbacks now yield side effects, for models and (new) controllers
+    (#193, #175); a shared position-aware nesting parser fixes namespace derivation in five
+    source-parsing extractors (#174); polymorphic associations, ApplicationController
+    discovery, cache-call attribution, GraphQL inner classes, YAML anchors, Whenever
+    blocks, label-form rake tasks, and `RSpec.describe Klass, type:` test mapping all
+    parse correctly (#194, #199–#204, #176); full extraction sweeps orphaned unit files
+    so reused output dirs stop over-reporting (#177).
+  - *Pipeline integrity:* `rails_source`/`gem_source` route through the real write pipeline
+    as a Gemfile.lock-keyed whole-app extractor and `include_framework_sources` genuinely
+    gates it (#169); every index writer — `woods:clean`, the embed tasks, MCP
+    `pipeline_extract` — now takes the pipeline lock (#170); incremental extraction cannot
+    prune units on a failed extractor construction or a degraded eager-load boot (#198);
+    the write-skip optimization actually fires (#208).
+  - *Embedding durability:* a mis-pointed `woods:embed_incremental` can no longer wipe the
+    vector index (30% purge guard + empty-load refusal, #191); non-ASCII identifiers stop
+    re-embedding forever (WVF1 ids hydrate as UTF-8, #192); a single 429 no longer aborts
+    an embed run — providers are wrapped in the previously-unwired resilience layer with
+    Retry-After honored (#188); pgvector works via the documented setup path and dedupes
+    in-batch ids (#187, #181); PageRank keeps rank mass for duplicate/unresolvable edges
+    (#205); temporal snapshots stop leaking a unit set per same-SHA re-capture (#206).
+  - *Robustness:* the embed pipeline, Unblocked manifest, StatusReporter, and flow layer
+    survive `LANG=C` and torn files (`AtomicFile` everywhere, #189, #190); flow artifacts
+    are portable (relative paths, #190); a standing-down watch daemon no longer clobbers
+    the live daemon's status, and the lock heartbeat cannot resurrect a released lock
+    (#196, #197); Notion/Unblocked clients no longer retry non-idempotent POSTs on read
+    timeout (#150); Notion multi-model sync no longer corrupts the Columns database
+    (qualified `table.column` titles with legacy-page adoption, #149); metadata search
+    validates field names and escapes LIKE metacharacters (#209).
+
+- **`woods:embed_incremental` no longer discards the vectors it embeds** (B-059, #148). On the
+  `:local` and `:shared_filesystem` presets the vector store is in-memory and the dump under
+  `dumps/` is the *only* durable copy — but `Indexer#index_incremental` never called
+  `persist_snapshot`, while `process_units` advanced `checkpoint.json` regardless. Each
+  incremental run therefore embedded changed units into a store that died with the process,
+  wrote nothing to `dumps/`, and left a checkpoint claiming the work was done, so no later
+  incremental run would ever produce those vectors again: unrecoverable without a full
+  re-embed, and silent — stats reported `processed: 1`. An incremental run now hydrates the
+  store from `dumps/latest` before embedding and dumps afterwards, so the dump it writes is
+  cumulative. The invariant now enforced is that **`checkpoint.json` never advances over a
+  unit whose vector was not durably stored**: on the dump-backed path the checkpoint is
+  written only after the dump is on disk and the `latest` pointer is flipped (the interval
+  checkpoints are suppressed there — a dump is a whole-store snapshot, so there is no partial
+  durability for them to record), and a checkpoint hit is honoured only when the hydrated
+  artifact actually holds a vector for that unit. A checkpoint that ran ahead of its dump —
+  an older gem with this bug, an interrupted promote, a store swap — self-heals into a
+  re-embed and says so on stderr. A dump that cannot be read (corrupt file, dimension
+  mismatch after a model switch) warns and falls back to re-embedding everything, which is
+  the documented remedy for both. Durable backends (pgvector, Qdrant) are unaffected: their
+  `store_batch` *is* the durable write, so they keep the interval checkpoints and never
+  hydrate.
+
+- **Woods' own JSON artifacts are read as UTF-8, not as the process locale** (#164 review,
+  round 4). `AtomicFile.write` uses `binmode` so bytes land verbatim, but a plain `File.read`
+  tags the result with the default *external* encoding — US-ASCII in a container with no
+  locale set, which is a plain Docker image and exactly where the watch daemon is documented
+  to run. The daemon writes status reasons containing em dashes, so one ordinary lock
+  contention under `LANG=C` raised `Encoding::InvalidByteSequenceError` out of
+  `Watch::Status#read` (which rescued `JSON::ParserError` and `SystemCallError`, neither of
+  which that is), taking `woods:watch_status`, the hook sync's daemon-deference check and the
+  `woods_status` tool down with it until something rewrote the file with an ASCII-only reason.
+  New `AtomicFile.read` is the counterpart to `.write`; `Status`, `Generation`, the daemon's
+  pending/graph reads and `woods_status` all go through it, and `Status#read` now also rescues
+  `EncodingError`.
+- **A cycle that writes an index without publishing a generation now reports degraded**
+  (#164 review, round 4). `Extractor#publish_generation` rescues its own failures so a good
+  index is not discarded over an unwritable marker — right, but the marker *is* the freshness
+  contract, so readers kept serving the previous index while the daemon reported `running`,
+  and the next incremental could be a no-op that bumped nothing either. The daemon now
+  cross-checks that the number moved when units were written, carries the paths forward, and
+  logs at error rather than warn.
+- **`graph_analysis.json` no longer depends on registration order** (#164 review, round 4).
+  `orphans` and `dead_ends` were emitted in graph-registration order and `cycles` started its
+  DFS from the same, so a full and an incremental extraction of one tree published different
+  analysis — the opposite of what the docs claimed. The differential harness could not see it:
+  its oracle `deep_sort`ed both sides of that file before comparing. Sorting there and
+  asserting determinism here cannot both be load-bearing; the analyzer is now genuinely
+  order-independent and the oracle compares the file exactly. Guarded by a registration-order
+  rotation in `spec/graph_analyzer_spec.rb`.
+- **The harness oracle keys units by filename, not by their own contents** (#164 review,
+  round 4). `unit_snapshot` keyed on the identifier *inside* each document, so a stale file
+  whose identifier a newly-written file also carried collapsed onto one entry with
+  last-write-wins — a leftover unit read as no difference at all — and content written under
+  the wrong name compared equal while the directories plainly were not.
+- **A class removed from a file that still exists is now pruned** (#164 review, round 4).
+  Deletion keyed on the source file being gone, which cannot see this: two models in one `.rb`
+  with one deleted leaves no missing path, and class-based units register a *convention* path
+  derived from the constant name, so the second class was never attributed to the file it
+  actually lived in. Nothing in the run removed it, so it outlived every subsequent
+  incremental — a permanent divergence from a full extraction. Class-based reconciliation now
+  runs in both directions, with removal gated on the eager load having completed: on the
+  documented NameError fallback the discovery sets are known-partial, and deleting by the type
+  is a far worse failure than a stale unit. The booted harness cannot cover this — Zeitwerk
+  unloads only a file's expected constant, so the side-effect class survives the reload and
+  the in-process full extraction the oracle compares against emits it too.
+- **`RailsReloader#reload!` no longer carries an unreachable interlock wrapper** (#164 review,
+  round 4). The call was guarded by `interlock.respond_to?(:done)`, and
+  `ActiveSupport::Dependencies::Interlock` has never had a `#done` — so the guard was false on
+  every Rails version, the wrapper never ran, and the comment above it described locking that
+  was not happening. It is also not needed: `reload!` takes the unload lock itself via
+  `class_unload!` → `require_unload_lock!`. Found by writing the first test that drives the
+  real reloader instead of a double; it was stubbed in every spec and so ran on zero of the
+  seven matrix rows.
+- **New GraphQL files are indexed incrementally** (#164 review, round 3). `app/graphql` had no
+  `PathDispatcher` rule and GraphQL types are not class-discoverable, so a created type,
+  mutation or resolver routed nowhere and never entered the index, and a rename lost the unit
+  entirely — #164 gap 1 verbatim, in the one corner the gap-1 fix missed. The coverage guard
+  missed it too: `GRAPHQL_TYPES` is its own constant, so deriving the expectation from
+  `FILE_BASED` left a hole exactly the size of the bug. The guard now works by subtraction —
+  every unit type must be reachable per file, wholesale, or by class discovery, with
+  `rails_source` the one stated exception.
+- **`resolve_head_sha` no longer folds git's stderr into the SHA** (#164 review, round 3). The
+  same `capture2e` hazard as the working-tree probe one method over: a warning on an otherwise
+  successful `rev-parse` was concatenated into the value and then compared against the manifest
+  as if it were a SHA. The status spec's git stub had also gone dead when the working-tree
+  probe moved to `capture3`, so real git was running against `/tmp` in those examples.
+- **Startup catch-up now notices deletion-only downtime** (#164 review, round 2). The
+  reconciliation scanned mtimes of files that exist, so a file deleted while no daemon was
+  running left no trace: the daemon logged "index is current at startup" and the ghost units
+  survived until the next unrelated event. Catch-up now also checks the graph's registered
+  paths for files gone from disk and, if any, runs one cycle with an *empty* change set — the
+  extractor's bounded sweep reaches the ghosts, with the bounds that keep nominal paths
+  (Rails < 7.1 `SchemaMigration`) safe from authoritative deletion.
+- **The drain guard is an atomic test-and-set** (#164 review, round 2). The re-entrancy guard
+  was a check-then-act boolean — the exact race it guarded against: two `listen` callback
+  threads could both read `false` before either wrote `true` and run two overlapping drain
+  loops. It is now `Mutex#try_lock`; the refused caller's paths are already in the pending set,
+  so the winning loop picks them up and nothing is lost.
+- **`IndexReader` freshness bookkeeping is safe under a threaded transport** (#164 review,
+  round 2). The generation check-and-reload was unguarded check-then-act, and the pin was a
+  boolean — under `woods-mcp-http`, whose tool handlers run on the Rack server's request
+  threads, two concurrent reads could double-reload or drop each other's caches mid-sequence,
+  and the first of two overlapping `with_pinned_generation` blocks to finish unpinned the
+  reader for both. The check-and-reload now runs under a per-reader mutex and pins are
+  refcounted: invalidation resumes when the *last* pin releases.
+- **A cycle that can't land its work no longer loses it** (#164 review). Lock contention
+  already carried its paths into the next cycle; a *failed reload* did not. Saving a valid
+  `post.rb` while `user.rb` sat half-typed produced one app-wide reload failure covering both,
+  and when `user.rb` was fixed the event named only `user.rb` — so `post.rb`'s change never
+  reached the index at all. Failed reloads and raising extractions now carry forward too, and
+  the drain lives inside `Daemon#process`, so an embedded host gets the same retry behaviour
+  `#run` does.
+- **A quiet daemon is no longer declared dead** (#164 review). `Status#alive?` disbelieves a
+  record older than 15 minutes and only cycle boundaries wrote one, so a healthy daemon
+  watching a worktree nobody was typing in read as stopped — and every caller that stands down
+  for a live daemon started contending for its lock instead. A heartbeat now re-stamps the
+  last published record every 5 minutes, republishing `degraded` as `degraded` rather than
+  claiming recovery.
+- **The daemon reconciles changes that predate it** (#164 review). It only ever reacted to
+  events it personally witnessed, so the documented hook pattern — start a daemon, then sync —
+  stood the sync down over changes the fresh daemon had never seen. `Daemon#run` now
+  reconciles against the index's own watermark (`generation.json`'s mtime) before waiting for
+  its first event. `woods:incremental` also no longer stands down for a *degraded* daemon:
+  alive but not updating is not coverage.
+- **`woods:refresh` serializes with the other writers** (#164 review). It rewrites the whole
+  dependency graph and took no lock, so a refresh racing a daemon cycle silently discarded the
+  other's work and then bumped the generation over it — atomic writes don't help, because each
+  write is individually intact and the *set* is not. It now runs under `PipelineLock` like
+  `woods:extract` and `woods:incremental`, and records its own generation reason instead of
+  masquerading as an incremental run.
+- **The polling watcher no longer loses a same-second write** (#164 review). Snapshots
+  truncated mtime with `to_i`, so a second write inside the same second was invisible
+  permanently — there is no later event to catch it — and save-then-formatter at the default
+  1s interval is entirely ordinary. Snapshots now carry full-resolution mtime plus size.
+- **`IndexReader` no longer misses a same-size generation bump** (#164 review). The freshness
+  signature was `[mtime, size]`, and equal size is the daemon's steady state (reason
+  `"incremental"` every cycle). On a coarse-mtime filesystem — including the volume-mounted
+  Docker deployment the Index Server is documented for — two bumps in one tick were
+  indistinguishable and the reader served a stale index indefinitely. The inode is now part of
+  the signature, which `AtomicFile`'s rename-per-write guarantees moves.
+- **A clean working tree no longer reports dirty** (#164 review). `resolve_working_tree_status`
+  used `capture2e`, folding git's stderr into the porcelain output — so any warning on an
+  otherwise successful run (a stale `index.lock` notice, `core.fsmonitor` chatter) read as
+  uncommitted changes, and the fingerprint tracked the warning rather than the code.
+- **Index artifacts are written atomically.** `dependency_graph.json`, `manifest.json`,
+  `_index.json` and every per-unit file went through plain `File.write`. With a resident daemon
+  writing while resident MCP readers read, a reader could catch a truncated file mid-write;
+  all of them now route through `Woods::AtomicFile`.
+- **A class-based file moved between autoload directories is no longer dropped for a run**
+  (#164 review). Reconciliation ran before pruning, so a file moved with its constant unchanged
+  still looked "known" and was not re-extracted, then was pruned for its vanished path.
+  `extract_changed` now reconciles once more after pruning.
+- The `listen` backend degrades instead of dying: only its setup is wrapped in the
+  `WatcherError` rescue, so a failure raised once it is merely parked (including from the
+  extraction inside a callback) is no longer relabelled "failed to start", and inotify
+  exhaustion falls back to polling. Both watchers also honour a `stop` that races startup.
+- The storm threshold counts only paths the reload policy considers actionable — sixty edited
+  markdown files plus one model is a one-model change, not a storm.
+
+- **Token estimates now describe the file that is written.** `ExtractedUnit#estimated_tokens`
+  measured `metadata.to_json`, which with ActiveSupport loaded applies HTML-safe escaping (`>`
+  becomes `\u003e`), while the unit file is written with `JSON.generate`. Any unit whose
+  metadata contained a lambda scope was therefore indexed with a token count that described a
+  document that was never written — and differed depending on whether a full or an incremental
+  run last touched it. Both sides now measure `JSON.generate`.
+
+- **Incremental extraction is now equivalent to a full extraction** (#164, phase 0). Five
+  confirmed correctness gaps in `woods:incremental` are closed. They mattered most in an
+  incremental CI chain, where the previous graph is restored and `woods:incremental` runs per
+  merge: a missed unit propagated forward run over run instead of being erased by the next
+  full rebuild.
+  - **New files are indexed.** Changes routed only through `DependencyGraph#affected_by`,
+    which resolves a path via the graph's file map — populated only from already-registered
+    units — so a file that did not exist at the last extraction routed nowhere and was
+    silently ignored. A new `Woods::PathDispatcher` supplies the missing direction, path →
+    extractor, for file-based types; class-based types (models, controllers, mailers,
+    components, channels) are reconciled against each extractor's own runtime discovery set,
+    now exposed as `#discoverable_classes`.
+  - **Deleted files no longer leave ghosts.** Units whose source file has vanished are pruned
+    — unit JSON removed, graph node unregistered, reverse edges withdrawn, type index
+    regenerated. Deletions named in the change set are authoritative; a sweep over registered
+    paths catches callers whose change set omits them. A rename resolves to delete-plus-add.
+  - **Files defining several units reconcile as a whole.** `DependencyGraph`'s file map is now
+    multi-valued (`path => Set<identifier>`), so a task removed from a multi-task `.rake` file
+    is dropped rather than left behind. Graphs written before this load unchanged.
+  - **Whole-app unit types refresh.** `route`, `middleware`, `engine`, `scheduled_job`,
+    `state_machine`, `factory`, `event`, and `database_view` are re-run wholesale when their
+    trigger paths change, instead of being skipped while the run still rewrote the manifest
+    and zeroed `staleness_seconds`. A routes change also re-extracts the types that embed the
+    route table (controllers, mailers, components, view templates).
+  - **Derived data no longer drifts.** Incremental runs recompute `graph_analysis.json`, and
+    refresh each affected unit's `dependents` list and `metadata.git` — all previously
+    full-extraction-only. A run that extracts nothing now leaves the manifest timestamp alone
+    rather than reporting the index as freshly synced.
 
 - **Assignment-form multi-line conditionals no longer unbalance depth
   tracking.** `block_opener?` counted `if`/`unless` only in line-leading
@@ -891,656 +1495,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`git -C Rails.root`), consistent with the provenance rooting, so it can no
   longer diff whatever checkout the process happened to start in.
 
-### Changed
-
-- New `Woods::Extractors::LineNeutralizer`: the quote-aware comment stripper (formerly private to
-  `SharedDependencyScanner`) plus string- and heredoc-blanking variants, shared by SourceNesting,
-  the rake and factory parsers, and CallbackAnalyzer.
-- New `Woods::Extractors::ReferencePatterns`: the namespace-capable service, mailer, and job-enqueue
-  regexes, shared by `SharedDependencyScanner`, `JobExtractor`, and `CallbackAnalyzer`.
-
-- **`FlowPrecomputer`'s `fail_closed:` switch is gone (EXTB-14).** Both callers
-  passed `true` and CLAUDE.md documents both paths as fail-closed, but the YARD
-  still promised the full path a "log-and-skip contract" and the
-  `Rails.logger.error` branch it described was dead code. Flow assembly now always
-  raises `Woods::ExtractionError` on a per-action failure.
-
-- **An unlisted integer tool parameter fails the server build with a named error
-  (MCP-8).** `ToolContract::INTEGER_BOUNDS.fetch` raised a bare
-  `KeyError: key not found: "count"` at `Server.build`, with no pointer to the
-  table that needs the entry. It now raises an `ArgumentError` naming the tool,
-  the property, and `INTEGER_BOUNDS`.
-
-- CI gains a `c-locale` job running the artifact-reader specs (`spec/mcp`,
-  `spec/feedback`, `spec/session_tracer`, `spec/evaluation`) under `LC_ALL=C`. The
-  runners default to a UTF-8 locale, so the whole encoding family could regress
-  with the suite green.
-- Three specs that simulate an unreadable/read-only path with `chmod` now skip as
-  root, where `chmod` is ineffective (`spec/operator/pipeline_guard_spec.rb` x2,
-  `spec/mcp/tasks/pipeline_tasks_spec.rb`).
-- `docs/backlog.json` gains B-140..B-163: the seven prior-audit deferred lows that
-  never received IDs (R2-2 — L3, L7, L12, L13, L14, L15, L21) plus seventeen
-  deferrals from this audit (CORE-3, CORE-5, EXTA-7, EXTA-9, EXTA-11, EXTA-13,
-  EXTA-15, CON-4, STO-7, STO-10, STO-14, INF-5, INF-6, INF-13, R2-4, R2-5, R2-6).
-
-- **STO-12**: Corrected the `Storage::Snapshotter` doc comment: `Snapshotter::Metadata.validate_store!` can use plain `respond_to?` only because `MetadataStore::Interface` defines neither `#each_entry` nor `#bulk_load` — adding either stub would silently convert the check into the B-108 bug. `spec/storage/snapshotter/vector_spec.rb`'s float-truncation tolerance block (which passed whether or not the load raised, stale since the M10 fix) now asserts the raise.
-
-### Documentation
-
-- **`woods-mcp-start` is described as what it is: a preflight wrapper (MCP-10).**
-  It validates the index directory and published manifest, then `exec`s
-  `woods-mcp`; there is no supervision and no restart loop. The "self-healing
-  MCP wrapper" description in the header comment and the CLAUDE.md architecture
-  table is gone. (`docs/MCP_SERVERS.md` and `docs/DOCKER_SETUP.md` already
-  described it accurately.)
-- **Reload documentation drift (MCP-7).** `Bootstrapper.populate_vector_metadata`
-  named `populate_reloaded_vector_metadata`, a method the M7 transaction removed;
-  `Ranker#invalidate_pagerank_cache!` claimed a bootstrapper caller that does not
-  exist (the transaction installs a fresh Ranker instead, deliberately). Both
-  comments now describe the current design; `invalidate_pagerank_cache!` is
-  re-documented as an API for direct embedders that repoint a Ranker's graph
-  store without rebuilding it.
-- **The unreleased-2.0 story is legible from the repository root.** `README.md`
-  gains a version banner naming both the documented 2.0.0 line and the published
-  1.6.1 gem, a "What's new in 2.0" comparison table, and a compact upgrade
-  checklist; `docs/UPGRADING_TO_2.md` covers the Notion physical-column re-sync,
-  the new task exit codes, the incremental baseline guard, and `reload`'s
-  write-access requirement; every claim that expires at tag time is wrapped in a
-  `v2-unreleased-note` fence, listed in the new release note in `docs/README.md`.
-
-### Testing
-
-- **The live-Redis session-tracer contract spec now runs in CI (M6).** The
-  `spec/session_tracer/redis_store_live_spec.rb` suite from the P4 eviction
-  rework was gated on `WOODS_RUN_LIVE_BACKENDS=1` but appeared in no CI
-  job's rspec run, so its six examples (including the two-client Lua
-  migration race) never executed anywhere. The `live-backends` job now
-  lists it; that job already provides the ephemeral `redis` client install,
-  the redis service, and `WOODS_REDIS_URL`.
-
-## [2.0.0] - 2026-08-20
-
-### Upgrade Notes
-
-This is a major release: the full-gem review (#210) corrected how several extractors
-derive unit identifiers, which changes the index format's observable contract.
-
-- **Unit identifiers have changed shape.** Namespaces are now derived correctly by a
-  position-aware nesting parser (#174), abstract-model and mixin-module artifacts no
-  longer leak into names, and GraphQL inner classes are no longer folded into
-  identifiers (#194). Concretely: a state machine that indexed as `Payment::aasm` is now
-  `Billing::Payment::aasm`; a service that indexed as bare `IssueInvoice` is now
-  `Billing::IssueInvoice`; concern units are no longer misnamed `ClassMethods`.
-  **Anything that cached the old identifiers will miss**: saved retrieval queries,
-  external notes, exported Notion pages and Unblocked documents, MCP clients holding
-  identifier lists.
-- **The remedy is one clean re-index**: `woods:clean` followed by `woods:extract`
-  (then `woods:embed` if you embed, and a re-export if you sync Notion/Obsidian/
-  Unblocked — the exporters reconcile renamed units as delete-plus-add).
-- **Durable vector stores are now reconciled against extraction output** (#211). The
-  first `woods:embed` / `woods:embed_incremental` after upgrading will **delete** vectors
-  for units the extraction no longer produces — including every unit the identifier
-  renames moved. Deleting more than 30% of the store (or purging into an empty load) is
-  refused with an explanation; `WOODS_ALLOW_PURGE=1` overrides after you've confirmed the
-  deletion is intentional. On a rename-heavy index, expect to need it once.
-- **An embedding-dimension mismatch now refuses to embed up front** (#214).
-  `woods:embed` compares the provider's dimension against what the store actually holds
-  (pgvector's column type, Qdrant's collection config) before embedding anything, raising
-  `Woods::MCP::DimensionMismatch` with both widths — instead of embedding everything and
-  failing per-row on insert. If you changed `embedding_model` at some point and it
-  "worked", this check may now surface the latent mismatch; the remedy is a full re-embed
-  into a store created at the new width.
-- **New environment variables**: `WOODS_ALLOW_PURGE` (override the vector purge guard,
-  above) and `WOODS_NOTION_FORCE` (bypass the Notion sync manifest for one run, forcing
-  a full re-push).
-
-### Added
-
-- **MCP 2026-07-28 support** (B-111–B-114). The gemspec now requires `mcp >= 1.2, < 2.0`,
-  the release that added the 2026-07-28 protocol revision.
-  - **Stateless Streamable HTTP by default.** `woods-mcp-http` no longer mints
-    `Mcp-Session-Id`, so restarting it (gem upgrade, machine sleep, worktree rebuild) is
-    invisible to connected clients instead of invalidating every session, and several
-    instances can serve one volume-mounted index without sticky routing. Set
-    `WOODS_MCP_HTTP_STATELESS=0` for a client that still needs sessions, the GET SSE
-    stream, or DELETE teardown — a transitional escape hatch, since all three are gone
-    from the specification.
-  - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
-    `pipeline_embed` return a durable task handle to clients that declare the extension:
-    poll with `tasks/get`. Cancellation is not advertised: `tasks/cancel` returns
-    `Method not found` because Woods cannot safely stop work already holding the
-    pipeline lock or prevent it from publishing. Records live on disk under
-    `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
-    mid-run can reconnect — even to a restarted server — and collect the result, and a
-    task whose owning process died resolves to `failed` instead of leaving an agent
-    polling forever. Clients that do not declare the extension get the previous
-    fire-and-forget behaviour, unchanged.
-  - **Cache hints and deterministic tool ordering.** List and read results carry
-    `ttlMs` (default 10s, `WOODS_MCP_CACHE_TTL_MS`) and `cacheScope: "private"`, and tools
-    are advertised in sorted order so a host with optional integrations wired presents the
-    same tool block as one without.
-  - **`server/discover`** is answered, advertising supported versions, capabilities and
-    the Tasks extension.
-
-### Changed
-
-- **Dead code removed.** The unwired formatting adapters (Claude, GPT, Generic),
-  console job/cache adapters, `StubBridge`, `HealthCheck`, `Instrumentation`,
-  `Notion::Mapper`, and a dozen spec-only methods are gone. `config.add_gem`
-  now warns like `config.extractors`: accepted, not implemented.
-- **Docs rewritten for readability**: shorter sentences, tables for
-  comparisons, no em-dashes, one owner per fact. The MCP 2026 handoff document
-  was folded into the strategy ADR.
-
-- **The packaged gem ships only user-facing files.** Internal release machinery
-  (`lib/tasks/release_v2.rake`, `lib/woods/release_v2/`) and non-user-facing
-  documentation subdirectories are excluded from the package; the repo keeps
-  them for CI. Historical build-phase design documents were removed from
-  `docs/` for the release and remain in git history.
-- **The Claude plugin releases with the gem.** `plugin.json` is 2.0.2.
-- **`config.extractors` warns when set.** The knob is accepted for forward
-  compatibility but extractor selection is not implemented; all extractors run.
-  Docs no longer teach it as a live setting. The unused `log_level` accessor
-  is removed.
-- **`woods-mcp-start` no longer pins the MCP protocol version.** It defaulted
-  `MCP_PROTOCOL_VERSION` to `2024-11-05` — the oldest revision there is — which silently
-  opted every user out of four protocol revisions. The SDK server is dual-era, answering
-  `initialize` for legacy clients while serving `server/discover` and per-request metadata
-  for modern ones, so the unpinned server is the *more* compatible one. The variable
-  remains as an escape hatch and now announces itself on stderr when set.
-  **No action required:** legacy clients keep working, and no re-extraction or re-embedding
-  is implied — no on-disk artifact format changed.
-
-### Fixed
-
-- **Wrapper-nested classes no longer collide on one identifier.** A file under
-  a managed autoload path is now named for the constant its path spells
-  (Zeitwerk-governed naming): `app/services/domain/container/parser.rb`
-  declaring `module Domain; class Container; class Parser` indexes as
-  `Domain::Container::Parser` instead of the wrapper `Domain::Container`.
-  Previously every sibling under the same wrapper indexed as the wrapper and
-  same-type dedup silently dropped all but one. The source parser remains the
-  fallback for unmanaged or unconventional paths, and extraction now aborts
-  naming both file paths when one type+identifier is still derived from two
-  different files. **Re-extract after upgrading** — embeddings, exports, and
-  saved queries keyed by the old identifiers need regeneration.
-
-- **Console stdio setup now explains production token validation.** Stdio clients do
-  not send the HTTP bearer token, but Rails still requires a 32-character-or-longer
-  `console_mcp_token` at production boot whenever Console MCP is enabled. The upgrade,
-  direct, Docker, FAQ, and agent setup paths now state that boundary explicitly.
-
-- **Console SQL gate no longer has MySQL comment and dollar-quote blind spots.**
-  `SqlNoiseStripper` did not know `#` line comments or `/*! ... */` executable
-  comments (both live SQL on MySQL), and treated a `$` inside a PostgreSQL
-  identifier as a dollar-quote opener, so a blocked table could be hidden from
-  `TableGate`. The `TABLE name` statement form was never scanned at all. All
-  four are closed, with the `#` rule gated on the MySQL dialect.
-- **Redacted columns are refused as query inputs, not only masked on output.**
-  `console_aggregate(column:)`, scope keys (including `_matches`), `find(by:)`,
-  and `recent(order_by:)` accepted `console_redacted_columns`, which gave a
-  plaintext aggregate or a comparison oracle over a secret.
-- **The MySQL console timeout no longer leaks into the host's connection pool.**
-  `SET max_execution_time` is session-scoped and survives rollback; the prior
-  value is now read and restored in `ensure`.
-- **Console SQL validation stops rejecting columns named `do`, `start`,
-  `lock`, `release`, or `handler`.** Forbidden statement keywords now match only
-  at a statement-leader position. `EXPLAIN ANALYSE` (the PostgreSQL spelling) is
-  rejected like `ANALYZE`. `console_association_count` gates the rendered SQL, so
-  a blocked `through` table is refused.
-- **Long-running MCP tasks no longer expire the moment they complete.** Terminal
-  task ttl is measured from the terminal transition, not from creation. A task
-  minted under a different boot identity (a container) is left alone by a host
-  reader instead of being marked failed.
-- **Extractor accuracy batch.** `permitted_params` no longer leaks across method
-  bodies (and reads Rails 8 `params.expect`); GraphQL complexity is read from a
-  real match; per-file GraphQL classification agrees with the runtime pass;
-  `form_action` edges stop at `do`/`end`; `SourceNesting` pops on `end.freeze`;
-  `render :partial => 'x'` resolves the real partial; a rake task whose name
-  contains `do` no longer swallows its neighbours; inline-namespaced migrations
-  are extracted; mounted engines are unwrapped from `Mapper::Constraints` so
-  `mounted_path` is populated, and `Rails::Application` is no longer reported as
-  an engine.
-- **An empty vector dump no longer refuses to boot.** `woods:embed` over an empty
-  payload wrote `dimension = 0` and every later boot raised `DimensionMismatch`.
-- **Storage hardening.** Interface stubs are no longer probed with `respond_to?`
-  (B-108) in the retryable provider, builder, indexer, and ranker; Notion
-  read-only POSTs retry on a network failure; the watch daemon's stale-claim
-  reclaim checks the claim inode before removing it and falls back to an
-  exclusive create where `File.link` is unsupported; `InMemory#delete_by_filter`
-  honours array filters like `#search`.
-- **Task orphan detection compares pid namespaces, not only boot ids.** Docker
-  on Linux shares the host kernel boot id, so a host reader could judge a
-  container's task by an unrelated host pid. The producer identity now carries
-  `/proc/<pid>/ns/pid`, and a task from another namespace is left alone.
-- **Daemon claim reclaim runs under an `flock`.** A byte comparison before the
-  delete still left a read-then-unlink window where two starters could both
-  end up as claim owners; the whole reclaim-and-create loop is now one
-  critical section on a sidecar lock file, released by the kernel on death.
-- **Snapshot capture retries a locked SQLite database.** SQLite skips the busy
-  handler in its deadlock-avoidance case, so two concurrent captures could
-  fail at `BEGIN IMMEDIATE` despite `busy_timeout`. Three bounded attempts.
-- **`woods:clean` and `woods:validate` no longer raise `NameError` in a host
-  app.** `woods.rake` reached `Woods::Generation` through the extractor, which
-  those tasks never load. Caught by every woods-testbed variant.
-- **The daemon's stale-claim race guard compares bytes, not the inode.** Linux
-  reuses a freed inode for the next file in the directory, so the inode check
-  let a just-replaced live claim be deleted. Failed on CI, passed on macOS.
-- **Routes that differ only by constraint are all indexed.** The identifier is
-  `VERB /path`, qualified by request constraints when the route has any:
-  `GET /users [subdomain=api]`, `GET /users [format=json]`, `constraint=proc`
-  for a callable. Routes that still collide are numbered in route order
-  (`GET /users #2`) instead of being dropped. Unconstrained routes keep their
-  old identifier; a constrained one changes, so the clean re-index above
-  covers it.
-- **A rake task reopened in two `.rake` files is one unit**, the way Rake sees
-  it: its source carries every definition, `metadata.defined_in` lists the
-  files, and a per-file incremental run produces the same merged unit as a
-  full run. Previously the second file overwrote the first.
-- **`woods:validate` and `Resilience::IndexValidator` are one implementation.**
-  The task now runs the class, which gained the task's manifest-count,
-  unit-file, file-path, and dependency-graph checks (`app_root:` opts into
-  the file-path check).
-- **`EXPLAIN (FORMAT JSON) SELECT` is accepted.** The option list was read as
-  a call to a function named `EXPLAIN`. `EXPLAIN ANALYZE` in any form is
-  still refused.
-- **Class names are position-aware in every file-scanning extractor.** Jobs,
-  serializers, decorators, policies, Pundit policies, managers, and validators
-  took the first `class` token in the file, so `module Billing; class ChargeJob`
-  indexed as bare `ChargeJob` (and the class-based second pass then added a
-  duplicate `Billing::ChargeJob`), while the decorator scanner joined every
-  `module` token, including helpers nested inside the class. All of them now
-  go through `SourceNesting#qualified_first_class_name` (#174).
-- **Policy `evaluated_models` no longer invents models from parameter syntax.**
-  `def initialize(order, user = nil, strict: false)` produced `Nil`, `Strict`,
-  and `False` model edges; only bare positional parameters are read now.
-- **The release gate requires the booted-extraction matrix.**
-  `script/validate-release-run` did not list the `rails-matrix` CI job, so a
-  red Rails 6.0 to 8.1 row could not block a release.
-- **Spec order no longer leaks a nil `Woods.configuration`.** Four spec files
-  nil it out in `after` hooks; `spec_helper` now restores whatever each example
-  started with, which fixes two seed-dependent failures in `extractor_spec`.
-
-- **Every MCP entry point boots a payload-layout index.** The #226 layout moved
-  `manifest.json` into `payloads/gen-<N>/`, but `woods-mcp`, `woods-mcp-http`,
-  `woods-mcp-start`, the retriever's graph hydration, and the operator status
-  reporter still looked for root-level artifacts: a fresh 2.0 extract was refused
-  at boot with "Run `rake woods:extract` first", the retriever's graph store
-  hydrated empty (silent loss of PageRank and graph expansion), and status read
-  `:not_extracted`. All five now resolve through the generation pointer, with the
-  legacy flat layout still accepted.
-- **MCP `reload` no longer crashes the stdio server on pgvector/Qdrant.** The
-  reload metadata backfill guarded on `respond_to?(:each_entry)`, which the
-  vector-store interface answers true for while raising `NotImplementedError`
-  (the B-108 anti-pattern); on stdio that unwound the transport loop and killed
-  the process. The guard is now an ownership check.
-- **Wholesale replacement prunes by `(identifier, type)`.** The #225 typed-graph
-  work missed one call site: a factories (or any wholesale) re-run removing a
-  vanished unit deleted every type sharing the identifier, so a same-named
-  Scenic view's node and JSON file vanished from the index until a full run.
-  Colliding identifiers also now serialize dependents on every sharing unit and
-  carry each type's own git metadata instead of one type's history.
-- **Incremental runs abort instead of publishing a collapsed index.** When
-  payload creation failed over a payload-born index, the degrade path published
-  a near-empty flat root and redirected readers to it. Incremental and refresh
-  runs now raise without bumping the generation; full runs keep the flat
-  fallback (their write set is complete). Payload seeding also gained the
-  cross-device copy fallback, and payload pruning survives a restarted
-  generation counter.
-- **Woods artifacts are read encoding-safely everywhere.** Twelve remaining bare
-  `File.read` sites (extractor incremental path, rake validate/stats/flow, the
-  index validator) crashed with `Encoding::InvalidByteSequenceError` under
-  `LANG=C` (the documented daemon container environment) on any multibyte byte.
-  All now use `AtomicFile.read`.
-- **Extraction-family rake tasks honor `config.output_dir`.** They hardcoded
-  `tmp/woods` while the embed and export families used the configured
-  directory, so a host that set `output_dir` split its index in two silently.
-- **The watch daemon captures files changed during startup catch-up.** The
-  watcher started only after catch-up finished, so a save during a long
-  catch-up extraction was lost until the next edit. The watcher now starts
-  first. A dead container daemon's startup claim also no longer blocks a
-  host-side daemon forever (host identity is compared before trusting pid
-  liveness), and a lock-release failure after a successful cycle no longer
-  relabels the cycle as a lock failure.
-- **Retrieval ranking and budgeting defects.** RRF source merging demoted
-  strong cross-source hits into the supporting section; the framework partition
-  never fired for real graph-expansion candidates; empty metadata could shadow
-  real metadata; `:within_type_fallback` was reported for types the fallback
-  never returned; an empty supporting section stranded ~35% of the token budget;
-  keyword scores encoded arbitrary database row order as the dominant ranking
-  signal. All fixed; keyword scores now derive from matched-field counts.
-- **Console SQL validation stops rejecting English.** Body keyword scans ran
-  over string literals, so `WHERE body = 'please update the record'` was refused
-  as an UPDATE; scans now run over noise-stripped SQL while comment-hidden
-  injections stay caught. `MERGE` joined the forbidden set, recursive writable
-  CTEs get the specific error, and the stdio transport passes the table map so
-  qualified `table.column` references validate like they do over HTTP.
-- **Exporter clients treat ambiguous 503s honestly.** A 503 for a
-  non-idempotent create (Notion `create_page`, Unblocked `create_collection`)
-  can arrive from an intermediary after the origin committed, so those now
-  raise the ambiguous-outcome error instead of retrying into a duplicate; 429
-  and idempotent requests retry as before. Notion's `query_all` gained the
-  nil-cursor loop guard, and the two clients' retry budgets now agree.
-- **Session tracer fairness and hygiene.** The Redis store evicted arbitrary
-  sessions at the cap (now oldest-first, matching the file store), and
-  client-controlled header values are escaped before landing in the
-  session-context document served to agents.
-- **Storage edge paths.** Dump-capability detection uses ownership checks
-  (typed `InapplicableBackend` instead of a bare `NotImplementedError`), the
-  in-memory metadata search no longer matches on injected timestamps, dump
-  pruning can never delete the just-promoted dump after a backward clock step,
-  and the tasks store sweeps corrupt records older than the TTL.
-- **A generation's payload is published atomically (#226).** `generation.json` was
-  bumped atomically and last, but it named the output root — a directory of
-  independently-written files — so a reader refreshing mid-publish could load a
-  unit from generation N+1 beside a manifest from N. Extraction now publishes
-  into `payloads/gen-<N>/` and names that directory from `generation.json`, so
-  the single atomic write of that file commits the whole payload; a reader sees
-  one generation whole, including artifacts it had not read yet. Incremental
-  runs seed their directory from the published one with hardlinks, so an
-  unchanged artifact costs a directory entry rather than a copy. Three
-  generations are retained by default (`WOODS_PAYLOAD_RETENTION`).
-  **This changes the on-disk layout.** No re-index is required — the first run
-  after upgrading publishes a payload and reading is unaffected, since every
-  Woods reader resolves the pointer — but anything outside Woods that reads
-  `tmp/woods/manifest.json`, `tmp/woods/dependency_graph.json` or
-  `tmp/woods/<type>/*.json` directly must now read `generation.json`, take its
-  `payload` value, and resolve relative to the index directory. Files left at
-  the root by a pre-2.0 run are stale from the first payload publish onward;
-  `woods:clean` removes them.
-- **Units of different types no longer collapse onto one graph node (#225).** A Scenic
-  view `reports` and a factory `reports` are two units and the index has always written
-  them to two files, but `DependencyGraph` keyed nodes on the bare identifier, so
-  registering the second destroyed the first's reverse edges, `file_map` entry and
-  `type_index` entry. Both now coexist as typed nodes. Deleting one type's source file
-  removes that type's node and its JSON only; incremental re-extraction, git enrichment
-  and the `dependents` rewrite fan out over every type an identifier names; and the MCP
-  traversal tools follow both units' edges and report `types` when an identifier is
-  ambiguous instead of picking one silently. **No re-index is required** — the persisted
-  graph is unchanged for any index with no shared identifier, and identifiers that are
-  shared add a `variants` array that older graphs simply do not carry.
-- **Release-hardening batch (2026-08-07, #211–#218, #220):**
-  - *Embedding durability:* every pgvector/Qdrant embed run crashed at the very end and
-    discarded its work — `Indexer#persistable?` asked `respond_to?(:each_entry)`, which
-    the storage interface answers true for by definition; it now asks which module owns
-    the method (B-108, #220). Durable stores are reconciled against extraction output on
-    full and incremental runs, with the purge guard shared with the dump path (#211).
-    Checkpoint hits on durable backends are verified against the store, so switching
-    `vector_store` from `:local` to pgvector/Qdrant no longer strands unchanged units
-    (#211). Qdrant mutating point operations pass `wait=true`, so a delete is readable
-    as deleted (#220). Dimension mismatches are detected before embedding, not per-row
-    after (#214).
-  - *Extraction fidelity:* blockless factories (`factory :admin, parent: :user`) are
-    extracted; abstract models no longer enter the model-name scan (which inflated
-    `ApplicationRecord`'s PageRank); `private def` methods are no longer reported
-    public; `EventExtractor` no longer mints phantom events from non-Wisper `.on(:sym)`
-    calls; `ManagerExtractor` resolves multi-word models (`order_item` → `OrderItem`,
-    not `Order_item`) (#215).
-  - *Flow/graph determinism:* `find_node_by_suffix` is memoized (was a full-graph scan
-    per call) and resolves ambiguous short names deterministically; `case` predicates
-    are no longer misattributed as branch operations; `domain_clusters` output no longer
-    depends on registration order; vector dumps record the embedding model in the WVF1
-    header (#216).
-  - *Export hardening:* the Unblocked client redacts its bearer token in error paths and
-    describes its per-run (not "daily") budget honestly; `Retry-After` is capped at 120s
-    in both export clients; Unblocked citations use the ref recorded in the manifest
-    rather than hardcoded `blob/main`, with path segments percent-encoded; Notion aborts
-    fast on 401/403 instead of spending the whole cold sync failing per-unit (#217).
-  - *Retrieval/observability residuals:* ranking signals no longer go neutral on chunked
-    corpora (the ranker now strips chunk suffixes like every other consumer); metadata
-    keyword search is case-insensitive on both adapters with the contract pinned by
-    shared examples; `IndexReader`'s LRU is thread-safe under the HTTP transport;
-    `GapDetector` counts queries, not keyword occurrences; `RedisStore#sessions` returns
-    recent sessions rather than arbitrary ones (#218).
-  - *MCP:* the `pipeline_extract` tool loads the extractor lazily, so it works in a
-    standalone `woods-mcp` process instead of dying in the background with
-    `NameError: uninitialized constant Woods::Extractor` (B-110).
-- **The evaluation harness is runnable** (#212). `woods:evaluate` existed on no host (its
-  rake file was never loaded by the railtie), called accessors that had never existed, and
-  no adapter implemented `all_identifiers` for the baselines. It now loads, builds stores
-  through the MCP bootstrapper so evaluation reads the same persisted index that semantic
-  search serves, and ships an offline end-to-end smoke on the `:fake` provider. The
-  ground-truth taxonomy now *is*
-  `QueryClassifier::INTENTS`/`SCOPES`, so annotations compare against what the pipeline
-  actually classified (#218's open item, closed here).
-
-- **Full-gem review batch (2026-07-30): 30 defects fixed** (#183–#209 and pre-existing
-  #149, #150, #169, #170, #174–#178; see each issue for the full analysis). Highlights,
-  grouped by blast radius:
-  - *Host-app safety:* enabling the documented console-MCP mode no longer 401s the entire
-    host application (guards are path-scoped, enablement is decided at request time), and
-    the enable flags now work from `config/initializers/woods.rb` (#183).
-  - *Retrieval correctness:* type-filtered `codebase_retrieve` no longer returns empty on
-    every booted server (symbol-keyed vector metadata on boot and reload, #150); the
-    weighted ranking layer actually ranks (live keyword signal, normalized RRF, assembler
-    honors ranked order, PageRank memo invalidated on reload, #185); classifier-derived
-    target types no longer hard-filter vector search on common English words (#184);
-    framework units are no longer duplicated across context sections (#186).
-  - *Extraction fidelity:* concern inlining works for compact-style class declarations and
-    concern-defined callbacks now yield side effects, for models and (new) controllers
-    (#193, #175); a shared position-aware nesting parser fixes namespace derivation in five
-    source-parsing extractors (#174); polymorphic associations, ApplicationController
-    discovery, cache-call attribution, GraphQL inner classes, YAML anchors, Whenever
-    blocks, label-form rake tasks, and `RSpec.describe Klass, type:` test mapping all
-    parse correctly (#194, #199–#204, #176); full extraction sweeps orphaned unit files
-    so reused output dirs stop over-reporting (#177).
-  - *Pipeline integrity:* `rails_source`/`gem_source` route through the real write pipeline
-    as a Gemfile.lock-keyed whole-app extractor and `include_framework_sources` genuinely
-    gates it (#169); every index writer — `woods:clean`, the embed tasks, MCP
-    `pipeline_extract` — now takes the pipeline lock (#170); incremental extraction cannot
-    prune units on a failed extractor construction or a degraded eager-load boot (#198);
-    the write-skip optimization actually fires (#208).
-  - *Embedding durability:* a mis-pointed `woods:embed_incremental` can no longer wipe the
-    vector index (30% purge guard + empty-load refusal, #191); non-ASCII identifiers stop
-    re-embedding forever (WVF1 ids hydrate as UTF-8, #192); a single 429 no longer aborts
-    an embed run — providers are wrapped in the previously-unwired resilience layer with
-    Retry-After honored (#188); pgvector works via the documented setup path and dedupes
-    in-batch ids (#187, #181); PageRank keeps rank mass for duplicate/unresolvable edges
-    (#205); temporal snapshots stop leaking a unit set per same-SHA re-capture (#206).
-  - *Robustness:* the embed pipeline, Unblocked manifest, StatusReporter, and flow layer
-    survive `LANG=C` and torn files (`AtomicFile` everywhere, #189, #190); flow artifacts
-    are portable (relative paths, #190); a standing-down watch daemon no longer clobbers
-    the live daemon's status, and the lock heartbeat cannot resurrect a released lock
-    (#196, #197); Notion/Unblocked clients no longer retry non-idempotent POSTs on read
-    timeout (#150); Notion multi-model sync no longer corrupts the Columns database
-    (qualified `table.column` titles with legacy-page adoption, #149); metadata search
-    validates field names and escapes LIKE metacharacters (#209).
-
-- **`woods:embed_incremental` no longer discards the vectors it embeds** (B-059, #148). On the
-  `:local` and `:shared_filesystem` presets the vector store is in-memory and the dump under
-  `dumps/` is the *only* durable copy — but `Indexer#index_incremental` never called
-  `persist_snapshot`, while `process_units` advanced `checkpoint.json` regardless. Each
-  incremental run therefore embedded changed units into a store that died with the process,
-  wrote nothing to `dumps/`, and left a checkpoint claiming the work was done, so no later
-  incremental run would ever produce those vectors again: unrecoverable without a full
-  re-embed, and silent — stats reported `processed: 1`. An incremental run now hydrates the
-  store from `dumps/latest` before embedding and dumps afterwards, so the dump it writes is
-  cumulative. The invariant now enforced is that **`checkpoint.json` never advances over a
-  unit whose vector was not durably stored**: on the dump-backed path the checkpoint is
-  written only after the dump is on disk and the `latest` pointer is flipped (the interval
-  checkpoints are suppressed there — a dump is a whole-store snapshot, so there is no partial
-  durability for them to record), and a checkpoint hit is honoured only when the hydrated
-  artifact actually holds a vector for that unit. A checkpoint that ran ahead of its dump —
-  an older gem with this bug, an interrupted promote, a store swap — self-heals into a
-  re-embed and says so on stderr. A dump that cannot be read (corrupt file, dimension
-  mismatch after a model switch) warns and falls back to re-embedding everything, which is
-  the documented remedy for both. Durable backends (pgvector, Qdrant) are unaffected: their
-  `store_batch` *is* the durable write, so they keep the interval checkpoints and never
-  hydrate.
-
-- **Woods' own JSON artifacts are read as UTF-8, not as the process locale** (#164 review,
-  round 4). `AtomicFile.write` uses `binmode` so bytes land verbatim, but a plain `File.read`
-  tags the result with the default *external* encoding — US-ASCII in a container with no
-  locale set, which is a plain Docker image and exactly where the watch daemon is documented
-  to run. The daemon writes status reasons containing em dashes, so one ordinary lock
-  contention under `LANG=C` raised `Encoding::InvalidByteSequenceError` out of
-  `Watch::Status#read` (which rescued `JSON::ParserError` and `SystemCallError`, neither of
-  which that is), taking `woods:watch_status`, the hook sync's daemon-deference check and the
-  `woods_status` tool down with it until something rewrote the file with an ASCII-only reason.
-  New `AtomicFile.read` is the counterpart to `.write`; `Status`, `Generation`, the daemon's
-  pending/graph reads and `woods_status` all go through it, and `Status#read` now also rescues
-  `EncodingError`.
-- **A cycle that writes an index without publishing a generation now reports degraded**
-  (#164 review, round 4). `Extractor#publish_generation` rescues its own failures so a good
-  index is not discarded over an unwritable marker — right, but the marker *is* the freshness
-  contract, so readers kept serving the previous index while the daemon reported `running`,
-  and the next incremental could be a no-op that bumped nothing either. The daemon now
-  cross-checks that the number moved when units were written, carries the paths forward, and
-  logs at error rather than warn.
-- **`graph_analysis.json` no longer depends on registration order** (#164 review, round 4).
-  `orphans` and `dead_ends` were emitted in graph-registration order and `cycles` started its
-  DFS from the same, so a full and an incremental extraction of one tree published different
-  analysis — the opposite of what the docs claimed. The differential harness could not see it:
-  its oracle `deep_sort`ed both sides of that file before comparing. Sorting there and
-  asserting determinism here cannot both be load-bearing; the analyzer is now genuinely
-  order-independent and the oracle compares the file exactly. Guarded by a registration-order
-  rotation in `spec/graph_analyzer_spec.rb`.
-- **The harness oracle keys units by filename, not by their own contents** (#164 review,
-  round 4). `unit_snapshot` keyed on the identifier *inside* each document, so a stale file
-  whose identifier a newly-written file also carried collapsed onto one entry with
-  last-write-wins — a leftover unit read as no difference at all — and content written under
-  the wrong name compared equal while the directories plainly were not.
-- **A class removed from a file that still exists is now pruned** (#164 review, round 4).
-  Deletion keyed on the source file being gone, which cannot see this: two models in one `.rb`
-  with one deleted leaves no missing path, and class-based units register a *convention* path
-  derived from the constant name, so the second class was never attributed to the file it
-  actually lived in. Nothing in the run removed it, so it outlived every subsequent
-  incremental — a permanent divergence from a full extraction. Class-based reconciliation now
-  runs in both directions, with removal gated on the eager load having completed: on the
-  documented NameError fallback the discovery sets are known-partial, and deleting by the type
-  is a far worse failure than a stale unit. The booted harness cannot cover this — Zeitwerk
-  unloads only a file's expected constant, so the side-effect class survives the reload and
-  the in-process full extraction the oracle compares against emits it too.
-- **`RailsReloader#reload!` no longer carries an unreachable interlock wrapper** (#164 review,
-  round 4). The call was guarded by `interlock.respond_to?(:done)`, and
-  `ActiveSupport::Dependencies::Interlock` has never had a `#done` — so the guard was false on
-  every Rails version, the wrapper never ran, and the comment above it described locking that
-  was not happening. It is also not needed: `reload!` takes the unload lock itself via
-  `class_unload!` → `require_unload_lock!`. Found by writing the first test that drives the
-  real reloader instead of a double; it was stubbed in every spec and so ran on zero of the
-  seven matrix rows.
-- **New GraphQL files are indexed incrementally** (#164 review, round 3). `app/graphql` had no
-  `PathDispatcher` rule and GraphQL types are not class-discoverable, so a created type,
-  mutation or resolver routed nowhere and never entered the index, and a rename lost the unit
-  entirely — #164 gap 1 verbatim, in the one corner the gap-1 fix missed. The coverage guard
-  missed it too: `GRAPHQL_TYPES` is its own constant, so deriving the expectation from
-  `FILE_BASED` left a hole exactly the size of the bug. The guard now works by subtraction —
-  every unit type must be reachable per file, wholesale, or by class discovery, with
-  `rails_source` the one stated exception.
-- **`resolve_head_sha` no longer folds git's stderr into the SHA** (#164 review, round 3). The
-  same `capture2e` hazard as the working-tree probe one method over: a warning on an otherwise
-  successful `rev-parse` was concatenated into the value and then compared against the manifest
-  as if it were a SHA. The status spec's git stub had also gone dead when the working-tree
-  probe moved to `capture3`, so real git was running against `/tmp` in those examples.
-- **Startup catch-up now notices deletion-only downtime** (#164 review, round 2). The
-  reconciliation scanned mtimes of files that exist, so a file deleted while no daemon was
-  running left no trace: the daemon logged "index is current at startup" and the ghost units
-  survived until the next unrelated event. Catch-up now also checks the graph's registered
-  paths for files gone from disk and, if any, runs one cycle with an *empty* change set — the
-  extractor's bounded sweep reaches the ghosts, with the bounds that keep nominal paths
-  (Rails < 7.1 `SchemaMigration`) safe from authoritative deletion.
-- **The drain guard is an atomic test-and-set** (#164 review, round 2). The re-entrancy guard
-  was a check-then-act boolean — the exact race it guarded against: two `listen` callback
-  threads could both read `false` before either wrote `true` and run two overlapping drain
-  loops. It is now `Mutex#try_lock`; the refused caller's paths are already in the pending set,
-  so the winning loop picks them up and nothing is lost.
-- **`IndexReader` freshness bookkeeping is safe under a threaded transport** (#164 review,
-  round 2). The generation check-and-reload was unguarded check-then-act, and the pin was a
-  boolean — under `woods-mcp-http`, whose tool handlers run on the Rack server's request
-  threads, two concurrent reads could double-reload or drop each other's caches mid-sequence,
-  and the first of two overlapping `with_pinned_generation` blocks to finish unpinned the
-  reader for both. The check-and-reload now runs under a per-reader mutex and pins are
-  refcounted: invalidation resumes when the *last* pin releases.
-- **A cycle that can't land its work no longer loses it** (#164 review). Lock contention
-  already carried its paths into the next cycle; a *failed reload* did not. Saving a valid
-  `post.rb` while `user.rb` sat half-typed produced one app-wide reload failure covering both,
-  and when `user.rb` was fixed the event named only `user.rb` — so `post.rb`'s change never
-  reached the index at all. Failed reloads and raising extractions now carry forward too, and
-  the drain lives inside `Daemon#process`, so an embedded host gets the same retry behaviour
-  `#run` does.
-- **A quiet daemon is no longer declared dead** (#164 review). `Status#alive?` disbelieves a
-  record older than 15 minutes and only cycle boundaries wrote one, so a healthy daemon
-  watching a worktree nobody was typing in read as stopped — and every caller that stands down
-  for a live daemon started contending for its lock instead. A heartbeat now re-stamps the
-  last published record every 5 minutes, republishing `degraded` as `degraded` rather than
-  claiming recovery.
-- **The daemon reconciles changes that predate it** (#164 review). It only ever reacted to
-  events it personally witnessed, so the documented hook pattern — start a daemon, then sync —
-  stood the sync down over changes the fresh daemon had never seen. `Daemon#run` now
-  reconciles against the index's own watermark (`generation.json`'s mtime) before waiting for
-  its first event. `woods:incremental` also no longer stands down for a *degraded* daemon:
-  alive but not updating is not coverage.
-- **`woods:refresh` serializes with the other writers** (#164 review). It rewrites the whole
-  dependency graph and took no lock, so a refresh racing a daemon cycle silently discarded the
-  other's work and then bumped the generation over it — atomic writes don't help, because each
-  write is individually intact and the *set* is not. It now runs under `PipelineLock` like
-  `woods:extract` and `woods:incremental`, and records its own generation reason instead of
-  masquerading as an incremental run.
-- **The polling watcher no longer loses a same-second write** (#164 review). Snapshots
-  truncated mtime with `to_i`, so a second write inside the same second was invisible
-  permanently — there is no later event to catch it — and save-then-formatter at the default
-  1s interval is entirely ordinary. Snapshots now carry full-resolution mtime plus size.
-- **`IndexReader` no longer misses a same-size generation bump** (#164 review). The freshness
-  signature was `[mtime, size]`, and equal size is the daemon's steady state (reason
-  `"incremental"` every cycle). On a coarse-mtime filesystem — including the volume-mounted
-  Docker deployment the Index Server is documented for — two bumps in one tick were
-  indistinguishable and the reader served a stale index indefinitely. The inode is now part of
-  the signature, which `AtomicFile`'s rename-per-write guarantees moves.
-- **A clean working tree no longer reports dirty** (#164 review). `resolve_working_tree_status`
-  used `capture2e`, folding git's stderr into the porcelain output — so any warning on an
-  otherwise successful run (a stale `index.lock` notice, `core.fsmonitor` chatter) read as
-  uncommitted changes, and the fingerprint tracked the warning rather than the code.
-- **Index artifacts are written atomically.** `dependency_graph.json`, `manifest.json`,
-  `_index.json` and every per-unit file went through plain `File.write`. With a resident daemon
-  writing while resident MCP readers read, a reader could catch a truncated file mid-write;
-  all of them now route through `Woods::AtomicFile`.
-- **A class-based file moved between autoload directories is no longer dropped for a run**
-  (#164 review). Reconciliation ran before pruning, so a file moved with its constant unchanged
-  still looked "known" and was not re-extracted, then was pruned for its vanished path.
-  `extract_changed` now reconciles once more after pruning.
-- The `listen` backend degrades instead of dying: only its setup is wrapped in the
-  `WatcherError` rescue, so a failure raised once it is merely parked (including from the
-  extraction inside a callback) is no longer relabelled "failed to start", and inotify
-  exhaustion falls back to polling. Both watchers also honour a `stop` that races startup.
-- The storm threshold counts only paths the reload policy considers actionable — sixty edited
-  markdown files plus one model is a one-model change, not a storm.
-
-- **Token estimates now describe the file that is written.** `ExtractedUnit#estimated_tokens`
-  measured `metadata.to_json`, which with ActiveSupport loaded applies HTML-safe escaping (`>`
-  becomes `\u003e`), while the unit file is written with `JSON.generate`. Any unit whose
-  metadata contained a lambda scope was therefore indexed with a token count that described a
-  document that was never written — and differed depending on whether a full or an incremental
-  run last touched it. Both sides now measure `JSON.generate`.
-
-- **Incremental extraction is now equivalent to a full extraction** (#164, phase 0). Five
-  confirmed correctness gaps in `woods:incremental` are closed. They mattered most in an
-  incremental CI chain, where the previous graph is restored and `woods:incremental` runs per
-  merge: a missed unit propagated forward run over run instead of being erased by the next
-  full rebuild.
-  - **New files are indexed.** Changes routed only through `DependencyGraph#affected_by`,
-    which resolves a path via the graph's file map — populated only from already-registered
-    units — so a file that did not exist at the last extraction routed nowhere and was
-    silently ignored. A new `Woods::PathDispatcher` supplies the missing direction, path →
-    extractor, for file-based types; class-based types (models, controllers, mailers,
-    components, channels) are reconciled against each extractor's own runtime discovery set,
-    now exposed as `#discoverable_classes`.
-  - **Deleted files no longer leave ghosts.** Units whose source file has vanished are pruned
-    — unit JSON removed, graph node unregistered, reverse edges withdrawn, type index
-    regenerated. Deletions named in the change set are authoritative; a sweep over registered
-    paths catches callers whose change set omits them. A rename resolves to delete-plus-add.
-  - **Files defining several units reconcile as a whole.** `DependencyGraph`'s file map is now
-    multi-valued (`path => Set<identifier>`), so a task removed from a multi-task `.rake` file
-    is dropped rather than left behind. Graphs written before this load unchanged.
-  - **Whole-app unit types refresh.** `route`, `middleware`, `engine`, `scheduled_job`,
-    `state_machine`, `factory`, `event`, and `database_view` are re-run wholesale when their
-    trigger paths change, instead of being skipped while the run still rewrote the manifest
-    and zeroed `staleness_seconds`. A routes change also re-extracts the types that embed the
-    route table (controllers, mailers, components, view templates).
-  - **Derived data no longer drifts.** Incremental runs recompute `graph_analysis.json`, and
-    refresh each affected unit's `dependents` list and `metadata.git` — all previously
-    full-extraction-only. A run that extracts nothing now leaves the manifest timestamp alone
-    rather than reporting the index as freshly synced.
-
 ### Added
 
 - **`embedding_provider = :fake`** — the deterministic bag-of-words provider is now a
@@ -1644,6 +1598,38 @@ derive unit identifiers, which changes the index format's observable contract.
   identifier instead of graph-insertion order, and `bridges` samples from a sorted node list,
   so two extractions of the same tree publish the same analysis.
 
+- New `Woods::Extractors::LineNeutralizer`: the quote-aware comment stripper (formerly private to
+  `SharedDependencyScanner`) plus string- and heredoc-blanking variants, shared by SourceNesting,
+  the rake and factory parsers, and CallbackAnalyzer.
+- New `Woods::Extractors::ReferencePatterns`: the namespace-capable service, mailer, and job-enqueue
+  regexes, shared by `SharedDependencyScanner`, `JobExtractor`, and `CallbackAnalyzer`.
+
+- **`FlowPrecomputer`'s `fail_closed:` switch is gone (EXTB-14).** Both callers
+  passed `true` and CLAUDE.md documents both paths as fail-closed, but the YARD
+  still promised the full path a "log-and-skip contract" and the
+  `Rails.logger.error` branch it described was dead code. Flow assembly now always
+  raises `Woods::ExtractionError` on a per-action failure.
+
+- **An unlisted integer tool parameter fails the server build with a named error
+  (MCP-8).** `ToolContract::INTEGER_BOUNDS.fetch` raised a bare
+  `KeyError: key not found: "count"` at `Server.build`, with no pointer to the
+  table that needs the entry. It now raises an `ArgumentError` naming the tool,
+  the property, and `INTEGER_BOUNDS`.
+
+- CI gains a `c-locale` job running the artifact-reader specs (`spec/mcp`,
+  `spec/feedback`, `spec/session_tracer`, `spec/evaluation`) under `LC_ALL=C`. The
+  runners default to a UTF-8 locale, so the whole encoding family could regress
+  with the suite green.
+- Three specs that simulate an unreadable/read-only path with `chmod` now skip as
+  root, where `chmod` is ineffective (`spec/operator/pipeline_guard_spec.rb` x2,
+  `spec/mcp/tasks/pipeline_tasks_spec.rb`).
+- `docs/backlog.json` gains B-140..B-163: the seven prior-audit deferred lows that
+  never received IDs (R2-2 — L3, L7, L12, L13, L14, L15, L21) plus seventeen
+  deferrals from this audit (CORE-3, CORE-5, EXTA-7, EXTA-9, EXTA-11, EXTA-13,
+  EXTA-15, CON-4, STO-7, STO-10, STO-14, INF-5, INF-6, INF-13, R2-4, R2-5, R2-6).
+
+- **STO-12**: Corrected the `Storage::Snapshotter` doc comment: `Snapshotter::Metadata.validate_store!` can use plain `respond_to?` only because `MetadataStore::Interface` defines neither `#each_entry` nor `#bulk_load` — adding either stub would silently convert the check into the B-108 bug. `spec/storage/snapshotter/vector_spec.rb`'s float-truncation tolerance block (which passed whether or not the load raised, stale since the M10 fix) now asserts the raise.
+
 ### Testing
 
 - The verifying-double sweep: 102 string-named `instance_double`s — which verify nothing
@@ -1660,6 +1646,14 @@ derive unit identifiers, which changes the index format's observable contract.
   real PostgreSQL+pgvector and Qdrant service containers plus an offline embed→retrieve
   round trip — every other storage spec drives doubles, which is how #181 shipped. The
   lane found B-108 on its first run.
+
+- **The live-Redis session-tracer contract spec now runs in CI (M6).** The
+  `spec/session_tracer/redis_store_live_spec.rb` suite from the P4 eviction
+  rework was gated on `WOODS_RUN_LIVE_BACKENDS=1` but appeared in no CI
+  job's rspec run, so its six examples (including the two-client Lua
+  migration race) never executed anywhere. The `live-backends` job now
+  lists it; that job already provides the ephemeral `redis` client install,
+  the redis service, and `WOODS_REDIS_URL`.
 
 ## [1.6.1] - 2026-07-22
 
