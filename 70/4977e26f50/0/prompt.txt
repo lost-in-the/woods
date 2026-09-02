@@ -1,0 +1,42 @@
+You are working in the woods gem repo on main. Task: triage and fix bugs found by an independent downstream validation pass of the 2.0 release candidate.
+
+Read tmp/rc-validation-brief.md first (gitignored scratch, already written for you).
+
+=== PII CONSTRAINT: READ BEFORE WRITING ANYTHING ===
+This is a PUBLIC open-source repo. The validation was run against a private commercial Rails application. You must never write any of the following into this repo, in any form (code, specs, fixtures, comments, docs, CHANGELOG, commit messages, branch names, PR text, issue text):
+- Any company, product, or brand name belonging to the downstream user, or any private repo name.
+- Ticket identifiers, PR numbers, or build/CI identifiers from that project.
+- Container names, hostnames, worktree or directory names from that environment.
+- Any person's name.
+- Absolute paths under a user home directory.
+- Proprietary class, module, or file names from the downstream application.
+
+The brief is already sanitized: its class and file names are INVENTED and the nesting shapes are what is real. When you write fixtures or specs, reuse the brief's synthetic names or invent obviously-generic ones. Do NOT invent realistic-looking proprietary-sounding names, and do not ask me for the real ones. Keep the brief inside tmp/ and never commit or copy it elsewhere.
+If you think you need a real downstream identifier to proceed, stop and ask instead of guessing.
+=== END PII CONSTRAINT ===
+
+Findings, in priority order:
+
+1. N-1 (recommend gating the 2.0 release on this) - governed naming is not applied on the incremental path. woods:extract and woods:incremental produce different indexes for the same tree; incremental emits a duplicate job unit named for the enclosing class of a nested job, which collides with a legitimate poro identifier, flips the graph node type, and pollutes variants. Self-heals on a full extract. The brief has the shape, the exact count deltas, a hypothesis about loader-root resolution, and a suggested regression test.
+
+2. N-2 (low) - one residual wrapper collapse. Distinct shape from the nine that were fixed: a single-line `class X < StandardError; end` at a shallower nesting depth than the target module. No collision, no data loss, misnaming only.
+
+3. N-3 (question, not a bug) - abstract base classes are unindexed, and one edge still points at the absent node. Tell me whether that is intended; if it is, consider suppressing the dangling edge.
+
+4. G-3 (low) - the Console missing-token warning is accurate for HTTP and false for stdio. Verified: with no token, an stdio Console server lists and executes all 9 Tier 1 tools. It also prints on woods:clean / extract / validate / stats / incremental.
+
+5. G-2 residual (low) - the surviving validate warning recommends a no-op remedy for framework-owned model paths.
+
+Confirmed fixed, no action needed: the wrapper-collapse fix (10 cases to 1, 28 dropped files to 0), the flows/ validate failure, and woods_status version reporting. Full-extract output validated clean: manifest counts match disk exactly, 8774/8774 JSON files parse, 0 dangling index entries, graph nodes equal distinct identifiers with 0 units missing, retention pruning correct.
+
+How to work: start with read-only triage and tell me which findings you can confirm in the code before changing anything. Follow the repo's own AGENTS.md and CLAUDE.md conventions, and its test standards. Prefer a failing spec first for N-1. Do not push, do not open a PR, and do not modify the working tree's existing untracked files.
+
+When you are done, or if you are blocked, report back concisely: which findings you confirmed, what you changed, and what you could not reproduce.
+
+---
+
+note the self_scan tool for auditing woods similar to how woods works in a rails app
+
+---
+
+Open a PR if not already done
