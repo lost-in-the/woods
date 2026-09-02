@@ -330,7 +330,7 @@ module Woods
 
     # Configure the module using a named preset and optional block customization.
     #
-    # Valid preset names: :local, :postgresql, :production
+    # Valid preset names: :local, :shared_filesystem, :postgresql, :production
     #
     # @param name [Symbol] Preset name
     # @yield [config] Optional block for further customization after preset is applied
