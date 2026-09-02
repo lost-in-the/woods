@@ -2285,5 +2285,17 @@
     ],
     "description": "Post-#275: gem-owned classes carry their real absolute (or vendored-relative) definition site. Gem paths never enter the incremental blast radius (no change set names them), and after a bundle update the recorded paths dangle until a full extraction rebuilds them; woods:validate reports them as gem-owned without a remedy. Acceptance: either extend the Gemfile.lock whole-app trigger to refresh class-discovered gem-owned units, or document the full-extract-after-bundle-update requirement in INCREMENTAL_EXTRACTION.md and the validate warning.",
     "status": "open"
+  },
+  {
+    "id": "B-167",
+    "title": "source_hash unstable across processes for controllers with inline proc filters",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+    "lib/woods/extractors/controller_extractor.rb"
+    ],
+    "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
+    "status": "open"
   }
 ]
