@@ -1,0 +1,107 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "3b5d9166a1d4",
+  "session_id": "59dd1318-7577-4b3b-808c-98091f2c65c9",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-02T17:35:12.77798Z",
+  "branch": "fix/gem-owned-source-paths",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "380c7452e2c1",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 7689,
+    "cache_creation_tokens": 305897,
+    "cache_read_tokens": 24690341,
+    "output_tokens": 137770,
+    "api_call_count": 107
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VmAEP577hjq7QBNmtSwnEr",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "superpowers:systematic-debugging"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "380c7452e2c1",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 28,
+        "end": 29,
+        "entry_ids": [
+          "c05959ae-7d3b-4428-817d-b9ca18ab4e5b"
+        ],
+        "tool_use_id": "toolu_01VmAEP577hjq7QBNmtSwnEr"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VmAEP577hjq7QBNmtSwnEr"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: superpowers:systematic-debugging",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01GVagWnyMyGXPBixQM1y7tT",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "pr-description"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "380c7452e2c1",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 433,
+        "end": 434,
+        "entry_ids": [
+          "79eafe9a-7a9e-4ba2-a8fb-64f50d0604bf"
+        ],
+        "tool_use_id": "toolu_01GVagWnyMyGXPBixQM1y7tT"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01GVagWnyMyGXPBixQM1y7tT"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: pr-description",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 1007,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2226,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.json": 84,
+        ".grove/.upgrade-notified": 1,
+        "_project-resources/audits/next-release-audit.md": 305,
+        "_project-resources/audits/p0-1-http-auth-options.md": 124,
+        "_project-resources/security/audit-followups-plan.md": 130,
+        "_project-resources/security/console-hardening-plan.md": 363
+      }
+    }
+  ]
+}
