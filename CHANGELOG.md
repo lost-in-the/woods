@@ -86,6 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`JobExtractor#discoverable_classes`). The booted equivalence lane pins the
   shape with a nested-job fixture in `spec/dummy`.
 
+- **Concerns join the Zeitwerk-governed naming contract.** `ConcernExtractor`
+  was the one extractor still naming from the outer-module chain alone, which
+  stops at the first non-module line. A concern under a mid-path `concerns/`
+  segment (a real namespace, not an autoload root) with a one-line `class
+  SomeError < StandardError; end` declared above it indexed as the wrapper
+  (`Outer::Mid::Inner`) instead of `Outer::Mid::Inner::Concerns::Leaf`. The
+  governed name is tried first; the module-chain scan remains the fallback.
+
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete
   `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
