@@ -869,6 +869,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comments now describe the current design; `invalidate_pagerank_cache!` is
   re-documented as an API for direct embedders that repoint a Ranker's graph
   store without rebuilding it.
+- **The unreleased-2.0 story is legible from the repository root.** `README.md`
+  gains a version banner naming both the documented 2.0.0 line and the published
+  1.6.1 gem, a "What's new in 2.0" comparison table, and a compact upgrade
+  checklist; `docs/UPGRADING_TO_2.md` covers the Notion physical-column re-sync,
+  the new task exit codes, the incremental baseline guard, and `reload`'s
+  write-access requirement; every claim that expires at tag time is wrapped in a
+  `v2-unreleased-note` fence, listed in the new release note in `docs/README.md`.
 
 ### Testing
 

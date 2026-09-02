@@ -4,6 +4,10 @@ Woods 2.0 changes observable index identifiers, publication layout, vector-store
 
 This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
 
+<!-- v2-unreleased-note:start -->
+> **2.0.0 is not published yet.** 1.6.1 is the latest released gem, and `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 ships. Read this runbook to plan the upgrade and to review a source checkout of the 2.0 line; run it against a published 2.0.0 gem. Documentation matching the released gem is on [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1).
+<!-- v2-unreleased-note:end -->
+
 ## Upgrade outcome
 
 After this runbook you will have:
@@ -30,6 +34,12 @@ After this runbook you will have:
 | Durable-store reconciliation and a 30% purge guard | The first v2 embed may refuse a legitimate rename-heavy deletion | Back up, inspect the deletion, then use the one-run override only if correct |
 | Embedding dimension preflight | A previously tolerated model/store mismatch now fails before writing | Rebuild into a store with the configured dimension |
 | Export reconciliation guards | Obsidian or Unblocked can refuse a rename-heavy stale-document sweep | Back up and use exporter-specific override only after review |
+| Notion column pages are grouped by physical table | Models sharing a table (STI, a shared `self.table_name`) previously rewrote each other's column pages on every run | Re-sync once after re-extraction; the shared pages settle and the churn stops |
+| One-shot extraction tasks fail when the generation marker cannot be published | A run that wrote a payload readers cannot reach used to print success and exit 0 | Fix the write failure and re-run; the previous generation stays active meanwhile |
+| `woods:incremental` and `woods:refresh` refuse an output directory with no baseline index | A restored-cache miss, a typo'd `WOODS_OUTPUT`, or a fresh runner now fails instead of publishing a near-empty index | Run a full `woods:extract` first, or point `WOODS_OUTPUT` at the directory holding the existing index |
+| `woods:incremental` exits 1 over a git range it cannot resolve | An unresolvable base ref used to read as "nothing changed" and exit 0 | Fetch the base ref, set `CHANGED_FILES`, or accept the stand-down a live watch daemon provides |
+| `woods:embed`, `woods:embed_incremental`, and `woods:notion_sync` exit 1 on reported errors | CI jobs that were green while every unit or page failed now fail | Read the printed errors, fix the cause, re-run; completed work is durable |
+| The Index MCP `reload` tool needs write access to the index directory | A read-only index mount can serve structural reads but cannot reload in place | Grant write access, or restart the MCP process after publishing |
 | `config.extractors` and `config.add_gem` warn as unimplemented | Old config may imply filtering that never occurred | Remove or comment the settings; do not rely on them |
 | New watch, refresh, and evaluation tasks | New operational options become available | Optional; no migration action |
 
@@ -111,9 +121,9 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
-The clean extract is required for corrected identifier shapes. Do not use an incremental run as the first v2 extraction.
+The clean extract is required for corrected identifier shapes. Do not use an incremental run as the first v2 extraction: after `woods:clean` there is no baseline, and v2 `woods:incremental` refuses that state rather than publishing a near-empty index as the application's complete truth.
 
-An interrupted extraction leaves readers on the last complete generation because Woods publishes `generation.json` only after the payload is complete. Re-run the task; do not delete a partial directory speculatively.
+An interrupted extraction leaves readers on the last complete generation because Woods publishes `generation.json` only after the payload is complete. Re-run the task; do not delete a partial directory speculatively. A run that completes its payload but cannot publish the marker now fails loudly instead of reporting success, so treat a non-zero exit as work to redo rather than as a partial success.
 
 ## Rebuild optional systems
 
@@ -156,6 +166,20 @@ Re-run every export after extraction and embeddings are verified. Renamed identi
 
 Review the target and backup before any force-purge override. Use `WOODS_NOTION_FORCE=1` only when you intentionally want Notion to re-check unchanged content hashes.
 
+**Notion needs one settling re-sync.** v2 groups column pages by physical table instead of by model, so models that share a table write one page per physical column, with the `Table` relation listing every owning model and their validations unioned. The page titles, and therefore the manifest keys, are unchanged, but the content hash of every shared-table column changes once. Expect the first post-upgrade `woods:notion_sync` to update those pages; subsequent runs skip them. This also ends the v1 behavior where two models sharing a table rewrote the same column page back and forth on every run. See [Notion integration](NOTION_INTEGRATION.md).
+
+## Update CI and scheduled automation
+
+v2 tasks fail instead of printing an error and exiting 0. Review any pipeline that runs Woods unattended before the first v2 run:
+
+| Task | v2 exit behavior |
+|---|---|
+| `woods:extract`, `woods:incremental`, `woods:refresh` | Raise when the payload cannot be published as a generation; the previous generation stays active |
+| `woods:incremental` | Refuses an output directory with no baseline index, and exits 1 over a git range it cannot resolve unless a live watch daemon maintains the tree. See [Incremental extraction](INCREMENTAL_EXTRACTION.md) |
+| `woods:embed`, `woods:embed_incremental`, `woods:notion_sync` | Exit 1 when the run reports errors, matching `woods:unblocked_sync` and `woods:obsidian` |
+
+A job that restores the index directory from a cache must restore the whole thing. A missing or empty restore is exactly the state the baseline guard refuses, and the fix is a full `woods:extract` on that runner, not an override.
+
 ## Update direct index consumers
 
 Woods 2.0 publishes immutable payload directories and atomically points to the active one:
@@ -193,6 +217,8 @@ Use the project bundle so the server and application resolve the same Woods vers
 Normally leave `MCP_PROTOCOL_VERSION` unset. The SDK negotiates with legacy clients through `initialize` and supports newer discovery in the same process. Pin only as a temporary workaround for a client known to require one revision; a pin reduces compatibility and is announced on stderr.
 
 Update agent prompts that refer to the old inventory. Standard Index launch provides 14 tools. Standard Console launch provides nine, or eleven with explicitly enabled embedded read tools. See [MCP servers](MCP_SERVERS.md).
+
+Structural reads still work from a read-only index mount, but the `reload` tool does not: its transactional refresh takes the same on-disk writer lock as extraction and embedding, so the MCP process needs write access to the index directory. Without it, `reload` returns a typed degraded error and keeps serving the previous aligned generation rather than swapping in a partial one. Grant write access, or restart the MCP process after publishing. [MCP servers](MCP_SERVERS.md) owns the detail.
 
 ### Console users: preserve or configure the HTTP token
 
@@ -236,6 +262,9 @@ Complete every applicable check:
 - [ ] Console HTTP rejects a request without the bearer token with 401 and accepts the configured client, if HTTP is used.
 - [ ] Console stdio starts through the application bundle, if stdio is used.
 - [ ] Exports were reconciled and stale-document changes reviewed.
+- [ ] A second `woods:notion_sync` reports the shared-table column pages as skipped, if Notion is enabled.
+- [ ] Unattended pipelines were reviewed against the new exit behavior, and any job that restores the index directory restores a complete baseline.
+- [ ] The MCP process has write access to the index directory, if agents call `reload`.
 - [ ] MCP and automation prompts no longer name inventory-only tools.
 - [ ] Backups remain available through the rollout window.
 
