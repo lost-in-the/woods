@@ -42,6 +42,33 @@ Woods turns that runtime class into one connected unit with:
 
 The result is a codebase index an agent can query by exact name, pattern, dependency path, graph structure, or natural language.
 
+## Let an agent install it
+
+Woods is built to be agent-operated, and the fastest path is handing installation to the coding agent that will use it. Claude Code users can install the distributed skills once — they trigger on install, upgrade, configuration, investigation, and diagnosis on their own:
+
+```bash
+/plugin marketplace add lost-in-the/plugins
+/plugin install woods-plugin@lost-in-the-plugins
+```
+
+With any coding agent (no plugin needed), paste this into a session opened at your Rails app's root:
+
+```text
+Install or upgrade the woods gem in this Rails application by following
+https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md.
+Structural setup only: add the gem to the development group, run the
+installer, extract and validate the index, and register the Index MCP
+server for this app. Do not run the generated legacy migration, and do
+not add embedding providers, vector databases, Console/live-data access,
+or secrets without asking me first. If woods 1.x is already installed,
+follow the upgrade runbook in docs/UPGRADING_TO_2.md instead and plan a
+clean re-index. Finish by reporting the installed version, files
+changed, commands run, and one verified woods_status call through the
+registered MCP server.
+```
+
+The runbook holds the agent to the same guardrails the skills enforce: a version preflight, minimal diffs, and explicit approval before anything beyond the structural index. Prefer doing it by hand? The next section is the same setup as commands.
+
 ## Five-minute setup
 
 The default setup provides structural code intelligence. It does not require an embedding provider, vector database, or access to live application records.
