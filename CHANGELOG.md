@@ -70,6 +70,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Incremental runs no longer duplicate a class-discovered job under its
+  enclosing class's identifier.** A job nested inside a non-job file (`class
+  Billing::Invoicing::Reconciler; class RefreshJob < ApplicationJob`) is found
+  on the full path by the `ApplicationJob` descendant walk, with the model
+  file as its `file_path`. Blast-radius re-extraction only knew the unit's
+  type, took the file-based entry point, and Zeitwerk-governed naming then
+  correctly named the *file* for its outer constant — registering a second
+  `job` unit under the PORO's identifier that no full extraction emits. The
+  duplicate flipped the graph node's type, added a false `variants` entry,
+  and made `woods:incremental` and `woods:extract` disagree about the same
+  tree until the next full run. `Extractor#re_extracted_units` now falls back
+  to the class-based entry point when the file does not reproduce the unit,
+  and only for a class the extractor's own discovery would return
+  (`JobExtractor#discoverable_classes`). The booted equivalence lane pins the
+  shape with a nested-job fixture in `spec/dummy`.
+
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete
   `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
