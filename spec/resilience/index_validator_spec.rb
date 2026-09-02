@@ -81,6 +81,25 @@ RSpec.describe Woods::Resilience::IndexValidator do
         expect(report.warnings.grep(/models: 1 unit\(s\) whose file_path resolves nowhere/)).not_to be_empty
       end
 
+      it 'separates gem-owned unit paths from app paths that resolve nowhere' do
+        # An engine model's file lives in a gem, not the application tree, so it
+        # is expected to be absent under the app root. Telling the operator to
+        # re-run extraction is a no-op remedy for that case.
+        write_json('models/User.json', { 'identifier' => 'User', 'source_code' => 'class User; end',
+                                         'file_path' => 'app/models/user.rb' })
+        write_json('models/Attachment.json',
+                   { 'identifier' => 'Attachment', 'source_code' => 'class Attachment; end',
+                     'file_path' => '/nonexistent/gems/storage-1.0/app/models/attachment.rb' })
+        report = described_class.new(index_dir: tmp_dir, app_root: tmp_dir).validate
+
+        outside = report.warnings.grep(/models: 1 unit\(s\) whose file_path lies outside the app root/)
+        expect(outside).not_to be_empty
+        expect(outside.first).to include('Attachment')
+        expect(outside.first).not_to include('Re-run extraction')
+        # User.json (relative path, missing) still gets the app-tree warning.
+        expect(report.warnings.grep(/models: 1 unit\(s\) whose file_path resolves nowhere/)).not_to be_empty
+      end
+
       it 'reports a unit file without source_code' do
         write_json('models/Order.json', { 'identifier' => 'Order' })
         report = described_class.new(index_dir: tmp_dir).validate

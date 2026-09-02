@@ -101,6 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requests will be refused, that stdio does not check the token, and that
   production boot will raise.
 
+- **`woods:validate` no longer tells you to re-run extraction for gem-owned
+  paths.** Engine models and framework sources carry absolute paths outside
+  the application tree, so under a different install prefix they resolve
+  nowhere by design and re-extraction cannot change that. They now get their
+  own warning without the no-op remedy; app-tree paths keep the original one.
+
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete
   `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
