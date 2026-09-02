@@ -313,3 +313,7 @@ lost-in-the repo names, PR numbers and branch names in this message are fine to 
 Working rules unchanged: read-only triage first, tell me what you can confirm before changing anything, follow AGENTS.md and CLAUDE.md and the repo test standards, failing spec first for any real fix, do not push, do not open a PR, and do not touch the existing untracked files or the six modified files listed at the top.
 
 Report back concisely: your verdict on priority 1, the proposal for priority 2, and any concerns from priority 3.
+
+---
+
+Open the G-2 PR and fix the two docs
