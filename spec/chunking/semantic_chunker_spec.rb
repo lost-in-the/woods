@@ -935,5 +935,37 @@ RSpec.describe Woods::Chunking::SemanticChunker do
         expect(validations.content).not_to include('audit!')
       end
     end
+
+    context 'with a =begin/=end block comment inside a method (STO-3)' do
+      let(:unit) do
+        build_unit(:service, 'Probe', <<~RUBY)
+          class Probe
+            def alpha
+          =begin
+            embedded comment
+          =end
+              1
+            end
+
+            def beta
+              2
+            end
+          end
+        RUBY
+      end
+
+      it 'gives the following method its own chunk' do
+        # `=begin` matched the assignment-position keyword branch, so the
+        # enclosing method never closed and every later method was appended
+        # to its chunk.
+        types = chunker.chunk(unit).map(&:chunk_type)
+        expect(types).to include(:method_alpha, :method_beta)
+      end
+
+      it 'does not swallow the following method into the commented one' do
+        alpha_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_alpha }
+        expect(alpha_chunk.content).not_to include('def beta')
+      end
+    end
   end
 end

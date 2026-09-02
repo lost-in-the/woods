@@ -179,6 +179,40 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       expect(units.first.metadata[:job_class]).to eq('CleanupJob')
     end
 
+    it 'unwraps the current environment, not whichever comes first (EXTB-19)' do
+      # `data.values.first` indexed the development schedule and dropped
+      # production entirely whenever development was listed first.
+      path = create_file('config/recurring.yml', <<~YAML)
+        development:
+          dev_only:
+            class: DevJob
+            schedule: every 1 minute
+        test:
+          prod_cleanup:
+            class: CleanupJob
+            schedule: every 6 hours
+      YAML
+
+      allow(Rails).to receive(:env).and_return('test')
+      units = described_class.new.extract_scheduled_job_file(path, :solid_queue)
+
+      expect(units.map(&:identifier)).to eq(['scheduled:prod_cleanup'])
+    end
+
+    it 'falls back to the first environment when the current one is absent (EXTB-19)' do
+      path = create_file('config/recurring.yml', <<~YAML)
+        development:
+          dev_only:
+            class: DevJob
+            schedule: every 1 minute
+      YAML
+
+      allow(Rails).to receive(:env).and_return('test')
+      units = described_class.new.extract_scheduled_job_file(path, :solid_queue)
+
+      expect(units.map(&:identifier)).to eq(['scheduled:dev_only'])
+    end
+
     # #203 — without aliases: true, Psych 4+ raises AliasesNotEnabled on any
     # schedule file using anchors, and the rescue silently dropped the file.
     it 'extracts schedule files that use YAML anchors and aliases' do
@@ -367,6 +401,35 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
 
       units = described_class.new.extract_scheduled_job_file(path, :whenever)
       expect(units.first.metadata[:command_type]).to eq(:runner)
+    end
+
+    it 'detects a single-quoted runner command (EXTB-12)' do
+      # The three command regexes were double-quote-only, so the
+      # frozen-string-literal-era idiom yielded command_type :unknown, no job
+      # class, and no :job dependency edge.
+      path = create_file('config/schedule.rb', <<~RUBY)
+        every 1.day do
+          runner 'CleanupJob.perform_later'
+        end
+      RUBY
+
+      unit = described_class.new.extract_scheduled_job_file(path, :whenever).first
+
+      expect(unit.metadata[:command_type]).to eq(:runner)
+      expect(unit.metadata[:job_class]).to eq('CleanupJob')
+      expect(unit.dependencies).to include(hash_including(type: :job, target: 'CleanupJob'))
+    end
+
+    it 'detects a single-quoted rake command (EXTB-12)' do
+      path = create_file('config/schedule.rb', <<~RUBY)
+        every 1.day do
+          rake 'db:cleanup'
+        end
+      RUBY
+
+      unit = described_class.new.extract_scheduled_job_file(path, :whenever).first
+
+      expect(unit.metadata[:command_type]).to eq(:rake)
     end
 
     it 'generates identifiers from frequency and index' do

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'reference_patterns'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
@@ -148,10 +149,19 @@ module Woods
           source.match?(/def perform/)
       end
 
-      # Locate the source file for a job class.
+      # Locate the source file for a job class (class-discovery path only).
       #
       # Convention path first, then introspection via {#resolve_source_location}
       # which filters out vendor/node_modules paths.
+      #
+      # Returns nil rather than a fabricated convention path when nothing
+      # resolves — the GraphQL precedent (B-070/#171). `ApplicationJob.descendants`
+      # includes gem- and engine-defined classes; registering
+      # `app/jobs/<name>.rb` for one puts a nonexistent, rule-claimed path in
+      # the graph's file_map, and the next incremental run's safety-net sweep
+      # prunes the unit a full extraction still emits (EXTA-3). A nil path
+      # never enters file_map, so the sweep cannot reach it;
+      # {#extract_job_class} already reads source only when the path exists.
       #
       # @param job_class [Class]
       # @return [String, nil]
@@ -159,7 +169,7 @@ module Woods
         convention_path = Rails.root.join("app/jobs/#{job_class.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)
 
-        resolve_source_location(job_class, app_root: Rails.root.to_s, fallback: convention_path)
+        resolve_source_location(job_class, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -260,8 +270,13 @@ module Woods
       def extract_retry_config(source)
         config = {}
 
-        # ActiveJob retry_on
-        source.scan(/retry_on\s+(\w+)(?:,\s*wait:\s*([^,\n]+))?(?:,\s*attempts:\s*(\d+))?/) do |error, wait, attempts|
+        # ActiveJob retry_on. The error capture spans `::` (matching the
+        # sibling `extract_retry_on`): `\w+` alone recorded `Net` for
+        # `Net::OpenTimeout` and, because the wait/attempts tail is matched
+        # against the same token run, dropped both of them (EXTA-10).
+        source.scan(
+          /retry_on\s+(\w+(?:::\w+)*)(?:,\s*wait:\s*([^,\n]+))?(?:,\s*attempts:\s*(\d+))?/
+        ) do |error, wait, attempts|
           config[:retry_on] ||= []
           config[:retry_on] << {
             error: error,
@@ -357,12 +372,15 @@ module Woods
 
       # Scan source for job class enqueue calls and return the list of enqueued job names.
       #
+      # Shares {ReferencePatterns::JOB_ENQUEUE} with the scanner and
+      # CallbackAnalyzer so all three sites agree on what an enqueue looks
+      # like — `*Worker` classes and namespaced jobs included (EXTA-2/EXTA-4).
+      #
       # @param source [String] The job source code
       # @param current_class_name [String, nil] The current job class name (excluded from results)
       # @return [Array<String>] Unique list of enqueued job class names
       def extract_enqueued_jobs(source, current_class_name = nil)
-        pattern = /(\w+Job)\.(?:perform_later|perform_async|perform_in|perform_at|set\b)/
-        job_names = source.scan(pattern).flatten.uniq
+        job_names = source.scan(ReferencePatterns::JOB_ENQUEUE).flatten.uniq
         job_names.reject { |name| name == current_class_name }
       end
     end

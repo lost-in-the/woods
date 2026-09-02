@@ -202,6 +202,60 @@ RSpec.describe Woods::Extractors::SourceNesting do
       expect(scanner.qualified_first_class_name(source)).to eq('Payment')
     end
 
+    it 'keeps a wrapper whose trailing comment ends in the word "end" (EXTA-1)' do
+      # `(?<!\bend)` in `block_opener?` fired on the comment text, so the
+      # wrapper looked self-terminated and never went on the stack —
+      # a prose comment silently demoted `Api::Payment` to `Payment`.
+      source = <<~RUBY
+        module Api # TODO: rename at the end
+          class Payment
+          end
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Api::Payment')
+    end
+
+    it 'does not open a phantom frame for a block keyword inside a trailing comment (EXTA-1)' do
+      # `x.to_s # pad for display` matched `block_opener?` on the comment's
+      # "for", pushing a frame that absorbed the module's own `end` and left
+      # `Util` on the stack for the following top-level class.
+      source = <<~RUBY
+        module Util
+          def self.fmt(x)
+            x.to_s # pad for display
+          end
+        end
+
+        class Payment
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Payment')
+    end
+
+    it 'preserves non-ASCII constant names instead of truncating them (EXTA-14)' do
+      source = <<~RUBY
+        class Café
+          def call; end
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Café')
+    end
+
+    it 'ignores declarations inside =begin/=end block comments (EXTA-14)' do
+      source = <<~RUBY
+        =begin
+        module Fake
+        =end
+        class Payment
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Payment')
+    end
+
     it 'returns nil when the source has no class declaration' do
       source = <<~RUBY
         module Billing

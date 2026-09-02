@@ -2,6 +2,8 @@
 
 require 'set'
 require_relative '../model_name_cache'
+require_relative 'line_neutralizer'
+require_relative 'reference_patterns'
 require_relative 'route_helper_resolver'
 
 module Woods
@@ -80,8 +82,8 @@ module Woods
       #
       # A naive `gsub(/#.*/, '')` truncates lines like
       # `redirect "/posts#comments"; Post.touch` at the in-string `#`,
-      # silently dropping the `Post` reference. This scanner walks each line
-      # tracking quote state so only a genuine (unquoted) `#` starts a
+      # silently dropping the `Post` reference. {LineNeutralizer} walks each
+      # line tracking quote state so only a genuine (unquoted) `#` starts a
       # comment. Escapes (`\"`, `\'`) inside literals are honored. Heredocs,
       # `%`-literals, and character literals whose char is a quote (`?'`,
       # `?"`) are not modeled — these are rare in the constant-bearing code
@@ -92,7 +94,7 @@ module Woods
       # @param source [String] Ruby source code
       # @return [String] source with unquoted `#` comments removed
       def strip_ruby_line_comments(source)
-        source.each_line.map { |line| strip_line_comment(line) }.join
+        LineNeutralizer.strip_comments(source)
       end
 
       # Strip a trailing `#` comment from a single line, ignoring `#` inside
@@ -101,30 +103,7 @@ module Woods
       # @param line [String]
       # @return [String]
       def strip_line_comment(line)
-        in_single = false
-        in_double = false
-        i = 0
-        len = line.length
-        while i < len
-          ch = line[i]
-          if (in_single || in_double) && ch == '\\'
-            i += 2 # skip escaped char inside a literal
-            next
-          elsif in_single
-            in_single = false if ch == "'"
-          elsif in_double
-            in_double = false if ch == '"'
-          elsif ch == "'"
-            in_single = true
-          elsif ch == '"'
-            in_double = true
-          elsif ch == '#'
-            trailing = line[i..].end_with?("\n") ? "\n" : ''
-            return line[0...i] + trailing
-          end
-          i += 1
-        end
-        line
+        LineNeutralizer.strip_line_comment(line)
       end
 
       # Extract string-literal arguments passed to `.constantize` or
@@ -154,22 +133,27 @@ module Woods
 
       # Scan for service object references (e.g., FooService.call, FooService::new).
       #
+      # Targets keep their namespace ({ReferencePatterns::SERVICE_REFERENCE}):
+      # `Billing::ChargeService.call` records the fully-qualified name the
+      # service's own unit is identified by.
+      #
       # @param source [String] Ruby source code to scan
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_service_dependencies(source, via: :code_reference)
-        source.scan(/(\w+Service)(?:\.|::)/).flatten.uniq.map do |service|
+        source.scan(ReferencePatterns::SERVICE_REFERENCE).flatten.uniq.map do |service|
           { type: :service, target: service, via: via }
         end
       end
 
-      # Scan for background job references (e.g., FooJob.perform_later).
+      # Scan for background job references (e.g., FooJob.perform_later,
+      # HardWorker.perform_async, SyncJob.set(wait: 5).perform_later).
       #
       # @param source [String] Ruby source code to scan
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_job_dependencies(source, via: :code_reference)
-        source.scan(/(\w+Job)\.perform/).flatten.uniq.map do |job|
+        source.scan(ReferencePatterns::JOB_ENQUEUE).flatten.uniq.map do |job|
           { type: :job, target: job, via: via }
         end
       end
@@ -180,7 +164,7 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_mailer_dependencies(source, via: :code_reference)
-        source.scan(/(\w+Mailer)\./).flatten.uniq.map do |mailer|
+        source.scan(ReferencePatterns::MAILER_REFERENCE).flatten.uniq.map do |mailer|
           { type: :mailer, target: mailer, via: via }
         end
       end

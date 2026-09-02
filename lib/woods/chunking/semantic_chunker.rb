@@ -64,6 +64,14 @@ module Woods
       # reserved word).
       END_LINE_PATTERN = /\Aend\b(?!:)/
 
+      # `=begin` / `=end` block-comment markers. `=begin` matched the
+      # assignment-position keyword branch (its `=` satisfying `=\s*`) and
+      # counted as an opener, while `=end` matched neither opener nor
+      # {END_LINE_PATTERN} — a net +1 depth per block comment, after which
+      # the enclosing method never closed and every later method was
+      # appended to its chunk (STO-3).
+      BLOCK_COMMENT_MARKER_PATTERN = /\A=(?:begin|end)\b/
+
       # Operator method names, longest-first so `<=>` wins over `<=`.
       OPERATOR_METHOD_NAMES =
         '<=>|===|==|=~|!~|!=|\[\]=|\[\]|\*\*|<<|>>|<=|>=|[+-]@|[+\-*\/%<>&|^~!]'
@@ -99,6 +107,7 @@ module Woods
       def block_opener?(line)
         stripped = line.strip
         return false if stripped.empty? || stripped.start_with?('#')
+        return false if stripped.match?(BLOCK_COMMENT_MARKER_PATTERN)
         return false if endless_def?(stripped)
         # An opener whose `end` sits on the same line is self-balancing
         # (`if x then y end`) — count neither side.

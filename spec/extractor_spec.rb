@@ -2793,6 +2793,34 @@ RSpec.describe Woods::Extractor do
 
       expect(extractor.send(:convention_path_unit?, 'Thing')).to be false
     end
+
+    # EXTA-3 — the same shape for jobs. `:job` is not in `convention_path_unit?`
+    # and jobs are absent from CLASS_BASED_DISCOVERY, so a class-discovered job
+    # holding a fabricated `app/jobs/<name>.rb` was pruned by the first
+    # incremental run after every full extraction — and nothing reconciled it
+    # back. `JobExtractor#source_file_for` now returns nil for an unresolvable
+    # class, which keeps the unit out of `file_map` the way GraphQL's does.
+    it 'does not need to spare a class-discovered job either, because it has no path to sweep' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :job, identifier: 'Gems::ExternalJob', file_path: nil)
+      )
+
+      expect(graph.to_h[:file_map]).to be_empty
+    end
+
+    it 'leaves a nil-path job unit alone on an empty incremental change set' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :job, identifier: 'Gems::ExternalJob', file_path: nil)
+      )
+      extractor = described_class.new(output_dir: Dir.mktmpdir)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+      change_set = Woods::ChangeSet.new(paths: [], root: Rails.root.to_s)
+
+      expect(extractor.send(:prune_vanished_units, change_set, Set.new)).to be_empty
+      expect(graph.node_exists?('Gems::ExternalJob')).to be(true)
+    end
   end
 
   # ── begin_payload! strict degrade (P2) ───────────────────────────────

@@ -660,6 +660,106 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     end
   end
 
+  # ── EXTB-1: keywords in comments, strings, and heredocs ─────────────
+
+  describe 'keywords that are not code' do
+    it 'does not count a block keyword inside a comment (EXTB-1)' do
+      # `# do not touch production` matched `block_opener?`, inflating depth
+      # with no matching `end`: the namespace stack stopped popping, so the
+      # following namespace inherited a stale `cleanup:` prefix, and the
+      # earlier task swallowed the next one's lines as its own body.
+      path = create_file('lib/tasks/clean.rake', <<~RAKE)
+        namespace :cleanup do
+          desc 'first'
+          task stale: :environment do
+            # do not touch production
+            puts 'one'
+          end
+
+          desc 'second'
+          task fresh: :environment do
+            puts 'two'
+          end
+        end
+
+        namespace :other do
+          task third: :environment do
+            puts 'three'
+          end
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('cleanup:stale', 'cleanup:fresh', 'other:third')
+      stale = units.find { |u| u.identifier == 'cleanup:stale' }
+      expect(stale.metadata[:source_lines]).to eq(2)
+    end
+
+    it 'does not count a keyword inside a string literal (EXTB-1)' do
+      path = create_file('lib/tasks/say.rake', <<~RAKE)
+        namespace :say do
+          task hello: :environment do
+            puts 'things to do'
+          end
+        end
+
+        namespace :other do
+          task bye: :environment do
+            puts 'bye'
+          end
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('say:hello', 'other:bye')
+    end
+
+    it 'does not let an `end`-leading heredoc line truncate the task body (EXTB-1)' do
+      # The heredoc line `end of the road` matched END_LINE, popping the
+      # task's own frame: the body stopped at one line and the service call
+      # after the heredoc produced no dependency edge.
+      path = create_file('lib/tasks/hd.rake', <<~RAKE)
+        namespace :db do
+          task fix: :environment do
+            msg = <<~TXT
+              end of the road
+            TXT
+            ImportantService.call(msg)
+          end
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.identifier).to eq('db:fix')
+      expect(unit.dependencies).to include(hash_including(type: :service, target: 'ImportantService'))
+    end
+  end
+
+  # ── EXTB-9: quoted namespaced task dependencies ─────────────────────
+
+  describe 'quoted task dependencies' do
+    it 'keeps the namespace of a quoted dependency (EXTB-9)' do
+      # `dep_str.scan(/:(\w+)/)` read `'assets:precompile'` as symbol syntax
+      # and recorded only `precompile`, pointing the edge at a task that
+      # does not exist.
+      path = create_file('lib/tasks/dep.rake', <<~RAKE)
+        task deploy: 'assets:precompile' do
+          puts 'deploying'
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).find { |u| u.identifier == 'deploy' }
+
+      expect(unit.metadata[:task_dependencies]).to eq(['assets:precompile'])
+      expect(unit.dependencies).to include(
+        hash_including(type: :rake_task, target: 'assets:precompile', via: :task_dependency)
+      )
+    end
+  end
+
   # ── Zero-task diagnostic (#176) ─────────────────────────────────────
 
   describe 'zero-task diagnostic' do

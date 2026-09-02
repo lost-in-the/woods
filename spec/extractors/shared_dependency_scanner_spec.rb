@@ -138,6 +138,21 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(foo_deps.size).to eq(1)
     end
 
+    it 'keeps the namespace of a fully-qualified service reference (EXTA-2)' do
+      # `\w+` cannot cross `::`, so the edge targeted a bare `ChargeService`
+      # while the unit's own identifier is `Billing::ChargeService` — the
+      # edge matched no node and the blast radius never reached the caller.
+      source = 'Billing::ChargeService.call(order)'
+      result = scanner.scan_service_dependencies(source)
+      expect(result.map { |d| d[:target] }).to eq(['Billing::ChargeService'])
+    end
+
+    it 'stops the namespace capture at the service constant (EXTA-2)' do
+      source = 'Billing::ChargeService::VERSION'
+      result = scanner.scan_service_dependencies(source)
+      expect(result.map { |d| d[:target] }).to eq(['Billing::ChargeService'])
+    end
+
     it 'returns empty array when no service references found' do
       source = 'class Foo; end'
       result = scanner.scan_service_dependencies(source)
@@ -185,6 +200,26 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(foo_deps.size).to eq(1)
     end
 
+    it 'finds Sidekiq Worker.perform_async patterns (EXTA-4)' do
+      # `*Worker` is the dominant Sidekiq naming convention and app/workers
+      # is a scanned directory, yet no unit anywhere recorded an edge to one.
+      source = 'HardWorker.perform_async(1)'
+      result = scanner.scan_job_dependencies(source)
+      expect(result.map { |d| d[:target] }).to eq(['HardWorker'])
+    end
+
+    it 'finds a delayed .set(...).perform_later chain (EXTA-4)' do
+      source = 'SyncJob.set(wait: 5.minutes).perform_later(id)'
+      result = scanner.scan_job_dependencies(source)
+      expect(result.map { |d| d[:target] }).to eq(['SyncJob'])
+    end
+
+    it 'keeps the namespace of a fully-qualified job reference (EXTA-2)' do
+      source = 'Billing::SyncJob.perform_later(id)'
+      result = scanner.scan_job_dependencies(source)
+      expect(result.map { |d| d[:target] }).to eq(['Billing::SyncJob'])
+    end
+
     it 'returns empty array when no job references found' do
       source = 'class Foo; end'
       result = scanner.scan_job_dependencies(source)
@@ -224,6 +259,12 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       result = scanner.scan_mailer_dependencies(source)
       foo_deps = result.select { |d| d[:target] == 'FooMailer' }
       expect(foo_deps.size).to eq(1)
+    end
+
+    it 'keeps the namespace of a fully-qualified mailer reference (EXTA-2)' do
+      source = 'Admin::AlertMailer.alert(user).deliver_later'
+      result = scanner.scan_mailer_dependencies(source)
+      expect(result.map { |d| d[:target] }).to eq(['Admin::AlertMailer'])
     end
 
     it 'returns empty array when no mailer references found' do

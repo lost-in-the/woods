@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
@@ -32,6 +33,13 @@ module Woods
       # those, leaving the namespace/task depth counters out of sync with
       # blocks that never get popped.
       END_LINE = /\Aend\b/
+
+      # One task-dependency token: a quoted name (`'assets:precompile'`, whose
+      # namespace segments must survive — EXTB-9) or a plain symbol
+      # (`:environment`). The quoted branch comes first so the `:` inside a
+      # quoted name is consumed with it instead of being read as symbol
+      # syntax and truncated to its last segment.
+      DEPENDENCY_TOKEN = /(?:(['"])([\w:]+)\1|:(\w+))/
 
       def initialize
         @directories = RAKE_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
@@ -125,6 +133,16 @@ module Woods
       #
       # Tracks namespace nesting, desc buffers, and task blocks.
       #
+      # Every structural decision (is this a declaration, does this line open
+      # or close a block) is made against the *neutralized* line — comments,
+      # string bodies, and heredoc bodies blanked by {LineNeutralizer} —
+      # while names and descriptions are still read from the raw line, which
+      # is where their string literals live. Scanning raw source let prose
+      # steer the parser: `# do not touch production` inflated depth with no
+      # matching `end`, so later namespaces inherited a stale prefix, and a
+      # heredoc line reading `end of the road` popped a task's own frame and
+      # truncated its body (EXTB-1).
+      #
       # @param source [String] Rake file source code
       # @return [Array<Hash>] Parsed task data
       def parse_tasks(source)
@@ -136,18 +154,21 @@ module Woods
         pending_desc = nil
         depth = 0
         lines = source.lines
+        scannable = LineNeutralizer.neutralize_lines(source)
 
         lines.each_with_index do |line, index|
           stripped = line.strip
+          code = scannable[index].to_s.strip
+          next if code.empty?
 
           # Track namespace blocks
-          if stripped.match?(/\Anamespace\s+/)
+          if code.match?(/\Anamespace\s+/)
             name = extract_namespace_name(stripped)
             if name
               namespace_stack.push(name)
               namespace_depths.push(depth)
               depth += 1
-            elsif stripped.include?(' do')
+            elsif code.include?(' do')
               # Unparseable namespace name (e.g. dynamic/interpolated) — still
               # count its block so depth stays in sync with the closing `end`.
               depth += 1
@@ -156,28 +177,28 @@ module Woods
           end
 
           # Buffer desc for the next task
-          if stripped.match?(/\Adesc\s+/)
+          if code.match?(/\Adesc\s+/)
             pending_desc = extract_desc(stripped)
             next
           end
 
           # Detect task definitions
-          if stripped.match?(/\Atask\s+/)
+          if code.match?(/\Atask\s+/)
             task_data = parse_task_line(stripped, namespace_stack, pending_desc, index + 1)
             if task_data
-              task_data[:block_source] = extract_task_block(lines, index)
+              task_data[:block_source] = extract_task_block(lines, scannable, index)
               tasks << task_data
             end
             pending_desc = nil
-            depth += 1 if stripped.include?(' do')
+            depth += 1 if code.include?(' do')
             next
           end
 
           # Track block openers (non-namespace, non-task)
-          depth += 1 if block_opener?(stripped)
+          depth += 1 if block_opener?(code)
 
           # Track end keywords
-          next unless stripped.match?(END_LINE)
+          next unless code.match?(END_LINE)
 
           depth -= 1
           # Pop namespace if we've returned to the depth where it was opened
@@ -294,16 +315,21 @@ module Woods
       # @param dep_str [String] e.g. ":environment" or "[:dep1, :dep2]"
       # @return [Array<String>]
       def parse_dependency_list(dep_str)
-        dep_str.scan(/:(\w+)/).flatten
+        dep_str.scan(DEPENDENCY_TOKEN).map { |_quote, quoted, symbol| quoted || symbol }
       end
 
       # Extract the task block body (lines between task...do and matching end).
       #
+      # Depth is counted against the neutralized lines so a keyword inside a
+      # comment, string, or heredoc body cannot open or close a block
+      # (EXTB-1); the body itself is collected from the raw lines.
+      #
       # @param lines [Array<String>] All source lines
+      # @param scannable [Array<String>] Neutralized counterparts of +lines+
       # @param task_line_index [Integer] 0-based index of the task line
       # @return [String] The block body source
-      def extract_task_block(lines, task_line_index)
-        task_line = lines[task_line_index]
+      def extract_task_block(lines, scannable, task_line_index)
+        task_line = scannable[task_line_index]
         # `block_opener?`, not a bare `include?('do')` substring check — a
         # task named `docs` (`task docs: :environment`) contains the
         # substring "do" in its own name, which made a blockless task look
@@ -315,15 +341,14 @@ module Woods
         body_lines = []
 
         ((task_line_index + 1)...lines.size).each do |i|
-          line = lines[i]
-          stripped = line.strip
+          code = scannable[i].to_s.strip
 
-          depth += 1 if block_opener?(stripped)
-          depth -= 1 if stripped.match?(END_LINE)
+          depth += 1 if block_opener?(code)
+          depth -= 1 if code.match?(END_LINE)
 
           break if depth.zero?
 
-          body_lines << line
+          body_lines << lines[i]
         end
 
         body_lines.join

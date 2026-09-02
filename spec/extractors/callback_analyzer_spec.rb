@@ -97,6 +97,74 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       result = analyzer.analyze(make_callback(filter: 'set_foo'))
       expect(result[:side_effects][:columns_written]).to be_empty
     end
+
+    it 'detects a self.col ||= conditional assignment (EXTA-6)' do
+      # `self\.(\w+)\s*=(?!=)` required `=` to be the next character, so the
+      # single most common before_create body in Rails reported no write.
+      source = <<~RUBY
+        class User
+          def ensure_status
+            self.status ||= 'pending'
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'ensure_status'))
+      expect(result[:side_effects][:columns_written]).to eq(['status'])
+    end
+
+    it 'detects a self.col += arithmetic assignment (EXTA-6)' do
+      source = <<~RUBY
+        class User
+          def bump
+            self.role += 1
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'bump'))
+      expect(result[:side_effects][:columns_written]).to eq(['role'])
+    end
+
+    it 'does not read self.col =~ /re/ as a write (EXTA-6)' do
+      source = <<~RUBY
+        class User
+          def check
+            raise unless self.email =~ /@/
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'check'))
+      expect(result[:side_effects][:columns_written]).to be_empty
+    end
+
+    it 'does not read an assignment inside a string literal as a write (EXTA-8)' do
+      source = <<~RUBY
+        class User
+          def log_it
+            Rails.logger.info "self.status = pending"
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'log_it'))
+      expect(result[:side_effects][:columns_written]).to be_empty
+    end
+
+    it 'does not read a commented-out assignment as a write (EXTA-8)' do
+      source = <<~RUBY
+        class User
+          def noop
+            # self.status = 'x' (legacy, removed)
+            nil
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'noop'))
+      expect(result[:side_effects][:columns_written]).to be_empty
+    end
   end
 
   # ── Job enqueue detection ──────────────────────────────────────
@@ -126,6 +194,32 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       analyzer = build_analyzer(source)
       result = analyzer.analyze(make_callback(filter: 'sync_data'))
       expect(result[:side_effects][:jobs_enqueued]).to include('SyncJob')
+    end
+
+    it 'detects a delayed .set(...).perform_later chain (EXTA-4)' do
+      source = <<~RUBY
+        class User
+          def enqueue_sync
+            SyncJob.set(wait: 5.minutes).perform_later(id)
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'enqueue_sync'))
+      expect(result[:side_effects][:jobs_enqueued]).to eq(['SyncJob'])
+    end
+
+    it 'keeps the namespace of an enqueued job (EXTA-2)' do
+      source = <<~RUBY
+        class User
+          def enqueue_billing
+            Billing::SyncJob.perform_later(id)
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'enqueue_billing'))
+      expect(result[:side_effects][:jobs_enqueued]).to eq(['Billing::SyncJob'])
     end
   end
 
@@ -157,6 +251,19 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       result = analyzer.analyze(make_callback(filter: 'validate_data'))
       expect(result[:side_effects][:services_called]).to include('ValidationService')
     end
+
+    it 'keeps the namespace of a called service (EXTA-2)' do
+      source = <<~RUBY
+        class User
+          def charge
+            Billing::ChargeService.call(self)
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'charge'))
+      expect(result[:side_effects][:services_called]).to eq(['Billing::ChargeService'])
+    end
   end
 
   # ── Mailer detection ───────────────────────────────────────────
@@ -173,6 +280,19 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       analyzer = build_analyzer(source)
       result = analyzer.analyze(make_callback(filter: 'send_welcome'))
       expect(result[:side_effects][:mailers_triggered]).to include('UserMailer')
+    end
+
+    it 'keeps the namespace of a triggered mailer (EXTA-2)' do
+      source = <<~RUBY
+        class User
+          def alert_admin
+            Admin::AlertMailer.alert(self).deliver_later
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      result = analyzer.analyze(make_callback(filter: 'alert_admin'))
+      expect(result[:side_effects][:mailers_triggered]).to eq(['Admin::AlertMailer'])
     end
   end
 

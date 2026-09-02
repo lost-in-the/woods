@@ -711,7 +711,12 @@ module Woods
       def extract_complexity(source)
         complexities = []
 
-        source.scan(/field\s+:(\w+).*?complexity:\s*(\d+|->.*?(?:end|\}))/m) do |name, value|
+        # `[^\n]*?` keeps the field name and its `complexity:` on one
+        # declaration line. With `.*?` under /m the match crossed
+        # declarations, so a field with no complexity absorbed the *next*
+        # field's — and the real owner lost it, because `scan` resumes after
+        # the match (EXTB-8). The lambda value may still span lines.
+        source.scan(/field\s+:(\w+)[^\n]*?complexity:\s*(\d+|->.*?(?:end|\}))/m) do |name, value|
           complexities << { field: name, complexity: value.strip }
         end
 
