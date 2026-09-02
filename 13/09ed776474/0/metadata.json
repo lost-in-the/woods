@@ -1,0 +1,90 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "1309ed776474",
+  "session_id": "59dd1318-7577-4b3b-808c-98091f2c65c9",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-02T17:10:16.817061Z",
+  "branch": "fix/gem-owned-source-paths",
+  "checkpoints_count": 10,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "b6b029aa8c94",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 7214,
+    "cache_creation_tokens": 294794,
+    "cache_read_tokens": 21991387,
+    "output_tokens": 129986,
+    "api_call_count": 99
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01VmAEP577hjq7QBNmtSwnEr",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "superpowers:systematic-debugging"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "b6b029aa8c94",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 28,
+        "end": 29,
+        "entry_ids": [
+          "c05959ae-7d3b-4428-817d-b9ca18ab4e5b"
+        ],
+        "tool_use_id": "toolu_01VmAEP577hjq7QBNmtSwnEr"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01VmAEP577hjq7QBNmtSwnEr"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: superpowers:systematic-debugging",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-toolu_01GVagWnyMyGXPBixQM1y7tT",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "pr-description"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "b6b029aa8c94",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 433,
+        "end": 434,
+        "entry_ids": [
+          "79eafe9a-7a9e-4ba2-a8fb-64f50d0604bf"
+        ],
+        "tool_use_id": "toolu_01GVagWnyMyGXPBixQM1y7tT"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01GVagWnyMyGXPBixQM1y7tT"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: pr-description",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 11
+  }
+}

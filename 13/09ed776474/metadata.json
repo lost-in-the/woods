@@ -1,0 +1,24 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "1309ed776474",
+  "strategy": "manual-commit",
+  "branch": "fix/gem-owned-source-paths",
+  "checkpoints_count": 10,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/13/09ed776474/0/metadata.json",
+      "transcript": "/13/09ed776474/0/full.jsonl",
+      "compact_transcript": "/13/09ed776474/0/transcript.jsonl",
+      "content_hash": "/13/09ed776474/0/content_hash.txt",
+      "prompt": "/13/09ed776474/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 7214,
+    "cache_creation_tokens": 294794,
+    "cache_read_tokens": 21991387,
+    "output_tokens": 129986,
+    "api_call_count": 99
+  }
+}
