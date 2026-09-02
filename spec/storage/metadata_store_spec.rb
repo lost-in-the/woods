@@ -111,6 +111,81 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(store.search(today_fragment)).to be_empty
       end
     end
+
+    # STO-8. The adapters are sold as substitutable, but neither field-scoped
+    # search over non-string values nor value-type round-trips was pinned.
+    # InMemory used a Ruby `Hash#to_s` haystack and returned symbols verbatim;
+    # SQLite serialises everything through JSON. Both are JSON now.
+    describe 'non-string values (STO-8)' do
+      before do
+        store.store('Config', { type: 'model', settings: { 'mode' => 'strict', 'retries' => 3 } })
+        store.store('Tags', { type: 'model', settings: %w[alpha beta] })
+      end
+
+      it 'does not leak Ruby hash-inspect syntax into a field-scoped haystack' do
+        expect(store.search('=>', fields: ['settings'])).to be_empty
+      end
+
+      it 'matches the JSON text of a hash-valued field' do
+        ids = store.search('"mode":"strict"', fields: ['settings']).map { |r| r['id'] }
+        expect(ids).to eq(['Config'])
+      end
+
+      it 'matches the JSON text of an array-valued field' do
+        ids = store.search('["alpha","beta"]', fields: ['settings']).map { |r| r['id'] }
+        expect(ids).to eq(['Tags'])
+      end
+
+      it 'matches a numeric value inside a hash-valued field' do
+        ids = store.search('"retries":3', fields: ['settings']).map { |r| r['id'] }
+        expect(ids).to eq(['Config'])
+      end
+
+      it 'searches a string-valued field without JSON quoting around it' do
+        store.store('Plain', { type: 'model', settings: 'strict' })
+
+        ids = store.search('"strict"', fields: ['settings']).map { |r| r['id'] }
+        expect(ids).to eq(['Config'])
+      end
+    end
+
+    describe 'value round-trips (STO-8)' do
+      it 'returns symbol values as strings' do
+        store.store('User', { type: :model, namespace: :Admin })
+
+        result = store.find('User')
+        expect(result['type']).to eq('model')
+        expect(result['namespace']).to eq('Admin')
+      end
+
+      it 'stringifies nested symbol keys and values' do
+        store.store('User', { type: 'model', options: { cache: :always } })
+
+        expect(store.find('User')['options']).to eq({ 'cache' => 'always' })
+      end
+
+      it 'stringifies symbols inside arrays' do
+        store.store('User', { type: 'model', hooks: %i[before after] })
+
+        expect(store.find('User')['hooks']).to eq(%w[before after])
+      end
+
+      it 'preserves numeric and boolean values' do
+        store.store('User', { type: 'model', count: 3, ratio: 1.5, enabled: true })
+
+        result = store.find('User')
+        expect(result['count']).to eq(3)
+        expect(result['ratio']).to eq(1.5)
+        expect(result['enabled']).to be(true)
+      end
+
+      it 'returns the same shape from find_by_type as from find' do
+        store.store('User', { type: 'model', options: { cache: :always } })
+
+        row = store.find_by_type('model').find { |r| r['id'] == 'User' }
+        expect(row['options']).to eq(store.find('User')['options'])
+      end
+    end
   end
 
   describe 'Interface contract' do
@@ -187,6 +262,23 @@ RSpec.describe Woods::Storage::MetadataStore do
       # none existed instead of surfacing the missing field.
       it 'rejects metadata stored without a type key instead of writing an empty type' do
         expect { store.store('Ghost', { file_path: 'app/models/ghost.rb' }) }
+          .to raise_error(ArgumentError, /type/)
+      end
+
+      # STO-9, the L22 neighbour: `unless type` is satisfied by `''`, which is
+      # exactly the fabricated empty type column L22 was fixed to reject.
+      it 'rejects a blank string type' do
+        expect { store.store('Ghost', { type: '' }) }
+          .to raise_error(ArgumentError, /type/)
+      end
+
+      it 'rejects a whitespace-only type' do
+        expect { store.store('Ghost', { type: "  \t" }) }
+          .to raise_error(ArgumentError, /type/)
+      end
+
+      it 'rejects a blank string type under a string key' do
+        expect { store.store('Ghost', { 'type' => '' }) }
           .to raise_error(ArgumentError, /type/)
       end
     end
@@ -406,12 +498,14 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(store.find('Nonexistent')).to be_nil
       end
 
-      it 'stringifies symbol keys to match the SQLite contract' do
+      # Was pinned the other way (`eq(:model)`) under this same title — the
+      # value SQLite returns as `'model'` (STO-8).
+      it 'stringifies symbol keys and values to match the SQLite contract' do
         store.store('User', { type: :model, namespace: :Admin })
 
         result = store.find('User')
-        expect(result['type']).to eq(:model)
-        expect(result['namespace']).to eq(:Admin)
+        expect(result['type']).to eq('model')
+        expect(result['namespace']).to eq('Admin')
       end
     end
 

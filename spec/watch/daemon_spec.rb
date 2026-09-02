@@ -6,6 +6,7 @@ require 'fileutils'
 require 'json'
 require 'timeout'
 require 'woods/watch/daemon'
+require 'woods/payload_store'
 
 RSpec.describe Woods::Watch::Daemon do
   let(:root) { Dir.mktmpdir('woods_watch_root') }
@@ -248,6 +249,54 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  # INF-2. Carried-forward work is retried by the heartbeat thread itself, so
+  # until the retried extraction returned nothing touched the lock or
+  # restamped the status. A retried storm past LOCK_STALE_TIMEOUT (600s) has
+  # its live lock retired by any waiting writer — the two-concurrent-writers
+  # clobber the lock exists to prevent.
+  describe 'a retry that outlives the heartbeat interval' do
+    let(:lock) do
+      instance_double(
+        Woods::Coordination::PipelineLock, acquire: true, release: true, touch: true, stale_timeout: 600
+      )
+    end
+
+    let(:blocking_extractor) do
+      gate = extraction_gate
+      instance_spy('Woods::Extractor').tap do |double|
+        allow(double).to receive(:extract_changed) do
+          gate[:in_flight] = true
+          sleep(0.01) until gate[:released]
+          ['Thing']
+        end
+        allow(double).to receive(:extract_all) { {} }
+      end
+    end
+
+    let(:extraction_gate) { { in_flight: false, released: false } }
+
+    it 'keeps touching the lock while the retried extraction is in flight' do
+      touch('config/locales/en.yml')
+      daemon = build(lock: lock, extractor_factory: -> { blocking_extractor })
+      daemon.send(:carry_forward, Woods::ChangeSet.new(paths: ['config/locales/en.yml'], root: root))
+      allow(daemon).to receive(:heartbeat_tick).and_return(0.01)
+
+      heartbeat = daemon.send(:start_heartbeat)
+      begin
+        Timeout.timeout(5) { sleep(0.01) until extraction_gate[:in_flight] }
+        # Several heartbeat ticks' worth of wall time with the extraction
+        # parked. A heartbeat that is itself inside the extraction cannot touch.
+        sleep(0.2)
+
+        expect(lock).to have_received(:touch).at_least(:twice)
+      ensure
+        extraction_gate[:released] = true
+        daemon.stop
+        heartbeat.join(5)
+      end
+    end
+  end
+
   # `Extractor#publish_generation` rescues its own failures so a good index is
   # not thrown away over an unwritable marker. That is right, but the marker is
   # the freshness contract: without it every reader keeps serving the previous
@@ -423,6 +472,37 @@ RSpec.describe Woods::Watch::Daemon do
       build(watcher: fake_watcher, catch_up: true).run
 
       expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    # INF-10. "Alive means covered" is the daemon's stated contract, and
+    # callers stand down on it. A generation marker that survives while its
+    # payload directory does not (a partial restore from a CI artifact, an
+    # external cleanup targeting the large directories) used to read as "index
+    # is current at startup" — while every reader resolved to a rootward
+    # fallback holding no index.
+    it 'treats a generation whose payload directory is gone as no index at all' do
+      Array.new(4) { |i| touch("app/services/svc_#{i}.rb") }
+      payload = Woods::PayloadStore.new(output_dir).create(1)
+      Woods::Generation.new(output_dir: output_dir)
+                       .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+      FileUtils.rm_rf(payload)
+
+      build(watcher: fake_watcher, catch_up: true, full_extraction_threshold: 2).run
+
+      expect(extractor).to have_received(:extract_all)
+    end
+
+    it 'still stands down when the payload directory the pointer names is present' do
+      touch('app/services/already_indexed.rb')
+      sleep 0.01
+      Woods::PayloadStore.new(output_dir).create(1)
+      Woods::Generation.new(output_dir: output_dir)
+                       .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+
+      build(watcher: fake_watcher, catch_up: true).run
+
+      expect(extractor).not_to have_received(:extract_changed)
+      expect(extractor).not_to have_received(:extract_all)
     end
   end
 
@@ -896,6 +976,65 @@ RSpec.describe Woods::Watch::Daemon do
       second = build
       expect(second.send(:create_claim)).to be false
     end
+
+    # INF-11. `release_claim` rm_f'd unconditionally whenever @claimed was
+    # set, so a daemon whose claim had been replaced (by the no-hardlink
+    # fallback's torn-read window, or any future reclaim bug) deleted its
+    # *successor's* live claim at shutdown, letting a third starter in while
+    # the successor was still running. `PipelineLock#release` and
+    # `reclaim_if_stale` both verify before deleting; this was the gap.
+    describe 'releasing a claim' do
+      let(:claim_path) { File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME) }
+
+      it 'removes its own claim' do
+        daemon = build
+        daemon.send(:create_claim)
+
+        daemon.send(:release_claim)
+
+        expect(File.exist?(claim_path)).to be false
+      end
+
+      it 'leaves a claim another process replaced ours with' do
+        daemon = build
+        daemon.send(:create_claim)
+        successor = JSON.generate(pid: Process.pid + 1, host: Woods::Watch::Status.host_identity)
+        File.write(claim_path, successor)
+
+        daemon.send(:release_claim)
+
+        expect(File.read(claim_path)).to eq(successor)
+      end
+
+      it 'leaves a claim recorded on a different host' do
+        daemon = build
+        daemon.send(:create_claim)
+        foreign = JSON.generate(pid: Process.pid, host: 'some-other-container')
+        File.write(claim_path, foreign)
+
+        daemon.send(:release_claim)
+
+        expect(File.read(claim_path)).to eq(foreign)
+      end
+
+      it 'removes an unparseable claim rather than leaking it' do
+        daemon = build
+        daemon.send(:create_claim)
+        File.write(claim_path, 'torn{')
+
+        daemon.send(:release_claim)
+
+        expect(File.exist?(claim_path)).to be false
+      end
+
+      it 'is a no-op when this daemon never claimed' do
+        File.write(claim_path, JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity))
+
+        build.send(:release_claim)
+
+        expect(File.exist?(claim_path)).to be true
+      end
+    end
   end
 
   # Every cycle writes generation.json and status.json, so watching the output
@@ -969,6 +1108,30 @@ RSpec.describe Woods::Watch::Daemon do
       # second call to an idempotent #stop. What matters is that it is the
       # fallback watcher receiving it at all, not the stale pre-fallback one.
       expect(fallback_watcher.stop_count).to be >= 1
+    end
+
+    # INF-1. The fallback is reached exactly when listen cannot start — the
+    # large-tree case — and it rebuilt the watcher without `ignored:`, so the
+    # output directory came back into scope. A WOODS_OUTPUT under the root but
+    # outside DEFAULT_IGNORED_DIRECTORIES then makes every cycle manufacture
+    # the events that trigger the next one: the loop ignored_directories
+    # exists to break, re-armed on the polling path.
+    it 'passes the ignore list, including the output dir, to the fallback watcher' do
+      inside = File.join(root, '.woods')
+      FileUtils.mkdir_p(inside)
+      fallback_watcher = BlockingWatcher.new
+      allow(Woods::Watch::Watcher).to receive(:build).and_return(fallback_watcher)
+
+      daemon = described_class.new(
+        output_dir: inside, root: root, extractor_factory: -> { extractor },
+        reloader: reloader, debounce: 0, catch_up: false,
+        watcher: RaisingWatcher.new, idle_timeout: 0.1
+      )
+
+      Timeout.timeout(5) { daemon.run }
+
+      expect(Woods::Watch::Watcher).to have_received(:build)
+        .with(hash_including(ignored: array_including('.woods'), force_polling: true))
     end
   end
 end

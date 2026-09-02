@@ -40,6 +40,44 @@ RSpec.describe Woods::Coordination::PipelineLock do
       expect(File.exist?(File.join(lock_dir, 'extraction.lock'))).to be false
       expect(File.file?(guard_path)).to be true
     end
+
+    # INF-7. A write that fails after the O_EXCL create (disk full) left a
+    # 0-byte lock: fresh (mtime now), unparseable so `lock_ownership` reads
+    # `:unknown` for everyone, never released because `@held` was never set —
+    # immovable until the stale window elapses. #touch's own docstring calls
+    # exactly this artifact out; acquire could still make one.
+    context 'when the lock write fails after the file is created' do
+      # Only the FIRST write fails — a later contender must find a working
+      # disk, or "does not block a healthy contender" would pass for the
+      # wrong reason.
+      before do
+        real_write = File.instance_method(:write)
+        attempts = 0
+        allow_any_instance_of(File).to receive(:write) do |file, *args|
+          attempts += 1
+          raise Errno::ENOSPC, 'no space left on device' if attempts == 1
+
+          real_write.bind_call(file, *args)
+        end
+      end
+
+      it 'propagates the failure' do
+        expect { lock.acquire }.to raise_error(Errno::ENOSPC)
+      end
+
+      it 'leaves no lock file behind' do
+        expect { lock.acquire }.to raise_error(Errno::ENOSPC)
+
+        expect(File.exist?(File.join(lock_dir, 'extraction.lock'))).to be false
+      end
+
+      it 'does not block a healthy contender' do
+        expect { lock.acquire }.to raise_error(Errno::ENOSPC)
+
+        contender = described_class.new(lock_dir: lock_dir, name: 'extraction')
+        expect(contender.acquire).to be true
+      end
+    end
   end
 
   describe '#release' do

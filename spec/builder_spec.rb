@@ -744,6 +744,62 @@ RSpec.describe Woods::Builder do
       expect { builder.build_embedding_provider }
         .to raise_error(ArgumentError, /Unknown embedding_provider/)
     end
+
+    # STO-6. `provider_object?` promises the rest of the interface is probed
+    # with respond_to? at each call site, and the durable stores document
+    # vector_store_options[:dimensions] as the fallback "when built without an
+    # embedding provider" — but `vector_dimensions` called #dimensions
+    # unguarded one frame earlier, so that fallback was unreachable.
+    context 'when the injected provider does not implement #dimensions' do
+      let(:injected) do
+        Class.new do
+          def embed(_text) = [1.0, 0.0]
+          def embed_batch(texts) = texts.map { [1.0, 0.0] }
+          def model_name = 'host-custom'
+        end.new
+      end
+
+      it 'falls back to the explicit qdrant dimensions option' do
+        config.vector_store = :qdrant
+        config.vector_store_options = { url: 'http://qdrant:6333', collection: 'c', dimensions: 384 }
+        sized = nil
+        allow_any_instance_of(Woods::Storage::VectorStore::Qdrant)
+          .to receive(:ensure_collection!) { |_, dimensions:| sized = dimensions }
+
+        builder.build_vector_store(dimensions: builder.send(:vector_dimensions, injected))
+
+        expect(sized).to eq(384)
+      end
+
+      it 'still raises when neither the provider nor the options supply dimensions' do
+        config.vector_store = :qdrant
+        config.vector_store_options = { url: 'http://qdrant:6333', collection: 'c' }
+
+        expect { builder.build_vector_store(dimensions: builder.send(:vector_dimensions, injected)) }
+          .to raise_error(Woods::ConfigurationError, /dimensions/)
+      end
+    end
+
+    # The B-108 shape: a provider that includes the interface without
+    # overriding #dimensions answers respond_to? and raises NotImplementedError.
+    context 'when the injected provider inherits the interface stub for #dimensions' do
+      let(:injected) do
+        Class.new do
+          include Woods::Embedding::Provider::Interface
+
+          def embed(_text) = [1.0, 0.0]
+          def embed_batch(texts) = texts.map { [1.0, 0.0] }
+          def model_name = 'host-custom'
+        end.new
+      end
+
+      it 'treats the raising stub as no dimensions' do
+        config.vector_store = :qdrant
+        config.vector_store_options = { url: 'http://qdrant:6333', collection: 'c', dimensions: 384 }
+
+        expect(builder.send(:vector_dimensions, injected)).to be_nil
+      end
+    end
   end
 
   # ── options hashes are passed through ────────────────────────────────

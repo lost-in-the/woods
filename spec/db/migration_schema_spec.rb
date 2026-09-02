@@ -96,11 +96,23 @@ RSpec.describe 'Core migrations' do
       expect(table_names.grep(/\Acodebase_/)).to be_empty
     end
 
-    it 'renames legacy codebase_units to woods_units, preserving data' do
+    # A genuine pre-rename database records its applied versions in
+    # `codebase_index_schema_migrations` — the legacy gem's own table name.
+    # Nothing in 001-006 renames the bookkeeping table, so without a
+    # pre-migration rename the migrator sees an empty ledger, re-runs 001-005
+    # (creating empty woods_* tables) and then 006's ALTER fails because the
+    # target already exists: a permanent wedge (STO-1).
+    def build_legacy_db
       legacy_db = SQLite3::Database.new(':memory:')
-      version = Woods::Db::SchemaVersion.new(connection: legacy_db)
-      version.ensure_table!
-      (1..5).each { |v| version.record_version(v) }
+      legacy_db.execute(<<~SQL)
+        CREATE TABLE codebase_index_schema_migrations (
+          version INTEGER PRIMARY KEY NOT NULL,
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      SQL
+      (1..5).each do |v|
+        legacy_db.execute('INSERT INTO codebase_index_schema_migrations (version) VALUES (?)', [v])
+      end
       legacy_db.execute(<<~SQL)
         CREATE TABLE codebase_units (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,6 +121,11 @@ RSpec.describe 'Core migrations' do
         )
       SQL
       legacy_db.execute("INSERT INTO codebase_units (unit_type, identifier) VALUES ('model', 'LegacyUser')")
+      legacy_db
+    end
+
+    it 'renames legacy codebase_units to woods_units, preserving data' do
+      legacy_db = build_legacy_db
 
       applied = Woods::Db::Migrator.new(connection: legacy_db).migrate!
 
@@ -119,6 +136,58 @@ RSpec.describe 'Core migrations' do
       expect(
         legacy_db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='codebase_units'")
       ).to be_empty
+    ensure
+      legacy_db&.close
+    end
+
+    it 'adopts the legacy schema-migrations ledger instead of starting empty' do
+      legacy_db = build_legacy_db
+
+      migrator = Woods::Db::Migrator.new(connection: legacy_db)
+      migrator.migrate!
+
+      expect(migrator.schema_version.applied_versions).to contain_exactly(1, 2, 3, 4, 5, 6)
+      expect(
+        legacy_db.execute(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='codebase_index_schema_migrations'"
+        )
+      ).to be_empty
+    ensure
+      legacy_db&.close
+    end
+
+    it 'is idempotent against a legacy database (a second migrate! is a no-op)' do
+      legacy_db = build_legacy_db
+      Woods::Db::Migrator.new(connection: legacy_db).migrate!
+
+      expect(Woods::Db::Migrator.new(connection: legacy_db).migrate!).to eq([])
+    ensure
+      legacy_db&.close
+    end
+
+    # Pathological: both ledgers present (a database already wedged by the
+    # pre-fix migrator, then upgraded). The woods ledger wins and the legacy
+    # table is left untouched for the operator to inspect.
+    it 'prefers the woods ledger and leaves the legacy table alone when both exist' do
+      legacy_db = build_legacy_db
+      legacy_db.execute(<<~SQL)
+        CREATE TABLE woods_schema_migrations (
+          version INTEGER PRIMARY KEY NOT NULL,
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      SQL
+      legacy_db.execute('INSERT INTO woods_schema_migrations (version) VALUES (1)')
+      version = Woods::Db::SchemaVersion.new(connection: legacy_db)
+
+      expect { version.ensure_table! }
+        .to output(/codebase_index_schema_migrations/).to_stderr
+
+      expect(version.applied_versions).to eq([1])
+      expect(
+        legacy_db.execute(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='codebase_index_schema_migrations'"
+        )
+      ).not_to be_empty
     ensure
       legacy_db&.close
     end

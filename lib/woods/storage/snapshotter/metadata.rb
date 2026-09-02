@@ -34,7 +34,7 @@ module Woods
       # atomically via +Tempfile+ + +File.rename+.
       #
       # @see Snapshotter::Vector companion class for vector stores
-      module Metadata
+      module Metadata # rubocop:disable Metrics/ModuleLength
         # Magic string identifying a valid Woods Metadata Dump file.
         MAGIC = 'WMD1'
 
@@ -89,8 +89,16 @@ module Woods
             validate_header!(header, dump_path)
             header['record_count'].times do
               record = unpacker.read
+              raise_corrupt(dump_path, 'record is not a hash') unless record.is_a?(Hash)
+
               store.store(record['id'], record['metadata'])
             end
+          # A stream shorter (or more corrupt) than the header promises is an
+          # interrupted dump, not a programming error: it fails closed with the
+          # typed error the Vector twin raises for the same shape (M3/STO-4),
+          # so the MCP bootstrapper's one artifact-error branch covers both.
+          rescue EOFError, MessagePack::MalformedFormatError => e
+            raise_corrupt(dump_path, "truncated or malformed dump (#{e.class})")
           end
           store
         end
@@ -137,6 +145,17 @@ module Woods
             latest.join(FILENAME)
           end
 
+          # @param path [Pathname] the dump being read
+          # @param reason [String] what was wrong with it
+          # @raise [Woods::MCP::UnsupportedArtifact] always
+          def raise_corrupt(path, reason)
+            raise Woods::MCP::UnsupportedArtifact.new(
+              "metadata.msgpack at #{path}: #{reason} — dump may have been interrupted " \
+              'mid-write; re-run woods:embed',
+              details: { path: path.to_s, reason: reason }
+            )
+          end
+
           def validate_header!(header, path)
             unless header.is_a?(Hash) && header['magic'] == MAGIC
               raise Woods::MCP::UnsupportedArtifact,
@@ -145,6 +164,8 @@ module Woods
                     "expected #{MAGIC.inspect}). The file may be corrupt or from an incompatible tool."
             end
 
+            validate_header_types!(header, path)
+
             version = header['schema_version']
             return if version <= MAX_SUPPORTED_SCHEMA_VERSION
 
@@ -152,6 +173,24 @@ module Woods
                   "metadata.msgpack at #{path} has schema_version #{version}; " \
                   "this gem supports up to #{MAX_SUPPORTED_SCHEMA_VERSION}. " \
                   'Upgrade the woods gem or re-run woods:embed to regenerate.'
+          end
+
+          # Both integer fields are load-bearing: the version gates the read
+          # and the count drives the record loop. A header missing or
+          # mistyping either one used to reach a raw NoMethodError one frame
+          # later (STO-4).
+          #
+          # @param header [Hash]
+          # @param path [Pathname]
+          # @return [void]
+          # @raise [Woods::MCP::UnsupportedArtifact]
+          def validate_header_types!(header, path)
+            %w[schema_version record_count].each do |field|
+              value = header[field]
+              next if value.is_a?(Integer) && !value.negative?
+
+              raise_corrupt(path, "header #{field} is #{value.inspect}, expected a non-negative integer")
+            end
           end
 
           # Write +store+ contents to +target+ atomically via a sibling Tempfile + rename.

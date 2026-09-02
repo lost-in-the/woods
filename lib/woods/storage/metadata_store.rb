@@ -186,7 +186,7 @@ module Woods
 
         # @see Interface#store
         def store(id, metadata)
-          @data[id] = stringify_keys(metadata).merge('updated_at' => Time.now.iso8601)
+          @data[id] = normalize(metadata).merge('updated_at' => Time.now.iso8601)
         end
 
         # @see Interface#find
@@ -237,8 +237,12 @@ module Woods
             # not part of the JSON blob), so leaving it in here made a query
             # that only matched a timestamp (e.g. "2026-08") return every
             # record on InMemory and none on SQLite.
-            haystacks = fields ? fields.map { |f| record[f] } : [JSON.generate(record.except('updated_at'))]
-            next unless haystacks.compact.any? { |h| h.to_s.downcase.include?(needle) }
+            haystacks = if fields
+                          fields.map { |f| field_haystack(record[f]) }
+                        else
+                          [JSON.generate(record.except('updated_at'))]
+                        end
+            next unless haystacks.compact.any? { |h| h.downcase.include?(needle) }
 
             out << record.except('updated_at').merge('id' => id)
           end
@@ -292,13 +296,37 @@ module Woods
 
         private
 
-        # Match the SQLite adapter's string-key contract regardless of how
-        # the caller serialises the input hash. Without this, find/search
-        # consumers that expect string keys (the SQLite path round-trips
-        # through JSON, which always returns strings) would break under
-        # symbol-keyed test fixtures.
-        def stringify_keys(hash)
-          hash.each_with_object({}) { |(k, v), out| out[k.to_s] = v }
+        # Match the SQLite adapter's contract regardless of how the caller
+        # serialises the input hash.
+        #
+        # The SQLite path stores +JSON.generate(metadata)+ and reads it back
+        # with +JSON.parse+, so every key *and value* comes back as JSON
+        # types: symbols become strings, nested hashes are stringified all the
+        # way down. Stringifying only the top-level keys left the two adapters
+        # returning different values for the same input (STO-8), so the round
+        # trip is performed here too rather than approximated.
+        #
+        # @param metadata [Hash]
+        # @return [Hash] string-keyed, JSON-typed values
+        def normalize(metadata)
+          JSON.parse(JSON.generate(metadata))
+        end
+
+        # The text SQLite's +json_extract(data, '$.field')+ would compare
+        # against for one field value: strings come back raw, structured
+        # values as their JSON text, scalars as their decimal form. A Ruby
+        # +Hash#to_s+ haystack used to leak `=>` and `:sym` syntax that no
+        # JSON document contains (STO-8).
+        #
+        # @param value [Object] the stored field value
+        # @return [String, nil] nil for a missing field, which never matches
+        def field_haystack(value)
+          case value
+          when nil then nil
+          when String then value
+          when Hash, Array then JSON.generate(value)
+          else value.to_s
+          end
         end
       end
 
@@ -348,10 +376,13 @@ module Woods
         # The type column backs {#find_by_type}, so an absent key used to
         # fall through +type.to_s+ and be stored as +""+ — fabricating a
         # type where none existed rather than surfacing the missing field
-        # (L22).
+        # (L22). A present-but-blank type fabricates exactly the same empty
+        # column, so it is refused on the same grounds (STO-9).
         def store(id, metadata)
           type = metadata[:type] || metadata['type']
-          raise ArgumentError, "metadata for #{id.inspect} has no type key" unless type
+          if type.nil? || type.to_s.strip.empty?
+            raise ArgumentError, "metadata for #{id.inspect} has no usable type key (got #{type.inspect})"
+          end
 
           data = JSON.generate(metadata)
 

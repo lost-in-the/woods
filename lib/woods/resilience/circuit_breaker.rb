@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 module Woods
+  # Same conditional-define pattern used elsewhere in the gem (pgvector,
+  # metadata_store) so this file can be required in isolation without
+  # tripping NameError on the CircuitOpenError superclass below.
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Resilience
     # Raised when the circuit breaker is open and calls are being rejected.
     #

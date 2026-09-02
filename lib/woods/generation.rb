@@ -149,15 +149,37 @@ module Woods
       return root if name.nil? || name.empty?
 
       candidate = root.join(name)
-      resolved = candidate.expand_path.to_s
-      return root unless resolved.start_with?("#{root.expand_path}#{File::SEPARATOR}")
+      return root unless candidate.directory?
+      return root unless within_root?(candidate)
 
-      candidate.directory? ? candidate : root
+      candidate
     end
 
     # @return [Pathname] the index directory this generation lives in
     def root
       @root ||= Pathname.new(File.dirname(@path))
+    end
+
+    private
+
+    # Does +candidate+ resolve inside the index root?
+    #
+    # Compared through +realpath+, mirroring
+    # {Woods::IndexArtifact#validate_dump_dir!} (B-134). +expand_path+ is
+    # textual, so a symlink planted *inside* +payloads/+ and pointing outside
+    # the index passed the check while +Pathname#directory?+ happily followed
+    # it — aiming every payload reader at an arbitrary directory (CORE-6). An
+    # index reached through a symlinked root still resolves, because both
+    # sides go through realpath.
+    #
+    # @param candidate [Pathname] an existing directory
+    # @return [Boolean] false when it cannot be resolved at all
+    def within_root?(candidate)
+      candidate_real = candidate.realpath.to_s
+      root_real = root.realpath.to_s
+      candidate_real.start_with?("#{root_real}#{File::SEPARATOR}")
+    rescue SystemCallError
+      false
     end
   end
 end

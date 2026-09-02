@@ -1806,6 +1806,108 @@ RSpec.describe Woods::Embedding::Indexer do
         expect(vector_store.deleted).to be_empty
       end
     end
+
+    # STO-2. A durable collection can be shared with a non-Woods writer — the
+    # Qdrant adapter explicitly tolerates foreign points on the read side. Such
+    # a point can never appear in @current_identifiers, so without a shape gate
+    # it reads as "vanished" and is deleted on every single run.
+    context 'when the store holds an id shaped like nothing Woods mints' do
+      let(:foreign_uuid) { '3f2504e0-4f89-41d3-9a0c-0305e82c3301' }
+      let(:seed) do
+        {
+          'User' => [0.1, 0.2], 'Keep1' => [0.1, 0.2], 'Keep2' => [0.1, 0.2],
+          'Keep3' => [0.1, 0.2], 'Keep4' => [0.1, 0.2],
+          foreign_uuid => [0.9, 0.9], 4711 => [0.9, 0.9]
+        }
+      end
+
+      before do
+        %w[Keep1 Keep2 Keep3 Keep4].each do |identifier|
+          File.write(
+            File.join(output_dir, "#{identifier.downcase}.json"),
+            JSON.generate(unit_data.merge('identifier' => identifier, 'source_hash' => "hash-#{identifier}"))
+          )
+        end
+      end
+
+      it 'leaves the foreign point alone on a full run' do
+        indexer.index_all
+
+        expect(vector_store.deleted).to be_empty
+        expect(vector_store.entries.keys).to include(foreign_uuid, 4711)
+      end
+
+      it 'leaves the foreign point alone on an incremental run' do
+        indexer.index_incremental
+
+        expect(vector_store.deleted).to be_empty
+      end
+
+      it 'still deletes a genuinely vanished Woods unit beside them' do
+        vector_store.entries['DeletedModel'] = [0.9, 0.9]
+
+        indexer.index_all
+
+        expect(vector_store.deleted).to eq(['DeletedModel'])
+        expect(vector_store.entries.keys).to include(foreign_uuid, 4711)
+      end
+    end
+
+    # STO-11 / B-108. `respond_to?(:delete)` is true for every adapter that
+    # merely includes the interface, so the guard discriminated nothing and a
+    # store without its own #delete hit a bare NotImplementedError mid-run.
+    context 'when the store does not implement its own #delete' do
+      let(:no_delete_store_class) do
+        Class.new do
+          include Woods::Storage::VectorStore::Interface
+
+          attr_reader :entries
+
+          def initialize(seed = {})
+            @entries = seed.dup
+          end
+
+          def store_batch(items)
+            items.each { |item| @entries[item[:id]] = item[:vector] }
+          end
+
+          def each_id(&block)
+            return enum_for(:each_id) unless block
+
+            @entries.keys.each(&block)
+          end
+
+          def count = @entries.size
+        end
+      end
+
+      let(:vector_store) { no_delete_store_class.new(seed) }
+      let(:seed) do
+        {
+          'User' => [0.1, 0.2], 'Keep1' => [0.1, 0.2], 'Keep2' => [0.1, 0.2],
+          'Keep3' => [0.1, 0.2], 'DeletedModel' => [0.9, 0.9]
+        }
+      end
+
+      before do
+        %w[Keep1 Keep2 Keep3].each do |identifier|
+          File.write(
+            File.join(output_dir, "#{identifier.downcase}.json"),
+            JSON.generate(unit_data.merge('identifier' => identifier, 'source_hash' => "hash-#{identifier}"))
+          )
+        end
+      end
+
+      it 'completes the run without deleting' do
+        expect { indexer.index_all }.not_to raise_error
+
+        expect(vector_store.entries.keys).to include('DeletedModel')
+      end
+
+      it 'is not reconcilable' do
+        expect(indexer.send(:reconcilable?)).to be(false)
+      end
+    end
   end
 
   # Regression: durable backends must not be treated as dumpable.

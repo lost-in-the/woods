@@ -310,6 +310,10 @@ module Woods
         # a batch races the shutdown snapshot of @pending.
         watcher_thread&.join
         stop_heartbeat(heartbeat)
+        # Before #persist_pending, for the same reason the watcher join is: a
+        # retry drain still running would race the shutdown snapshot of
+        # @pending.
+        stop_retry(@retry_thread)
         persist_pending
         publish_status(:stopped, reason: @stop_reason&.to_s)
         release_claim
@@ -385,6 +389,7 @@ module Woods
         @pending_mutex = Mutex.new
         @stop_reason = nil
         @drain_mutex = Mutex.new
+        @retry_thread = nil
       end
 
       # Wait out the debounce window so events that land during it join the
@@ -597,10 +602,37 @@ module Woods
         false
       end
 
+      # When this index was last known good, or nil when there is no usable
+      # index — which the storm threshold turns into one full extraction.
+      #
+      # A dangling payload pointer counts as "no index" (INF-10). The marker
+      # can outlive the directory it names (a partial restore from a CI
+      # artifact, an external cleanup targeting the large directories), and
+      # {Generation#payload_dir} deliberately degrades to the index root for
+      # *readers* — so a gutted index would otherwise read "current at
+      # startup", publish `running`, and have every caller stand down over a
+      # directory holding no index at all. "Alive means covered" is the
+      # daemon's contract; here it would have been false.
+      #
+      # @return [Float, nil]
       def index_watermark
+        return nil if dangling_payload_pointer?
+
         File.mtime(@generation.path).to_f
       rescue SystemCallError
         nil
+      end
+
+      # @return [Boolean] true when the marker names a payload directory that
+      #   no longer resolves
+      def dangling_payload_pointer?
+        marker = @generation.current
+        name = marker.payload
+        return false if name.nil? || name.empty?
+
+        @generation.payload_dir(marker) == @generation.root
+      rescue ScriptError, StandardError
+        false
       end
 
       # Keep the status file believable, and stop a dormant daemon.
@@ -650,11 +682,51 @@ module Woods
       # stop typing. The heartbeat is already the right cadence for "try that
       # again": slow enough not to spin, frequent enough that a finished
       # contender is noticed in minutes rather than never.
+      #
+      # The drain runs on its **own** thread, not this one (INF-2). Running it
+      # inline meant the heartbeat stopped restamping the status and stopped
+      # touching the lock for the whole duration of the retried extraction —
+      # and a retried storm (`extract_all` on a large host) can outlive
+      # {LOCK_STALE_TIMEOUT}, at which point any waiting writer retires the
+      # live lock and two writers clobber one index. {#drain}'s `try_lock`
+      # already refuses overlapping drains; the `alive?` check keeps
+      # consecutive heartbeat ticks from stacking threads behind it.
       def retry_pending
         return if pending_empty? || @stop_reason
+        return if @retry_thread&.alive?
 
         @logger.info('[Woods] watch: retrying paths carried forward from an earlier cycle')
-        drain
+        @retry_thread = start_retry_thread
+      end
+
+      # @return [Thread] a thread running one drain
+      def start_retry_thread
+        thread = Thread.new do
+          drain
+        rescue ScriptError, StandardError => e
+          # #run_extraction rescues its own failures, so reaching here means
+          # something outside it broke. Log rather than let `join` re-raise it
+          # into the shutdown path.
+          @logger.error("[Woods] watch: retry cycle failed — #{e.class}: #{e.message}")
+        end
+        thread.report_on_exception = false
+        thread
+      end
+
+      # Wind down a retry drain at shutdown.
+      #
+      # Bounded exactly like {#stop_heartbeat}: before INF-2 the retry ran on
+      # the heartbeat thread and inherited that thread's join-then-kill, so
+      # this preserves the shutdown timing rather than making a long retry
+      # hold the process open. {#shut_down} sets +@stop_reason+ first, so
+      # {#drain_cycles} ends after the cycle already in flight.
+      #
+      # @param thread [Thread, nil]
+      # @return [void]
+      def stop_retry(thread)
+        return unless thread
+
+        thread.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || thread.kill
       end
 
       def heartbeat_tick
@@ -693,7 +765,12 @@ module Woods
 
         @polling_fallback = true
         @logger.warn("[Woods] watch: #{e.message} — falling back to polling")
-        @watcher = Watcher.build(root: @root, logger: @logger, force_polling: true)
+        # `ignored:` must travel with the rebuild (INF-1). Dropping it re-arms
+        # the output-directory feedback loop {#ignored_directories} exists to
+        # break, on precisely the path a large tree reaches.
+        @watcher = Watcher.build(
+          root: @root, ignored: ignored_directories, logger: @logger, force_polling: true
+        )
         @watcher.start(&on_change)
       end
 
@@ -1016,6 +1093,12 @@ module Woods
           # loses the tmp-write-then-link guarantee that content is
           # complete before a reader can see the file exist, but the
           # content here is a few bytes written in one syscall.
+          #
+          # Documented residual (INF-11): on this path a contender reading
+          # between the create and the write still sees an empty claim, judges
+          # it stale and replaces it. {#release_claim}'s verify-before-delete
+          # bounds the damage to one lost claim rather than two daemons
+          # deleting each other's.
           File.open(claim_path, File::WRONLY | File::CREAT | File::EXCL) { |f| f.write(content) }
         end
         @claimed = true
@@ -1105,12 +1188,35 @@ module Woods
         true
       end
 
+      # Drop this daemon's startup claim at shutdown.
+      #
+      # Verify-before-delete, mirroring {#reclaim_if_stale}'s snapshot-compare
+      # and `PipelineLock#release` (INF-11). `@claimed` records that *we* once
+      # created the claim, not that the file on disk is still ours: the
+      # no-hardlink fallback leaves a window in which a contender can judge our
+      # half-written claim stale and replace it. Deleting unconditionally then
+      # removes the successor's *live* claim and lets a third starter in while
+      # it is still running.
+      #
+      # An unreadable or unparseable claim is still removed — it cannot be a
+      # live daemon's claim, the same judgement {#stale_claim?} makes.
+      #
       # @return [void]
       def release_claim
         return unless @claimed
 
-        FileUtils.rm_f(claim_path)
+        FileUtils.rm_f(claim_path) if own_claim?
         @claimed = false
+      end
+
+      # @return [Boolean] whether the claim on disk still records this process
+      def own_claim?
+        record = JSON.parse(File.read(claim_path))
+        return true unless record.is_a?(Hash)
+
+        record['pid'] == Process.pid && same_claim_host?(record['host'])
+      rescue JSON::ParserError, SystemCallError
+        true
       end
 
       def claim_path

@@ -323,6 +323,41 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
         /OpenAI API error \(retry failed\): .*second drop/
       )
     end
+
+    # STO-15. Net::ReadTimeout descends from Timeout::Error, not IOError, so
+    # it slipped past this rescue and escaped as a raw stdlib exception —
+    # asymmetric with Ollama, which has pinned this since it was written.
+    it 'retries once on Net::ReadTimeout' do
+      allow(http_double).to receive(:request).and_raise(Net::ReadTimeout)
+      retry_http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http_double, retry_http)
+      allow(retry_http).to receive(:use_ssl=)
+      allow(retry_http).to receive(:open_timeout=)
+      allow(retry_http).to receive(:read_timeout=)
+      allow(retry_http).to receive(:keep_alive_timeout=)
+      allow(retry_http).to receive(:start).and_return(retry_http)
+      allow(retry_http).to receive(:started?).and_return(true)
+      allow(retry_http).to receive(:request).and_return(success_response)
+
+      expect(provider.embed('hello')).to eq(single_embedding)
+    end
+
+    it 'wraps a second Net::ReadTimeout in a typed RequestError' do
+      allow(http_double).to receive(:request).and_raise(Net::ReadTimeout)
+      retry_http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:new).and_return(http_double, retry_http)
+      allow(retry_http).to receive(:use_ssl=)
+      allow(retry_http).to receive(:open_timeout=)
+      allow(retry_http).to receive(:read_timeout=)
+      allow(retry_http).to receive(:keep_alive_timeout=)
+      allow(retry_http).to receive(:start).and_return(retry_http)
+      allow(retry_http).to receive(:started?).and_return(true)
+      allow(retry_http).to receive(:request).and_raise(Net::ReadTimeout)
+
+      expect { provider.embed('hello') }.to raise_error(
+        Woods::Embedding::Provider::RequestError, /OpenAI API error \(retry failed\)/
+      )
+    end
   end
 
   describe 'custom configuration' do

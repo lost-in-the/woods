@@ -74,10 +74,18 @@ module Woods
       # than replace. ASCII-only strings already share their byte
       # sequence with UTF-8; anything else is transcoded explicitly.
       #
+      # ASCII-8BIT is the exception: it is not a character encoding to
+      # transcode *from*, it is "this string is already bytes". `String#encode`
+      # treats it as latin-1-ish and raises `UndefinedConversionError` on any
+      # high byte, so a binary-tagged name is passed through instead — which is
+      # what "hash the bytes" meant all along (STO-13).
+      #
       # @param name [String]
       # @return [String] binary
       def self.name_bytes(name)
         str = name.to_s
+        return str.b if str.encoding == Encoding::ASCII_8BIT
+
         str = str.encode(Encoding::UTF_8) unless str.encoding == Encoding::UTF_8 || str.ascii_only?
         str.b
       end

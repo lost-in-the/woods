@@ -2,6 +2,11 @@
 
 require 'digest'
 require_relative 'cache_store'
+# CachedEmbeddingProvider includes Embedding::Provider::Interface at load
+# time, so the interface must be defined before this file's class bodies run
+# — otherwise a narrow `require 'woods/cache/cache_middleware'` raises
+# NameError (STO-5).
+require_relative '../embedding/provider'
 
 module Woods
   module Cache

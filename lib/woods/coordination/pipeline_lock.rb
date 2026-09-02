@@ -73,8 +73,15 @@ module Woods
 
           # Keep O_EXCL even though cooperating implementations hold the guard:
           # it still fails closed if an external writer creates the path.
-          File.open(@lock_path, File::WRONLY | File::CREAT | File::EXCL) do |file|
-            file.write(lock_content)
+          begin
+            File.open(@lock_path, File::WRONLY | File::CREAT | File::EXCL) do |file|
+              file.write(lock_content)
+            end
+          rescue Errno::EEXIST
+            raise
+          rescue ScriptError, StandardError
+            discard_partial_lock
+            raise
           end
           @held = true
           true
@@ -175,6 +182,27 @@ module Woods
       end
 
       private
+
+      # Remove a lock file this {#acquire} call created but could not finish
+      # writing (INF-7).
+      #
+      # A write that fails after the O_EXCL create — a full or read-only disk —
+      # would otherwise leave a 0-byte lock: fresh (mtime now, so never stale),
+      # unparseable (so {#lock_ownership} reads +:unknown+ for every process,
+      # including this one), and never released because +@held+ was never set.
+      # That artifact blocks every writer for the whole stale window; {#touch}
+      # was already fixed never to create one.
+      #
+      # Safe unconditionally: O_EXCL proves *this* call created the path, and
+      # the path guard is still held. Errors from the unlink itself are
+      # swallowed so they cannot replace the real failure being re-raised.
+      #
+      # @return [void]
+      def discard_partial_lock
+        File.unlink(@lock_path)
+      rescue SystemCallError
+        nil
+      end
 
       def with_path_guard
         # Ensure the lock directory itself exists — never its parent. A guard
