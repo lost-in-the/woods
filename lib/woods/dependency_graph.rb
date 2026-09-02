@@ -387,6 +387,14 @@ module Woods
       @nodes.key?(identifier)
     end
 
+    # Whether the graph holds no nodes at all — an incremental run's
+    # "do I have a baseline?" check ({Woods::Extractor}).
+    #
+    # @return [Boolean]
+    def empty?
+      @nodes.empty?
+    end
+
     # Find a node by suffix matching (e.g., "Update" matches "Order::Update").
     #
     # When multiple nodes share the same suffix, the first match wins.

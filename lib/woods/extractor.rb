@@ -638,6 +638,7 @@ module Woods
     def prepare_incremental_run
       begin_payload!(strict: true)
       graph_path = payload_dir.join('dependency_graph.json')
+      ensure_incremental_baseline!(graph_path)
       @dependency_graph = DependencyGraph.from_h(JSON.parse(AtomicFile.read(graph_path))) if graph_path.exist?
 
       ModelNameCache.reset!
@@ -782,6 +783,41 @@ module Woods
       )
       @payload_dir = nil
       @payload_generation = nil
+    end
+
+    # Refuse an incremental run that has no baseline to be incremental
+    # against (CORE-2). With no published generation and no dependency
+    # graph — a failed CI cache restore, a typo'd WOODS_OUTPUT, a first run
+    # on a fresh runner — {#extract_changed} would compute an empty blast
+    # radius, dispatch only the diffed paths, and publish generation 1: a
+    # near-empty index that readers, `woods:validate`, and retrieval all
+    # treat as the complete truth of the app, and that nothing self-heals
+    # until a full extraction. The watch daemon already enforces this
+    # invariant on its side (a missing generation marker means one full
+    # extraction); the one-shot entry points must refuse rather than
+    # publish silently. A pre-generation flat index passes: its graph was
+    # seeded into this run's payload directory by {#begin_payload!}.
+    #
+    # @param graph_path [Pathname] the seeded payload's dependency graph
+    # @return [void]
+    # @raise [Woods::ExtractionError] when no baseline exists
+    def ensure_incremental_baseline!(graph_path)
+      return if graph_path.exist?
+      return if Generation.new(output_dir: @output_dir).current.number.positive?
+      # An embedding caller that already holds a populated graph (a prior
+      # in-process run, or seeded registrations) IS the baseline —
+      # {#prepare_incremental_run} keeps the in-memory graph whenever no
+      # disk graph exists.
+      return unless @dependency_graph.nil? || @dependency_graph.empty?
+
+      raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+        No baseline index found under #{@output_dir}: no generation has been
+        published and no dependency_graph.json exists. An incremental run
+        only re-extracts what changed relative to an existing index, so
+        running it here would publish a near-empty index as the complete
+        truth of the application. Run a full `woods:extract` first (or point
+        WOODS_OUTPUT at the directory holding the existing index).
+      MSG
     end
 
     # Copy the published generation's payload into this run's directory.
@@ -2241,7 +2277,13 @@ module Woods
             next
           end
 
-          produced.merge(units.map(&:identifier))
+          # (identifier, type) pairs, not bare identifiers: two rules can
+          # claim one path (policies/pundit_policies) and mint the same
+          # identifier for different unit types. When one of them stops
+          # producing, an identifier-keyed set would let the survivor shield
+          # the stale sibling-type node from the prune below (the #225 shape,
+          # one method over — CORE-1).
+          produced.merge(units.map { |unit| [unit.identifier, unit.type] })
           touched.merge(register_and_write(rule.extractor_key, units, affected_types))
         end
 
@@ -2302,7 +2344,8 @@ module Woods
     #
     # @param absolute_path [String]
     # @param rules [Array<PathDispatcher::Rule>]
-    # @param produced [Set<String>] identifiers just extracted from the path
+    # @param produced [Set<Array(String, Symbol)>] (identifier, type) pairs
+    #   just extracted from the path
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers removed
     def prune_path_leftovers(absolute_path, rules, produced, affected_types)
@@ -2310,7 +2353,7 @@ module Woods
       removed = Set.new
 
       @dependency_graph.units_for_path(absolute_path).each do |identifier, node_type|
-        next if produced.include?(identifier)
+        next if produced.include?([identifier, node_type])
         next unless covered_keys.include?(TYPE_TO_EXTRACTOR_KEY[node_type])
 
         removed.add(identifier) if remove_unit(identifier, affected_types, type: node_type)
