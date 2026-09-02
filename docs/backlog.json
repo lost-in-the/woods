@@ -2246,5 +2246,44 @@
     ],
     "description": "Audit finding R2-6 (Low, traced). Retention picks its eviction victims from parseable snapshot summaries, so an unreadable or corrupt file is never a candidate and accumulates forever \u2014 the exact files B-135 taught the reader to skip are the ones retention cannot reclaim. Intersection of P8 and B-135. Acceptance: rank unreadable files as the oldest victims, with a spec asserting a corrupt file is pruned once the retention bound is exceeded.",
     "status": "open"
+  },
+  {
+    "id": "B-164",
+    "title": "Self-map dependents dangle: static analyzer records include targets as short names",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "self-map",
+    "files": [
+    "lib/woods/ruby_analyzer/",
+    "lib/tasks/woods.rake"
+    ],
+    "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map.",
+    "status": "open"
+  },
+  {
+    "id": "B-165",
+    "title": "Class-discovered jobs have no removal reconciliation (not in CLASS_BASED_DISCOVERY)",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+    "lib/woods/extractor.rb",
+    "lib/woods/extractors/job_extractor.rb"
+    ],
+    "description": "Post-#274: JobExtractor#discoverable_classes exists and gates re_extract_by_class, but jobs are not registered in CLASS_BASED_DISCOVERY, so a class-discovered job whose class disappears without its host file changing (gem removed, dynamic definition gone) survives incrementally until a full extraction. Same accepted posture as GraphQL runtime types. Acceptance: either add a jobs discovery entry (decide reconcile_removals semantics against the nested-job fixture and the audit EXTA-3 nil-path contract) or document the staleness bound in INCREMENTAL_EXTRACTION.md.",
+    "status": "open"
+  },
+  {
+    "id": "B-166",
+    "title": "Gem-owned unit paths go stale after a gem upgrade until a full extraction",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+    "lib/woods/extractors/shared_utility_methods.rb",
+    "lib/woods/extractor.rb"
+    ],
+    "description": "Post-#275: gem-owned classes carry their real absolute (or vendored-relative) definition site. Gem paths never enter the incremental blast radius (no change set names them), and after a bundle update the recorded paths dangle until a full extraction rebuilds them; woods:validate reports them as gem-owned without a remedy. Acceptance: either extend the Gemfile.lock whole-app trigger to refresh class-discovered gem-owned units, or document the full-extract-after-bundle-update requirement in INCREMENTAL_EXTRACTION.md and the validate warning.",
+    "status": "open"
   }
 ]
