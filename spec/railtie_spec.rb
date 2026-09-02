@@ -201,11 +201,16 @@ RSpec.describe 'Woods::Railtie support logic' do
           .to raise_error(Woods::ConfigurationError, /console_mcp_token is not set/)
       end
 
-      it 'warns (requests fail closed with 401) outside production' do
+      it 'warns outside production, scoped to the HTTP transport' do
+        # Only BearerAuth on the HTTP path checks the token. An stdio console
+        # server lists and executes every Tier 1 tool without one, so the old
+        # "requests will be refused (401)" text was false for stdio.
         Woods::RailtieSupport.verify_console_configuration!(production: false)
 
         expect(Woods::RailtieSupport).to have_received(:warn)
-          .with(a_string_including('refused (401)'))
+          .with(a_string_including('HTTP Console MCP requests will be refused (401)')
+                  .and(a_string_including('stdio'))
+                  .and(a_string_including('Production boot will raise')))
       end
 
       # G-3. The 401 belongs to the HTTP stack (BearerAuth, RackMiddleware);

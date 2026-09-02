@@ -16,8 +16,10 @@ module Woods
   # loading Rails::Railtie.
   module RailtieSupport
     # Boot-time message for a console enabled without a token. Raised in
-    # production; warned everywhere else (HTTP requests fail closed with 401
-    # either way — see {Woods::MCP::BearerAuth}).
+    # production; warned everywhere else. Only the HTTP transport enforces
+    # the token ({Woods::MCP::BearerAuth} fails closed with 401 at the console
+    # path); the stdio server never sees a bearer header, so for it a missing
+    # token is a production-boot failure, not a request failure.
     MISSING_TOKEN_MESSAGE =
       '[Woods Console] console_mcp_token is not set — Console MCP is a high-privilege ' \
       'endpoint that runs SQL and model introspection against the live database. ' \
@@ -32,10 +34,10 @@ module Woods
     # bearer token, so an unqualified "requests will be refused (401)" sent
     # stdio-only operators configuring a token their setup never uses.
     MISSING_TOKEN_TRANSPORT_NOTE =
-      'The token authenticates the Console MCP HTTP transport: without it every HTTP ' \
-      'request is refused (401). The stdio transport (rake woods:console) does not ' \
-      'transmit or use a bearer token, so a stdio-only setup still works — set the token ' \
-      'before exposing the HTTP endpoint.'
+      'HTTP Console MCP requests will be refused (401) until one is set. The stdio ' \
+      'transport (rake woods:console) does not transmit or use a bearer token, so a ' \
+      'stdio-only setup still works — set the token before exposing the HTTP endpoint. ' \
+      'Production boot will raise while Console MCP is enabled without a token.'
 
     class << self
       # @return [String, nil] path the console stack was mounted at (captured
@@ -94,9 +96,11 @@ module Woods
 
       # Boot-time console validation, run from `after_initialize` once the
       # final configuration is known. With the console enabled and no usable
-      # token, every guarded request will be refused with 401 — production
-      # refuses to boot instead (matching the pre-#183 fail-closed posture),
-      # other environments warn loudly. A token shorter than
+      # token, every HTTP request at the console path will be refused with
+      # 401 — production refuses to boot instead (matching the pre-#183
+      # fail-closed posture), other environments warn loudly. The stdio
+      # server carries no bearer check, so the warning says which transport
+      # it is about rather than claiming every request fails. A token shorter than
       # {Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH} is a misconfiguration and
       # raises in every environment (as the eager BearerAuth constructor
       # used to). Also warns when `console_mcp_path` changed after the stack

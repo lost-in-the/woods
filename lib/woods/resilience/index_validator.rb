@@ -114,13 +114,44 @@ module Woods
           validate_manifest_type(payload, type, expected_count, unresolvable, warnings, errors)
         end
 
-        unresolvable.each do |type, identifiers|
-          sample = identifiers.first(3).join(', ')
-          warnings << "#{type}: #{identifiers.size} unit(s) whose file_path resolves nowhere " \
-                      "(e.g. #{sample}). Extracted in a different environment? Re-run extraction."
-        end
-
+        warn_unresolvable_paths(warnings, unresolvable)
         validate_dependency_graph(payload, errors)
+      end
+
+      # Split each type's unresolvable units into app-tree paths and gem-owned
+      # paths, since only the first has a remedy the operator can act on.
+      #
+      # @param warnings [Array<String>]
+      # @param unresolvable [Hash{String => Array<Array(String, Boolean)>}]
+      def warn_unresolvable_paths(warnings, unresolvable)
+        unresolvable.each do |type, entries|
+          inside, outside = entries.partition { |_identifier, outside_root| !outside_root }
+          warn_unresolvable_app_paths(warnings, type, inside.map(&:first))
+          warn_unresolvable_gem_paths(warnings, type, outside.map(&:first))
+        end
+      end
+
+      # App-tree paths that do not exist under the app root: the index was
+      # extracted from a different tree, and re-extracting here fixes it.
+      def warn_unresolvable_app_paths(warnings, type, identifiers)
+        return if identifiers.empty?
+
+        warnings << "#{type}: #{identifiers.size} unit(s) whose file_path resolves nowhere " \
+                    "(e.g. #{identifiers.first(3).join(', ')}). Extracted in a different environment? " \
+                    'Re-run extraction.'
+      end
+
+      # Absolute paths outside the app root belong to a gem — an engine model,
+      # a framework source — and resolve only where that gem is installed at
+      # the extracting path. Re-running extraction here cannot change that,
+      # so the remedy is not offered.
+      def warn_unresolvable_gem_paths(warnings, type, identifiers)
+        return if identifiers.empty?
+
+        warnings << "#{type}: #{identifiers.size} unit(s) whose file_path lies outside the app root " \
+                    "and is absent here (e.g. #{identifiers.first(3).join(', ')}). Gem-owned units " \
+                    '(engine models, framework sources) resolve only where that gem is installed at ' \
+                    'the extracting path.'
       end
 
       # rubocop:disable-next Metrics/ParameterLists
@@ -138,16 +169,18 @@ module Woods
 
       # @param file [String] unit JSON path
       # @param type [String] type directory name
-      # @param unresolvable [Hash{String => Array<String>}] identifiers whose
-      #   file_path resolves nowhere, keyed by type
+      # @param unresolvable [Hash{String => Array<Array(String, Boolean)>}]
+      #   `[identifier, outside_app_root]` pairs whose file_path resolves
+      #   nowhere, keyed by type
       # @param errors [Array<String>]
       def validate_unit_file(file, type, unresolvable, errors)
         data = JSON.parse(Woods::AtomicFile.read(file))
         errors << "#{file}: missing identifier" unless data['identifier']
         errors << "#{file}: missing source_code" unless data['source_code']
-        return if path_resolvable?(data['file_path'])
+        file_path = data['file_path']
+        return if path_resolvable?(file_path)
 
-        unresolvable[type] << (data['identifier'] || File.basename(file))
+        unresolvable[type] << [data['identifier'] || File.basename(file), outside_app_root?(file_path)]
       rescue JSON::ParserError => e
         errors << "#{file}: invalid JSON - #{e.message}"
       end
@@ -160,6 +193,15 @@ module Woods
         File.exist?(file_path) || File.exist?(File.join(@app_root, file_path))
       rescue StandardError
         false
+      end
+
+      # True for an absolute path that is not under the app root. Extraction
+      # relativizes every path under Rails.root, so an absolute path in the
+      # index is one that was never in the app tree: a gem's.
+      def outside_app_root?(file_path)
+        return false unless file_path.to_s.start_with?('/')
+
+        !file_path.start_with?("#{@app_root.to_s.chomp('/')}/")
       end
 
       def validate_dependency_graph(payload, errors)

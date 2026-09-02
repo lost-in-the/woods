@@ -425,6 +425,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **INF-10**: The daemon's startup watermark treats a generation whose payload directory no longer resolves as no index at all, so the existing no-watermark → storm → full-extraction path recovers a gutted index. Previously the surviving marker read as "index is current at startup" while every reader resolved to a rootward fallback holding nothing.
 - **INF-11**: `Daemon#release_claim` verifies ownership before deleting the startup claim, mirroring `reclaim_if_stale`'s snapshot-compare and `PipelineLock#release`. A daemon whose claim had been replaced deleted its *successor's* live claim at shutdown, letting a third starter in while the successor ran.
 - **CORE-6**: `Generation#payload_dir` bounds the payload pointer with a `realpath` comparison against the index root, mirroring `IndexArtifact#validate_dump_dir!` (B-134). `expand_path` is textual, so a symlink planted inside `payloads/` and pointing outside the index passed the check and every payload reader followed it. Flat-index, missing-directory and textual-escape fallbacks are unchanged.
+- **Gem-owned classes keep their real source path instead of a synthesized
+  app path.** `resolve_source_location` accepted only app-owned locations and
+  otherwise returned the caller's convention fallback, so an engine model such
+  as `ActiveStorage::Blob` indexed at `app/models/active_storage/blob.rb`, a
+  file that does not exist, with no class body in its source and a
+  `woods:validate` warning telling the operator to re-run extraction for a
+  path no extraction could produce. When nothing in the app defines the class
+  and its definition site exists on disk, that site is used. It stays absolute
+  through path normalization, `woods:validate` reports it as gem-owned, and git
+  enrichment skips paths outside `Rails.root` (git rejects a whole `log`
+  invocation when any pathspec is outside the repository) as well as vendored
+  `vendor/` and `node_modules/` paths under it (a bundle vendored inside the
+  app root is gitignored, so asking git about it is wasted work). Applies to every
+  class-based extractor sharing the helper: models, controllers, mailers, jobs,
+  serializers.
+
+- **Incremental runs no longer duplicate a class-discovered job under its
+  enclosing class's identifier.** A job nested inside a non-job file (`class
+  Billing::Invoicing::Reconciler; class RefreshJob < ApplicationJob`) is found
+  on the full path by the `ApplicationJob` descendant walk, with the model
+  file as its `file_path`. Blast-radius re-extraction only knew the unit's
+  type, took the file-based entry point, and Zeitwerk-governed naming then
+  correctly named the *file* for its outer constant — registering a second
+  `job` unit under the PORO's identifier that no full extraction emits. The
+  duplicate flipped the graph node's type, added a false `variants` entry,
+  and made `woods:incremental` and `woods:extract` disagree about the same
+  tree until the next full run. `Extractor#re_extracted_units` now falls back
+  to the class-based entry point when the file does not reproduce the unit,
+  and only for a class the extractor's own discovery would return
+  (`JobExtractor#discoverable_classes`). The booted equivalence lane pins the
+  shape with a nested-job fixture in `spec/dummy`.
+
+- **Concerns join the Zeitwerk-governed naming contract.** `ConcernExtractor`
+  was the one extractor still naming from the outer-module chain alone, which
+  stops at the first non-module line. A concern under a mid-path `concerns/`
+  segment (a real namespace, not an autoload root) with a one-line `class
+  SomeError < StandardError; end` declared above it indexed as the wrapper
+  (`Outer::Mid::Inner`) instead of `Outer::Mid::Inner::Concerns::Leaf`. The
+  governed name is tried first; the module-chain scan remains the fallback.
+
+- **The missing-token console warning names the transport it applies to.**
+  It claimed every Console MCP request would be refused with 401, but only
+  the HTTP transport carries the bearer check; an stdio console server lists
+  and executes every Tier 1 tool without a token. The warning now says HTTP
+  requests will be refused, that stdio does not check the token, and that
+  production boot will raise.
+
+- **`woods:validate` no longer tells you to re-run extraction for gem-owned
+  paths.** Engine models and framework sources carry absolute paths outside
+  the application tree, so under a different install prefix they resolve
+  nowhere by design and re-extraction cannot change that. They now get their
+  own warning without the no-op remedy; app-tree paths keep the original one.
 
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete

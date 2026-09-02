@@ -690,6 +690,42 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  describe '#enrich_with_git_data' do
+    it 'sends only app-owned paths under Rails.root to git' do
+      # A gem-owned unit (an engine model) carries its real absolute path,
+      # outside the repository. git rejects the whole `log` invocation when any
+      # pathspec is outside the repository, and batch_git_data sends 500 paths
+      # per invocation, so one gem path would erase the git metadata of 499
+      # app units.
+      require 'woods'
+      app_path = File.join(tmpdir, 'app', 'models', 'post.rb')
+      FileUtils.mkdir_p(File.dirname(app_path))
+      FileUtils.touch(app_path)
+      gem_dir = Dir.mktmpdir('gem')
+      gem_path = File.join(gem_dir, 'blob.rb')
+      FileUtils.touch(gem_path)
+
+      # A bundle vendored INSIDE Rails.root (BUNDLE_PATH=vendor/bundle) puts gem
+      # paths under the root prefix; they are gitignored, so sending them is
+      # wasted pathspec work per batch. Same exclusion app_source? applies.
+      vendored_path = File.join(tmpdir, 'vendor', 'bundle', 'ruby', 'gems', 'engine-1.0', 'app', 'models', 'blob.rb')
+      FileUtils.mkdir_p(File.dirname(vendored_path))
+      FileUtils.touch(vendored_path)
+
+      app_unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: app_path)
+      gem_unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Engine::Blob', file_path: gem_path)
+      vendored_unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Engine::Attachment', file_path: vendored_path)
+      extractor.instance_variable_set(:@results, { models: [app_unit, gem_unit, vendored_unit] })
+
+      allow(extractor).to receive(:git_available?).and_return(true)
+      expect(extractor).to receive(:batch_git_data).with([app_path]).and_return({})
+
+      extractor.send(:enrich_with_git_data)
+    ensure
+      FileUtils.rm_rf(gem_dir) if gem_dir
+    end
+  end
+
   describe 'git command rooting' do
     def run_command(dir, *args)
       output, status = Open3.capture2e(*args, chdir: dir)
@@ -775,6 +811,47 @@ RSpec.describe Woods::Extractor do
 
       expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:one')))).to be(true)
       expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:two')))).to be(true)
+    end
+
+    it 're-extracts a class-discovered job by class when its file names a different constant' do
+      # A job nested inside a model-directory class (`class Billing::Invoicing::
+      # Reconciler; class RefreshJob < ApplicationJob`) is found on the full
+      # path by the ApplicationJob descendant walk — never by the job-directory
+      # scan — with the model file as its file_path. Re-deriving it from that
+      # file names the file's governed constant, the enclosing PORO, and used
+      # to register a second job unit under the PORO's identifier that no full
+      # extraction emits: the wrapper-naming collision, reached incrementally.
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
+
+      model_path = File.join(tmpdir, 'app', 'models', 'billing', 'invoicing', 'reconciler.rb')
+      FileUtils.mkdir_p(File.dirname(model_path))
+      FileUtils.touch(model_path)
+      FileUtils.mkdir_p(File.join(tmpdir, 'output', 'jobs'))
+
+      stub_const('Billing::Invoicing::Reconciler::RefreshJob', Class.new)
+      job_class = Billing::Invoicing::Reconciler::RefreshJob
+
+      node = { type: :job, file_path: model_path }
+      graph = extractor.instance_variable_get(:@dependency_graph)
+      allow(graph).to receive(:node_types).with(job_class.name).and_return([:job])
+      allow(graph).to receive(:node).with(job_class.name, type: :job).and_return(node)
+      allow(graph).to receive(:register).and_call_original
+
+      wrapper = Woods::ExtractedUnit.new(type: :job, identifier: 'Billing::Invoicing::Reconciler',
+                                         file_path: model_path)
+      nested = Woods::ExtractedUnit.new(type: :job, identifier: job_class.name, file_path: model_path)
+
+      job_extractor = instance_double(Woods::Extractors::JobExtractor)
+      allow(Woods::Extractors::JobExtractor).to receive(:new).and_return(job_extractor)
+      allow(job_extractor).to receive(:extract_job_file).with(model_path).and_return(wrapper)
+      allow(job_extractor).to receive(:extract_job_class).with(job_class).and_return(nested)
+      allow(job_extractor).to receive(:discoverable_classes).and_return([job_class])
+
+      extractor.send(:re_extract_unit, job_class.name)
+
+      expect(graph).to have_received(:register).with(nested)
+      expect(graph).not_to have_received(:register).with(wrapper)
     end
   end
 

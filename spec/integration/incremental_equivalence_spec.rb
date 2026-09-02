@@ -437,6 +437,26 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'class-discovered job nested in a model file (N-1)' do
+    # spec/dummy/app/models/billing/invoicing/reconciler.rb nests
+    # `RefreshJob < ApplicationJob` inside a compact-form PORO. The full path
+    # finds the job by descendant walk with the model file as its file_path.
+    # The incremental path used to re-derive it from that file, naming the
+    # enclosing class, and registered a duplicate job unit under the PORO's
+    # identifier — flipping the node type and adding a false variant.
+    def touch_source(relative)
+      write_file(relative, "#{File.read(app_path(relative))}# touched\n")
+    end
+
+    it 'stays equivalent when the enclosing model file changes' do
+      run_sequence([-> { touch_source('app/models/billing/invoicing/reconciler.rb') }])
+    end
+
+    it 'stays equivalent when a model the nested job depends on changes' do
+      run_sequence([-> { touch_source('app/models/post.rb') }])
+    end
+  end
+
   describe 'class-based move-shape (M1)' do
     # A model file moved with its constant unchanged: the first
     # reconciliation pass sees the class as known, the prune removes it for

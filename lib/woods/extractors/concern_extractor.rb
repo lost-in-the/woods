@@ -91,19 +91,24 @@ module Woods
 
       # Extract the module name from source or infer from file path.
       #
-      # A concern file defines one concern module, possibly wrapped in
-      # namespace modules. The position-aware scan names the concern by its
-      # outer module chain — `module Gateway; module Stripe; module
-      # Refundable` yields +Gateway::Stripe::Refundable+ — and never by an
-      # inner mixin module: `module Trackable; module ClassMethods` yields
-      # +Trackable+, where the old innermost-declaration scan yielded
-      # +ClassMethods+ (#174).
+      # Zeitwerk-governed naming first (G-1): a file under a managed autoload
+      # path is named for the constant its path spells, which is what lets a
+      # concern under a mid-path `concerns/` segment (`app/models/outer/
+      # concerns/leaf.rb`, a real namespace, not an autoload root) survive a
+      # one-line class declared above it — the outer-module scan below stops
+      # at the first non-module line and would name the wrapper.
+      #
+      # Otherwise the position-aware scan names the concern by its outer
+      # module chain — `module Gateway; module Stripe; module Refundable`
+      # yields +Gateway::Stripe::Refundable+ — and never by an inner mixin
+      # module: `module Trackable; module ClassMethods` yields +Trackable+,
+      # where the old innermost-declaration scan yielded +ClassMethods+ (#174).
       #
       # @param file_path [String] Path to the concern file
       # @param source [String] Ruby source code
       # @return [String, nil] The module name
       def extract_module_name(file_path, source)
-        qualified = qualified_outer_module_name(source)
+        qualified = governed_class_name(file_path, source) || qualified_outer_module_name(source)
         return qualified if qualified
 
         # Infer from file path — strip everything up to and including the first concerns/ dir.

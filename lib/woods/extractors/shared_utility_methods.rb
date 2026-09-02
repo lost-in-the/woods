@@ -55,22 +55,30 @@ module Woods
       end
 
       # Resolve the source file for a class using reliable introspection,
-      # filtered through {#app_source?} to reject vendor/gem paths.
+      # preferring app-owned locations ({#app_source?}) over vendor/gem paths.
       #
       # Tier order:
       #   1. +const_source_location+ (returns the class definition site)
       #   2. Instance method source locations (first match wins)
       #   3. Class/singleton method source locations (first match wins)
+      #   4. The tier-1 definition site even when it is outside the app, if
+      #      that file exists — a gem-owned class (an engine model such as
+      #      +ActiveStorage::Blob+) has no app location at all, and the
+      #      convention fallback would name a file that does not exist.
+      #      Path normalization leaves such a path absolute, and
+      #      `woods:validate` reports it as gem-owned rather than missing.
       #
       # @param klass [Class, Module] The class to resolve
       # @param app_root [String] Rails.root.to_s
       # @param fallback [String] Path to return when resolution fails
       # @return [String] Resolved source path or fallback
       def resolve_source_location(klass, app_root:, fallback:)
+        definition_site = nil
+
         # Tier 1: const_source_location (most reliable — returns class definition site)
         if Object.respond_to?(:const_source_location) && klass.name
-          loc = Object.const_source_location(klass.name)&.first
-          return loc if app_source?(loc, app_root)
+          definition_site = Object.const_source_location(klass.name)&.first
+          return definition_site if app_source?(definition_site, app_root)
         end
 
         # Tier 2: Instance methods defined directly on this class
@@ -84,6 +92,10 @@ module Woods
           loc = klass.method(method_name).source_location&.first
           return loc if app_source?(loc, app_root)
         end
+
+        # Tier 4: nothing in the app defines it — the real definition site,
+        # when it exists, beats a synthesized path that does not.
+        return definition_site if definition_site && File.exist?(definition_site)
 
         fallback
       rescue StandardError

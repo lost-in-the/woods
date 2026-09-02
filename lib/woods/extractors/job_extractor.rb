@@ -53,20 +53,34 @@ module Woods
         end
 
         # Also try class-based discovery for ActiveJob
-        if defined?(ApplicationJob)
-          seen = units.to_set(&:identifier)
-          ApplicationJob.descendants.each do |job_class|
-            next if seen.include?(job_class.name)
+        seen = units.to_set(&:identifier)
+        discoverable_classes.each do |job_class|
+          next if seen.include?(job_class.name)
 
-            unit = extract_job_class(job_class)
-            if unit
-              units << unit
-              seen << unit.identifier
-            end
+          unit = extract_job_class(job_class)
+          if unit
+            units << unit
+            seen << unit.identifier
           end
         end
 
         units.compact
+      end
+
+      # Job classes the runtime vouches for beyond the job-directory scan:
+      # every named ApplicationJob descendant. A job nested inside a class
+      # that lives elsewhere (a model file) is reachable only this way.
+      #
+      # Shared with the incremental path, which re-extracts a job by class
+      # when re-deriving it from its file names a different constant — the
+      # file's governed name is then the enclosing class, not the job.
+      #
+      # @return [Array<Class>] named ApplicationJob descendants, or [] when
+      #   the app defines no ApplicationJob
+      def discoverable_classes
+        return [] unless defined?(ApplicationJob)
+
+        ApplicationJob.descendants.reject { |job_class| job_class.name.nil? }
       end
 
       # Extract a job from its file
