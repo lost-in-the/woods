@@ -122,8 +122,9 @@ module Woods
       # Find the source file for a model, handling STI and namespacing.
       #
       # Uses convention path first (most reliable for models), then falls
-      # back to introspection via {#resolve_source_location} which filters
-      # out vendor/node_modules paths.
+      # back to introspection via {#resolve_source_location}, which prefers
+      # app-owned locations and keeps a gem-owned class (an engine model) at
+      # its real gem path rather than a synthesized app path.
       def source_file_for(model)
         convention_path = Rails.root.join("app/models/#{model.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)

@@ -145,6 +145,52 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
       expect(result).to eq('/app/app/models/thing.rb')
     end
 
+    it 'returns the real definition site when it exists outside the app and nothing in the app defines the class' do
+      # An engine model (ActiveStorage::Blob, ActionText::RichText) has one
+      # definition site, in a gem. Returning the convention fallback for it
+      # fabricated `app/models/active_storage/blob.rb`, a file that does not
+      # exist, so the unit indexed with no source and `woods:validate` told the
+      # operator to re-run extraction for a path no extraction could produce.
+      gem_dir = Dir.mktmpdir('gem')
+      gem_path = File.join(gem_dir, 'app', 'models', 'engine', 'blob.rb')
+      FileUtils.mkdir_p(File.dirname(gem_path))
+      File.write(gem_path, "class Engine::Blob; end\n")
+
+      klass = double('Klass', name: 'Engine::Blob', instance_methods: [], methods: [])
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
+      allow(Object).to receive(:const_source_location).with('Engine::Blob').and_return([gem_path, 1])
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq(gem_path)
+    ensure
+      FileUtils.rm_rf(gem_dir) if gem_dir
+    end
+
+    it 'returns fallback when the definition site outside the app does not exist on disk' do
+      klass = double('Klass', name: 'Engine::Blob', instance_methods: [], methods: [])
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
+      allow(Object).to receive(:const_source_location).with('Engine::Blob').and_return(['/nonexistent/gems/blob.rb', 1])
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq(fallback)
+    end
+
+    it 'still prefers an app-owned method location over a gem definition site' do
+      # A gem class reopened in the app: the definition site is the gem, but
+      # the app file is where a reader wants to land.
+      app_method = double('Method', source_location: ['/app/app/models/thing.rb', 3])
+      klass = double('Klass', name: 'Thing', instance_methods: [:app_m], methods: [])
+      allow(klass).to receive(:instance_method).with(:app_m).and_return(app_method)
+      allow(Object).to receive(:respond_to?).and_call_original
+      allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(true)
+      allow(Object).to receive(:const_source_location).with('Thing').and_return([__FILE__, 1])
+
+      result = utility.resolve_source_location(klass, app_root: app_root, fallback: fallback)
+      expect(result).to eq('/app/app/models/thing.rb')
+    end
+
     it 'returns fallback when no methods resolve to app source' do
       klass = double('Klass', name: 'Ghost', instance_methods: [], methods: [])
       allow(Object).to receive(:respond_to?).and_call_original

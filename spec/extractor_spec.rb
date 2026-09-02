@@ -690,6 +690,34 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  describe '#enrich_with_git_data' do
+    it 'sends only paths under Rails.root to git' do
+      # A gem-owned unit (an engine model) carries its real absolute path,
+      # outside the repository. git rejects the whole `log` invocation when any
+      # pathspec is outside the repository, and batch_git_data sends 500 paths
+      # per invocation, so one gem path would erase the git metadata of 499
+      # app units.
+      require 'woods'
+      app_path = File.join(tmpdir, 'app', 'models', 'post.rb')
+      FileUtils.mkdir_p(File.dirname(app_path))
+      FileUtils.touch(app_path)
+      gem_dir = Dir.mktmpdir('gem')
+      gem_path = File.join(gem_dir, 'blob.rb')
+      FileUtils.touch(gem_path)
+
+      app_unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: app_path)
+      gem_unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Engine::Blob', file_path: gem_path)
+      extractor.instance_variable_set(:@results, { models: [app_unit, gem_unit] })
+
+      allow(extractor).to receive(:git_available?).and_return(true)
+      expect(extractor).to receive(:batch_git_data).with([app_path]).and_return({})
+
+      extractor.send(:enrich_with_git_data)
+    ensure
+      FileUtils.rm_rf(gem_dir) if gem_dir
+    end
+  end
+
   describe 'git command rooting' do
     def run_command(dir, *args)
       output, status = Open3.capture2e(*args, chdir: dir)
