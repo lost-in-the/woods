@@ -660,6 +660,209 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     end
   end
 
+  # ── EXTB-1: keywords in comments, strings, and heredocs ─────────────
+
+  describe 'keywords that are not code' do
+    it 'does not count a block keyword inside a comment (EXTB-1)' do
+      # `# do not touch production` matched `block_opener?`, inflating depth
+      # with no matching `end`: the namespace stack stopped popping, so the
+      # following namespace inherited a stale `cleanup:` prefix, and the
+      # earlier task swallowed the next one's lines as its own body.
+      path = create_file('lib/tasks/clean.rake', <<~RAKE)
+        namespace :cleanup do
+          desc 'first'
+          task stale: :environment do
+            # do not touch production
+            puts 'one'
+          end
+
+          desc 'second'
+          task fresh: :environment do
+            puts 'two'
+          end
+        end
+
+        namespace :other do
+          task third: :environment do
+            puts 'three'
+          end
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('cleanup:stale', 'cleanup:fresh', 'other:third')
+      stale = units.find { |u| u.identifier == 'cleanup:stale' }
+      expect(stale.metadata[:source_lines]).to eq(2)
+    end
+
+    it 'does not count a keyword inside a string literal (EXTB-1)' do
+      path = create_file('lib/tasks/say.rake', <<~RAKE)
+        namespace :say do
+          task hello: :environment do
+            puts 'things to do'
+          end
+        end
+
+        namespace :other do
+          task bye: :environment do
+            puts 'bye'
+          end
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('say:hello', 'other:bye')
+    end
+
+    it 'does not let an `end`-leading heredoc line truncate the task body (EXTB-1)' do
+      # The heredoc line `end of the road` matched END_LINE, popping the
+      # task's own frame: the body stopped at one line and the service call
+      # after the heredoc produced no dependency edge.
+      path = create_file('lib/tasks/hd.rake', <<~RAKE)
+        namespace :db do
+          task fix: :environment do
+            msg = <<~TXT
+              end of the road
+            TXT
+            ImportantService.call(msg)
+          end
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.identifier).to eq('db:fix')
+      expect(unit.dependencies).to include(hash_including(type: :service, target: 'ImportantService'))
+    end
+  end
+
+  # ── Assignment-form multi-line conditionals ─────────────────────────
+
+  describe 'assignment-form multi-line conditionals' do
+    # `value = if cond` opens a construct whose line-leading `end` pops a
+    # depth frame, but `block_opener?` counted `if`/`unless` only in
+    # line-leading position — the frame was never pushed, so that `end`
+    # closed the enclosing namespace one construct early and every task
+    # after it lost its prefix. `case`/`begin` matched anywhere on the
+    # line, so the same syntactic shape was counted for one keyword and
+    # not the other. Five-case matrix from the PR #276 downstream
+    # validation; every case expects `probe:alpha` and `probe:beta`.
+
+    def probe_identifiers(alpha_body)
+      path = create_file('lib/tasks/probe.rake', <<~RAKE)
+        namespace :probe do
+          task alpha: :environment do
+        #{alpha_body.gsub(/^/, '    ').chomp}
+          end
+
+          task beta: :environment do
+            puts 'beta'
+          end
+        end
+      RAKE
+      described_class.new.extract_rake_file(path).map(&:identifier)
+    end
+
+    it 'control: plain tasks keep the namespace' do
+      expect(probe_identifiers("puts 'alpha'")).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace across an assignment-form multi-line if' do
+      body = <<~RUBY
+        value = if ENV['MODE']
+          'special'
+        else
+          'plain'
+        end
+        puts value
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace across a comment containing a block keyword (EXTB-1)' do
+      body = <<~RUBY
+        # do not run this outside maintenance windows
+        puts 'alpha'
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace when the comment and the assignment-form if appear together' do
+      body = <<~RUBY
+        # do not run this outside maintenance windows
+        value = if ENV['MODE']
+          'special'
+        else
+          'plain'
+        end
+        puts value
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the namespace across an assignment-form multi-line case' do
+      body = <<~RUBY
+        value = case ENV['MODE']
+                when 'a' then 'special'
+                else 'plain'
+                end
+        puts value
+      RUBY
+      expect(probe_identifiers(body)).to contain_exactly('probe:alpha', 'probe:beta')
+    end
+
+    it 'keeps the assignment-form conditional inside the task body' do
+      body = <<~RUBY
+        value = if ENV['MODE']
+          'special'
+        else
+          'plain'
+        end
+        puts value
+      RUBY
+      path = create_file('lib/tasks/probe.rake', <<~RAKE)
+        namespace :probe do
+          task alpha: :environment do
+        #{body.gsub(/^/, '    ').chomp}
+          end
+
+          task beta: :environment do
+            puts 'beta'
+          end
+        end
+      RAKE
+      alpha = described_class.new.extract_rake_file(path).find { |u| u.identifier == 'probe:alpha' }
+      expect(alpha.source_code).to include('else').and include('puts value')
+      # The task block is the 6 body lines through the conditional's `end`
+      # plus `puts value` — a truncated walk stops at 4.
+      expect(alpha.metadata[:source_lines]).to eq(6)
+    end
+  end
+
+  # ── EXTB-9: quoted namespaced task dependencies ─────────────────────
+
+  describe 'quoted task dependencies' do
+    it 'keeps the namespace of a quoted dependency (EXTB-9)' do
+      # `dep_str.scan(/:(\w+)/)` read `'assets:precompile'` as symbol syntax
+      # and recorded only `precompile`, pointing the edge at a task that
+      # does not exist.
+      path = create_file('lib/tasks/dep.rake', <<~RAKE)
+        task deploy: 'assets:precompile' do
+          puts 'deploying'
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).find { |u| u.identifier == 'deploy' }
+
+      expect(unit.metadata[:task_dependencies]).to eq(['assets:precompile'])
+      expect(unit.dependencies).to include(
+        hash_including(type: :rake_task, target: 'assets:precompile', via: :task_dependency)
+      )
+    end
+  end
+
   # ── Zero-task diagnostic (#176) ─────────────────────────────────────
 
   describe 'zero-task diagnostic' do

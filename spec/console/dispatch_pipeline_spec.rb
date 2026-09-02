@@ -236,6 +236,89 @@ RSpec.describe Woods::Console::DispatchPipeline do
       expect { pipeline.call({}) }.not_to raise_error
     end
 
+    # ── Unexpected raises stay inside the pipeline (L9) ──────────────────
+    #
+    # The rescue list named five known error classes, so anything else — a
+    # renderer NoMethodError, an encoding oddity, a handler bug — escaped into
+    # whatever the `mcp` gem does with a raising tool block, potentially
+    # echoing `Class: message` to the client. Executor errors are already
+    # sanitized (EmbeddedExecutor#sanitize_execution_error); the pipeline's own
+    # bugs must land on the same footing: a sanitized tool error carrying no
+    # exception text, credential-scanned like every other early error.
+    describe 'unexpected exceptions' do
+      it 'renders a renderer NoMethodError as a sanitized tool error' do
+        broken_renderer = Class.new do
+          def render_default(_result)
+            nil.no_such_method
+          end
+        end.new
+        conn = conn_mgr.new(ok_result)
+        pipeline = build_pipeline(conn: conn, renderer: broken_renderer)
+
+        response = nil
+        expect { response = pipeline.call({}) }.not_to raise_error
+        expect(response).to be_error
+        expect(response.content.first[:text]).to include('demo')
+        expect(response.content.first[:text]).not_to include('no_such_method')
+        expect(response.content.first[:text]).not_to include('NoMethodError')
+      end
+
+      it 'renders an unexpected handler raise as a sanitized tool error' do
+        raising_handler = ->(_args) { raise ArgumentError, 'password=hunter2' }
+        pipeline = described_class.new(
+          tool_name: 'demo', handler: raising_handler, properties: {},
+          conn_mgr: conn_mgr.new(ok_result), ctx: ctx
+        )
+
+        response = nil
+        expect { response = pipeline.call({}) }.not_to raise_error
+        expect(response).to be_error
+        expect(response.content.first[:text]).not_to include('hunter2')
+      end
+
+      it 'credential-scans the sanitized text through the early-error path' do
+        credential = 'sk_live_abcdefghijklmnopqrstuvwx'
+        raising_handler = ->(_args) { raise ArgumentError, credential }
+        scanner = Woods::Console::CredentialScanner.new
+        response_ctx = Woods::Console::ResponseContext.build(credential_scanner: scanner)
+        pipeline = described_class.new(
+          tool_name: 'console_sql', handler: raising_handler, properties: {},
+          conn_mgr: conn_mgr.new(ok_result), ctx: response_ctx
+        )
+
+        response = pipeline.call({})
+
+        expect(response).to be_error
+        expect(response.content.first[:text]).not_to include(credential)
+      end
+
+      it 'logs the unexpected failure so operators can still debug it' do
+        raising_handler = ->(_args) { raise ArgumentError, 'boom' }
+        logger = recording_logger_class.new
+        pipeline = described_class.new(
+          tool_name: 'demo', handler: raising_handler, properties: {},
+          conn_mgr: conn_mgr.new(ok_result), ctx: ctx, logger: logger
+        )
+
+        pipeline.call({})
+
+        event = logger.events.find { |entry| entry[:event] == 'console.dispatch.unexpected_error' }
+        expect(event).not_to be_nil
+        expect(event.dig(:payload, :tool)).to eq('demo')
+        expect(event.dig(:payload, :error_class)).to eq('ArgumentError')
+      end
+
+      it 'still lets a non-StandardError abort the process' do
+        exploding_handler = ->(_args) { raise NotImplementedError, 'interface stub' }
+        pipeline = described_class.new(
+          tool_name: 'demo', handler: exploding_handler, properties: {},
+          conn_mgr: conn_mgr.new(ok_result), ctx: ctx
+        )
+
+        expect { pipeline.call({}) }.to raise_error(NotImplementedError)
+      end
+    end
+
     it 'defaults to NullResponseContext when no ctx is supplied' do
       pipeline = described_class.new(
         tool_name: 'demo', handler: handler, properties: {},

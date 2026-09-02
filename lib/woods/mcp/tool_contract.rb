@@ -35,7 +35,7 @@ module Woods
       class << self
         def apply!(server)
           server.tools.each do |name, tool|
-            tool.input_schema(close_input_schema(tool.input_schema_value.to_h))
+            tool.input_schema(close_input_schema(tool.input_schema_value.to_h, name))
             tool.output_schema(OUTPUT_SCHEMA) unless TASK_RESULT_TOOLS.include?(name)
           end
           server.configuration.validate_tool_call_results = true
@@ -60,28 +60,28 @@ module Woods
 
         private
 
-        def close_input_schema(source)
+        def close_input_schema(source, tool_name)
           schema = JSON.parse(JSON.generate(source), symbolize_names: true)
           schema.delete(:$schema)
           schema[:type] = 'object'
           schema[:properties] ||= {}
           schema[:additionalProperties] = false
-          bound_properties!(schema)
+          bound_properties!(schema, tool_name)
           schema
         end
 
-        def bound_properties!(schema)
+        def bound_properties!(schema, tool_name)
           required = Array(schema[:required]).map(&:to_s)
           schema[:properties].each do |name, property|
-            Array(property[:anyOf]).each { |branch| bound_property!(name, branch, required) }
-            bound_property!(name, property, required)
+            Array(property[:anyOf]).each { |branch| bound_property!(name, branch, required, tool_name) }
+            bound_property!(name, property, required, tool_name)
           end
         end
 
-        def bound_property!(name, property, required)
+        def bound_property!(name, property, required, tool_name)
           case property[:type]
           when 'integer'
-            minimum, maximum = INTEGER_BOUNDS.fetch(name.to_s)
+            minimum, maximum = integer_bounds(name, tool_name)
             property[:minimum] = minimum
             property[:maximum] = maximum
           when 'string'
@@ -90,6 +90,20 @@ module Woods
           when 'array'
             property[:maxItems] = 1_000
             property[:items][:maxLength] ||= 10_000 if property.dig(:items, :type) == 'string'
+          end
+        end
+
+        # Every integer argument on the tool surface must declare its own
+        # inclusive range in {INTEGER_BOUNDS}. Fail-closed at Server.build is
+        # deliberate — an unbounded integer reaches the handlers — but the
+        # failure has to name the table and the property that needs the entry,
+        # not surface as a bare KeyError far from its cause.
+        def integer_bounds(name, tool_name)
+          INTEGER_BOUNDS.fetch(name.to_s) do
+            raise ArgumentError,
+                  "#{tool_name}: integer property '#{name}' has no entry in " \
+                  "Woods::MCP::ToolContract::INTEGER_BOUNDS; add '#{name}' => [minimum, maximum] " \
+                  'to that table so the argument is bounded at the wire contract'
           end
         end
       end

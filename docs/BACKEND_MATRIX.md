@@ -150,6 +150,8 @@ SQLite metadata is always reopened as `metadata.sqlite3` beneath the supplied in
 
 **Point IDs.** Qdrant accepts only an unsigned integer or a UUID as a point id, so the adapter cannot store a Woods identifier directly. It derives a deterministic UUIDv5 from the identifier over a pinned namespace (`Qdrant::POINT_ID_NAMESPACE`) and carries the identifier in the payload under `woods_identifier`; `#search` reverse-maps hits back to identifiers and `#delete` translates through the same function. The namespace must never change: a v5 id is what makes re-embedding an unchanged unit *replace* its point instead of adding a second one. See #147.
 
+**Sharing a collection.** `#each_id` enumerates only points carrying a `woods_identifier` payload — points another writer put in the same collection are skipped, not yielded. It backs the embed pipeline's staleness sweep, which deletes anything it enumerates that extraction no longer holds, so yielding a foreign point would destroy another system's vectors on every run. The Indexer applies the same rule a second time, ignoring vanished ids shaped like a canonical UUID or an integer — shapes Woods never mints as an identifier.
+
 **Docker Compose:**
 ```yaml
 services:

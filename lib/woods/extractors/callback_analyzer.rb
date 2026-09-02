@@ -3,6 +3,8 @@
 require 'set'
 require_relative '../ast/parser'
 require_relative '../flow_analysis/operation_extractor'
+require_relative 'line_neutralizer'
+require_relative 'reference_patterns'
 
 module Woods
   module Extractors
@@ -32,7 +34,15 @@ module Woods
       MULTI_COLUMN_WRITERS = %w[update_columns assign_attributes].freeze
 
       # Async enqueue methods that indicate a job is being dispatched.
-      ASYNC_METHODS = %w[perform_later perform_async perform_in perform_at].freeze
+      ASYNC_METHODS = ReferencePatterns::ENQUEUE_METHODS
+
+      # Assignment to a column through +self+: plain, conditional (`||=`,
+      # `&&=`), or arithmetic (`+=`, `-=`, `*=`, `/=`). `self.token ||=
+      # SecureRandom.uuid` in a before_create is arguably the most common
+      # callback body in Rails and reported no write at all (EXTA-6). The
+      # lookahead rejects `==` (comparison) and `=~` (regex match), the
+      # latter having been read as a write.
+      SELF_ASSIGNMENT_PATTERN = %r{self\.(\w+)\s*(?:\|\||&&|[+\-*/])?=(?!=|~)}
 
       # Pre-compiled regex patterns (avoid dynamic regex construction in hot loops)
       SINGLE_COLUMN_WRITER_PATTERNS = SINGLE_COLUMN_WRITERS.to_h do |w|
@@ -43,7 +53,7 @@ module Woods
         [w, /\b#{Regexp.escape(w)}\s*\(([^)]+)\)/m]
       end.freeze
 
-      ASYNC_PATTERN = /(\w+(?:Job|Worker))\.(?:#{ASYNC_METHODS.map { |m| Regexp.escape(m) }.join('|')})/
+      ASYNC_PATTERN = ReferencePatterns::JOB_ENQUEUE
 
       DB_READ_PATTERNS = DB_READ_METHODS.to_h do |m|
         [m, /\.#{Regexp.escape(m)}\b/]
@@ -74,7 +84,7 @@ module Woods
 
         return callback_hash.merge(side_effects: empty_side_effects) if method_node.nil?
 
-        method_source = method_source_from_node(method_node)
+        method_source = scannable_source(method_source_from_node(method_node))
         return callback_hash.merge(side_effects: empty_side_effects) if method_source.nil?
 
         callback_hash.merge(
@@ -130,6 +140,24 @@ module Woods
         lines[start_idx..end_idx].join
       end
 
+      # Neutralize a method body before the regex scans run over it.
+      #
+      # The body is located by AST but scanned by regex, so
+      # `logger.info "self.status = pending"` and a commented-out
+      # `# self.status = 'x'` both reported a column write (EXTA-8).
+      # {LineNeutralizer} blanks comment and string-literal bodies, which is
+      # exactly the text a side-effect scan must not believe; identifiers,
+      # call chains, and symbols — everything the patterns actually match —
+      # survive untouched.
+      #
+      # @param method_source [String, nil]
+      # @return [String, nil]
+      def scannable_source(method_source)
+        return nil if method_source.nil?
+
+        LineNeutralizer.neutralize_lines(method_source).join
+      end
+
       # Check if a filter string looks like a valid Ruby method name.
       # Rejects proc/lambda string representations and other non-method filters.
       #
@@ -150,8 +178,8 @@ module Woods
       def detect_columns_written(method_source)
         columns = Set.new
 
-        # Pattern: self.col = value (direct assignment, not ==)
-        method_source.scan(/self\.(\w+)\s*=(?!=)/).flatten.each do |col|
+        # Pattern: self.col = value (plain, ||=, &&=, +=, … — never == or =~)
+        method_source.scan(SELF_ASSIGNMENT_PATTERN).flatten.each do |col|
           columns << col if @column_names.include?(col)
         end
 
@@ -186,22 +214,24 @@ module Woods
 
       # Detect service objects called by the callback method.
       #
-      # Matches classes ending in Service followed by a method call.
+      # Matches classes ending in Service followed by a method call,
+      # namespace included (EXTA-2).
       #
       # @param method_source [String]
       # @return [Array<String>]
       def detect_services_called(method_source)
-        method_source.scan(/(\w+Service)(?:\.|::)/).flatten.uniq.sort
+        method_source.scan(ReferencePatterns::SERVICE_REFERENCE).flatten.uniq.sort
       end
 
       # Detect mailers triggered by the callback method.
       #
-      # Matches classes ending in Mailer followed by a method call.
+      # Matches classes ending in Mailer followed by a method call,
+      # namespace included (EXTA-2).
       #
       # @param method_source [String]
       # @return [Array<String>]
       def detect_mailers_triggered(method_source)
-        method_source.scan(/(\w+Mailer)\./).flatten.uniq.sort
+        method_source.scan(ReferencePatterns::MAILER_REFERENCE).flatten.uniq.sort
       end
 
       # Detect database read operations in the callback method.

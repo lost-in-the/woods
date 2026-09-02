@@ -199,6 +199,25 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(units.first.identifier).to eq('order_created')
     end
 
+    it 'detects the paren form broadcast(:event, ...) (EXTB-3)' do
+      # The publisher regex required whitespace after the method name, so
+      # Wisper's README-canonical call registered no publisher — and with no
+      # subscriber naming the event, no event unit existed at all.
+      create_file('app/services/order_service.rb', <<~RUBY)
+        class OrderService
+          include Wisper::Publisher
+
+          def call
+            broadcast(:order_created, order)
+            publish :order_logged
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('order_created', 'order_logged')
+    end
+
     it 'detects broadcast calls as publishers in Wisper context' do
       create_file('app/services/order_service.rb', <<~RUBY)
         class OrderService

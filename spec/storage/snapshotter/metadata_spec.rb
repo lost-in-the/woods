@@ -138,6 +138,101 @@ RSpec.describe Woods::Storage::Snapshotter::Metadata do
           .to raise_error(Woods::MCP::UnsupportedArtifact, /schema_version 999/)
       end
     end
+
+    # STO-4. The Vector twin got typed guards (M3/M10) for exactly this
+    # contract: a corrupt dump raises UnsupportedArtifact naming the path, not
+    # a raw stdlib exception the MCP bootstrapper has no branch for.
+    context 'when the dump is truncated mid-records' do
+      let(:dump_dir) { artifact.new_dump_dir }
+
+      before do
+        # Header intact, last record cut short: the interrupted-write shape.
+        described_class.dump(populated_store, artifact, dump_dir)
+        path = dump_dir.join('metadata.msgpack').to_s
+        bytes = File.binread(path)
+        File.binwrite(path, bytes.byteslice(0, bytes.bytesize - 20))
+        artifact.promote(dump_dir)
+      end
+
+      it 'raises UnsupportedArtifact rather than EOFError' do
+        expect { described_class.load_or_empty(artifact) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /truncated/)
+      end
+
+      it 'names the dump path' do
+        expect { described_class.load_or_empty(artifact) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /metadata\.msgpack/)
+      end
+    end
+
+    context 'when the records are malformed msgpack' do
+      let(:dump_dir) { artifact.new_dump_dir }
+
+      before do
+        dump_dir.mkpath
+        File.open(dump_dir.join('metadata.msgpack').to_s, 'wb') do |io|
+          packer = MessagePack::Packer.new(io)
+          packer.write('magic' => 'WMD1', 'schema_version' => 1, 'record_count' => 1,
+                       'gem_version' => '1.2.0', 'created_at' => '2026-01-01T00:00:00Z')
+          packer.flush
+          io.write("\xC1".b) # never-used msgpack byte
+        end
+        artifact.promote(dump_dir)
+      end
+
+      it 'raises UnsupportedArtifact' do
+        expect { described_class.load_or_empty(artifact) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact)
+      end
+    end
+
+    context 'when the header omits schema_version' do
+      let(:dump_dir) { artifact.new_dump_dir }
+
+      before do
+        write_raw_dump(dump_dir,
+                       { 'magic' => 'WMD1', 'record_count' => 0,
+                         'gem_version' => '1.2.0', 'created_at' => '2026-01-01T00:00:00Z' })
+        artifact.promote(dump_dir)
+      end
+
+      it 'raises UnsupportedArtifact rather than NoMethodError' do
+        expect { described_class.load_or_empty(artifact) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /schema_version/)
+      end
+    end
+
+    context 'when the header omits record_count' do
+      let(:dump_dir) { artifact.new_dump_dir }
+
+      before do
+        write_raw_dump(dump_dir,
+                       { 'magic' => 'WMD1', 'schema_version' => 1,
+                         'gem_version' => '1.2.0', 'created_at' => '2026-01-01T00:00:00Z' })
+        artifact.promote(dump_dir)
+      end
+
+      it 'raises UnsupportedArtifact rather than NoMethodError' do
+        expect { described_class.load_or_empty(artifact) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /record_count/)
+      end
+    end
+
+    context 'when the header carries a non-integer record_count' do
+      let(:dump_dir) { artifact.new_dump_dir }
+
+      before do
+        write_raw_dump(dump_dir,
+                       { 'magic' => 'WMD1', 'schema_version' => 1, 'record_count' => 'lots',
+                         'gem_version' => '1.2.0', 'created_at' => '2026-01-01T00:00:00Z' })
+        artifact.promote(dump_dir)
+      end
+
+      it 'raises UnsupportedArtifact' do
+        expect { described_class.load_or_empty(artifact) }
+          .to raise_error(Woods::MCP::UnsupportedArtifact, /record_count/)
+      end
+    end
   end
 
   describe '.dump' do

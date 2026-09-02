@@ -560,6 +560,18 @@ module Woods
         formats.uniq
       end
 
+      # Strong-parameter declarations, keyed by the `*_params` method name.
+      #
+      # Each entry is `{ model:, permitted: }`. `permitted` is the list of
+      # keys named at the TOP level of the `permit`/`expect` call — scalar
+      # symbols and hash keys alike — and never the members of a nested list
+      # or hash: `permit(:title, tags: [], meta: {seo: [:keyword]})` yields
+      # `%w[title tags meta]`. See {#permitted_keys}.
+      #
+      # @param controller [Class, nil] Controller class (used only to locate
+      #   the source when +source+ is not supplied)
+      # @param source [String, nil] Controller source code
+      # @return [Hash{String => Hash}] `{ method_name => { model:, permitted: } }`
       def extract_permitted_params(controller, source = nil)
         if source.nil?
           source_path = source_file_for(controller)
@@ -578,24 +590,60 @@ module Woods
         # The /m flag plus a [\s\S] capture let the permit list cross
         # newlines — the common style in large controllers (M2); without
         # them `permit(` followed by a newline matched nothing and
-        # permitted_params came back empty.
-        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.require\(:(\w+)\)\.permit\(([\s\S]*?)\)/m) do |method, model, permitted|
-          params[method] = {
-            model: model,
-            permitted: permitted.scan(/:(\w+)/).flatten
-          }
+        # permitted_params came back empty. The `\s*` around each chain joint
+        # covers the fluent style the M2 fix missed (EXTA-5): the list could
+        # cross newlines but the call chain itself still could not, so
+        # `params.require(:post)\n  .permit(...)` matched nothing.
+        source.scan(
+          /def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}
+           params\s*\.\s*require\(:(\w+)\)\s*\.\s*permit\(([\s\S]*?)\)/xm
+        ) do |method, model, permitted|
+          params[method] = { model: model, permitted: permitted_keys(permitted) }
         end
 
         # Rails 8's params.expect(post: [:title, :body]) replacement for
         # require(...).permit(...). Same multi-line capture as above (M2).
-        source.scan(/def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}params\.expect\(\s*(\w+):\s*\[([\s\S]*?)\]\s*\)/m) do |method, model, permitted|
-          params[method] ||= {
-            model: model,
-            permitted: permitted.scan(/:(\w+)/).flatten
-          }
+        source.scan(
+          /def\s+(\w+_params)\b#{PARAMS_METHOD_BODY}
+           params\s*\.\s*expect\(\s*(\w+):\s*\[([\s\S]*?)\]\s*\)/xm
+        ) do |method, model, permitted|
+          params[method] ||= { model: model, permitted: permitted_keys(permitted) }
         end
 
         params
+      end
+
+      # The top-level keys of a permit/expect argument list.
+      #
+      # The contract is deliberately flat and shallow: every key the caller
+      # names at the top level, whether declared as a scalar symbol
+      # (`:title`) or as a hash key (`tags: []`, `meta: {…}`), and nothing
+      # from inside a nested list or hash. Scanning for `:(\w+)` alone
+      # produced neither contract — hash keys, which is how every array and
+      # nested param is declared, were dropped while their nested leaves
+      # leaked in flat, so `permit(:title, tags: [], meta: {seo: [:keyword]})`
+      # reported `title, keyword` (EXTA-12).
+      #
+      # @param list [String] Raw text between `permit(`/`expect(…[` and its close
+      # @return [Array<String>] Top-level key names, in source order
+      def permitted_keys(list)
+        top_level_arguments(list).scan(/:(\w+)|(\w+):/).map { |symbol, key| symbol || key }.uniq
+      end
+
+      # Drop everything inside nested `[...]` / `{...}` groups, leaving the
+      # argument list's own tokens.
+      #
+      # @param list [String]
+      # @return [String]
+      def top_level_arguments(list)
+        depth = 0
+        list.each_char.with_object(+'') do |char, kept|
+          case char
+          when '[', '{' then depth += 1
+          when ']', '}' then depth -= 1 if depth.positive?
+          else kept << char if depth.zero?
+          end
+        end
       end
 
       # ──────────────────────────────────────────────────────────────────────

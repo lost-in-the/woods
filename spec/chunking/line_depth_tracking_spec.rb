@@ -136,6 +136,16 @@ RSpec.describe Woods::Chunking::LineDepthTracking do
     it 'ignores keyword-prefixed identifiers' do
       expect(tracker.send(:block_opener?, 'x = format(template)')).to be(false)
     end
+
+    it 'ignores a =begin block-comment marker (STO-3)' do
+      # `=begin` matched the assignment-position branch (`=\s*begin`), so
+      # every block comment added a permanent +1 to the depth count.
+      expect(tracker.send(:block_opener?, '=begin')).to be(false)
+    end
+
+    it 'ignores a =end block-comment marker (STO-3)' do
+      expect(tracker.send(:block_opener?, '=end')).to be(false)
+    end
   end
 
   describe '#block_terminator?' do

@@ -1085,7 +1085,11 @@ RSpec.describe Woods::MCP::IndexReader do
     end
 
     it 'does not name Regexp::TimeoutError in a rescue clause' do
-      source = File.read(File.expand_path('../../lib/woods/mcp/index_reader.rb', __dir__))
+      # Gem source, not a Woods artifact — but the same locale trap applies: a
+      # bare File.read tags the bytes with the process default external
+      # encoding, so this guard died with "invalid byte sequence in US-ASCII"
+      # under a C locale (R2-3). The source is UTF-8 on disk; say so.
+      source = File.read(File.expand_path('../../lib/woods/mcp/index_reader.rb', __dir__), encoding: 'UTF-8')
 
       expect(source).not_to match(/rescue[^\n]*Regexp::TimeoutError/)
     end

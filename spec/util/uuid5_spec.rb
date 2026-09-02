@@ -103,6 +103,22 @@ RSpec.describe Woods::Util::UUID5 do
       expect(described_class.generate(described_class::NAMESPACE_DNS, latin1))
         .to eq(described_class.generate(described_class::NAMESPACE_DNS, utf8))
     end
+
+    # STO-13. ASCII-8BIT is not an encoding to transcode *from* — it is
+    # "these are already bytes". `String#encode` treats it as one and raises
+    # UndefinedConversionError on any high byte, which contradicts this
+    # method's own contract of hashing bytes.
+    it 'hashes a BINARY-tagged name by its bytes rather than raising' do
+      utf8 = 'Modèle'
+
+      expect(described_class.generate(described_class::NAMESPACE_DNS, utf8.b))
+        .to eq(described_class.generate(described_class::NAMESPACE_DNS, utf8))
+    end
+
+    it 'hashes a BINARY-tagged name that is not valid UTF-8' do
+      expect { described_class.generate(described_class::NAMESPACE_DNS, "\xC3".b) }
+        .not_to raise_error
+    end
   end
 
   describe '.uuid?' do

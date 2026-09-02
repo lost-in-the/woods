@@ -36,6 +36,7 @@ module Woods
       # DDL operations that take a table name as the first symbol argument
       TABLE_OPERATIONS = %w[
         create_table
+        change_table
         drop_table
         rename_table
         add_column
@@ -56,7 +57,12 @@ module Woods
         change_column_null
       ].freeze
 
-      # Column type methods used inside create_table blocks
+      # Block-form DDL openers whose `do |t|` body declares columns. Only
+      # `create_table` was scanned, so a `change_table :orders do |t|` block
+      # contributed neither a table nor a column (EXTB-18).
+      TABLE_BLOCK_OPENERS = '(?:create_table|change_table)'
+
+      # Column type methods used inside create_table and change_table blocks
       COLUMN_TYPE_METHODS = %w[
         string integer float decimal boolean binary text
         date datetime time timestamp
@@ -265,7 +271,7 @@ module Woods
           { table: table, column: column, type: type }
         end
 
-        # t.type :column inside create_table blocks
+        # t.type :column inside create_table/change_table blocks
         extract_block_columns(source, columns)
 
         # t.column :name, :type
@@ -321,7 +327,7 @@ module Woods
           { table: table, reference: reference }
         end
 
-        # t.references :ref inside create_table blocks
+        # t.references :ref inside create_table/change_table blocks
         extract_block_references(source, refs)
 
         refs
@@ -341,14 +347,14 @@ module Woods
       # Block Column / Reference Parsing
       # ──────────────────────────────────────────────────────────────────────
 
-      # Extract t.type :column declarations inside create_table blocks.
+      # Extract t.type :column declarations inside create_table/change_table blocks.
       #
       # @param source [String] Ruby source code
       # @param columns [Array<Hash>] Accumulator array
       # @return [void]
       def extract_block_columns(source, columns)
-        # Find create_table blocks and parse t.type :column patterns
-        source.scan(/create_table\s+:(\w+).*?do\s*\|(\w+)\|(.+?)^\s*end/m).each do |table, var, block|
+        # Find create_table/change_table blocks and parse t.type :column patterns
+        source.scan(/#{TABLE_BLOCK_OPENERS}\s+:(\w+).*?do\s*\|(\w+)\|(.+?)^\s*end/m).each do |table, var, block|
           type_pattern = COLUMN_TYPE_METHODS.join('|')
           block.scan(/#{var}\.(#{type_pattern})\s+:(\w+)/).each do |type, column|
             columns << { table: table, column: column, type: type }
@@ -356,26 +362,26 @@ module Woods
         end
       end
 
-      # Extract t.column :name, :type declarations inside create_table blocks.
+      # Extract t.column :name, :type declarations inside create_table/change_table blocks.
       #
       # @param source [String] Ruby source code
       # @param columns [Array<Hash>] Accumulator array
       # @return [void]
       def extract_explicit_column_calls(source, columns)
-        source.scan(/create_table\s+:(\w+).*?do\s*\|(\w+)\|(.+?)^\s*end/m).each do |table, var, block|
+        source.scan(/#{TABLE_BLOCK_OPENERS}\s+:(\w+).*?do\s*\|(\w+)\|(.+?)^\s*end/m).each do |table, var, block|
           block.scan(/#{var}\.column\s+:(\w+)\s*,\s*:(\w+)/).each do |column, type|
             columns << { table: table, column: column, type: type }
           end
         end
       end
 
-      # Extract t.references declarations inside create_table blocks.
+      # Extract t.references declarations inside create_table/change_table blocks.
       #
       # @param source [String] Ruby source code
       # @param refs [Array<Hash>] Accumulator array
       # @return [void]
       def extract_block_references(source, refs)
-        source.scan(/create_table\s+:(\w+).*?do\s*\|(\w+)\|(.+?)^\s*end/m).each do |table, var, block|
+        source.scan(/#{TABLE_BLOCK_OPENERS}\s+:(\w+).*?do\s*\|(\w+)\|(.+?)^\s*end/m).each do |table, var, block|
           block.scan(/#{var}\.references\s+:(\w+)/).each do |reference,|
             refs << { table: table, reference: reference }
           end

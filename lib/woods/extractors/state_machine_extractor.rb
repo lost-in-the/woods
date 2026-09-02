@@ -273,6 +273,14 @@ module Woods
       # Only processes lines after detecting +event :name do+, and closes the event
       # when the matching +end+ is found.
       #
+      # A blockless declaration (`event :noop`) is complete on its own line and
+      # is emitted immediately — the same discipline
+      # {FactoryExtractor#match_factory} follows. Leaving it "current" with
+      # depth 0 dropped it silently when the next `event` replaced it, and the
+      # enclosing block's `end` drove depth negative, after which every later
+      # event failed the `depth.zero?` guard (EXTB-17). Depth is clamped at
+      # zero so an unbalanced `end` cannot poison the rest of the scan.
+      #
       # @param source [String] Source code to parse
       # @param event_pattern [Regexp] Pattern to match event declaration (must capture event name in group 1)
       # @return [Array<Hash>] Events with :name and :transitions keys
@@ -286,8 +294,13 @@ module Woods
           next if stripped.start_with?('#')
 
           if depth.zero? && (m = stripped.match(event_pattern))
-            current_event = { name: m[1], transitions: [] }
-            depth = 1 if stripped.include?(' do') || stripped.end_with?('do')
+            event = { name: m[1], transitions: [] }
+            if stripped.include?(' do') || stripped.end_with?('do')
+              current_event = event
+              depth = 1
+            else
+              events << event
+            end
             next
           end
 
@@ -300,7 +313,7 @@ module Woods
           if stripped.match?(/\bdo\b/) && depth.positive?
             depth += 1
           elsif stripped == 'end'
-            depth -= 1
+            depth -= 1 if depth.positive?
             if depth.zero?
               events << current_event
               current_event = nil

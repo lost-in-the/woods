@@ -186,8 +186,10 @@ module Woods
         # ArgumentError from OpenAI.new(**opts) wasn't a BootstrapError
         # and the top-level rescue in exe/woods-mcp wouldn't catch it.
         if provider_sym == :openai
+          # Strip-aware, matching the resolver-default path (:321): a
+          # whitespace-only key is not a credential on either path (R1-5).
           api_key = env.fetch('OPENAI_API_KEY', nil)
-          if api_key.nil? || api_key.empty?
+          if api_key.nil? || api_key.strip.empty?
             raise Woods::MCP::MissingCredential.new(
               'woods.json says the index was embedded with OpenAI but OPENAI_API_KEY is unset. ' \
               'Export the key before starting the MCP server, or re-embed with a different provider.',

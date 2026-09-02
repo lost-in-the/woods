@@ -340,6 +340,76 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
       expect(result['comment_params']).to eq(model: 'comment', permitted: %w[body author])
     end
+
+    it 'captures a fluent-chained require(...)\n.permit(...) (EXTA-5)' do
+      # The M2 fix let the argument *list* cross newlines; the call chain
+      # itself still had to be on one line, so the RuboCop-endorsed
+      # multiline-chain style yielded an empty permitted_params.
+      source = <<~RUBY
+        def post_params
+          params.require(:post)
+                .permit(:title, :body)
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title body])
+    end
+
+    it 'captures a fully fluent params\n.require\n.permit chain (EXTA-5)' do
+      source = <<~RUBY
+        def post_params
+          params
+            .require(:post)
+            .permit(:title, :body)
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title body])
+    end
+
+    it 'captures a fluent-chained params.expect(...) (EXTA-5)' do
+      source = <<~RUBY
+        def post_params
+          params
+            .expect(post: [:title, :body])
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title body])
+    end
+
+    it 'captures hash-form keys and drops their nested leaves (EXTA-12)' do
+      # The list was neither the top-level contract nor a flattened one:
+      # `tags`/`meta` (the actual permitted keys) were dropped while the
+      # deeply nested `keyword` leaked in. The contract is now top-level only.
+      source = <<~RUBY
+        def post_params
+          params.require(:post).permit(:title, tags: [], meta: {seo: [:keyword]})
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title tags meta])
+    end
+
+    it 'captures hash-form keys inside params.expect (EXTA-12)' do
+      source = <<~RUBY
+        def post_params
+          params.expect(post: [:title, tags: []])
+        end
+      RUBY
+
+      result = extractor.send(:extract_permitted_params, nil, source)
+
+      expect(result['post_params']).to eq(model: 'post', permitted: %w[title tags])
+    end
   end
 
   # ── extract_metadata — own actions only ──────────────────────────────

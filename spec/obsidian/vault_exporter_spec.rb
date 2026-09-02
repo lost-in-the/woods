@@ -201,6 +201,44 @@ RSpec.describe Woods::Obsidian::VaultExporter do
     end
   end
 
+  # EXP-5. Every public IndexReader accessor self-refreshes when the published
+  # generation moves, and the reader assigns pinning responsibility to direct
+  # callers — so an extraction publishing mid-export used to build the notes,
+  # the indexes and the sweep set from two different generations, which the
+  # "byte-identical across runs" contract cannot survive.
+  describe 'generation pinning' do
+    it 'performs every index read inside one pinned generation' do
+      pinned = false
+      reads = []
+
+      allow(reader).to receive(:with_pinned_generation) do |&block|
+        pinned = true
+        begin
+          block.call
+        ensure
+          pinned = false
+        end
+      end
+      allow(reader).to receive(:raw_graph_data) do
+        reads << pinned
+        graph
+      end
+      allow(reader).to receive(:list_units) do
+        reads << pinned
+        index_entries
+      end
+      allow(reader).to receive(:find_unit) do |id|
+        reads << pinned
+        units[id]
+      end
+
+      exporter.export_all
+
+      expect(reads).not_to be_empty
+      expect(reads).to all(be(true))
+    end
+  end
+
   describe 'machine sidecar' do
     it 'writes a manifest with bijective notes/paths maps and verbatim graph copies' do
       exporter.export_all
@@ -310,6 +348,20 @@ RSpec.describe Woods::Obsidian::VaultExporter do
 
       expect(exporter.export_all[:swept]).to eq(0) # guard blocks
       expect(exporter(force_purge: true).export_all[:swept]).to be >= 10
+    end
+
+    # EXP-6. The vault path was interpolated into the glob pattern unescaped,
+    # so "[", "]", "{", "}", "*" and "?" in a folder name (`my [work] vault`
+    # is an ordinary human folder name) made `managed_notes` match nothing.
+    # The sweep then saw zero managed notes and deleted nothing, forever.
+    it 'sweeps a stale note when the vault path contains glob metacharacters' do
+      @vault = File.join(File.dirname(@vault), 'my [work] {2} vault')
+
+      exporter.export_all
+      write_managed_note('models/Deleted.md', marker: true)
+
+      expect(exporter.export_all[:swept]).to eq(1)
+      expect(File).not_to exist(File.join(@vault, 'models/Deleted.md'))
     end
   end
 

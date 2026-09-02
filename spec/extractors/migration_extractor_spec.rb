@@ -444,6 +444,35 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
       )
     end
 
+    # EXTB-18. `change_table` was absent from TABLE_OPERATIONS and the three
+    # block scanners anchored on `create_table` only, so a change_table
+    # migration produced neither a table nor a column — and the table got no
+    # `:table_name` model edge.
+    it 'extracts tables and columns from a change_table block' do
+      path = create_file('db/migrate/20240101000000_extend_orders.rb', <<~RUBY)
+        class ExtendOrders < ActiveRecord::Migration[7.1]
+          def change
+            change_table :orders do |t|
+              t.string :notes
+              t.column :priority, :integer
+              t.references :shipper
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_migration_file(path)
+
+      expect(unit.metadata[:tables_affected]).to include('orders')
+      expect(unit.metadata[:columns_added]).to include(
+        { table: 'orders', column: 'notes', type: 'string' },
+        { table: 'orders', column: 'priority', type: 'integer' }
+      )
+      expect(unit.metadata[:references_added]).to include(
+        { table: 'orders', reference: 'shipper' }
+      )
+    end
+
     it 'extracts columns removed' do
       path = create_file('db/migrate/20240101000000_remove_cols.rb', <<~RUBY)
         class RemoveCols < ActiveRecord::Migration[7.1]

@@ -135,6 +135,15 @@ The heartbeat republishes the **last** state, not `running`. A degraded daemon
 is still degraded between events, and saying otherwise is the one thing this
 file exists to prevent.
 
+The same tick is also when carried-forward paths get retried, but the retry
+drain runs on **its own thread**, not the heartbeat's. Running it inline meant a
+retried storm (`extract_all` on a large host) stopped the re-stamping and the
+`PipelineLock` touch for its whole duration: past `LOCK_STALE_TIMEOUT` (600 s)
+any waiting writer retires the live lock and two writers clobber one index, and
+past `STALE_AFTER` (900 s) `woods:incremental` stops standing down at the same
+moment. `drain`'s own `try_lock` still refuses overlapping drains, so at most
+one retry is ever in flight.
+
 ## Startup is not a clean slate
 
 A daemon that only reacts to events it personally witnessed is stale the moment
@@ -145,7 +154,12 @@ is alive, so *alive has to mean covered*.
 So `run` reconciles before it waits. The watermark is `generation.json`'s mtime, written last on every successful run, so it means "when this index was last
 known good", and everything modified since is uncovered, whoever changed it.
 With no generation file there is no index, every file is uncovered, and the
-storm threshold correctly turns that into one full extraction.
+storm threshold correctly turns that into one full extraction. A marker whose
+payload pointer no longer resolves counts as no index too: the marker can
+outlive the directory it names (a partial restore from a CI artifact, an
+external cleanup targeting the large directories), and readers deliberately
+degrade a dangling pointer to the index root, so trusting the mtime there would
+report "current at startup" over a directory holding nothing.
 
 **The watcher thread starts before this reconciliation runs, not after.** A
 file saved while catch-up's own extraction is still in flight (which can take

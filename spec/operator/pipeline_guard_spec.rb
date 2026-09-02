@@ -49,13 +49,18 @@ RSpec.describe Woods::Operator::PipelineGuard do
     end
 
     it 'fails closed (denies) when the state file is unreadable' do
+      # chmod 0o000 does not stop root, so this example can only prove the
+      # unreadable branch as an unprivileged user (container runs are root).
+      skip 'requires non-root: chmod 0o000 does not stop root from reading' if Process.uid.zero?
+
       state_path = File.join(state_dir, 'pipeline_guard.json')
       File.write(state_path, JSON.generate('extraction' => (Time.now - 301).iso8601))
       File.chmod(0o000, state_path)
 
       expect(guard.allow?(:extraction)).to be false
     ensure
-      File.chmod(0o600, state_path)
+      # nil when the skip above fired before the assignment.
+      File.chmod(0o600, state_path) if state_path
     end
 
     it 'still allows when the state file is simply missing' do
@@ -91,12 +96,15 @@ RSpec.describe Woods::Operator::PipelineGuard do
     end
 
     it 'reports :permission_denied for a state file this process cannot read, distinct from :corrupt' do
+      skip 'requires non-root: chmod 0o000 does not stop root from reading' if Process.uid.zero?
+
       File.write(state_path, JSON.generate('extraction' => Time.now.iso8601))
       File.chmod(0o000, state_path)
 
       expect(guard.state_status).to eq(:permission_denied)
     ensure
-      File.chmod(0o600, state_path)
+      # Never written when the skip above fired.
+      File.chmod(0o600, state_path) if File.exist?(state_path)
     end
   end
 

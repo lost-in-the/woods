@@ -4,6 +4,12 @@ require 'json'
 require 'time'
 require_relative 'store'
 
+# Woods::SessionTracerError is defined in the entry point; required here so
+# this file can be loaded directly. Without it a narrow entry point (a custom
+# boot, a script) turned the documented "add `gem \"redis\"`" error into a
+# NameError naming a missing constant (INF-8).
+require 'woods'
+
 module Woods
   module SessionTracer
     # Redis-backed session store using Lists plus a recency ZSET.

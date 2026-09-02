@@ -16,11 +16,19 @@ module Woods
     #
     # Persistent backends (pgvector, Qdrant, SQLite) never touch the Snapshotter.
     # Passing one to {Snapshotter::Vector.dump} or {Snapshotter::Metadata.dump} raises
-    # {InapplicableBackend} immediately — see each adapter's +validate_store!+,
-    # which checks *ownership* of the persistence-seam methods rather than
-    # +respond_to?+ (B-108): both are defined as stubs on
-    # {VectorStore::Interface} / {MetadataStore::Interface}, so a durable
-    # adapter that merely includes the interface would otherwise pass.
+    # {InapplicableBackend} immediately — see each adapter's +validate_store!+.
+    #
+    # The two checks are deliberately different, because the two interfaces
+    # are:
+    # - {Snapshotter::Vector.validate_store!} checks *ownership* of
+    #   +#each_entry+ rather than +respond_to?+ (B-108), because
+    #   {VectorStore::Interface} defines it as a raising stub, so a durable
+    #   adapter that merely includes the interface would otherwise pass.
+    # - {Snapshotter::Metadata.validate_store!} can use plain +respond_to?+
+    #   only because {MetadataStore::Interface} defines neither +#each_entry+
+    #   nor +#bulk_load+ — the seams exist on +InMemory+ alone. Adding either
+    #   stub to that interface would silently convert this check into the
+    #   B-108 bug, so the ownership check must move with it (STO-12).
     #
     # {Woods::Embedding::Indexer#persist_snapshot} is the write-side caller,
     # invoked at the end of a successful {Woods::Embedding::Indexer#index_all}

@@ -259,6 +259,10 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     end
 
     it 'fails closed without starting untrackable work' do
+      # The read-only index dir is simulated with chmod 0o555, which root
+      # ignores — the store stays writable and no refusal is produced.
+      skip 'requires non-root: chmod 0o555 does not stop root from writing' if Process.uid.zero?
+
       allow(fake_extractor).to receive(:extract_all).and_return(true)
       allow(Woods.configuration).to receive(:output_dir).and_return(nil)
       server

@@ -248,6 +248,111 @@ RSpec.describe Woods::Ast::Parser do
       end
     end
 
+    describe 'call arguments' do
+      # EXTB-5. Call arguments were flattened to source text and never became
+      # children, so anything nested inside them — most visibly a `private def`
+      # body — was invisible to every tree walker.
+      it 'converts a def passed as an argument into a child node' do
+        source = <<~RUBY
+          class Foo
+            def visible
+              Public.call
+            end
+
+            private def hidden
+              Secret.reveal
+            end
+          end
+        RUBY
+
+        root = parser.parse(source)
+
+        expect(root.find_all(:def).map(&:method_name)).to include('hidden')
+      end
+
+      it 'converts call arguments into children so nested calls are walkable' do
+        root = parser.parse('foo(Bar.baz)')
+
+        nested = root.find_all(:send).find { |n| n.method_name == 'baz' }
+
+        expect(nested).not_to be_nil
+        expect(nested.receiver).to eq('Bar')
+      end
+
+      it 'keeps the arguments text field alongside the argument children' do
+        root = parser.parse('foo(Bar.baz)')
+
+        outer = root.find_all(:send).find { |n| n.method_name == 'foo' }
+
+        expect(outer.arguments).to eq(['Bar.baz'])
+      end
+    end
+
+    describe 'unless nodes' do
+      # EXTB-4. `Prism::UnlessNode` shares `convert_prism_if`; its body runs
+      # when the predicate is *false*, so it belongs in the else slot.
+      it 'places the unless body in the else slot and the else clause in the then slot' do
+        source = <<~RUBY
+          unless admin?
+            audit
+          else
+            charge
+          end
+        RUBY
+
+        root = parser.parse(source)
+        if_node = root.find_first(:if)
+
+        expect(if_node.source).to eq('admin?')
+        expect(if_node.children[1].find_first(:send).method_name).to eq('charge')
+        expect(if_node.children[2].find_first(:send).method_name).to eq('audit')
+      end
+
+      it 'leaves a nil then hole for the modifier form' do
+        root = parser.parse('charge unless admin?')
+        if_node = root.find_first(:if)
+
+        expect(if_node.children[1]).to be_nil
+        expect(if_node.children[2].find_first(:send).method_name).to eq('charge')
+      end
+    end
+
+    describe 'case nodes' do
+      # EXTB-15. The predicate slot is positional: a predicate-less `case`
+      # keeps a nil hole so consumers can still `drop(1)` for the branches.
+      it 'keeps a nil predicate hole when the case has no predicate' do
+        source = <<~RUBY
+          case
+          when urgent?
+            escalate
+          else
+            ignore
+          end
+        RUBY
+
+        root = parser.parse(source)
+        case_node = root.find_first(:case)
+
+        expect(case_node).not_to be_nil
+        expect(case_node.children[0]).to be_nil
+        expect(case_node.children.drop(1).size).to eq(2)
+      end
+
+      it 'keeps the predicate in the first slot when present' do
+        source = <<~RUBY
+          case role
+          when :admin
+            escalate
+          end
+        RUBY
+
+        root = parser.parse(source)
+        case_node = root.find_first(:case)
+
+        expect(case_node.children[0]).to be_a(Woods::Ast::Node)
+      end
+    end
+
     describe 'line numbers' do
       it 'tracks correct 1-based line numbers' do
         source = <<~RUBY

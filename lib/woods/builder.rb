@@ -142,8 +142,27 @@ module Woods
       end
     end
 
+    # The provider's advertised dimension count, when a durable store needs
+    # one to size its column or collection.
+    #
+    # Probed exactly like {#safe_max_input_tokens}: {#provider_object?}'s
+    # contract is that only +#embed+/+#embed_batch+ are required of an
+    # injected provider and the rest of the interface is checked at each call
+    # site, and a provider that merely includes {Embedding::Provider::Interface}
+    # answers +respond_to?+ with a +NotImplementedError+ stub (B-108). Either
+    # way the answer is "no dimensions", which lets
+    # {#resolve_pgvector_dimensions}/{#resolve_qdrant_dimensions} fall back to
+    # the explicit +vector_store_options[:dimensions]+ they document (STO-6).
+    #
+    # @param provider [Embedding::Provider::Interface]
+    # @return [Integer, nil]
     def vector_dimensions(provider)
-      provider.dimensions if %i[pgvector qdrant].include?(@config.vector_store)
+      return nil unless %i[pgvector qdrant].include?(@config.vector_store)
+      return nil unless provider.respond_to?(:dimensions)
+
+      provider.dimensions
+    rescue NotImplementedError
+      nil
     end
     private :vector_dimensions
 

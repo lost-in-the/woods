@@ -906,6 +906,84 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── prune_path_leftovers typed identity (CORE-1) ─────────────────────
+  #
+  # The #225 shape one method over: `produced` was identifier-keyed, so when
+  # two rules claim one path (app/policies is claimed by both the policies
+  # and pundit_policies rules, both minting identifier = class name) and an
+  # edit makes ONE of them stop producing, the surviving identifier shielded
+  # the stale sibling-type node from the prune — a permanent full/incremental
+  # divergence until the next full extraction's orphan sweep.
+  describe '#reconcile_changed_paths prune by (identifier, type) (CORE-1)' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 'prunes the stale pundit_policy unit when the edit removed the Pundit shape' do
+      policy_path = File.join(tmpdir, 'app/policies/post_policy.rb')
+      FileUtils.mkdir_p(File.dirname(policy_path))
+
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :policy, identifier: 'PostPolicy', file_path: policy_path)
+      )
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :pundit_policy, identifier: 'PostPolicy', file_path: policy_path)
+      )
+
+      # The edit: now a plain domain policy — extract_pundit_file answers nil,
+      # extract_policy_file still produces a unit.
+      File.write(policy_path, <<~RUBY)
+        class PostPolicy
+          def initialize(order)
+            @order = order
+          end
+
+          def refundable?
+            @order.paid?
+          end
+        end
+      RUBY
+
+      expect(Woods::Extractors::PunditExtractor.new.extract_pundit_file(policy_path)).to be_nil
+      expect(Woods::Extractors::PolicyExtractor.new.extract_policy_file(policy_path)).not_to be_nil
+
+      change_set = Woods::ChangeSet.new(paths: ['app/policies/post_policy.rb'], root: rails_root)
+      extractor.send(:reconcile_changed_paths, change_set, Set.new)
+
+      # A full extraction of this tree produces no :pundit_policy unit.
+      expect(extractor.dependency_graph.node_types('PostPolicy')).to eq([:policy])
+    end
+
+    it 'keeps both typed units when the path still produces both shapes' do
+      policy_path = File.join(tmpdir, 'app/policies/guarded_policy.rb')
+      FileUtils.mkdir_p(File.dirname(policy_path))
+
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :policy, identifier: 'GuardedPolicy', file_path: policy_path)
+      )
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :pundit_policy, identifier: 'GuardedPolicy', file_path: policy_path)
+      )
+
+      File.write(policy_path, <<~RUBY)
+        class GuardedPolicy < ApplicationPolicy
+          def show?
+            user.admin? || record.owner == user
+          end
+        end
+      RUBY
+
+      change_set = Woods::ChangeSet.new(paths: ['app/policies/guarded_policy.rb'], root: rails_root)
+      extractor.send(:reconcile_changed_paths, change_set, Set.new)
+
+      expect(extractor.dependency_graph.node_types('GuardedPolicy')).to contain_exactly(:policy, :pundit_policy)
+    end
+  end
+
   # ── refresh ──────────────────────────────────────────────────────────
 
   describe '#refresh' do
@@ -921,6 +999,11 @@ RSpec.describe Woods::Extractor do
       FileUtils.mkdir_p(File.join(tmpdir, 'output'))
       @original_config = Woods.configuration
       Woods.configuration = Woods::Configuration.new
+      # A refresh runs against an existing index (CORE-2 refuses a virgin
+      # one); seed the minimal baseline these unit examples assume.
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
+      )
     end
 
     after { Woods.configuration = @original_config }
@@ -1661,6 +1744,10 @@ RSpec.describe Woods::Extractor do
     # must not inherit the sweep.
     it 'does not sweep on the incremental path' do
       seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
+      # Baseline for the CORE-2 guard: an incremental run needs an index.
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
+      )
 
       expect(extractor).not_to receive(:sweep_orphaned_unit_files)
       extractor.extract_changed([])
@@ -1702,6 +1789,10 @@ RSpec.describe Woods::Extractor do
     end
 
     it 'extract_changed raises and does not bump the generation when the analysis write fails' do
+      # Baseline for the CORE-2 guard: an incremental run needs an index.
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
+      )
       allow(extractor).to receive(:reconcile_changed_paths).and_return(Set.new(['User']))
       allow(extractor).to receive(:reconcile_class_based_types).and_return(Set.new)
       allow(extractor).to receive(:rerun_whole_app_extractors).and_return(Set.new)
@@ -2779,6 +2870,34 @@ RSpec.describe Woods::Extractor do
 
       expect(extractor.send(:convention_path_unit?, 'Thing')).to be false
     end
+
+    # EXTA-3 — the same shape for jobs. `:job` is not in `convention_path_unit?`
+    # and jobs are absent from CLASS_BASED_DISCOVERY, so a class-discovered job
+    # holding a fabricated `app/jobs/<name>.rb` was pruned by the first
+    # incremental run after every full extraction — and nothing reconciled it
+    # back. `JobExtractor#source_file_for` now returns nil for an unresolvable
+    # class, which keeps the unit out of `file_map` the way GraphQL's does.
+    it 'does not need to spare a class-discovered job either, because it has no path to sweep' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :job, identifier: 'Gems::ExternalJob', file_path: nil)
+      )
+
+      expect(graph.to_h[:file_map]).to be_empty
+    end
+
+    it 'leaves a nil-path job unit alone on an empty incremental change set' do
+      graph = Woods::DependencyGraph.new
+      graph.register(
+        Woods::ExtractedUnit.new(type: :job, identifier: 'Gems::ExternalJob', file_path: nil)
+      )
+      extractor = described_class.new(output_dir: Dir.mktmpdir)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+      change_set = Woods::ChangeSet.new(paths: [], root: Rails.root.to_s)
+
+      expect(extractor.send(:prune_vanished_units, change_set, Set.new)).to be_empty
+      expect(graph.node_exists?('Gems::ExternalJob')).to be(true)
+    end
   end
 
   # ── begin_payload! strict degrade (P2) ───────────────────────────────
@@ -2876,6 +2995,63 @@ RSpec.describe Woods::Extractor do
       expect(manifest['total_units']).to eq(1)
 
       Woods.configuration = original_config
+    end
+  end
+
+  # ── prepare_incremental_run baseline guard (CORE-2) ──────────────────
+  #
+  # An incremental run over an output directory with no baseline (a failed
+  # CI cache restore, a typo'd WOODS_OUTPUT, a first run on a fresh runner)
+  # used to compute an empty blast radius over the empty graph, dispatch
+  # only the diffed paths, and publish generation 1 — a near-empty index
+  # that readers, validation, and retrieval all treat as the complete truth
+  # of the app, and that nothing self-heals until a full extraction. The
+  # daemon already enforces the invariant (missing generation → one full
+  # extraction); the rake path must refuse rather than publish silently.
+  describe '#prepare_incremental_run baseline guard (CORE-2)' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      allow(extractor).to receive(:safe_eager_load!)
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 'raises ExtractionError when no generation was ever published and no graph exists' do
+      expect { extractor.send(:prepare_incremental_run) }
+        .to raise_error(Woods::ExtractionError, /woods:extract/)
+
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(0)
+    end
+
+    it 'aborts extract_changed before publishing anything over the missing baseline' do
+      expect { extractor.extract_changed(['app/models/user.rb']) }
+        .to raise_error(Woods::ExtractionError, /baseline|woods:extract/i)
+
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(0)
+    end
+
+    it 'proceeds when a published generation provides the baseline' do
+      FileUtils.mkdir_p(output_dir)
+      store = Woods::PayloadStore.new(output_dir)
+      dir = store.create(1)
+      File.write(dir.join('dependency_graph.json'),
+                 JSON.generate(nodes: {}, edges: {}, reverse: {}, file_map: {}))
+      Woods::Generation.new(output_dir: output_dir)
+                       .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+
+      expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
+    end
+
+    it 'proceeds for an unpublished marker when a flat-root graph exists (pre-generation index)' do
+      FileUtils.mkdir_p(output_dir)
+      File.write(File.join(output_dir, 'dependency_graph.json'),
+                 JSON.generate(nodes: {}, edges: {}, reverse: {}, file_map: {}))
+
+      expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
     end
   end
 

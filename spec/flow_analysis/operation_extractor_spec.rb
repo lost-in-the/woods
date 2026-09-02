@@ -192,6 +192,46 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       expect(cond[:else_ops].map { |o| o[:target] }).to eq(['ElseWorker'])
     end
 
+    # EXTB-4. `Prism::UnlessNode` shared `convert_prism_if` and landed its
+    # body in the *then* slot, so every flow document stated the opposite of
+    # what the code does. The parser now swaps the slots for `unless`, which
+    # makes the emitted `if <predicate>` reading exact.
+    describe 'unless statements' do
+      it 'attributes the else branch to the condition being true' do
+        source = <<~RUBY
+          def settle
+            unless admin?
+              AuditService.log
+            else
+              PaymentService.charge
+            end
+          end
+        RUBY
+
+        cond = extract_method_ops(source, 'settle').find { |o| o[:type] == :conditional }
+
+        expect(cond).not_to be_nil
+        expect(cond[:condition]).to eq('admin?')
+        expect(cond[:then_ops].map { |o| o[:target] }).to eq(['PaymentService'])
+        expect(cond[:else_ops].map { |o| o[:target] }).to eq(['AuditService'])
+      end
+
+      it 'attributes a modifier unless body to the condition being false' do
+        source = <<~RUBY
+          def settle
+            PaymentService.charge unless admin?
+          end
+        RUBY
+
+        cond = extract_method_ops(source, 'settle').find { |o| o[:type] == :conditional }
+
+        expect(cond).not_to be_nil
+        expect(cond[:condition]).to eq('admin?')
+        expect(cond[:then_ops]).to be_empty
+        expect(cond[:else_ops].map { |o| o[:target] }).to eq(['PaymentService'])
+      end
+    end
+
     # #216 / B-103. `handle_case` walked every child, so a call in the
     # predicate — the thing being switched *on* — was reported as an operation
     # performed inside a branch, and the condition was the entire multi-line
@@ -236,6 +276,32 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
         cond = extract_method_ops(case_source, 'route').find { |o| o[:type] == :conditional }
 
         expect(cond[:then_ops].map { |o| o[:type] }).to include(:async, :response)
+      end
+
+      # EXTB-15. A predicate-less `case` put its first `when` in children[0],
+      # so `drop(1)` skipped that branch entirely and the condition rendered
+      # as the literal text "when". The predicate slot is now positional (a
+      # nil hole when absent), mirroring the L2 fix for `:if`.
+      it 'keeps the first when branch when the case has no predicate' do
+        source = <<~RUBY
+          def route
+            case
+            when urgent?
+              AService.call
+            else
+              BService.call
+            end
+          end
+        RUBY
+
+        cond = extract_method_ops(source, 'route').find { |o| o[:type] == :conditional }
+
+        expect(cond).not_to be_nil
+        # The first `when` branch used to be consumed by `drop(1)` and lost.
+        expect(cond[:then_ops].map { |o| o[:target] }).to include('AService', 'BService')
+        # No predicate to switch on, so no condition text — never the literal
+        # word "when" read off the first branch node.
+        expect(cond[:condition]).to be_nil
       end
     end
 

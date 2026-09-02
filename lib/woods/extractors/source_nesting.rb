@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'line_neutralizer'
+
 module Woods
   module Extractors
     # Position-aware module/class nesting scanner for Ruby source text.
@@ -21,10 +23,11 @@ module Woods
     # their qualified segments.
     #
     # The heuristic is regex-based, not an AST. Pathological constructs
-    # (heredocs containing keywords, `x = if ...` assignments, keywords inside
-    # string literals) can unbalance the depth count — the accepted house
-    # tradeoff, shared with RakeTaskExtractor: declarations and their +end+s
-    # pair up for conventionally formatted files.
+    # (heredocs containing keywords, keywords inside string literals) can
+    # unbalance the depth count — the accepted house tradeoff, shared with
+    # RakeTaskExtractor: declarations and their +end+s pair up for
+    # conventionally formatted files. Assignment-form conditionals
+    # (`x = if ...`) are counted; see {#block_opener?}.
     #
     # @example Qualifying the first class declaration
     #   qualified_first_class_name("module Billing\n  class Payment\n  end\nend")
@@ -39,8 +42,11 @@ module Woods
       # keyword and the (possibly compact, `A::B`-style) constant name.
       # The constant must start uppercase, which also keeps `class << self`
       # from matching as a named declaration (it is still depth-tracked as an
-      # anonymous block via {#block_opener?}).
-      DECLARATION_PATTERN = /\A(module|class)\s+([A-Z]\w*(?:::[A-Z]\w*)*)/
+      # anonymous block via {#block_opener?}). The POSIX classes (rather than
+      # `[A-Z]\w*`) keep non-ASCII constants whole: `class Café` captured as
+      # +Caf+ is a wrong identifier, worse than declining and falling back to
+      # the path convention.
+      DECLARATION_PATTERN = /\A(module|class)\s+([[:upper:]][[:word:]]*(?:::[[:upper:]][[:word:]]*)*)/
 
       # The offline stand-in for a Zeitwerk autoload root: the last `app/`
       # directory segment in a path. When no Rails autoloader is up there is
@@ -164,16 +170,17 @@ module Woods
       # Check if a line opens a new block (do...end, def...end, etc.).
       #
       # Mirrors RakeTaskExtractor#block_opener? — the house pattern:
-      # +if+/+unless+ only count when they start the line (standalone form),
-      # not as trailing modifiers (e.g., `return if x`), and a line ending in
-      # +end+ closed whatever it opened.
+      # +if+/+unless+ count in statement position (leading the line, or
+      # directly after an assignment operator: `value = if x`), not as
+      # trailing modifiers (e.g., `return if x`, `value = 1 if x`), and a
+      # line ending in +end+ closed whatever it opened.
       #
       # @param stripped [String] Stripped line content
       # @return [Boolean]
       def block_opener?(stripped)
         return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
 
-        stripped.match?(/\A(if|unless)\b/)
+        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
       end
 
       private
@@ -516,13 +523,34 @@ module Woods
 
       # Yield each non-blank, non-comment line of source, stripped.
       #
+      # Trailing comments are removed too (quote-aware, via
+      # {LineNeutralizer}): a comment is prose, and prose containing "end",
+      # "do", or "for" made {#block_opener?} miscount — `module Api # rename
+      # at the end` looked self-terminated, `x.to_s # pad for display` opened
+      # a phantom frame that swallowed a real `end`. `=begin`/`=end` block
+      # comments are skipped whole for the same reason.
+      #
       # @param source [String] Ruby source code
       # @yieldparam stripped [String] Stripped significant line
       # @return [void]
       def each_significant_line(source)
+        in_block_comment = false
+
         source.each_line do |line|
-          stripped = line.strip
-          next if stripped.empty? || stripped.start_with?('#')
+          raw = line.strip
+
+          if in_block_comment
+            in_block_comment = false if raw.start_with?('=end')
+            next
+          elsif raw.start_with?('=begin')
+            in_block_comment = true
+            next
+          end
+
+          next if raw.empty? || raw.start_with?('#')
+
+          stripped = LineNeutralizer.strip_line_comment(line).strip
+          next if stripped.empty?
 
           yield stripped
         end

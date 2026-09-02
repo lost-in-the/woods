@@ -136,6 +136,39 @@ RSpec.describe Woods::Evaluation::Evaluator do
       expect(report.results.last.scores[:mrr]).to eq(1.0)
     end
 
+    # EXP-10. `compute_scores` passed `expected` as both the relevant set and
+    # the required set, so `context_completeness` was recall under a second
+    # name — a dashboard keyed on it silently gated on recall. `required_units`
+    # is now a real (optional) annotation on the query.
+    it 'diverges from recall when the query names a required subset' do
+      required_queries = [
+        Woods::Evaluation::QuerySet::Query.new(
+          query: 'Trace order creation',
+          expected_units: %w[Order OrdersController],
+          required_units: %w[Order],
+          intent: :trace,
+          scope: :focused,
+          tags: %w[flow]
+        )
+      ]
+      allow(retriever).to receive(:retrieve).and_return(retrieval_result_two)
+
+      report = described_class.new(
+        retriever: retriever,
+        query_set: Woods::Evaluation::QuerySet.new(queries: required_queries)
+      ).evaluate
+
+      # Order retrieved, OrdersController not: recall 1/2, completeness 1/1.
+      expect(report.results.first.scores[:recall]).to eq(0.5)
+      expect(report.results.first.scores[:context_completeness]).to eq(1.0)
+    end
+
+    it 'falls back to the expected set when no required subset is annotated' do
+      report = evaluator.evaluate
+
+      expect(report.results.last.scores[:context_completeness]).to eq(report.results.last.scores[:recall])
+    end
+
     it 'includes tokens_used in each result' do
       report = evaluator.evaluate
 

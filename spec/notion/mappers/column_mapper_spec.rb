@@ -117,9 +117,9 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
       end
     end
 
-    context 'with parent_page_id for relation' do
+    context 'with parent_page_ids for relation' do
       let(:result) do
-        mapper.map(string_column, model_identifier: 'User', validations: [], parent_page_id: 'page-abc-123')
+        mapper.map(string_column, model_identifier: 'User', validations: [], parent_page_ids: ['page-abc-123'])
       end
 
       it 'sets Table as relation property' do
@@ -127,7 +127,20 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
       end
     end
 
-    context 'without parent_page_id' do
+    # EXP-1. A physical table owned by several models (STI) gets one column
+    # page whose relation names every owner — Notion relations are lists.
+    context 'with several parent_page_ids' do
+      let(:result) do
+        mapper.map(string_column, model_identifier: 'User', validations: [],
+                                  parent_page_ids: %w[page-user page-admin])
+      end
+
+      it 'lists every owning page in the given order' do
+        expect(result['Table']).to eq({ relation: [{ id: 'page-user' }, { id: 'page-admin' }] })
+      end
+    end
+
+    context 'without parent_page_ids' do
       let(:result) do
         mapper.map(string_column, model_identifier: 'User', validations: [])
       end

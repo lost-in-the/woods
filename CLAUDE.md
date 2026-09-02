@@ -131,7 +131,10 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 **Gotchas:**
 - `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
 - Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
-- If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container.
+- If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container. This bites often: bootsnap has served stale compiles of just-edited files repeatedly, and a file written on the host can be read back partially over the bind mount. Any script that edits a file and immediately executes it in-container should clear `tmp/cache/bootsnap/` and pause briefly first — an otherwise unexplained exit 1 in a probe is likely this.
+- A testbed container has no `.git` at the app root, so `capture_snapshot` sees an `"unknown"` SHA and returns early (#137) — `woods:extract` then never builds the snapshot store or runs the SQLite migrator. To exercise snapshot/migration paths in a variant, set `GIT_SHA` (honored exactly when there is no `.git`). A probe of those paths without it looks green while exercising nothing.
+- For the same reason, `woods:incremental` in a container exits 1 at changed-file-set resolution (a *git range* error) before ever reaching `prepare_incremental_run` — an exit-code-only probe of the incremental baseline guard is a false green. Supply `CHANGED_FILES=<paths>` so the run reaches the guard.
+- When byte-diffing unit JSON between two extractions, establish a full-vs-full control first: controllers with inline proc filters differ between any two processes (`Proc#inspect` embeds a memory address in the filter-chain annotation, B-167). Only differences beyond that control set are real divergence.
 
 See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
 
@@ -191,7 +194,7 @@ lib/
 │   └── woods.rake                       # Rake task definitions
 exe/
 ├── woods-mcp                            # MCP Index Server executable (stdio)
-├── woods-mcp-start                      # Self-healing MCP wrapper
+├── woods-mcp-start                      # Preflight wrapper: validates, then execs woods-mcp (no restart loop)
 ├── woods-mcp-http                       # MCP Index Server executable (HTTP/Rack)
 └── woods-console-mcp                    # Console MCP Server executable
 ```
@@ -223,7 +226,7 @@ exe/
 **Two test suites**: the gem has unit specs with mocks, and a separate Rails app has integration specs that run real extractions.
 
 - **Gem unit specs** (`spec/`): RSpec (`rubocop-rspec` is installed but not loaded as a RuboCop plugin, enabling it repo-wide is an open backlog item). Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
-- **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained. Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`.
+- **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained. Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`. Run booted spec files **one per rspec process**: `Rails::Application` is a singleton, so whichever file boots first fixes the root for both and `BootedAppRoot.assert!` fails the other with spurious "root mismatch" errors (CI runs each file as its own step). The `rails_6.0` row needs Ruby <= 3.3 locally: ActiveSupport 6.0 requires `mutex_m`, dropped from default gems in Ruby 3.4 (CI pins Ruby 3.0 for that row).
 - **Integration specs** (in a separate Rails app): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Set up a host Rails app per the Getting Started guide, then run `bundle exec rspec spec/integration/`.
 - Every extractor needs tests for: happy path extraction, edge cases (empty files, namespaced classes, STI), concern inlining, dependency detection
 - Test `ExtractedUnit#to_h` serialization round-trips
@@ -339,7 +342,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   - `sort_tools!` runs after every conditional registration so tool order is stable across hosts (prompt cache, offset-based `tools/list` pagination).
 - `Woods::MCP::Tasks` (protocol extension) is distinct from `Woods::Tasks` (rake helpers).
   - `Store` writes one file per task under `<index_dir>/tasks/` and deliberately does **not** take `PipelineLock` (taking it would deadlock `pipeline_extract`).
-  - Orphan detection marks a `working` record whose producer is gone as `failed`, but only when the reader shares the producer's boot identity.
+  - Orphan detection marks a `working` record whose producer is gone as `failed`. A pid table can only judge a producer that shares the reader's boot identity and pid namespace; a foreign one is believed on age alone, up to `Store::FOREIGN_PRODUCER_GRACE_SECONDS` (24h from `updated_at`), then resolved to `failed` so a rebooted host stops answering `working` forever.
   - A task handle is returned only to a client that declared `io.modelcontextprotocol/tasks`. The opt-in is captured per request into a thread-local cleared in an `ensure`.
 
 ### Console server
@@ -358,6 +361,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - Embedding dimensions must match between provider and store. `Woods::MCP::DimensionMismatch` is raised from two places:
   - `Tasks.verify_store_dimensions!` at the start of `woods:embed` for durable stores, via the adapter's `stored_dimensions`.
   - `Storage::Snapshotter::Vector.load` at MCP boot when the WVF1 header disagrees with `resolved_config.dimension`. An empty dump carries no dimension and is not checked.
+  - Against Qdrant specifically, the adapter's own collection guard (`verify_collection_dimensions!`) usually fires first — `build_embed_indexer` builds the store (which touches the collection) before the pre-flight check — so a width-mismatch probe sees a `Woods::ConfigurationError` naming both widths, not `DimensionMismatch`. Both fail closed before any write; assert on the message, not the class.
 - Qdrant point IDs are **UUIDv5**, not identifiers (#147). The identifier travels in the payload under `woods_identifier`. **Never change `POINT_ID_NAMESPACE`**: a new namespace orphans every existing vector.
 - `checkpoint.json` never advances over a unit whose vector is not durably stored (B-059 / #148). On `:local`/`:shared_filesystem` the dump is the only durable copy, so the checkpoint is written after `persist_snapshot` and interval saves are suppressed. `checkpoint_satisfied?` requires the hydrated artifact to hold the vector, so a checkpoint that ran ahead self-heals into a re-embed.
 - `PipelineGuard` enforces a 5-minute cooldown on full runs. Incremental runs are not rate-limited.

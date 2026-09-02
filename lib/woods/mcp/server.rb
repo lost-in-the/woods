@@ -61,6 +61,9 @@ module Woods
       # stub it and lexical lookup from the tool definitions still finds it.
       PIPELINE_LOCK_WAIT = 2.0
 
+      # Human-readable pipeline names for the `already_running` message.
+      PIPELINE_LABELS = { extraction: 'Extraction', embedding: 'Embedding' }.freeze
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -454,7 +457,7 @@ module Woods
                   description: 'Restrict scan to these unit types: model, controller, service, job, mailer, etc.'
                 },
                 fields: {
-                  type: 'array', items: { type: 'string' },
+                  type: 'array', items: { type: 'string', enum: %w[identifier metadata source_code] },
                   description: 'Fields to search: identifier (default), source_code, metadata'
                 },
                 limit: { type: 'integer', description: 'Maximum results (default: 20)' },
@@ -1136,58 +1139,24 @@ module Woods
               next blocked
             end
 
-            # Acquire the in-process lock BEFORE recording to the guard.
-            # Otherwise a refused "already running" request still resets
-            # the cooldown clock and blocks the next legitimate attempt
-            # for the full 5-minute window once the current run finishes.
-            unless Woods::MCP::Server.send(:pipeline_start, :extraction)
-              next respond_err.call(
-                'Extraction pipeline is already running. Wait for it to complete.',
-                code: :already_running,
-                tool: 'pipeline_extract'
-              )
-            end
-
-            # Cross-PROCESS serialization (#170). pipeline_start only guards
-            # this process; the rake writers and the watch daemon serialize on
-            # the on-disk PipelineLock, and an unlocked MCP extraction was the
-            # sixth writer — free to rewrite the dependency graph under any of
-            # them, with the loser's work silently discarded. The wait is
-            # short and the failure explicit: an MCP tool must not sit on a
-            # lock queue for minutes the way `woods:extract` does, so
-            # contention becomes a clear tool error the caller can retry.
-            #
-            # A nil/duck-typed configuration (no output_dir) yields no lock —
-            # there is no known lock domain, and the extraction below fails in
-            # the background exactly as it always has on an unconfigured host.
-            config = Woods.configuration
-            output_dir = config.output_dir if config.respond_to?(:output_dir)
-            lock = output_dir && Woods::MCP::Server.send(:build_extraction_lock, output_dir)
-            if lock && !Woods::MCP::Server.send(:acquire_lock_briefly, lock)
-              Woods::MCP::Server.send(:pipeline_finish, :extraction)
-              next respond_err.call(
-                'Another writer holds the extraction lock (a rake task or the watch daemon ' \
-                'is writing this index). Try again shortly.',
-                code: :locked,
-                tool: 'pipeline_extract'
-              )
-            end
-
-            run_extraction = lambda do
-              # exe/woods-mcp deliberately loads no extraction machinery, so
-              # Woods::Extractor is not defined in a standalone index-server
-              # process. Resolve it here, the same lazy require Woods.extract!
-              # uses — otherwise every pipeline_extract run dies in the
-              # background with NameError.
-              require_relative '../extractor' unless defined?(Woods::Extractor)
-              extractor = Woods::Extractor.new(output_dir: output_dir)
-              incremental ? extractor.extract_changed(files) : extractor.extract_all
+            build_extraction_runner = lambda do |output_dir|
+              lambda do
+                # exe/woods-mcp deliberately loads no extraction machinery, so
+                # Woods::Extractor is not defined in a standalone index-server
+                # process. Resolve it here, the same lazy require Woods.extract!
+                # uses — otherwise every pipeline_extract run dies in the
+                # background with NameError.
+                require_relative '../extractor' unless defined?(Woods::Extractor)
+                extractor = Woods::Extractor.new(output_dir: output_dir)
+                incremental ? extractor.extract_changed(files) : extractor.extract_all
+              end
             end
 
             next Woods::MCP::Server.send(
-              :run_pipeline_in_background,
-              kind: :extraction, tool: 'pipeline_extract', lock: lock,
-              task_store: task_store, respond: respond, respond_err: respond_err, runner: run_extraction,
+              :start_pipeline_run,
+              kind: :extraction, tool: 'pipeline_extract',
+              task_store: task_store, respond: respond, respond_err: respond_err,
+              runner_builder: build_extraction_runner,
               started: -> { guard&.record!(:extraction) },
               started_message: 'Extraction pipeline started in background thread'
             )
@@ -1290,57 +1259,122 @@ module Woods
               next blocked
             end
 
-            # Acquire the in-process lock first so a refused "already
-            # running" request doesn't burn the cooldown clock.
-            unless Woods::MCP::Server.send(:pipeline_start, :embedding)
-              next respond_err.call(
-                'Embedding pipeline is already running. Wait for it to complete.',
-                code: :already_running,
-                tool: 'pipeline_embed'
-              )
-            end
-
-            # Cross-PROCESS serialization, mirroring pipeline_extract (#170):
-            # embedding writes the checkpoint, dumps and metadata into the
-            # same index directory, and the rake embed twins (`woods:embed`,
-            # `woods:embed_incremental`) already serialize on the on-disk
-            # PipelineLock — one lock domain per index. An unlocked MCP embed
-            # was free to interleave with any of them. Same short acquire:
-            # contention becomes a clear tool error the caller can retry.
-            #
-            # A nil/duck-typed configuration (no output_dir) yields no lock —
-            # there is no known lock domain, and the embed below fails in the
-            # background exactly as it always has on an unconfigured host.
-            config = Woods.configuration
-            output_dir = config.output_dir if config.respond_to?(:output_dir)
-            lock = output_dir && Woods::MCP::Server.send(:build_extraction_lock, output_dir)
-            if lock && !Woods::MCP::Server.send(:acquire_lock_briefly, lock)
-              Woods::MCP::Server.send(:pipeline_finish, :embedding)
-              next respond_err.call(
-                'Another writer holds the extraction lock (a rake task or the watch daemon ' \
-                'is writing this index). Try again shortly.',
-                code: :locked,
-                tool: 'pipeline_embed'
-              )
-            end
-
-            run_embed = lambda do
-              # Share the rake-task wiring so the MCP path picks up the
-              # provider-tuned TextPreparer + token-aware chunker. Without
-              # this, MCP-triggered embedding still hit Ollama's "input
-              # length exceeds context length" error after the rake path
-              # was fixed in PR #70.
-              indexer = Woods::Tasks.build_embed_indexer
-              incremental ? indexer.index_incremental : indexer.index_all
+            build_embed_runner = lambda do |_output_dir|
+              lambda do
+                # Share the rake-task wiring so the MCP path picks up the
+                # provider-tuned TextPreparer + token-aware chunker. Without
+                # this, MCP-triggered embedding still hit Ollama's "input
+                # length exceeds context length" error after the rake path
+                # was fixed in PR #70.
+                indexer = Woods::Tasks.build_embed_indexer
+                incremental ? indexer.index_incremental : indexer.index_all
+              end
             end
 
             next Woods::MCP::Server.send(
-              :run_pipeline_in_background,
-              kind: :embedding, tool: 'pipeline_embed', lock: lock,
-              task_store: task_store, respond: respond, respond_err: respond_err, runner: run_embed,
+              :start_pipeline_run,
+              kind: :embedding, tool: 'pipeline_embed',
+              task_store: task_store, respond: respond, respond_err: respond_err,
+              runner_builder: build_embed_runner,
               started: -> { guard&.record!(:embedding) },
               started_message: 'Embedding pipeline started in background thread'
             )
+          end
+        end
+
+        # Claim the in-process pipeline slot, take the cross-process writer
+        # lock, and hand the run off to a background thread.
+        #
+        # Owns the entire window between {pipeline_start} and the hand-off.
+        # Before this existed, ANY raise inside that window skipped
+        # {pipeline_finish} for the life of the process, so every later call
+        # answered `already_running` and only a restart cleared it (MCP-3).
+        # `PipelineLock#acquire` rescues only `Errno::EEXIST` and opens/creates
+        # files, so an index directory this process cannot write — the
+        # documented Docker deployment mounts the index into a host-side
+        # server — raises `SystemCallError` out of {acquire_lock_briefly}
+        # rather than returning false. That escaping error also reached
+        # {ToolContract} as a nested SystemCallError and came back as
+        # `corrupt_artifact` ("An Index artifact is unavailable or malformed"),
+        # a misdiagnosis of a permissions failure. Both are closed here, with
+        # the same handoff-flag shape {run_pipeline_in_background} uses one
+        # layer down (L6).
+        #
+        # Cross-PROCESS serialization (#170): {pipeline_start} only guards this
+        # process; the rake writers and the watch daemon serialize on the
+        # on-disk PipelineLock, and an unlocked MCP run was free to rewrite the
+        # index under any of them with the loser's work silently discarded. The
+        # wait is short and the failure explicit — an MCP tool must not sit on
+        # a lock queue for minutes the way `woods:extract` does.
+        #
+        # A nil/duck-typed configuration (no output_dir) yields no lock: there
+        # is no known lock domain, and the run fails in the background exactly
+        # as it always has on an unconfigured host.
+        #
+        # @param kind [Symbol] :extraction or :embedding
+        # @param tool [String] tool name, for the error payloads
+        # @param runner_builder [Proc] called with the resolved output_dir;
+        #   returns the runner lambda {run_pipeline_in_background} executes
+        # @return [Hash, MCP::Tool::Response]
+        def start_pipeline_run(kind:, tool:, task_store:, respond:, respond_err:, runner_builder:, started:,
+                               started_message:)
+          # Claim the slot BEFORE recording to the guard. Otherwise a refused
+          # "already running" request still resets the cooldown clock and
+          # blocks the next legitimate attempt for the full window.
+          unless pipeline_start(kind)
+            return respond_err.call(
+              "#{PIPELINE_LABELS.fetch(kind)} pipeline is already running. Wait for it to complete.",
+              code: :already_running,
+              tool: tool
+            )
+          end
+
+          handed_off = false
+          held_lock = nil
+          begin
+            config = Woods.configuration
+            output_dir = config.output_dir if config.respond_to?(:output_dir)
+            lock = output_dir && build_extraction_lock(output_dir)
+            if lock
+              unless acquire_lock_briefly(lock)
+                return respond_err.call(
+                  'Another writer holds the extraction lock (a rake task or the watch daemon ' \
+                  'is writing this index). Try again shortly.',
+                  code: :locked,
+                  tool: tool
+                )
+              end
+
+              held_lock = lock
+            end
+
+            # Built before the flag flips: a runner_builder that raises must
+            # still release the lock and the slot on the way out.
+            runner = runner_builder.call(output_dir)
+
+            # From here the background hand-off owns both the on-disk lock and
+            # the in-process slot: run_pipeline_in_background releases them on
+            # every one of its own paths.
+            handed_off = true
+            run_pipeline_in_background(
+              kind: kind, tool: tool, lock: lock, task_store: task_store,
+              respond: respond, respond_err: respond_err, runner: runner,
+              started: started, started_message: started_message
+            )
+          rescue SystemCallError => e
+            respond_err.call(
+              'The index directory\'s writer lock could not be taken — this is a filesystem ' \
+              "permissions problem, not a corrupt index (#{e.class}: #{e.message}). Make the index " \
+              'directory writable by this process, then invoke the tool again.',
+              code: :lock_unwritable,
+              tool: tool,
+              exception: e.class.name
+            )
+          ensure
+            unless handed_off
+              held_lock&.release
+              pipeline_finish(kind)
+            end
           end
         end
 

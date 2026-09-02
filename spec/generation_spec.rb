@@ -79,4 +79,77 @@ RSpec.describe Woods::Generation do
       expect(generation.current.payload).to be_nil
     end
   end
+
+  # Every payload reader resolves through this one method, so its boundary is
+  # the boundary. B-134 moved the dumps side to a realpath comparison
+  # (`IndexArtifact#validate_dump_dir!`); this side stayed textual (CORE-6).
+  describe '#payload_dir' do
+    it 'resolves a real payload directory' do
+      FileUtils.mkdir_p(File.join(dir, 'payloads', 'gen-1'))
+      generation.bump!(reason: 'full', payload: 'payloads/gen-1')
+
+      expect(generation.payload_dir.to_s).to eq(File.join(dir, 'payloads', 'gen-1'))
+    end
+
+    it 'falls back to the root for a flat index with no pointer' do
+      generation.bump!(reason: 'full')
+
+      expect(generation.payload_dir.to_s).to eq(dir)
+    end
+
+    it 'falls back to the root when the named directory is gone' do
+      generation.bump!(reason: 'full', payload: 'payloads/pruned')
+
+      expect(generation.payload_dir.to_s).to eq(dir)
+    end
+
+    it 'falls back to the root for a textually escaping pointer' do
+      generation.bump!(reason: 'full', payload: '../escape')
+
+      expect(generation.payload_dir.to_s).to eq(dir)
+    end
+
+    # expand_path does not resolve symlinks, so a link planted inside
+    # payloads/ passed the textual start_with? check and `candidate.directory?`
+    # then followed it — pointing every payload reader at an arbitrary
+    # directory.
+    it 'falls back to the root when the payload name is a symlink out of the index' do
+      outside = Dir.mktmpdir('woods_outside')
+      begin
+        FileUtils.mkdir_p(File.join(dir, 'payloads'))
+        File.symlink(outside, File.join(dir, 'payloads', 'gen-9'))
+        generation.bump!(reason: 'full', payload: 'payloads/gen-9')
+
+        expect(generation.payload_dir.to_s).to eq(dir)
+      ensure
+        FileUtils.rm_rf(outside)
+      end
+    end
+
+    # A symlink that stays inside the index is fine — the boundary is about
+    # where the target lands, not about links as such.
+    it 'follows a symlink that stays inside the index root' do
+      FileUtils.mkdir_p(File.join(dir, 'payloads', 'real'))
+      File.symlink(File.join(dir, 'payloads', 'real'), File.join(dir, 'payloads', 'gen-9'))
+      generation.bump!(reason: 'full', payload: 'payloads/gen-9')
+
+      expect(generation.payload_dir.to_s).to eq(File.join(dir, 'payloads', 'gen-9'))
+    end
+
+    # An index reached through a symlinked root must still resolve — the
+    # B-134 twin of this rule allows exactly that.
+    it 'resolves when the index root itself is reached through a symlink' do
+      alias_root = File.join(Dir.mktmpdir('woods_alias'), 'link')
+      begin
+        File.symlink(dir, alias_root)
+        FileUtils.mkdir_p(File.join(dir, 'payloads', 'gen-1'))
+        aliased = described_class.new(output_dir: alias_root)
+        aliased.bump!(reason: 'full', payload: 'payloads/gen-1')
+
+        expect(aliased.payload_dir.to_s).to eq(File.join(alias_root, 'payloads', 'gen-1'))
+      ensure
+        FileUtils.rm_rf(File.dirname(alias_root))
+      end
+    end
+  end
 end

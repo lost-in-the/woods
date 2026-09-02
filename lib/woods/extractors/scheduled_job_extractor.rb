@@ -41,6 +41,11 @@ module Woods
       # Environment keys to unwrap when nested in YAML
       ENVIRONMENT_KEYS = %w[production development test staging].freeze
 
+      # A quoted Whenever command argument in either style. The body runs to
+      # the *matching* delimiter, so the inner quotes of `command "echo 'hi'"`
+      # stay part of the command.
+      QUOTED_ARGUMENT = /(['"])((?:(?!\1).)+)\1/
+
       def initialize
         @schedule_files = SCHEDULE_FILES.each_with_object({}) do |(relative_path, format), hash|
           full_path = Rails.root.join(relative_path)
@@ -113,17 +118,28 @@ module Woods
 
       # Detect and unwrap environment-nested YAML.
       #
-      # If the top-level keys are environment names (production, development, etc.),
-      # unwrap to the first environment's entries.
+      # If the top-level keys are environment names (production, development,
+      # etc.), unwrap to the section for the environment being extracted,
+      # falling back to the first section when the current environment has no
+      # entry. Taking `values.first` unconditionally meant a file listing
+      # `development:` before `production:` indexed the development schedule
+      # and dropped production entirely (EXTB-19).
       #
       # @param data [Hash] Parsed YAML data
       # @return [Hash] Unwrapped entries
       def unwrap_environment_nesting(data)
-        if data.keys.all? { |k| ENVIRONMENT_KEYS.include?(k.to_s) }
-          data.values.first || {}
-        else
-          data
-        end
+        return data unless data.keys.all? { |k| ENVIRONMENT_KEYS.include?(k.to_s) }
+
+        data[current_environment] || data.values.first || {}
+      end
+
+      # The environment name the extraction is running under, as a String.
+      #
+      # @return [String, nil]
+      def current_environment
+        Rails.env.to_s if defined?(Rails) && Rails.respond_to?(:env)
+      rescue StandardError
+        nil
       end
 
       # Build an ExtractedUnit from a YAML schedule entry.
@@ -226,16 +242,20 @@ module Woods
 
       # Detect the command type inside a Whenever block body.
       #
+      # Both quote styles are accepted (EXTB-12): double-quote-only regexes
+      # left `runner 'CleanupJob.perform_later'` — the frozen-string-literal
+      # idiom — as command_type :unknown with no job class and no `:job` edge.
+      #
       # @param body [String] Block body content
       # @return [Array<Symbol, String>] Command type and body
       def detect_whenever_command(body)
         case body
-        when /runner\s+"([^"]+)"/
-          [:runner, ::Regexp.last_match(1)]
-        when /rake\s+"([^"]+)"/
-          [:rake, ::Regexp.last_match(1)]
-        when /command\s+"([^"]+)"/
-          [:command, ::Regexp.last_match(1)]
+        when /runner\s+#{QUOTED_ARGUMENT}/o
+          [:runner, ::Regexp.last_match(2)]
+        when /rake\s+#{QUOTED_ARGUMENT}/o
+          [:rake, ::Regexp.last_match(2)]
+        when /command\s+#{QUOTED_ARGUMENT}/o
+          [:command, ::Regexp.last_match(2)]
         else
           [:unknown, body.strip]
         end

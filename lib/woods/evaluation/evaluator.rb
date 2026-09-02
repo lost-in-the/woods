@@ -79,7 +79,8 @@ module Woods
         retrieval_result = @retriever.retrieve(query.query, budget: @budget)
         retrieved_ids = extract_identifiers(retrieval_result)
 
-        scores = compute_scores(retrieved_ids, query.expected_units, retrieval_result)
+        scores = compute_scores(retrieved_ids, query.expected_units, retrieval_result,
+                                required: query.completeness_units)
 
         QueryResult.new(
           query: query.query,
@@ -102,17 +103,23 @@ module Woods
 
       # Compute all metrics for a query result.
       #
+      # +required+ is what separates `context_completeness` from `recall`
+      # (EXP-10): passing `expected` for both made the two metrics one number
+      # under two names. A query with no `required_units` annotation still
+      # passes its expected set, keeping the historical value.
+      #
       # @param retrieved [Array<String>] Retrieved identifiers
       # @param expected [Array<String>] Expected identifiers
       # @param result [Retriever::RetrievalResult] Retrieval result
+      # @param required [Array<String>] Identifiers the retrieval must surface
       # @return [Hash] Metric scores
-      def compute_scores(retrieved, expected, result)
+      def compute_scores(retrieved, expected, result, required: expected)
         {
           precision_at5: Metrics.precision_at_k(retrieved, expected, cutoff: 5),
           precision_at10: Metrics.precision_at_k(retrieved, expected, cutoff: 10),
           recall: Metrics.recall(retrieved, expected),
           mrr: Metrics.mrr(retrieved, expected),
-          context_completeness: Metrics.context_completeness(retrieved, expected),
+          context_completeness: Metrics.context_completeness(retrieved, required),
           token_efficiency: compute_token_efficiency(retrieved, expected, result)
         }
       end

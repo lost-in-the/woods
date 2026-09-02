@@ -5,6 +5,7 @@ require 'timeout'
 require_relative 'audit_logger'
 require_relative 'bridge_protocol'
 require_relative 'confirmation'
+require_relative 'credential_scanner'
 require_relative 'eval_guard'
 require_relative 'input_contract'
 require_relative 'model_validator'
@@ -123,10 +124,28 @@ module Woods
         return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
 
         Rails.logger.warn(
-          "[Woods::Console] execution error: #{error.class}: #{error.message}"
+          "[Woods::Console] execution error: #{error.class}: #{scan_log_text(error.message)}"
         )
       rescue StandardError
         # Never let logging break the request path.
+      end
+
+      # Layer 2 applied to server-side log text (L11). The client response for
+      # this branch is already sanitized down to the class name, but the log
+      # line carries the adapter's own message — and PG/Mysql2 errors embed the
+      # rejected SQL and, for constraint violations, the offending literal. A
+      # secret pasted into a WHERE clause therefore landed unscanned in the
+      # server log while the response path was scanned. Failure falls back to a
+      # sentinel rather than raw text, mirroring {AuditLogger#redact}.
+      def scan_log_text(text)
+        scanned, = error_log_scanner.scan(text.to_s)
+        scanned
+      rescue StandardError
+        '[REDACTION_FAILED]'
+      end
+
+      def error_log_scanner
+        @error_log_scanner ||= CredentialScanner.new
       end
 
       # Return a pre-dispatch refusal hash for tools the executor cannot or
@@ -942,10 +961,10 @@ module Woods
       # Validate one select expression against the model and the redaction
       # configuration.
       #
-      # Exactly three shapes are refused (redaction stays positional by
+      # Exactly four shapes are refused (redaction stays positional by
       # output header — {Woods::Console::Redactor} masks by column name, so
-      # any construct that renames the output header would carry plaintext
-      # past it):
+      # any construct that renames or shadows an output header would carry
+      # plaintext past it):
       #   1. an `AS` alias over a `console_redacted_columns` column
       #      (`password_digest AS note` returns plaintext under the `note`
       #      header, which no redaction rule matches);
@@ -956,7 +975,12 @@ module Woods
       #   3. an `AS` alias over either column of a
       #      `console_redacted_key_values` pair (the positional EAV rule
       #      resolves key/value columns by header name, so renaming either
-      #      header silently disarms it).
+      #      header silently disarms it);
+      #   4. any `AS` alias whose NAME collides with a protected header
+      #      (`id AS value` duplicates the EAV value header; positional
+      #      index resolution could then mask the shadow instead of the
+      #      secret — the aliased source being harmless is exactly what
+      #      makes the shape dangerous).
       #
       # Direct, unaliased selection of a redacted column REMAINS ALLOWED:
       # the output header keeps the column's real name, and the positional
@@ -986,8 +1010,44 @@ module Woods
         column = bare_col || fn_arg
         validate_column_reference!(column, model_name) unless column == '*'
 
+        refuse_protected_alias_target!(alias_name) if alias_name
         refuse_redacted_select_alias!(bare_col, alias_name) if alias_name
         refuse_redacted_aggregate_expression!(fn_arg) if fn
+      end
+
+      # Refuse an `AS` alias whose NAME collides with a protected output
+      # header (shape 4 in {#validate_select_expression!}). The positional
+      # redactor resolves masks by header name; an alias naming a redacted
+      # or EAV column duplicates that header, and the duplicate can steal
+      # the mask from the real column's cell. Case-insensitive: unquoted
+      # SQL identifiers fold, so a case-variant alias lands on the same
+      # output header.
+      #
+      # @param alias_name [String] the `AS` alias
+      # @raise [ValidationError] when the alias names a protected header
+      def refuse_protected_alias_target!(alias_name)
+        return unless protected_column_name?(alias_name)
+
+        raise ValidationError,
+              "Rejected: alias '#{alias_name}' names a protected output header; an alias must not " \
+              'collide with a redacted or EAV column name.'
+      end
+
+      # @param name [String]
+      # @return [Boolean] whether either redaction layer protects the name
+      def protected_column_name?(name)
+        casecmp_member?(@safe_context.redacted_columns, name) ||
+          casecmp_member?(redacted_kv_columns, name)
+      end
+
+      # Case-insensitive membership, matching unquoted SQL identifier
+      # semantics (the predicate refusals already compare this way).
+      #
+      # @param list [Array<String>]
+      # @param name [String]
+      # @return [Boolean]
+      def casecmp_member?(list, name)
+        list.any? { |entry| entry.to_s.casecmp?(name.to_s) }
       end
 
       # Refuse an `AS` alias over a column protected by either redaction
@@ -1002,13 +1062,13 @@ module Woods
         return unless column
 
         base = base_column_name(column)
-        if @safe_context.redacted_columns.include?(base)
+        if casecmp_member?(@safe_context.redacted_columns, base)
           raise ValidationError,
                 "Rejected: aliasing redacted column '#{base}' as '#{alias_name}' bypasses output " \
                 'redaction. Select it unaliased; the value is masked.'
         end
 
-        return unless redacted_kv_columns.include?(base)
+        return unless casecmp_member?(redacted_kv_columns, base)
 
         raise ValidationError,
               "Rejected: aliasing redacted key/value column '#{base}' as '#{alias_name}' bypasses " \
@@ -1029,13 +1089,13 @@ module Woods
         return if column.nil? || column == '*'
 
         base = base_column_name(column)
-        if @safe_context.redacted_columns.include?(base)
+        if casecmp_member?(@safe_context.redacted_columns, base)
           raise ValidationError,
                 "Rejected: aggregating redacted column '#{base}' reads its value; it cannot be used " \
                 'as an aggregate input.'
         end
 
-        return unless redacted_kv_columns.include?(base)
+        return unless casecmp_member?(redacted_kv_columns, base)
 
         raise ValidationError,
               "Rejected: aggregating redacted key/value column '#{base}' reads its value; it cannot " \

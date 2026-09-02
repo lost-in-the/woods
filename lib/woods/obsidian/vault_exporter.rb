@@ -70,30 +70,52 @@ module Woods
       #
       # @return [Hash] { exported:, indexes:, swept:, skipped:, errors: }
       def export_all
-        graph = @reader.raw_graph_data || {}
-        @nodes = graph['nodes'] || {}
-        @pagerank = graph['pagerank'] || {}
-        analysis = safe_graph_analysis
-        owned = vault_owned_at_start?
+        with_pinned_index do
+          graph = @reader.raw_graph_data || {}
+          @nodes = graph['nodes'] || {}
+          @pagerank = graph['pagerank'] || {}
+          analysis = safe_graph_analysis
+          owned = vault_owned_at_start?
 
-        emitted, skipped = partition_emitted
-        mapper = build_mapper(emitted)
-        edge_map = build_edge_map(emitted.to_set, graph)
-        builder = build_note_builder(mapper, analysis)
+          emitted, skipped = partition_emitted
+          mapper = build_mapper(emitted)
+          edge_map = build_edge_map(emitted.to_set, graph)
+          builder = build_note_builder(mapper, analysis)
 
-        written = Set.new
-        errors = []
-        exported = write_notes(emitted, mapper, edge_map, builder, written, errors)
-        indexes = write_indexes(emitted, mapper, written)
-        write_sidecar(emitted, mapper, graph, analysis, written)
-        write_owned_assets(emitted) if owned
+          written = Set.new
+          errors = []
+          exported = write_notes(emitted, mapper, edge_map, builder, written, errors)
+          indexes = write_indexes(emitted, mapper, written)
+          write_sidecar(emitted, mapper, graph, analysis, written)
+          write_owned_assets(emitted) if owned
 
-        swept = owned && errors.empty? ? sweep(written) : 0
-        warn_foreign unless owned
-        { exported: exported, indexes: indexes, swept: swept, skipped: skipped, errors: cap_errors(errors) }
+          swept = owned && errors.empty? ? sweep(written) : 0
+          warn_foreign unless owned
+          { exported: exported, indexes: indexes, swept: swept, skipped: skipped, errors: cap_errors(errors) }
+        end
       end
 
       private
+
+      # Run the export against one index generation.
+      #
+      # Every public IndexReader accessor self-refreshes when the published
+      # generation moves, and the reader assigns pinning responsibility to
+      # direct callers. Unpinned, `raw_graph_data` and the per-unit reads can
+      # straddle two generations (EXP-5) — which the "byte-identical across
+      # runs" contract cannot survive, and which computes the sweep set against
+      # a mixture.
+      #
+      # Guarded by +respond_to?+: injected readers (specs, embedders) need not
+      # implement pinning.
+      #
+      # @yield the export body
+      # @return [Object] the block's value
+      def with_pinned_index(&block)
+        return yield unless @reader.respond_to?(:with_pinned_generation)
+
+        @reader.with_pinned_generation(&block)
+      end
 
       # ── Selection / mapping ──────────────────────────────────────────
 
@@ -294,12 +316,19 @@ module Woods
         end
       end
 
+      # Every managed note in the vault, vault-relative.
+      #
+      # `base:` keeps the vault's own path out of the pattern: "[", "]", "{",
+      # "}", "*" and "?" in a folder name (`my [work] vault` is an ordinary
+      # human folder name) are glob syntax, and interpolating the path matched
+      # nothing — the sweep saw zero managed notes and deleted nothing,
+      # silently, forever (EXP-6).
+      #
+      # @return [Array<String>] paths relative to the vault root
       def managed_notes
-        Dir.glob(@vault.join('**', '*.md')).filter_map do |abs|
-          next unless managed_marker?(abs)
+        return [] unless @vault.directory?
 
-          Pathname.new(abs).relative_path_from(@vault).to_s
-        end
+        Dir.glob(File.join('**', '*.md'), base: @vault.to_s).select { |rel| managed_marker?(@vault.join(rel)) }
       end
 
       # Only our notes carry this frontmatter flag. Reads just the frontmatter

@@ -1951,5 +1951,351 @@
   ],
   "description": "M7 monitoring item, mitigated and currently non-release-blocking. Two official-client stdio examples historically exceeded their 10s read timeout only in randomized full-suite runs. The failure has not reproduced across 30 targeted runs, 12 concurrent processes, the complete suite at seed 41729, or nine subsequent green CI runs, so no root cause is claimed. The timeout is now 30s and a timeout fails once with the child stderr appended; there is no retry that could hide the evidence. Acceptance: on the next captured timeout, record the full-suite seed, request method, captured child stderr, mcp gem and Ruby versions, and runner load; then identify the root cause and add a deterministic regression before changing production or transport code.",
   "status": "open"
-}
+},
+  {
+    "id": "B-140",
+    "title": "AST parser-gem fallback loses chained-receiver call sites",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/ast/parser.rb",
+      "lib/woods/ast/call_site_extractor.rb"
+    ],
+    "description": "Prior-audit L3, deferred with reason \"unreachable; prism hard dep\". parser.rb:506 gives :send nodes `children: []` where the Prism path (:279-280) keeps the receiver, and call_site_extractor.rb:62-87 has no return after the :send case, so under the parser gem `a.b.c` yields only the outermost call. Unreachable today: prism ~> 1.4 is a hard dependency and parser is not a dependency, so the fallback raises LoadError first, and call_site_extractor_spec.rb:62-69 would fail if it were ever taken. Acceptance: either delete the dead fallback or make it produce the same call set as the Prism path, with a spec that drives the fallback branch directly.",
+    "status": "open"
+  },
+  {
+    "id": "B-141",
+    "title": "Bearer scheme match is case-sensitive, unlike RFC 6750",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "console-mcp",
+    "files": [
+      "lib/woods/mcp/bearer_auth.rb"
+    ],
+    "description": "Prior-audit L7, deferred with reason \"deliberate, spec-pinned; decision on record\". bearer_auth.rb:64 uses `header.start_with?('Bearer ')` while RFC 6750 auth schemes are case-insensitive, so a client sending `bearer <token>` is refused. The comparison itself is secure_compare (constant-time), and bearer_auth_spec.rb:32 asserts the strict behavior, so this is contract rather than accident. Acceptance: either document the strict scheme in CONSOLE_MCP_SETUP.md as intended, or accept a case-insensitive scheme prefix with the constant-time token comparison unchanged and flip the pinning spec.",
+    "status": "open"
+  },
+  {
+    "id": "B-142",
+    "title": "Console validation errors enumerate the full model and column registry",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/model_validator.rb"
+    ],
+    "description": "Prior-audit L12, deferred with reason \"bounded, intentional\". model_validator.rb:41,56 answer \"Unknown model: X. Available: <every model name>\", disclosing the whole registry on a typo. Disclosure is bounded because the caller already holds a bearer token for a debug server, and model_validator_spec.rb:27,43 assert the enumeration intentionally. Acceptance: decide whether to cap the enumeration (nearest-match suggestions plus a count) and, either way, record the decision in the docs so it is not rediscovered as a leak.",
+    "status": "open"
+  },
+  {
+    "id": "B-143",
+    "title": "Console Server.@active_scanner is last-build-wins across servers in one process",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/server.rb"
+    ],
+    "description": "Prior-audit L13, deferred with reason \"single-server unaffected; track\". server.rb:63-73,251 holds the credential scanner in class-level state, so building two Console servers in one process overwrites the reference and a credential-index rotation hot-swaps into whichever server was built last. The swap itself is atomic as documented, and single-server hosts (every packaged mode) are unaffected. Acceptance: move the scanner reference to per-server state, with a spec that builds two servers and rotates the index on one without disturbing the other.",
+    "status": "open"
+  },
+  {
+    "id": "B-144",
+    "title": "Confirmation#history retains full eval code in memory, unredacted",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/confirmation.rb"
+    ],
+    "description": "Prior-audit L14, deferred with reason \"latent, unsupported modes\". confirmation.rb:59-65 stores up to 1 KB of requested eval code per request; AuditLogger redacts what it writes but this in-memory history does not, so a credential pasted into console_eval sits unredacted in the process. Latent only: console_eval is not registered in any packaged mode. Acceptance: run the stored code through CredentialScanner before it enters the history (or store a digest), with a spec asserting no credential-shaped substring survives in #history.",
+    "status": "open"
+  },
+  {
+    "id": "B-145",
+    "title": "Shapeless secrets depend entirely on the credential index",
+    "severity": "low",
+    "category": "doc-missing",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/credential_scanner.rb",
+      "docs/CONSOLE_MCP_SETUP.md"
+    ],
+    "description": "Prior-audit L15, deferred with reason \"documented boundary; credential-index is the control\". credential_scanner.rb:43-101 is shape-based, so AWS secret access keys, 32-hex Twilio tokens and hand-rolled HMAC secrets have no pattern and are caught only when CredentialIndex can build (master key present, plus a restart or rebuild_credential_index after rotation). The limitation is stated in docs/CONSOLE_MCP_SETUP.md:538-542. Acceptance: keep this as a tracked boundary; revisit only if an operator-supplied literal list or entropy heuristic is accepted as a design.",
+    "status": "open"
+  },
+  {
+    "id": "B-146",
+    "title": "TextPreparer#enforce_token_limit is char-estimate based, so a truncated text can still exceed 8191 tokens",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "embedding",
+    "files": [
+      "lib/woods/embedding/text_preparer.rb"
+    ],
+    "description": "Prior-audit L21, deferred with reason \"blocked on tokenizers gem\". text_preparer.rb:128-134 enforces the limit against the 4.0 chars/token estimate; code tokenizes denser than that, so a last-resort-truncated text can pass the estimate and still exceed 8191 real tokens and take an OpenAI 400. The chunker bounds this first in the normal path, leaving only the last-resort branch exposed. A real fix needs a real tokenizer, the same dependency that makes token_counter_spec.rb:36 skip. Acceptance: once tokenizers is available on the supported Ruby floor, enforce against a true count with a regression at the boundary.",
+    "status": "open"
+  },
+  {
+    "id": "B-147",
+    "title": "extracted_at write-skip mask is a global gsub and can blank a nested metadata timestamp",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Audit finding CORE-3 (Low, executed). extractor.rb:1503-1539 masks `extracted_at` with a global gsub before the byte comparison that decides whether to rewrite a unit file. A future extractor storing a nested `extracted_at` key would have that value masked too, so a change to only it skips the write and the artifact silently goes stale. Latent: no extractor emits a nested one today, and the spec covers only the top-level skip. Acceptance: anchor the mask to the document-final position, with a spec whose fixture carries a nested extracted_at and asserts the write still happens.",
+    "status": "open"
+  },
+  {
+    "id": "B-148",
+    "title": "ChangeSet normalization edges: trailing-slash root breaks relativize, doubled slashes bypass dispatch",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/change_set.rb"
+    ],
+    "description": "Audit finding CORE-5 (Low, executed). change_set.rb:74-86 does not normalize its inputs: `root: \"dir/\"` makes every relative path miss the dispatch rules, and `app//models/x.rb` matches no rule at all, so the changed file is silently dropped from an incremental run. Every current caller passes a clean root, so this is latent. Acceptance: chomp the root and cleanpath in absolutize, with specs for both shapes asserting the path still reaches PathDispatcher.",
+    "status": "open"
+  },
+  {
+    "id": "B-149",
+    "title": "Governed naming silently degrades on zeitwerk < 2.6.4 and classic-mode hosts",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/source_nesting.rb",
+      "docs/UPGRADING_TO_2.md"
+    ],
+    "description": "Audit finding EXTA-7 (Low, traced). source_nesting.rb:248-255,414-433 relies on Zeitwerk's `cpath_expected_at`, added in zeitwerk 2.6.4 (Jan 2023). On an older zeitwerk or a classic-mode host, governance yields nothing and the G-1 wrapper shape then aborts extraction with a misleading remedy \u2014 and Rails 6-era lockfiles are realistic on the supported railties >= 6.0 floor. Deferred because it needs a decision (fallback vs documented floor). Acceptance: name the zeitwerk floor in UPGRADING_TO_2 and in the collision message now; decide on a fallback in a 2.0.x.",
+    "status": "open"
+  },
+  {
+    "id": "B-150",
+    "title": "ModelExtractor cannot inline concerns outside three hardcoded directories",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/model_extractor.rb"
+    ],
+    "description": "Audit finding EXTA-9 (Low, traced). model_extractor.rb:385-392 resolves concern sources by convention against three directories, so a namespaced concern (app/models/library/sluggable.rb) silently fails to inline and the model unit loses the behavior that concern inlining exists to capture. controller_extractor.rb:344-350 already solved this with const_source_location. Deferred as a behavior improvement, not a regression. Acceptance: use const_source_location with the conventions as fallback, and a spec inlining a namespaced concern.",
+    "status": "open"
+  },
+  {
+    "id": "B-151",
+    "title": "Phantom parameters in perform_params/initialize_params for kwargs and comma-bearing defaults",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/job_extractor.rb",
+      "lib/woods/extractors/shared_utility_methods.rb"
+    ],
+    "description": "Audit finding EXTA-11 (Low, executed). job_extractor.rb:291-310 and shared_utility_methods.rb:294-310 split parameter lists on commas without consuming keyword defaults, so `perform(user_id, notify: true)` records params `user_id, notify, true` \u2014 a fabricated third parameter in agent-facing output. Deferred because the right fix is Prism-based parameter parsing, a small design of its own. Acceptance: parse the parameter list with Prism (or consume kwarg defaults), with specs for kwargs, comma-bearing defaults, and block/splat parameters.",
+    "status": "open"
+  },
+  {
+    "id": "B-152",
+    "title": "IGNORED_HELPER_PREFIXES drops navigation edges for real file_*/image_*/video_*/log_*/download_* resources",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/route_helper_resolver.rb"
+    ],
+    "description": "Audit finding EXTA-13 (Low, traced). route_helper_resolver.rb:35-51,106-111 filters known false-positive helper prefixes before consulting the route map, so an app with a genuine `file_path`/`download_path` resource loses every navigation edge to it even though the helper resolves in the live map. Deferred because it changes edge emission and needs a host-app false-positive re-check. Acceptance: consult the route map first and ignore only unresolvable bases, validated against a real host app for new false positives.",
+    "status": "open"
+  },
+  {
+    "id": "B-153",
+    "title": "MailerExtractor lacks the defined? guard and app-defined gate its peers got in #200",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/mailer_extractor.rb"
+    ],
+    "description": "Audit finding EXTA-15 (Low, traced). mailer_extractor.rb:30,47-81 neither guards on `defined?(ActionMailer)` nor gates on an app-defined ApplicationMailer, unlike the peers fixed in #200. Without ActionMailer, construction raises and the whole run aborts; without an ApplicationMailer, gem-defined mailers index as empty units at fabricated convention paths and, being CLASS_BASED-protected, persist across incremental runs. Deferred because validating it needs a booted host with ActionMailer removed. Acceptance: mirror the #200 shape, with a testbed variant that boots without ActionMailer.",
+    "status": "open"
+  },
+  {
+    "id": "B-154",
+    "title": "validate_scope_array! strips SQL noise with a fixed :postgres dialect",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/embedded_executor.rb"
+    ],
+    "description": "Audit finding CON-4 (Low, executed). embedded_executor.rb:1406 calls `SqlNoiseStripper.strip_noise(template)` with the default :postgres dialect, unlike sql_identifier_referenced? (:1514) and validate_protected_sql_usage! (:1448), which both pass `dialect: sql_dialect || :postgres`. On a MySQL host a `\\'` escape folds a forbidden subquery into what the postgres strip reads as a literal, so SCOPE_TEMPLATE_FORBIDDEN never sees the SELECT. Not reachable through the registered schema (QUERY_SCOPE_TEMPLATE_REGEXP and the tool schemas constrain scope first); the exposure is direct/legacy bridge callers. Acceptance: pass the active dialect (or scan both strips, mirroring dml_body_views), with a MySQL-adapter scope-array example asserting the subquery is still refused.",
+    "status": "open"
+  },
+  {
+    "id": "B-155",
+    "title": "CacheStore#cache_key single-part vs multi-part arity collision",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/cache/cache_store.rb"
+    ],
+    "description": "Audit finding STO-7 (Low, executed). cache_store.rb:27-35 joins key parts without length-prefixing, so `cache_key(:d, '4:abc22:xy')` and `cache_key(:d, 'abc2', 'xy')` produce the same key and two different queries can share one cached response. Latent: no current caller constructs a part containing the separator. Acceptance: length-prefix each part (or escape the separator), with a spec asserting the two colliding call shapes produce different keys.",
+    "status": "open"
+  },
+  {
+    "id": "B-156",
+    "title": "WOODS_OUTPUT does not reach the SQLite metadata database path",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/tasks.rb",
+      "lib/woods/builder.rb"
+    ],
+    "description": "Audit finding STO-10 (Low, traced). tasks.rb:63 resolves the output directory from WOODS_OUTPUT, but builder.rb:476-481 builds the metadata store path from `config.output_dir`. Units and dumps land under WOODS_OUTPUT while metadata.sqlite3 lands elsewhere: outside the swept index, and potentially shared between worktrees that believe they have disjoint indexes. Acceptance: thread the resolved output dir into build_metadata_store, with a spec asserting the database path follows WOODS_OUTPUT.",
+    "status": "open"
+  },
+  {
+    "id": "B-157",
+    "title": "One embedding provider request can carry batch_size x chunks inputs with no per-request cap",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "embedding",
+    "files": [
+      "lib/woods/embedding/indexer.rb"
+    ],
+    "description": "Audit finding STO-14 (Low, traced with inferred impact). indexer.rb:465-472,567-576,661-665 accumulates every chunk of a unit batch into one provider request, so the input count is batch_size x chunks_per_unit and not bounded by anything. Thirty-two heavily chunked units can exceed OpenAI's 2048-inputs limit, and that is a hard 400 the resilience stack cannot retry past \u2014 it aborts the run. Acceptance: flush `to_embed` in slices bounded by a per-provider input cap, with a spec asserting the request count for a chunk-heavy batch.",
+    "status": "open"
+  },
+  {
+    "id": "B-158",
+    "title": "JsonSnapshotStore raises TypeError on wrong-type JSON and ENOENT on a mid-listing prune",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/temporal/json_snapshot_store.rb"
+    ],
+    "description": "Audit finding INF-5 (Low, executed). json_snapshot_store.rb:259-307 assumes every parsed snapshot file is a Hash, so one file containing `[]` raises TypeError out of find, list, diff and unit_history at once; separately the glob-then-read window races the unlocked retention prune and raises ENOENT. Both break the B-135 \"corrupt = absent\" posture, which pinned only the truncation shape. Acceptance: require a Hash and rescue SystemCallError per file, treating either as absent, with specs for both shapes across all four tools.",
+    "status": "open"
+  },
+  {
+    "id": "B-159",
+    "title": "A corrupt pipeline_guard state file is a dead end pipeline_repair cannot clear",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "infrastructure",
+    "files": [
+      "lib/woods/operator/pipeline_guard.rb",
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "Audit finding INF-6 (Low, executed). pipeline_guard.rb:43-53,145-153 fails closed on corrupt state (correct) but reset! treats it as nothing to reset, so mcp/server.rb:1588-1594 answers \"nothing was repaired\" while diagnose reports the state corrupt \u2014 the operator has no in-band way out. The spec pins reset-as-no-op. Acceptance: let an explicit reset!(:all) rewrite corrupt state, or make the repair message name the file to delete; flip the pinning spec either way.",
+    "status": "open"
+  },
+  {
+    "id": "B-160",
+    "title": "CHANGELOG P4 entry overstates what the session-index ZSET migration preserves",
+    "severity": "low",
+    "category": "doc-fix",
+    "layer": "docs",
+    "files": [
+      "CHANGELOG.md",
+      "lib/woods/session_tracer/redis_store.rb"
+    ],
+    "description": "Audit finding INF-13 (Low, traced). redis_store.rb:40-51 inserts every migrated legacy member into the recency ZSET at score 0, so the migrated cohort evicts lexicographically and ahead of any post-migration session. The [Unreleased] Performance / P4 entry's claim that \"eviction order (oldest last request) is unchanged\" is therefore not true for that cohort. Acceptance: one-line CHANGELOG correction naming the migrated-cohort exception.",
+    "status": "open"
+  },
+  {
+    "id": "B-161",
+    "title": "P5's ReDoS bound does not exist on the supported Ruby 3.0/3.1 floor",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/index_reader.rb"
+    ],
+    "description": "Audit finding R2-4 (Low, traced). index_reader.rb:883-889 gates the user-search regex timeout on Ruby >= 3.2, and those older interpreters also lack 3.2's regex memoization, so the supported floor has neither protection. The CHANGELOG discloses the gate; the remediation ledger row does not. Deferred pending a decision. Acceptance: either add a coarse wall-clock deadline for < 3.2 or state the exclusion in the release notes and the ledger.",
+    "status": "open"
+  },
+  {
+    "id": "B-162",
+    "title": "Session-index ZSET migration is write-path-only: reads raise WRONGTYPE against a legacy index",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/session_tracer/redis_store.rb"
+    ],
+    "description": "Audit finding R2-5 (Low, traced). The legacy SET-to-ZSET migration runs only inside `record` (the write path), while redis_store.rb:100,137 issue zrange against the index. A reader-only process, or a mixed-version fleet where the reader upgrades first, hits WRONGTYPE on an unmigrated index instead of degrading. Acceptance: migrate (or rescue and fall back) on the read path too, with a spec seeding a legacy SET and reading without any prior write.",
+    "status": "open"
+  },
+  {
+    "id": "B-163",
+    "title": "JSON snapshot retention can never prune a corrupt snapshot file",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/temporal/json_snapshot_store.rb"
+    ],
+    "description": "Audit finding R2-6 (Low, traced). Retention picks its eviction victims from parseable snapshot summaries, so an unreadable or corrupt file is never a candidate and accumulates forever \u2014 the exact files B-135 taught the reader to skip are the ones retention cannot reclaim. Intersection of P8 and B-135. Acceptance: rank unreadable files as the oldest victims, with a spec asserting a corrupt file is pruned once the retention bound is exceeded.",
+    "status": "open"
+  },
+  {
+    "id": "B-164",
+    "title": "Self-map dependents dangle: static analyzer records include targets as short names",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "self-map",
+    "files": [
+    "lib/woods/ruby_analyzer/",
+    "lib/tasks/woods.rake"
+    ],
+    "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map.",
+    "status": "open"
+  },
+  {
+    "id": "B-165",
+    "title": "Class-discovered jobs have no removal reconciliation (not in CLASS_BASED_DISCOVERY)",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+    "lib/woods/extractor.rb",
+    "lib/woods/extractors/job_extractor.rb"
+    ],
+    "description": "Post-#274: JobExtractor#discoverable_classes exists and gates re_extract_by_class, but jobs are not registered in CLASS_BASED_DISCOVERY, so a class-discovered job whose class disappears without its host file changing (gem removed, dynamic definition gone) survives incrementally until a full extraction. Same accepted posture as GraphQL runtime types. Acceptance: either add a jobs discovery entry (decide reconcile_removals semantics against the nested-job fixture and the audit EXTA-3 nil-path contract) or document the staleness bound in INCREMENTAL_EXTRACTION.md.",
+    "status": "open"
+  },
+  {
+    "id": "B-166",
+    "title": "Gem-owned unit paths go stale after a gem upgrade until a full extraction",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+    "lib/woods/extractors/shared_utility_methods.rb",
+    "lib/woods/extractor.rb"
+    ],
+    "description": "Post-#275: gem-owned classes carry their real absolute (or vendored-relative) definition site. Gem paths never enter the incremental blast radius (no change set names them), and after a bundle update the recorded paths dangle until a full extraction rebuilds them; woods:validate reports them as gem-owned without a remedy. Acceptance: either extend the Gemfile.lock whole-app trigger to refresh class-discovered gem-owned units, or document the full-extract-after-bundle-update requirement in INCREMENTAL_EXTRACTION.md and the validate warning.",
+    "status": "open"
+  },
+  {
+    "id": "B-167",
+    "title": "source_hash unstable across processes for controllers with inline proc filters",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+    "lib/woods/extractors/controller_extractor.rb"
+    ],
+    "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
+    "status": "open"
+  }
 ]

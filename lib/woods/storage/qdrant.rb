@@ -11,6 +11,11 @@ require_relative '../util/host_guard'
 require_relative '../util/uuid5'
 
 module Woods
+  # Same conditional-define pattern used elsewhere in the gem (pgvector,
+  # metadata_store) so this file can be required in isolation without
+  # tripping NameError on the RequestError superclass below.
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   module Storage
     module VectorStore
       # Qdrant adapter for vector storage and similarity search via HTTP API.
@@ -398,7 +403,13 @@ module Woods
         # here can be handed straight back to {#delete}.
         #
         # Points written by something else — no {IDENTIFIER_KEY} in their
-        # payload — yield their raw point id, mirroring {#search}'s fallback.
+        # payload — are **skipped**, not yielded (STO-2). A collection may be
+        # shared with another writer; an unattributable point can never appear
+        # in extraction output, so yielding it would make the embed pipeline's
+        # reconciliation sweep read it as a vanished unit and delete another
+        # system's vector on every run. Enumerating only what Woods wrote is
+        # the property callers depend on. {#search} still falls back to the raw
+        # id, because there the point was matched, not swept.
         #
         # @see Interface#each_id
         def each_id(&block)
@@ -407,7 +418,10 @@ module Woods
           offset = nil
           loop do
             points, offset = scroll_page(offset)
-            points.each { |point| yield(identifier_for(point)) }
+            points.each do |point|
+              identifier = woods_identifier_for(point)
+              yield(identifier) if identifier
+            end
             break if offset.nil?
           end
         end
@@ -510,13 +524,13 @@ module Woods
           [result['points'] || [], result['next_page_offset']]
         end
 
-        # The Woods identifier for a scrolled point, falling back to the raw
-        # point id for anything this adapter did not write.
+        # The Woods identifier a scrolled point carries, or nil when the point
+        # was not written by this adapter.
         #
         # @param point [Hash] a scroll-result point
-        # @return [String, Integer]
-        def identifier_for(point)
-          (point['payload'] || {})[IDENTIFIER_KEY] || point['id']
+        # @return [String, nil]
+        def woods_identifier_for(point)
+          (point['payload'] || {})[IDENTIFIER_KEY]
         end
 
         # Build one Qdrant point: UUIDv5 id, vector, and a payload carrying

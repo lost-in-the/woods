@@ -57,6 +57,24 @@ RSpec.describe Woods::Evaluation::QuerySet do
   end
 
   describe '#add' do
+    it 'rejects required_units that are not a subset of expected_units' do
+      query = described_class::Query.new(
+        query: 'q', expected_units: %w[User], required_units: %w[Ghost],
+        intent: :locate, scope: :pinpoint, tags: []
+      )
+
+      expect { query_set.add(query) }.to raise_error(ArgumentError, /subset of expected_units/)
+    end
+
+    it 'accepts required_units that are a subset of expected_units' do
+      query = described_class::Query.new(
+        query: 'q', expected_units: %w[User Post], required_units: %w[User],
+        intent: :locate, scope: :pinpoint, tags: []
+      )
+
+      expect { query_set.add(query) }.not_to raise_error
+    end
+
     it 'adds a valid query' do
       new_query = described_class::Query.new(
         query: 'Explain the mailer system',
@@ -185,9 +203,84 @@ RSpec.describe Woods::Evaluation::QuerySet do
       expect(loaded.queries.map(&:query)).to eq(query_set.queries.map(&:query))
     end
 
+    # EXP-10. `context_completeness` was scored against `expected_units`,
+    # making it recall under a second name. The optional `required_units`
+    # annotation is the subset a retrieval must surface.
+    it 'loads an optional required_units annotation' do
+      File.write(json_path, JSON.generate(
+                              'queries' => [
+                                { 'query' => 'Trace the login flow',
+                                  'expected_units' => %w[SessionsController AuthService],
+                                  'required_units' => %w[SessionsController] }
+                              ]
+                            ))
+
+      loaded = described_class.load(json_path)
+
+      expect(loaded.queries.first.required_units).to eq(%w[SessionsController])
+      expect(loaded.queries.first.completeness_units).to eq(%w[SessionsController])
+    end
+
+    it 'defaults completeness_units to the expected set when unannotated' do
+      loaded = described_class.load(json_path.tap { |path| File.write(path, JSON.generate(json_data)) })
+
+      expect(loaded.queries.first.required_units).to be_nil
+      expect(loaded.queries.first.completeness_units).to eq(%w[User])
+    end
+
+    it 'round-trips required_units through save' do
+      set = described_class.new(queries: [
+                                  described_class::Query.new(
+                                    query: 'Trace the login flow',
+                                    expected_units: %w[SessionsController AuthService],
+                                    required_units: %w[AuthService],
+                                    intent: :trace, scope: :focused, tags: []
+                                  )
+                                ])
+      set.save(json_path)
+
+      expect(described_class.load(json_path).queries.first.required_units).to eq(%w[AuthService])
+    end
+
+    it 'omits required_units from the JSON when unannotated' do
+      query_set.save(json_path)
+
+      JSON.parse(File.read(json_path))['queries'].each do |raw|
+        expect(raw).not_to have_key('required_units')
+      end
+    end
+
     it 'raises Woods::Error for missing file' do
       expect { described_class.load('/nonexistent/file.json') }
         .to raise_error(Woods::Error, /file not found/i)
+    end
+
+    # EXP-7. A hand-written query set is UTF-8 on disk; a bare File.read tags
+    # it with the process default external encoding, so under a POSIX locale
+    # the first accented query raised a raw ArgumentError out of JSON.parse —
+    # neither of the two typed Woods::Error branches. Baseline.load already
+    # reads with an explicit encoding; this is the same house pattern.
+    it 'loads a query set holding non-ASCII query text' do
+      unicode_data = {
+        'queries' => [{ 'query' => 'Où se trouve le café dans le domaine ?', 'expected_units' => %w[Café] }]
+      }
+      File.binwrite(json_path, JSON.generate(unicode_data))
+
+      loaded = described_class.load(json_path)
+
+      expect(loaded.queries.first.query).to eq('Où se trouve le café dans le domaine ?')
+      expect(loaded.queries.first.expected_units).to eq(%w[Café])
+    end
+
+    it 'round-trips non-ASCII query text through #save' do
+      set = described_class.new(
+        queries: [Woods::Evaluation::QuerySet::Query.new(query: 'Où est le café ?', expected_units: %w[Café])]
+      )
+
+      set.save(json_path)
+
+      expect(File.binread(json_path).force_encoding(Encoding::UTF_8)).to include('Où est le café ?')
+      expect(described_class.load(json_path).queries.first.query).to eq('Où est le café ?')
     end
 
     it 'raises Woods::Error for invalid JSON' do

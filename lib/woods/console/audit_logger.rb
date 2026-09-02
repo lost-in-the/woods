@@ -44,11 +44,17 @@ module Woods
       def log(tool:, params:, confirmed:, result_summary:)
         ensure_directory!
 
+        # Redact BEFORE truncating (CON-5). Truncation cuts at
+        # MAX_FIELD_CHARS, and a credential straddling that boundary is split
+        # in two: the scanner's word-boundary/length-anchored patterns no
+        # longer match the surviving prefix, so cleartext `sk_live_…` reached
+        # the JSONL. Scanning the whole value first means the boundary can
+        # only ever fall inside `[REDACTED]`.
         entry = {
           tool: tool,
-          params: redact(truncate_deep(params)),
+          params: truncate_deep(redact(params)),
           confirmed: confirmed,
-          result_summary: redact(truncate_value(result_summary)),
+          result_summary: truncate_value(redact(result_summary)),
           timestamp: Time.now.utc.iso8601
         }
 
@@ -121,7 +127,10 @@ module Woods
       def entries
         return [] unless File.exist?(@path)
 
-        File.readlines(@path).filter_map do |line|
+        # Explicit UTF-8: entries are written as UTF-8 (the truncation notice
+        # alone carries a multibyte ellipsis), so a bare read would tag them
+        # with the process default external encoding and raise under LANG=C.
+        File.readlines(@path, encoding: Encoding::UTF_8).filter_map do |line|
           JSON.parse(line.strip) unless line.strip.empty?
         end
       end

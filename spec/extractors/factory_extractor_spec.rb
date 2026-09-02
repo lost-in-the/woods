@@ -376,6 +376,79 @@ RSpec.describe Woods::Extractors::FactoryExtractor do
       expect(parent_dep[:type]).to eq(:factory)
     end
 
+    it 'does not count block keywords inside attribute strings (EXTB-2)' do
+      # `title { "things to do" }` matched `block_opener?` on the string's
+      # "do", inflating depth with no closing `end`. Two such attributes left
+      # the factory on the stack at EOF and the unit was dropped entirely.
+      path = create_file('spec/factories/checklists.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :checklist do
+            title { "things to do" }
+            note { "walk for a while" }
+            association :owner
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.map(&:identifier)).to eq(['checklist'])
+      expect(units.first.metadata[:associations]).to eq(['owner'])
+    end
+
+    it 'keeps sibling factories separate when one carries a keyword string (EXTB-2)' do
+      path = create_file('spec/factories/things.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :task_item do
+            title { "things to do today" }
+            association :owner
+          end
+
+          factory :note do
+            association :author
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('task_item', 'note')
+      expect(units.find { |u| u.identifier == 'note' }.metadata[:associations]).to eq(['author'])
+    end
+
+    it 'does not close a factory early on an assignment-form multi-line if' do
+      # `record.tier = if ...` opens a construct whose line-leading `end`
+      # decrements depth, but the opener rule counted `if` only in
+      # line-leading position. The unbalanced `end`s brought depth back to
+      # the factory's open depth one construct early, completing it while
+      # its body was still being read — every attribute after that point
+      # (here the association) was attributed to nothing and dropped.
+      path = create_file('spec/factories/tiers.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :alpha do
+            after(:create) do |record|
+              record.tier = if record.special?
+                'gold'
+              else
+                'basic'
+              end
+            end
+            association :owner
+          end
+
+          factory :beta do
+            association :author
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.map(&:identifier)).to contain_exactly('alpha', 'beta')
+      expect(units.find { |u| u.identifier == 'alpha' }.metadata[:associations]).to eq(['owner'])
+      expect(units.find { |u| u.identifier == 'beta' }.metadata[:associations]).to eq(['author'])
+    end
+
     it 'returns empty array for non-rb files' do
       path = create_file('spec/factories/readme.txt', 'not a factory file')
       units = described_class.new.extract_factory_file(path)

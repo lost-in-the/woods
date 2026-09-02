@@ -326,7 +326,12 @@ RSpec.describe Woods::Extractors::JobExtractor do
       unit = described_class.new.extract_job_file(path)
       retry_config = unit.metadata[:retry_config]
       expect(retry_config[:retry_on]).not_to be_empty
-      expect(retry_config[:retry_on].first[:error]).to eq('Net')
+      # `retry_on\s+(\w+)` stopped at the `::`, recording `Net` and — because
+      # the wait/attempts tail is matched off the same token run — losing both
+      # of them for every namespaced error class (EXTA-10).
+      expect(retry_config[:retry_on].first[:error]).to eq('Net::OpenTimeout')
+      expect(retry_config[:retry_on].first[:wait]).to eq('10')
+      expect(retry_config[:retry_on].first[:attempts]).to eq(3)
     end
 
     it 'extracts Sidekiq retry count' do
@@ -619,6 +624,34 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(job_deps.first[:via]).to eq(:job_enqueue)
     end
 
+    it 'detects a Sidekiq *Worker enqueue as a :job dependency (EXTA-4)' do
+      path = create_file('app/jobs/dispatch_worker_job.rb', <<~RUBY)
+        class DispatchWorkerJob < ApplicationJob
+          def perform(user_id)
+            HardWorker.perform_async(user_id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      expect(job_deps.map { |d| d[:target] }).to include('HardWorker')
+    end
+
+    it 'keeps the namespace of an enqueued job (EXTA-2)' do
+      path = create_file('app/jobs/namespaced_dispatch_job.rb', <<~RUBY)
+        class NamespacedDispatchJob < ApplicationJob
+          def perform(id)
+            Billing::SyncJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      job_deps = unit.dependencies.select { |d| d[:type] == :job }
+      expect(job_deps.map { |d| d[:target] }).to include('Billing::SyncJob')
+    end
+
     it 'detects multiple enqueued jobs' do
       path = create_file('app/jobs/pipeline_job.rb', <<~RUBY)
         class PipelineJob < ApplicationJob
@@ -726,6 +759,50 @@ RSpec.describe Woods::Extractors::JobExtractor do
 
       unit = described_class.new.extract_job_file(path)
       expect(unit.identifier).to eq('ChargeJob')
+    end
+  end
+
+  # ── Class-based discovery source paths (EXTA-3) ──────────────────────
+
+  describe '#source_file_for' do
+    # The class-discovery pass walks ApplicationJob.descendants, which
+    # includes classes defined by gems and engines. Handing those a
+    # fabricated `app/jobs/<name>.rb` puts a nonexistent, rule-claimed path
+    # in the graph's file_map, and the next incremental run's safety-net
+    # sweep deletes the unit — the B-070/#171 GraphQL shape, reproduced for
+    # jobs. Returning nil keeps the unit out of file_map entirely.
+    let(:external_job_class) do
+      Class.new do
+        def self.name
+          'Gems::ExternalJob'
+        end
+      end
+    end
+
+    it 'returns nil when no source resolves and the convention path does not exist' do
+      expect(described_class.new.send(:source_file_for, external_job_class)).to be_nil
+    end
+
+    it 'still returns the convention path when the file exists' do
+      path = create_file('app/jobs/real_job.rb', <<~RUBY)
+        class RealJob < ApplicationJob
+          def perform(id); end
+        end
+      RUBY
+      job_class = Class.new do
+        def self.name
+          'RealJob'
+        end
+      end
+
+      expect(described_class.new.send(:source_file_for, job_class)).to eq(path)
+    end
+
+    it 'builds a unit with a nil file_path for an unresolvable job class' do
+      unit = described_class.new.send(:extract_job_class, external_job_class)
+
+      expect(unit.identifier).to eq('Gems::ExternalJob')
+      expect(unit.file_path).to be_nil
     end
   end
 

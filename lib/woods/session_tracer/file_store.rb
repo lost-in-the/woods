@@ -51,7 +51,16 @@ module Woods
 
         with_store_lock do
           path = migrate_legacy_session!(session_id)
-          lines = File.exist?(path) ? File.readlines(path).last(@max_requests_per_session - 1) : []
+          # Explicit UTF-8 on every read in this file: the JSONL is written as
+          # raw UTF-8 bytes, so a bare read tags the lines with the process
+          # default external encoding and one non-ASCII request path (a
+          # localized route) breaks `record`'s history join, `read`,
+          # `sessions`, and the `session_trace` MCP tool under LANG=C (R1-1).
+          lines = if File.exist?(path)
+                    File.readlines(path, encoding: Encoding::UTF_8).last(@max_requests_per_session - 1)
+                  else
+                    []
+                  end
           atomic_replace(path, (lines << line).join)
           prune_sessions!
         end
@@ -71,7 +80,7 @@ module Woods
             return []
           end
 
-          File.readlines(path)
+          File.readlines(path, encoding: Encoding::UTF_8)
         end
         lines.filter_map do |line|
           stripped = line.strip
@@ -152,7 +161,9 @@ module Woods
         return target unless legacy && File.exist?(legacy)
 
         if File.exist?(target)
-          atomic_replace(target, File.read(legacy) + File.read(target))
+          atomic_replace(target,
+                         File.read(legacy, encoding: Encoding::UTF_8) +
+                         File.read(target, encoding: Encoding::UTF_8))
           FileUtils.rm_f(legacy)
         else
           File.rename(legacy, target)

@@ -202,6 +202,60 @@ RSpec.describe Woods::Extractors::SourceNesting do
       expect(scanner.qualified_first_class_name(source)).to eq('Payment')
     end
 
+    it 'keeps a wrapper whose trailing comment ends in the word "end" (EXTA-1)' do
+      # `(?<!\bend)` in `block_opener?` fired on the comment text, so the
+      # wrapper looked self-terminated and never went on the stack —
+      # a prose comment silently demoted `Api::Payment` to `Payment`.
+      source = <<~RUBY
+        module Api # TODO: rename at the end
+          class Payment
+          end
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Api::Payment')
+    end
+
+    it 'does not open a phantom frame for a block keyword inside a trailing comment (EXTA-1)' do
+      # `x.to_s # pad for display` matched `block_opener?` on the comment's
+      # "for", pushing a frame that absorbed the module's own `end` and left
+      # `Util` on the stack for the following top-level class.
+      source = <<~RUBY
+        module Util
+          def self.fmt(x)
+            x.to_s # pad for display
+          end
+        end
+
+        class Payment
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Payment')
+    end
+
+    it 'preserves non-ASCII constant names instead of truncating them (EXTA-14)' do
+      source = <<~RUBY
+        class Café
+          def call; end
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Café')
+    end
+
+    it 'ignores declarations inside =begin/=end block comments (EXTA-14)' do
+      source = <<~RUBY
+        =begin
+        module Fake
+        =end
+        class Payment
+        end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Payment')
+    end
+
     it 'returns nil when the source has no class declaration' do
       source = <<~RUBY
         module Billing
@@ -797,6 +851,54 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
     it 'does not count a self-terminated definition as an opener' do
       expect(scanner.block_opener?('def call; end')).to be false
+    end
+
+    it 'counts an assignment-form if as an opener' do
+      expect(scanner.block_opener?('value = if ready?')).to be true
+    end
+
+    it 'counts an or-assignment-form unless as an opener' do
+      expect(scanner.block_opener?('@memo ||= unless done?')).to be true
+    end
+
+    it 'does not count a trailing if modifier after an assignment as an opener' do
+      expect(scanner.block_opener?('value = 1 if ready?')).to be false
+    end
+
+    it 'does not count a self-balancing assignment-form conditional as an opener' do
+      expect(scanner.block_opener?('value = if a then b else c end')).to be false
+    end
+  end
+
+  # ── Assignment-form conditionals inside method bodies ────────────────
+
+  describe 'assignment-form multi-line conditionals' do
+    it 'keeps a sibling class qualified past an assignment-form if' do
+      # `value = if ready?` opens a construct whose line-leading `end` pops
+      # a frame, but the opener rule counted `if` only in line-leading
+      # position. The unbalanced `end`s then closed `Outer` early and the
+      # sibling class was reported as bare `Sibling`, so the governed
+      # comparison found no declaration matching the path's constant.
+      source = <<~RUBY
+        module Outer
+          class Helper
+            def compute
+              value = if ready?
+                1
+              else
+                2
+              end
+              value
+            end
+          end
+
+          class Sibling
+          end
+        end
+      RUBY
+
+      expect(scanner.governed_class_name('/rails/app/services/outer/sibling.rb', source))
+        .to eq('Outer::Sibling')
     end
   end
 end

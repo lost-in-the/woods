@@ -64,13 +64,27 @@ RSpec.describe 'exe/woods-console boot sequence' do
       end
 
       module ActiveRecord
+        class FakePool
+          def with_connection
+            yield(nil)
+          end
+        end
+
         class Base
           def self.descendants
             []
           end
 
+          # Both accessors announce themselves so a spec can prove which one
+          # the boot script reaches for.
           def self.connection
+            warn '[fake-boot] ActiveRecord::Base.connection'
             nil
+          end
+
+          def self.connection_pool
+            warn '[fake-boot] ActiveRecord::Base.connection_pool'
+            FakePool.new
           end
         end
       end
@@ -125,6 +139,20 @@ RSpec.describe 'exe/woods-console boot sequence' do
     expect(status).to be_success
     expect(stderr).to include('console_blocked_tables is empty')
     expect(stderr).to include('Layer 1 (table gate) is INACTIVE')
+  end
+
+  # L10. `SafeContext.new(connection: ActiveRecord::Base.connection)` captured
+  # one connection for the process lifetime: after a failover or a
+  # `wait_timeout` recycle every tool call failed on a stale connection until
+  # restart. The HTTP path already leases per request
+  # (`RackMiddleware#build_embedded_server` passes `pool:`); stdio predates
+  # that fix. Boot must reach for the pool, never the bare connection.
+  it 'builds SafeContext from the connection pool, not a pinned connection' do
+    _stdout, stderr, status = run_fake_boot
+
+    expect(status).to be_success
+    expect(stderr).to include('[fake-boot] ActiveRecord::Base.connection_pool')
+    expect(stderr.lines.grep(/ActiveRecord::Base\.connection$/)).to be_empty
   end
 
   it 'raises instead of booting when console_blocked_tables is empty in production' do

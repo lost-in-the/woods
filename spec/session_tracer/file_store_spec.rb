@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
 require 'tmpdir'
 require 'json'
 require 'woods/session_tracer/file_store'
@@ -210,6 +211,91 @@ RSpec.describe Woods::SessionTracer::FileStore do
       expect { store.record('sess1', request_data.merge('action' => 'new')) }.to raise_error(Errno::EIO)
       expect(store.read('sess1').map { |entry| entry['action'] }).to eq(['old'])
       expect(Dir.glob(File.join(base_dir, '.*.tmp'))).to be_empty
+    end
+  end
+
+  # ── Encoding: JSONL reads must not depend on the process locale (R1-1) ──
+  #
+  # `record` writes raw UTF-8 bytes. Bare `File.readlines` / `File.read` tag
+  # every line with the process default external encoding, so under LANG=C a
+  # single non-ASCII request path (a localized route, an accented query
+  # string) made `record`'s history join, `read`, `sessions`, and the
+  # `session_trace` MCP tool raise `Encoding::CompatibilityError` — and the
+  # poison line stays in the file while writes keep succeeding.
+  describe 'non-ASCII request data under a C locale' do
+    let(:root) { File.expand_path('../..', __dir__) }
+
+    # Non-ASCII stays out of the -e script: a child Ruby parses -e source in
+    # the locale encoding, so the payload travels through the JSONL file only.
+    def read_back_under_c_locale(script, *args)
+      Open3.capture3(
+        { 'LANG' => 'C', 'LC_ALL' => 'C' },
+        RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, base_dir, *args
+      )
+    end
+
+    it 'reads back a session whose request path is non-ASCII' do
+      store.record('sess1', request_data.merge('path' => '/comandes/café'))
+
+      script = <<~RUBY
+        require 'json'
+        require 'woods/session_tracer/file_store'
+        store = Woods::SessionTracer::FileStore.new(base_dir: ARGV.fetch(0))
+        print JSON.generate(store.read('sess1').map { |entry| entry.fetch('path') })
+      RUBY
+      stdout, stderr, status = read_back_under_c_locale(script)
+
+      expect(status).to be_success, stderr
+      expect(JSON.parse(stdout.dup.force_encoding(Encoding::UTF_8))).to eq(['/comandes/café'])
+    end
+
+    it 'summarises sessions holding non-ASCII paths' do
+      store.record('sess1', request_data.merge('path' => '/facturación'))
+
+      script = <<~RUBY
+        require 'json'
+        require 'woods/session_tracer/file_store'
+        store = Woods::SessionTracer::FileStore.new(base_dir: ARGV.fetch(0))
+        print JSON.generate(store.sessions.map { |summary| summary.fetch('request_count') })
+      RUBY
+      stdout, stderr, status = read_back_under_c_locale(script)
+
+      expect(status).to be_success, stderr
+      expect(JSON.parse(stdout)).to eq([1])
+    end
+
+    it 'appends to an existing non-ASCII history without re-encoding it' do
+      store.record('sess1', request_data.merge('path' => '/comandes/café'))
+
+      script = <<~RUBY
+        require 'json'
+        require 'woods/session_tracer/file_store'
+        store = Woods::SessionTracer::FileStore.new(base_dir: ARGV.fetch(0))
+        store.record('sess1', JSON.parse(ARGV.fetch(1)))
+        print store.read('sess1').size.to_s
+      RUBY
+      stdout, stderr, status = read_back_under_c_locale(script, JSON.generate(request_data))
+
+      expect(status).to be_success, stderr
+      expect(stdout).to eq('2')
+    end
+
+    it 'merges a legacy session file holding non-ASCII content' do
+      store.record('sess1', request_data.merge('path' => '/comandes/café'))
+      legacy = File.join(base_dir, 'sess1.jsonl')
+      migrated = Dir.glob(File.join(base_dir, '*.jsonl')).reject { |f| f == legacy }.first
+      File.binwrite(legacy, File.binread(migrated))
+
+      script = <<~RUBY
+        require 'json'
+        require 'woods/session_tracer/file_store'
+        store = Woods::SessionTracer::FileStore.new(base_dir: ARGV.fetch(0))
+        print store.read('sess1').size.to_s
+      RUBY
+      stdout, stderr, status = read_back_under_c_locale(script)
+
+      expect(status).to be_success, stderr
+      expect(stdout).to eq('2')
     end
   end
 end

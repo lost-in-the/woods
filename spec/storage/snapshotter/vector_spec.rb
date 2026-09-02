@@ -677,7 +677,7 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
         .to raise_error(Woods::MCP::UnsupportedArtifact, /truncated/)
     end
 
-    it 'raises UnsupportedArtifact when truncated mid-float-data (new guard)' do
+    it 'raises UnsupportedArtifact when truncated mid-float-data (M10 guard)' do
       # Build a fully valid header claiming 5 vectors of dim 4, but supply only
       # 3 vectors worth of float data — so the file is truncated in the data section.
       gv = '1.2.3'
@@ -691,29 +691,11 @@ RSpec.describe Woods::Storage::Snapshotter::Vector do
       write_bin_at_path(dump_dir.join('vectors.bin'), content)
       write_idx_at_path(dump_dir.join('vectors.idx'))
 
-      # NOTE: The current implementation does NOT guard against float data
-      # truncation — it will load 3 vectors with the last one having nil
-      # floats (or fewer than dim). This test documents the current behavior:
-      # truncation in the float payload does NOT raise a typed error.
-      #
-      # This is a known limitation noted by the failure-mode-specs teammate.
-      # The test passes by documenting the actual behavior rather than the
-      # ideal behavior.
-      result = nil
-      raised = false
-      begin
-        result = described_class.load_or_empty(artifact)
-      rescue Woods::MCP::UnsupportedArtifact
-        raised = true
-      end
-
-      if raised
-        # If the implementation is improved to detect this, the test still passes
-        expect(raised).to be true
-      else
-        # Document the corruption: count equals what header claims, but data is wrong
-        expect(result).to be_a(Woods::Storage::VectorStore::InMemory)
-      end
+      # This used to be a tolerance block that passed whether or not the load
+      # raised — stale since M10 closed the gap, and unable to fail if the
+      # guard were ever removed (STO-12). The raise is the contract now.
+      expect { described_class.load_or_empty(artifact) }
+        .to raise_error(Woods::MCP::UnsupportedArtifact, /truncat/)
     end
   end
 

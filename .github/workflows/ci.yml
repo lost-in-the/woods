@@ -204,6 +204,34 @@ jobs:
       - name: Run linter
         run: bundle exec rubocop
 
+  # The encoding canary. Woods writes UTF-8 JSON/JSONL artifacts; a bare
+  # File.read tags them with the process default external encoding, so a
+  # non-ASCII byte raises under a POSIX locale — the documented Docker/CI
+  # deployment (see the CLAUDE.md AtomicFile.read gotcha). The runners default
+  # to a UTF-8 locale, so the H1/INF-3/R1-1/EXP-7 family of readers could
+  # regress with the whole suite green. One cheap single-Ruby job over the
+  # directories that read Woods-written artifacts keeps that honest.
+  c-locale:
+    name: Artifact readers under a POSIX locale
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run artifact-reader specs under LC_ALL=C
+        env:
+          LC_ALL: C
+          LANG: C
+        run: >-
+          bundle exec rspec
+          spec/mcp
+          spec/feedback
+          spec/session_tracer
+          spec/evaluation
+
   # Drives both packaged MCP executables with the official Ruby client and the
   # pinned Inspector CLI, including a real HTTP socket. Its own job because the
   # process boundaries and Node dependency are intentionally outside unit specs.

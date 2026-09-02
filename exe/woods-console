@@ -91,7 +91,15 @@ rescue StandardError
 end
 
 validator = Woods::Console::ModelValidator.new(registry: registry, table_names: model_tables)
-safe_context = Woods::Console::SafeContext.new(connection: ActiveRecord::Base.connection)
+
+# SafeContext gets the writing connection *pool*, not a connection, so each
+# request leases a fresh connection via `pool.with_connection { ... }` and
+# returns it when the rolled-back transaction completes. Capturing one
+# connection here pinned it for the process lifetime: after a database
+# failover or a `wait_timeout` recycle every tool call failed on the stale
+# connection until restart. The HTTP path has leased per request since
+# `RackMiddleware#build_embedded_server`; stdio predated that fix.
+safe_context = Woods::Console::SafeContext.new(pool: ActiveRecord::Base.connection_pool)
 
 config = Woods.configuration
 redacted_columns = Array(config.console_redacted_columns)

@@ -102,7 +102,13 @@ module Woods
       # @return [void]
       def scan_wisper_patterns(source, file_path, event_map)
         if source.match?(/include\s+Wisper/)
-          source.scan(/\b(?:publish|broadcast)\s+:(\w+)/) do |m|
+          # `\s*\(?\s*` accepts both call styles. Requiring whitespace before
+          # the symbol missed `broadcast(:order_created, order)` — Wisper's
+          # README-canonical form — so no publisher was registered and, with
+          # no subscriber naming the event either, the event unit did not
+          # exist at all (EXTB-3). The AS::Notifications and `.on(` scans
+          # already accept parens.
+          source.scan(/\b(?:publish|broadcast)\s*\(?\s*:(\w+)/) do |m|
             register_publisher(event_map, m[0], file_path, :wisper)
           end
         end

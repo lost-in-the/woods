@@ -163,11 +163,15 @@ module Woods
           raise request_error(response) unless response.is_a?(Net::HTTPSuccess)
 
           JSON.parse(response.body)
-        rescue Errno::ECONNRESET, Net::OpenTimeout, IOError
+        rescue Errno::ECONNRESET, Net::OpenTimeout, Net::ReadTimeout, IOError
           # Connection dropped — reset and retry once. A second transport
           # failure is wrapped (mirroring Ollama) rather than left to escape
           # as a raw Errno, so callers rescuing Woods::Error see a typed,
           # context-bearing failure.
+          #
+          # Net::ReadTimeout descends from Timeout::Error, not IOError, so it
+          # needs naming explicitly or a stalled response escapes both the
+          # retry and the typing (STO-15).
           discard_http_client
           begin
             response = http_client.request(request)

@@ -2,6 +2,7 @@
 
 require 'json'
 require 'fileutils'
+require 'time'
 
 module Woods
   module Feedback
@@ -68,7 +69,12 @@ module Woods
         return [] unless File.exist?(@path)
 
         entries = []
-        File.foreach(@path) do |line|
+        # Explicit UTF-8: `record_*` appends raw UTF-8 bytes, so a bare read
+        # would tag every line with the process default external encoding and
+        # the first non-ASCII entry would raise under LANG=C — permanently,
+        # since the poison line stays in the file (INF-3). Same contract as
+        # AtomicFile.read.
+        File.foreach(@path, encoding: Encoding::UTF_8) do |line|
           entry = JSON.parse(line.strip)
           entries << entry
           break if limit && entries.size >= limit

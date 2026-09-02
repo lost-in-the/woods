@@ -255,6 +255,59 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       expect(units.first.source_code).to include('# State machine (aasm) for Order')
     end
 
+    it 'keeps a blockless event and the events that follow it (EXTB-17)' do
+      # A blockless `event :noop` used to become `current_event` with depth 0
+      # and was replaced — never emitted — by the next event declaration.
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            state :pending, initial: true
+            state :paid
+
+            event :noop
+
+            event :pay do
+              transitions from: :pending, to: :paid
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+
+      events = units.first.metadata[:events]
+      expect(events.map { |e| e[:name] }).to contain_exactly('noop', 'pay')
+      expect(events.find { |e| e[:name] == 'noop' }[:transitions]).to eq([])
+    end
+
+    it 'keeps parsing events after a blockless event closes its enclosing block (EXTB-17)' do
+      # With the blockless event left current, the enclosing `end` drove
+      # depth to -1 and every later event failed the `depth.zero?` guard.
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            state :pending, initial: true
+
+            event :noop
+          end
+
+          aasm do
+            event :pay do
+              transitions from: :pending, to: :paid
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+
+      expect(units.first.metadata[:events].map { |e| e[:name] }).to include('noop', 'pay')
+    end
+
     it 'returns empty array for files without AASM' do
       path = create_file('app/models/user.rb', <<~RUBY)
         class User < ApplicationRecord

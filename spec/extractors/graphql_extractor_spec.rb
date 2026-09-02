@@ -765,6 +765,26 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(complexity.first[:field]).to eq('friends')
     end
 
+    it 'attributes a complexity to the field that declares it (EXTB-8)' do
+      # `.*?` with /m crossed field declarations, so the first field without
+      # a complexity absorbed the next field's — and the real owner lost it,
+      # because `scan` resumes after the match.
+      source = <<~RUBY
+        module Types
+          class PostType < Types::BaseObject
+            field :title, String, null: false
+            field :comments, [Types::CommentType], null: false, complexity: 10
+          end
+        end
+      RUBY
+
+      path = create_file('app/graphql/types/post_type.rb', source)
+
+      unit = described_class.new.extract_graphql_file(path)
+
+      expect(unit.metadata[:complexity]).to eq([{ field: 'comments', complexity: '10' }])
+    end
+
     # `match?` never sets `$~`, so `Regexp.last_match(1)` after it always
     # read back 0 regardless of the actual schema-level limit.
     it 'detects schema-level max_complexity with the real value, not 0' do

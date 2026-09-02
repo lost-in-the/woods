@@ -212,6 +212,27 @@ RSpec.describe 'Woods::Railtie support logic' do
                   .and(a_string_including('stdio'))
                   .and(a_string_including('Production boot will raise')))
       end
+
+      # G-3. The 401 belongs to the HTTP stack (BearerAuth, RackMiddleware);
+      # the stdio Console transport neither sends nor consumes a bearer token.
+      # An unqualified "requests will be refused (401)" reads to a stdio-only
+      # operator as "your setup cannot work", and sends them configuring a
+      # token that transport never uses.
+      it 'names the transport the token applies to' do
+        Woods::RailtieSupport.verify_console_configuration!(production: false)
+
+        expect(Woods::RailtieSupport).to have_received(:warn)
+          .with(a_string_including('HTTP'))
+        expect(Woods::RailtieSupport).to have_received(:warn)
+          .with(a_string_including('stdio'))
+      end
+
+      it 'says stdio does not use the token, so the 401 is not a stdio symptom' do
+        Woods::RailtieSupport.verify_console_configuration!(production: false)
+
+        expect(Woods::RailtieSupport).to have_received(:warn)
+          .with(a_string_matching(/stdio[^.]*(does not|neither)/i))
+      end
     end
 
     context 'with the console enabled and a too-short token' do

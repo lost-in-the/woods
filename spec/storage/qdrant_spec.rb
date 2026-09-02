@@ -386,11 +386,29 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(http).to have_received(:request).twice
     end
 
-    it 'falls back to the raw point id for points this adapter did not write' do
+    # STO-2. Previously the raw point id was yielded, which made every foreign
+    # point in a shared collection look "vanished" to the Indexer's
+    # reconciliation sweep and got it deleted on every run. A point with no
+    # woods_identifier payload is unattributable to Woods, so it is skipped:
+    # each_id enumerates what Woods wrote, nothing more.
+    it 'skips points this adapter did not write' do
       body = { result: { points: [{ id: 'foreign-id', payload: {} }], next_page_offset: nil } }.to_json
       allow(http).to receive(:request).and_return(success(body))
 
-      expect(store.each_id.to_a).to eq(['foreign-id'])
+      expect(store.each_id.to_a).to be_empty
+    end
+
+    it 'skips foreign points without losing Woods points on the same page' do
+      points = [
+        { id: 1, payload: { woods_identifier: 'User' } },
+        { id: '3f2504e0-4f89-41d3-9a0c-0305e82c3301', payload: {} },
+        { id: 2, payload: nil },
+        { id: 3, payload: { woods_identifier: 'Post' } }
+      ]
+      body = { result: { points: points, next_page_offset: nil } }.to_json
+      allow(http).to receive(:request).and_return(success(body))
+
+      expect(store.each_id.to_a).to eq(%w[User Post])
     end
   end
 

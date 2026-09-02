@@ -110,6 +110,39 @@ RSpec.describe Woods::Unblocked::Exporter do
   end
 
   describe '#sync_all' do
+    # EXP-5. Every public IndexReader accessor self-refreshes when the
+    # published generation moves, and the reader assigns pinning
+    # responsibility to direct callers — so an extraction publishing mid-sync
+    # used to leave `build_uri_index`, the per-type listings and `purge_stale`
+    # straddling two generations.
+    it 'performs every index read inside one pinned generation' do
+      pinned = false
+      reads = []
+      unit = { 'identifier' => 'User', 'type' => 'model' }
+
+      allow(reader).to receive(:with_pinned_generation) do |&block|
+        pinned = true
+        begin
+          block.call
+        ensure
+          pinned = false
+        end
+      end
+      allow(reader).to receive(:list_units) do |**kwargs|
+        reads << pinned
+        kwargs[:type] == 'model' ? [unit] : []
+      end
+      allow(reader).to receive(:find_unit) do |_identifier|
+        reads << pinned
+        { 'type' => 'model', 'identifier' => 'User', 'file_path' => 'app/models/user.rb', 'metadata' => {} }
+      end
+
+      exporter.sync_all
+
+      expect(reads).not_to be_empty
+      expect(reads).to all(be(true))
+    end
+
     it 'returns empty stats when no units exist' do
       stats = exporter.sync_all
       expect(stats[:synced]).to eq(0)

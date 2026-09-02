@@ -79,6 +79,12 @@ module Woods
               block: true
             }
           end
+          # Recurse into the send's own children — its receiver chain and its
+          # arguments — the way the non-block :send branch does (EXTB-16).
+          # Skipping them lost `where` from `User.where(active: true).each {}`
+          # while the same chain without a block recorded it. The send itself
+          # is emitted above, so recursing into its children adds no duplicate.
+          send_child.children&.each { |child| collect_calls(child, calls) } if send_child.is_a?(Ast::Node)
           # Also recurse into block body (children[1])
           node.children&.drop(1)&.each { |child| collect_calls(child, calls) }
           return # Don't double-recurse into children

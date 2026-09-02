@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative '../dependency_graph'
 
 module Woods
   module RubyAnalyzer
@@ -89,16 +90,25 @@ module Woods
           lines << '  end'
         end
 
-        # Render edges
+        # Render edges. `to_h` has emitted `[{target:, via:}]` hashes since the
+        # via migration; iterating them as bare targets made `nodes.key?` false
+        # for every edge, so the map rendered nodes and nothing else (EXTB-6).
+        # Legacy bare-string edges still load — {DependencyGraph.normalize_edges}
+        # accepts both shapes.
         seen_edges = Set.new
         edges.each do |source, targets|
-          Array(targets).each do |target|
-            next unless nodes.key?(target)
+          Woods::DependencyGraph.normalize_edges(Array(targets)).each do |edge|
+            target = edge[:target]
+            next unless target && nodes.key?(target)
 
             edge_key = "#{sanitize_id(source)}->#{sanitize_id(target)}"
             next unless seen_edges.add?(edge_key)
 
-            lines << "  #{sanitize_id(source)} --> #{sanitize_id(target)}"
+            lines << if edge[:via]
+                       "  #{sanitize_id(source)} -->|#{edge[:via]}| #{sanitize_id(target)}"
+                     else
+                       "  #{sanitize_id(source)} --> #{sanitize_id(target)}"
+                     end
           end
         end
 

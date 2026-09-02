@@ -218,11 +218,20 @@ module Woods
       # yet taken), +before_swap:+ (both rechecks passed, Pipeline assignment
       # imminent), +after_swap:+ (bundle swapped). Production passes nil.
       #
-      # No-op when:
+      # A zero-count no-op when:
       #   - +retriever+ is nil (no embedding provider configured)
       #   - the live stores are durable (pgvector / Qdrant auto-refresh
       #     externally) — a partial all-or-nothing swap would mix backends
       #   - +woods.json+ is absent (Shape-1 deployments don't use Snapshotter)
+      #   - no dump has ever been promoted (extraction ran, +woods:embed+
+      #     never did) — boot hydrates that shape with +load_or_empty+, so
+      #     reload must not fail closed over it (MCP-1)
+      #
+      # Every one of those returns still refreshes +reader+ first (MCP-2).
+      # There is no store work to do, but the JSON index may still have moved,
+      # and on a flat (pre-2.0) index the reader never self-refreshes — reload
+      # is its only freshness path, so a store no-op must not become an index
+      # no-op reported as +reloaded: true+ over the retired generation.
       #
       # @param retriever [Woods::Retriever, Cache::CachedRetriever, nil]
       # @param index_dir [String, Pathname]
@@ -237,13 +246,13 @@ module Woods
       #   was swapped and the generation named by the error is still served
       def self.reload_stores!(retriever, index_dir:, reader: nil, state: nil, hooks: nil)
         zero_counts = { vectors: 0, metadata: 0, graph: 0 }
-        return zero_counts unless retriever
+        return refresh_reader_only(reader, zero_counts) unless retriever
 
         target = swap_target(retriever)
-        return zero_counts unless target
+        return refresh_reader_only(reader, zero_counts) unless target
 
         artifact = build_artifact(index_dir)
-        return zero_counts unless artifact
+        return refresh_reader_only(reader, zero_counts) unless artifact
 
         generation = Woods::Generation.new(output_dir: artifact.output_dir)
 
@@ -252,6 +261,15 @@ module Woods
         # the commit recheck itself.
         served = generation.current
         captured_dump = artifact.latest_dump_path
+
+        # Nothing has ever been promoted: extraction ran, `woods:embed` did
+        # not. Boot hydrates this with `load_or_empty` and serves empty stores
+        # happily, so reload has to agree — building candidates with
+        # `required: true` against a nil dump raises MissingArtifact, degrades
+        # the transaction, and sticks a reload_failure on `state` that only a
+        # SUCCESSFUL reload clears, which is impossible until an embed runs
+        # (MCP-1). A dump that IS promoted but incomplete stays fail-closed.
+        return refresh_reader_only(reader, zero_counts) if captured_dump.nil?
 
         begin
           config, _source = ConfigResolver.resolve(
@@ -269,7 +287,7 @@ module Woods
         end
         resolved = build_resolved_config(config)
 
-        return zero_counts unless refreshable_stores?(target)
+        return refresh_reader_only(reader, zero_counts) unless refreshable_stores?(target)
 
         # A captured dump whose embedded config names store types the
         # refreshable live target cannot refresh cannot be turned into
@@ -279,7 +297,7 @@ module Woods
 
         # Phase 1: candidates off-side, exclusively from the captured locations.
         candidates = build_reload_candidates(config, resolved, artifact, served, captured_dump, hooks)
-        return zero_counts unless candidates
+        return refresh_reader_only(reader, zero_counts) unless candidates
 
         # Phase 2: writer lock, reader lock, recheck both identities, swap.
         commit_reload!(target, candidates, artifact: artifact, generation: generation,
@@ -290,6 +308,25 @@ module Woods
                                      reason: "#{e.class}: #{e.message}")
         raise
       end
+
+      # Refresh the reader's cached index state and answer the zero-count
+      # no-op (MCP-2).
+      #
+      # A store no-op is not an index no-op: the caller invoked `reload`
+      # because something on disk moved, and on a flat (pre-2.0) index
+      # {IndexReader} never self-refreshes, so skipping this reports
+      # +reloaded: true+ over the retired generation. Runs under the reader's
+      # exclusive generation lock, the same gate the swap path uses, so pinned
+      # readers drain before the caches are cleared.
+      #
+      # @param reader [Woods::MCP::IndexReader, nil]
+      # @param zero_counts [Hash]
+      # @return [Hash] +zero_counts+, unchanged
+      def self.refresh_reader_only(reader, zero_counts)
+        reader&.with_exclusive_reload { nil }
+        zero_counts
+      end
+      private_class_method :refresh_reader_only
 
       # The stored config snapshot anchored at the CAPTURED dump (M7): the
       # embedded +woods.json+ inside that dump directory, falling back to the
@@ -736,9 +773,11 @@ module Woods
       # Back-fill the vector store's per-entry metadata hashes from the
       # metadata store. Only makes sense when both are in-memory — durable
       # backends return nil from the hydration helpers and never reach
-      # this path on boot. {.populate_reloaded_vector_metadata} reaches a
-      # LIVE store directly, though, so the guard below still has to hold
-      # even when +vector_store+ turns out to be a durable adapter.
+      # this path. Both callers hand over stores they built themselves —
+      # boot's freshly hydrated pair and {.build_reload_candidates}'
+      # off-side candidates (the M7 transaction retired the old in-place
+      # variant that reached a LIVE store) — but the guard below still has
+      # to hold: either store can turn out to be a durable adapter.
       def self.populate_vector_metadata(vector_store, metadata_store)
         return unless implements_own?(vector_store, :each_entry) && vector_store.respond_to?(:store)
         return unless metadata_store.respond_to?(:find)

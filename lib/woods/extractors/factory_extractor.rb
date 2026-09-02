@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
@@ -64,6 +65,13 @@ module Woods
       # transient attributes. Each factory block (including nested factories within
       # a parent factory) produces one entry in the returned array.
       #
+      # Block accounting runs against the {LineNeutralizer}-neutralized line —
+      # comment, string, and heredoc bodies blanked — while names are still
+      # read from the raw line, where their literals live. Counting keywords in
+      # raw source meant `title { "things to do" }` opened a `do` block nothing
+      # closed; two such attributes left the factory on the stack at EOF and
+      # the unit was dropped entirely (EXTB-2).
+      #
       # @param source [String] Factory file source code
       # @return [Array<Hash>] Parsed factory data hashes
       def parse_factories(source)
@@ -72,9 +80,12 @@ module Woods
         depth = 0
         in_transient = false
         transient_depth = nil
+        scannable = LineNeutralizer.neutralize_lines(source)
 
         source.lines.each_with_index do |line, index|
           stripped = line.strip
+          code = scannable[index].to_s.strip
+          next if code.empty?
 
           # Factory definition. A factory with a block goes on the stack and is
           # completed when its `end` brings depth back; a blockless one —
@@ -83,7 +94,7 @@ module Woods
           # those silently, which is the very shape the parent-inheritance
           # parsing below exists to support.
           if (factory_data = match_factory(stripped, depth, index + 1))
-            if opens_block?(stripped)
+            if opens_block?(code)
               factory_stack.push(factory_data)
               depth += 1
             else
@@ -93,14 +104,14 @@ module Woods
           end
 
           # Trait definition — record trait in current factory, open block
-          if (trait_match = stripped.match(/\Atrait\s+:(\w+)\s+do/))
+          if (trait_match = code.match(/\Atrait\s+:(\w+)\s+do/))
             factory_stack.last[:traits] << trait_match[1] if factory_stack.any?
             depth += 1
             next
           end
 
           # Transient block — start collecting transient attributes
-          if stripped.match?(/\Atransient\s+do/)
+          if code.match?(/\Atransient\s+do/)
             in_transient = true
             transient_depth = depth
             depth += 1
@@ -128,12 +139,12 @@ module Woods
           end
 
           # Generic block openers — factory/trait/transient already handled above with next
-          if block_opener?(stripped)
+          if block_opener?(code)
             depth += 1
             next
           end
 
-          next unless stripped == 'end'
+          next unless code == 'end'
 
           depth -= 1
 
@@ -233,7 +244,7 @@ module Woods
         return false if stripped.match?(/\Atransient\s+do/)
         return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
 
-        stripped.match?(/\A(if|unless)\b/)
+        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
       end
 
       # Build an ExtractedUnit from parsed factory data.

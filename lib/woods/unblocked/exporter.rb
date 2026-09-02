@@ -96,35 +96,37 @@ module Woods
       #
       # @return [Hash] { synced:, skipped:, deleted:, errors: }
       def sync_all
-        @current_uris = Set.new
-        @budget_exhausted = false
-        build_uri_index
-        reconcile_from_remote if @manifest.empty?
+        with_pinned_index do
+          @current_uris = Set.new
+          @budget_exhausted = false
+          build_uri_index
+          reconcile_from_remote if @manifest.empty?
 
-        synced = 0
-        skipped = 0
-        errors = []
+          synced = 0
+          skipped = 0
+          errors = []
 
-        FULL_SYNC_TYPES.each do |type|
-          break if @budget_exhausted
+          FULL_SYNC_TYPES.each do |type|
+            break if @budget_exhausted
 
-          result = sync_type(type)
-          synced += result[:synced]
-          skipped += result[:skipped]
-          errors.concat(result[:errors])
+            result = sync_type(type)
+            synced += result[:synced]
+            skipped += result[:skipped]
+            errors.concat(result[:errors])
+          end
+
+          PARTIAL_SYNC_TYPES.each do |type, max_count|
+            break if @budget_exhausted
+
+            result = sync_type_partial(type, max_count)
+            synced += result[:synced]
+            skipped += result[:skipped]
+            errors.concat(result[:errors])
+          end
+
+          deleted = @budget_exhausted ? 0 : purge_stale(errors)
+          { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
         end
-
-        PARTIAL_SYNC_TYPES.each do |type, max_count|
-          break if @budget_exhausted
-
-          result = sync_type_partial(type, max_count)
-          synced += result[:synced]
-          skipped += result[:skipped]
-          errors.concat(result[:errors])
-        end
-
-        deleted = @budget_exhausted ? 0 : purge_stale(errors)
-        { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
       ensure
         save_manifest
       end
@@ -175,6 +177,25 @@ module Woods
       end
 
       private
+
+      # Run a multi-read export body against one index generation.
+      #
+      # Every public IndexReader accessor self-refreshes when the published
+      # generation moves, and the reader assigns pinning responsibility to
+      # direct callers. Unpinned, `build_uri_index`, the per-type listings and
+      # `purge_stale` can straddle two generations (EXP-5), so the purge set is
+      # computed against a mixture of them.
+      #
+      # Guarded by +respond_to?+: injected readers (specs, embedders) need not
+      # implement pinning.
+      #
+      # @yield the export body
+      # @return [Object] the block's value
+      def with_pinned_index(&block)
+        return yield unless @reader.respond_to?(:with_pinned_generation)
+
+        @reader.with_pinned_generation(&block)
+      end
 
       def sync_units(units)
         synced = 0

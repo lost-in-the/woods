@@ -9,6 +9,7 @@ require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
+require_relative '../util/uuid5'
 
 module Woods
   # Standalone-require shim (same pattern as Console::Server and
@@ -356,11 +357,31 @@ module Woods
 
       # Identifiers the durable store holds that this run did not see.
       #
+      # Ids Woods could not have written are excluded rather than treated as
+      # vanished (STO-2). A pgvector table or Qdrant collection may be shared
+      # with another writer, and a foreign row can never appear in
+      # +@current_identifiers+ — without this gate it would read as vanished
+      # and be deleted on every single run. The adapter's own read side is the
+      # first line of defence (Qdrant skips points with no +woods_identifier+
+      # payload); this is the belt-and-braces one, keyed on shapes Woods never
+      # mints as an identifier: canonical UUIDs and native integer point ids.
+      #
       # @return [Array<String>]
       def vanished_durable_identifiers
         return [] if @durable_ids.nil?
 
-        @durable_ids.keys.reject { |identifier| @current_identifiers.include?(identifier) }
+        @durable_ids.keys.reject do |identifier|
+          @current_identifiers.include?(identifier) || unattributable_id?(identifier)
+        end
+      end
+
+      # Could Woods have written this id? Identifiers come from extraction —
+      # class and file names — never a bare integer or a canonical UUID.
+      #
+      # @param identifier [Object] an id read back from the durable store
+      # @return [Boolean]
+      def unattributable_id?(identifier)
+        identifier.is_a?(Integer) || Util::UUID5.uuid?(identifier)
       end
 
       # Delete every stored id belonging to the given identifiers.
@@ -447,19 +468,31 @@ module Woods
       # Strip the embedding-side chunk suffix to recover the unit identifier.
       # `collect_embed_items` writes "User#chunk_0" for chunked units; the
       # index only ever knows "User".
+      #
+      # A non-String id keeps its type: Qdrant's native integer point ids can
+      # only have come from another writer, and stringifying them here would
+      # disguise that shape from {#unattributable_id?}.
       def base_identifier(id)
-        id.to_s.sub(/#chunk_\d+\z/, '')
+        return id unless id.is_a?(String)
+
+        id.sub(/#chunk_\d+\z/, '')
       end
 
       # Can this run reconcile the vector store against extraction output?
       #
-      # True for durable adapters that genuinely implement +#each_id+ — as with
-      # {#persistable?}, +respond_to?+ is not the question, since the interface
-      # defines the method for every adapter. The dump-backed path is excluded:
-      # it already reconciles via {#drop_vanished_units} plus the dump rewrite,
-      # and doing both would be redundant work on the same store.
+      # True for durable adapters that genuinely implement +#each_id+ *and*
+      # +#delete+ — as with {#persistable?}, +respond_to?+ is not the question,
+      # since the interface defines both methods for every adapter as raising
+      # stubs (B-108). Reconciliation ends in deletes, so an adapter that can
+      # be enumerated but not deleted from must not enter the path at all
+      # rather than raise +NotImplementedError+ mid-run (STO-11). The
+      # dump-backed path is excluded: it already reconciles via
+      # {#drop_vanished_units} plus the dump rewrite, and doing both would be
+      # redundant work on the same store.
       def reconcilable?
-        !persistable? && implements_own?(@vector_store, :each_id)
+        !persistable? &&
+          implements_own?(@vector_store, :each_id) &&
+          implements_own?(@vector_store, :delete)
       end
 
       def embed_batches(units, checkpoint, stats, incremental:)
@@ -743,7 +776,7 @@ module Woods
       # start issuing deletes against pgvector or Qdrant.
       def prune_superseded_vectors(items)
         return if @persisted_ids.empty?
-        return unless @vector_store.respond_to?(:delete)
+        return unless implements_own?(@vector_store, :delete)
 
         items.group_by { |item| item[:identifier] }.each do |identifier, group|
           prune_identifier(identifier, group.map { |item| item[:id] })
@@ -763,7 +796,7 @@ module Woods
       # the old chunk rows/points that no current embed item rewrote.
       def prune_superseded_durable_vectors(items)
         return if @durable_ids.nil?
-        return unless @vector_store.respond_to?(:delete)
+        return unless implements_own?(@vector_store, :delete)
 
         items.group_by { |item| item[:identifier] }.each do |identifier, group|
           prune_durable_identifier(identifier, group.map { |item| item[:id] })
