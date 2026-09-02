@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.8.42",
+  "checkpoint_id": "e43e19a35a10",
+  "strategy": "manual-commit",
+  "branch": "fix/rc-validation-findings",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "lib/woods/railtie_support.rb",
+    "spec/railtie_spec.rb"
+  ],
+  "sessions": [
+    {
+      "metadata": "/e4/3e19a35a10/0/metadata.json",
+      "transcript": "/e4/3e19a35a10/0/full.jsonl",
+      "compact_transcript": "/e4/3e19a35a10/0/transcript.jsonl",
+      "content_hash": "/e4/3e19a35a10/0/content_hash.txt",
+      "prompt": "/e4/3e19a35a10/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3884,
+    "cache_creation_tokens": 197618,
+    "cache_read_tokens": 7618960,
+    "output_tokens": 72996,
+    "api_call_count": 47
+  }
+}
