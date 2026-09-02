@@ -80,7 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and its definition site exists on disk, that site is used. It stays absolute
   through path normalization, `woods:validate` reports it as gem-owned, and git
   enrichment skips paths outside `Rails.root` (git rejects a whole `log`
-  invocation when any pathspec is outside the repository). Applies to every
+  invocation when any pathspec is outside the repository) as well as vendored
+  `vendor/` and `node_modules/` paths under it (a bundle vendored inside the
+  app root is gitignored, so asking git about it is wasted work). Applies to every
   class-based extractor sharing the helper: models, controllers, mailers, jobs,
   serializers.
 
