@@ -253,6 +253,74 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
       # Invalidation resumes once the last pin is gone.
       expect(reader.manifest['total_units']).to eq(2)
     end
+
+    # MCP-5: the ride-along above is correct for the reads of a pin already
+    # held — but it used to be UNBOUNDED for pins that arrive later. Refresh
+    # was only ever attempted at depth 0 → 1, so on a threaded transport
+    # (`woods-mcp-http` stateless, the deployment several agents share) the
+    # depth never touched 0 and the reader served a retired generation for as
+    # long as traffic overlapped, silently. A new pin arriving after the
+    # generation moved now drains the held pins first, then refreshes.
+    it 'drains held pins so a later pin observes a generation published mid-traffic' do
+      generation.bump!(reason: 'full')
+      reader = described_class.new(dir)
+      reader.manifest
+
+      stop = false
+      entered = Queue.new
+      holders = Array.new(2) do
+        Thread.new do
+          entered << true
+          until stop
+            # A request-shaped pin: long enough that the two holders overlap
+            # continuously, which is the whole point — the depth must never
+            # reach zero on its own.
+            reader.with_pinned_generation do
+              reader.manifest['total_units']
+              sleep 0.004
+            end
+            sleep 0.001
+          end
+        end
+      end
+      2.times { entered.pop }
+
+      republish(total_units: 2)
+
+      served = nil
+      Timeout.timeout(10) do
+        20.times do
+          served = reader.with_pinned_generation { reader.manifest['total_units'] }
+          break if served == 2
+
+          sleep 0.01
+        end
+      end
+
+      expect(served).to eq(2)
+    ensure
+      stop = true
+      holders&.each { |thread| thread.join(5) }
+    end
+
+    # The drain must not turn into a deadlock: a pin nested inside a held pin
+    # rides its owner's generation instead of waiting for a drain that can only
+    # happen after that owner returns.
+    it 'lets a nested pin proceed while a refresh is pending' do
+      generation.bump!(reason: 'full')
+      reader = described_class.new(dir)
+      reader.manifest
+
+      seen = Timeout.timeout(10) do
+        reader.with_pinned_generation do
+          republish(total_units: 2)
+          reader.with_pinned_generation { reader.manifest['total_units'] }
+        end
+      end
+
+      expect(seen).to eq(1)
+      expect(reader.manifest['total_units']).to eq(2)
+    end
   end
 
   describe '#with_exclusive_reload' do
@@ -338,5 +406,32 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
     Woods::AtomicFile.write(generation.path, JSON.generate('number' => 2, 'updated_at' => nil))
 
     expect(reader.manifest['total_units']).to eq(2)
+  end
+
+  # CORE-4: the retention-pin loop retried on ENOENT by reloading the
+  # generation and trying again. With the pointer unchanged and the payload
+  # directory present but its manifest.json gone, every iteration took the
+  # same path — no sleep, no cap, no fallthrough — so the request thread spun
+  # at 100% CPU forever instead of degrading to an unpinned read. Only
+  # tampering produces that shape (every published payload carries a
+  # manifest), but the failure mode has to be a degraded read, not a hang.
+  it 'proceeds unpinned when the payload directory has lost its manifest' do
+    payload_root = File.join(dir, 'payloads', 'gen-1')
+    FileUtils.mkdir_p(payload_root)
+    File.write(File.join(payload_root, 'manifest.json'),
+               JSON.generate('total_units' => 1, 'counts' => { 'models' => 1 }))
+    Woods::AtomicFile.write(
+      generation.path,
+      JSON.generate('number' => 1, 'token' => 'tok1', 'updated_at' => nil,
+                    'reason' => 'full', 'payload' => 'payloads/gen-1')
+    )
+    reader = described_class.new(dir)
+    expect(reader.manifest['total_units']).to eq(1)
+
+    FileUtils.rm_f(File.join(payload_root, 'manifest.json'))
+    reader.reload!
+
+    expect { Timeout.timeout(5) { reader.with_pinned_generation { reader.payload_dir } } }
+      .not_to raise_error
   end
 end

@@ -191,7 +191,7 @@ lib/
 │   └── woods.rake                       # Rake task definitions
 exe/
 ├── woods-mcp                            # MCP Index Server executable (stdio)
-├── woods-mcp-start                      # Self-healing MCP wrapper
+├── woods-mcp-start                      # Preflight wrapper: validates, then execs woods-mcp (no restart loop)
 ├── woods-mcp-http                       # MCP Index Server executable (HTTP/Rack)
 └── woods-console-mcp                    # Console MCP Server executable
 ```
@@ -339,7 +339,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   - `sort_tools!` runs after every conditional registration so tool order is stable across hosts (prompt cache, offset-based `tools/list` pagination).
 - `Woods::MCP::Tasks` (protocol extension) is distinct from `Woods::Tasks` (rake helpers).
   - `Store` writes one file per task under `<index_dir>/tasks/` and deliberately does **not** take `PipelineLock` (taking it would deadlock `pipeline_extract`).
-  - Orphan detection marks a `working` record whose producer is gone as `failed`, but only when the reader shares the producer's boot identity.
+  - Orphan detection marks a `working` record whose producer is gone as `failed`. A pid table can only judge a producer that shares the reader's boot identity and pid namespace; a foreign one is believed on age alone, up to `Store::FOREIGN_PRODUCER_GRACE_SECONDS` (24h from `updated_at`), then resolved to `failed` so a rebooted host stops answering `working` forever.
   - A task handle is returned only to a client that declared `io.modelcontextprotocol/tasks`. The opt-in is captured per request into a thread-local cleared in an `ensure`.
 
 ### Console server

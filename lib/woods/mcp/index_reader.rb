@@ -62,6 +62,11 @@ module Woods
         @pin_owners = Hash.new(0)
         @exclusive_waiters = 0
         @exclusive_owner = nil
+        # Pins waiting for the held pins to drain so a moved generation can be
+        # adopted (MCP-5). Gates NEW pin entries exactly as @exclusive_waiters
+        # does, so sustained overlapping traffic cannot pin the reader on a
+        # retired generation indefinitely.
+        @refresh_waiters = 0
         @freshness_mutex = Mutex.new
         @freshness_condition = ConditionVariable.new
         # Separate from @freshness_mutex: the LRU bookkeeping must not
@@ -145,9 +150,22 @@ module Woods
       # requests can hold pins at once, and with a boolean the first to finish
       # unpinned the reader while the second still relied on it — its remaining
       # reads could then be invalidated mid-sequence, the exact tear this
-      # method exists to prevent. Freshness is checked only when the depth goes
-      # 0 → 1; nested and overlapping pins ride the generation already held,
-      # and invalidation resumes when the last pin releases.
+      # method exists to prevent. Freshness is checked when the depth goes
+      # 0 → 1; nested pins and the reads of a pin already held ride the
+      # generation it entered on, and invalidation resumes when the last pin
+      # releases.
+      #
+      # **Bounded staleness under sustained overlap (MCP-5).** Refresh used to
+      # be attempted ONLY at depth 0 → 1, so on a threaded transport with
+      # enough concurrent traffic — several agents against one shared
+      # `woods-mcp-http`, the deployment stateless mode exists for — the depth
+      # never reached 0 and a retired generation was served indefinitely, with
+      # nothing in the response saying so. A pin that arrives after the
+      # generation signature moved while pins are held now registers as a
+      # refresh waiter: like {#with_exclusive_reload}'s waiters it gates NEW
+      # pin entries, waits for the held pins to drain, refreshes, and admits
+      # the queue. Nested pins and existing holders are exempt, so the drain
+      # can always complete. The cost is one drain per published generation.
       #
       # The Index MCP server applies this around reader-backed handlers. Direct
       # IndexReader callers remain responsible for pinning any multi-read
@@ -166,6 +184,7 @@ module Woods
             exclusive_owner = true
           else
             wait_for_generation_access(thread)
+            drain_for_pending_refresh(thread)
             refresh_if_stale if @auto_refresh && @pin_depth.zero?
             acquire_payload_retention_pin if @pin_depth.zero?
             @pin_depth += 1
@@ -657,7 +676,52 @@ module Woods
       def generation_access_blocked?(thread)
         return false if @exclusive_owner.equal?(thread) || @pin_owners.key?(thread)
 
-        !@exclusive_owner.nil? || @exclusive_waiters.positive?
+        !@exclusive_owner.nil? || @exclusive_waiters.positive? || @refresh_waiters.positive?
+      end
+
+      # Wait for held pins to drain when the generation moved while they were
+      # held, so the pin about to be taken adopts the new generation instead
+      # of riding the retired one (MCP-5).
+      #
+      # Exemptions keep the drain from deadlocking against itself:
+      #   - a thread that already holds a pin (a NESTED pin) never waits — the
+      #     drain it would wait for can only happen after that thread returns,
+      #     and its nested read must stay on its owner's generation anyway;
+      #   - the reads of an existing pin go through {#ensure_fresh!}, not
+      #     here, and stay pinned as before.
+      #
+      # Registering as a waiter blocks other new pins ({#generation_access_blocked?})
+      # for the same reason an exclusive reload does: without it, a steady
+      # arrival rate keeps the depth off zero forever. The waiter itself holds
+      # no pin, so it never blocks the drain it is waiting on.
+      #
+      # Callers hold `@freshness_mutex`.
+      #
+      # @param thread [Thread] the thread taking the pin
+      # @return [void]
+      def drain_for_pending_refresh(thread)
+        return unless @auto_refresh
+        return if @pin_depth.zero?
+        return if @pin_owners.key?(thread)
+        return unless generation_moved?
+
+        @refresh_waiters += 1
+        begin
+          @freshness_condition.wait(@freshness_mutex) until @pin_depth.zero? && @exclusive_owner.nil?
+        ensure
+          @refresh_waiters -= 1
+          @freshness_condition.broadcast
+        end
+      end
+
+      # Has the published generation moved since the caches were populated?
+      # Signature-only (one `File.stat`) — the same cheap probe
+      # {#refresh_if_stale} guards its parse with, without consuming it.
+      #
+      # @return [Boolean]
+      def generation_moved?
+        signature = generation_signature
+        !signature.nil? && signature != @generation_signature
       end
 
       def release_generation_pin(thread)
@@ -686,8 +750,19 @@ module Woods
       # the manifest open (or the directory check) fails and we retry from the
       # new published pointer.
       #
+      # The retry is bounded (CORE-4). A payload directory that exists without
+      # its `manifest.json` — only reachable by tampering, since every
+      # published payload carries one — leaves the pointer unchanged, so every
+      # iteration would take the identical path with no sleep and no cap: a
+      # 100%-CPU hang of the request thread instead of a degraded read. A
+      # second consecutive ENOENT against the SAME expected directory means
+      # retrying cannot help, so the read proceeds unpinned, exactly as it
+      # does for a flat index.
+      #
       # @return [void]
       def acquire_payload_retention_pin
+        missing_manifest_dir = nil
+        saw_missing_manifest = false
         loop do
           expected_dir = current_payload_dir
           return if expected_dir == @index_dir
@@ -711,6 +786,10 @@ module Woods
           load_generation(marker) unless marker.number.zero?
         rescue Errno::ENOENT
           file&.close unless file&.closed?
+          return if saw_missing_manifest && missing_manifest_dir == expected_dir
+
+          saw_missing_manifest = true
+          missing_manifest_dir = expected_dir
           marker = @generation.current
           load_generation(marker) unless marker.number.zero?
         end

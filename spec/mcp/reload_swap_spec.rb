@@ -212,6 +212,31 @@ RSpec.describe 'Index MCP transactional store reload' do
       expect(response_text(retrieval)).to include('AlphaUnit')
     end
 
+    # MCP-1: the ordinary shape of a host that ran extraction but never
+    # `woods:embed` — OPENAI_API_KEY exported, so autodetect wires a provider
+    # and the retriever is non-nil, but `dumps/latest` points at nothing. Boot
+    # hydrates that with `load_or_empty` and comes up healthy over empty
+    # stores; reload used `required: true` and degraded the server for the
+    # life of the process, because only a SUCCESSFUL reload clears the
+    # reload-failure condition and no reload can succeed until an embed runs.
+    it 'a retriever-wired index with no promoted dump reloads as zero-count success and records no reload_failure' do
+      FileUtils.rm_rf(File.join(index_dir, 'dumps'))
+      server
+      expect(Woods::IndexArtifact.new(index_dir).latest_dump_path).to be_nil
+
+      response = call_tool('reload')
+
+      expect(response.error?).to be(false)
+      data = parse_response(response)
+      expect(data['reloaded']).to be(true)
+      expect(data['retriever']).to include('vectors' => 0, 'metadata' => 0, 'graph' => 0)
+      expect(state.reload_failed?).to be(false)
+      expect(state.reload_failure).to be_nil
+
+      status = parse_response(call_tool('woods_status'))
+      expect(status.dig('bootstrap', 'reload_failure')).to be_nil
+    end
+
     it 'keeps a genuine empty dump a successful zero-count reload (no divergence)' do
       server
       write_empty_dump

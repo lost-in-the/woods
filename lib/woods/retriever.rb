@@ -119,6 +119,49 @@ module Woods
       end
     end
 
+    # Store adapter wrapper that turns ANY failure of a store call into the
+    # shared typed {StoreError}, naming the store that failed.
+    #
+    # M8 wrapped the three lookups the Retriever performs itself, but the
+    # store reads carrying most of the query traffic happen INSIDE the
+    # pipeline components — the ranker's and assembler's +find_batch+, and
+    # every executor store call. Those escaped raw: the SDK reported
+    # "Internal error calling tool codebase_retrieve", or {MCP::ToolContract}
+    # saw an IO-flavored cause and relabeled it +corrupt_artifact+ ("An Index
+    # artifact is unavailable or malformed") — the wrong diagnosis for, say, a
+    # SQLite metadata DB deleted mid-serve (MCP-6).
+    #
+    # Only the pipeline COMPONENTS get facades. The Pipeline struct's store
+    # members and the public +vector_store+ / +metadata_store+ / +graph_store+
+    # readers keep the raw adapters, so the reload transaction's capability
+    # and store-type checks ({MCP::Bootstrapper.refreshable_stores?},
+    # +implements_own?+) still see the real objects.
+    class TranslatedStore
+      # @param store [Object] the wrapped adapter
+      # @param name [Symbol] store component name (+:vector+, +:metadata+, +:graph+)
+      def initialize(store, name)
+        @store = store
+        @name = name
+      end
+
+      # @return [Object] the wrapped adapter, for callers that need identity
+      attr_reader :store
+
+      def respond_to_missing?(name, include_private = false)
+        @store.respond_to?(name, include_private) || super
+      end
+
+      def method_missing(name, ...)
+        return super unless @store.respond_to?(name)
+
+        @store.public_send(name, ...)
+      rescue StoreError
+        raise
+      rescue StandardError => e
+        raise StoreError.new("#{@name} store call #{name} failed: #{e.class}: #{e.message}", store: @name)
+      end
+    end
+
     # Unit types queried for the structural context overview.
     STRUCTURAL_TYPES = %w[model controller service job mailer component graphql].freeze
 
@@ -198,17 +241,26 @@ module Woods
     end
 
     # Build one immutable pipeline around a store bundle.
+    #
+    # Components read through {TranslatedStore} facades so every store call
+    # they make raises the typed {StoreError} instead of a raw adapter error
+    # (MCP-6); the struct keeps the raw adapters for identity and capability
+    # checks.
     def build_pipeline(vector_store:, metadata_store:, graph_store:)
+      translated_vector = translate_store(vector_store, :vector)
+      translated_metadata = translate_store(metadata_store, :metadata)
+      translated_graph = translate_store(graph_store, :graph)
+
       Pipeline.new(
         executor: Retrieval::SearchExecutor.new(
-          vector_store: vector_store,
-          metadata_store: metadata_store,
-          graph_store: graph_store,
+          vector_store: translated_vector,
+          metadata_store: translated_metadata,
+          graph_store: translated_graph,
           embedding_provider: @embedding_provider
         ),
-        ranker: Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store),
+        ranker: Retrieval::Ranker.new(metadata_store: translated_metadata, graph_store: translated_graph),
         assembler: Retrieval::ContextAssembler.new(
-          metadata_store: metadata_store,
+          metadata_store: translated_metadata,
           chars_per_token: infer_chars_per_token(@embedding_provider),
           token_counter: infer_token_counter(@embedding_provider)
         ),
@@ -218,6 +270,13 @@ module Woods
       )
     end
     private :build_pipeline
+
+    # Wrap one store adapter for the pipeline components. Nil stays nil — a
+    # nil graph store is a supported bundle shape.
+    def translate_store(store, name)
+      store && TranslatedStore.new(store, name)
+    end
+    private :translate_store
 
     # Infer the chars-per-token ratio from an embedding provider's model.
     # Ollama WordPiece-style tokenizers (nomic-embed-text, bge-*,
@@ -615,7 +674,8 @@ module Woods
     #
     # @param metadata_store [Storage::MetadataStore::Interface] the resolved
     #   bundle's metadata store (M7)
-    # @return [String, nil] Overview string, or nil if the store is empty or on error
+    # @return [String, nil] Overview string, or nil if the store is empty
+    # @raise [StoreError] the metadata store failed
     def build_structural_context(metadata_store)
       total = metadata_store.count
       return nil if total.zero?
@@ -627,8 +687,18 @@ module Woods
 
       "Codebase: #{total} searchable entries (#{type_counts.join(', ')}). " \
         'Entries include per-chunk rows for chunked units; see `structure` for canonical unit counts.'
-    rescue StandardError
-      nil
+    rescue StoreError
+      raise
+    rescue StandardError => e
+      # MCP-6: this used to rescue to nil — the last swallow-to-empty on the
+      # query path. A broken metadata store dropped the banner and every
+      # answer looked like a healthy codebase with nothing to say about
+      # itself. It is a metadata read like any other; raise the shared typed
+      # store error so the MCP boundary can report degraded_index.
+      raise StoreError.new(
+        "metadata store failed while building the structural overview: #{e.class}: #{e.message}",
+        store: :metadata
+      )
     end
   end
 end

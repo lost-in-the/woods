@@ -256,6 +256,27 @@ RSpec.describe Woods::MCP::ConfigResolver do
           end.to raise_error(Woods::MCP::MissingCredential, /OPENAI_API_KEY/)
         end
       end
+
+      # R1-5: the resolver-default path already treats a whitespace-only key as
+      # absent (it falls through to the Ollama probe). The woods.json path must
+      # agree — otherwise one env value produces two behaviors, and the operator
+      # gets per-request OpenAI auth errors instead of the one-line M9 message.
+      it 'raises MissingCredential when OPENAI_API_KEY is whitespace only' do
+        Dir.mktmpdir do |dir|
+          openai_hash = woods_json_hash.merge(
+            'embedding_provider' => {
+              'class' => 'Woods::Embedding::Provider::OpenAI',
+              'model' => 'text-embedding-3-small',
+              'dimension' => 1536
+            }
+          )
+          write_woods_json(dir, openai_hash)
+          artifact = Woods::IndexArtifact.new(dir)
+          expect do
+            described_class.resolve(blank_config, artifact: artifact, env: { 'OPENAI_API_KEY' => '  ' })
+          end.to raise_error(Woods::MCP::MissingCredential, /OPENAI_API_KEY/)
+        end
+      end
     end
 
     context 'woods.json present but schema_version is unsupported' do

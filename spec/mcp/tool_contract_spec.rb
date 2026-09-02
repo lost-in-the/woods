@@ -257,7 +257,7 @@ RSpec.describe 'Index MCP tool contracts' do
         properties: {
           'query' => string_contract(nil, 10_000),
           'types' => array_contract(1_000, 10_000),
-          'fields' => array_contract(1_000, 10_000),
+          'fields' => enum_array_contract(%w[identifier metadata source_code], 1_000, 10_000),
           'limit' => integer_contract(1, 1_000),
           'exact_prefix' => string_contract(nil, 10_000),
           'exact_suffix' => string_contract(nil, 10_000)
@@ -516,6 +516,12 @@ RSpec.describe 'Index MCP tool contracts' do
       'items' => { 'type' => 'string', 'maxLength' => maximum_item_length },
       'maxItems' => maximum_items
     }
+  end
+
+  def enum_array_contract(values, maximum_items, maximum_item_length)
+    array_contract(maximum_items, maximum_item_length).tap do |contract|
+      contract['items'] = contract.fetch('items').merge('enum' => values)
+    end
   end
 
   def boolean_contract
@@ -1191,8 +1197,9 @@ RSpec.describe 'Index MCP tool contracts' do
           when 'array'
             maximum = property.fetch('maxItems')
             item_maximum = property.dig('items', 'maxLength')
-            valid = contract.fetch(:arguments).merge(name => Array.new(maximum, 'x'))
-            too_many = contract.fetch(:arguments).merge(name => Array.new(maximum + 1, 'x'))
+            item = property.dig('items', 'enum')&.first || 'x'
+            valid = contract.fetch(:arguments).merge(name => Array.new(maximum, item))
+            too_many = contract.fetch(:arguments).merge(name => Array.new(maximum + 1, item))
             long_item = contract.fetch(:arguments).merge(name => ['x' * (item_maximum + 1)])
             expect { input.validate_arguments(valid) }.not_to raise_error, "#{tool_name}.#{name}=#{maximum}"
             expect { input.validate_arguments(too_many) }
@@ -1240,6 +1247,26 @@ RSpec.describe 'Index MCP tool contracts' do
         expect(result.dig('_meta', 'error_code')).to eq('missing_required_arguments'), name
       end
     end
+  end
+
+  it 'names the bounds table and the property when an integer argument has no INTEGER_BOUNDS entry' do
+    server = MCP::Server.new(name: 'woods-bounds-probe', version: Woods::VERSION)
+    server.define_tool(
+      name: 'bounds_probe',
+      input_schema: { properties: { count: { type: 'integer' } } }
+    ) { |server_context:, count: nil| [server_context, count] }
+
+    expect { Woods::MCP::ToolContract.apply!(server) }.to raise_error(ArgumentError) do |error|
+      expect(error.message).to include('INTEGER_BOUNDS').and include('count').and include('bounds_probe')
+    end
+  end
+
+  it 'rejects an unknown search field instead of answering with a clean empty result' do
+    result = call_tool(full_server, 'search', { 'query' => 'Post', 'fields' => ['bogus'] }).fetch('result')
+
+    expect(result['isError']).to be(true)
+    expect(result.dig('_meta', 'error_code')).to eq('invalid_arguments')
+    expect(result.dig('content', 0, 'text')).to include('fields')
   end
 
   it 'returns schema-valid structured content alongside text' do

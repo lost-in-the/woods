@@ -360,8 +360,9 @@ RSpec.describe Woods::MCP::Tasks::Store do
     # otherwise see a namespaced pid as "not running" and fail a task that is
     # actually still working. pid 2**30 stands in for "would read as dead if
     # the process table were consulted" to prove the boot check short-circuits
-    # before it gets there.
-    it 'leaves a task alone when its producer identity records a foreign boot' do
+    # before it gets there. The leave-alone is bounded by
+    # FOREIGN_PRODUCER_GRACE_SECONDS — see the aged case below.
+    it 'leaves a recent task alone when its producer identity records a foreign boot' do
       allow(store).to receive(:producer_identity_for).and_return('boot=test-boot;start_ticks=1')
       live = store.create!(tool: 'pipeline_embed')
       path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
@@ -371,6 +372,28 @@ RSpec.describe Woods::MCP::Tasks::Store do
       File.write(path, JSON.generate(raw))
 
       expect(store.get(live.id).status).to eq('working')
+    end
+
+    # MCP-4: the overwhelmingly common source of a boot-id mismatch on the SAME
+    # store is "this machine rebooted", in which the producer is dead by
+    # construction — the crash-resilience headline. Without an age backstop the
+    # client polls `working` forever. The window is wide enough that a genuine
+    # cross-machine producer (the NFS reading the conservatism protects) is
+    # never failed mid-run.
+    it 'fails a foreign-boot working record once it is older than the grace window' do
+      allow(store).to receive(:producer_identity_for).and_return('boot=test-boot;start_ticks=1')
+      live = store.create!(tool: 'pipeline_embed')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{live.id}.json")
+      raw = JSON.parse(File.read(path))
+      raw['producer_identity'] = 'boot=not-this-hosts-boot;start_ticks=1'
+      raw['pid'] = 2**30
+      aged = Time.now.utc - described_class::FOREIGN_PRODUCER_GRACE_SECONDS - 60
+      raw['updated_at'] = aged.iso8601
+      File.write(path, JSON.generate(raw))
+
+      task = store.get(live.id)
+      expect(task.status).to eq('failed')
+      expect(task.error['message']).to include('did not survive')
     end
 
     it 'leaves a task alone when its producer identity records another pid namespace on this boot' do

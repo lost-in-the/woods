@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'woods'
 require 'woods/dependency_graph'
 require 'woods/flow_document'
+require 'woods/mcp/bootstrapper'
 require 'woods/mcp/server'
 # The verifying doubles below reference these constants directly, so the
 # spec must load them itself — in the full suite other files load them
@@ -469,25 +470,31 @@ RSpec.describe Woods::MCP::Server do
       expect(data).to have_key('counts')
     end
 
+    # MCP-2: both packaged executables ALWAYS wire a retriever_reloader, so a
+    # reloader-less server is a shape no shipped process produces and the
+    # `with_exclusive_reload` fallback branch is unreachable in production.
+    # This exercises the wiring the exes build (reloader present, retriever nil
+    # on a pattern-only boot) against a flat index, where the reader never
+    # self-refreshes and `reload` is therefore the only freshness path.
     it 'picks up changed data after reload' do
-      # Read structure before reload
-      pre = parse_response(call_tool(server, 'structure'))
-      expect(pre['manifest']['total_units']).to eq(9)
+      Dir.mktmpdir('woods-mcp-flat-reload') do |dir|
+        FileUtils.cp_r(File.join(fixture_dir, '.'), dir)
+        reloader = ->(reader) { Woods::MCP::Bootstrapper.reload_stores!(nil, index_dir: dir, reader: reader) }
+        wired = described_class.build(index_dir: dir, retriever: nil, response_format: :json,
+                                      retriever_reloader: reloader)
 
-      # Modify manifest on disk
-      manifest_path = File.join(fixture_dir, 'manifest.json')
-      original_content = File.read(manifest_path)
-      modified = JSON.parse(original_content).merge('total_units' => 42)
+        pre = parse_response(call_tool(wired, 'structure'))
+        expect(pre['manifest']['total_units']).to eq(9)
 
-      begin
-        File.write(manifest_path, JSON.generate(modified))
-        call_tool(server, 'reload')
+        manifest_path = File.join(dir, 'manifest.json')
+        File.write(manifest_path, JSON.generate(JSON.parse(File.read(manifest_path)).merge('total_units' => 42)))
 
-        # Structure should now reflect the new value
-        post = parse_response(call_tool(server, 'structure'))
+        reload = parse_response(call_tool(wired, 'reload'))
+        expect(reload['reloaded']).to be true
+        expect(reload['total_units']).to eq(42)
+
+        post = parse_response(call_tool(wired, 'structure'))
         expect(post['manifest']['total_units']).to eq(42)
-      ensure
-        File.write(manifest_path, original_content)
       end
     end
 
@@ -1210,6 +1217,77 @@ RSpec.describe Woods::MCP::Server do
 
       expect(Dir.children(tmp_output_dir).grep(/\.lock\z/)).to be_empty
       expect(build_lock.acquire).to be(true)
+    end
+  end
+
+  # MCP-3: a raising `lock.acquire` — a read-only or permission-restricted
+  # index directory, which the documented Docker deployment makes easy — used
+  # to escape between `pipeline_start` and the background hand-off. The
+  # in-process flag leaked for the life of the process (every later call
+  # answered `already_running`) and the escaping SystemCallError was relabeled
+  # `corrupt_artifact` by ToolContract, a misdiagnosis of a permissions
+  # failure. Distinct from L6, which fixed the same class of leak one layer
+  # lower.
+  describe 'pipeline lock acquisition that raises (MCP-3)' do
+    let(:guard) do
+      instance_double(Woods::Operator::PipelineGuard).tap do |g|
+        allow(g).to receive(:allow?).and_return(true)
+        allow(g).to receive(:record!)
+      end
+    end
+
+    let(:server_with_operator) do
+      described_class.build(index_dir: fixture_dir, operator: { pipeline_guard: guard }, response_format: :json)
+    end
+
+    let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-lock-raise') }
+
+    before do
+      stub_const('Woods::MCP::Server::PIPELINE_LOCK_WAIT', 0)
+      Woods.configuration = Struct.new(:output_dir).new(tmp_output_dir)
+      require 'woods/coordination/pipeline_lock'
+    end
+
+    after do
+      described_class.send(:pipeline_finish, :extraction)
+      Woods.configuration = nil
+      FileUtils.rm_rf(tmp_output_dir)
+    end
+
+    it 'answers a typed lock error naming permissions, not a corrupt artifact' do
+      allow_any_instance_of(Woods::Coordination::PipelineLock)
+        .to receive(:acquire).and_raise(Errno::EACCES, 'read-only index dir')
+
+      response = call_tool(server_with_operator, 'pipeline_extract')
+
+      expect(response.error?).to be(true)
+      expect(response.meta[:error_code]).to eq(:lock_unwritable)
+      expect(response_text(response)).to include('lock')
+      expect(response_text(response)).not_to include('unavailable or malformed')
+    end
+
+    it 'releases the in-process pipeline flag so a later attempt is not refused as already running' do
+      allow_any_instance_of(Woods::Coordination::PipelineLock)
+        .to receive(:acquire).and_raise(Errno::EACCES, 'read-only index dir')
+      call_tool(server_with_operator, 'pipeline_extract')
+
+      allow_any_instance_of(Woods::Coordination::PipelineLock)
+        .to receive(:acquire).and_return(false)
+      second = call_tool(server_with_operator, 'pipeline_extract')
+
+      expect(second.meta[:error_code]).not_to eq(:already_running)
+      expect(second.meta[:error_code]).to eq(:locked)
+    end
+
+    it 'releases the embedding flag on the pipeline_embed twin too' do
+      allow_any_instance_of(Woods::Coordination::PipelineLock)
+        .to receive(:acquire).and_raise(Errno::EROFS, 'read-only file system')
+
+      first = call_tool(server_with_operator, 'pipeline_embed')
+      expect(first.meta[:error_code]).to eq(:lock_unwritable)
+
+      expect(described_class.send(:pipeline_start, :embedding)).to be(true)
+      described_class.send(:pipeline_finish, :embedding)
     end
   end
 

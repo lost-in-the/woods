@@ -1,8 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Self-healing entry point for the Woods Index MCP server. RubyGems loads gem
-# executables as Ruby, so this wrapper must remain a Ruby program when packaged.
+# Preflight entry point for the Woods Index MCP server: it validates the index
+# directory and its published manifest, then `exec`s woods-mcp in place. There
+# is no supervision and no restart loop — a crashed woods-mcp stays down, the
+# same as when launched directly. RubyGems loads gem executables as Ruby, so
+# this wrapper must remain a Ruby program when packaged.
 
 index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil)
 

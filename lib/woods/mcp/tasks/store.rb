@@ -47,6 +47,19 @@ module Woods
 
         JSON_RPC_INTERNAL_ERROR = -32_603
 
+        # How long a `working` record minted by a producer this reader cannot
+        # judge (foreign boot id or pid namespace) is believed on age alone.
+        #
+        # The pid-table check is unusable across boots and namespaces, so the
+        # only two readings of a foreign identity on the SAME store are "this
+        # machine rebooted while a run was in flight" (the producer is dead by
+        # construction) and "another machine is writing this index over a
+        # shared filesystem" (it may still be running). Nothing on disk tells
+        # them apart, so age decides: wider than any plausible extraction or
+        # embed run, narrow enough that a rebooted host stops answering
+        # `working` forever.
+        FOREIGN_PRODUCER_GRACE_SECONDS = 86_400 # 24 hours
+
         # Terminal states: "once reached, the task's state does not change".
         TERMINAL = %w[completed failed cancelled].freeze
         STATUSES = (%w[working input_required] + TERMINAL).freeze
@@ -321,10 +334,22 @@ module Woods
           # `task.pid` names a slot in a namespace this process doesn't share,
           # so `process_alive?` would be checking an unrelated, possibly
           # reused, host pid. Leave those tasks alone rather than risk failing
-          # one that is still running.
-          return true if foreign_producer?(task.producer_identity)
+          # one that is still running — but only within
+          # FOREIGN_PRODUCER_GRACE_SECONDS, or a rebooted host answers
+          # `working` forever for a run that died in the reboot.
+          return foreign_producer_within_grace?(task) if foreign_producer?(task.producer_identity)
 
           process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
+        end
+
+        # Age backstop for an unjudgeable producer, measured from
+        # `updated_at` (the last sign of life this record carries) exactly as
+        # {#expired?} measures terminal TTL. An unparseable timestamp keeps the
+        # conservative answer.
+        def foreign_producer_within_grace?(task)
+          Time.now.utc - Time.parse(task.updated_at) <= FOREIGN_PRODUCER_GRACE_SECONDS
+        rescue ArgumentError, TypeError
+          true
         end
 
         # A producer this reader cannot judge by its own pid table: minted

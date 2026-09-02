@@ -741,12 +741,18 @@ RSpec.describe Woods::Retriever do
       expect(result).to be_nil
     end
 
-    it 'returns nil on error' do
+    # MCP-6: this used to `rescue StandardError => nil` — the last
+    # swallow-to-empty on the query path. A broken metadata store dropped the
+    # banner and every answer looked like a healthy codebase with nothing to
+    # say about itself. It is a metadata-store read like any other, so it
+    # raises the shared typed store error.
+    it 'raises the typed store error instead of silently dropping the banner' do
       allow(metadata_store).to receive(:count).and_raise(StandardError, 'db connection failed')
 
-      result = retriever.send(:build_structural_context, metadata_store)
-
-      expect(result).to be_nil
+      expect { retriever.send(:build_structural_context, metadata_store) }
+        .to raise_error(Woods::Retriever::StoreError, /db connection failed/) do |e|
+          expect(e.store).to eq('metadata')
+        end
     end
   end
 
@@ -811,6 +817,66 @@ RSpec.describe Woods::Retriever do
 
       expect { retriever.retrieve('auth', types: %w[model]) }
         .to raise_error(Woods::Retriever::StoreError) { |e| expect(e.store).to eq('metadata') }
+    end
+  end
+
+  # ── MCP-6: the pipeline's OWN store reads, not just the retriever's ──
+
+  # M8 wrapped the three lookups the Retriever performs itself. The store
+  # calls that carry most of the traffic live inside the pipeline components:
+  # the assembler's and ranker's `find_batch`, and every executor
+  # store call. Those raised raw through `retrieve`, so the SDK wrapped them
+  # as "Internal error calling tool codebase_retrieve" — or ToolContract saw
+  # an IO-flavored cause and relabeled it `corrupt_artifact`, the wrong
+  # diagnosis for (say) a SQLite metadata DB deleted mid-serve.
+  describe 'pipeline store failures (MCP-6)' do
+    # The real components — the whole point is that the failure happens
+    # INSIDE the pipeline, not in a Retriever-level lookup.
+    let(:retriever) do
+      allow(Woods::Retrieval::SearchExecutor).to receive(:new).and_call_original
+      allow(Woods::Retrieval::Ranker).to receive(:new).and_call_original
+      allow(Woods::Retrieval::ContextAssembler).to receive(:new).and_call_original
+      described_class.new(
+        vector_store: vector_store, metadata_store: metadata_store,
+        graph_store: graph_store, embedding_provider: embedding_provider
+      )
+    end
+
+    let(:store_hit) do
+      Struct.new(:id, :score, :metadata).new('User', 0.9, { 'type' => 'model' })
+    end
+
+    before do
+      allow(embedding_provider).to receive(:embed).and_return([0.1, 0.2, 0.3])
+      allow(vector_store).to receive(:search).and_return([store_hit])
+      allow(metadata_store).to receive_messages(search: [], find: nil, find_batch: {}, count: 0)
+    end
+
+    it 'translates a metadata find_batch failure into the typed store error' do
+      allow(metadata_store).to receive(:find_batch).and_raise(RuntimeError, 'sqlite database is locked')
+
+      expect { retriever.retrieve('How does the User model work?') }
+        .to raise_error(Woods::Retriever::StoreError, /sqlite database is locked/) do |e|
+          expect(e.store).to eq('metadata')
+        end
+    end
+
+    it 'translates a vector-store search failure into the typed store error' do
+      allow(vector_store).to receive(:search).and_raise(RuntimeError, 'qdrant connection refused')
+
+      expect { retriever.retrieve('How does the User model work?') }
+        .to raise_error(Woods::Retriever::StoreError, /qdrant connection refused/) do |e|
+          expect(e.store).to eq('vector')
+        end
+    end
+
+    it 'raises rather than silently dropping the structural banner when the store fails' do
+      allow(metadata_store).to receive(:count).and_raise(RuntimeError, 'metadata store gone')
+
+      expect { retriever.retrieve('How does the User model work?') }
+        .to raise_error(Woods::Retriever::StoreError, /metadata store gone/) do |e|
+          expect(e.store).to eq('metadata')
+        end
     end
   end
 end

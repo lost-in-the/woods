@@ -77,13 +77,17 @@ module Woods
       # Drop the memoized PageRank rank-percentile map so the next {#rank}
       # call recomputes it from the graph store.
       #
-      # The map is memoized per Ranker instance ({#pagerank_importance_map})
-      # and the graph store wrapper is shared by reference across the whole
-      # pipeline — when {Woods::MCP::Bootstrapper.reload_stores!} swaps a
-      # fresh {DependencyGraph} into that wrapper via +replace_graph+, the
-      # memo would keep serving the OLD graph's importance scores for the
-      # life of the process. The bootstrapper calls this right after the
-      # swap, next to the context-cache invalidation.
+      # The map is memoized per Ranker instance ({#pagerank_importance_map}),
+      # so a Ranker outlives any change to the graph it was built against.
+      # The Index MCP reload path does NOT call this: the M7 build-then-swap
+      # transaction ({Woods::MCP::Bootstrapper.commit_reload!}) installs a
+      # whole fresh Pipeline — including a fresh Ranker with no memo — rather
+      # than mutating a live graph in place, and must keep doing so.
+      #
+      # This is therefore an API for direct embedders only: code that holds a
+      # Ranker itself and repoints its graph store without rebuilding the
+      # Ranker has to invalidate the memo here, or the ranker keeps scoring
+      # importance from the retired graph.
       #
       # @return [void]
       def invalidate_pagerank_cache!
