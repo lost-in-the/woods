@@ -64,6 +64,47 @@ RSpec.describe Woods::Obsidian::NameMapper do
       expect(m.path_for('_index')).not_to eq('models/_index.md')
       expect(m.path_for('_index')).to start_with('models/_index-')
     end
+
+    # EXP-9. The hashed candidate was inserted into the taken set without
+    # being re-checked against it, so a hash prefix that happened to equal an
+    # existing literal basename produced two ids at one path (last writer
+    # wins) and dropped one of them from the inverse map.
+    it 'keeps widening the hashed candidate until the basename is free' do
+      allow(Digest::SHA256).to receive(:hexdigest).and_return('aaaaaaaa' * 8)
+
+      m = mapper('Foo-aaaaaaaa' => 'models', 'Foo' => 'models', 'foo' => 'models')
+      paths = %w[Foo-aaaaaaaa Foo foo].map { |id| m.path_for(id) }
+
+      expect(paths.map(&:downcase).uniq.size).to eq(3)
+      expect(m.paths_to_ids.size).to eq(3)
+    end
+  end
+
+  # EXP-9. Windows cannot create a file named CON/PRN/AUX/NUL/COM1-9/LPT1-9
+  # (with or without an extension), so a Ruby class named `Aux` broke any
+  # vault synced through Windows or OneDrive.
+  describe 'Windows reserved device names' do
+    %w[CON PRN AUX NUL COM1 COM9 LPT1 LPT9].each do |device|
+      it "does not emit a bare #{device} basename" do
+        m = mapper(device => 'models')
+
+        expect(File.basename(m.path_for(device), '.md').upcase).not_to eq(device)
+      end
+    end
+
+    it 'sanitizes the lowercase and mixed-case spellings too' do
+      m = mapper('aux' => 'models', 'Nul' => 'policies')
+
+      expect(File.basename(m.path_for('aux'), '.md').upcase).not_to eq('AUX')
+      expect(File.basename(m.path_for('Nul'), '.md').upcase).not_to eq('NUL')
+    end
+
+    it 'leaves names that merely start with a device name alone' do
+      m = mapper('Console' => 'models', 'Auxiliary' => 'models')
+
+      expect(m.path_for('Console')).to eq('models/Console.md')
+      expect(m.path_for('Auxiliary')).to eq('models/Auxiliary.md')
+    end
   end
 
   describe 'length safety' do

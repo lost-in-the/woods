@@ -12,7 +12,7 @@ module Woods
       #
       # @example
       #   mapper = ColumnMapper.new
-      #   properties = mapper.map(column, model_identifier: "User", validations: [...], parent_page_id: "page-123")
+      #   properties = mapper.map(column, model_identifier: "User", validations: [...], parent_page_ids: ["page-123"])
       #
       class ColumnMapper
         include Shared
@@ -27,13 +27,21 @@ module Woods
         # {ModelMapper.table_name_for} so it agrees with the Data Models page
         # the Table relation points at.
         #
+        # A physical table can be owned by several models (STI, or a shared
+        # +self.table_name=+), and the column page is one page per physical
+        # column — so the Table relation lists *every* owner's Data Models
+        # page. A single-owner relation made the two models fight over the
+        # page's parent claim on every run (EXP-1); Notion relations are lists,
+        # so naming them all is both accurate and stable.
+        #
         # @param column [Hash] Column hash from metadata["columns"] (name, type, null, default)
         # @param model_identifier [String] Parent model name (for context)
         # @param table_name [String, nil] Owning table name used to qualify the page title
         # @param validations [Array<Hash>] Model-level validations to match against this column
-        # @param parent_page_id [String, nil] Notion page ID of the Data Models parent page
+        # @param parent_page_ids [Array<String>] Notion page IDs of the owning
+        #   Data Models pages, in a caller-fixed (deterministic) order
         # @return [Hash] Notion page properties hash
-        def map(column, model_identifier: nil, table_name: nil, validations: [], parent_page_id: nil) # rubocop:disable Lint/UnusedMethodArgument
+        def map(column, model_identifier: nil, table_name: nil, validations: [], parent_page_ids: []) # rubocop:disable Lint/UnusedMethodArgument
           properties = {
             'Column Name' => { title: [{ text: { content: qualified_title(column['name'], table_name) } }] },
             'Data Type' => { select: { name: column['type'] } },
@@ -42,7 +50,8 @@ module Woods
             'Validation Rules' => rich_text_property(format_validation_rules(column['name'], validations))
           }
 
-          properties['Table'] = { relation: [{ id: parent_page_id }] } if parent_page_id
+          related = Array(parent_page_ids).compact
+          properties['Table'] = { relation: related.map { |id| { id: id } } } if related.any?
 
           properties
         end

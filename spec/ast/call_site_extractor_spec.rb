@@ -102,6 +102,37 @@ RSpec.describe Woods::Ast::CallSiteExtractor do
       expect(method_names).to include('create!')
     end
 
+    # EXTB-16. The :block branch only recursed into the block body, so the
+    # send's own receiver chain was skipped — the same chain without a block
+    # recorded both calls.
+    it 'extracts calls from the receiver chain of a block-passing call' do
+      source = <<~RUBY
+        User.where(active: true).each do |user|
+          user.touch
+        end
+      RUBY
+
+      root = parser.parse(source)
+      calls = extractor.extract(root)
+
+      method_names = calls.map { |c| c[:method_name] }
+      expect(method_names).to include('where')
+      expect(method_names.count('where')).to eq(1)
+      expect(method_names).to include('each')
+      expect(method_names.count('each')).to eq(1)
+    end
+
+    # EXTB-5. Arguments were flattened to source text, so a call nested in an
+    # argument list was never a call site.
+    it 'extracts calls nested inside call arguments' do
+      root = parser.parse('foo(Bar.baz)')
+      calls = extractor.extract(root)
+
+      method_names = calls.map { |c| c[:method_name] }
+      expect(method_names).to include('baz')
+      expect(method_names.count('foo')).to eq(1)
+    end
+
     it 'returns call hashes with required keys' do
       root = parser.parse('User.find(1)')
       calls = extractor.extract(root)

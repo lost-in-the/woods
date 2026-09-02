@@ -94,17 +94,20 @@ module Woods
       # @return [Hash] { data_models: Integer, columns: Integer,
       #   skipped: Integer, errors: Array<String> }
       def sync_all
-        model_stats = @database_ids[:data_models] ? sync_data_models : empty_stats
-        column_stats = @database_ids[:columns] && @database_ids[:data_models] ? sync_columns : empty_stats
+        with_pinned_index do
+          model_stats = @database_ids[:data_models] ? sync_data_models : empty_stats
+          warn_columns_without_data_models if @database_ids[:columns] && !@database_ids[:data_models]
+          column_stats = @database_ids[:columns] ? sync_columns : empty_stats
 
-        all_errors = model_stats[:errors] + column_stats[:errors]
+          all_errors = model_stats[:errors] + column_stats[:errors]
 
-        {
-          data_models: model_stats[:synced],
-          columns: column_stats[:synced],
-          skipped: model_stats[:skipped] + column_stats[:skipped],
-          errors: cap_errors(all_errors)
-        }
+          {
+            data_models: model_stats[:synced],
+            columns: column_stats[:synced],
+            skipped: model_stats[:skipped] + column_stats[:skipped],
+            errors: cap_errors(all_errors)
+          }
+        end
       end
 
       # Sync model units to the Data Models Notion database.
@@ -144,6 +147,13 @@ module Woods
 
       # Sync column data to the Columns Notion database.
       #
+      # Columns are synced **per physical table**, not per model. Column pages
+      # are titled "<table>.<column>", so two models sharing a table (STI, a
+      # shared +self.table_name=+) produced one page from two different
+      # payloads and PATCHed it back and forth on every run, forever (EXP-1).
+      # Grouping first means one page per physical column per run, with the
+      # Table relation listing every owning model and the validations unioned.
+      #
       # Manifest entries whose qualified title vanished from the current
       # column set are pruned afterwards; the Notion pages themselves are
       # left alone (no deletion path exists, and none is invented here).
@@ -157,8 +167,8 @@ module Woods
           totals = { synced: 0, skipped: 0, errors: [] }
           current_keys = []
 
-          each_model_unit do |entry, unit_data|
-            result = sync_model_columns(entry, unit_data, database_id, current_keys)
+          column_groups.each do |group|
+            result = sync_table_columns(group, database_id, current_keys)
             totals[:synced] += result[:synced]
             totals[:skipped] += result[:skipped]
             totals[:errors].concat(result[:errors])
@@ -225,7 +235,78 @@ module Woods
         end
       end
 
-      # Sync columns for a single model.
+      # Run a multi-read export body against one index generation.
+      #
+      # Every public IndexReader accessor self-refreshes when the published
+      # generation moves, and the reader assigns pinning responsibility to
+      # direct callers. Unpinned, a concurrent extraction mid-sync means the
+      # model list, the unit bodies and the page-id cache can straddle two
+      # generations (EXP-5) — a model present only in the newer one gets a nil
+      # parent page and a run of avoidable churn.
+      #
+      # Guarded by +respond_to?+: injected readers (specs, embedders) need not
+      # implement pinning.
+      #
+      # @yield the export body
+      # @return [Object] the block's value
+      def with_pinned_index(&block)
+        return yield unless @reader.respond_to?(:with_pinned_generation)
+
+        @reader.with_pinned_generation(&block)
+      end
+
+      # A columns-only configuration used to make {#sync_all} return all-zero
+      # stats in silence, which is indistinguishable from breakage (EXP-11).
+      # The sync runs; only the Table relation is unavailable, because its
+      # target pages live in the Data Models database nobody configured.
+      #
+      # @return [void]
+      def warn_columns_without_data_models
+        warn 'woods: notion sync has no data_models database configured — ' \
+             'syncing columns without a Table relation'
+      end
+
+      # One entry per physical table: every model that owns it, the union of
+      # their columns and validations, and the Data Models pages the Table
+      # relation should list.
+      #
+      # Parent page ids come from the page-id cache, which the manifest skip
+      # path populates too — so on a warm run the Table relation is
+      # byte-identical to the previous run and unchanged columns hash stable.
+      # Owners and page ids are sorted so the payload does not depend on the
+      # order the index happens to list models in.
+      #
+      # @return [Array<Hash>] { table_name:, owners:, columns:, validations:,
+      #   parent_page_ids: }
+      def column_groups
+        groups = {}
+        each_model_unit { |entry, unit_data| absorb_into_column_group(groups, entry, unit_data) }
+        groups.each_value { |group| finalize_column_group(group) }
+        groups.values
+      end
+
+      # Fold one model's columns and validations into its table's group.
+      #
+      # @return [void]
+      def absorb_into_column_group(groups, entry, unit_data)
+        table_name = Mappers::ModelMapper.table_name_for(unit_data)
+        group = (groups[table_name] ||= { table_name: table_name, owners: [], columns: {}, validations: [] })
+        group[:owners] << entry['identifier']
+        (unit_data.dig('metadata', 'columns') || []).each { |column| group[:columns][column['name']] ||= column }
+        group[:validations].concat(unit_data.dig('metadata', 'validations') || [])
+      end
+
+      # Sort and dedupe a group so its payload does not depend on the order
+      # the index happens to list models in.
+      #
+      # @return [void]
+      def finalize_column_group(group)
+        group[:owners] = group[:owners].uniq.sort
+        group[:validations] = group[:validations].uniq
+        group[:parent_page_ids] = group[:owners].filter_map { |owner| @page_id_cache[owner] }.uniq
+      end
+
+      # Sync the columns of one physical table.
       #
       # Column pages are titled "<table>.<column>" (#149). Every model shares
       # id/created_at/updated_at, and upserting by the bare column name found
@@ -234,35 +315,38 @@ module Woods
       # The table qualifier comes from {Mappers::ModelMapper.table_name_for},
       # the same value the Table relation's target page is titled with.
       #
-      # The parent page id comes from the page-id cache, which the manifest
-      # skip path populates too — so on a warm run the Table relation is
-      # byte-identical to the previous run and unchanged columns hash stable.
-      #
+      # @param group [Hash] One {#column_groups} entry
       # @param current_keys [Array<String>] Sink for this run's column titles
       # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
-      def sync_model_columns(entry, unit_data, database_id, current_keys)
-        parent_page_id = @page_id_cache[entry['identifier']]
-        table_name = Mappers::ModelMapper.table_name_for(unit_data)
-        columns = unit_data.dig('metadata', 'columns') || []
-        validations = unit_data.dig('metadata', 'validations') || []
+      def sync_table_columns(group, database_id, current_keys)
         mapper = Mappers::ColumnMapper.new
         stats = { synced: 0, skipped: 0, errors: [] }
+        owners = group[:owners].join(', ')
 
-        columns.each do |column|
-          properties = mapper.map(column, model_identifier: entry['identifier'], table_name: table_name,
-                                          validations: validations, parent_page_id: parent_page_id)
-          title_value = extract_title_text(properties['Column Name'])
-          current_keys << title_value
-          status, = sync_page(scope: SCOPE_COLUMNS, database_id: database_id, title_value: title_value,
-                              properties: properties, legacy: column_legacy_descriptor(column, parent_page_id))
-          stats[status] += 1
+        group[:columns].each_value do |column|
+          stats[sync_one_column(mapper, group, column, database_id, current_keys)] += 1
         rescue AuthenticationError
           raise # see sync_units — an auth failure dooms the whole run
         rescue StandardError => e
-          stats[:errors] << "#{entry['identifier']}.#{column['name']}: #{e.message}"
+          stats[:errors] << "#{owners}.#{column['name']}: #{e.message}"
         end
 
         stats
+      end
+
+      # Sync one physical column's page.
+      #
+      # @return [Symbol] :synced or :skipped
+      def sync_one_column(mapper, group, column, database_id, current_keys)
+        properties = mapper.map(column, model_identifier: group[:owners].first, table_name: group[:table_name],
+                                        validations: group[:validations],
+                                        parent_page_ids: group[:parent_page_ids])
+        title_value = extract_title_text(properties['Column Name'])
+        current_keys << title_value
+        status, = sync_page(scope: SCOPE_COLUMNS, database_id: database_id, title_value: title_value,
+                            properties: properties,
+                            legacy: column_legacy_descriptor(column, group[:parent_page_ids].first))
+        status
       end
 
       # Sync one page through the manifest. Three tiers, cheapest first:

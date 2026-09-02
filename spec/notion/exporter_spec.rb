@@ -265,6 +265,73 @@ RSpec.describe Woods::Notion::Exporter do
       stats = exporter_no_models.sync_all
       expect(stats[:data_models]).to eq(0)
     end
+
+    # EXP-11. A columns-only configuration used to return all-zero stats with
+    # no message — indistinguishable from breakage, and contradicting the
+    # documented "the other sync is skipped" contract.
+    context 'when only the columns database is configured' do
+      let(:columns_only_config) do
+        double(
+          'Configuration',
+          notion_api_token: 'secret_test',
+          notion_database_ids: { columns: 'db-columns-uuid' }
+        )
+      end
+
+      subject(:columns_only_exporter) do
+        described_class.new(index_dir: index_dir, config: columns_only_config, client: client, reader: reader)
+      end
+
+      it 'still syncs the columns, without a Table relation' do
+        created = []
+        allow(client).to receive(:create_page) do |args|
+          created << args[:properties]
+          { 'id' => "page-#{SecureRandom.hex(4)}" }
+        end
+
+        stats = columns_only_exporter.sync_all
+
+        expect(stats[:columns]).to eq(3)
+        expect(created.map(&:keys).flatten.uniq).not_to include('Table')
+      end
+
+      it 'says why the Table relation is missing' do
+        expect { columns_only_exporter.sync_all }.to output(/without a Table relation/).to_stderr
+      end
+    end
+  end
+
+  # EXP-5. Every public IndexReader accessor self-refreshes when the published
+  # generation moves, and the reader assigns pinning responsibility to direct
+  # callers — so an extraction publishing mid-export used to produce an export
+  # assembled from two generations.
+  describe 'generation pinning' do
+    it 'performs every index read inside one pinned generation' do
+      pinned = false
+      reads = []
+
+      allow(reader).to receive(:with_pinned_generation) do |&block|
+        pinned = true
+        begin
+          block.call
+        ensure
+          pinned = false
+        end
+      end
+      allow(reader).to receive(:list_units) do |type:|
+        reads << pinned
+        (type == 'model' ? model_units : migration_units).map { |u| { 'identifier' => u['identifier'] } }
+      end
+      allow(reader).to receive(:find_unit) do |identifier|
+        reads << pinned
+        (model_units + migration_units).find { |u| u['identifier'] == identifier }
+      end
+
+      exporter.sync_all
+
+      expect(reads).not_to be_empty
+      expect(reads).to all(be(true))
+    end
   end
 
   describe '#sync_data_models' do
@@ -527,6 +594,34 @@ RSpec.describe Woods::Notion::Exporter do
         exporter.sync_all
 
         expect(pages_in('db-columns-uuid').map { |page| page_title(page) }).to eq(['users.id'])
+      end
+
+      # EXP-1. Column pages are qualified by *table*, so both models emitted
+      # the title "users.id" with a different Table relation and a different
+      # content hash. Each run, each model saw the other's hash and PATCHed
+      # the page back — two API calls per shared column, forever, with the
+      # relation pointing at whichever model synced last.
+      it 'issues zero API calls on an unchanged second sync' do
+        exporter.sync_all
+        cold_calls = api_calls.dup
+
+        stats = described_class.new(index_dir: index_dir, config: config, client: client, reader: reader).sync_all
+
+        expect(api_calls).to eq(cold_calls)
+        expect(stats[:columns]).to eq(0)
+        expect(stats[:errors]).to be_empty
+      end
+
+      it 'points the shared column at every owning model, in a stable order' do
+        exporter.sync_all
+        relation_after_first = pages_titled('db-columns-uuid', 'users.id').first[:properties]['Table']
+
+        described_class.new(index_dir: index_dir, config: config, client: client, reader: reader).sync_all
+        relation_after_second = pages_titled('db-columns-uuid', 'users.id').first[:properties]['Table']
+
+        model_page_ids = %w[Admin User].map { |name| pages_titled('db-models-uuid', "users (#{name})").first['id'] }
+        expect(relation_after_first).to eq({ relation: model_page_ids.map { |id| { id: id } } })
+        expect(relation_after_second).to eq(relation_after_first)
       end
 
       context 'with a legacy bare-title Data Models page' do

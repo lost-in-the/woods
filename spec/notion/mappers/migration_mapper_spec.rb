@@ -6,6 +6,13 @@ require 'woods/notion/mappers/migration_mapper'
 RSpec.describe Woods::Notion::Mappers::MigrationMapper do
   subject(:mapper) { described_class.new }
 
+  # EXP-3. These fixtures used to set extracted_at equal to the migration's
+  # own timestamp, so "picks the latest extracted_at" read as correct while
+  # asserting the wrong field. A full extraction re-stamps extracted_at for
+  # every unit, which made every table read "changed today"; the migration
+  # version — sitting unused in the same metadata hash — is the real date.
+  let(:extraction_run_at) { '2026-09-01T00:00:00Z' }
+
   let(:migration_units) do
     [
       {
@@ -14,7 +21,7 @@ RSpec.describe Woods::Notion::Mappers::MigrationMapper do
           'tables_affected' => %w[users],
           'migration_version' => '20260101120000'
         },
-        'extracted_at' => '2026-01-01T12:00:00Z'
+        'extracted_at' => extraction_run_at
       },
       {
         'identifier' => '20260215090000_AddEmailIndexToUsers',
@@ -22,7 +29,7 @@ RSpec.describe Woods::Notion::Mappers::MigrationMapper do
           'tables_affected' => %w[users],
           'migration_version' => '20260215090000'
         },
-        'extracted_at' => '2026-02-15T09:00:00Z'
+        'extracted_at' => extraction_run_at
       },
       {
         'identifier' => '20260110080000_CreatePosts',
@@ -30,7 +37,7 @@ RSpec.describe Woods::Notion::Mappers::MigrationMapper do
           'tables_affected' => %w[posts],
           'migration_version' => '20260110080000'
         },
-        'extracted_at' => '2026-01-10T08:00:00Z'
+        'extracted_at' => extraction_run_at
       },
       {
         'identifier' => '20260220100000_AddUserIdToPosts',
@@ -38,7 +45,7 @@ RSpec.describe Woods::Notion::Mappers::MigrationMapper do
           'tables_affected' => %w[posts users],
           'migration_version' => '20260220100000'
         },
-        'extracted_at' => '2026-02-20T10:00:00Z'
+        'extracted_at' => extraction_run_at
       }
     ]
   end
@@ -50,10 +57,40 @@ RSpec.describe Woods::Notion::Mappers::MigrationMapper do
       expect(result['posts']).to eq('2026-02-20T10:00:00Z')
     end
 
-    it 'picks the latest extracted_at for each table' do
+    it 'picks the latest migration version for each table' do
       result = mapper.latest_changes(migration_units)
-      # users: affected by migration at 2026-01-01, 2026-02-15, 2026-02-20 → latest is 2026-02-20
+      # users: affected by migrations 20260101120000, 20260215090000, 20260220100000
       expect(result['users']).to eq('2026-02-20T10:00:00Z')
+      expect(result['users']).not_to eq(extraction_run_at)
+    end
+
+    it 'falls back to extracted_at when the migration version is absent' do
+      units = [
+        { 'identifier' => 'LegacyMigration',
+          'metadata' => { 'tables_affected' => ['orders'] },
+          'extracted_at' => extraction_run_at }
+      ]
+
+      expect(mapper.latest_changes(units)['orders']).to eq(extraction_run_at)
+    end
+
+    it 'falls back to extracted_at when the migration version does not parse' do
+      units = [
+        { 'identifier' => 'OddMigration',
+          'metadata' => { 'tables_affected' => ['orders'], 'migration_version' => 'not-a-stamp' },
+          'extracted_at' => extraction_run_at }
+      ]
+
+      expect(mapper.latest_changes(units)['orders']).to eq(extraction_run_at)
+    end
+
+    it 'uses the migration version even when the unit has no extracted_at' do
+      units = [
+        { 'identifier' => '20200101000000_CreateOrders',
+          'metadata' => { 'tables_affected' => ['orders'], 'migration_version' => '20200101000000' } }
+      ]
+
+      expect(mapper.latest_changes(units)['orders']).to eq('2020-01-01T00:00:00Z')
     end
 
     it 'returns empty hash for empty input' do

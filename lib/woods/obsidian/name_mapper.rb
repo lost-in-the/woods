@@ -32,8 +32,13 @@ module Woods
     class NameMapper
       MAX_FILENAME_BYTES = 255
       EXTENSION = '.md'
-      HASH_SUFFIX_BYTES = 9 # "-" + 8 hex chars
+      HASH_SUFFIX_HEX = 8 # hex chars per disambiguation step
       RESERVED_BASENAMES = %w[_index].freeze
+
+      # Basenames Windows refuses to create, with or without an extension.
+      # A Ruby class named +Aux+ produced "models/Aux.md", which breaks any
+      # vault synced through Windows Obsidian or OneDrive (EXP-9).
+      WINDOWS_RESERVED_BASENAMES = /\A(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\z/i
 
       # @param id_to_dir [Hash{String=>String}] map of unit identifier -> type
       #   folder name (e.g. "User" => "models")
@@ -76,18 +81,46 @@ module Woods
         end
       end
 
+      # Claim a free basename in this folder, case-insensitively.
+      #
+      # The hashed candidate used to be inserted without being re-checked, so
+      # a hash prefix that happened to equal an existing literal basename put
+      # two notes at one path — last writer wins, and one id silently vanished
+      # from the inverse map (EXP-9). Now the digest slice widens until the
+      # candidate is free.
       def assign_basename(id, used)
-        base = fit(sanitize(id), EXTENSION.bytesize)
-        if used.include?(base.downcase)
-          base = "#{fit(sanitize(id), EXTENSION.bytesize + HASH_SUFFIX_BYTES)}-#{Digest::SHA256.hexdigest(id)[0, 8]}"
+        candidate = fit(sanitize(id), EXTENSION.bytesize)
+        digest = Digest::SHA256.hexdigest(id)
+        attempt = 0
+
+        while used.include?(candidate.downcase)
+          attempt += 1
+          candidate = hashed_basename(id, hash_suffix(digest, attempt))
         end
-        used << base.downcase
-        base
+
+        used << candidate.downcase
+        candidate
+      end
+
+      # Widening slices of the digest (8, 16, ... 64 hex chars), then the whole
+      # digest plus a counter — so {#assign_basename} terminates even in the
+      # (unreachable, ids are unique) case that every slice is taken.
+      def hash_suffix(digest, attempt)
+        width = attempt * HASH_SUFFIX_HEX
+        return digest[0, width] if width <= digest.length
+
+        "#{digest}-#{attempt - (digest.length / HASH_SUFFIX_HEX)}"
+      end
+
+      def hashed_basename(id, suffix)
+        "#{fit(sanitize(id), EXTENSION.bytesize + 1 + suffix.bytesize)}-#{suffix}"
       end
 
       def sanitize(id)
         out = id.to_s.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-        out.empty? ? 'unit' : out
+        return 'unit' if out.empty?
+
+        WINDOWS_RESERVED_BASENAMES.match?(out) ? "_#{out}" : out
       end
 
       # Replace only the chars that are structural inside a wikilink alias.

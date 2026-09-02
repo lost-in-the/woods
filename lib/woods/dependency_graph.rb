@@ -594,7 +594,11 @@ module Woods
         rank_sum = (@reverse[id] || []).sum do |src|
           counts, out_degree = weights[src]
           multiplicity = counts ? counts[id] : 0
-          multiplicity.positive? ? scores[src] * multiplicity / out_degree : 0.0
+          # `fetch(src, 0.0)`: {.from_h} accepts (and {#registered_types}
+          # relies on) a hash carrying edges for an identifier it has no node
+          # for. Such a source is absent from +node_ids+, so it holds no rank
+          # to give — `scores[src]` was nil and crashed the refresh (EXTB-10).
+          multiplicity.positive? ? scores.fetch(src, 0.0) * multiplicity / out_degree : 0.0
         end
 
         [id, ((1.0 - damping) / n) + (damping * (rank_sum + (dangling_sum / n)))]
@@ -664,8 +668,30 @@ module Woods
         }
         variants.empty? ? base : base.merge(variants: variants)
       end
-      @to_h.dup
+      detached_snapshot(@to_h)
     end
+
+    # A copy whose edge containers are the caller's alone.
+    #
+    # `dup` copies only the top level, so `to_h[:edges][id]` used to be the
+    # very Array `@edges` holds: appending to it polluted the live graph and
+    # the memo, both silently (EXTB-11). {#primary_edges} and
+    # {#variant_records} already detach from the graph; this detaches each
+    # handed-out snapshot from the memo as well.
+    #
+    # @param memo [Hash] the memoized serialization
+    # @return [Hash]
+    def detached_snapshot(memo)
+      snapshot = memo.dup
+      snapshot[:edges] = memo[:edges].transform_values { |list| list.map(&:dup) }
+      if memo.key?(:variants)
+        snapshot[:variants] = memo[:variants].map do |record|
+          record.merge(edges: record[:edges].map(&:dup))
+        end
+      end
+      snapshot
+    end
+    private :detached_snapshot
 
     # @return [Hash{String => Hash}] identifier => primary node
     def primary_nodes
@@ -673,11 +699,15 @@ module Woods
     end
     private :primary_nodes
 
+    # Edge arrays are copied element-wise: {#to_h}'s `dup` is shallow, so
+    # handing back the live Arrays let a caller append straight into `@edges`
+    # and change what {#dependencies_of} answers (EXTB-11).
+    #
     # @return [Hash{String => Array<Hash>}] identifier => primary node's edges
     def primary_edges
       @edges.each_with_object({}) do |(identifier, by_type), edges|
         primary_type = primary_type_for(identifier, by_type)
-        edges[identifier] = by_type.fetch(primary_type, [])
+        edges[identifier] = by_type.fetch(primary_type, []).map(&:dup)
       end
     end
     private :primary_edges
@@ -695,7 +725,8 @@ module Woods
             type: type,
             file_path: node[:file_path],
             namespace: node[:namespace],
-            edges: @edges[identifier]&.[](type) || []
+            # Copied like {#primary_edges} — see EXTB-11.
+            edges: (@edges[identifier]&.[](type) || []).map(&:dup)
           }
         end
       end

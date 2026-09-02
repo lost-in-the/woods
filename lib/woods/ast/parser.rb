@@ -277,7 +277,13 @@ module Woods
 
         # Convert receiver node so tree walking finds nested calls/constants
         receiver_node = prism_node.receiver ? convert_prism_node(prism_node.receiver, source) : nil
-        children = [receiver_node].compact
+        # Argument nodes become children too (EXTB-5). Flattening arguments to
+        # source text alone hid every definition and call nested in an argument
+        # list — `private def hidden` lost the whole method, `foo(Bar.baz)` lost
+        # the `Bar.baz` call site. The `arguments` text field is unchanged for
+        # existing consumers; the children are appended *after* the receiver so
+        # nothing that reads children[0] as the receiver moves.
+        children = [receiver_node].compact + convert_prism_arguments(prism_node, source)
 
         # If there's a block, create a :block node wrapping this send
         if prism_node.block.is_a?(Prism::BlockNode)
@@ -311,6 +317,20 @@ module Woods
         )
       end
 
+      # Convert a call's argument nodes into walkable children.
+      #
+      # Only {Node} results are kept: literals convert to bare Strings or
+      # Integers, which carry nothing for a tree walker and would only make
+      # the children array noisier.
+      def convert_prism_arguments(prism_node, source)
+        return [] unless prism_node.arguments
+
+        prism_node.arguments.arguments.filter_map do |arg|
+          converted = convert_prism_node(arg, source)
+          converted if converted.is_a?(Node)
+        end
+      end
+
       def convert_prism_constant_path(prism_node, _source)
         parent_text = (extract_const_path_text(prism_node.parent) if prism_node.parent)
         const_name = prism_node.respond_to?(:name) ? prism_node.name.to_s : prism_node.child.name.to_s
@@ -331,9 +351,21 @@ module Woods
           condition = Node.new(**condition.to_h, source: condition_source)
         end
 
-        then_body = prism_node.statements ? convert_prism_node(prism_node.statements, source) : nil
+        body = prism_node.statements ? convert_prism_node(prism_node.statements, source) : nil
         else_clause = prism_else_clause(prism_node)
         else_body = else_clause ? convert_prism_node(else_clause, source) : nil
+
+        # `unless` runs its body when the predicate is FALSE, so the body
+        # belongs in the else slot and the else clause in the then slot
+        # (EXTB-4). Sharing the unswapped :if shape made every flow document
+        # state the opposite of what the code does. After the swap the emitted
+        # `if <predicate>` reading is exact, so no negation marker is needed —
+        # the parser-gem branch below already normalizes `unless` the same way.
+        then_body, else_body = if prism_node.is_a?(Prism::UnlessNode)
+                                 [else_body, body]
+                               else
+                                 [body, else_body]
+                               end
 
         Node.new(
           type: :if,
@@ -350,8 +382,13 @@ module Woods
       end
 
       def convert_prism_case(prism_node, source)
-        children = []
-        children << convert_prism_node(prism_node.predicate, source) if prism_node.predicate
+        # Positional: [predicate, *branches]. The predicate slot stays a nil
+        # hole for a predicate-less `case` (EXTB-15) — omitting it shifted the
+        # first `when` into children[0], where every consumer's `drop(1)` threw
+        # the branch away and rendered its condition as the word "when".
+        # Mirrors the L2 convention in {#convert_prism_if}.
+        predicate = (convert_prism_node(prism_node.predicate, source) if prism_node.predicate)
+        children = [predicate]
         prism_node.conditions.each { |c| children << convert_prism_node(c, source) }
         else_clause = prism_else_clause(prism_node)
         children << convert_prism_node(else_clause, source) if else_clause

@@ -61,7 +61,7 @@ module Woods
       flow_map = {}
 
       controller_units.each do |unit|
-        entries, unit_flow_paths = assemble_controller_unit(assembler, unit, fail_closed: true)
+        entries, unit_flow_paths = assemble_controller_unit(assembler, unit)
         flow_map.merge!(entries)
         unit.metadata[:flow_paths] = unit_flow_paths if unit_flow_paths.any?
       end
@@ -101,11 +101,11 @@ module Woods
       annotations = {}
 
       touched_units.each do |unit|
-        # fail_closed: a per-action skip would publish an index missing
-        # that entry. The incremental path must not advance publication
+        # A per-action skip would publish an index missing that entry, so
+        # assembly raises. The incremental path must not advance publication
         # over a broken assembly; the caller aborts before the generation
         # bump.
-        entries, unit_flow_paths = assemble_controller_unit(assembler, unit, fail_closed: true)
+        entries, unit_flow_paths = assemble_controller_unit(assembler, unit)
         annotations[unit.identifier] = unit_flow_paths
         delta.merge!(entries)
       end
@@ -129,23 +129,25 @@ module Woods
 
     # Assemble and write every flow for one controller unit.
     #
+    # Both entry points fail closed: a per-action failure aborts the run
+    # rather than publishing a flow index missing that entry (EXTB-14 — the
+    # old `fail_closed:` switch documented a log-and-skip contract for the
+    # full path that no caller ever asked for).
+    #
     # @param assembler [FlowAssembler]
     # @param unit [ExtractedUnit]
-    # @param fail_closed [Boolean] raise on a per-action assembly failure
-    #   instead of skipping the entry (the delta path raises; the full
-    #   path keeps its log-and-skip contract)
     # @return [Array(Hash{String => String}, Hash{String => String})] the
     #   entry_point => relative-path entries for the flow index, and the
     #   action => relative-path annotation for the unit's metadata
-    def assemble_controller_unit(assembler, unit, fail_closed: false)
+    # @raise [Woods::ExtractionError] when an action fails to assemble
+    def assemble_controller_unit(assembler, unit)
       entries = {}
       unit_flow_paths = {}
 
       actions = unit.metadata[:actions] || unit.metadata['actions'] || []
       actions.each do |action|
         entry_point = "#{unit.identifier}##{action}"
-        flow_path = assemble_and_write(assembler, entry_point, unit.identifier, action, fail_closed: fail_closed)
-        next unless flow_path
+        flow_path = assemble_and_write(assembler, entry_point, unit.identifier, action)
 
         entries[entry_point] = flow_path
         unit_flow_paths[action] = flow_path
@@ -189,11 +191,10 @@ module Woods
     # @param entry_point [String]
     # @param controller_id [String]
     # @param action [String]
-    # @param fail_closed [Boolean] raise instead of logging and skipping —
-    #   the incremental delta must not publish an index missing an entry
-    # @return [String, nil] The output_dir-relative path of the written file
-    #   (e.g. "flows/OrdersController_create.json"), or nil on failure
-    def assemble_and_write(assembler, entry_point, controller_id, action, fail_closed: false)
+    # @return [String] The output_dir-relative path of the written file
+    #   (e.g. "flows/OrdersController_create.json")
+    # @raise [Woods::ExtractionError] when assembly or the write fails
+    def assemble_and_write(assembler, entry_point, controller_id, action)
       flow = assembler.assemble(entry_point, max_depth: @max_depth)
 
       filename = Woods::FilenameUtils.flow_filename(controller_id, action)
@@ -204,10 +205,7 @@ module Woods
       # metadata[:flow_paths]), so it must not carry this machine's root.
       File.join('flows', filename)
     rescue StandardError => e
-      raise Woods::ExtractionError, "flow precompute failed for #{entry_point}: #{e.message}" if fail_closed
-
-      Rails.logger.error("[Woods] Flow precompute failed for #{entry_point}: #{e.message}")
-      nil
+      raise Woods::ExtractionError, "flow precompute failed for #{entry_point}: #{e.message}"
     end
 
     # Write the flow index mapping entry points to output_dir-relative file paths.

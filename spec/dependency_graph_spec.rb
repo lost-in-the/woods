@@ -244,6 +244,38 @@ RSpec.describe Woods::DependencyGraph do
         expect(total).to be_within(0.01).of(1.0)
       end
     end
+
+    # EXTB-10. `from_h` accepts (and #registered_types relies on) a hash
+    # carrying edges for an identifier it has no node for. `pagerank_step`
+    # read `scores[src]` for every reverse source, so a node-less source
+    # crashed the whole refresh with `nil * 1`.
+    context 'when the restored graph carries edges for a node-less source' do
+      let(:restored) do
+        described_class.from_h(
+          'nodes' => {
+            'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb' }
+          },
+          'edges' => {
+            'Ghost' => [{ 'target' => 'User', 'via' => 'code_reference' }]
+          },
+          'reverse' => {
+            'User' => ['Ghost']
+          },
+          'type_index' => { 'model' => ['User'] }
+        )
+      end
+
+      it 'returns finite scores instead of raising' do
+        scores = restored.pagerank
+
+        expect(scores.keys).to eq(['User'])
+        expect(scores['User']).to be_finite
+      end
+
+      it 'conserves total mass (a phantom source contributes nothing)' do
+        expect(restored.pagerank.values.sum).to be_within(0.01).of(1.0)
+      end
+    end
   end
 
   describe '#node_exists?' do
@@ -450,6 +482,20 @@ RSpec.describe Woods::DependencyGraph do
       second = graph.to_h
       expect(first).to eq(second)
       expect(first).not_to equal(second)
+    end
+
+    # EXTB-11. `@to_h.dup` copies only the top level, so `to_h[:edges][id]`
+    # was the very Array `@edges` holds — a caller appending to it polluted
+    # the live graph, not just their own copy.
+    it 'does not expose the live edge arrays' do
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))
+
+      snapshot = graph.to_h
+      snapshot[:edges]['Order'] << { target: 'EVIL', via: :code_reference }
+
+      expect(graph.dependencies_of('Order')).to eq(['User'])
+      expect(graph.to_h[:edges]['Order'].map { |e| e[:target] }).to eq(['User'])
     end
 
     it 'invalidates the cache when a new unit is registered' do

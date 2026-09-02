@@ -137,7 +137,23 @@ RSpec.describe Woods::RubyAnalyzer::MermaidRenderer do
       expect(result).to include('UsersController["UsersController"]')
     end
 
-    it 'renders edges between nodes' do
+    # EXTB-6. This pinned bare-string edges — a shape `DependencyGraph#to_h`
+    # stopped producing when edges gained their `:via` label — so the renderer
+    # dropping every real edge (`nodes.key?(a_Hash)` is always false) was
+    # invisible, and the committed self-analysis artifacts shipped dependency
+    # maps with zero dependencies.
+    it 'renders edges from a real DependencyGraph#to_h' do
+      graph = Woods::DependencyGraph.new
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :controller, identifier: 'UsersController',
+                               dependencies: [{ type: :model, target: 'User', via: :code_reference }]))
+
+      result = renderer.render_dependency_map(graph.to_h)
+
+      expect(result).to include('UsersController -->|code_reference| User')
+    end
+
+    it 'renders legacy bare-string edges' do
       graph_data = {
         nodes: {
           'UsersController' => { type: :controller },

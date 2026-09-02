@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'time' # Time#iso8601 — the file is loadable standalone (EXTB-13)
 
 module Woods
   # Value object representing an assembled execution flow trace.

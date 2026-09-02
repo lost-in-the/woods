@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'time'      # Time#iso8601 — the file is loadable standalone (EXP-8)
+require 'fileutils' # FileUtils.mkdir_p in #save
 
 module Woods
   module Evaluation

@@ -31,7 +31,25 @@ module Woods
       #     vocabulary {Woods::Retrieval::QueryClassifier} produces
       # @!attribute [r] tags
       #   @return [Array<String>] Tags for filtering queries
-      Query = Struct.new(:query, :expected_units, :intent, :scope, :tags, keyword_init: true)
+      # @!attribute [r] required_units
+      #   @return [Array<String>, nil] The subset of {#expected_units} a
+      #     retrieval *must* surface for the answer to be usable. Optional;
+      #     absent (or empty) means "every expected unit is required", which
+      #     is the semantics the harness had before the field existed.
+      Query = Struct.new(:query, :expected_units, :intent, :scope, :tags, :required_units, keyword_init: true) do
+        # The set +context_completeness+ is scored against.
+        #
+        # +context_completeness+ used to be handed {#expected_units}, making it
+        # recall under a second name (EXP-10). A query that annotates
+        # +required_units+ separates the two; one that doesn't keeps the old
+        # meaning.
+        #
+        # @return [Array<String>]
+        def completeness_units
+          required = required_units
+          required.nil? || required.empty? ? (expected_units || []) : required
+        end
+      end
 
       # The annotation vocabulary is the *classifier's* vocabulary (#218 /
       # B-105). These lists used to be a parallel invention — intents
@@ -130,7 +148,8 @@ module Woods
           expected_units: hash.fetch('expected_units', []),
           intent: LEGACY_INTENTS.fetch(hash.fetch('intent', 'understand').to_sym) { |v| v },
           scope: LEGACY_SCOPES.fetch(hash.fetch('scope', 'focused').to_sym) { |v| v },
-          tags: hash.fetch('tags', [])
+          tags: hash.fetch('tags', []),
+          required_units: hash['required_units']
         )
       end
 
@@ -138,16 +157,21 @@ module Woods
 
       # Serialize a Query to a hash for JSON output.
       #
+      # +required_units+ is omitted when the query does not annotate one, so a
+      # set that never used the field round-trips byte-identically.
+      #
       # @param query [Query] Query to serialize
       # @return [Hash]
       def serialize_query(query)
-        {
+        data = {
           'query' => query.query,
           'expected_units' => query.expected_units,
           'intent' => query.intent.to_s,
           'scope' => query.scope.to_s,
           'tags' => query.tags
         }
+        data['required_units'] = query.required_units if query.required_units
+        data
       end
 
       # Validate intent and scope values.
@@ -159,9 +183,24 @@ module Woods
           raise ArgumentError, "Invalid intent: #{query.intent}. Must be one of #{VALID_INTENTS.join(', ')}"
         end
 
-        return if VALID_SCOPES.include?(query.scope)
+        unless VALID_SCOPES.include?(query.scope)
+          raise ArgumentError, "Invalid scope: #{query.scope}. Must be one of #{VALID_SCOPES.join(', ')}"
+        end
 
-        raise ArgumentError, "Invalid scope: #{query.scope}. Must be one of #{VALID_SCOPES.join(', ')}"
+        validate_required_units!(query)
+      end
+
+      # +required_units+ is documented as a subset of +expected_units+; a
+      # required unit outside the ground truth could never be scored as
+      # retrieved-and-relevant, so it is a typo, not a stricter bar.
+      #
+      # @param query [Query]
+      # @raise [ArgumentError] when a required unit is not expected
+      def validate_required_units!(query)
+        stray = Array(query.required_units) - Array(query.expected_units)
+        return if stray.empty?
+
+        raise ArgumentError, "required_units must be a subset of expected_units; unknown: #{stray.join(', ')}"
       end
     end
   end

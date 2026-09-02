@@ -349,7 +349,17 @@ RSpec.describe Woods::GraphAnalyzer do
           { type: :model, identifier: 'Catalog::Stock', dependencies: [{ type: :model, target: 'Shared::Money' }] },
           { type: :model, identifier: 'Shared::Money' },
           { type: :model, identifier: 'Shared::Currency' },
-          { type: :model, identifier: 'Shared::Rate' }
+          { type: :model, identifier: 'Shared::Rate' },
+          # EXTB-7. Unnamespaced units are assigned to their most-connected
+          # cluster, and each assignment used to mutate the cluster before the
+          # next unit was scored. `Standalone1`'s only edge is to another
+          # unnamespaced unit, so it joined Billing only when `Standalone2`
+          # happened to be registered (and assigned) first — the fixture had no
+          # such chain, so the rotation assertion could not see it.
+          { type: :model, identifier: 'Standalone1',
+            dependencies: [{ type: :model, target: 'Standalone2' }] },
+          { type: :model, identifier: 'Standalone2',
+            dependencies: [{ type: :model, target: 'Billing::Invoice' }] }
         ]
       end
 

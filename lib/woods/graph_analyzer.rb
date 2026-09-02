@@ -26,6 +26,14 @@ module Woods
     # in the dependency graph's reverse index.
     EXCLUDED_ORPHAN_TYPES = %i[rails_source gem_source].freeze
 
+    # How many rounds {#assign_orphaned_units} runs before it stops pulling
+    # unnamespaced units into clusters through other unnamespaced units. The
+    # loop already stops early on the first round that assigns nothing; this
+    # bounds the pathological case (a long chain of unnamespaced units, where
+    # each round advances the frontier by one) so clustering stays linear-ish
+    # on large graphs.
+    ORPHAN_ASSIGNMENT_ROUNDS = 10
+
     # @param dependency_graph [DependencyGraph] The graph to analyze
     def initialize(dependency_graph)
       @graph = dependency_graph
@@ -273,35 +281,63 @@ module Woods
     end
 
     # Assign units with no namespace prefix to their most-connected cluster.
+    #
+    # Order-free (EXTB-7). Each round scores *every* still-unassigned unit
+    # against one membership snapshot taken before the round, then applies all
+    # of that round's assignments at once. Assigning inside the scoring loop —
+    # as this did — let a unit whose only connection is another unnamespaced
+    # unit join a cluster or not depending on which of the two the graph
+    # happened to enumerate first, i.e. on registration order, which differs
+    # between a full and an incremental run.
+    #
+    # Rounds are bounded: each one either assigns at least one unit or ends the
+    # loop, and {ORPHAN_ASSIGNMENT_ROUNDS} caps how far a chain of unnamespaced
+    # units can pull its successors in. Units past that depth stay unassigned —
+    # deterministically, which is the property that matters here.
     def assign_orphaned_units(clusters, filtered_ids, _nodes)
       return if clusters.empty?
 
-      unassigned = filtered_ids.select { |id| cluster_prefix(id).nil? }
+      pending = filtered_ids.select { |id| cluster_prefix(id).nil? }.sort
 
-      unassigned.each do |id|
-        best_cluster = find_most_connected_cluster(id, clusters)
-        next unless best_cluster
+      ORPHAN_ASSIGNMENT_ROUNDS.times do
+        break if pending.empty?
 
-        clusters[best_cluster][:members] << id
-        clusters[best_cluster][:member_set].add(id)
+        membership = clusters.transform_values { |cluster| cluster[:member_set] }.freeze
+        assignments = pending.filter_map do |id|
+          best_cluster = find_most_connected_cluster(id, clusters.keys, membership)
+          [id, best_cluster] if best_cluster
+        end
+        break if assignments.empty?
+
+        assignments.each do |id, name|
+          clusters[name][:members] << id
+          clusters[name][:member_set].add(id)
+        end
+        pending -= assignments.map(&:first)
       end
     end
 
     # Find which cluster a unit has the most connections to.
-    def find_most_connected_cluster(identifier, clusters)
+    #
+    # @param identifier [String]
+    # @param cluster_names [Array<String>]
+    # @param membership [Hash{String => Set<String>}] name => members, read as
+    #   of the start of the assignment round (see {#assign_orphaned_units})
+    # @return [String, nil]
+    def find_most_connected_cluster(identifier, cluster_names, membership)
       connections = Hash.new(0)
 
       # Check forward edges (dependencies)
       @graph.dependencies_of(identifier).each do |dep|
-        clusters.each do |name, cluster|
-          connections[name] += 1 if cluster[:member_set].include?(dep)
+        cluster_names.each do |name|
+          connections[name] += 1 if membership[name].include?(dep)
         end
       end
 
       # Check reverse edges (dependents)
       @graph.dependents_of(identifier).each do |dep|
-        clusters.each do |name, cluster|
-          connections[name] += 1 if cluster[:member_set].include?(dep)
+        cluster_names.each do |name|
+          connections[name] += 1 if membership[name].include?(dep)
         end
       end
 
