@@ -16,8 +16,10 @@ module Woods
   # loading Rails::Railtie.
   module RailtieSupport
     # Boot-time message for a console enabled without a token. Raised in
-    # production; warned everywhere else (requests fail closed with 401
-    # either way — see {Woods::MCP::BearerAuth}).
+    # production; warned everywhere else. Only the HTTP transport enforces
+    # the token ({Woods::MCP::BearerAuth} fails closed with 401 at the console
+    # path); the stdio server never sees a bearer header, so for it a missing
+    # token is a production-boot failure, not a request failure.
     MISSING_TOKEN_MESSAGE =
       '[Woods Console] console_mcp_token is not set — Console MCP is a high-privilege ' \
       'endpoint that runs SQL and model introspection against the live database. ' \
@@ -81,9 +83,11 @@ module Woods
 
       # Boot-time console validation, run from `after_initialize` once the
       # final configuration is known. With the console enabled and no usable
-      # token, every guarded request will be refused with 401 — production
-      # refuses to boot instead (matching the pre-#183 fail-closed posture),
-      # other environments warn loudly. A token shorter than
+      # token, every HTTP request at the console path will be refused with
+      # 401 — production refuses to boot instead (matching the pre-#183
+      # fail-closed posture), other environments warn loudly. The stdio
+      # server carries no bearer check, so the warning says which transport
+      # it is about rather than claiming every request fails. A token shorter than
       # {Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH} is a misconfiguration and
       # raises in every environment (as the eager BearerAuth constructor
       # used to). Also warns when `console_mcp_path` changed after the stack
@@ -102,7 +106,8 @@ module Woods
         if token.empty?
           raise Woods::ConfigurationError, MISSING_TOKEN_MESSAGE if production
 
-          warn "#{MISSING_TOKEN_MESSAGE} Console MCP requests will be refused (401) until one is set."
+          warn "#{MISSING_TOKEN_MESSAGE} HTTP Console MCP requests will be refused (401) until one is set; " \
+               'the stdio server (woods-console-mcp) does not check the token. Production boot will raise.'
         elsif token.length < Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH
           raise Woods::ConfigurationError,
                 '[Woods Console] console_mcp_token is shorter than ' \

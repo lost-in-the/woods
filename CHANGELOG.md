@@ -94,6 +94,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Outer::Mid::Inner`) instead of `Outer::Mid::Inner::Concerns::Leaf`. The
   governed name is tried first; the module-chain scan remains the fallback.
 
+- **The missing-token console warning names the transport it applies to.**
+  It claimed every Console MCP request would be refused with 401, but only
+  the HTTP transport carries the bearer check; an stdio console server lists
+  and executes every Tier 1 tool without a token. The warning now says HTTP
+  requests will be refused, that stdio does not check the token, and that
+  production boot will raise.
+
 - **Metadata searches with `fields: []` now return an empty result on every
   backend (B-133).** The SQLite adapter previously emitted an incomplete
   `WHERE` clause and exposed a raw `SQLite3::SQLException`; adapters now stop
