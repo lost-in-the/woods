@@ -45,6 +45,34 @@ namespace :woods do
   # So the wait is now generous and the failure explicit. `WOODS_LOCK_WAIT`
   # overrides it; exceeding it exits non-zero rather than corrupting the index,
   # which is the outcome a CI job or a developer can actually act on.
+  # Fail the task when a run reported per-item errors (INF-4 / EXP-4).
+  #
+  # A printed-but-green run is invisible in the CI/cron pipelines these tasks
+  # target: a revoked API key, a full vector store, or a 401 on every page
+  # prints `Errors: N` and the job stays green while the index or the export
+  # target rots. `woods:unblocked_sync` and `woods:obsidian` already exit 1 on
+  # the same shape, and #270 fixed it for the extraction family; the embedding
+  # and Notion tasks carry identical CI exposure.
+  #
+  # Partial progress is deliberately *not* a carve-out here. The unblocked
+  # exporter has one (budget exhaustion with progress is the expected
+  # cold-start shape and converges on the next run); an embedding or Notion
+  # error is a genuine failure per unit and does not self-heal, so any
+  # non-zero count fails.
+  #
+  # @param errors [Integer, Array, nil] the run's error count or error list
+  # @return [void]
+  def woods_exit_on_reported_errors(errors)
+    # The embed indexer reports a count; the exporters report a list.
+    # (`Integer#size` exists and answers 8, so this must branch on the type.)
+    count = errors.is_a?(Numeric) ? errors.to_i : Array(errors).size
+    return if count.zero?
+
+    puts
+    puts 'Run completed with errors — failing so CI surfaces it.'
+    exit 1
+  end
+
   def woods_with_extraction_lock(output_dir, wait: nil, &block)
     # Requires first. The default wait reads a constant from the daemon, so
     # resolving it above these lines NameError'd every write task — the same
@@ -250,6 +278,14 @@ namespace :woods do
     return [woods_parse_git_diff_name_status(output), nil] if status.success?
 
     [nil, "#{error.strip} (git exited #{status.exitstatus})"]
+  rescue SystemCallError => e
+    # No git binary at all (a slim container image, git removed after
+    # checkout). Errno::ENOENT out of `Open3.capture3` used to kill the task
+    # with a backtrace: non-zero, so safe, but it bypassed the decision below
+    # — the `:running`-daemon stand-down branch was unreachable, and the
+    # operator got a stack trace instead of the remediation text. An absent
+    # binary is an unresolvable range like any other (INF-12).
+    [nil, "git unavailable: #{e.message}"]
   end
 
   # The changed-path set `woods:incremental` will process, or a stand-down.
@@ -763,6 +799,7 @@ namespace :woods do
     puts 'Embedding all extracted units...'
     stats = woods_with_extraction_lock(output_dir) { indexer.index_all }
     Woods::Tasks.print_embed_stats(stats, mode: :full)
+    woods_exit_on_reported_errors(stats[:errors])
   end
 
   desc 'Nest the data — embed all units (alias for embed)'
@@ -780,6 +817,7 @@ namespace :woods do
     puts 'Embedding changed units (incremental)...'
     stats = woods_with_extraction_lock(output_dir) { indexer.index_incremental }
     Woods::Tasks.print_embed_stats(stats, mode: :incremental)
+    woods_exit_on_reported_errors(stats[:errors])
   end
 
   desc 'Hone the blade — incremental embedding (alias for embed_incremental)'
@@ -991,6 +1029,7 @@ namespace :woods do
       puts "  Errors:      #{stats[:errors].size}"
       stats[:errors].first(5).each { |e| puts "    - #{e}" }
       puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+      woods_exit_on_reported_errors(stats[:errors])
     end
   end
 

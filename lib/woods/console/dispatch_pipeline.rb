@@ -64,9 +64,40 @@ module Woods
         error_response(scan_early_error(e.message))
       rescue InputContract::ValidationError, SqlValidationError, ForbiddenExpressionError => e
         error_response(scan_early_error(e.message))
+      rescue StandardError => e
+        # Catch-all for pipeline bugs — a renderer NoMethodError, an encoding
+        # oddity, a handler defect (L9). Without it the exception escaped into
+        # the `mcp` gem's own handling of a raising tool block, which can echo
+        # `Class: message` to the client: a leak channel the executor's
+        # responses are already sanitized against. Answer with the same
+        # sanitized shape the executor uses (class name only, details logged
+        # server-side), still routed through the credential scan so nothing an
+        # exception message picked up reaches the client either.
+        log_unexpected_error(e)
+        error_response(scan_early_error(sanitized_unexpected_error(e)))
       end
 
       private
+
+      # Client-safe stand-in for an unexpected exception. Names the tool so an
+      # agent can retry or report, and nothing else — the class and message
+      # go to the log instead.
+      def sanitized_unexpected_error(_error)
+        "Internal error in #{@tool_name} (details logged server-side)"
+      end
+
+      def log_unexpected_error(error)
+        return unless @logger
+
+        @logger.warn(
+          'console.dispatch.unexpected_error',
+          tool: @tool_name,
+          error_class: error.class.name,
+          message: error.message
+        )
+      rescue StandardError
+        nil
+      end
 
       def send_to_bridge(request)
         response = @conn_mgr.send_request(request)

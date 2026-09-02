@@ -164,5 +164,42 @@ RSpec.describe 'woods:incremental changed-path parsing' do
         .and output('').to_stdout
         .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
     end
+
+    # ── A missing git binary is the same decision, not a crash (INF-12) ──
+    #
+    # `Open3.capture3` raises Errno::ENOENT when git is absent (a slim
+    # container image, git removed after checkout). Unrescued, the task died
+    # with a backtrace: exit non-zero — the safe direction — but the
+    # `:running`-daemon stand-down branch was unreachable, so a daemon-covered
+    # tree that would legitimately exit 0 failed its hook, and the operator got
+    # a stack trace instead of the remediation text.
+    describe 'a missing git binary' do
+      before do
+        require 'open3'
+        allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'No such file or directory - git')
+      end
+
+      it 'returns the same [nil, failure] shape the decision matrix reads' do
+        paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD')
+
+        expect(paths).to be_nil
+        expect(failure).to be_a(String)
+        expect(failure).to include('git unavailable')
+      end
+
+      it 'exits 1 with the remediation text when no daemon covers the index' do
+        expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+          .to output(/git unavailable/).to_stderr
+          .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
+      end
+
+      it 'stands down with exit 0 when a running daemon covers the index' do
+        live_daemon_status!('running')
+
+        expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+          .to output(/daemon/).to_stdout
+          .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(0) }
+      end
+    end
   end
 end

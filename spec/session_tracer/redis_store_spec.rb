@@ -308,6 +308,25 @@ RSpec.describe Woods::SessionTracer::RedisStore do
       expect(stderr).to include('redis gem is required')
     end
 
+    # INF-8: the documented contract is "RedisStore raises SessionTracerError
+    # if the redis gem is not available at initialization time". Without
+    # `lib/woods.rb` loaded first the constant does not exist, so a narrow
+    # entry point (a custom boot, a script, a future exe) got a NameError
+    # naming a missing constant instead of the actionable remediation.
+    it 'raises the same actionable error when only the store file is required' do
+      script = <<~RUBY
+        require 'woods/session_tracer/redis_store'
+        Woods::SessionTracer::RedisStore.new(redis: Object.new)
+      RUBY
+      _stdout, stderr, status = Open3.capture3(
+        RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script
+      )
+
+      expect(status).not_to be_success
+      expect(stderr).to include('redis gem is required')
+      expect(stderr).not_to include('uninitialized constant')
+    end
+
     it 'does not push a partial request when serialization fails' do
       cyclic = {}
       cyclic['self'] = cyclic

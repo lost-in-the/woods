@@ -32,7 +32,7 @@ end
 
 The stdio and Docker entry points exit with status 1 while this setting is false. Enabling it grants the MCP process live read access under the blocked-table, redaction, and credential-scanning controls described below.
 
-The token authenticates HTTP requests; a stdio client does not send it. Production Rails boot nevertheless requires a token of at least 32 characters whenever Console MCP is enabled, even for a stdio-only setup. Store `WOODS_CONSOLE_MCP_TOKEN` in the application's normal secret store. Outside production a missing token warns and leaves Console HTTP guarded with 401.
+The token authenticates HTTP requests; a stdio client does not send it. Production Rails boot nevertheless requires a token of at least 32 characters whenever Console MCP is enabled, even for a stdio-only setup. Store `WOODS_CONSOLE_MCP_TOKEN` in the application's normal secret store. Outside production a missing token warns and leaves Console HTTP guarded with 401 — the boot warning names both transports, so a stdio-only setup can tell that the 401 is not its symptom and that its own session still works.
 
 ### How It Works
 
@@ -77,6 +77,12 @@ rake woods:console
   │
   └─ MCP server responds to tool calls via stdin/stdout
 ```
+
+Like the HTTP path, the stdio server hands `SafeContext` the connection
+*pool*, so every tool call leases a fresh connection and returns it when the
+rolled-back transaction ends. A long-lived stdio session therefore survives a
+database failover or a `wait_timeout` recycle instead of failing every call on
+a stale connection until the client restarts it.
 
 ---
 
@@ -728,7 +734,10 @@ Each transaction sets a statement timeout before any query runs. The default is 
 
 ### SQL Validation (Tier 4 `console_sql`)
 
-`SqlValidator` rejects non-read-only SQL at the string level, before any database interaction:
+`SqlValidator` rejects non-read-only SQL at the string level, before any database interaction.
+
+Validation runs **once**, inside the executor, with the dialect of the live adapter. There is deliberately no earlier dialect-blind pre-check in the tool handler: a validator built without a dialect is the conservative MySQL+PostgreSQL union, and running it first meant a MySQL host rejected statements whose `\'`/backtick grammar produces a spuriously forbidden PostgreSQL view — the adapter-aware acceptance below could never be reached on a real transport. The executor raises `SqlValidationError` for anything it refuses, which the dispatch pipeline renders as a tool error, so nothing is ungated.
+
 
 - **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected, it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
 - **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`

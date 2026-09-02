@@ -37,15 +37,27 @@ module Woods
           { tool: 'eval', params: { code: code, timeout: timeout } }
         end
 
-        # Read-only SQL execution with validation.
+        # Read-only SQL execution.
+        #
+        # SQL validation belongs to whoever knows the host's dialect. The
+        # embedded executor re-validates with `SqlValidator.new(dialect:
+        # sql_dialect)` from the live adapter and raises
+        # {Woods::Console::SqlValidationError}, so the registered handler
+        # passes no validator: a handler-stage `SqlValidator.new` is the
+        # conservative postgres+mysql union, and on a MySQL host its
+        # PostgreSQL view of `\'` rejected dialect-valid statements before the
+        # executor could accept them (CON-2). `validator:` stays available for
+        # callers that own their own gate — the bridge path, and specs that
+        # exercise the validator in isolation.
         #
         # @param sql [String] SQL query (must be SELECT or WITH...SELECT)
-        # @param validator [SqlValidator] SQL validator instance
+        # @param validator [SqlValidator, nil] Optional pre-dispatch validator.
+        #   Leave nil to let the executor validate with the adapter's dialect.
         # @param limit [Integer, nil] Optional row limit (max 10000)
         # @return [Hash] Bridge request
-        # @raise [SqlValidationError] if SQL is not read-only
-        def console_sql(sql:, validator:, limit: nil)
-          validator.validate!(sql)
+        # @raise [SqlValidationError] if a validator was supplied and refuses
+        def console_sql(sql:, validator: nil, limit: nil)
+          validator&.validate!(sql)
           { tool: 'sql', params: { sql: sql, limit: limit }.compact }
         end
 

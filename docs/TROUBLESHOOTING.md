@@ -161,6 +161,23 @@ bundle exec rake woods:extract
 
 Note `WOODS_IGNORE_WATCH=1` removes daemon coverage rather than bypassing the failure — an unresolved range then exits 1. The full exit-behavior table lives in [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains).
 
+An image with no `git` binary at all reports `git unavailable: …` and takes the same decision — install git in the image, or set `CHANGED_FILES` so git is never consulted.
+
+---
+
+### `woods:embed`, `woods:embed_incremental`, or `woods:notion_sync` exits 1 after printing `Errors: N`
+
+**Symptom:** The task prints its normal summary, reports a non-zero error count, and the job fails.
+
+**Cause:** Per-item failures accumulated during the run — a revoked or rate-limited API key that kept failing after the resilience stack exhausted its retries, a full or unreachable vector store, or a Notion 401/400 on every page. These tasks used to print the count and exit 0, which left CI green while the embedding index or the Notion database drifted stale indefinitely. They now fail like their siblings `woods:unblocked_sync` and `woods:obsidian`, and like the extraction family.
+
+**Fix:** Read the first five errors the task prints — they name the failing units or pages. Then:
+
+- Embedding: check `OPENAI_API_KEY` (or the Ollama endpoint), the provider's rate limits, and free space in the vector store. Re-run `woods:embed_incremental`; the checkpoint means already-embedded units are not paid for twice.
+- Notion: check `NOTION_API_TOKEN` and that every database ID in `notion_database_ids` is shared with the integration.
+
+A partial run is not rolled back: whatever succeeded is durable, and re-running after the fix converges.
+
 ---
 
 ### Extraction exits non-zero after "Could not publish generation"

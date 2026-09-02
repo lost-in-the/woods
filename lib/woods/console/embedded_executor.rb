@@ -5,6 +5,7 @@ require 'timeout'
 require_relative 'audit_logger'
 require_relative 'bridge_protocol'
 require_relative 'confirmation'
+require_relative 'credential_scanner'
 require_relative 'eval_guard'
 require_relative 'input_contract'
 require_relative 'model_validator'
@@ -123,10 +124,28 @@ module Woods
         return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
 
         Rails.logger.warn(
-          "[Woods::Console] execution error: #{error.class}: #{error.message}"
+          "[Woods::Console] execution error: #{error.class}: #{scan_log_text(error.message)}"
         )
       rescue StandardError
         # Never let logging break the request path.
+      end
+
+      # Layer 2 applied to server-side log text (L11). The client response for
+      # this branch is already sanitized down to the class name, but the log
+      # line carries the adapter's own message — and PG/Mysql2 errors embed the
+      # rejected SQL and, for constraint violations, the offending literal. A
+      # secret pasted into a WHERE clause therefore landed unscanned in the
+      # server log while the response path was scanned. Failure falls back to a
+      # sentinel rather than raw text, mirroring {AuditLogger#redact}.
+      def scan_log_text(text)
+        scanned, = error_log_scanner.scan(text.to_s)
+        scanned
+      rescue StandardError
+        '[REDACTION_FAILED]'
+      end
+
+      def error_log_scanner
+        @error_log_scanner ||= CredentialScanner.new
       end
 
       # Return a pre-dispatch refusal hash for tools the executor cannot or

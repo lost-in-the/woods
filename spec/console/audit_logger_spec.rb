@@ -116,4 +116,62 @@ RSpec.describe Woods::Console::AuditLogger do
       expect(entry['params']['code']).to eq("a\tb")
     end
   end
+
+  # ── Redaction runs before truncation (CON-5) ────────────────────────────
+  #
+  # `truncate_value` cuts a >16 KiB field at MAX_FIELD_CHARS. When redaction
+  # ran on the already-truncated string, a credential positioned across the
+  # cut was split: the scanner's word-boundary/length-anchored patterns no
+  # longer matched the surviving prefix, and cleartext `sk_live_4eC39…` landed
+  # in the JSONL — a plaintext secret at rest in the one artifact that is
+  # supposed to be safe for audit review.
+  describe 'a credential straddling the truncation boundary' do
+    # Documented fixture — Stripe's own documentation example key.
+    let(:secret) { 'sk_live_4eC39HqLyjWDarjtT1zdp7dc' }
+
+    # Build a payload whose secret begins `head_chars` before the truncation
+    # cut, so `head_chars` of it survive and the rest is discarded. The
+    # surrounding spaces are what the scanner's word-boundary anchors need —
+    # the same shape a pasted credential has in a real `console_eval` payload.
+    def straddling_payload(secret, head_chars: 20)
+      "#{'x' * (described_class::MAX_FIELD_CHARS - head_chars - 1)} #{secret} #{'y' * 100}"
+    end
+
+    it 'redacts a param secret instead of logging its truncated prefix' do
+      logger.log(tool: 'console_eval', params: { code: straddling_payload(secret) },
+                 confirmed: true, result_summary: 'ok')
+
+      line = File.read(log_path, encoding: 'UTF-8')
+      expect(line).to include('[REDACTED]')
+      expect(line).not_to include('sk_live_')
+    end
+
+    it 'redacts a result_summary secret instead of logging its truncated prefix' do
+      logger.log(tool: 'console_eval', params: { code: '1+1' },
+                 confirmed: true, result_summary: straddling_payload(secret))
+
+      line = File.read(log_path, encoding: 'UTF-8')
+      expect(line).to include('[REDACTED]')
+      expect(line).not_to include('sk_live_')
+    end
+
+    it 'leaks no prefix at any offset across the boundary' do
+      (1..31).each do |head_chars|
+        FileUtils.rm_f(log_path)
+        logger.log(tool: 'console_eval', params: { code: straddling_payload(secret, head_chars: head_chars) },
+                   confirmed: true, result_summary: 'ok')
+
+        expect(File.read(log_path, encoding: 'UTF-8')).not_to include('sk_live_'), "leaked at offset #{head_chars}"
+      end
+    end
+
+    it 'still bounds the logged field so the disk cap survives redaction' do
+      logger.log(tool: 'console_eval', params: { code: straddling_payload(secret) },
+                 confirmed: true, result_summary: 'ok')
+
+      entry = JSON.parse(File.read(log_path, encoding: 'UTF-8'))
+      expect(entry['params']['code']).to include('[truncated')
+      expect(entry['params']['code'].length).to be <= described_class::MAX_FIELD_CHARS + 100
+    end
+  end
 end

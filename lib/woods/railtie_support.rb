@@ -16,13 +16,26 @@ module Woods
   # loading Rails::Railtie.
   module RailtieSupport
     # Boot-time message for a console enabled without a token. Raised in
-    # production; warned everywhere else (requests fail closed with 401
+    # production; warned everywhere else (HTTP requests fail closed with 401
     # either way — see {Woods::MCP::BearerAuth}).
     MISSING_TOKEN_MESSAGE =
       '[Woods Console] console_mcp_token is not set — Console MCP is a high-privilege ' \
       'endpoint that runs SQL and model introspection against the live database. ' \
       'Set Woods.configuration.console_mcp_token (or WOODS_CONSOLE_MCP_TOKEN env var) ' \
       'to a 32+ character random string.'
+
+    # Transport qualifier appended to {MISSING_TOKEN_MESSAGE} outside
+    # production (G-3). The token authenticates the *HTTP* Console transport
+    # only: {Woods::Console::RackMiddleware} and {Woods::MCP::BearerAuth} are
+    # what return the 401. The stdio transport (`rake woods:console`,
+    # `exe/woods-console`) speaks over a pipe and neither sends nor consumes a
+    # bearer token, so an unqualified "requests will be refused (401)" sent
+    # stdio-only operators configuring a token their setup never uses.
+    MISSING_TOKEN_TRANSPORT_NOTE =
+      'The token authenticates the Console MCP HTTP transport: without it every HTTP ' \
+      'request is refused (401). The stdio transport (rake woods:console) does not ' \
+      'transmit or use a bearer token, so a stdio-only setup still works — set the token ' \
+      'before exposing the HTTP endpoint.'
 
     class << self
       # @return [String, nil] path the console stack was mounted at (captured
@@ -102,7 +115,7 @@ module Woods
         if token.empty?
           raise Woods::ConfigurationError, MISSING_TOKEN_MESSAGE if production
 
-          warn "#{MISSING_TOKEN_MESSAGE} Console MCP requests will be refused (401) until one is set."
+          warn "#{MISSING_TOKEN_MESSAGE} #{MISSING_TOKEN_TRANSPORT_NOTE}"
         elsif token.length < Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH
           raise Woods::ConfigurationError,
                 '[Woods Console] console_mcp_token is shorter than ' \

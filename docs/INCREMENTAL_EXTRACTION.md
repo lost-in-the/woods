@@ -50,6 +50,7 @@ failure a CI chain cannot afford:
 | The git range resolves | Current behavior: extract the changed paths, or exit 0 with `No relevant files changed` when nothing relevant changed. |
 | The range fails **and** a `:running` watch daemon maintains the index | Stand down with a printed reason, exit 0 — the daemon's start-up catch-up covers whatever changed. |
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
+| There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
 
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
 `origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default). An
@@ -58,7 +59,10 @@ a shallow clone with no `HEAD~1` — reads as "nothing changed" to git, which is
 why a failed range must not be mistaken for an empty one: the sync never ran,
 and CI drift would stay unbounded. A degraded daemon covers nothing, so it
 does not stand the run down. `WOODS_IGNORE_WATCH=1` removes daemon coverage
-too — with it set, a failed range exits 1.
+too — with it set, a failed range exits 1. A slim image with no `git` binary
+resolves to the same decision rather than a raw `Errno::ENOENT`: the failure is
+reported as `git unavailable: …`, so a daemon-covered tree still stands down
+and an uncovered one still gets the remediation text.
 
 Recovery choices, in the order they are worth trying:
 

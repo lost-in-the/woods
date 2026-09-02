@@ -667,10 +667,15 @@ module Woods
           },
           required: ['sql'],
           tier: 4,
-          handler: begin
-            validator = SqlValidator.new
-            ->(args) { Tools::Tier4.console_sql(sql: args[:sql], validator: validator, limit: args[:limit]) }
-          end
+          # No handler-stage validator: SQL validation is the executor's, which
+          # alone knows the host adapter's dialect (CON-2). A `SqlValidator.new`
+          # here is the conservative postgres+mysql union, and it ran *first* —
+          # so on a MySQL host it rejected statements whose `\'`/backtick
+          # grammar produces a spuriously forbidden PostgreSQL view, and the
+          # dialect-aware validator at EmbeddedExecutor#handle_sql never got to
+          # accept them. No gate is lost: the executor re-validates and raises
+          # SqlValidationError, which DispatchPipeline renders as a tool error.
+          handler: ->(args) { Tools::Tier4.console_sql(sql: args[:sql], limit: args[:limit]) }
         ),
         ToolSpec.new(
           name: 'console_query',

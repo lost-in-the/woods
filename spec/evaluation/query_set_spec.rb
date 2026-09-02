@@ -255,6 +255,34 @@ RSpec.describe Woods::Evaluation::QuerySet do
         .to raise_error(Woods::Error, /file not found/i)
     end
 
+    # EXP-7. A hand-written query set is UTF-8 on disk; a bare File.read tags
+    # it with the process default external encoding, so under a POSIX locale
+    # the first accented query raised a raw ArgumentError out of JSON.parse —
+    # neither of the two typed Woods::Error branches. Baseline.load already
+    # reads with an explicit encoding; this is the same house pattern.
+    it 'loads a query set holding non-ASCII query text' do
+      unicode_data = {
+        'queries' => [{ 'query' => 'Où se trouve le café dans le domaine ?', 'expected_units' => %w[Café] }]
+      }
+      File.binwrite(json_path, JSON.generate(unicode_data))
+
+      loaded = described_class.load(json_path)
+
+      expect(loaded.queries.first.query).to eq('Où se trouve le café dans le domaine ?')
+      expect(loaded.queries.first.expected_units).to eq(%w[Café])
+    end
+
+    it 'round-trips non-ASCII query text through #save' do
+      set = described_class.new(
+        queries: [Woods::Evaluation::QuerySet::Query.new(query: 'Où est le café ?', expected_units: %w[Café])]
+      )
+
+      set.save(json_path)
+
+      expect(File.binread(json_path).force_encoding(Encoding::UTF_8)).to include('Où est le café ?')
+      expect(described_class.load(json_path).queries.first.query).to eq('Où est le café ?')
+    end
+
     it 'raises Woods::Error for invalid JSON' do
       File.write(json_path, 'not valid json{{{')
 

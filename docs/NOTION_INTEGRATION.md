@@ -248,6 +248,8 @@ Common errors:
 - **400 Validation Error**: Check that Notion database properties match the expected schema above
 - **429 Rate Limited**: Automatic retry (up to 3 times)
 
+`rake woods:notion_sync` prints the first five errors and then **exits 1**, matching `woods:unblocked_sync` and `woods:obsidian`. A printed-but-green run is invisible in a post-merge pipeline: a dead token would otherwise keep the job green while the Notion database went stale indefinitely. Whatever synced before the failure is durable, so re-running after the fix converges. The Buildkite examples above use `soft_fail: true`; drop it if you want the sync failure to fail the build.
+
 ## Architecture
 
 ```

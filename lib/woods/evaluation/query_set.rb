@@ -85,7 +85,12 @@ module Woods
       # @return [QuerySet] Loaded query set
       # @raise [Woods::Error] if the file cannot be read or parsed
       def self.load(path)
-        data = JSON.parse(File.read(path))
+        # Explicit UTF-8: a query set is UTF-8 on disk, and a bare read tags
+        # it with the process default external encoding — under a POSIX locale
+        # the first accented query raised a raw Encoding error out of
+        # JSON.parse, past both typed branches below (EXP-7). Same pattern as
+        # {Woods::Evaluation::Baseline.load}.
+        data = JSON.parse(File.read(path, encoding: 'UTF-8'))
         queries = data.fetch('queries', []).map { |q| parse_query(q) }
         new(queries: queries)
       rescue JSON::ParserError => e
@@ -102,7 +107,9 @@ module Woods
         data = {
           'queries' => queries.map { |q| serialize_query(q) }
         }
-        File.write(path, JSON.pretty_generate(data))
+        # Pair the explicit UTF-8 with {.load} so a saved set reads back
+        # byte-for-byte regardless of the writer's locale (EXP-7).
+        File.write(path, JSON.pretty_generate(data), encoding: 'UTF-8')
       end
 
       # Filter queries by intent, scope, or tags.

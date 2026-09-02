@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
 require 'tmpdir'
 require 'woods/feedback/store'
 
@@ -144,6 +145,87 @@ RSpec.describe Woods::Feedback::Store do
 
     it 'returns nil when no ratings' do
       expect(store.average_score).to be_nil
+    end
+  end
+
+  # ── Encoding: JSONL reads must not depend on the process locale (INF-3) ──
+  #
+  # `record_*` appends raw UTF-8 bytes. A bare `File.foreach` tags each line
+  # with the process default external encoding, so under LANG=C the first
+  # entry carrying an em dash or an accent made `all_entries` (and with it
+  # `ratings`, `gaps`, `average_score`, and the feedback MCP tools) raise
+  # `Encoding::CompatibilityError` — permanently, because the poison line
+  # stays in the file while writes keep succeeding. Same defect class as the
+  # IndexReader/StatusReporter sweeps; the CLAUDE.md contract is that every
+  # Woods-written JSON artifact reads back as UTF-8.
+  describe 'non-ASCII entries under a C locale' do
+    let(:root) { File.expand_path('../..', __dir__) }
+
+    # Non-ASCII is spelled with \u escapes so the -e script stays pure ASCII:
+    # a child Ruby parses -e source in the locale encoding.
+    def read_back_under_c_locale(script)
+      Open3.capture3(
+        { 'LANG' => 'C', 'LC_ALL' => 'C' },
+        RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, feedback_path
+      )
+    end
+
+    it 'round-trips an em dash in a rating comment' do
+      store.record_rating(query: 'How does User work?', score: 4,
+                          comment: 'läuft nicht — see the retrieval trace')
+
+      script = <<~RUBY
+        require 'json'
+        require 'woods/feedback/store'
+        store = Woods::Feedback::Store.new(path: ARGV.fetch(0))
+        print JSON.generate(comment: store.ratings.first.fetch('comment'),
+                            average: store.average_score)
+      RUBY
+      stdout, stderr, status = read_back_under_c_locale(script)
+
+      expect(status).to be_success, stderr
+      parsed = JSON.parse(stdout.dup.force_encoding(Encoding::UTF_8))
+      expect(parsed.fetch('comment')).to eq('läuft nicht — see the retrieval trace')
+      expect(parsed.fetch('average')).to eq(4.0)
+    end
+
+    it 'reads later entries past a non-ASCII gap report' do
+      store.record_gap(query: 'facturación', missing_unit: 'BillingService', unit_type: 'service')
+      store.record_rating(query: 'plain ascii', score: 2)
+
+      script = <<~RUBY
+        require 'json'
+        require 'woods/feedback/store'
+        store = Woods::Feedback::Store.new(path: ARGV.fetch(0))
+        print JSON.generate(store.all_entries.map { |e| e.fetch('query') })
+      RUBY
+      stdout, stderr, status = read_back_under_c_locale(script)
+
+      expect(status).to be_success, stderr
+      expect(JSON.parse(stdout.dup.force_encoding(Encoding::UTF_8)))
+        .to eq(['facturación', 'plain ascii'])
+    end
+  end
+
+  # INF-9: `Time#iso8601` only exists after `require 'time'`. In the MCP server
+  # process unrelated requires monkeypatch it into existence, so nothing fails
+  # today — the exact masked shape spec/load_order_spec.rb documents.
+  describe 'standalone load order' do
+    it 'records a rating when only the store file is required' do
+      Dir.mktmpdir('woods-feedback-load-order') do |dir|
+        path = File.join(dir, 'feedback.jsonl')
+        script = <<~RUBY
+          require 'woods/feedback/store'
+          Woods::Feedback::Store.new(path: ARGV.fetch(0)).record_rating(query: 'q', score: 3)
+          print 'ok'
+        RUBY
+        stdout, stderr, status = Open3.capture3(
+          RbConfig.ruby, '-I', File.expand_path('../../lib', __dir__), '-e', script, path
+        )
+
+        expect(status).to be_success, stderr
+        expect(stdout).to eq('ok')
+      end
     end
   end
 end
