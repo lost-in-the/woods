@@ -6,6 +6,17 @@
 
 **Give AI coding agents a runtime-accurate map of your Rails application.**
 
+<!-- v2-unreleased-note:start -->
+> ### Version: `main` documents 2.0.0, which is not released yet
+>
+> | Line | Version | Documentation |
+> |---|---|---|
+> | Documented here | **2.0.0**, unreleased | this README and the [documentation index](docs/README.md) |
+> | Latest published gem | **1.6.1** | [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1) |
+>
+> `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 is published; the released constraint is `gem "woods", "~> 1.6"`. Everything below describes 2.0.0. If you already run 1.x, read [What's new in 2.0](#whats-new-in-20) and then [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md).
+<!-- v2-unreleased-note:end -->
+
 Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
 
 Woods 2.0 supports Ruby 3.0 or later and Rails 6.0 through 8.x. It connects AI coding tools and agents through MCP.
@@ -101,6 +112,32 @@ The complete walkthrough, including expected output and first questions to ask, 
 | Keep the index current automatically while coding | [Watch daemon](docs/WATCH_DAEMON.md) |
 | Upgrade an existing 1.x installation | [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md) |
 | Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
+
+## What's new in 2.0
+
+Woods 2.0 is a major release. It changes the index's observable identifier contract, its on-disk layout, the MCP protocol surface, and the failure posture of the tasks that maintain it. The table compares the two lines; the deep detail lives in [CHANGELOG.md](CHANGELOG.md) and the linked references.
+
+| Area | Woods 1.x | Woods 2.0 | On upgrade |
+|---|---|---|---|
+| Unit identifiers | Namespaces were derived from the first `class` token in a file, so `module Billing; class ChargeJob` indexed as bare `ChargeJob`, and every sibling under one wrapper class collapsed onto the wrapper's identifier | A position-aware nesting parser derives the namespace, and a file on a managed autoload path is named for the constant its path spells (Zeitwerk-governed): `Billing::ChargeJob`, `Domain::Container::Parser`. A type plus identifier still derived from two different files aborts extraction naming both | **Anything holding the old identifiers misses**: saved queries, notes, vectors, exported pages. The remedy is one clean re-index, then re-embed and re-export |
+| Index layout | Artifacts were written flat under the index directory, so a reader refreshing mid-run could pair one run's units with another's manifest | Each run publishes an immutable `payloads/gen-<N>/` directory and `generation.json` names the active one, so the single atomic write of that pointer commits the whole payload. Retention keeps three generations (`WOODS_PAYLOAD_RETENTION`) | No re-index. Custom tooling that read root-level `manifest.json`, `dependency_graph.json`, or `<type>/*.json` must follow the pointer |
+| MCP protocol | `woods-mcp-start` defaulted `MCP_PROTOCOL_VERSION` to `2024-11-05`, the oldest revision; the HTTP transport minted `Mcp-Session-Id` | `mcp >= 1.2, < 2.0` with protocol revision 2026-07-28: [stateless Streamable HTTP](docs/MCP_HTTP_TRANSPORT.md) by default (`WOODS_MCP_HTTP_STATELESS=0` is a transitional escape hatch), the Tasks extension for pipeline tools, `ttlMs` plus `cacheScope: "private"` cache hints, deterministic sorted tool order, and `server/discover` | Reconnect clients and leave `MCP_PROTOCOL_VERSION` unset. Nothing on disk changes |
+| Durable vector stores | An embed run added vectors; nothing removed the ones extraction had stopped producing | pgvector and Qdrant are reconciled against extraction output on full and incremental runs. Deleting more than 30% of the store, or purging into an empty extraction, is refused with an explanation | Back up the store first. A rename-heavy first v2 embed usually needs one authorized run with `WOODS_ALLOW_PURGE=1` after you confirm the deletion |
+| Embedding dimensions | A provider/store width mismatch surfaced per row at insert time | `woods:embed` compares the provider's dimension against what the store actually holds before embedding anything, and MCP boot checks the vector dump header, raising `Woods::MCP::DimensionMismatch` with both widths | A latent mismatch surfaces immediately. Rebuild into a store created at the configured width; vectors cannot be converted in place |
+| Failure posture | Tasks printed an error count and exited 0, a run whose generation marker failed to publish still reported success, and `woods:incremental` against an empty directory published a near-empty index as the truth | Fail closed: one-shot extraction tasks raise when the generation marker cannot be published, `woods:incremental` and `woods:refresh` refuse an output directory with no baseline index, and `woods:embed`, `woods:embed_incremental`, and `woods:notion_sync` exit 1 when they report errors | CI jobs that were green while failing now fail. Keep a baseline index in the cache, or run a full `woods:extract` first |
+| Console Server | Redaction masked output; the SQL gate had comment and dialect blind spots | Redacted columns are refused as query inputs, not only masked on output, including aliases, aggregates, `having`, order and scope keys, and unpaired EAV value columns. `console_sql` is validated once with the live adapter's dialect, and row-lock clauses, writable CTEs, and tables hidden in MySQL executable comments are rejected | Nothing unless Console is enabled. Its callable surface stays the packaged default; see [Console MCP setup](docs/CONSOLE_MCP_SETUP.md#safety-model) |
+
+## Upgrading from 1.x
+
+The full runbook, including backups, rollback, and the verification checklist, is [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md). The short version:
+
+1. Record the current install: Woods version, output directory, providers, embedding model and dimension, Console settings, enabled exports, and any script that reads the index directly.
+2. Back up the output directory and every durable store (pgvector, Qdrant, `dumps/`), plus managed Obsidian and Unblocked destinations.
+3. Move the bundle to `gem "woods", "~> 2.0"` with `bundle update woods`, and confirm `mcp` resolves at `>= 1.2, < 2.0`.
+4. Review the initializer against the [configuration reference](docs/CONFIGURATION_REFERENCE.md); do not overwrite it with a freshly generated one.
+5. Re-index cleanly with `woods:clean`, then `woods:extract`, `woods:validate`, and `woods:stats`. An incremental run is not a valid first v2 extraction.
+6. Rebuild what depends on identifiers: `woods:embed`, then each export. Review any refused purge before authorizing it.
+7. Reconnect MCP clients, update agent prompts that name a tool inventory, and work through the verification checklist before reopening access.
 
 ## Optional Claude Code workflows
 
