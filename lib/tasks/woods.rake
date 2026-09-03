@@ -898,24 +898,12 @@ namespace :woods do
     FileUtils.mkdir_p(docs_dir)
     renderer = Woods::RubyAnalyzer::MermaidRenderer.new
 
+    # architecture.md embeds the call-graph, dependency-map, and dataflow
+    # renders as sections; emitting them as standalone files too duplicated
+    # ~13k generated lines in the docs tree for no reader benefit.
     File.write(
       File.join(docs_dir, 'architecture.md'),
       renderer.render_architecture(units, graph_data, analysis)
-    )
-
-    File.write(
-      File.join(docs_dir, 'call-graph.md'),
-      "# Call Graph\n\n```mermaid\n#{renderer.render_call_graph(units)}\n```\n"
-    )
-
-    File.write(
-      File.join(docs_dir, 'dependency-map.md'),
-      "# Dependency Map\n\n```mermaid\n#{renderer.render_dependency_map(graph_data)}\n```\n"
-    )
-
-    File.write(
-      File.join(docs_dir, 'dataflow.md'),
-      "# Data Flow\n\n```mermaid\n#{renderer.render_dataflow(units)}\n```\n"
     )
 
     puts "  JSON output: #{json_dir}"

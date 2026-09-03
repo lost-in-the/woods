@@ -35,7 +35,7 @@ Gem::Specification.new do |spec|
   # ledger's own machinery (findings.json, surface-inventory tooling) — repo
   # CI runs them straight from source via `release_v2:verify_surface_inventory`,
   # which is unaffected by packaging exclusion. `docs/design`, `docs/security`,
-  # `docs/self-analysis`, `docs/specs`, `docs/superpowers`, and `docs/backlog.json`
+  # `docs/self-analysis`, `docs/design`, and `docs/backlog.json`
   # are process/planning artifacts, not user-facing reference docs — excluded so
   # the packaged gem ships the same `docs/*.md` a user reads on GitHub, not the
   # audit trail that produced them.

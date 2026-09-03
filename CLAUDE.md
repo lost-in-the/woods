@@ -323,7 +323,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   7. Reconcile class-based types **again** (pruning can un-know a class the first pass skipped).
   8. Refresh `dependents`, `metadata.git`, PageRank, `graph_analysis.json`.
 - The oracle is `spec/integration/incremental_equivalence_spec.rb` (`:booted_app`). Run it before and after touching the incremental path.
-- `Extractor::WHOLE_APP_EXTRACTORS` (route, middleware, engine, scheduled_job, state_machine, factory, event, database_view) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
+- `Extractor::WHOLE_APP_EXTRACTORS` (route, middleware, engine, scheduled_job, state_machine, factory, event, database_view, rails_source) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
 - Wholesale replacement prunes by `(identifier, type)`, never by bare identifier (#225). Two units sharing an identifier across types are distinct graph nodes.
 - `Extractor#refresh(*keys)` (`woods:refresh`) is the by-name counterpart to the by-trigger path. Both must call `prepare_incremental_run` first or they inherit `@dependents_dirty`/`@incremental_written`.
 - Every Woods-written JSON artifact is read through `AtomicFile.read`. A bare `File.read` tags content with the process default external encoding (US-ASCII under `LANG=C`) and raises on multibyte bytes.

@@ -2,7 +2,7 @@
 
 The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: database counts, record lookups, and schema inspection. It does not expose job-monitoring tools in supported modes. Database work on the request's current connection is rolled back, subject to the side-effect limits documented below.
 
-## Transport Options at a Glance
+## Transport options at a glance
 
 | Option | How it works | When to use |
 |--------|-------------|-------------|
@@ -13,7 +13,7 @@ The Console MCP Server gives MCP-capable coding tools and agents live access to 
 
 ---
 
-## Option A: Stdio via Rake (Recommended)
+## Option A: Stdio via Rake (recommended)
 
 The simplest setup. The `woods:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. All queries run in-process via ActiveRecord, no separate bridge process needed.
 
@@ -34,14 +34,14 @@ The stdio and Docker entry points exit with status 1 while this setting is false
 
 The token authenticates HTTP requests; a stdio client does not send it. Production Rails boot nevertheless requires a token of at least 32 characters whenever Console MCP is enabled, even for a stdio-only setup. Store `WOODS_CONSOLE_MCP_TOKEN` in the application's normal secret store. Outside production a missing token warns and leaves Console HTTP guarded with 401 — the boot warning names both transports, so a stdio-only setup can tell that the 401 is not its symptom and that its own session still works.
 
-### How It Works
+### How it works
 
 The rake task does two things before starting the MCP server:
 
 1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC, they break the protocol. The rake task redirects stdout → stderr immediately, saves the real stdout fd, and restores it after boot completes.
 2. **Calls `Rails.application.eager_load!`** to load all application models. Without eager loading, only the models that happen to be autoloaded before the first query appear in the registry.
 
-### MCP Client Configuration
+### MCP client configuration
 
 Add this server entry to your MCP client's project configuration:
 
@@ -57,7 +57,7 @@ Add this server entry to your MCP client's project configuration:
 }
 ```
 
-### What Happens Under the Hood
+### What happens under the hood
 
 ```
 MCP client
@@ -95,7 +95,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
 - Running container with Rails app
 - `woods` gem in the container's Gemfile
 
-### MCP Client Configuration
+### MCP client configuration
 
 **Plain Docker:**
 
@@ -133,7 +133,7 @@ Same embedded approach as Option A, but piped through `docker exec -i`. The `-i`
 
 > **Note:** Compose uses the service name and `-T` to disable its pseudo-TTY. Plain `docker exec` uses the exact container name from `docker ps` and needs `-i` to keep stdin open.
 
-### Environment Variables
+### Environment variables
 
 If your Rails app requires environment variables at boot (credentials, database URL), pass them via `docker exec -e` or ensure they are set in the container already:
 
@@ -155,7 +155,7 @@ If your Rails app requires environment variables at boot (credentials, database 
 
 ---
 
-## Option C: HTTP Rack Middleware
+## Option C: HTTP rack middleware
 
 Mount the console as a Rack middleware endpoint. The MCP client connects over HTTP using the streamable-http transport instead of spawning a subprocess. Useful when multiple clients need shared access, or when stdio subprocess spawning is not practical.
 
@@ -165,7 +165,7 @@ Mount the console as a Rack middleware endpoint. The MCP client connects over HT
 2. `bundle install`
 3. A running Rails server accessible to the MCP client
 
-### Rails Configuration
+### Rails configuration
 
 In an initializer (`config/initializers/woods.rb`):
 
@@ -201,7 +201,7 @@ Streamable HTTP is stateless by default. For a legacy client that still
 requires MCP session IDs, a custom guarded mount may pass `stateless: false`;
 the default Railtie mount remains stateless.
 
-### MCP Client Configuration
+### MCP client configuration
 
 For an MCP client that supports Streamable HTTP:
 
@@ -221,7 +221,7 @@ For an MCP client that supports Streamable HTTP:
 
 For production or staging, use HTTPS in addition to the mandatory bearer token.
 
-### What Happens Under the Hood
+### What happens under the hood
 
 The middleware lazy-initializes the MCP server on first request:
 
@@ -239,7 +239,7 @@ First HTTP request to /mcp/console
 
 Each request gets its own database connection from the connection pool. `SafeContext` wraps that connection in a rolled-back transaction.
 
-### Security Note
+### Security note
 
 The HTTP endpoint grants read access to live database data. In production environments:
 
@@ -249,7 +249,7 @@ The HTTP endpoint grants read access to live database data. In production enviro
 
 ---
 
-## Option D: Launcher Wrapper
+## Option D: Launcher wrapper
 
 `woods-console-mcp` is a process launcher. It replaces itself with the same
 embedded server used by Options A-C, either directly or through `docker exec`
@@ -269,7 +269,7 @@ that bundle and set the application directory as `cwd`:
 }
 ```
 
-### How It Works
+### How it works
 
 ```
 MCP client
@@ -318,7 +318,7 @@ Override config path with environment variable:
 WOODS_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
 ```
 
-### MCP Client Configuration
+### MCP client configuration
 
 ```json
 {
@@ -337,7 +337,7 @@ WOODS_CONSOLE_CONFIG=/path/to/console.yml woods-console-mcp
 
 ---
 
-## Tool Support by Mode
+## Tool support by mode
 
 The codebase keeps schemas for 31 possible tools as an inventory. Supported
 servers register only executable tools: the 9 Tier 1 tools by default, plus
@@ -345,7 +345,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 `config.console_embedded_read_tools = true`). Tier 2, Tier 3, and
 `console_eval` are not registered in any supported mode.
 
-### Tier 1: Read-Only (9 tools): Supported in all modes
+### Tier 1: Read-only (9 tools): supported in all modes
 
 | Tool | Description |
 |------|-------------|
@@ -359,7 +359,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
-### Tier 2: Domain-Aware (9 tools): Inventory only, not executable
+### Tier 2: Domain-aware (9 tools): inventory only, not executable
 
 | Tool | Description |
 |------|-------------|
@@ -401,7 +401,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 
 ---
 
-## Configuration Options
+## Configuration options
 
 Set these in your Rails initializer:
 
@@ -474,7 +474,7 @@ Woods.configure do |config|
 end
 ```
 
-### `console_mcp_enabled` (Layer 0: feature gate)
+### `console_mcp_enabled` (layer 0: feature gate)
 
 Until this flag is `true`, none of the transports route traffic:
 
@@ -483,7 +483,7 @@ Until this flag is `true`, none of the transports route traffic:
 
 Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment, e.g. in `config/environments/development.rb` or a staging-only initializer, once the layers below are configured for that environment's threat model.
 
-### `console_blocked_tables` (Layer 1: table gate)
+### `console_blocked_tables` (layer 1: table gate)
 
 Entries are lowercased table names. A tool call is rejected at dispatch time when:
 
@@ -513,7 +513,7 @@ config.console_blocked_tables = []
 
 Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture, EAV credential stores, audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
 
-### `console_disabled_scanner_patterns` (Layer 2: content scanner)
+### `console_disabled_scanner_patterns` (layer 2: content scanner)
 
 The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss, e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
 
@@ -677,7 +677,7 @@ Keep the flag off when the host requires a narrower database capability.
 
 ---
 
-## Safety Model
+## Safety model
 
 The executable Console surface uses the following defense layers in every
 supported transport (stdio, Docker/SSH launcher, and HTTP).
@@ -692,12 +692,12 @@ supported transport (stdio, Docker/SSH launcher, and HTTP).
 
 Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks, `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2, emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
 
-### Confirmation and Audit Inventory
+### Confirmation and audit inventory
 
 No currently executable tool claims a confirmation or privileged audit-log
 contract. Tier 2, Tier 3, and `console_eval` remain unregistered inventory.
 
-### Current-Connection Rollback
+### Current-connection rollback
 
 Database work performed through the request's current Active Record connection
 runs inside a transaction that is **always rolled back**:
@@ -722,7 +722,7 @@ boundary remain necessary.
 - Direct accidental mutation on the wrapped connection is rolled back.
 - External, asynchronous, callback, and cross-connection effects may execute live.
 
-### Statement Timeout
+### Statement timeout
 
 Each transaction sets a statement timeout before any query runs. The default is **5000ms** (5 seconds). Timeout enforcement is adapter-specific:
 
@@ -732,7 +732,7 @@ Each transaction sets a statement timeout before any query runs. The default is 
 | MySQL | `SET max_execution_time = 5000` (session scope; the prior value is restored after the transaction) | SELECT only (MySQL limitation) |
 | Other | Best-effort (skipped gracefully) | n/a |
 
-### SQL Validation (Tier 4 `console_sql`)
+### SQL validation (tier 4 `console_sql`)
 
 `SqlValidator` rejects non-read-only SQL at the string level, before any database interaction.
 
@@ -745,7 +745,7 @@ Validation runs **once**, inside the executor, with the dialect of the live adap
 - **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS`, a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
 - **Rejected patterns:** multiple statements (semicolons), writable CTEs (every `AS (...)` body is checked, so a writable CTE in any WITH position is refused — `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`), a CTE list attached to top-level DML (`WITH a AS (SELECT 1) DELETE FROM users RETURNING *`), comment-hidden injections
 
-### Model and Column Validation
+### Model and column validation
 
 Before any query runs, the model name is checked against the registry built from `ActiveRecord::Base.descendants`. Unrecognized model names raise `ValidationError` without touching the database. Column names are validated against the model's `column_names` before pluck, aggregate, and recent operations.
 

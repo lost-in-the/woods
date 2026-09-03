@@ -6,9 +6,9 @@ Woods ships **34 extractor classes** producing **38 distinct unit types**: one f
 
 ---
 
-## How Do Extractors Work?
+## How do extractors work?
 
-### The Five Phases
+### The five phases
 
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
@@ -21,7 +21,7 @@ Phase 4: Enrich     . Git metadata added (last author, change frequency, recent 
 Phase 5: Write      . One JSON file per unit, _index.json per type, dependency_graph.json, SUMMARY.md
 ```
 
-### Two Discovery Strategies
+### Two discovery strategies
 
 Extractors discover code one of two ways:
 
@@ -32,7 +32,7 @@ Extractors discover code one of two ways:
 
 Some extractors combine both (e.g., `JobExtractor` scans directories first, then supplements with `ApplicationJob.descendants`).
 
-### Identifier Naming (source-derived units)
+### Identifier naming (source-derived units)
 
 File-based extractors derive an identifier in three steps, first match wins:
 
@@ -42,17 +42,17 @@ File-based extractors derive an identifier in three steps, first match wins:
 
 Unmanaged paths (`lib/`, configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide, exactly as before the governed lookup existed.
 
-### Eager Loading
+### Eager loading
 
 The orchestrator calls `Rails.application.eager_load!` once before extraction begins. If that fails with a `NameError` (common when `app/graphql/` references an uninstalled gem), it falls back to per-directory loading via `EXTRACTION_DIRECTORIES`. This fallback covers the directories that matter for extraction.
 
-### What Every Extractor Returns
+### What every extractor returns
 
 Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-contained snapshot of one code unit with source, metadata, and relationships. See [ExtractedUnit Field Reference](#extractedunit-field-reference) at the bottom of this doc.
 
 ---
 
-## Core Application Extractors
+## Core application extractors
 
 ### ModelExtractor
 
@@ -257,7 +257,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
-## UI Component Extractors
+## UI component extractors
 
 ### PhlexExtractor
 
@@ -307,7 +307,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
-## Data Layer Extractors
+## Data layer extractors
 
 ### ConcernExtractor
 
@@ -357,7 +357,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
-## API & Authorization Extractors
+## API & authorization extractors
 
 ### GraphQLExtractor
 
@@ -407,7 +407,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
-## Infrastructure Extractors
+## Infrastructure extractors
 
 ### EngineExtractor
 
@@ -540,7 +540,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
-## Testing & Source Extractors
+## Testing & source extractors
 
 ### FactoryExtractor
 
@@ -588,7 +588,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
-## How Do I Enable or Disable Extractors?
+## How do I enable or disable extractors?
 
 You can't, today. All 34 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
@@ -601,7 +601,7 @@ Extractor selection is a documented future knob, not a shipped feature.
 
 ---
 
-## ExtractedUnit Field Reference
+## ExtractedUnit field reference
 
 Every extractor produces `ExtractedUnit` objects with this schema:
 
@@ -618,7 +618,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |
 | `estimated_tokens` | Integer | Approximate token count for `source_code + metadata.to_json` using 4.0 chars/token. Computed, not stored. |
 
-### Serialized JSON Fields
+### Serialized JSON fields
 
 When written to disk, units also include:
 
@@ -627,7 +627,7 @@ When written to disk, units also include:
 | `extracted_at` | ISO 8601 timestamp of extraction |
 | `source_hash` | SHA-256 of `source_code` for change detection |
 
-### Git Enrichment Fields (`metadata[:git]`)
+### Git enrichment fields (`metadata[:git]`)
 
 If the host app is a git repo, the following are added to `metadata[:git]` after extraction:
 
@@ -640,7 +640,7 @@ If the host app is a git repo, the following are added to `metadata[:git]` after
 | `recent_commits` | Last 5 commits: `[{ sha:, message:, date:, author: }]` |
 | `change_frequency` | `:new`, `:hot`, `:active`, `:stable`, or `:dormant` |
 
-### Full Example JSON
+### Full example JSON
 
 ```json
 {

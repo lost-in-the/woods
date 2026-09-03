@@ -4,10 +4,6 @@ Woods 2.0 changes observable index identifiers, publication layout, vector-store
 
 This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
 
-<!-- v2-unreleased-note:start -->
-> **2.0.0 is not published yet.** 1.6.1 is the latest released gem, and `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 ships. Read this runbook to plan the upgrade and to review a source checkout of the 2.0 line; run it against a published 2.0.0 gem. Documentation matching the released gem is on [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1).
-<!-- v2-unreleased-note:end -->
-
 ## Upgrade outcome
 
 After this runbook you will have:

@@ -985,16 +985,6 @@
     "README.md": [],
     "docs/AGENT_GUIDE.md": [],
     "docs/AGENT_SETUP.md": [],
-    "docs/ARCHITECTURE.md": [
-      {
-        "surface": "extractor_registrations",
-        "count": 34
-      },
-      {
-        "surface": "console_mcp_read_tools",
-        "count": 11
-      }
-    ],
     "docs/BACKEND_MATRIX.md": [],
     "docs/CONFIGURATION_REFERENCE.md": [
       {
@@ -1023,6 +1013,16 @@
     "docs/FAQ.md": [],
     "docs/GETTING_STARTED.md": [],
     "docs/INCREMENTAL_EXTRACTION.md": [],
+    "docs/INTERNALS.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 34
+      },
+      {
+        "surface": "console_mcp_read_tools",
+        "count": 11
+      }
+    ],
     "docs/MCP_HTTP_TRANSPORT.md": [],
     "docs/MCP_SERVERS.md": [
       {

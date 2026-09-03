@@ -4,6 +4,47 @@ This guide covers the most common problems encountered when installing, extracti
 
 ---
 
+## Quick Reference
+
+| Error message | Cause | Fix |
+|---------------|-------|-----|
+| `No manifest.json found` | Wrong index path or no published generation | Use the path visible to the server process; run `woods:validate` |
+| `uninitialized constant Rails` | Not running inside Rails app | Run via `bundle exec rake` in Rails root |
+| `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
+| `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
+| `Connection refused (localhost:6333)` | Qdrant not running | Start Qdrant container |
+| Qdrant private/loopback URL rejected | SSRF guard is working | Add `allow_private_hosts: true` only for a deliberately trusted endpoint |
+| Missing `console_sql` / `console_query` | Read tools disabled | Enable `console_embedded_read_tools` |
+| `database is locked` | SQLite concurrent access | Run one extraction at a time |
+| `Dimension mismatch` | Embedding model changed | Full re-index: extract + embed |
+| `401 Unauthorized` (Notion) | Invalid API token | Check `NOTION_API_TOKEN` env var |
+| `404 Not Found` (Notion) | Wrong database ID | Verify ID + integration access |
+| `broken pipe` (Docker console) | Missing `-i` flag | Add `-i` to docker exec args |
+| `No such container` | Wrong container name | Check with `docker ps --format '{{.Names}}'` |
+| `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
+| Query timeout | Large table, no scope | Add scope conditions to narrow results |
+| Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
+| Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
+| Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
+| HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
+| HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ALLOWED_ORIGINS="https://example.com"` (comma-separated; default is loopback-only) |
+| Tool returns `error_code: :not_configured` | Feature flag or credential not set | Check `config_key` in `_meta` and the linked `doc_link` |
+| Tool returns `error_code: :rate_limited` | `PipelineGuard` 5-min cooldown hit | Wait `retry_after_seconds` from `_meta`, then retry |
+
+### First-Pass Diagnostics
+
+For a single-call health snapshot, call the Index Server's `woods_status` tool. It reports:
+
+- Extraction freshness (last run time, unit count, index version)
+- Overall readiness plus index, watch, retriever, and bootstrap state (`ready`, `index`, `watch`, `retriever`, `bootstrap` sections)
+- Which optional features are configured (embedding provider, Notion, session tracer)
+- Per-feature config-key hints for anything missing
+- `server.update`: the installed gem version, the newest version the process knows about (the latest published release, or the installed version itself when the install is ahead of the registry or the check could not run), and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)
+
+Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
+
+If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
+
 ## Extraction Problems
 
 ### Extraction produces empty or incomplete output
@@ -741,43 +782,3 @@ config.notion_database_ids = {
 
 ---
 
-## Quick Reference
-
-| Error message | Cause | Fix |
-|---------------|-------|-----|
-| `No manifest.json found` | Wrong index path or no published generation | Use the path visible to the server process; run `woods:validate` |
-| `uninitialized constant Rails` | Not running inside Rails app | Run via `bundle exec rake` in Rails root |
-| `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
-| `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
-| `Connection refused (localhost:6333)` | Qdrant not running | Start Qdrant container |
-| Qdrant private/loopback URL rejected | SSRF guard is working | Add `allow_private_hosts: true` only for a deliberately trusted endpoint |
-| Missing `console_sql` / `console_query` | Read tools disabled | Enable `console_embedded_read_tools` |
-| `database is locked` | SQLite concurrent access | Run one extraction at a time |
-| `Dimension mismatch` | Embedding model changed | Full re-index: extract + embed |
-| `401 Unauthorized` (Notion) | Invalid API token | Check `NOTION_API_TOKEN` env var |
-| `404 Not Found` (Notion) | Wrong database ID | Verify ID + integration access |
-| `broken pipe` (Docker console) | Missing `-i` flag | Add `-i` to docker exec args |
-| `No such container` | Wrong container name | Check with `docker ps --format '{{.Names}}'` |
-| `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
-| Query timeout | Large table, no scope | Add scope conditions to narrow results |
-| Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
-| Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
-| Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
-| HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
-| HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ALLOWED_ORIGINS="https://example.com"` (comma-separated; default is loopback-only) |
-| Tool returns `error_code: :not_configured` | Feature flag or credential not set | Check `config_key` in `_meta` and the linked `doc_link` |
-| Tool returns `error_code: :rate_limited` | `PipelineGuard` 5-min cooldown hit | Wait `retry_after_seconds` from `_meta`, then retry |
-
-### First-Pass Diagnostics
-
-For a single-call health snapshot, call the Index Server's `woods_status` tool. It reports:
-
-- Extraction freshness (last run time, unit count, index version)
-- Overall readiness plus index, watch, retriever, and bootstrap state (`ready`, `index`, `watch`, `retriever`, `bootstrap` sections)
-- Which optional features are configured (embedding provider, Notion, session tracer)
-- Per-feature config-key hints for anything missing
-- `server.update`: the installed gem version, the newest version the process knows about (the latest published release, or the installed version itself when the install is ahead of the registry or the check could not run), and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)
-
-Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
-
-If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.

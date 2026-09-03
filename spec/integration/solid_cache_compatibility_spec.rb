@@ -108,7 +108,18 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
             adapter: 'sqlite3', database: File.join(dir, 'cache.sqlite3'), pool: 8
           )
           create_solid_cache_schema(ActiveRecord::Base.connection)
-          example.run
+          begin
+            example.run
+          ensure
+            # Every SQLite handle must close BEFORE mktmpdir removes the
+            # directory: an open pooled connection (or a late async Solid
+            # Cache trim checking one out) can recreate the -wal/-shm
+            # journals between remove_entry's unlink pass and its final
+            # rmdir, failing cleanup with ENOTEMPTY. remove_connection also
+            # drops the connection spec, so a straggler checkout raises
+            # instead of reopening the database file.
+            ActiveRecord::Base.remove_connection
+          end
         end
       end
     ensure
