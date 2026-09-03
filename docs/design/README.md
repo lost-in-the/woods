@@ -11,6 +11,10 @@ longer describe the shipping code. History still has them:
 git log --follow -- docs/design/
 ```
 
+Implementation planning records live in subdirectories: `specs/` holds design
+specifications and `plans/` holds their execution plans (the reconciled v2
+documentation plan supersedes the original, which lives in git history).
+
 ## Live documents
 
 | Document | Status | What's useful |

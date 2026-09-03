@@ -40,8 +40,6 @@ and stdio or Streamable HTTP endpoints directly.
 
 ## Index lifecycle
 
-- [Incremental extraction](INCREMENTAL_EXTRACTION.md): update changed paths while preserving full-extraction equivalence.
-- [Watch daemon](WATCH_DAEMON.md): keep an index current with a resident process.
 - [Retrieval guide](RETRIEVAL_GUIDE.md): configure embeddings and understand semantic retrieval, ranking, and token budgets.
 - [Embedding models](EMBEDDING_MODELS.md): choose and size local Ollama models.
 - [Upgrade to Woods 2.0](UPGRADING_TO_2.md): identifier changes, atomic payloads, durable-store reconciliation, and rollback.
@@ -49,7 +47,7 @@ and stdio or Streamable HTTP endpoints directly.
 ## Reference
 
 - [Why Woods](WHY_WOODS.md): the problems runtime introspection solves.
-- [Architecture](ARCHITECTURE.md): extraction, publication, graph, storage, retrieval, and MCP components.
+- [Internals](INTERNALS.md): extraction, publication, graph, storage, retrieval, and MCP components.
 - [Extractor reference](EXTRACTOR_REFERENCE.md): what each extractor produces and the edge cases it handles.
 - [Backend matrix](BACKEND_MATRIX.md): implemented provider/store combinations and their operational requirements.
 - [Token benchmark](TOKEN_BENCHMARK.md): evidence behind Woods token-estimation defaults.
@@ -65,31 +63,12 @@ and stdio or Streamable HTTP endpoints directly.
 
 Historical build-phase documents are not user guides. Source checkouts also contain the [MCP protocol decision record](https://github.com/lost-in-the/woods/blob/main/docs/design/MCP_2026_STRATEGY.md), [generated self-analysis diagrams](https://github.com/lost-in-the/woods/tree/main/docs/self-analysis), and the maintainer work ledger in `backlog.json`; these maintainer-only paths are not packaged with the gem.
 
-### At release: cutting the 2.0.0 tag
+Contract records that read as maintainer reference rather than guides:
 
-> Executed for 2.0.0 on 2026-09-02 (the release-flip commit). Kept as the template for the next major: while `main` documents an unreleased version, wrap every claim that depends on that gap in a `v2-unreleased-note` HTML comment fence, so tagging is a search, not a re-read. Do all four steps in the release commit:
+- [Incremental extraction](INCREMENTAL_EXTRACTION.md): the incremental/full equivalence contract and dispatch inventory.
+- [Watch daemon](WATCH_DAEMON.md): the resident daemon's design contract (the user-facing entry point is the task table above).
 
-| Step | What to change |
-|---|---|
-| Find every fence | `grep -rn "v2-unreleased-note" README.md CONTRIBUTING.md docs/` lists all of them. There are four: the `README.md` version banner, the "not published yet" note in `UPGRADING_TO_2.md`, and two around repository links in `CONTRIBUTING.md` |
-| Delete the two version notes | Remove the fenced block whole in `README.md` and in `UPGRADING_TO_2.md`. Both name 1.6.1 and link the `tree/v1.6.1` tag, which is what expires |
-| Repoint the `CONTRIBUTING.md` links | Keep the prose, delete the fence markers and the reminder comment, and move `blob/main/AGENTS.md` and `blob/main/CLAUDE.md` back to `blob/v2.0.0/` |
-| Fold the changelog | Move `CHANGELOG.md`'s `[Unreleased]` entries into `[2.0.0]` under their existing headings and stamp the release date. Leave an empty `[Unreleased]` for the next line of work |
-| Re-verify | Run `bundle exec rake release_v2:verify_surface_inventory`, `bin/rspec spec/release_v2`, and `bin/rspec spec/integration/packaged_gem_spec.rb`, which pins the gemspec's `v2.0.0` metadata URIs and checks every local `README.md` link |
-
-`README.md`'s "What's new in 2.0" table and its upgrade checklist describe released behavior and stay as they are.
-
-### After the flip merges: tag and publish
-
-The flip commit lands on `main` through a reviewed pull request like any other change. `main` is the development branch — it holds work for the next release and can run ahead of the published gem — so a release is pinned by its tag, never by a branch:
-
-| Step | Command | What guards it |
-|---|---|---|
-| Tag the flip merge commit | `git tag v2.0.0 <merge-sha> && git push origin v2.0.0` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history, match `Woods::VERSION`, and match the dated `CHANGELOG.md` heading |
-| Trigger the release workflow | `gh api --method POST repos/lost-in-the/woods/dispatches -f event_type=release -F 'client_payload[tag]=v2.0.0' -F 'client_payload[ci_run_id]=<id>'` where `<id>` is the green CI run on the tagged SHA (requires Contents write) | `.github/workflows/release.yml` re-validates the named CI run through the API, verifies the artifact digest, and runs secret-free candidate package tests before publishing |
-| Verify publication | `gem info woods --remote` shows the new version; the README gem badge updates on its own | just before pushing, the workflow re-runs `script/verify-release-tag` so a tag that moved since validation aborts the publish |
-
-Nothing is published from a laptop: the workflow builds and pushes the gem from the validated CI artifact, so the bytes on RubyGems are the bytes CI tested.
+The release-cutting runbook lives in [CONTRIBUTING.md](../CONTRIBUTING.md#at-release-cutting-the-200-tag).
 
 ## Canonical owners
 

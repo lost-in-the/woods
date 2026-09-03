@@ -75,7 +75,7 @@ Fallback watcher gets the ignore list; retry drain under LockHeartbeat (or its o
 Physical-column grouping for STI; UTF-16 truncation; migration_version for Last Schema Change; pinned-generation export; escaped vault glob; NameMapper re-check + reserved names; columns-only warning; completeness metric decision. Risk: EXP-1 changes page grouping for STI hosts; note the one-time re-sync in CHANGELOG. Rollback: revert restores churn.
 
 ### PR-N `fix/graph-determinism-and-renderer`: EXTB-6, EXTB-7, EXTB-11. Size S.
-Renderer normalizes current-format edges (flip the pinning spec, regenerate docs/self-analysis); fixed-point orphan assignment (extend the rotation fixture); deep-frozen to_h memo. Rollback: renderer revert restores edge-less maps.
+Renderer normalizes current-format edges (flip the pinning spec, regenerate docs/self-analysis — `architecture.md` only; the standalone call-graph/dataflow/dependency-map duplicates were removed post-audit); fixed-point orphan assignment (extend the rotation fixture); deep-frozen to_h memo. Rollback: renderer revert restores edge-less maps.
 
 ### PR-O `test/spec-hygiene-and-bookkeeping`: R2-2, STO-5, INF-8, INF-9, EXP-8, root-guard for the three permission specs, STO-8 shared examples. Size S. Wave 1-adjacent (no behavior change).
 Seven backlog entries for the deferred lows; standalone-require shims plus a require-in-isolation sweep in load_order_spec; skip-if-root guards; adapter-parity shared examples.

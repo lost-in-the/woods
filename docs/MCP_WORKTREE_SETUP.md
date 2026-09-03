@@ -1,5 +1,7 @@
 # MCP Registration in Git Worktrees
 
+> **Claude Code specific.** This page covers Claude Code's MCP registration model (`/mcp`, `~/.claude/plugins/`); other MCP clients manage per-directory registration their own way.
+
 When you work in a git worktree, a separate directory checked out from the same repository, your MCP tools may not be available to subagents running in that directory. This page explains why, how to fix it, and how to confirm the registration took effect.
 
 ## Why Worktree Subagents May Not See Woods Tools

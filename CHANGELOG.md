@@ -72,6 +72,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **The documentation set is restructured for a cold reader** (from the
+  2026-09-03 documentation review). The README opens with the pitch and
+  reaches setup before any migration content, links Why Woods, and points
+  1.x users at the upgrade guide instead of restating it;
+  `docs/ARCHITECTURE.md` is renamed `docs/INTERNALS.md` (ending the name
+  collision with generated self-analysis output); Troubleshooting's quick
+  reference sits under its intro; the FAQ, tool cookbook, and configuration
+  reference open with question/scenario/options indexes; reference-doc
+  headings use sentence case; the release-cutting runbook lives in
+  CONTRIBUTING.md; and implementation plans moved under `docs/design/`.
+  `woods:self_analyze` no longer emits `call-graph.md`, `dependency-map.md`,
+  and `dataflow.md` — byte-identical duplicates of sections
+  `architecture.md` already embeds (13k generated lines removed).
+
 - **The distributed plugin grows from three skills to five, with upgrade
   coverage and reworked triggering** (plugin 2.2.0). `woods-investigate`
   triggers on audits, code reviews, investigations, debugging, onboarding,
@@ -171,6 +185,87 @@ derive unit identifiers, which changes the index format's observable contract.
   - **`server/discover`** is answered, advertising supported versions, capabilities and
     the Tasks extension.
 
+- **`embedding_provider = :fake`** — the deterministic bag-of-words provider is now a
+  first-class citizen (promoted from spec support), and `Builder` also accepts an injected
+  provider object responding to `#embed`/`#embed_batch`. `woods:embed` → `woods:retrieve`
+  now runs fully offline; `woods:retrieve` resolves all four backends through the
+  configuration instead of hardcoding Ollama + in-memory stores (#178).
+- **Notion sync manifest** — unchanged pages cost zero API calls on re-sync; changed pages
+  update by cached page id without a title query; `WOODS_NOTION_FORCE=1` bypasses for one
+  run (#207).
+- **`woods:validate`** warns for units whose `file_path` resolves neither as written nor
+  under `Rails.root` (#169).
+
+- **`rake woods:watch` — a resident extraction daemon** (#164, phase 2). Watches the app and
+  keeps the index current as files change, instead of as-fresh-as-the-last-explicit-run. One
+  cycle is watch → debounce → classify → reload if needed → extract → publish. Freshness was
+  pull-based because every sync from a cold process pays a full Rails boot; a process that
+  stays booted removes that tax without giving up runtime-true extraction. Development only —
+  it adds no network listener. See `docs/WATCH_DAEMON.md`.
+  - **Restart triggers, Spring-style.** A change to `Gemfile.lock`, `config/**`, or the schema
+    stops the daemon with a degraded status and exit `75` for a supervisor, because Rails'
+    reloader re-runs none of it.
+  - **Failure posture.** A failed reload (the mid-edit syntax error) publishes a degraded
+    status naming the reason and leaves the index intact at its last good generation. The
+    daemon never crash-loops, never publishes a partial write, and never advances the
+    generation over work that didn't land.
+  - **Storm handling.** Above a changed-file threshold (default 50) a branch switch falls back
+    to one full extraction rather than N incremental steps.
+  - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
+    scan otherwise — which is also the right choice inside a container, where native FS events
+    don't cross bind mounts reliably.
+- **Multi-instance operation across worktrees** (#164, phase 4). Worktrees stay disjoint by
+  construction (own `Rails.root`, own `tmp/woods`), so the work is within one worktree: the
+  daemon, a manual `woods:extract`, and a hook-triggered `woods:incremental` now share the
+  existing `PipelineLock`. The daemon yields to another writer and carries its paths into the
+  next cycle rather than losing them; manual runs wait up to 30 s and then proceed with a
+  warning rather than hanging a terminal; and `woods:incremental` skips entirely when a live
+  daemon is already watching the tree (`WOODS_IGNORE_WATCH=1` overrides). New
+  `rake woods:watch_status` exits 0 when a daemon is alive, so a worktree hook can revive one
+  without parsing anything. `Woods::Watch::Daemon`'s `idle_timeout` (off by default) stops a
+  daemon in a dormant slot so it stops holding a booted app's memory.
+- **An MCP freshness contract** (#164, phase 3). `woods_status` now reports the index
+  `generation` (number, when it moved, what moved it), whether the **working tree** is dirty
+  plus a fingerprint of it, and the watch daemon's state (`running` / `degraded` + reason /
+  `stopped` / `absent`). `git_sha_matches_head` only ever saw *committed* HEAD, so an agent
+  forty uncommitted edits deep was told the index matched while every answer described the
+  tree before those edits.
+- **`IndexReader` self-refreshes on a generation change**, making the MCP `reload` tool an
+  optimization rather than a correctness requirement. A long-lived server used to hold
+  whatever it read at boot, so an agent working alongside a running extraction silently got
+  answers describing the tree as of the last server start. The check costs one `File.stat` of
+  a ~100-byte file per read. `IndexReader#with_pinned_generation` extends it across a sequence
+  of reads. Indexes with no generation file behave exactly as before.
+- **`Woods::Generation`** — a monotonic marker for "which version of the index is on disk",
+  written atomically as the last step of a successful run by *every* extraction mode (full,
+  incremental, targeted refresh, daemon cycle). Never advanced by a run that failed or changed
+  nothing, so staleness stays honest.
+- **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
+  named extractors wholesale against an already-booted app, replacing every unit of the types
+  they own. The unit types with no per-file entry point — routes, middleware, engines,
+  scheduled jobs, state machines, factories, events, database views — were only reachable by
+  full extraction from a cold boot, which was an artifact of the boot cost rather than
+  anything inherent: in a booted process re-running one extractor takes seconds. A routes
+  refresh cascades to the extractors that embed the route table. Any extractor key is
+  accepted, so `refresh(:models)` is a legitimate way to re-derive models after a schema
+  change.
+- **`Woods::ReloadPolicy`** — the reload-trigger inventory (#164). Classifies a changed path
+  as `:ignore`, `:reextract` (Woods reads bytes; no Rails involvement), `:reload` (an
+  autoloaded constant changed) or `:restart` (boot-captured state changed — initializers,
+  `config/**`, `Gemfile.lock`, schema). Consumed by `Watch::Daemon` on every cycle, and
+  tested against the `railties >= 6.0` support matrix. `spec/reload_policy_spec.rb` derives
+  its samples from the `PathDispatcher` rules themselves, so the two cannot drift apart
+  silently.
+- **Differential test harness for incremental extraction**
+  (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
+  randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at
+  every step, that the incrementally-maintained index matches a cold full extraction: same
+  units, same unit content, same graph, PageRank recomputed. Tune with `WOODS_DIFF_OPS` and
+  `WOODS_DIFF_SEEDS`; runs in CI on every Rails-matrix row.
+- `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
+  present from vanished) shared by every entry point, so the git-diff caller and the watch
+  daemon can't drift apart.
+
 ### Changed
 
 - **Dead code removed.** The unwired formatting adapters (Claude, GPT, Generic),
@@ -199,6 +294,56 @@ derive unit identifiers, which changes the index format's observable contract.
   remains as an escape hatch and now announces itself on stderr when set.
   **No action required:** legacy clients keep working, and no re-extraction or re-embedding
   is implied — no on-disk artifact format changed.
+
+- `woods:watch_status` no longer depends on `:environment`. It reads one small JSON file, and
+  the point is that a worktree hook can call it *before* deciding whether to do real work —
+  paying a full Rails boot to find out cost more than the sync it exists to avoid.
+- `WOODS_WATCH_POLL=1` forces the polling backend. `docs/WATCH_DAEMON.md` told container hosts
+  watching a bind mount to do this; nothing exposed it. `WOODS_WATCH_IDLE_TIMEOUT` and
+  `WOODS_WATCH_CATCH_UP` are exposed on the rake task for the same reason.
+- The debounce window now genuinely coalesces. The watcher callback merges into a pending set
+  and returns, so a save, the formatter's rewrite and the linter's touch become one cycle
+  rather than three — previously `settle` only delayed the first of the three.
+- `spec/reload_policy_spec.rb` derives its samples from the `PathDispatcher` rules rather than
+  a hand-written list, so a rule added for a new extractor is covered without editing the
+  spec. `spec/support/index_comparison.rb` compares PageRank *values* (to 6 dp) rather than
+  just keys — comparing keys alone said nothing about the modify-only operations most likely
+  to leave scores stale.
+- `GraphAnalyzer` output is now a pure function of graph content. `hubs` breaks ties on
+  identifier instead of graph-insertion order, and `bridges` samples from a sorted node list,
+  so two extractions of the same tree publish the same analysis.
+
+- New `Woods::Extractors::LineNeutralizer`: the quote-aware comment stripper (formerly private to
+  `SharedDependencyScanner`) plus string- and heredoc-blanking variants, shared by SourceNesting,
+  the rake and factory parsers, and CallbackAnalyzer.
+- New `Woods::Extractors::ReferencePatterns`: the namespace-capable service, mailer, and job-enqueue
+  regexes, shared by `SharedDependencyScanner`, `JobExtractor`, and `CallbackAnalyzer`.
+
+- **`FlowPrecomputer`'s `fail_closed:` switch is gone (EXTB-14).** Both callers
+  passed `true` and CLAUDE.md documents both paths as fail-closed, but the YARD
+  still promised the full path a "log-and-skip contract" and the
+  `Rails.logger.error` branch it described was dead code. Flow assembly now always
+  raises `Woods::ExtractionError` on a per-action failure.
+
+- **An unlisted integer tool parameter fails the server build with a named error
+  (MCP-8).** `ToolContract::INTEGER_BOUNDS.fetch` raised a bare
+  `KeyError: key not found: "count"` at `Server.build`, with no pointer to the
+  table that needs the entry. It now raises an `ArgumentError` naming the tool,
+  the property, and `INTEGER_BOUNDS`.
+
+- CI gains a `c-locale` job running the artifact-reader specs (`spec/mcp`,
+  `spec/feedback`, `spec/session_tracer`, `spec/evaluation`) under `LC_ALL=C`. The
+  runners default to a UTF-8 locale, so the whole encoding family could regress
+  with the suite green.
+- Three specs that simulate an unreadable/read-only path with `chmod` now skip as
+  root, where `chmod` is ineffective (`spec/operator/pipeline_guard_spec.rb` x2,
+  `spec/mcp/tasks/pipeline_tasks_spec.rb`).
+- `docs/backlog.json` gains B-140..B-163: the seven prior-audit deferred lows that
+  never received IDs (R2-2 — L3, L7, L12, L13, L14, L15, L21) plus seventeen
+  deferrals from this audit (CORE-3, CORE-5, EXTA-7, EXTA-9, EXTA-11, EXTA-13,
+  EXTA-15, CON-4, STO-7, STO-10, STO-14, INF-5, INF-6, INF-13, R2-4, R2-5, R2-6).
+
+- **STO-12**: Corrected the `Storage::Snapshotter` doc comment: `Snapshotter::Metadata.validate_store!` can use plain `respond_to?` only because `MetadataStore::Interface` defines neither `#each_entry` nor `#bulk_load` — adding either stub would silently convert the check into the B-108 bug. `spec/storage/snapshotter/vector_spec.rb`'s float-truncation tolerance block (which passed whether or not the load raised, stale since the M10 fix) now asserts the raise.
 
 ### Fixed
 
@@ -1510,141 +1655,6 @@ derive unit identifiers, which changes the index format's observable contract.
   lock-timeout abort). The diff is also rooted at the extracted application
   (`git -C Rails.root`), consistent with the provenance rooting, so it can no
   longer diff whatever checkout the process happened to start in.
-
-### Added
-
-- **`embedding_provider = :fake`** — the deterministic bag-of-words provider is now a
-  first-class citizen (promoted from spec support), and `Builder` also accepts an injected
-  provider object responding to `#embed`/`#embed_batch`. `woods:embed` → `woods:retrieve`
-  now runs fully offline; `woods:retrieve` resolves all four backends through the
-  configuration instead of hardcoding Ollama + in-memory stores (#178).
-- **Notion sync manifest** — unchanged pages cost zero API calls on re-sync; changed pages
-  update by cached page id without a title query; `WOODS_NOTION_FORCE=1` bypasses for one
-  run (#207).
-- **`woods:validate`** warns for units whose `file_path` resolves neither as written nor
-  under `Rails.root` (#169).
-
-- **`rake woods:watch` — a resident extraction daemon** (#164, phase 2). Watches the app and
-  keeps the index current as files change, instead of as-fresh-as-the-last-explicit-run. One
-  cycle is watch → debounce → classify → reload if needed → extract → publish. Freshness was
-  pull-based because every sync from a cold process pays a full Rails boot; a process that
-  stays booted removes that tax without giving up runtime-true extraction. Development only —
-  it adds no network listener. See `docs/WATCH_DAEMON.md`.
-  - **Restart triggers, Spring-style.** A change to `Gemfile.lock`, `config/**`, or the schema
-    stops the daemon with a degraded status and exit `75` for a supervisor, because Rails'
-    reloader re-runs none of it.
-  - **Failure posture.** A failed reload (the mid-edit syntax error) publishes a degraded
-    status naming the reason and leaves the index intact at its last good generation. The
-    daemon never crash-loops, never publishes a partial write, and never advances the
-    generation over work that didn't land.
-  - **Storm handling.** Above a changed-file threshold (default 50) a branch switch falls back
-    to one full extraction rather than N incremental steps.
-  - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
-    scan otherwise — which is also the right choice inside a container, where native FS events
-    don't cross bind mounts reliably.
-- **Multi-instance operation across worktrees** (#164, phase 4). Worktrees stay disjoint by
-  construction (own `Rails.root`, own `tmp/woods`), so the work is within one worktree: the
-  daemon, a manual `woods:extract`, and a hook-triggered `woods:incremental` now share the
-  existing `PipelineLock`. The daemon yields to another writer and carries its paths into the
-  next cycle rather than losing them; manual runs wait up to 30 s and then proceed with a
-  warning rather than hanging a terminal; and `woods:incremental` skips entirely when a live
-  daemon is already watching the tree (`WOODS_IGNORE_WATCH=1` overrides). New
-  `rake woods:watch_status` exits 0 when a daemon is alive, so a worktree hook can revive one
-  without parsing anything. `Woods::Watch::Daemon`'s `idle_timeout` (off by default) stops a
-  daemon in a dormant slot so it stops holding a booted app's memory.
-- **An MCP freshness contract** (#164, phase 3). `woods_status` now reports the index
-  `generation` (number, when it moved, what moved it), whether the **working tree** is dirty
-  plus a fingerprint of it, and the watch daemon's state (`running` / `degraded` + reason /
-  `stopped` / `absent`). `git_sha_matches_head` only ever saw *committed* HEAD, so an agent
-  forty uncommitted edits deep was told the index matched while every answer described the
-  tree before those edits.
-- **`IndexReader` self-refreshes on a generation change**, making the MCP `reload` tool an
-  optimization rather than a correctness requirement. A long-lived server used to hold
-  whatever it read at boot, so an agent working alongside a running extraction silently got
-  answers describing the tree as of the last server start. The check costs one `File.stat` of
-  a ~100-byte file per read. `IndexReader#with_pinned_generation` extends it across a sequence
-  of reads. Indexes with no generation file behave exactly as before.
-- **`Woods::Generation`** — a monotonic marker for "which version of the index is on disk",
-  written atomically as the last step of a successful run by *every* extraction mode (full,
-  incremental, targeted refresh, daemon cycle). Never advanced by a run that failed or changed
-  nothing, so staleness stays honest.
-- **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
-  named extractors wholesale against an already-booted app, replacing every unit of the types
-  they own. The unit types with no per-file entry point — routes, middleware, engines,
-  scheduled jobs, state machines, factories, events, database views — were only reachable by
-  full extraction from a cold boot, which was an artifact of the boot cost rather than
-  anything inherent: in a booted process re-running one extractor takes seconds. A routes
-  refresh cascades to the extractors that embed the route table. Any extractor key is
-  accepted, so `refresh(:models)` is a legitimate way to re-derive models after a schema
-  change.
-- **`Woods::ReloadPolicy`** — the reload-trigger inventory (#164). Classifies a changed path
-  as `:ignore`, `:reextract` (Woods reads bytes; no Rails involvement), `:reload` (an
-  autoloaded constant changed) or `:restart` (boot-captured state changed — initializers,
-  `config/**`, `Gemfile.lock`, schema). Consumed by `Watch::Daemon` on every cycle, and
-  tested against the `railties >= 6.0` support matrix. `spec/reload_policy_spec.rb` derives
-  its samples from the `PathDispatcher` rules themselves, so the two cannot drift apart
-  silently.
-- **Differential test harness for incremental extraction**
-  (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
-  randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at
-  every step, that the incrementally-maintained index matches a cold full extraction: same
-  units, same unit content, same graph, PageRank recomputed. Tune with `WOODS_DIFF_OPS` and
-  `WOODS_DIFF_SEEDS`; runs in CI on every Rails-matrix row.
-- `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
-  present from vanished) shared by every entry point, so the git-diff caller and the watch
-  daemon can't drift apart.
-
-### Changed
-
-- `woods:watch_status` no longer depends on `:environment`. It reads one small JSON file, and
-  the point is that a worktree hook can call it *before* deciding whether to do real work —
-  paying a full Rails boot to find out cost more than the sync it exists to avoid.
-- `WOODS_WATCH_POLL=1` forces the polling backend. `docs/WATCH_DAEMON.md` told container hosts
-  watching a bind mount to do this; nothing exposed it. `WOODS_WATCH_IDLE_TIMEOUT` and
-  `WOODS_WATCH_CATCH_UP` are exposed on the rake task for the same reason.
-- The debounce window now genuinely coalesces. The watcher callback merges into a pending set
-  and returns, so a save, the formatter's rewrite and the linter's touch become one cycle
-  rather than three — previously `settle` only delayed the first of the three.
-- `spec/reload_policy_spec.rb` derives its samples from the `PathDispatcher` rules rather than
-  a hand-written list, so a rule added for a new extractor is covered without editing the
-  spec. `spec/support/index_comparison.rb` compares PageRank *values* (to 6 dp) rather than
-  just keys — comparing keys alone said nothing about the modify-only operations most likely
-  to leave scores stale.
-- `GraphAnalyzer` output is now a pure function of graph content. `hubs` breaks ties on
-  identifier instead of graph-insertion order, and `bridges` samples from a sorted node list,
-  so two extractions of the same tree publish the same analysis.
-
-- New `Woods::Extractors::LineNeutralizer`: the quote-aware comment stripper (formerly private to
-  `SharedDependencyScanner`) plus string- and heredoc-blanking variants, shared by SourceNesting,
-  the rake and factory parsers, and CallbackAnalyzer.
-- New `Woods::Extractors::ReferencePatterns`: the namespace-capable service, mailer, and job-enqueue
-  regexes, shared by `SharedDependencyScanner`, `JobExtractor`, and `CallbackAnalyzer`.
-
-- **`FlowPrecomputer`'s `fail_closed:` switch is gone (EXTB-14).** Both callers
-  passed `true` and CLAUDE.md documents both paths as fail-closed, but the YARD
-  still promised the full path a "log-and-skip contract" and the
-  `Rails.logger.error` branch it described was dead code. Flow assembly now always
-  raises `Woods::ExtractionError` on a per-action failure.
-
-- **An unlisted integer tool parameter fails the server build with a named error
-  (MCP-8).** `ToolContract::INTEGER_BOUNDS.fetch` raised a bare
-  `KeyError: key not found: "count"` at `Server.build`, with no pointer to the
-  table that needs the entry. It now raises an `ArgumentError` naming the tool,
-  the property, and `INTEGER_BOUNDS`.
-
-- CI gains a `c-locale` job running the artifact-reader specs (`spec/mcp`,
-  `spec/feedback`, `spec/session_tracer`, `spec/evaluation`) under `LC_ALL=C`. The
-  runners default to a UTF-8 locale, so the whole encoding family could regress
-  with the suite green.
-- Three specs that simulate an unreadable/read-only path with `chmod` now skip as
-  root, where `chmod` is ineffective (`spec/operator/pipeline_guard_spec.rb` x2,
-  `spec/mcp/tasks/pipeline_tasks_spec.rb`).
-- `docs/backlog.json` gains B-140..B-163: the seven prior-audit deferred lows that
-  never received IDs (R2-2 — L3, L7, L12, L13, L14, L15, L21) plus seventeen
-  deferrals from this audit (CORE-3, CORE-5, EXTA-7, EXTA-9, EXTA-11, EXTA-13,
-  EXTA-15, CON-4, STO-7, STO-10, STO-14, INF-5, INF-6, INF-13, R2-4, R2-5, R2-6).
-
-- **STO-12**: Corrected the `Storage::Snapshotter` doc comment: `Snapshotter::Metadata.validate_store!` can use plain `respond_to?` only because `MetadataStore::Interface` defines neither `#each_entry` nor `#bulk_load` — adding either stub would silently convert the check into the B-108 bug. `spec/storage/snapshotter/vector_spec.rb`'s float-truncation tolerance block (which passed whether or not the load raised, stale since the M10 fix) now asserts the raise.
 
 ### Testing
 

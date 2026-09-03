@@ -7,7 +7,7 @@ paths:
 # Storage & Retrieval Layer Conventions
 
 Rules:
-- Every storage adapter (vector, metadata, graph) implements a common interface. See `docs/ARCHITECTURE.md` — "What Storage Backends Are Available?" for the interface contracts.
+- Every storage adapter (vector, metadata, graph) implements a common interface. See `docs/INTERNALS.md` — "What storage backends are available?" for the interface contracts.
 - Shipped backends: vector stores are in-memory, pgvector, and Qdrant; metadata stores are in-memory and SQLite; the graph store is in-memory. Anything else raises from `Builder`. Do not document or code against adapters that do not exist.
 - The **host app's** database must stay agnostic (MySQL or PostgreSQL): any SQL the Console layer or extractors run against the host must work on both. Woods' own stores are the fixed set above.
 - Durable stores (pgvector, Qdrant) implement `each_id`, not `each_entry`. Never detect either with `respond_to?` — the Interface defines both as raising stubs. Use ownership checks (`implements_own?` pattern, B-108).

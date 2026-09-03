@@ -108,7 +108,7 @@ For example:
 
 > Use Woods to find `Order`, inspect its resolved callbacks and associations, and list the first two levels of code that depend on it. Cite the Woods identifiers you used.
 
-The Index schema inventory totals 29 tools. Fourteen register in a normal packaged launch; `codebase_retrieve` is among them but returns a configuration error until embeddings are enabled. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
+The Index schema inventory totals 29 schemas. Fourteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but returns a configuration error until embeddings are enabled. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
 
 ## Optional next steps
 

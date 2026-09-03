@@ -142,59 +142,66 @@ Checklist items 518 and 520 restate Task 8, so they add no new work.
 
 ## Remaining work
 
+> **Status: executed 2026-09-03 on the release branch (PR #277).** Every box below is
+> checked; deviations are noted inline. R1 was already delivered on the paired
+> marketplace PR (lost-in-the/plugins#6, commits `94f8866`/`b3d39af`/`903998f`) before this
+> plan landed — this plan's "verified missing" checked `plugins@main`, where #6 had not
+> yet merged. Post-execution verification: zero broken local or cross-file anchors across
+> all markdown; packaged-gem link check, surface inventory, and release specs green.
+
 Ordered by what most improves a cold reader's first five minutes. R2 through R6 come from the accompanying review at `docs/self-analysis/v2-docs-review.md` and are not in the original plan; they are listed here because this is the plan an implementer would pick up.
 
 ### R1: Close the marketplace compatibility gap
 
 The only surviving work from the original plan. Repository: `lost-in-the/plugins`.
 
-- [ ] Branch from current `main` in `lost-in-the/plugins`.
-- [ ] In `.claude-plugin/marketplace.json`, change the `woods-plugin` description from "Requires woods >= 1.5.0" to "Requires woods >= 2.0.0".
-- [ ] In the same description, replace the three-skill list with the five that ship: `woods-setup`, `woods-mcp-config`, `woods-diagnose`, `woods-investigate`, `woods-agent-enable`.
-- [ ] In `README.md:11`, change "woods **≥ 1.5.0**" to "woods **≥ 2.0.0**" and update "Three guide skills" to "Five guide skills".
-- [ ] Verify: `jq empty .claude-plugin/marketplace.json` passes and `grep -rn 'woods.*1\.5' .` returns nothing.
-- [ ] Open the PR and link it from a Woods issue.
+- [x] Branch from current `main` in `lost-in-the/plugins`.
+- [x] In `.claude-plugin/marketplace.json`, change the `woods-plugin` description from "Requires woods >= 1.5.0" to "Requires woods >= 2.0.0".
+- [x] In the same description, replace the three-skill list with the five that ship: `woods-setup`, `woods-mcp-config`, `woods-diagnose`, `woods-investigate`, `woods-agent-enable`.
+- [x] In `README.md:11`, change "woods **≥ 1.5.0**" to "woods **≥ 2.0.0**" and update "Three guide skills" to "Five guide skills".
+- [x] Verify: `jq empty .claude-plugin/marketplace.json` passes and `grep -rn 'woods.*1\.5' .` returns nothing.
+- [x] Open the PR and link it from a Woods issue. *(Delivered as lost-in-the/plugins#6, cross-linked from the woods #277 PR body rather than an issue.)*
 
 ### R2: Remove the duplicated generated files
 
 Highest-value change in the repo. Deletes 13,493 lines.
 
-- [ ] `git rm docs/self-analysis/call-graph.md docs/self-analysis/dataflow.md docs/self-analysis/dependency-map.md`. Each is byte-identical to a section of `docs/self-analysis/architecture.md`.
-- [ ] Create `docs/self-analysis/README.md`: name the generator, state that the output is not for reading, and note that `woods.gemspec:45` already excludes it from the packaged gem.
-- [ ] Update the generator so it stops emitting the three duplicates.
-- [ ] Update `docs/self-analysis/v2-audit-2/07-suggested-fixes.md:78`, which names `docs/self-analysis` as a regeneration target.
+- [x] `git rm docs/self-analysis/call-graph.md docs/self-analysis/dataflow.md docs/self-analysis/dependency-map.md`. Each is byte-identical to a section of `docs/self-analysis/architecture.md`.
+- [x] Create `docs/self-analysis/README.md`: name the generator, state that the output is not for reading, and note that `woods.gemspec:45` already excludes it from the packaged gem.
+- [x] Update the generator so it stops emitting the three duplicates.
+- [x] Update `docs/self-analysis/v2-audit-2/07-suggested-fixes.md:78`, which names `docs/self-analysis` as a regeneration target.
 
 ### R3: Fix the CHANGELOG 2.0.0 section
 
-- [ ] Merge `CHANGELOG.md:1514` `### Added` into `CHANGELOG.md:146` `### Added`.
-- [ ] Merge `CHANGELOG.md:1597` `### Changed` into `CHANGELOG.md:174` `### Changed`.
-- [ ] Verify: `sed -n '10,1673p' CHANGELOG.md | grep -c '^### Added'` returns 1, same for `### Changed`.
-- [ ] Correct the "fold the changelog" row in `docs/README.md:77`, whose instruction ("under their existing headings") was not followed by `b8eecb4`.
+- [x] Merge `CHANGELOG.md:1514` `### Added` into `CHANGELOG.md:146` `### Added`.
+- [x] Merge `CHANGELOG.md:1597` `### Changed` into `CHANGELOG.md:174` `### Changed`.
+- [x] Verify: `sed -n '10,1673p' CHANGELOG.md | grep -c '^### Added'` returns 1, same for `### Changed`.
+- [x] Correct the "fold the changelog" row in `docs/README.md:77`, whose instruction ("under their existing headings") was not followed by `b8eecb4`. *(The row now lives in CONTRIBUTING.md after the R5 move; it requires each heading to appear exactly once in the released section.)*
 
 ### R4: Re-order the README for a first-time reader
 
-- [ ] Add a link to `docs/WHY_WOODS.md` above "Five-minute setup" at `README.md:72`. It currently has no inbound link from any user-facing page except one docs-index row.
-- [ ] Replace `README.md:140-165` ("What's new in 2.0" table plus "Upgrading from 1.x" list) with a two-line pointer to `docs/UPGRADING_TO_2.md`, which already holds both in full.
-- [ ] Move `README.md:45-71` ("Let an agent install it") below "Five-minute setup".
-- [ ] Verify: README returns to the plan's original 180-260 line target and the pitch reaches the reader before any migration content.
+- [x] Add a link to `docs/WHY_WOODS.md` above "Five-minute setup" at `README.md:72`. It currently has no inbound link from any user-facing page except one docs-index row.
+- [x] Replace `README.md:140-165` ("What's new in 2.0" table plus "Upgrading from 1.x" list) with a two-line pointer to `docs/UPGRADING_TO_2.md`, which already holds both in full.
+- [x] Move `README.md:45-71` ("Let an agent install it") below "Five-minute setup". *(Also folded the duplicate plugin-install commands out of "Optional Claude Code workflows".)*
+- [x] Verify: README returns to the plan's original 180-260 line target and the pitch reaches the reader before any migration content.
 
 ### R5: Move maintainer material out of reader paths
 
-- [ ] Move `docs/README.md:64-93` (the release-cutting runbook) into `CONTRIBUTING.md`. `CONTRIBUTING.md:28` already links to it by anchor, so update that link.
-- [ ] Move `docs/superpowers/` out of the user documentation tree. `docs/design/plans/` matches existing repo precedent.
-- [ ] Retire `docs/superpowers/plans/2026-08-27-v2-documentation-rewrite.md` in favor of this file.
+- [x] Move `docs/README.md:64-93` (the release-cutting runbook) into `CONTRIBUTING.md`. `CONTRIBUTING.md:28` already links to it by anchor, so update that link.
+- [x] Move `docs/superpowers/` out of the user documentation tree. `docs/design/plans/` matches existing repo precedent.
+- [x] Retire `docs/superpowers/plans/2026-08-27-v2-documentation-rewrite.md` in favor of this file.
 
 ### R6: Even out the reference docs
 
 Lowest priority. Cosmetic, but it is what makes the set read as one document.
 
-- [ ] Move `docs/TROUBLESHOOTING.md`'s existing "Quick Reference" table from line 744 to just under the intro. It is already written; it is 744 lines below where it is needed.
-- [ ] Add a question index to `docs/FAQ.md` (36 questions), a scenario index to `docs/MCP_TOOL_COOKBOOK.md` (33 scenarios), and an options index to `docs/CONFIGURATION_REFERENCE.md`.
-- [ ] Fix `docs/FAQ.md:266`: it says two embedding providers ship. `lib/woods/builder.rb:192-200` accepts `:openai`, `:ollama`, and `:fake`.
-- [ ] Fix `CLAUDE.md:326`: it lists eight `WHOLE_APP_EXTRACTORS`. `lib/woods/extractor.rb:298-322` has nine; `rails_source` is missing.
-- [ ] Convert Title Case headings to sentence case, worst first: `ARCHITECTURE.md` (21), `CONFIGURATION_REFERENCE.md` (17), `EXTRACTOR_REFERENCE.md` (13), `CONSOLE_MCP_SETUP.md` (13), `BACKEND_MATRIX.md` (11).
-- [ ] Rename `docs/ARCHITECTURE.md` to `docs/INTERNALS.md` to end the collision with `docs/self-analysis/architecture.md`.
-- [ ] Label `docs/MCP_WORKTREE_SETUP.md` as Claude Code specific, or move it under `plugin/`. It names `/mcp` and `~/.claude/plugins/` throughout.
-- [ ] Move `docs/WATCH_DAEMON.md` and `docs/INCREMENTAL_EXTRACTION.md` out of the docs index's "Index lifecycle" user route into a maintainer-reference group. Both are contract records; neither needs rewriting.
-- [ ] Fix `.claude/rules/docs.md`: drop "Avoid bullet-point-heavy sections", and scope the MySQL-and-PostgreSQL rule to `BACKEND_MATRIX.md` and `CONFIGURATION_REFERENCE.md`.
-- [ ] Change `docs/GETTING_STARTED.md:111` from "29 tools" to "29 schemas" so the schema/tool distinction holds everywhere.
+- [x] Move `docs/TROUBLESHOOTING.md`'s existing "Quick Reference" table from line 744 to just under the intro. It is already written; it is 744 lines below where it is needed.
+- [x] Add a question index to `docs/FAQ.md` (36 questions), a scenario index to `docs/MCP_TOOL_COOKBOOK.md` (33 scenarios), and an options index to `docs/CONFIGURATION_REFERENCE.md`.
+- [x] Fix `docs/FAQ.md:266`: it says two embedding providers ship. `lib/woods/builder.rb:192-200` accepts `:openai`, `:ollama`, and `:fake`.
+- [x] Fix `CLAUDE.md:326`: it lists eight `WHOLE_APP_EXTRACTORS`. `lib/woods/extractor.rb:298-322` has nine; `rails_source` is missing.
+- [x] Convert Title Case headings to sentence case, worst first: `ARCHITECTURE.md` (21), `CONFIGURATION_REFERENCE.md` (17), `EXTRACTOR_REFERENCE.md` (13), `CONSOLE_MCP_SETUP.md` (13), `BACKEND_MATRIX.md` (11).
+- [x] Rename `docs/ARCHITECTURE.md` to `docs/INTERNALS.md` to end the collision with `docs/self-analysis/architecture.md`. *(All inbound links updated; heading-case changes do not alter GitHub anchors, verified by a repo-wide anchor check.)*
+- [x] Label `docs/MCP_WORKTREE_SETUP.md` as Claude Code specific, or move it under `plugin/`. It names `/mcp` and `~/.claude/plugins/` throughout.
+- [x] Move `docs/WATCH_DAEMON.md` and `docs/INCREMENTAL_EXTRACTION.md` out of the docs index's "Index lifecycle" user route into a maintainer-reference group. Both are contract records; neither needs rewriting.
+- [x] Fix `.claude/rules/docs.md`: drop "Avoid bullet-point-heavy sections", and scope the MySQL-and-PostgreSQL rule to `BACKEND_MATRIX.md` and `CONFIGURATION_REFERENCE.md`.
+- [x] Change `docs/GETTING_STARTED.md:111` from "29 tools" to "29 schemas" so the schema/tool distinction holds everywhere.
