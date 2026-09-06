@@ -66,7 +66,7 @@ group :development, :test do
   # ratio when the gem is absent, so the suite runs fine without it.
   if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.1')
     install_if -> { Gem::Version.new(RUBY_VERSION) < Gem::Version.new('4.0') } do
-      gem 'tokenizers', '~> 0.5.0'
+      gem 'tokenizers', '~> 0.7.0'
     end
   end
 end
