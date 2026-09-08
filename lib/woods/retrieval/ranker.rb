@@ -362,7 +362,7 @@ module Woods
       # @param identifier [String] Candidate identifier (matched against PageRank keys)
       # @return [Float] 0.0 to 1.0
       def importance_score(unit, identifier)
-        pagerank = pagerank_importance_map[identifier]
+        pagerank = pagerank_importance_map[(unit && (unit['identifier'] || unit[:identifier])) || identifier]
         return pagerank if pagerank
 
         return 0.5 unless unit

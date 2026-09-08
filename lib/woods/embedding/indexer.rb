@@ -6,6 +6,7 @@ require 'fileutils'
 require 'set'
 
 require_relative '../atomic_file'
+require_relative '../storage_identity'
 require_relative '../generation'
 require_relative '../extracted_unit'
 require_relative '../chunking/semantic_chunker'
@@ -174,11 +175,13 @@ module Woods
       #    re-embed instead of stranding the unit forever.
       def process_units(units, incremental:)
         prepare_run(incremental: incremental)
+        units = assign_storage_identities(units)
         checkpoint = incremental ? load_checkpoint : {}
         stats = { processed: 0, skipped: 0, errors: 0 }
 
         embed_batches(units, checkpoint, stats, incremental: incremental)
 
+        retire_legacy_identities
         report_checkpoint_misses
         vanished = incremental && persistable? ? drop_vanished_units : 0
         persist_snapshot if persistable? && snapshot_worth_writing?(stats, vanished, incremental: incremental)
@@ -190,6 +193,46 @@ module Woods
         save_checkpoint(checkpoint)
 
         stats
+      end
+
+      # Unambiguous existing keys stay stable. A collision uses reversible typed keys.
+      def assign_storage_identities(units)
+        counts = units.group_by { |unit| unit['identifier'] }.transform_values(&:size)
+        units.map do |unit|
+          id = unit['identifier']
+          typed = StorageIdentity.key(id, unit['type'])
+          existing = known_storage_key?(typed)
+          next unit unless counts[id] > 1 || existing || id.start_with?(StorageIdentity::PREFIX)
+
+          unit.merge('storage_id' => typed)
+        end
+      end
+
+      def storage_id(unit)
+        unit['storage_id'] || unit['identifier']
+      end
+
+      def retire_legacy_identities
+        @current_identifiers.each do |key|
+          parts = StorageIdentity.parts(key)
+          next unless parts
+
+          legacy = parts.first
+          next if @current_identifiers.include?(legacy)
+
+          retire_legacy_key(legacy)
+        end
+      end
+
+      def known_storage_key?(key)
+        (@persisted_ids || {}).key?(key) || (@durable_ids || {}).key?(key)
+      end
+
+      def retire_legacy_key(legacy)
+        prune_identifier(legacy, []) if @persisted_ids&.key?(legacy)
+        delete_durable_identifiers([legacy]) if @durable_ids&.key?(legacy)
+        @persisted_ids&.delete(legacy)
+        @metadata_store.delete(legacy) if @metadata_store.respond_to?(:delete)
       end
 
       # Is there anything new for a dump to capture?
@@ -270,8 +313,15 @@ module Woods
 
         warn "[woods] dropping #{vanished.size} unit(s) from the vector index that the " \
              'extraction no longer holds; rewriting the dump.'
-        vanished.each { |identifier| prune_identifier(identifier, []) }
+        vanished.each do |identifier|
+          prune_identifier(identifier, [])
+          delete_unit_metadata(identifier)
+        end
         vanished.size
+      end
+
+      def delete_unit_metadata(identifier)
+        @metadata_store.delete(identifier) if @metadata_store.respond_to?(:delete)
       end
 
       # Guard rail on the vanished-unit sweep (B-079 / #191).
@@ -396,7 +446,10 @@ module Woods
         warn "[woods] deleting #{stale_ids.size} stale vector(s) for #{identifiers.size} unit(s) " \
              "from #{@vector_store.class} that the extraction no longer holds."
         stale_ids.each { |id| @vector_store.delete(id) }
-        identifiers.each { |identifier| @durable_ids.delete(identifier) }
+        identifiers.each do |identifier|
+          @durable_ids.delete(identifier)
+          delete_unit_metadata(identifier)
+        end
         identifiers.size
       end
 
@@ -527,7 +580,7 @@ module Woods
 
           # Every unit passes through here, embedded or skipped, so this is the
           # authoritative "what the index holds this run" set.
-          @current_identifiers << unit_data['identifier']
+          @current_identifiers << storage_id(unit_data)
           persist_unit_metadata(unit_data)
           if incremental && checkpoint_satisfied?(unit_data, checkpoint)
             stats[:skipped] += 1
@@ -558,14 +611,14 @@ module Woods
       # unit permanently: checkpoint.json said "embedded", the new store held
       # nothing, and no subsequent incremental run ever disagreed.
       def checkpoint_satisfied?(unit_data, checkpoint)
-        return false unless checkpoint[unit_data['identifier']] == unit_data['source_hash']
+        return false unless checkpoint[storage_id(unit_data)] == unit_data['source_hash']
 
         known_ids = persistable? ? @persisted_ids : @durable_ids
         # No durable view to check against (an adapter with no #each_id, or an
         # enumeration that failed) — fall back to trusting the checkpoint.
         return true if known_ids.nil?
 
-        return true if known_ids.key?(unit_data['identifier'])
+        return true if known_ids.key?(storage_id(unit_data))
 
         @checkpoint_misses += 1
         false
@@ -582,7 +635,7 @@ module Woods
       def persist_unit_metadata(unit_data)
         return unless @metadata_store
 
-        @metadata_store.store(unit_data['identifier'], unit_data)
+        @metadata_store.store(storage_id(unit_data), unit_data)
       end
 
       # Refuse to index a unit whose real identifier already matches the
@@ -599,7 +652,7 @@ module Woods
 
       def collect_embed_items(unit_data, items)
         texts = prepare_texts(unit_data)
-        identifier = unit_data['identifier']
+        identifier = storage_id(unit_data)
 
         texts.each_with_index do |text, idx|
           embed_id = texts.length > 1 ? "#{identifier}#chunk_#{idx}" : identifier
@@ -704,7 +757,7 @@ module Woods
       def store_vectors(items, vectors, checkpoint, stats)
         entries = items.each_with_index.map do |item, idx|
           { id: item[:id], vector: vectors[idx],
-            metadata: { type: item[:unit_data]['type'], identifier: item[:identifier],
+            metadata: { type: item[:unit_data]['type'], identifier: item[:unit_data]['identifier'],
                         file_path: item[:unit_data]['file_path'] } }
         end
 

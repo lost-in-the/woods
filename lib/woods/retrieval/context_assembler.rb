@@ -332,7 +332,7 @@ module Woods
       # @return [Hash]
       def build_source_attribution(candidate, unit, truncated: false)
         attribution = {
-          identifier: candidate.identifier,
+          identifier: unit_field(unit, :identifier) || candidate.identifier,
           type: unit_field(unit, :type),
           score: candidate.score,
           file_path: unit_field(unit, :file_path)

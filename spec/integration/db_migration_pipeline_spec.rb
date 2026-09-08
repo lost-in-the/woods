@@ -60,7 +60,7 @@ RSpec.describe 'DB Migration Pipeline Integration', :integration do
     it 'runs all 6 migrations' do
       applied = migrator.migrate!
 
-      expect(applied).to eq([1, 2, 3, 4, 5, 6])
+      expect(applied).to eq([1, 2, 3, 4, 5, 6, 7])
     end
 
     it 'creates the woods_units table' do
@@ -87,8 +87,8 @@ RSpec.describe 'DB Migration Pipeline Integration', :integration do
     it 'records all versions as applied' do
       migrator.migrate!
 
-      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6])
-      expect(migrator.schema_version.current_version).to eq(6)
+      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6, 7])
+      expect(migrator.schema_version.current_version).to eq(7)
     end
 
     it 'is idempotent — re-running returns empty' do

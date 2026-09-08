@@ -30,19 +30,19 @@ RSpec.describe Woods::Db::Migrator do
 
     it 'records applied versions' do
       migrator.migrate!
-      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6])
+      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6, 7])
     end
 
     it 'is idempotent — skips already-applied migrations' do
       migrator.migrate!
       # Should not raise on second run
       migrator.migrate!
-      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6])
+      expect(migrator.schema_version.applied_versions).to eq([1, 2, 3, 4, 5, 6, 7])
     end
 
     it 'returns list of newly applied version numbers' do
       result = migrator.migrate!
-      expect(result).to eq([1, 2, 3, 4, 5, 6])
+      expect(result).to eq([1, 2, 3, 4, 5, 6, 7])
 
       # Second run applies nothing
       result2 = migrator.migrate!

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../storage_identity'
+
 module Woods
   module Retrieval
     # SearchExecutor maps a query classification to a retrieval strategy and
@@ -85,13 +87,30 @@ module Woods
         )
 
         ExecutionResult.new(
-          candidates: bounded_candidates(candidates, limit, strategy),
+          candidates: bounded_candidates(expand_graph_candidates(candidates), limit, strategy),
           strategy: strategy,
           query: query
         )
       end
 
       private
+
+      def expand_graph_candidates(candidates)
+        candidates.flat_map do |candidate|
+          next candidate unless %i[graph graph_expansion].include?(candidate.source)
+          next candidate if @metadata_store.find(candidate.identifier)
+
+          matches = @metadata_store.search(candidate.identifier).select do |record|
+            record['identifier'] == candidate.identifier
+          end
+          next candidate if matches.empty?
+
+          matches.map do |record|
+            Candidate.new(identifier: record['id'], score: candidate.score,
+                          source: candidate.source, metadata: record)
+          end
+        end
+      end
 
       # Select the best retrieval strategy for a classification.
       #
@@ -308,13 +327,13 @@ module Woods
 
         seeds.each do |seed_id|
           # Forward dependencies
-          deps = @graph_store.dependencies_of(seed_id)
+          deps = @graph_store.dependencies_of(StorageIdentity.identifier(seed_id))
           deps.each do |dep|
             candidates << Candidate.new(identifier: dep, score: 0.8, source: :graph, metadata: {})
           end
 
           # Reverse dependencies (dependents)
-          dependents = @graph_store.dependents_of(seed_id)
+          dependents = @graph_store.dependents_of(StorageIdentity.identifier(seed_id))
           dependents.each do |dep|
             candidates << Candidate.new(identifier: dep, score: 0.7, source: :graph, metadata: {})
           end
@@ -358,7 +377,7 @@ module Woods
         # Graph expansion on top vector results
         graph_candidates = []
         vector_candidates.first(3).each do |candidate|
-          deps = @graph_store.dependencies_of(candidate.identifier)
+          deps = @graph_store.dependencies_of(StorageIdentity.identifier(candidate.identifier.sub(/#chunk_\d+\z/, '')))
           deps.each do |dep|
             graph_candidates << Candidate.new(
               identifier: dep, score: 0.5, source: :graph_expansion, metadata: {}
