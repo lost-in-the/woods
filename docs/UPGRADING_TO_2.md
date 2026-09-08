@@ -198,6 +198,30 @@ Woods tasks, readers, exporters, and MCP servers resolve this automatically. Cus
 
 Graph consumers must also tolerate multiple typed variants for the same textual identifier. Do not collapse nodes by identifier alone when type is part of identity.
 
+Embedding preserves coexisting types with internal `@woods-unit:` storage keys
+(Base64-encoded JSON `[identifier, type]`, with the existing chunk suffix appended
+when needed). Public identifiers and source attribution stay unchanged. Unique
+ordinary names retain their previous keys; names beginning with this reserved
+prefix are escaped too. An incremental embed migrates an ambiguous legacy key only
+after storing its replacement vectors. Existing typed keys stay stable when one
+variant disappears. Normal mass-deletion guards still apply to vanished units.
+Custom vector consumers must treat storage IDs as opaque and use metadata for
+public identifiers. Older dumps remain readable; re-embed to recover variants
+that an older writer had already overwritten.
+
+SQLite migration 007 preserves snapshot rows and permits one row per
+`(snapshot_id, identifier, unit_type)`. JSON snapshot readers accept older untyped
+records, while new records preserve both names and types. Lost historical variants
+cannot be reconstructed from old snapshots. Back up `woods.sqlite3` and the whole
+index before upgrading: reverting code alone does not reverse this migration.
+Restore the matching backup or rebuild in a separate store when rolling back.
+
+Flow documents for identifiers containing literal underscores now use a digest to
+avoid collisions with namespaced controllers and combined action names. Read the
+published flow index instead of constructing filenames. A full extraction rebuilds
+precomputed flows consistently; use it when upgrading an index with existing flow
+artifacts.
+
 ## Reconnect MCP clients
 
 Use the project bundle so the server and application resolve the same Woods version:

@@ -10,12 +10,12 @@ RSpec.describe 'release gemspec dependency contract' do
     gemspec.runtime_dependencies.find { |dependency| dependency.name == name }.requirement
   end
 
-  it 'supports msgpack 1.5 through the 1.x series without admitting 2.0' do
+  it 'requires patched msgpack 1.8.2 through the 1.x series without admitting 2.0' do
     requirement = runtime_requirement('msgpack')
 
-    expect(requirement).to be_satisfied_by(Gem::Version.new('1.5.0'))
+    expect(requirement).to be_satisfied_by(Gem::Version.new('1.8.2'))
     expect(requirement).to be_satisfied_by(Gem::Version.new('1.99.0'))
-    expect(requirement).not_to be_satisfied_by(Gem::Version.new('1.4.9'))
+    expect(requirement).not_to be_satisfied_by(Gem::Version.new('1.8.1'))
     expect(requirement).not_to be_satisfied_by(Gem::Version.new('2.0.0'))
   end
 

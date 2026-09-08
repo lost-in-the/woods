@@ -56,7 +56,7 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 
 - OpenAI: verify the key exists without printing it.
 - Ollama: verify the service and configured model locally.
-- Stale vectors: run the documented embed refresh.
+- Stale vectors or missing same-name types: follow the installed version's upgrade guide and run the documented embed refresh; do not rename public identifiers or edit vector IDs by hand.
 - Dimension mismatch: rebuild into a store matching the configured model; do not suppress the preflight.
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
 

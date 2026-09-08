@@ -63,7 +63,7 @@ Gem::Specification.new do |spec|
   # pin blocks patch releases and user dependency resolution; the SDK-internal
   # touchpoints already guard shape drift defensively.
   spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
-  spec.add_dependency 'msgpack', '>= 1.5', '< 2'
+  spec.add_dependency 'msgpack', '>= 1.8.2', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower
