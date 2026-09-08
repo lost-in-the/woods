@@ -7,6 +7,8 @@ module Woods
       private
 
       def build_fqn(name, namespace_stack)
+        return name.delete_prefix('::') if name.start_with?('::')
+
         if namespace_stack.empty?
           name
         else

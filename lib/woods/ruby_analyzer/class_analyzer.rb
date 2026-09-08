@@ -81,7 +81,7 @@ module Woods
         units << unit
 
         # Recurse into body for nested definitions
-        inner_ns = namespace_stack + fqn_parts(name)
+        inner_ns = fqn.split('::')
         children.each do |child|
           extract_definitions(child, source, file_path, inner_ns, units, [fqn] + scopes)
         end
@@ -89,14 +89,9 @@ module Woods
 
       # Build namespace string (everything except the leaf name).
       def build_namespace(name, namespace_stack)
-        parts = namespace_stack + fqn_parts(name)
+        parts = build_fqn(name, namespace_stack).split('::')
         parts.pop # Remove leaf
         parts.empty? ? nil : parts.join('::')
-      end
-
-      # Split a name that may contain :: into parts.
-      def fqn_parts(name)
-        name.to_s.split('::')
       end
 
       # Extract superclass name from a class node.
