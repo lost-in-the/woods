@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whitespace/comment-separated qualified table names. Validate every SQL safety
   check with the active dialect and exercise PostgreSQL/MySQL Console requests in CI.
 - Require MessagePack 1.8.2 or newer for the patched runtime buffer implementation.
+- Require patched JSON 2.x (>=2.19.9, <3) so older supported Rails encoders
+  retain their `quirks_mode` compatibility.
 - Update Inspector transitive dependencies `fast-uri` and `qs` to patched versions
   and audit the pinned Node dependency tree in CI.
 

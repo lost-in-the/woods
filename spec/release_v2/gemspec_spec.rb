@@ -19,6 +19,15 @@ RSpec.describe 'release gemspec dependency contract' do
     expect(requirement).not_to be_satisfied_by(Gem::Version.new('2.0.0'))
   end
 
+  it 'requires patched JSON 2.x compatible with the supported older Rails encoders' do
+    requirement = runtime_requirement('json')
+
+    expect(requirement).to be_satisfied_by(Gem::Version.new('2.19.9'))
+    expect(requirement).to be_satisfied_by(Gem::Version.new('2.99.0'))
+    expect(requirement).not_to be_satisfied_by(Gem::Version.new('2.19.8'))
+    expect(requirement).not_to be_satisfied_by(Gem::Version.new('3.0.0'))
+  end
+
   it 'supports Rails 6 through 8 without admitting Rails 9' do
     requirement = runtime_requirement('railties')
 

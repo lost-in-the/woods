@@ -198,6 +198,10 @@ Woods tasks, readers, exporters, and MCP servers resolve this automatically. Cus
 
 Graph consumers must also tolerate multiple typed variants for the same textual identifier. Do not collapse nodes by identifier alone when type is part of identity.
 
+The bundle requires patched MessagePack >=1.8.2 and JSON >=2.19.9, <3.
+JSON 3 removes an encoder option used by older supported Rails versions; keep the
+compatible JSON 2.x dependency when resolving the v2 bundle.
+
 Embedding preserves coexisting types with internal `@woods-unit:` storage keys
 (Base64-encoded JSON `[identifier, type]`, with the existing chunk suffix appended
 when needed). Public identifiers and source attribution stay unchanged. Unique
