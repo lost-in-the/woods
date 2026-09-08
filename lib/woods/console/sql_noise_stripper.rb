@@ -59,8 +59,7 @@ module Woods
       #     Dollar-quoted strings (`$$...$$`, `$tag$...$tag$`) are also stripped.
       #   - `:mysql` — single-quoted strings support both `\'` (backslash-escape)
       #     and `''` (doubled-quote) as apostrophe escapes. Dollar-quoted strings
-      #     are also stripped (MySQL does not use them, but stripping them is
-      #     harmless and keeps the two dialects consistent).
+      #     are not recognized by the combined MySQL security scanner.
       # @return [String] a new string with all string literals replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
       DOLLAR_QUOTED = /\$(\w*)\$.*?\$\1\$/m
@@ -167,7 +166,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
+          elsif !mysql && ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
             close = sql.index(tag, i + tag.length)
             if close
               out << "''"
@@ -176,7 +175,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif (ch == '-' && sql[i + 1] == '-') || (mysql && ch == '#')
+          elsif dash_comment?(sql, i, mysql: mysql) || (mysql && ch == '#')
             nl = sql.index("\n", i)
             i = nl || len
           elsif ch == '/' && sql[i + 1] == '*' && sql[i + 2] != '!'
@@ -204,6 +203,14 @@ module Woods
 
         out
       end
+
+      # MySQL requires whitespace/control after --; otherwise it is subtraction.
+      def self.dash_comment?(sql, index, mysql:)
+        return false unless sql[index, 2] == '--'
+
+        !mysql || sql[index + 2].nil? || sql[index + 2].match?(/[[:space:][:cntrl:]]/)
+      end
+      private_class_method :dash_comment?
 
       # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
       # `$tag$`) at the start of the given slice.

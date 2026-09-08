@@ -313,6 +313,11 @@ module Woods
       def validate!(sql)
         raise SqlValidationError, 'SQL is empty' if sql.nil? || sql.strip.empty?
 
+        if dialect.nil?
+          KNOWN_DIALECTS.each { |name| self.class.new(dialect: name).validate!(sql) }
+          return
+        end
+
         normalized = sql.strip
 
         # Reject multiple statements (semicolons not inside string literals)
@@ -365,13 +370,17 @@ module Woods
 
       private
 
+      def validation_dialect
+        dialect || :postgres
+      end
+
       # Check if the SQL contains multiple statements separated by semicolons.
       # Strips SQL comments and string literals before checking.
       #
       # @param sql [String]
       # @return [Boolean]
       def contains_multiple_statements?(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
         stripped.include?(';')
       end
 
@@ -395,7 +404,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_body_forbidden_keywords!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
 
         BODY_FORBIDDEN_REGEXES.each do |keyword, pattern|
           raise SqlValidationError, "Rejected: #{keyword} is not allowed" if stripped.match?(pattern)
@@ -420,7 +429,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a writable CTE body is found
       def check_writable_ctes!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
         each_as_body(stripped) do |body|
           next unless body.match?(WRITABLE_CTE_BODY_PATTERN)
 
@@ -484,7 +493,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if DML follows the CTE list
       def check_with_attached_dml!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
         return unless stripped.match?(WITH_ATTACHED_DML_PATTERN)
 
         raise SqlValidationError,
@@ -536,7 +545,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a dangerous function is found
       def check_dangerous_functions!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
 
         DANGEROUS_FUNCTION_REGEXES.each do |func, pattern|
           raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if stripped.match?(pattern)
@@ -548,7 +557,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a non-allowlisted function is called
       def check_function_allowlist!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
 
         stripped.scan(FUNCTION_CALL_PATTERN) do
           match = Regexp.last_match
@@ -587,7 +596,7 @@ module Woods
       # @raise [SqlValidationError] if a forbidden keyword is found as a
       #   statement leader, or a DML keyword anywhere in the body
       def check_forbidden_keywords_in_body!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect)
 
         FORBIDDEN_BODY_REGEXES.each do |keyword, leader_pattern|
           next unless stripped.match?(leader_pattern)

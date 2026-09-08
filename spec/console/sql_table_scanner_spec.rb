@@ -237,6 +237,7 @@ RSpec.describe Woods::Console::SqlTableScanner do
     end
 
     context 'when content is hidden inside PG dollar-quoted literals' do
+      let(:identifiers) { described_class.identifiers_in(sql, dialect: :postgres) }
       let(:sql) { 'SELECT $tag$FROM authorizations$tag$ AS literal FROM users' }
 
       it 'does not return identifiers from dollar-quoted literals' do
@@ -249,6 +250,7 @@ RSpec.describe Woods::Console::SqlTableScanner do
     end
 
     context 'when content is hidden inside unnamed dollar-quoted literals' do
+      let(:identifiers) { described_class.identifiers_in(sql, dialect: :postgres) }
       let(:sql) { 'SELECT $$FROM authorizations$$ AS literal FROM users' }
 
       it 'does not return identifiers from unnamed dollar-quoted literals' do

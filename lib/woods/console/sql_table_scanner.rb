@@ -46,7 +46,7 @@ module Woods
             "(?<jschema_dq>[^"]+)" |
             (?<jschema_bare>\w+)
           )
-          \.
+          \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
@@ -89,7 +89,7 @@ module Woods
             "(?<schema_dq>[^"]+)" |
             (?<schema_bare>\w+)
           )
-          \.
+          \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
@@ -127,7 +127,7 @@ module Woods
             "(?<schema_dq>[^"]+)" |
             (?<schema_bare>\w+)
           )
-          \.
+          \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
@@ -156,11 +156,11 @@ module Woods
       #
       # @param sql [String, nil] the SQL string to scan
       # @return [Array<String>] identifiers in first-encounter order, deduplicated
-      def self.identifiers_in(sql)
+      def self.identifiers_in(sql, dialect: nil)
         return [] if sql.nil? || sql.empty?
 
         results = []
-        %i[postgres mysql].each do |dialect|
+        (dialect ? [dialect] : %i[postgres mysql]).each do |dialect|
           stripped = strip_noise(sql, dialect: dialect)
           executable_comment_views(stripped).each do |view|
             collect_join_identifiers(view, results)

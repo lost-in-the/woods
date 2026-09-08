@@ -450,7 +450,7 @@ module Woods
         return unless @table_gate
 
         begin
-          @table_gate.check_sql!(sql)
+          @table_gate.check_sql!(sql, dialect: sql_dialect)
         rescue TableGateError => e
           raise ValidationError, e.message
         end
