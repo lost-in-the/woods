@@ -7,6 +7,7 @@ require 'woods/embedding/text_preparer'
 require 'woods/storage/vector_store'
 require 'woods/storage/metadata_store'
 require 'woods/retriever'
+require 'woods/evaluation/baseline_runner'
 
 RSpec.describe 'Typed embedding identities' do
   it 'retains both types through incremental embedding and retrieval' do
@@ -26,6 +27,10 @@ RSpec.describe 'Typed embedding identities' do
       end
       expect(vectors.count).to eq(2)
       expect(metadata.count).to eq(2)
+      baseline = Woods::Evaluation::BaselineRunner.new(metadata_store: metadata, seed: 1)
+      %i[grep random file_level].each do |strategy|
+        expect(baseline.run('reports', strategy: strategy)).to eq(['reports'])
+      end
       retriever = Woods::Retriever.new(vector_store: vectors, metadata_store: metadata,
                                        graph_store: Woods::Storage::GraphStore::Memory.new,
                                        embedding_provider: provider)

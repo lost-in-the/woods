@@ -210,7 +210,9 @@ prefix are escaped too. An incremental embed migrates an ambiguous legacy key on
 after storing its replacement vectors. Existing typed keys stay stable when one
 variant disappears. Normal mass-deletion guards still apply to vanished units.
 Custom vector consumers must treat storage IDs as opaque and use metadata for
-public identifiers. Older dumps remain readable; re-embed to recover variants
+public identifiers. Evaluation baselines normalize storage keys back to public
+names and count same-named typed variants once, matching name-based ground truth.
+Older dumps remain readable; re-embed to recover variants
 that an older writer had already overwritten.
 
 SQLite migration 007 preserves snapshot rows and permits one row per

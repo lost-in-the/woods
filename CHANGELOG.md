@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Respect MySQL session quote modes throughout Console SQL checks, including
+  `ANSI_QUOTES` and `NO_BACKSLASH_ESCAPES`, without rejecting ordinary escaped literals.
+- Preserve absolute Ruby constants through both AST backends and static-map resolution.
+- Compare evaluation baselines against public names after typed storage transitions.
+
 - Preserve coexisting typed units through embedding, checkpoints, retrieval and
   snapshots. SQLite migration 007 retains old snapshot rows; older JSON snapshots
   remain readable. Remove metadata when the corresponding vanished vectors are pruned.
