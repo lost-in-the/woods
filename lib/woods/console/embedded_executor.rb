@@ -92,7 +92,7 @@ module Woods
 
         normalize_params!(tool, params)
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        result = @safe_context.execute { dispatch(tool, params) }
+        result = @safe_context.execute { with_mysql_quote_modes { dispatch(tool, params) } }
         elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
 
         { 'ok' => true, 'result' => result, 'timing_ms' => elapsed }
@@ -450,7 +450,7 @@ module Woods
         return unless @table_gate
 
         begin
-          @table_gate.check_sql!(sql, dialect: sql_dialect)
+          @table_gate.check_sql!(sql, dialect: sql_dialect, mysql_modes: mysql_quote_modes)
         rescue TableGateError => e
           raise ValidationError, e.message
         end
@@ -762,7 +762,7 @@ module Woods
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
         require_relative 'sql_validator'
-        SqlValidator.new(dialect: sql_dialect).validate!(sql)
+        SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(sql)
         validate_protected_sql_usage!(sql)
         # Post-validation, pre-execution TableGate — blocks every configured
         # table even if the sql is otherwise well-formed.
@@ -807,6 +807,34 @@ module Woods
         return :postgres if adapter.include?('postgre')
 
         nil
+      end
+
+      # Keep session reads local to this request and execution context. Restore
+      # the previous cache for nested requests, including when dispatch raises.
+      def with_mysql_quote_modes
+        previous = Thread.current[:woods_console_mysql_quote_modes]
+        Thread.current[:woods_console_mysql_quote_modes] = {}
+        yield
+      ensure
+        Thread.current[:woods_console_mysql_quote_modes] = previous
+      end
+
+      # Read the executing session, not adapter defaults or a cached boot value.
+      # The request runs inside SafeContext on active_connection throughout.
+      def mysql_quote_modes
+        return {} unless sql_dialect == :mysql
+
+        connection = active_connection
+        cache = Thread.current[:woods_console_mysql_quote_modes]
+        return cache[connection] if cache&.key?(connection)
+
+        modes = connection.select_value('SELECT @@SESSION.sql_mode').to_s.upcase.split(',')
+        result = {
+          ansi_quotes: modes.include?('ANSI_QUOTES'),
+          no_backslash_escapes: modes.include?('NO_BACKSLASH_ESCAPES')
+        }
+        cache[connection] = result if cache
+        result
       end
 
       # Build and execute a structured ActiveRecord query.
@@ -1505,7 +1533,7 @@ module Woods
         referenced = protected.select { |column| sql_identifier_referenced?(sql, column) }
         return if referenced.empty?
 
-        stripped = SqlNoiseStripper.strip_noise(sql, dialect: sql_dialect || :postgres)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: sql_dialect || :postgres, **mysql_quote_modes)
         expressions, tail = protected_sql_projection(stripped)
         selected = expressions.filter_map { |expression| direct_sql_column_name(expression) }
         unsafe = unsafe_protected_sql_column(referenced, expressions, selected, tail)
@@ -1571,7 +1599,7 @@ module Woods
       end
 
       def sql_identifier_referenced?(sql, column)
-        stripped = SqlNoiseStripper.strip_noise(sql, dialect: sql_dialect || :postgres)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: sql_dialect || :postgres, **mysql_quote_modes)
         stripped.match?(/(?<![A-Za-z0-9_$])#{Regexp.escape(column)}(?![A-Za-z0-9_$])/i)
       end
 

@@ -30,4 +30,19 @@ RSpec.describe 'Console SQL dialect boundaries' do
     expect { validator.validate!('SELECT 1--1; SELECT 2') }.to raise_error(Woods::Console::SqlValidationError)
     expect { validator.validate!('SELECT 1--1') }.not_to raise_error
   end
+  [
+    'SELECT 1 FROM "private"."records"',
+    %q(SELECT 'x\' FROM private.records WHERE 'a' = 'a'),
+    'SELECT 1 AS $tag$ FROM "private"."records" AS $tag$'
+  ].each do |sql|
+    it "gates MySQL session-mode interpretation of #{sql}" do
+      expect { gate.check_sql!(sql, dialect: :mysql) }.to raise_error(Woods::Console::TableGateError)
+    end
+  end
+
+  it 'validates functions after literals under NO_BACKSLASH_ESCAPES' do
+    sql = %q(SELECT 'x\', SLEEP(0), 'tail')
+    expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(sql) }
+      .to raise_error(Woods::Console::SqlValidationError)
+  end
 end

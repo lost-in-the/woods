@@ -64,6 +64,8 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 
 Console failures are live Rails/config/security failures, not Index failures. Verify authorized environment, Rails boot, `WOODS_CONSOLE_CONFIG` or direct `cwd`, blocked-table policy, credentials, and stderr.
 
+For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
+
 Nine tools are normal. Eleven appear only with `console_embedded_read_tools`. Do not chase Tier 2/3 or `console_eval`; they do not register in supported packaged modes. Never work around redaction, credential scanning, SQL validation, or a block.
 
 ## Report
