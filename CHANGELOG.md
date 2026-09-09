@@ -82,21 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `enforce_dependencies`, `layer`, `public_path`, `owner`, with a `package_dependency`
   edge per declared dependency. Any `package.yml` change re-runs the extractor wholesale
   during incremental extraction. Woods reports boundaries; `pks check` and
-  `packwerk check` keep enforcement. Package membership on other units is not yet tracked,
-  so a pack-resident file-based unit is not discovered by `PathDispatcher` through its
-  package boundary (follow-up B-175).
-- **Package membership on units (#280).** Every app-owned unit under a package root carries
-  `metadata[:package]` and its graph node carries `package`, on full and incremental runs alike;
-  a `package.yml` change re-annotates the affected units in the same incremental run.
+  `packwerk check` keep enforcement. A pack-resident file-based unit (a service under
+  `packs/billing/app/services/`) is still not discovered by `PathDispatcher`, so it never
+  becomes a unit at all (follow-up B-175).
+- **Package membership on units (#280).** Every discovered app-owned unit under a package
+  root carries `metadata[:package]` and its graph node carries `package`, on full and
+  incremental runs alike; a `package.yml` change re-annotates the affected units in the
+  same incremental run.
 - **`undeclared_package_edges` report.** `GraphAnalyzer#analyze` lists every edge that
   crosses a package boundary the source package never declared, read from the `package`
   node attribute and each package unit's own `package_dependency` edges. `dependents`,
   `lookup`, and `domain_clusters` already show the units; this shows the boundary an
   agent is about to cross. Enforcement stays with `packwerk check` / `pks check`.
-- **`graph_analysis` exposes the cross-database and volatile-dependency reports.** `analysis`
-  accepts `cross_database_edges`, `volatile_dependencies`, and `undeclared_package_edges`; `all`
-  paginates them like every
-  other section, and the markdown and plain renderers print edge-shaped items on one line each.
+- **`graph_analysis` exposes the cross-database and volatile-dependency reports.**
+  `analysis` accepts `cross_database_edges`, `volatile_dependencies`, and
+  `undeclared_package_edges`; `all` paginates them like every other section, and the
+  markdown and plain renderers print edge-shaped items on one line each.
 - **`woods:check:moved_messages` (#280).** Compares two retained payload generations through
   `Woods::PublishedIndex` and lists every public method name that looks like it moved between
   units while its `test_coverage` edge did not follow. Each row is a candidate move into a unit

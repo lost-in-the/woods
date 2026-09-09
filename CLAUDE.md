@@ -149,6 +149,7 @@ lib/
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
+│   ├── published_index.rb              # Read-only reader over one published generation (RuboCop cops, gate scripts)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator (strategy dispatch + type-rank reporting)
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
@@ -185,7 +186,9 @@ lib/
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
-│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
+│   ├── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
+│   ├── published_index/                 # PublishedIndex helpers (EdgeShaper, GenerationCatalog, TypedUnitReader)
+│   └── checks/                          # woods:check:* tasks (GenerationResolution, MovedMessages)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
 │   └── woods.rake                       # Rake task definitions
