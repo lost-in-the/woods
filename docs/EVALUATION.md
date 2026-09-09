@@ -80,7 +80,7 @@ bin/rails "woods:evaluate:ablation[config/eval_ablation.json]"
 
 The report holds every attempt (`task_id`, `condition`, `resolved`, `total_tokens`, `cost_usd`, `turns`, `duration_ms`, `error`, `provenance`) and a summary per condition (`resolution_rate`, `mean_tokens`, `mean_cost_usd`, `mean_turns`, `tasks`, `errors`) plus a `delta` (on minus off, present only when both conditions ran). Tokens are the sum of input, output, cache-creation, and cache-read tokens. `mean_tokens` is `null` when every trial in that condition errored before the agent produced JSON.
 
-A per-trial timeout (`AblationRunner.new(..., timeout: seconds)`, default 600) aborts a hung agent invocation and counts it as an error rather than blocking the run indefinitely.
+A timeout (`AblationRunner.new(..., timeout: seconds)`, default 600) bounds every command a trial runs, applied independently to each one rather than as a single budget shared across the trial: worktree add/remove, the optional `reset`, the agent invocation, and the check. A timed-out `reset` or `check` counts as an error the same way a timed-out agent invocation does. When the default subprocess executor is in use, a timed-out command is terminated (`TERM`, then `KILL` if still alive after a short grace period) so it never outlives the trial that started it.
 
 ### Where to get tasks
 

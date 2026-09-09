@@ -1,13 +1,13 @@
 # frozen_string_literal: true
 
-require 'open3'
 require 'shellwords'
-require 'timeout'
 
 require_relative 'ablation_worktree'
 require_relative 'ablation_summary'
 require_relative 'ablation_provenance'
 require_relative 'ablation_agent_payload'
+require_relative 'ablation_executor'
+require_relative 'ablation_timed_executor'
 
 module Woods
   module Evaluation
@@ -24,6 +24,14 @@ module Woods
     # `claude -p --output-format json` shape. The executor is injectable so
     # the runner never invokes a real agent in specs.
     #
+    # Every command a trial runs (worktree add/remove, the optional reset,
+    # the agent invocation, and the check) shares one {AblationTimedExecutor}
+    # and is therefore bound by the same `timeout`, applied per call rather
+    # than once for the whole trial: a slow reset does not eat into the
+    # agent's budget, and vice versa. A timed-out call is terminated (TERM,
+    # then KILL if still alive after a short grace period) when the
+    # underlying executor exposes a pid.
+    #
     # @example
     #   set = AblationTaskSet.load('config/eval_ablation.json')
     #   report = AblationRunner.new(task_set: set, workdir: Rails.root.to_s).run
@@ -35,11 +43,6 @@ module Woods
       Report = Struct.new(:results, :summary, keyword_init: true)
 
       DEFAULT_TIMEOUT = 600
-
-      DEFAULT_EXECUTOR = lambda do |command, chdir:|
-        stdout, stderr, status = Open3.capture3(command, chdir: chdir)
-        [stdout, stderr, status.success?]
-      end
 
       # Verifies Woods availability before a trial runs, distinguishing "MCP
       # enabled" (the agent command is wired to reach the Woods MCP server)
@@ -59,18 +62,23 @@ module Woods
 
       # @param task_set [AblationTaskSet::Definition]
       # @param workdir [String] the host application root
-      # @param executor [#call] `call(command, chdir:)` returning `[stdout, stderr, success]`
+      # @param executor [#call] `call(command, chdir:)` returning `[stdout, stderr, success]`.
+      #   Wrapped in an {AblationTimedExecutor} exactly once, so every command a trial runs
+      #   through it (worktree add/remove, reset, agent, check) shares the same per-call
+      #   timeout; see `timeout` below.
       # @param conditions [Array<Symbol>] subset of `%i[on off]`
       # @param trial_options [Hash]
-      # @option trial_options [Numeric] :timeout seconds allowed per agent invocation
+      # @option trial_options [Numeric] :timeout seconds allowed per call the trial makes
+      #   (worktree add/remove, the optional reset, the agent invocation, and the check),
+      #   applied independently to each one rather than shared across the whole trial
       # @option trial_options [#call] :woods_probe `call(condition, chdir, command)` returning a boolean
       def initialize(task_set:, workdir:, executor: nil, conditions: %i[on off], **trial_options)
         @task_set = task_set
         @workdir = workdir
-        @executor = executor || DEFAULT_EXECUTOR
         @conditions = conditions
         @timeout = trial_options.fetch(:timeout, DEFAULT_TIMEOUT)
         @woods_probe = trial_options.fetch(:woods_probe, DEFAULT_WOODS_PROBE)
+        @executor = AblationTimedExecutor.new(executor || AblationExecutor.new, timeout: @timeout)
       end
 
       # @return [Report]
@@ -108,29 +116,35 @@ module Woods
       end
 
       def run_agent_and_check(task, condition, chdir, command, provenance)
-        stdout, stderr, success = timed_call(command, chdir)
+        stdout, stderr, success = @executor.call(command, chdir: chdir)
         payload = AblationAgentPayload.parse(stdout)
         provenance.model = payload && payload['model']
-        _out, _err, resolved = @executor.call(task.check, chdir: chdir)
+        _check_stdout, check_stderr, resolved = @executor.call(task.check, chdir: chdir)
 
         Result.new(task_id: task.id, condition: condition, resolved: resolved == true,
                    total_tokens: payload && AblationAgentPayload.token_total(payload['usage']),
                    cost_usd: payload && payload['total_cost_usd'],
                    turns: payload && payload['num_turns'],
                    duration_ms: payload && payload['duration_ms'],
-                   error: agent_error(success, payload, stderr), provenance: provenance)
-      rescue Timeout::Error
-        failed_result(task, condition, provenance, "agent timed out after #{@timeout}s")
-      end
-
-      def timed_call(command, chdir)
-        Timeout.timeout(@timeout) { @executor.call(command, chdir: chdir) }
+                   error: agent_error(success, payload, stderr) || check_timeout_error(check_stderr),
+                   provenance: provenance)
       end
 
       def agent_error(success, payload, stderr)
         return nil if success && payload
 
         [stderr.to_s.strip, payload ? nil : 'agent printed no JSON'].compact.join('; ')
+      end
+
+      # The check's own exit status already drives `resolved`; a normal test
+      # failure is not a harness error. A timeout is: {AblationTimedExecutor}
+      # marks it with a recognizable stderr message, so it still surfaces as
+      # an error (and is counted in the summary) even though `resolved` is
+      # also false.
+      def check_timeout_error(check_stderr)
+        return nil unless check_stderr.to_s.include?('timed out after')
+
+        "check #{check_stderr.strip}"
       end
 
       def preflight_error(condition, chdir, command)

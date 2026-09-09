@@ -175,6 +175,7 @@ RSpec.describe Woods::Evaluation::AblationRunner do
       when /\Aagent --on/
         sleep 0.05
         ['{}', "ran in #{chdir}", true]
+      when /\Acheck-/ then ['', '', false]
       else raise "unexpected command: #{command}"
       end
     end
@@ -184,6 +185,46 @@ RSpec.describe Woods::Evaluation::AblationRunner do
 
     expect(report.results).to all(have_attributes(resolved: false))
     expect(report.results.map(&:error)).to all(include('timed out'))
+  end
+
+  it 'aborts a trial as an error when the reset command hangs past the per-call timeout' do
+    hanging_reset = lambda do |command, chdir:|
+      case command
+      when 'git rev-parse HEAD' then ["abc123\n", '', true]
+      when /\Agit worktree/ then ['', '', true]
+      when 'reset-tree'
+        sleep 0.05
+        ["done in #{chdir}", '', true]
+      else raise "unexpected command: #{command}"
+      end
+    end
+
+    report = described_class.new(task_set: task_set, workdir: '/app', executor: hanging_reset, conditions: [:on],
+                                 timeout: 0.01, woods_probe: permissive_probe).run
+
+    expect(report.results).to all(have_attributes(resolved: false, total_tokens: nil))
+    expect(report.results.map(&:error)).to all(include('reset failed', 'timed out'))
+  end
+
+  it 'aborts a trial as an error when the check command hangs past the per-call timeout' do
+    hanging_check = lambda do |command, chdir:|
+      case command
+      when 'git rev-parse HEAD' then ["abc123\n", '', true]
+      when /\Agit worktree/, 'reset-tree' then ['', '', true]
+      when /\Aagent --on/ then [agent_json(tokens_in: 100, tokens_out: 50, cost: 0.02, turns: 4), '', true]
+      when /\Acheck-/
+        sleep 0.05
+        ["done in #{chdir}", '', true]
+      else raise "unexpected command: #{command}"
+      end
+    end
+
+    report = described_class.new(task_set: task_set, workdir: '/app', executor: hanging_check, conditions: [:on],
+                                 timeout: 0.01, woods_probe: permissive_probe).run
+
+    expect(report.results).to all(have_attributes(resolved: false))
+    expect(report.results.map(&:error)).to all(include('check', 'timed out'))
+    expect(report.summary[:on][:errors]).to eq(2)
   end
 
   describe 'the default Woods availability probe' do

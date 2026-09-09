@@ -10,6 +10,18 @@ module Woods
     # environment overrides, runs the harness, and writes the report (#280).
     # Kept out of the rake file so the task definition stays a thin
     # delegation and the logic is testable without Rake.
+    #
+    # File map for `lib/woods/evaluation/ablation_*.rb`: {AblationTaskSet}
+    # loads and validates the task set file; {AblationRunner} orchestrates a
+    # trial per task per condition; {AblationWorktree} gives each trial its
+    # own disposable git checkout; {AblationExecutor} is the default
+    # subprocess executor; {AblationTimedExecutor} wraps any executor with
+    # the per-call timeout and kill-on-timeout behavior; {AblationProvenance}
+    # and {AblationAgentPayload} build a trial's provenance and parse the
+    # agent's JSON payload; {AblationSummary} aggregates results into the
+    # per-condition and delta summary; {AblationReportWriter} serializes the
+    # report and renders the terminal summary; this class wires them
+    # together for the rake task.
     class AblationTask
       DEFAULT_TASKS = 'config/eval_ablation.json'
       DEFAULT_OUTPUT = 'tmp/eval_ablation.json'
