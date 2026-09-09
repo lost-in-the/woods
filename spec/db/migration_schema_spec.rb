@@ -129,7 +129,7 @@ RSpec.describe 'Core migrations' do
 
       applied = Woods::Db::Migrator.new(connection: legacy_db).migrate!
 
-      expect(applied).to eq([6])
+      expect(applied).to eq([6, 7])
       expect(
         legacy_db.get_first_value('SELECT identifier FROM woods_units WHERE id = 1')
       ).to eq('LegacyUser')
@@ -146,7 +146,7 @@ RSpec.describe 'Core migrations' do
       migrator = Woods::Db::Migrator.new(connection: legacy_db)
       migrator.migrate!
 
-      expect(migrator.schema_version.applied_versions).to contain_exactly(1, 2, 3, 4, 5, 6)
+      expect(migrator.schema_version.applied_versions).to contain_exactly(1, 2, 3, 4, 5, 6, 7)
       expect(
         legacy_db.execute(
           "SELECT name FROM sqlite_master WHERE type='table' AND name='codebase_index_schema_migrations'"
@@ -196,7 +196,7 @@ RSpec.describe 'Core migrations' do
   describe 'Migrator integration' do
     it 'records every migration version as applied' do
       migrator = Woods::Db::Migrator.new(connection: db)
-      expect(migrator.schema_version.applied_versions).to contain_exactly(1, 2, 3, 4, 5, 6)
+      expect(migrator.schema_version.applied_versions).to contain_exactly(1, 2, 3, 4, 5, 6, 7)
     end
 
     it 'is idempotent' do

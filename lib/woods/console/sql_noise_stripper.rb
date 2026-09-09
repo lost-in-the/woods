@@ -59,8 +59,7 @@ module Woods
       #     Dollar-quoted strings (`$$...$$`, `$tag$...$tag$`) are also stripped.
       #   - `:mysql` — single-quoted strings support both `\'` (backslash-escape)
       #     and `''` (doubled-quote) as apostrophe escapes. Dollar-quoted strings
-      #     are also stripped (MySQL does not use them, but stripping them is
-      #     harmless and keeps the two dialects consistent).
+      #     are not recognized by the combined MySQL security scanner.
       # @return [String] a new string with all string literals replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
       DOLLAR_QUOTED = /\$(\w*)\$.*?\$\1\$/m
@@ -115,11 +114,11 @@ module Woods
       # @param sql [String] the SQL string to process
       # @param dialect [Symbol] `:postgres` (default) or `:mysql` — controls
       #   single-quote escape rules (see {.strip_literals}) and whether `#`
-      #   opens a line comment.
+      #   opens a line comment. MySQL quote flags reflect session sql_mode.
       # @return [String] a new string with comments removed and every string
       #   literal replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
-      def self.strip_noise(sql, dialect: :postgres) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity,Metrics/AbcSize
+      def self.strip_noise(sql, dialect: :postgres, ansi_quotes: false, no_backslash_escapes: false) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity,Metrics/AbcSize
         unless SUPPORTED_DIALECTS.include?(dialect)
           raise ArgumentError, "Unknown dialect #{dialect.inspect}. Supported: #{SUPPORTED_DIALECTS.inspect}"
         end
@@ -133,7 +132,10 @@ module Woods
           ch = sql[i]
 
           if ch == "'"
-            close = single_quote_end(sql, i, backslash_escapes: mysql || postgres_escape_string?(sql, i))
+            close = single_quote_end(
+              sql, i,
+              backslash_escapes: (mysql && !no_backslash_escapes) || (!mysql && postgres_escape_string?(sql, i))
+            )
             if close
               out << "''"
               i = close
@@ -143,20 +145,21 @@ module Woods
               i += 1
             end
           elsif ch == '"'
-            close = quoted_span_end(sql, i, quote: '"', backslash_escapes: mysql)
+            close = quoted_span_end(sql, i, quote: '"',
+                                            backslash_escapes: mysql && !ansi_quotes && !no_backslash_escapes)
             if close
               # MySQL parses double quotes as strings unless ANSI_QUOTES is
               # enabled. Treating them as literals prevents a `#` inside the
               # value from hiding live SQL. PostgreSQL uses them for
               # identifiers, which must remain visible to table/column scans.
-              out << double_quote_replacement(sql, i, close, mysql: mysql)
+              out << double_quote_replacement(sql, i, close, mysql: mysql && !ansi_quotes)
               i = close
             else
               out << ch
               i += 1
             end
           elsif mysql && ch == '`'
-            close = quoted_span_end(sql, i, quote: '`', backslash_escapes: true)
+            close = quoted_span_end(sql, i, quote: '`', backslash_escapes: false)
             if close
               # Backticks delimit identifiers. Preserve the token for table
               # and protected-column scans while shielding comment markers
@@ -167,7 +170,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
+          elsif !mysql && ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
             close = sql.index(tag, i + tag.length)
             if close
               out << "''"
@@ -176,7 +179,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif (ch == '-' && sql[i + 1] == '-') || (mysql && ch == '#')
+          elsif dash_comment?(sql, i, mysql: mysql) || (mysql && ch == '#')
             nl = sql.index("\n", i)
             i = nl || len
           elsif ch == '/' && sql[i + 1] == '*' && sql[i + 2] != '!'
@@ -204,6 +207,25 @@ module Woods
 
         out
       end
+
+      # Session modes change MySQL quoting without changing the adapter name.
+      # Security consumers must reject SQL unsafe under any supported combination.
+      MYSQL_QUOTE_MODES = [false, true].product([false, true]).map do |ansi, no_backslash|
+        { ansi_quotes: ansi, no_backslash_escapes: no_backslash }.freeze
+      end.freeze
+
+      def self.security_views(sql, dialect:, mysql_modes: nil)
+        modes = dialect == :mysql && mysql_modes.nil? ? MYSQL_QUOTE_MODES : [mysql_modes || {}]
+        modes.map { |mode| strip_noise(sql, dialect: dialect, **mode) }.uniq
+      end
+
+      # MySQL requires whitespace/control after --; otherwise it is subtraction.
+      def self.dash_comment?(sql, index, mysql:)
+        return false unless sql[index, 2] == '--'
+
+        !mysql || sql[index + 2].nil? || sql[index + 2].match?(/[[:space:][:cntrl:]]/)
+      end
+      private_class_method :dash_comment?
 
       # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
       # `$tag$`) at the start of the given slice.

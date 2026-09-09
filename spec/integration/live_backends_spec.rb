@@ -28,6 +28,7 @@ require 'woods/embedding/fake'
 require 'woods/embedding/indexer'
 require 'woods/embedding/text_preparer'
 require 'woods/storage/vector_store'
+require 'woods/storage/metadata_store'
 require 'woods/storage/pgvector'
 require 'woods/storage/qdrant'
 
@@ -73,6 +74,36 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
   end
 
+  shared_examples 'typed embedding persistence' do
+    it 'reconciles a name collision without losing either durable vector' do
+      Dir.mktmpdir do |dir|
+        metadata = Woods::Storage::MetadataStore::InMemory.new
+        provider = Woods::Embedding::Provider::Fake.new(dims: 3)
+        indexer = Woods::Embedding::Indexer.new(
+          provider: provider,
+          text_preparer: Woods::Embedding::TextPreparer.new,
+          vector_store: store, metadata_store: metadata, output_dir: dir
+        )
+        %w[factory database_view].each_with_index do |type, index|
+          data = { type: type, identifier: 'reports', source_code: type, source_hash: type }
+          File.write(File.join(dir, "#{type}.json"), JSON.generate(data))
+          unless index.zero?
+            allow(provider).to receive(:embed_batch).and_raise('provider unavailable')
+            expect { indexer.index_incremental }.to raise_error(Woods::Error, /provider unavailable/)
+            expect(store.each_id.to_a).to eq(['reports'])
+            allow(provider).to receive(:embed_batch).and_call_original
+          end
+          index.zero? ? indexer.index_all : indexer.index_incremental
+        end
+        expect(store.count).to eq(2)
+        expect(store.each_id.to_a).to contain_exactly(
+          Woods::StorageIdentity.key('reports', 'factory'), Woods::StorageIdentity.key('reports', 'database_view')
+        )
+        expect(indexer.index_incremental[:skipped]).to eq(2)
+      end
+    end
+  end
+
   describe 'pgvector against a real PostgreSQL' do
     let(:connection) do
       require 'active_record'
@@ -90,6 +121,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
 
     before { reset_pg_schema!(connection, store) }
+
+    include_examples 'typed embedding persistence'
 
     it 'creates its schema idempotently' do
       expect { store.ensure_schema! }.not_to raise_error
@@ -205,6 +238,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     end
 
     before { reset_qdrant_collection!(qdrant_url, collection, 3, store) }
+
+    include_examples 'typed embedding persistence'
 
     it 'round-trips a stored vector, reverse-mapping the point id to the Woods identifier' do
       store.store('Billing::Payment', vec(1, 0, 0), { type: 'model' })

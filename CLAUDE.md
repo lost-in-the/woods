@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 7 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (34 extractors + 7 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
 
 ## Commands
 
@@ -125,9 +125,6 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - **`woods-testbed` `rails-8.0`**: default. Day-to-day Rails 8 validation. Fast, small, self-contained.
 - **`woods-testbed` `rails-7.2`**: when a change could plausibly behave differently on Rails 7 (Zeitwerk load paths, callback-chain internals, `eager_load!` error paths).
 - **`woods-testbed` `rails-6.0`**: the supported floor (`railties >= 6.0`, #135). Use when a change touches 6.0/6.1-era APIs (e.g. `connection_db_config`, `has_many_inversing` guards) or to validate the lowest end of the matrix. Boots on Ruby 3.0.
-- **`~/work/test_app`** (local-only host), when a change needs a committed integration spec, or maps cleanly to `spec/integration/` fixtures. No Docker, runs on Rails 8.1.
-- **A production-shaped MySQL host app** (local-only, see `.claude/rules/integration-testing.md`), only when a problem demands a large real codebase: namespace collisions, large callback chains, non-standard service directories, many-model PageRank behaviour.
-
 **Gotchas:**
 - `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
 - Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
@@ -136,7 +133,7 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - For the same reason, `woods:incremental` in a container exits 1 at changed-file-set resolution (a *git range* error) before ever reaching `prepare_incremental_run` — an exit-code-only probe of the incremental baseline guard is a false green. Supply `CHANGED_FILES=<paths>` so the run reaches the guard.
 - When byte-diffing unit JSON between two extractions, establish a full-vs-full control first: controllers with inline proc filters differ between any two processes (`Proc#inspect` embeds a memory address in the filter-chain annotation, B-167). Only differences beyond that control set are real divergence.
 
-See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
+Keep host-specific paths, credentials, and session notes outside the repository. Use the companion testbed for reproducible runtime validation.
 
 ## Architecture
 
@@ -250,7 +247,7 @@ bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb # Single file
 bundle exec rubocop -a
 ```
 
-After gem-level specs pass, validate in a host app if the change affects extraction output. See `.claude/rules/integration-testing.md` for host app validation workflow.
+After gem-level specs pass, validate in the companion testbed if the change affects extraction output.
 
 ## Documentation
 
@@ -264,24 +261,6 @@ Key references:
 ## Backlog Workflow
 
 See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking items, implementing with TDD, marking resolved, and adding new work.
-
-## Session Continuity
-
-At the end of a session, update `.claude/context/session-state.md` with breadcrumbs:
-
-- Which backlog items were touched (resolved or in-progress)
-- Which files were modified
-- Any gotchas discovered during the session
-
-At the start of a session, read `.claude/context/session-state.md` for context from the previous session.
-
-> **Local-only files.** `.claude/context/session-state.md` and
-> `.claude/rules/integration-testing.md` are intentionally gitignored
-> (see `.gitignore`), they're session-local and host-local notes, not
-> shared conventions. If either file is missing in a fresh clone, create
-> it (templates live in `.claude/skills/backlog-workflow/SKILL.md`'s
-> references and this section). `.claude/skills/backlog-workflow/SKILL.md`
-> is tracked, the workflow itself is shared.
 
 ## Gotchas
 

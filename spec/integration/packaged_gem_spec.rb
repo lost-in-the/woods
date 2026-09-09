@@ -29,8 +29,9 @@ module PackagedGemSpec
   # purpose outside this repo's own CI, which runs it straight from source).
   RELEASE_V2_MACHINERY = %r{\Alib/(tasks/release_v2\.rake|woods/release_v2/)}
   SEMANTIC_REOPEN_BOOTSTRAP = <<~'RUBY'
-    require 'json'
+    # Activate the installed gem's dependencies before instrumentation loads JSON.
     require 'woods'
+    require 'json'
 
     executable, index_dir, expected_cwd, source_root, gem_home, evidence_path = ARGV
     abort "unexpected cwd: #{Dir.pwd}" unless File.identical?(Dir.pwd, expected_cwd)

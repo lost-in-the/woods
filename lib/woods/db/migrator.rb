@@ -7,6 +7,7 @@ require_relative 'migrations/003_create_embeddings'
 require_relative 'migrations/004_create_snapshots'
 require_relative 'migrations/005_create_snapshot_units'
 require_relative 'migrations/006_rename_tables'
+require_relative 'migrations/007_typed_snapshot_units'
 
 module Woods
   module Db
@@ -28,7 +29,8 @@ module Woods
         Migrations::CreateEmbeddings,
         Migrations::CreateSnapshots,
         Migrations::CreateSnapshotUnits,
-        Migrations::RenameTables
+        Migrations::RenameTables,
+        Migrations::TypedSnapshotUnits
       ].freeze
 
       attr_reader :schema_version

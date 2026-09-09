@@ -142,6 +142,7 @@ module Woods
       units.each { |unit| unit.file_path = relative_path(unit.file_path) }
       units.concat(file_units(sources))
       disambiguate!(units)
+      qualify_dependencies(units)
       resolve_dependents(units)
       units.sort_by { |unit| [unit.identifier, unit.type.to_s, unit.file_path] }
     end
@@ -171,6 +172,34 @@ module Woods
           unit.dependencies << { type: unit.type, target: canonical, via: :definition_of }
         end
       end
+    end
+
+    # Resolve only known lexical definitions, retaining external/dynamic names as written.
+    def qualify_dependencies(units)
+      definitions = units.select { |unit| %i[ruby_class ruby_module].include?(unit.type) }.to_h do |unit|
+        [unit.metadata[:canonical_identifier] || unit.identifier, unit]
+      end
+      units.each do |unit|
+        unit.dependencies.each { |dependency| qualify_dependency(unit, dependency, definitions) }
+      end
+    end
+
+    def qualify_dependency(unit, dependency, definitions)
+      target = dependency[:target]
+      return unless target.is_a?(String)
+
+      scopes = Array(unit.metadata[:lexical_scopes])
+      scopes = scopes.drop(1) if dependency[:via] == :inheritance
+      candidates = if target.start_with?('::')
+                     [target.delete_prefix('::')]
+                   else
+                     scopes.map { |scope| "#{scope}::#{target}" } + [target]
+                   end
+      resolved = candidates.find { |candidate| definitions.key?(candidate) }
+      return unless resolved
+
+      dependency[:target] = resolved
+      dependency[:type] = definitions[resolved].type
     end
 
     def resolve_dependents(units)

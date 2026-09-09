@@ -39,13 +39,13 @@ Run the relevant spec file after every edit; run the full suite
 rubocop -a`.
 
 Host-app validation: if the change affects extraction output, re-run
-against `woods-testbed` per `.claude/rules/integration-testing.md`.
+against `woods-testbed` using the shared instructions in `CLAUDE.md`.
 
 ## 3. Mark the item resolved
 
 1. Update `docs/backlog.json`:
    - Flip `status` from `ready` (or `in-progress`) to `resolved`.
-2. Update `.claude/context/session-state.md` with a one-line breadcrumb.
+2. Record validation evidence and any remaining limitations in the PR.
 
 ## 4. Add new work discovered along the way
 
@@ -91,30 +91,3 @@ the field order stable when updating existing entries.
   failures the change caused.
 - Don't delete a resolved item — keep it in the archive so reviewers
   can trace history.
-
-## Session-state template
-
-`CLAUDE.md` asks you to update `.claude/context/session-state.md` at
-the end of a session and read it at the start of the next. That file
-is gitignored (it's session-local, not shared). If the directory or
-file doesn't exist yet, bootstrap it with:
-
-```bash
-mkdir -p .claude/context
-cat > .claude/context/session-state.md <<'EOF'
-# Session State
-
-Local notes for the next Claude Code session. This file is gitignored.
-
-## Last session — <YYYY-MM-DD>
-
-- Backlog items touched (ids + status transitions):
-- Files modified:
-- Tests run and status:
-- Gotchas discovered:
-- Next suggested pick:
-EOF
-```
-
-Then update the five bullets at the end of each session. Keep it
-terse — it's a breadcrumb, not a journal.

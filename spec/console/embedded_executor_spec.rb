@@ -41,6 +41,26 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
   end
 
   describe '#send_request' do
+    it 'reads MySQL quote modes once per request and refreshes after a failed request' do
+      allow(connection).to receive(:adapter_name).and_return('Mysql2')
+      allow(connection).to receive(:select_value).with('SELECT @@SESSION.max_execution_time').and_return(0)
+      expect(connection).to receive(:select_value).with('SELECT @@SESSION.sql_mode').once.ordered
+                                                  .and_return('ANSI_QUOTES')
+      expect(connection).to receive(:select_value).with('SELECT @@SESSION.sql_mode').once.ordered
+                                                  .and_return('NO_BACKSLASH_ESCAPES')
+      observed = []
+      allow(executor).to receive(:dispatch) do
+        3.times { observed << executor.send(:mysql_quote_modes) }
+        raise Woods::Console::ValidationError, 'refused' if observed.size == 3
+      end
+
+      expect(executor.send_request({ 'tool' => 'status' })['ok']).to be false
+      expect(executor.send_request({ 'tool' => 'status' })['ok']).to be true
+      expect(observed.first(3)).to all(eq({ ansi_quotes: true, no_backslash_escapes: false }))
+      expect(observed.last(3)).to all(eq({ ansi_quotes: false, no_backslash_escapes: true }))
+      expect(Thread.current[:woods_console_mysql_quote_modes]).to be_nil
+    end
+
     context 'unsupported tools' do
       it 'states that Tier 2+ tools are unavailable in supported modes' do
         response = executor.send_request({ 'tool' => 'diagnose_model', 'params' => { 'model' => 'User' } })

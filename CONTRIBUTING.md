@@ -94,6 +94,8 @@ bin/rubocop
 
 Before requesting review, run the full unit suite and style check unless the PR explains why one cannot run.
 
+Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces the aggregate line floor and measures branches, but does not enforce a branch floor. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
+
 ### Rails version matrix
 
 The gem supports Ruby 3.0 or later and Rails 6.0 through 8.x. CI separates fast unit coverage from real Rails boots:
@@ -111,17 +113,17 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
 
 When adding a Rails line, update `Appraisals`, the corresponding hand-maintained gemfile, and `.github/workflows/ci.yml`. For Rails below 7.1, copy an existing 6.x gemfile so its sqlite3 and concurrent-ruby compatibility pins are preserved.
 
-### Live storage backends
+### Live storage and SQL dialects
 
 The opt-in `live-backends` lane verifies behavior against PostgreSQL/pgvector and Qdrant that doubles cannot prove, including batch conflicts, delete addressing, filter translation, and extension setup.
 
 ```bash
 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile bundle install
 WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
-  bin/rspec spec/integration/live_backends_spec.rb
+  bin/rspec spec/integration/live_backends_spec.rb spec/integration/console_sql_dialects_spec.rb
 ```
 
-The lane expects reachable PostgreSQL/pgvector and Qdrant services. Configure endpoints with `WOODS_PG_URL` and `WOODS_QDRANT_URL`. New adapter behavior that depends on a real server belongs in this lane.
+The lane expects reachable PostgreSQL/pgvector, MySQL, and Qdrant services. Configure endpoints with `WOODS_PG_URL`, `WOODS_MYSQL_URL`, and `WOODS_QDRANT_URL`. The Console contracts exercise blocked-table enforcement and legitimate SQL on both database dialects. New adapter behavior that depends on a real server belongs in this lane.
 
 ## Keep public surfaces synchronized
 

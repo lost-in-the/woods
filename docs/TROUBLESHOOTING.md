@@ -781,3 +781,11 @@ For a single-call health snapshot, call the Index Server's `woods_status` tool. 
 Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
 
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
+
+## Units with the same name but different types
+
+After upgrading, run embedding again if semantic results omit a factory or database
+view sharing the same name. Current writers distinguish typed storage identities;
+public names remain unchanged. Snapshot migration 007 runs automatically and keeps
+existing rows, but cannot recover variants lost by older writers. See the
+[upgrade guide](UPGRADING_TO_2.md) for storage, flow rebuild, and rollback details.
