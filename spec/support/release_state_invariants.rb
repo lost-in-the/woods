@@ -28,12 +28,21 @@ RSpec.shared_examples 'a coherent release state' do
     end
   end
 
-  it 'empties Unreleased at a release and leaves it collecting during development' do
+  # A release commit leaves Unreleased empty; the checkout then stays at that
+  # version while the next cycle's entries collect under Unreleased, so a
+  # released tree may carry entries as long as every one sits under a heading.
+  let(:freshly_released) { false }
+
+  it 'empties Unreleased at a release and lets the next cycle collect afterwards' do
     if release_state.alpha?
       expect { Woods::Release::Changelog.fold(release_changelog, version: "#{release_state.base}.beta1") }
         .not_to raise_error
-    else
+    elsif freshly_released
       expect(release_unreleased.to_s.strip).to eq('')
+    else
+      stray = release_unreleased.to_s.lines.map(&:rstrip).reject(&:empty?)
+                                .reject { |line| line.start_with?('### ', '- ', '  ') }
+      expect(stray).to be_empty
     end
   end
 
