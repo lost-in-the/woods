@@ -1504,6 +1504,8 @@ module Woods
     # the units (an incremental run never holds every unit in memory).
     #
     # @return [void]
+    # build_file_metadata always emits commit_count and change_frequency together
+    # and non-nil, so no nil compaction is needed here (contrast annotate_node_from_git).
     def annotate_graph_with_git_data
       @results.each_value do |units|
         units.each do |unit|

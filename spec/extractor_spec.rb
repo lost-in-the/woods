@@ -3330,7 +3330,7 @@ RSpec.describe Woods::Extractor do
       File.write(File.join(dir, extractor.send(:collision_safe_filename, 'Post')),
                  JSON.generate(identifier: 'Post', metadata: {}))
 
-      # This batch's git data carries only commit_count — change_frequency is
+      # This batch's git data carries only commit_count: change_frequency is
       # absent from the hash entirely, not present-and-nil.
       extractor.send(:rewrite_unit_json_of_type, 'Post', :model, Set.new,
                      refresh_dependents: false,
@@ -3349,6 +3349,9 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # Characterization: no current caller sets metadata[:git] before registration
+  # (the incremental git second pass annotates through annotate_node_from_git).
+  # These specs pin the guarantee for a future caller that does.
   describe '#register_and_write git node annotation (#280)' do
     before do
       require 'woods'
