@@ -533,6 +533,26 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
 | `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |
+| `WOODS_GIT_DIR` | unset | Absolute path to the canonical git directory. Wins over the repository Woods would otherwise find, for every git call it makes: per-unit `commit_count` and `change_frequency`, and `manifest.json`'s `git_branch`/`git_sha`. |
+| `GIT_BRANCH`, `GIT_SHA` | unset | Provenance for a checkout with no `.git` at all (a source tarball, a Docker `COPY` that excludes it). Ignored when a `.git` is present but unresolvable, so a stale build arg cannot mask a worktree. |
+
+**`GIT_DIR` alone is not enough for a linked git worktree.** Woods runs git as a
+subprocess, so git's own `GIT_DIR` and `GIT_COMMON_DIR` are honored wherever git
+honors them. But pointing `GIT_DIR` at a worktree's *private* git directory only
+moves the failure: that directory reaches the shared object store through a
+relative `commondir` pointer, which still resolves outside a container mount,
+and `GIT_COMMON_DIR` does not override it. `git rev-parse --git-dir` then
+succeeds while no ref resolves.
+
+Woods refuses to enrich in that state rather than writing `commit_count: 0` and
+`change_frequency: "new"` on every unit: the git keys are omitted, provenance is
+`"unknown"`, and one warning names the cause. Point `WOODS_GIT_DIR` at the
+canonical git directory (the one a worktree's `gitdir:` pointer ultimately leads
+to) and mount it:
+
+```bash
+WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
+```
 
 ### Exporters
 

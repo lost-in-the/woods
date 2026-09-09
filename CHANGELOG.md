@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`WOODS_GIT_DIR` names the canonical git directory outright.** It wins over
+  whatever repository Woods would otherwise find, for both per-unit git metadata
+  and `manifest.json` provenance. This is the escape hatch for a container that
+  can mount the canonical git directory but not the host path a linked
+  worktree's `gitdir:` pointer names.
 - **Database-partition layer for multi-database apps (#280).** Model units record
   `metadata[:database]` from `connection_db_config` (Rails 6.1+, `nil` on 6.0), so a model
   that inherits `connects_to` from an abstract class reports the inherited database.
@@ -458,6 +463,17 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Git enrichment refuses to invent history it cannot read.** Over a
+  containerized linked worktree, `git rev-parse --git-dir` succeeds while no ref
+  resolves (the private git directory reaches the shared one through a relative
+  `commondir` pointer), `git log` exits 0 with no output, and every unit was
+  written with `commit_count: 0` and `change_frequency: "new"`,
+  indistinguishable from a file that was never committed. Enrichment now
+  requires `git rev-parse HEAD` to succeed: when it does not, the git keys are
+  omitted from every unit, provenance records `"unknown"`, and one warning names
+  git's own reason. `docs/TROUBLESHOOTING.md` and
+  `docs/CONFIGURATION_REFERENCE.md` state that `GIT_DIR` alone is not enough for
+  a linked worktree.
 - **`dependents` and `dependencies` are bounded and say when they truncate.**
   Both tools now return at most 50 traversal nodes by default, accept `limit`
   and `offset` like `graph_analysis`, and print the same

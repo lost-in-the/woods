@@ -78,10 +78,26 @@ module Woods
     #
     # @return [String] stripped output, or empty string on any failure
     def rev_parse(*args)
-      out, _err, status = Open3.capture3('git', '-C', @root, 'rev-parse', *args)
+      out, _err, status = Open3.capture3(*git_argv('rev-parse', *args))
       status.success? ? out.strip : ''
     rescue StandardError
       ''
+    end
+
+    # +WOODS_GIT_DIR+ names the canonical git directory outright and wins when
+    # set. It is the escape hatch for a container that can mount that
+    # directory but not the host path a linked worktree's +.git+ file points
+    # at; git's own +GIT_DIR+ is not enough there, because a worktree's
+    # private git directory reaches the shared one through a relative
+    # +commondir+ pointer that resolves outside the mount.
+    #
+    # @param args [Array<String>] git arguments
+    # @return [Array<String>] full argv
+    def git_argv(*args)
+      override = @env['WOODS_GIT_DIR']
+      return ['git', '-C', @root, *args] if override.nil? || override.empty?
+
+      ['git', '--git-dir', override, '--work-tree', @root, '-C', @root, *args]
     end
 
     # Decide what to emit when git resolution produced nothing. A baked +GIT_*+
