@@ -395,7 +395,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
 - **Git metadata for untouched units.** An incremental run refreshes
   `metadata.git` on the units it wrote. A unit nothing touched keeps the git
   metadata from the last run that did, which goes stale as commits land on
-  other files.
+  other files. The same holds for the node attributes `commit_count` and
+  `change_frequency` that feed the `volatile_dependencies` report.
 - **Snapshots stay full-extraction-only.** They hash the full unit set, and an
   incremental run only holds changed units in memory.
 - **A divergence floor is still worth keeping.** Incremental correctness is a

@@ -16,8 +16,8 @@ A full extraction (`bundle exec rake woods:extract`) runs five phases:
 Phase 1: Extract    . All 34 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
-Phase 3: Graph      . PageRank + structural analysis (orphans, hubs, cycles, bridges)
-Phase 4: Enrich     . Git metadata added (last author, change frequency, recent commits)
+Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
+Phase 4: Graph      . PageRank + structural analysis (orphans, hubs, cycles, bridges, cross-database edges)
 Phase 5: Write      . One JSON file per unit, _index.json per type, dependency_graph.json, SUMMARY.md
 ```
 

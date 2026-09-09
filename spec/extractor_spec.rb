@@ -3270,4 +3270,111 @@ RSpec.describe Woods::Extractor do
       expect { extractor.send(:regenerate_type_index, :models) }.not_to raise_error
     end
   end
+
+  # ── git attributes on graph nodes (#280) ─────────────────────────────
+
+  describe '#annotate_graph_with_git_data' do
+    it 'copies commit_count and change_frequency from unit metadata onto the node' do
+      require 'woods'
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post',
+                                      file_path: File.join(tmpdir, 'app/models/post.rb'))
+      bare = Woods::ExtractedUnit.new(type: :model, identifier: 'Comment',
+                                      file_path: File.join(tmpdir, 'app/models/comment.rb'))
+      extractor.instance_variable_set(:@results, { models: [unit, bare] })
+      extractor.dependency_graph.register(unit)
+      extractor.dependency_graph.register(bare)
+      # Git enrichment lands after registration, so the metadata is set here
+      # to prove annotate copies it rather than register.
+      unit.metadata = { git: { commit_count: 14, change_frequency: :hot } }
+
+      extractor.send(:annotate_graph_with_git_data)
+
+      nodes = extractor.dependency_graph.to_h[:nodes]
+      expect(nodes['Post']).to include(commit_count: 14, change_frequency: 'hot')
+      expect(nodes['Comment'].keys).to contain_exactly(:type, :file_path, :namespace)
+    end
+  end
+
+  describe '#rewrite_unit_json_of_type git node annotation (#280)' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 'annotates the node with the git data it patched into the unit JSON' do
+      path = File.join(tmpdir, 'app/models/post.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: path)
+      extractor.dependency_graph.register(unit)
+      dir = File.join(tmpdir, 'output', 'models')
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, extractor.send(:collision_safe_filename, 'Post')),
+                 JSON.generate(identifier: 'Post', metadata: {}))
+
+      extractor.send(:rewrite_unit_json_of_type, 'Post', :model, Set.new,
+                     refresh_dependents: false,
+                     git_data: { 'app/models/post.rb' => { 'commit_count' => 7, 'change_frequency' => 'active' } })
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Post']).to include(commit_count: 7, change_frequency: 'active')
+    end
+
+    it 'leaves an existing attribute alone when the patched git data is missing that key (#280)' do
+      path = File.join(tmpdir, 'app/models/post.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: path)
+      extractor.dependency_graph.register(unit)
+      extractor.dependency_graph.annotate('Post', type: :model, commit_count: 3, change_frequency: 'warm')
+      dir = File.join(tmpdir, 'output', 'models')
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, extractor.send(:collision_safe_filename, 'Post')),
+                 JSON.generate(identifier: 'Post', metadata: {}))
+
+      # This batch's git data carries only commit_count — change_frequency is
+      # absent from the hash entirely, not present-and-nil.
+      extractor.send(:rewrite_unit_json_of_type, 'Post', :model, Set.new,
+                     refresh_dependents: false,
+                     git_data: { 'app/models/post.rb' => { 'commit_count' => 9 } })
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Post']).to include(commit_count: 9, change_frequency: 'warm')
+    end
+  end
+
+  describe '#build_graph_analyzer' do
+    it 'returns a GraphAnalyzer over the current graph' do
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
+
+      expect(extractor.send(:build_graph_analyzer)).to be_a(Woods::GraphAnalyzer)
+    end
+  end
+
+  describe '#register_and_write git node annotation (#280)' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it "annotates the node from the unit's own metadata[:git] when a caller has already set it" do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post',
+                                      file_path: File.join(tmpdir, 'app/models/post.rb'))
+      unit.metadata[:git] = { commit_count: 9, change_frequency: 'warm' }
+
+      extractor.send(:register_and_write, :models, [unit], Set.new)
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Post']).to include(commit_count: 9, change_frequency: 'warm')
+    end
+
+    it 'does not annotate the node when the unit carries no git metadata' do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Comment',
+                                      file_path: File.join(tmpdir, 'app/models/comment.rb'))
+
+      extractor.send(:register_and_write, :models, [unit], Set.new)
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Comment'].keys).to contain_exactly(:type, :file_path, :namespace)
+    end
+  end
 end

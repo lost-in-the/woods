@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
   complementary on symbol references.
+- **Git commit facts land on graph nodes before analysis (#280).** Both extraction
+  paths copy `commit_count` and `change_frequency` from a unit's git metadata onto its
+  graph node: full extraction after git enrichment and before graph analysis
+  (`Extractor#annotate_graph_with_git_data`), incremental extraction as part of the
+  per-unit JSON patch (`Extractor#annotate_node_from_git`). A patch missing one of the
+  two keys leaves the node's existing value for that key alone rather than clearing it.
+
+  This gives `GraphAnalyzer` access to git facts without holding every unit in memory,
+  which an incremental run never does.
 
 ### Performance
 

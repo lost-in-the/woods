@@ -107,11 +107,11 @@ EXTRACTORS.each { |type, klass| @results[type] = klass.new.extract_all }
 # Phase 2: Resolve dependents
 # Second pass: if A.dependencies includes B, B.dependents gets a back-reference to A
 
-# Phase 3: Graph analysis
-# PageRank, orphans, dead ends, hubs, cycles, bridges
-
-# Phase 4: Enrich with git
+# Phase 3: Enrich with git
 # batch git log for all file paths → last_modified, contributors, change_frequency
+
+# Phase 4: Graph analysis
+# PageRank, orphans, dead ends, hubs, cycles, bridges
 
 # Phase 5: Write
 # One JSON file per unit + _index.json per type + dependency_graph.json + SUMMARY.md + manifest.json

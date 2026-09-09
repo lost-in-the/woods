@@ -416,13 +416,15 @@ module Woods
       Rails.logger.info '[Woods] Resolving dependents...'
       resolve_dependents
 
-      # Phase 3: Graph analysis (PageRank, structural metrics)
-      Rails.logger.info '[Woods] Analyzing dependency graph...'
-      @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
-
-      # Phase 4: Enrich with git data
+      # Phase 3: Enrich with git data. Runs BEFORE analysis now: the
+      # volatile_dependencies report reads commit counts off graph nodes.
       Rails.logger.info '[Woods] Enriching with git data...'
       enrich_with_git_data
+      annotate_graph_with_git_data
+
+      # Phase 4: Graph analysis (PageRank, structural metrics)
+      Rails.logger.info '[Woods] Analyzing dependency graph...'
+      @graph_analysis = build_graph_analyzer.analyze
 
       # Phase 4.5: Normalize file_path to relative paths
       Rails.logger.info '[Woods] Normalizing file paths...'
@@ -931,7 +933,7 @@ module Woods
     # @return [void]
     # @raise [StandardError] whatever GraphAnalyzer or the write raised
     def write_incremental_graph_analysis
-      @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
+      @graph_analysis = build_graph_analyzer.analyze
       write_graph_analysis
     rescue StandardError => e
       Rails.logger.error "[Woods] Incremental graph analysis failed: #{e.message}"
@@ -1496,6 +1498,33 @@ module Woods
           unit.metadata[:git] = git_data[relative] if git_data[relative]
         end
       end
+    end
+
+    # Copy git facts onto graph nodes so the analyzer can read them without
+    # the units (an incremental run never holds every unit in memory).
+    #
+    # @return [void]
+    def annotate_graph_with_git_data
+      @results.each_value do |units|
+        units.each do |unit|
+          git = unit.metadata[:git]
+          next unless git.is_a?(Hash)
+
+          @dependency_graph.annotate(
+            unit.identifier,
+            type: unit.type,
+            commit_count: git[:commit_count],
+            change_frequency: git[:change_frequency]
+          )
+        end
+      end
+    end
+
+    # The one constructor for the analyzer both extraction paths use.
+    #
+    # @return [GraphAnalyzer]
+    def build_graph_analyzer
+      GraphAnalyzer.new(@dependency_graph)
     end
 
     # Is this a path worth asking git about?
@@ -3058,7 +3087,10 @@ module Woods
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
-      (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git)) if git
+      if git
+        (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
+        annotate_node_from_git(identifier, type, git)
+      end
 
       return if JSON.generate(data) == before
 
@@ -3080,6 +3112,29 @@ module Woods
       return nil unless node && node[:file_path]
 
       git_data[normalize_file_path(node[:file_path])]
+    end
+
+    # Mirror of {#annotate_graph_with_git_data} for one incrementally
+    # patched unit. Git data arrives symbol-keyed from {#batch_git_data} and
+    # string-keyed when a caller hands in parsed JSON; both are accepted.
+    #
+    # Unlike {#annotate_graph_with_git_data}, a missing key is never forwarded
+    # as an explicit `nil`: {DependencyGraph#annotate} treats `nil` as
+    # "clear this attribute", and this batch's git data can be missing one of
+    # the two keys without meaning the other's last-known value is gone.
+    #
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param git [Hash]
+    # @return [void]
+    def annotate_node_from_git(identifier, type, git)
+      attributes = {
+        commit_count: git[:commit_count] || git['commit_count'],
+        change_frequency: git[:change_frequency] || git['change_frequency']
+      }.compact
+      return if attributes.empty?
+
+      @dependency_graph.annotate(identifier, type: type, **attributes)
     end
 
     # Batch-fetch git metadata for the units written by this run, in a single
