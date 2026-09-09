@@ -34,9 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry come back with `to: nil` and an `ambiguous_owners` list instead of guessing.
   Written to `graph_analysis.json`; exposed through `graph_analysis` in Task 10.
 - **A phase breakdown of one full extraction of the fixture app**, in
-  `docs/WATCH_DAEMON.md`. Graph analysis, PageRank included, is 3.3% of the run;
-  git enrichment is 12%; the one phase over 15% is `RailsSourceExtractor`, which
-  is 55% only because 119 of the fixture's 147 units are framework sources.
+  `docs/WATCH_DAEMON.md`. Graph analysis, PageRank included, is 3.2% of the run;
+  git enrichment is 11.6%; the one phase over 15% is `RailsSourceExtractor`,
+  which is 52.6% only because 119 of the fixture's 147 units are framework
+  sources.
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
   complementary on symbol references.
@@ -475,8 +476,11 @@ derive unit identifiers, which changes the index format's observable contract.
   subtree of `app/views` was never a descendant and never indexed. Both now ask
   the autoloader for every Ruby file under the component directories first, and
   the directory list is configurable through `config.component_paths` (default
-  `app/components`, `app/views/components`, `app/views`). The ViewComponent path
-  is skipped entirely when `ViewComponent::Base` is undefined.
+  `app/components`, `app/views/components`, `app/views`; an empty array walks
+  nothing). Nested directories collapse into their ancestor, and one debug line
+  per run reports files whose directory is not on an autoload path. The
+  ViewComponent path is skipped entirely when `ViewComponent::Base` is
+  undefined.
 - **Git enrichment refuses to invent history it cannot read.** Over a
   containerized linked worktree, `git rev-parse --git-dir` succeeds while no ref
   resolves (the private git directory reaches the shared one through a relative

@@ -25,6 +25,14 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
 
   after { FileUtils.rm_rf(root) }
 
+  # `Rails.logger.debug` is called with a block, so the spy records no
+  # arguments. Capture what the block would have written instead.
+  let(:debug_messages) { [] }
+
+  before do
+    allow(logger).to receive(:debug) { |*args, &block| debug_messages << (block ? block.call : args.first) }
+  end
+
   def write(relative, contents = "# component\n")
     path = File.join(root, relative)
     FileUtils.mkdir_p(File.dirname(path))
@@ -78,6 +86,46 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
       host.load_component_files
     end
 
+    it 'walks nothing when the configured list is empty' do
+      Woods.configuration.component_paths = []
+      write('app/components/badge_component.rb')
+
+      expect(host).not_to receive(:constantize_component_file)
+
+      host.load_component_files
+    end
+
+    # `app/views/components` sits under `app/views`, and both are defaults, so
+    # the recursive glob handed every file below the former to the autoloader
+    # twice.
+    it 'walks a nested configured directory once' do
+      nested = write('app/views/components/ui/card_component.rb')
+
+      expect(host).to receive(:constantize_component_file).with(nested).once
+
+      host.load_component_files
+    end
+
+    it 'says once how many files resolved to no constant' do
+      write('lib/loose/thing.rb')
+      Woods.configuration.component_paths = ['lib/loose']
+
+      host.load_component_files
+
+      # Logged through a block, so the string is never built on a logger that
+      # would drop it.
+      expect(debug_messages.size).to eq(1)
+      expect(debug_messages.first).to match(/1 component file/)
+    end
+
+    it 'stays quiet when every file resolved' do
+      write('app/views/ui/card_component.rb')
+
+      host.load_component_files
+
+      expect(debug_messages).to be_empty
+    end
+
     it 'honours a configured directory list' do
       Woods.configuration.component_paths = ['app/widgets']
       autoload_paths << File.join(root, 'app', 'widgets')
@@ -105,10 +153,10 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
       expect(host.component_paths).to eq(described_class::DEFAULT_COMPONENT_PATHS)
     end
 
-    it 'falls back to the default when the configured list is empty' do
+    it 'walks nothing when the configured list is empty' do
       Woods.configuration.component_paths = []
 
-      expect(host.component_paths).to eq(described_class::DEFAULT_COMPONENT_PATHS)
+      expect(host.component_paths).to eq([])
     end
   end
 end

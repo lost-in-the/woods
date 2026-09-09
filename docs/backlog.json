@@ -2504,7 +2504,7 @@
     "id": "B-182",
     "title": "Persisted volatile_dependencies is capped at 20 with no marker in the artifact, and section names do not derive their stat keys",
     "severity": "low",
-    "category": "docs",
+    "category": "code-bug",
     "layer": "graph",
     "files": [
       "lib/woods/graph_analyzer.rb",

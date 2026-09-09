@@ -33,35 +33,61 @@ module Woods
       #
       # @return [void]
       def load_component_files
-        component_paths.each do |relative|
-          directory = File.join(Rails.root.to_s, relative)
-          next unless File.directory?(directory)
-
+        unresolved = 0
+        component_directories.each do |directory|
           Dir.glob(File.join(directory, '**', '*.rb')).each do |path|
-            constantize_component_file(path)
+            unresolved += 1 unless constantize_component_file(path)
           end
+        end
+        return if unresolved.zero?
+
+        # The one misconfiguration this cannot fix for the caller: a component
+        # directory no Rails autoload path owns. Loading those files by hand
+        # would define constants Zeitwerk does not manage, so they are skipped,
+        # and skipping silently looks identical to having no components.
+        Rails.logger.debug do
+          "[Woods] #{unresolved} component file(s) resolved to no constant; " \
+            'their directory is not on an autoload path.'
         end
       end
 
+      # @return [Array<String>] absolute directories to walk, nested entries
+      #   collapsed into their ancestor so no file is handed over twice
+      def component_directories
+        present = component_paths
+                  .map { |relative| File.join(Rails.root.to_s, relative) }
+                  .uniq
+                  .select { |directory| File.directory?(directory) }
+
+        present.reject do |directory|
+          present.any? { |other| other != directory && directory.start_with?("#{other}#{File::SEPARATOR}") }
+        end
+      end
+
+      # Nil means "the defaults". An explicitly empty list means "walk
+      # nothing", which is how an app opts out of the walk entirely.
+      #
       # @return [Array<String>] directories to scan, relative to Rails.root
       def component_paths
         configured = Woods.configuration&.component_paths
-        configured.nil? || configured.empty? ? DEFAULT_COMPONENT_PATHS : Array(configured)
+        configured.nil? ? DEFAULT_COMPONENT_PATHS : Array(configured)
       end
 
       private
 
       # @param path [String] absolute path to a Ruby file
-      # @return [void]
+      # @return [Boolean] false when the path implies no constant Zeitwerk owns
       def constantize_component_file(path)
         name = component_constant_name(path)
-        return unless name
+        return false unless name
 
         name.safe_constantize
+        true
       rescue StandardError, ScriptError => e
         # A component that cannot load must not abort the extraction; a
         # SyntaxError in one file would otherwise take the whole run with it.
         Rails.logger.warn("[Woods] Could not load component file #{path}: #{e.message}")
+        true
       end
 
       # The constant a file's path implies, under the autoload root that owns

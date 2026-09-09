@@ -465,9 +465,23 @@ Woods.configure do |config|
 end
 ```
 
+`nil` means the defaults above. An explicitly empty array means walk nothing,
+which is how an app that keeps no components (or eager-loads all of them) opts
+out of the walk entirely:
+
+```ruby
+Woods.configure { |config| config.component_paths = [] }
+```
+
+Nested entries collapse into their ancestor, so the default list walks
+`app/components` and `app/views` and never hands a file under
+`app/views/components` to the autoloader twice.
+
 A file is loaded only when a Rails autoload path owns it, so the constant its
 path implies is the one Zeitwerk manages. A directory that is not autoloaded is
-walked and skipped.
+walked and skipped; one `Rails.logger.debug` line per extraction says how many
+files that was, so the misconfiguration is visible instead of looking like an
+app with no components.
 
 ## Console MCP options
 

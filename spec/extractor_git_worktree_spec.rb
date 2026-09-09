@@ -49,8 +49,15 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     Woods.configuration = Woods::Configuration.new
   end
 
+  # A machine with global commit signing, a global hooksPath, or a system
+  # gitconfig would otherwise decide whether this spec passes. Every git call
+  # below runs with neither config file in scope.
+  def hermetic_git_env
+    { 'GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_NOSYSTEM' => '1' }
+  end
+
   def run!(*args, chdir:)
-    output, status = Open3.capture2e(*args, chdir: chdir)
+    output, status = Open3.capture2e(hermetic_git_env, *args, chdir: chdir)
     raise "command failed: #{args.join(' ')}\n#{output}" unless status.success?
 
     output
@@ -61,6 +68,10 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     run!('git', 'init', '--quiet', '--initial-branch', 'main', '.', chdir: main_repo)
     run!('git', 'config', 'user.email', 'specs@example.test', chdir: main_repo)
     run!('git', 'config', 'user.name', 'Specs', chdir: main_repo)
+    # A background gc keeps writing into .git after `git commit` returns, and
+    # the tmpdir cleanup then races it into Errno::ENOTEMPTY.
+    run!('git', 'config', 'gc.autoDetach', 'false', chdir: main_repo)
+    run!('git', 'config', 'gc.auto', '0', chdir: main_repo)
     File.write(File.join(main_repo, 'app', 'models', 'post.rb'), "class Post\nend\n")
     run!('git', 'add', '.', chdir: main_repo)
     run!('git', 'commit', '--quiet', '-m', 'add post', chdir: main_repo)
