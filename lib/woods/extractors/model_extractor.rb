@@ -824,29 +824,10 @@ module Woods
         nil
       end
 
-      # table name => database name, over every concrete descendant. Built
-      # once per extractor instance, for a cross-model report that resolves
-      # each foreign key's target database from the table it belongs to.
-      #
-      # @return [Hash{String => String}]
-      def table_database_map
-        @table_database_map ||= ActiveRecord::Base.descendants.each_with_object({}) do |klass, map|
-          next if abstract_class?(klass) || klass.name.nil?
-
-          table = klass.table_name
-          next if table.nil? || map.key?(table)
-
-          database = database_name_for(klass)
-          map[table] = database if database
-        rescue StandardError
-          next
-        end
-      end
-
       # Foreign keys declared on the model's table, as the connection
       # reports them. The target table's database is intentionally not
-      # resolved here, that is a cross-model lookup {#table_database_map}
-      # exists for, left to the graph-level cross_database_edges report.
+      # resolved here, that is left to the graph-level cross_database_edges
+      # report, which resolves it from table owners.
       #
       # @param model [Class]
       # @return [Array<Hash>] `{ from_table:, to_table:, column: }`

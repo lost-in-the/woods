@@ -1345,27 +1345,4 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(deps).to eq(expected)
     end
   end
-
-  describe '#table_database_map' do
-    before do
-      stub_const('ActiveRecord', Module.new)
-      stub_const('ActiveRecord::Base', Class.new do
-        def self.descendants
-          []
-        end
-      end)
-    end
-
-    it 'maps every concrete table to its database and skips classes with no resolvable database' do
-      billing = stub_bare_model('Invoice')
-      allow(billing).to receive_messages(connection_db_config: double('DbConfig', name: 'billing'),
-                                         table_name: 'invoices')
-      plain = stub_bare_model('Post')
-      abstract = stub_bare_model('ApplicationRecord')
-      allow(abstract).to receive(:abstract_class?).and_return(true)
-      allow(ActiveRecord::Base).to receive(:descendants).and_return([billing, plain, abstract])
-
-      expect(extractor.send(:table_database_map)).to eq('invoices' => 'billing')
-    end
-  end
 end
