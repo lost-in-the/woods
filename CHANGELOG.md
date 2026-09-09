@@ -492,9 +492,11 @@ derive unit identifiers, which changes the index format's observable contract.
   Both tools now return at most 50 traversal nodes by default, accept `limit`
   and `offset` like `graph_analysis`, and print the same
   `Showing N of M (truncated)` line; their descriptions name `depth`, `types`
-  and `via` as the controls that shrink an answer rather than page it. Rows
-  carry the unit's database, but only in a graph that spans more than one, so a
-  single-database index renders exactly as before.
+  and `via` as the controls that shrink an answer rather than page it. Every
+  partial answer carries `nodes_total`, the last page of a walk included, so a
+  page is never mistaken for a complete result. Rows carry the unit's database,
+  but only in a graph that spans more than one, so a single-database index
+  renders exactly as before.
 - **`graph_analysis.json` states its own volatile-dependency cap.**
   `stats.volatile_dependencies_limit` (20) now sits beside
   `stats.volatile_dependency_count`, so a reader of the truncated

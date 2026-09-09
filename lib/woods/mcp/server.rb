@@ -399,6 +399,12 @@ module Woods
         # holds every node adds no keys at all, so a small result renders
         # exactly as it did before the bound existed (B-183).
         #
+        # `nodes_total` marks *any* partial answer, not only one with more
+        # behind it. Keying it on `total > offset + limit` left the last page
+        # of a walk indistinguishable from a complete one: 21 nodes of 121,
+        # with nothing saying 100 were skipped. `nodes_truncated` still means
+        # what it always did, "there is more after this page".
+        #
         # @param result [Hash] traversal result, mutated
         # @param limit [Integer] maximum nodes to retain
         # @param offset [Integer] nodes to skip from the front
@@ -411,10 +417,8 @@ module Woods
           return if offset.zero? && total <= limit
 
           result[:nodes] = nodes.to_a.drop(offset).take(limit).to_h
-          if total > offset + limit
-            result[:nodes_total] = total
-            result[:nodes_truncated] = true
-          end
+          result[:nodes_total] = total if offset.positive? || total > limit
+          result[:nodes_truncated] = true if total > offset + limit
           result[:nodes_offset] = offset if offset.positive?
         end
 

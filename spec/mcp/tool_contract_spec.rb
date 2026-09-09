@@ -751,6 +751,8 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(data.dig('nodes', 'Post', 'deps')).to eq(value.zero? ? [] : %w[Comment PostsController])
   end
 
+  # `nodes_total` marks any partial answer; `nodes_truncated` marks one with
+  # more behind it. A last page carries the first and not the second.
   def assert_traversal_limit(data, value, name)
     full = contract_oracle.fetch(name).dig(:result, :data)
     nodes = full.fetch('nodes')
@@ -761,8 +763,9 @@ RSpec.describe 'Index MCP tool contracts' do
 
   def assert_traversal_offset(data, value, name)
     full = contract_oracle.fetch(name).dig(:result, :data)
-    expected = full.merge('nodes' => full.fetch('nodes').to_a.drop(value).to_h)
-    expected = expected.merge('nodes_offset' => value) if value.positive?
+    nodes = full.fetch('nodes')
+    expected = full.merge('nodes' => nodes.to_a.drop(value).to_h)
+    expected = expected.merge('nodes_total' => nodes.size, 'nodes_offset' => value) if value.positive?
     expect(data).to eq(expected)
   end
 

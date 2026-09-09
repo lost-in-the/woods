@@ -356,6 +356,23 @@ RSpec.describe Woods::MCP::Server do
       expect(data['nodes_total']).to eq(121)
     end
 
+    # The marker keyed on `total > offset + limit`, so the *last* page came
+    # back looking exactly like an unpaged complete answer: no total, no
+    # offset, nothing to say 70 nodes were skipped.
+    it 'marks the last page rather than rendering it as a complete answer' do
+      data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', limit: 50, offset: 100))
+
+      expect(data['nodes'].size).to eq(21)
+      expect(data['nodes_total']).to eq(121)
+      expect(data['nodes_offset']).to eq(100)
+    end
+
+    it 'marks a page that is short of the total even at offset zero' do
+      data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', limit: 121))
+
+      expect(data).not_to have_key('nodes_total')
+    end
+
     it 'leaves a page that fits unmarked' do
       data = parse_response(call_tool(server, 'dependents', identifier: 'Post'))
 
