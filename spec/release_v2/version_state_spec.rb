@@ -61,4 +61,13 @@ RSpec.describe 'release version state' do
     expect(plugin_version).not_to eq(version)
     expect(source).not_to include('Woods::VERSION')
   end
+
+  # A version claim outside a fence is a claim nothing rewrites, so it survives
+  # the release that makes it false. Only the banner may name a version here.
+  it 'keeps every version claim in README.md inside a release-state fence' do
+    outside = Woods::Release::Notes.source_outside_fences(root, 'README.md')
+    claims = outside.scan(/(?<![\d.])v?\d+\.\d+\.\d+/)
+
+    expect(claims).to be_empty
+  end
 end

@@ -101,4 +101,67 @@ RSpec.describe Woods::Release::Notes do
         .to raise_error(described_class::MissingFence, /README\.md: no release-state:version-banner fence/)
     end
   end
+
+  describe 'the version claims the banner owns' do
+    it 'carries the tree-documents and development-branch paragraphs in every unreleased state' do
+      with_release_repository(version: '2.0.0.alpha', commit: false) do |root|
+        expect(banner(root)).to include(
+          '> **This tree documents version 2.0.0.**',
+          'read [what changed and how to upgrade](docs/UPGRADING_TO_2.md)',
+          '> `main` is the development branch and can run ahead of the latest published gem.'
+        )
+
+        described_class.apply!(root: root, version: '2.0.0.beta1')
+        expect(banner(root)).to include('> **This tree documents version 2.0.0.**')
+      end
+    end
+
+    it 'leaves no version claim outside a fence in any state' do
+      with_release_repository(version: '2.0.0.alpha', commit: false) do |root|
+        %w[2.0.0.alpha 2.0.0.beta1 2.0.0.rc1 2.0.0].each do |version|
+          described_class.apply!(root: root, version: version)
+          outside = described_class.source_outside_fences(root, 'README.md')
+
+          expect(outside.scan(/(?<![\d.])v?\d+\.\d+\.\d+/)).to be_empty, "leaked a version at #{version}"
+        end
+      end
+    end
+
+    it 'drops the upgrade-guide sentence once the documented version is not a major bump' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n## [2.0.0] - 2026-09-10\n"
+
+      with_release_repository(version: '2.0.0', changelog: changelog, commit: false) do |root|
+        described_class.apply!(root: root, version: '2.1.0.alpha')
+
+        expect(banner(root)).to include('> **This tree documents version 2.1.0.** The full history is in')
+        expect(banner(root)).not_to include('UPGRADING_TO')
+      end
+    end
+  end
+
+  describe 'the upgrade guide fence' do
+    def upgrade_fence
+      described_class::FENCES.find { |fence| fence.fetch(:id) == 'upgrade-availability' }
+    end
+
+    it 'stays pinned to the version the guide is about' do
+      with_release_repository(version: '2.0.0.alpha', commit: false) do |root|
+        expect(described_class.read_body(root, upgrade_fence)).to include('after RubyGems lists 2.0.0')
+
+        described_class.apply!(root: root, version: '2.0.0.beta1')
+        expect(described_class.read_body(root, upgrade_fence)).to include('RubyGems lists 2.0.0.beta1')
+      end
+    end
+
+    it 'empties once the documented version moves past the version the guide is about' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n## [2.0.0] - 2026-09-10\n"
+
+      with_release_repository(version: '2.0.0', changelog: changelog, commit: false) do |root|
+        described_class.apply!(root: root, version: '2.1.0.alpha')
+
+        expect(described_class.read_body(root, upgrade_fence)).to eq('')
+        expect(described_class.mismatches(root: root, version: '2.1.0.alpha')).to be_empty
+      end
+    end
+  end
 end

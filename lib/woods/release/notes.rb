@@ -25,8 +25,16 @@ module Woods
         { path: 'README.md', id: 'version-banner', kind: :note, builder: :version_banner },
         { path: 'CONTRIBUTING.md', id: 'contributing-intro', kind: :ref },
         { path: 'CONTRIBUTING.md', id: 'contributing-architecture', kind: :ref },
-        { path: 'docs/UPGRADING_TO_2.md', id: 'upgrade-availability', kind: :note, builder: :upgrade_availability }
+        # `target` is the version the guide is about, not the version the tree
+        # is on. The guide covers the 1.x to 2.0 migration, so its note has
+        # nothing to say once development moves past 2.0.0.
+        { path: 'docs/UPGRADING_TO_2.md', id: 'upgrade-availability', kind: :note,
+          builder: :upgrade_availability, target: '2.0.0' }
       ].freeze
+
+      BRANCH_PARAGRAPH = '> `main` is the development branch and can run ahead of the latest published gem. ' \
+                         'The gem badge above shows the latest published version; documentation for a ' \
+                         'published version lives on its tag.'
 
       REPOSITORY_REF = %r{(#{Regexp.escape(REPOSITORY_URL)}/(?:blob|tree)/)([^/\s)]+)(/)}
 
@@ -87,6 +95,16 @@ module Woods
         File.read(File.join(root, path), encoding: Encoding::UTF_8)
       end
 
+      # The document with every fence (markers and bodies) removed, so a spec can
+      # assert that no state-dependent claim escaped into unmanaged prose.
+      #
+      # @return [String]
+      def source_outside_fences(root, path)
+        opening = Regexp.escape("<!-- #{MARKER}:")
+        closing = Regexp.escape("<!-- #{MARKER}:end -->")
+        read(root, path).gsub(/^#{opening}[a-z][a-z-]* -->\n.*?^#{closing}\n/m, '')
+      end
+
       def previous_stable_version(root)
         Changelog.latest_stable_version(read(root, 'CHANGELOG.md'))
       end
@@ -109,7 +127,7 @@ module Woods
 
       def expected_body(fence, body, state, previous)
         case fence.fetch(:kind)
-        when :note then public_send(fence.fetch(:builder), state, previous)
+        when :note then public_send(fence.fetch(:builder), state, previous, fence)
         when :ref
           body.gsub(REPOSITORY_REF) { "#{Regexp.last_match(1)}#{state.release_ref}#{Regexp.last_match(3)}" }
         end
@@ -127,24 +145,49 @@ module Woods
         end
       end
 
-      # The README version banner. Empty once the documented version is released.
-      def version_banner(state, previous)
+      # The README version banner. It owns every version claim in the README, so
+      # nothing above it goes stale at a release. Empty once the documented
+      # version is released: the gem badge is then the whole story.
+      def version_banner(state, previous, _fence = nil)
         return '' if state.final?
 
+        blocks = [
+          documents_paragraph(state, previous),
+          BRANCH_PARAGRAPH,
+          version_table(state, previous),
+          "> #{banner_constraint(state, previous)}"
+        ]
+        "#{blocks.join("\n>\n")}\n"
+      end
+
+      def documents_paragraph(state, previous)
+        documented = state.documented_version
+        sentences = ["> **This tree documents version #{documented}.**"]
+        sentences << upgrade_sentence(documented, previous) if major_bump?(documented, previous)
+        sentences << 'The full history is in the [CHANGELOG](CHANGELOG.md).'
+        sentences.join(' ')
+      end
+
+      def upgrade_sentence(documented, previous)
+        "It is a major update from #{previous.split('.').first}.x: read " \
+          "[what changed and how to upgrade](docs/UPGRADING_TO_#{documented.split('.').first}.md) " \
+          'before updating.'
+      end
+
+      def major_bump?(documented, previous)
+        return false unless previous
+
+        documented.split('.').first != previous.split('.').first
+      end
+
+      def version_table(state, previous)
         rows = ["> | Documented here | **#{state.documented_version}**, unreleased | this README and the " \
                 '[documentation index](docs/README.md) |']
         rows << "> | Latest prerelease | **#{state}** | #{tag_link(state.tag)} |" if state.prerelease?
         rows << "> | Latest published gem | **#{previous}** | #{tag_link("v#{previous}")} |" if previous
 
-        <<~MARKDOWN
-          > ### #{banner_heading(state)}
-          >
-          > | Line | Version | Documentation |
-          > |---|---|---|
-          #{rows.join("\n")}
-          >
-          > #{banner_constraint(state, previous)}
-        MARKDOWN
+        ["> ### #{banner_heading(state)}", '>', '> | Line | Version | Documentation |', '> |---|---|---|', *rows]
+          .join("\n")
       end
 
       def banner_heading(state)
@@ -168,19 +211,25 @@ module Woods
         end
       end
 
-      # The upgrade guide's availability note. Empty once the version is released.
-      def upgrade_availability(state, _previous)
+      # The upgrade guide's availability note.
+      #
+      # The guide is about one target version, not about whatever `main` is
+      # developing, so the note is empty once that target ships or once
+      # development moves past it.
+      def upgrade_availability(state, _previous, fence)
+        target = fence.fetch(:target)
+        return '' unless state.documented_version == target
         return '' if state.final?
 
         if state.prerelease?
           <<~MARKDOWN
             > RubyGems lists #{state} as a prerelease. Pin it explicitly with
             > `gem "woods", "#{state}"`; `#{state.approximate_constraint}` resolves only once
-            > #{state.documented_version} is published.
+            > #{target} is published.
           MARKDOWN
         else
           <<~MARKDOWN
-            > Run the published-gem upgrade only after RubyGems lists #{state.documented_version}. Until then,
+            > Run the published-gem upgrade only after RubyGems lists #{target}. Until then,
             > this guide supports planning and validation against a source checkout.
           MARKDOWN
         end

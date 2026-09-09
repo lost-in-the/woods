@@ -10,11 +10,11 @@
 [![CI](https://github.com/lost-in-the/woods/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lost-in-the/woods/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
 
-> **This tree documents version 2.0.0** — a major update from 1.x that changes index identifiers, the publication layout, and the MCP surface. Read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating from 1.x; the full history is in the [CHANGELOG](CHANGELOG.md).
->
-> `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for published versions lives on their tags. Until 2.0.0 is published, use this tree to review a source checkout, and use [v1.6.1](https://github.com/lost-in-the/woods/tree/v1.6.1) for the released gem.
-
 <!-- release-state:version-banner -->
+> **This tree documents version 2.0.0.** It is a major update from 1.x: read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating. The full history is in the [CHANGELOG](CHANGELOG.md).
+>
+> `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for a published version lives on its tag.
+>
 > ### Version: `main` documents 2.0.0, which is not released yet
 >
 > | Line | Version | Documentation |
