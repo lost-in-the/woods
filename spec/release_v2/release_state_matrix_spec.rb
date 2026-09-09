@@ -13,6 +13,7 @@ RSpec.describe 'release state matrix' do
   ReleaseStateTrees::STATES.each do |state|
     context "a tree generated at the #{state} state" do
       let(:release_root) { ReleaseStateTrees.roots.fetch(state) }
+      let(:freshly_released) { true }
 
       it_behaves_like 'a coherent release state'
     end

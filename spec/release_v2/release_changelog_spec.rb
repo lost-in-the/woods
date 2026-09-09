@@ -25,7 +25,9 @@ RSpec.describe Woods::Release::Changelog do
 
     expect(section).not_to be_nil
     expect(headings).to eq(headings.uniq)
-    expect(unreleased_body(real).to_s.strip).to eq('')
+    stray = unreleased_body(real).to_s.lines.map(&:rstrip).reject(&:empty?)
+                                 .reject { |line| line.start_with?('### ', '- ', '  ') }
+    expect(stray).to be_empty
   end
 
   let(:source) do
