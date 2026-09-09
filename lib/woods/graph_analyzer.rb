@@ -267,6 +267,20 @@ module Woods
       all_volatile_dependencies.first(limit)
     end
 
+    # Edges that cross a Packwerk package boundary the source package never
+    # declared (#280).
+    #
+    # Membership comes from the `package` node attribute (Task 8); a
+    # declaration comes from a package unit's own `:package_dependency`
+    # edges (Task 7). Both are graph-only, so a full and an incremental run
+    # compute the same report. Enforcement stays with `packwerk check` /
+    # `pks check`; this only makes the undeclared boundary visible.
+    #
+    # @return [Array<Hash>] `{ from:, from_type:, to:, to_type:, via:, from_package:, to_package: }`, sorted
+    def undeclared_package_edges
+      @undeclared_package_edges ||= compute_undeclared_package_edges
+    end
+
     # Group units into semantic domains using namespace prefixes and graph connectivity.
     #
     # Strategy:
@@ -325,6 +339,7 @@ module Woods
       computed_bridges = bridges(limit: 10)
       computed_cross_database = cross_database_edges
       computed_volatile = volatile_dependencies
+      computed_undeclared = undeclared_package_edges
 
       {
         orphans: computed_orphans,
@@ -334,13 +349,15 @@ module Woods
         bridges: computed_bridges,
         cross_database_edges: computed_cross_database,
         volatile_dependencies: computed_volatile,
+        undeclared_package_edges: computed_undeclared,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
           hub_count: computed_hubs.size,
           cycle_count: computed_cycles.size,
           cross_database_edge_count: computed_cross_database.size,
-          volatile_dependency_count: all_volatile_dependencies.size
+          volatile_dependency_count: all_volatile_dependencies.size,
+          undeclared_package_edge_count: computed_undeclared.size
         }
       }
     end
@@ -703,6 +720,62 @@ module Woods
         from: from, from_type: from_meta[:type], to: to, to_type: to_meta[:type], via: edge[:via].to_s,
         from_commits: from_commits, to_commits: to_commits,
         ratio: ratio.round(2), pagerank: (scores[to] || 0.0).round(4)
+      }
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Package boundary helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Short-circuits to `[]`, skipping declaration lookup entirely, when no
+    # node carries a `package` attribute (no package extraction ran).
+    #
+    # @return [Array<Hash>]
+    def compute_undeclared_package_edges
+      nodes = graph_nodes
+      return [] unless nodes.each_value.any? { |meta| meta.key?(:package) }
+
+      declared = package_declarations(nodes)
+      entries = nodes.keys.sort.flat_map do |from|
+        meta = nodes[from]
+        from_package = meta[:package]
+        next [] if from_package.nil? || meta[:type] == :package
+
+        @graph.edge_records(from, type: meta[:type]).filter_map do |edge|
+          undeclared_entry(from, meta, from_package, edge, nodes, declared)
+        end
+      end
+      entries.uniq.sort_by { |e| [e[:from], e[:to], e[:via]] }
+    end
+
+    # package identifier => Set of package identifiers it declares as
+    # dependencies, read from that package unit's own `:package_dependency`
+    # edges. A root package (`.`) declaring nothing is just another entry
+    # with an empty Set, no special-cased root handling.
+    #
+    # @param nodes [Hash]
+    # @return [Hash{String => Set<String>}]
+    def package_declarations(nodes)
+      nodes.each_with_object({}) do |(identifier, meta), declared|
+        next unless meta[:type] == :package
+
+        declared[identifier] = @graph.dependencies_of(identifier, via: :package_dependency).to_set
+      end
+    end
+
+    # @return [Hash, nil] the report entry, or nil when the edge stays inside declared boundaries
+    def undeclared_entry(from, from_meta, from_package, edge, nodes, declared)
+      to = edge[:target]
+      to_meta = nodes[to]
+      to_package = to_meta && to_meta[:package]
+      return nil if to_package.nil? || to_package == from_package
+
+      declared_deps = declared[from_package] || Set.new
+      return nil if declared_deps.include?(to_package)
+
+      {
+        from: from, from_type: from_meta[:type], to: to, to_type: to_meta[:type], via: edge[:via].to_s,
+        from_package: from_package, to_package: to_package
       }
     end
 

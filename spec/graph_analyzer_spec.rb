@@ -654,4 +654,84 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(report[:stats][:volatile_dependency_count]).to be > 20
     end
   end
+
+  describe '#undeclared_package_edges' do
+    def package(name, dependencies: [])
+      make_unit(type: :package, identifier: name, file_path: "/app/#{name}/package.yml",
+                dependencies: dependencies.map { |d| { type: :package, target: d, via: :package_dependency } })
+    end
+
+    def member(identifier, package_name, dependencies: [], type: :model)
+      make_unit(type: type, identifier: identifier, dependencies: dependencies, metadata: { package: package_name })
+    end
+
+    it 'reports an edge into a package the source package never declared' do
+      graph.register(package('packs/billing'))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('Invoice', 'packs/billing',
+                            dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expected = { from: 'Invoice', from_type: :model, to: 'Account', to_type: :model, via: 'belongs_to',
+                   from_package: 'packs/billing', to_package: 'packs/accounts' }
+
+      expect(analyzer.undeclared_package_edges).to eq([expected])
+    end
+
+    it 'stays silent for a declared dependency, an intra-package edge, and an unpackaged unit' do
+      graph.register(package('packs/billing', dependencies: ['packs/accounts']))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('Plan', 'packs/billing'))
+      graph.register(member('Invoice', 'packs/billing', dependencies: [
+                              { type: :model, target: 'Account', via: :belongs_to },
+                              { type: :model, target: 'Plan', via: :has_many },
+                              { type: :service, target: 'Mailer', via: :code_reference }
+                            ]))
+      graph.register(make_unit(type: :service, identifier: 'Mailer'))
+
+      expect(analyzer.undeclared_package_edges).to eq([])
+    end
+
+    it 'never reports the package declaration edges themselves' do
+      graph.register(package('packs/billing', dependencies: ['packs/accounts']))
+      graph.register(package('packs/accounts'))
+
+      expect(analyzer.undeclared_package_edges).to eq([])
+    end
+
+    it 'treats the root package like any other package' do
+      graph.register(package('.'))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('LegacyReport', '.',
+                            dependencies: [{ type: :model, target: 'Account', via: :code_reference }]))
+
+      expected = { from: 'LegacyReport', from_type: :model, to: 'Account', to_type: :model, via: 'code_reference',
+                   from_package: '.', to_package: 'packs/accounts' }
+
+      expect(analyzer.undeclared_package_edges).to eq([expected])
+    end
+
+    it 'short-circuits to an empty list when no node carries a package attribute' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))
+
+      expect(analyzer.undeclared_package_edges).to eq([])
+    end
+
+    it 'is part of analyze with a count in stats' do
+      graph.register(package('packs/billing'))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('Invoice', 'packs/billing',
+                            dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      report = analyzer.analyze
+
+      expect(report[:undeclared_package_edges].size).to eq(1)
+      expect(report[:stats][:undeclared_package_edge_count]).to eq(1)
+    end
+  end
 end
