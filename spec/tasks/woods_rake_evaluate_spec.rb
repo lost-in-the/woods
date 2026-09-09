@@ -48,6 +48,9 @@ RSpec.describe 'lib/tasks/woods_evaluation.rake' do
       expect(Rake::Task.task_defined?('woods:evaluate')).to be(true)
       expect(Rake::Task.task_defined?('woods:evaluate:baseline')).to be(true)
       expect(Rake::Task['woods:evaluate:baseline'].arg_names).to eq([:strategy])
+      expect(Rake::Task.task_defined?('woods:evaluate:ablation')).to be(true)
+      expect(Rake::Task['woods:evaluate:ablation'].arg_names).to eq([:task_set])
+      expect(Rake::Task['woods:evaluate:ablation'].prerequisites).to eq([])
     ensure
       $VERBOSE = previous_verbose
     end

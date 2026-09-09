@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "agent_on": "claude -p {prompt} --output-format json --mcp-config .mcp.json",
+  "agent_off": "claude -p {prompt} --output-format json --strict-mcp-config",
+  "reset": "git checkout -- . && git clean -fdq",
+  "tasks": [
+    {
+      "id": "comment-count",
+      "prompt": "Add a comments_count counter cache to Post and keep it correct on create and destroy.",
+      "check": "bin/rspec spec/models/post_spec.rb"
+    },
+    {
+      "id": "publish-job",
+      "prompt": "Make PostsController#create enqueue PublishPostJob after a successful save.",
+      "check": "bin/rspec spec/requests/posts_spec.rb",
+      "workdir": "."
+    }
+  ]
+}
