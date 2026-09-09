@@ -225,6 +225,14 @@ The watcher catches up changes made while it was stopped, batches new file chang
 
 Changes to boot-captured state, including dependencies, initializers, database configuration, credentials, or schema, make the watcher exit with status 75 so a process supervisor can restart it cleanly. If semantic retrieval is enabled, the watcher keeps structural context current; run `bin/rails woods:embed_incremental` to update vectors.
 
+In CI on Rails 8.1, add one step to `config/ci.rb` so the index the gates read matches the commit under test:
+
+```ruby
+step "Woods: refresh", "bin/rails woods:incremental"
+```
+
+Claude Code users with the Woods plugin can opt into the same refresh from a `PostToolUse` hook, plus a `SessionStart` warning scoped to commit timestamps (it does not see uncommitted edits or an older checkout). Both ship disabled; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
+
 Without a resident watcher, run `bin/rails woods:incremental` after changes. See [Watch daemon](docs/WATCH_DAEMON.md) for Docker polling, failure behavior, and restart triggers.
 
 ## What gets indexed

@@ -511,6 +511,43 @@ containerized daemon, so it can misread liveness in either direction for up to
 live daemon inside that bound). Run `watch_status` on the same side as the
 daemon; a cross-namespace liveness protocol isn't worth its complexity here.
 
+### Hooks for agent sessions
+
+The daemon covers a human's editor session. A `claude -p` run in a worktree
+with no daemon needs a different trigger, so the Woods plugin ships two
+hooks (`plugin/hooks/hooks.json`), both shipped disabled:
+
+| Hook | When | What it does |
+|---|---|---|
+| `PostToolUse` (`Edit`, `Write`, `MultiEdit`), async | An edit under `app/models`, `config/routes*`, `db/migrate`, `db/*_migrate`, `db/schema.rb`, `db/structure.sql`, or any `package.yml` / `packwerk.yml` | Appends the path to `hook-pending.txt` under a lock, then runs `CHANGED_FILES=<paths> woods:incremental` for whatever is pending, output to `hook.log` |
+| `SessionStart` (`startup`, `resume`) | Session begins | Prints a warning when `generation.json`'s `updated_at` predates `git log -1` |
+
+Both read `cwd` from the hook payload, not `CLAUDE_PROJECT_DIR`, which stays
+at the launch root inside a worktree. Both do nothing until
+`tmp/woods/generation.json` exists, and neither runs at all until
+`WOODS_HOOKS_ENABLED=1` is set; `WOODS_HOOKS_DISABLED=1` turns them back off
+without touching that setting. `woods:incremental` still stands down under a
+`:running` daemon, so a hook and a daemon on the same worktree never
+contend. `WOODS_HOOK_RAKE` sets the command prefix (Docker:
+`docker compose exec -T app bundle exec rake`); `WOODS_OUTPUT` points the
+hooks at a non-default index directory, the same variable
+`woods:incremental`/`woods:watch_status` already read.
+
+A hook invocation that finds another one already draining the pending file
+does not wait for it: it appends its own path and returns, and the
+in-progress drainer picks that path up on its next pass, looping until a
+drain comes back empty. The one gap this leaves is an append that lands
+between the drainer's last (empty) drain and its releasing the lock: that
+edit is delayed to the next graph-changing edit rather than lost outright,
+and the `SessionStart` warning is the backstop for it.
+
+The `SessionStart` warning compares two commit-adjacent timestamps only:
+the generation's `updated_at` against the last commit's time. It says
+nothing about uncommitted changes in the working tree, and a checkout
+sitting on an older commit than the one that produced the generation can
+still read as fresh under this check. Treat a quiet session start as "not
+behind the last commit," not as a general freshness guarantee.
+
 ### Reader multiplicity is free
 
 Several sessions in one worktree each spawn their own stdio `woods-mcp`. With
