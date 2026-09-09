@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `artifact-ids` extracts into `dist/<artifact-name>/`, so the digest check and the install
   in `dist/` failed with a missing file on every dispatch since the switch to artifact ids.
   Both downloads now set `merge-multiple: true`; the workflow spec requires it.
+- **Release candidate tests accept a prerelease version.** The clean-install smoke specs
+  pinned `2.0.0` as a literal in the dummy app's Gemfile, the loaded-version check, and a
+  snapshot fixture, so the first prerelease failed them (Bundler never resolves a prerelease
+  from an unpinned requirement). They now use `Woods::VERSION`. The candidate host also
+  installs `webrick` so `woods-mcp-http` finds a Rack handler on Rubies that no longer ship one.
 
 ## [2.0.0.beta1] - 2026-09-09
 

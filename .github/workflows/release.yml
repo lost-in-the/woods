@@ -121,6 +121,9 @@ jobs:
           # The official MCP client's HTTP transport loads Faraday lazily
           # (test-only; the packaged server itself needs no Faraday).
           gem install --no-document faraday -v '~> 2.0'
+          # woods-mcp-http needs a Rack handler from the host; webrick is no
+          # longer a default gem, so the candidate host installs one explicitly.
+          gem install --no-document webrick -v '~> 1.8'
           gem install --no-document "dist/${{ needs.release-context.outputs.gem-name }}"
       - name: Test the installed artifact outside the repository load path
         env:
