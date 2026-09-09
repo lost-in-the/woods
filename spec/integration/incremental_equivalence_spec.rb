@@ -84,6 +84,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     require 'action_mailer/railtie'
     require 'active_job/railtie'
     require 'logger'
+    require File.expand_path('../dummy/config/application_config', __dir__)
 
     # @pristine_root is the tree every example is reset to; @app_root is the
     # copy the examples mutate. Without the reset, files one example creates
@@ -106,6 +107,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = @app_root
       WoodsDummyApplication.config.secret_key_base = 'woods-dummy-secret'
+      WoodsDummyConfig.apply(WoodsDummyApplication.config, @app_root)
       WoodsDummyApplication.initialize!
     end
 

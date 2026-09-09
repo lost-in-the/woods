@@ -23,6 +23,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     require 'action_mailer/railtie'
     require 'active_job/railtie'
     require 'logger'
+    require File.expand_path('../dummy/config/application_config', __dir__)
 
     dummy_root = File.expand_path('../dummy', __dir__)
 
@@ -42,6 +43,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = dummy_root
       WoodsDummyApplication.config.secret_key_base = 'woods-dummy-secret'
+      WoodsDummyConfig.apply(WoodsDummyApplication.config, dummy_root)
       WoodsDummyApplication.initialize!
     end
 
@@ -318,6 +320,31 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       expect(flow_snapshot).to eq(before_flows)
       expect(File.read(File.join(flow_payload_dir, 'manifest.json'))).to eq(before_manifest)
       expect(File.read(File.join(flow_payload_dir, 'dependency_graph.json'))).to eq(before_graph)
+    end
+  end
+
+  # B-184: discovery was `component_base.descendants` after `eager_load!`, so
+  # a component under an autoloaded but not eager-loaded subtree of app/views
+  # was never a descendant, and never indexed. The dummy app keeps
+  # `Ui::CardComponent` in exactly that position.
+  describe 'components outside the eager-load paths' do
+    it 'indexes a component under an autoloaded subtree of app/views' do
+      expect(find_unit(:components, 'Ui::CardComponent')).not_to be_nil
+    end
+
+    it 'records the file it was read from' do
+      unit = find_unit(:components, 'Ui::CardComponent')
+
+      expect(unit['file_path']).to eq('app/views/ui/card_component.rb')
+    end
+
+    it 'still indexes a component the eager load did reach' do
+      expect(find_unit(:components, 'BadgeComponent')).not_to be_nil
+    end
+
+    it 'leaves view_components empty, since ViewComponent::Base is undefined here' do
+      expect(defined?(ViewComponent::Base)).to be_nil
+      expect(units_in(:view_components)).to be_empty
     end
   end
 

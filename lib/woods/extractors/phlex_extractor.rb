@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
@@ -22,6 +23,7 @@ module Woods
     #   card = units.find { |u| u.identifier == "Components::CardComponent" }
     #
     class PhlexExtractor
+      include ComponentDiscovery
       include SharedUtilityMethods
       include SharedDependencyScanner
       include RouteHelperResolver
@@ -53,10 +55,15 @@ module Woods
       # The component classes this extractor would extract from the running
       # app. Shared with the incremental path's class reconciliation (#164).
       #
+      # The component directories are walked first: `descendants` only knows
+      # what something has already loaded, and a component under an autoloaded
+      # but not eager-loaded subtree of app/views is loaded by nothing (B-184).
+      #
       # @return [Array<Class>]
       def discoverable_classes
         return [] unless @component_base
 
+        load_component_files
         @component_base.descendants
       end
 

@@ -35,6 +35,7 @@ end
 - [Session tracer options](#session-tracer-options)
 - [Gem indexing](#gem-indexing)
 - [Extractors](#extractors)
+  - [Component directories](#component-directories)
 - [Console MCP options](#console-mcp-options)
 - [Environment variables](#environment-variables)
   - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
@@ -442,6 +443,31 @@ Leave it at its default. The full list of what always runs:
 | `:libs` | LibExtractor | Ruby files in lib/ |
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
+
+### Component directories
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `component_paths` | Array&lt;String&gt; | `["app/components", "app/views/components", "app/views"]` | Directories `PhlexExtractor` and `ViewComponentExtractor` walk before reading `descendants`, relative to `Rails.root`. |
+
+Both component extractors discover their units from
+`component_base.descendants`, which only knows classes something has already
+loaded. Rails leaves `app/views` out of both `autoload_paths` and
+`eager_load_paths`, so an app that keeps components beside their templates and
+opts that subtree into autoloading has components that resolve by name and are
+absent from `descendants` for the whole extraction. Woods asks the autoloader
+for each file under these directories first.
+
+```ruby
+Woods.configure do |config|
+  # Components live under app/ui/ in this app, nowhere else.
+  config.component_paths = %w[app/ui]
+end
+```
+
+A file is loaded only when a Rails autoload path owns it, so the constant its
+path implies is the one Zeitwerk manages. A directory that is not autoloaded is
+walked and skipped.
 
 ## Console MCP options
 

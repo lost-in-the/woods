@@ -22,6 +22,8 @@
 #   end
 #
 require_relative 'woods/version'
+# Configuration's `component_paths` default lives with the discovery it feeds.
+require_relative 'woods/extractors/component_discovery'
 
 module Woods
   class Error < StandardError; end
@@ -142,7 +144,7 @@ module Woods
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
-                  :dump_retention_count
+                  :dump_retention_count, :component_paths
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio
 
@@ -203,6 +205,9 @@ module Woods
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @dump_retention_count = 3
       @volatile_dependency_ratio = 3.0
+      # Directories the component extractors walk before reading `descendants`,
+      # relative to Rails.root. See Extractors::ComponentDiscovery.
+      @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
     end
 
     def embedding_model=(value)

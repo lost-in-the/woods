@@ -54,6 +54,17 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
         extractor = described_class.new
         expect(extractor.extract_all).to eq([])
       end
+
+      # B-184 gave PhlexExtractor a directory walk before `descendants`, and
+      # this extractor the same treatment. An app without ViewComponent must
+      # not pay for a walk that can only ever find nothing.
+      it 'does not walk the component directories' do
+        extractor = described_class.new
+
+        expect(extractor).not_to receive(:load_component_files)
+
+        extractor.discoverable_classes
+      end
     end
 
     context 'when ViewComponent gem is loaded' do
@@ -84,6 +95,15 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
         base = build_view_component_base(descendants: [component_class])
         component_class.define_singleton_method(:superclass) { base }
         stub_const('ViewComponent::Base', base)
+      end
+
+      it 'asks the autoloader for the component directories before reading descendants' do
+        extractor = described_class.new
+
+        expect(extractor).to receive(:load_component_files).ordered
+        expect(ViewComponent::Base).to receive(:descendants).ordered.and_return([])
+
+        extractor.discoverable_classes
       end
 
       it 'discovers ViewComponent::Base descendants' do

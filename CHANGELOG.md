@@ -463,6 +463,14 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Components outside the eager-load paths are indexed.** `PhlexExtractor` and
+  `ViewComponentExtractor` discovered units from `component_base.descendants`
+  after `eager_load!`, so a component under an autoloaded but not eager-loaded
+  subtree of `app/views` was never a descendant and never indexed. Both now ask
+  the autoloader for every Ruby file under the component directories first, and
+  the directory list is configurable through `config.component_paths` (default
+  `app/components`, `app/views/components`, `app/views`). The ViewComponent path
+  is skipped entirely when `ViewComponent::Base` is undefined.
 - **Git enrichment refuses to invent history it cannot read.** Over a
   containerized linked worktree, `git rev-parse --git-dir` succeeds while no ref
   resolves (the private git directory reaches the shared one through a relative
