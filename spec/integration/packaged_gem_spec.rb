@@ -495,7 +495,7 @@ RSpec.describe 'packaged gem' do
           gem 'activerecord', require: false
           gem 'railties', require: false
           gem 'sqlite3', require: false
-          gem 'woods', '= 2.0.0', require: false
+          gem 'woods', '= #{Woods::VERSION}', require: false
         GEMFILE
         'Rakefile' => <<~RUBY,
           require_relative 'config/application'
@@ -580,7 +580,7 @@ RSpec.describe 'packaged gem' do
       stdout, stderr, status = Open3.capture3(env, 'ruby', '-e', script, chdir: @package_tmp)
 
       expect_success(['ruby', '-e', 'require woods'], stdout, stderr, status)
-      expect(stdout).to eq("2.0.0\n")
+      expect(stdout).to eq("#{Woods::VERSION}\n")
     end
 
     it 'loads all five installed executables to their safe startup boundaries' do
@@ -657,7 +657,7 @@ RSpec.describe 'packaged gem' do
           File.join(index_dir, 'manifest.json')
         )
         snapshot = {
-          schema_version: 1, gem_version: '2.0.0', created_at: Time.now.utc.iso8601,
+          schema_version: 1, gem_version: Woods::VERSION, created_at: Time.now.utc.iso8601,
           embedding_provider: { class: 'Woods::Embedding::Provider::Fake', model: 'installed', dimension: 8 },
           stores: { vector_store: adapter, metadata_store: 'in_memory', graph_store: 'in_memory' },
           store_options: {
