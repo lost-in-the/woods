@@ -86,14 +86,13 @@ RSpec.describe 'Index MCP tool contracts' do
                               }),
       'graph_analysis' => contract(:always, { 'analysis' => 'orphans' }, exact_data({
                                                                                       'orphans' => ['PostsController'],
-                                                                                      'stats' => {
-                                                                                        'orphan_count' => 1, 'dead_end_count' => 1,
-                                                                                        'hub_count' => 3, 'cycle_count' => 0
-                                                                                      }
+                                                                                      'stats' => expected_graph_stats
                                                                                     }),
                                    properties: {
                                      'analysis' => enum_contract(
-                                       %w[orphans dead_ends hubs cycles bridges all], nil, 10_000
+                                       %w[orphans dead_ends hubs cycles bridges
+                                          cross_database_edges volatile_dependencies
+                                          undeclared_package_edges all], nil, 10_000
                                      ),
                                      'limit' => integer_contract(1, 1_000),
                                      'offset' => integer_contract(0, 1_000_000)
@@ -466,7 +465,11 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def expected_graph_stats
-    { 'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0 }
+    {
+      'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0,
+      'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1,
+      'undeclared_package_edge_count' => 2
+    }
   end
 
   def expected_graph_analysis
@@ -479,8 +482,39 @@ RSpec.describe 'Index MCP tool contracts' do
         { 'identifier' => 'Comment', 'type' => 'model', 'dependent_count' => 0, 'dependents' => [] },
         { 'identifier' => 'PostsController', 'type' => 'controller', 'dependent_count' => 0, 'dependents' => [] }
       ],
-      'cycles' => [], 'bridges' => [], 'stats' => expected_graph_stats
+      'cycles' => [], 'bridges' => [],
+      'cross_database_edges' => expected_cross_database_edges,
+      'volatile_dependencies' => expected_volatile_dependencies,
+      'undeclared_package_edges' => expected_undeclared_package_edges,
+      'stats' => expected_graph_stats
     }
+  end
+
+  def expected_cross_database_edges
+    [
+      { 'from' => 'Comment', 'to' => 'Post', 'via' => 'belongs_to', 'from_db' => 'analytics',
+        'to_db' => 'primary', 'through' => nil, 'through_db' => nil, 'disable_joins' => false,
+        'kind' => 'association_across_databases' },
+      { 'from' => 'Invoice', 'via' => 'foreign_key', 'from_db' => 'billing', 'through' => nil,
+        'through_db' => nil, 'disable_joins' => false, 'kind' => 'foreign_key_across_databases',
+        'to' => nil, 'to_db' => nil, 'ambiguous_owners' => %w[Account LegacyAccount] }
+    ]
+  end
+
+  def expected_volatile_dependencies
+    [
+      { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'Post', 'to_type' => 'model',
+        'via' => 'code_reference', 'from_commits' => 2, 'to_commits' => 9, 'ratio' => 4.5, 'pagerank' => 0.4 }
+    ]
+  end
+
+  def expected_undeclared_package_edges
+    [
+      { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'BillingService', 'to_type' => 'service',
+        'via' => 'code_reference', 'from_package' => 'checkout', 'to_package' => 'billing' },
+      { 'from' => 'Comment', 'from_type' => 'model', 'to' => 'AdminPanel', 'to_type' => 'controller',
+        'via' => 'belongs_to', 'from_package' => '.', 'to_package' => 'admin' }
+    ]
   end
 
   def expected_summary

@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **34 extractor classes** producing **38 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **35 extractor classes** producing **39 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 41 files: 34 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 38 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 42 files: 35 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 39 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,11 +13,11 @@ Woods ships **34 extractor classes** producing **38 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 34 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 35 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
-Phase 3: Graph      . PageRank + structural analysis (orphans, hubs, cycles, bridges)
-Phase 4: Enrich     . Git metadata added (last author, change frequency, recent commits)
+Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
+Phase 4: Graph      . PageRank + structural analysis (orphans, hubs, cycles, bridges, cross-database edges)
 Phase 5: Write      . One JSON file per unit, _index.json per type, dependency_graph.json, SUMMARY.md
 ```
 
@@ -66,6 +66,47 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
+- **Database partition (multi-DB apps).** `metadata[:database]` is `klass.connection_db_config.name` (Rails 6.1+; `nil` on 6.0). Because reflection climbs to the abstract class that declared `connects_to`, a concrete model that only inherits its connection still reports the right database. Each association entry carries `from_db`, `to_db`, `through_db` (the has_many :through join model's database, guarded the same way and nil for a plain association), and `disable_joins`; `metadata[:foreign_keys]` lists `{ from_table, to_table, column }`, the target table's owning database is resolved separately by the graph-level `cross_database_edges` report (see [Internals](INTERNALS.md#graphanalyzer-structural-metrics)), not stored per model. That report never picks an owner living in the foreign key's own source database, even when another database also claims the table; only when every owner sits elsewhere, across more than one database, does it come back ambiguous rather than guessing. The graph node carries `database`, `table`, and `foreign_key_tables`, and association edges carry `through`, `through_db`, and `disable_joins`. `consolidate_dependencies` keeps the first edge per `[type, target]`, so a model with two associations to the same target keeps only the first edge's `through`/`through_db`/`disable_joins`.
+
+**Multi-database configuration Woods reads.** Woods needs nothing beyond the Rails configuration the app already has. Both shapes below produce `metadata[:database]` values of `primary` and `analytics`.
+
+MySQL:
+
+```yaml
+# config/database.yml
+production:
+  primary:
+    adapter: mysql2
+    database: shop_production
+  analytics:
+    adapter: mysql2
+    database: shop_analytics_production
+    migrations_paths: db/analytics_migrate
+```
+
+PostgreSQL:
+
+```yaml
+# config/database.yml
+production:
+  primary:
+    adapter: postgresql
+    database: shop_production
+  analytics:
+    adapter: postgresql
+    database: shop_analytics_production
+    migrations_paths: db/analytics_migrate
+```
+
+```ruby
+# app/models/analytics_record.rb
+class AnalyticsRecord < ApplicationRecord
+  self.abstract_class = true
+  connects_to database: { writing: :analytics, reading: :analytics }
+end
+
+class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
+```
 
 **Edge cases:**
 - STI subclasses are extracted separately from their parent (each has its own identifier)
@@ -82,8 +123,9 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
   "namespace": null,
   "source_code": "# == Schema Information\n# id :bigint\n# user_id :bigint\n# status :string\n# total_cents :integer\n#\nclass Order < ApplicationRecord\n  belongs_to :user\n  has_many :line_items\n  ...\nend\n\n# ┌───────────────────────────────────────────────────────────────────┐\n# │ Included from: Auditable                                          │\n# └───────────────────────────────────────────────────────────────────┘\n#   module Auditable\n#     ...\n#   end\n# ──────────────────────── End Auditable ────────────────────────────",
   "metadata": {
+    "database": "primary",
     "associations": [
-      { "type": "belongs_to", "name": "user", "target": "User" },
+      { "type": "belongs_to", "name": "user", "target": "User", "from_db": "primary", "to_db": "primary", "disable_joins": false },
       { "type": "has_many", "name": "line_items", "target": "LineItem" }
     ],
     "callbacks": [
@@ -420,6 +462,46 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
+### PackageExtractor
+
+**What it captures:** Packwerk / pks package boundaries from every `package.yml`, one unit per package. No Rails boot is needed for the read itself.
+
+**Key details:**
+- Identifier is the package directory relative to `Rails.root` (`.` for the root package), the same name Packwerk uses
+- Honors `packwerk.yml` `package_paths` and `exclude`; without one, `**/` with the Packwerk default excludes (`bin`, `node_modules`, `script`, `tmp`, `vendor`)
+- `metadata`: `name`, `dependencies` (sorted), `enforce_dependencies` (`true`, `false`, or `"strict"`), `enforce_privacy`, `layer` (pks), `public_path`, `owner`
+- Each declared dependency becomes a `{ type: :package, target: <name>, via: :package_dependency }` edge
+- Package membership on other units (`metadata[:package]`, below) does not depend on how a unit was discovered: any registered unit with a file path under a package root is annotated. The undeclared cross-package edge report remains a follow-up, not this extractor. Discovery is the separate open gap: a pack-resident file-based unit is not yet found by `PathDispatcher` when only its `package.yml` changes (follow-up B-175), so it carries no membership only because it has no unit at all yet, not because membership skips it
+- Woods does not enforce anything. `pks check` and `packwerk check` own enforcement; Woods shows the boundary before an agent writes the cross-package call
+- Whole-app: any `package.yml` or `packwerk.yml` change re-runs the extractor wholesale
+
+**Example output (abbreviated):**
+
+```json
+{
+  "type": "package",
+  "identifier": "packs/billing",
+  "file_path": "packs/billing/package.yml",
+  "metadata": {
+    "name": "packs/billing",
+    "dependencies": [".", "packs/accounts"],
+    "enforce_dependencies": "strict",
+    "layer": "product",
+    "owner": "billing-team"
+  },
+  "dependencies": [
+    { "type": "package", "target": ".", "via": "package_dependency" },
+    { "type": "package", "target": "packs/accounts", "via": "package_dependency" }
+  ]
+}
+```
+
+#### Package membership
+
+Every app-owned unit under a package root carries `metadata[:package]` with the package name (longest root wins; `.` when only a root package exists). Framework sources and units with no path never carry it. The graph node carries the same value as `package`. When a `package.yml` changes, an incremental run re-annotates every unit whose package changed in the same run, so `metadata[:package]` never lags behind the file that defines it.
+
+---
+
 ### I18nExtractor
 
 **What it captures:** Locale files from `config/locales` with the full translation key hierarchy.
@@ -590,7 +672,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 34 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 35 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -607,12 +689,12 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 38 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib` |
+| `type` | Symbol | Unit category, one of the 39 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
 | `source_code` | String | The full source code, potentially enriched: models have concerns inlined and schema prepended; controllers have a route context header prepended |
-| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor |
+| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor. Model units add `database`, `foreign_keys`, and per-association `from_db`/`to_db`/`disable_joins` (#280). Any app-owned unit under a Packwerk package adds `package` (#280) |
 | `dependencies` | Array\<Hash\> | Forward edges: `[{ type: :model, target: "User", via: "belongs_to" }, ...]` |
 | `dependents` | Array\<Hash\> | Reverse edges: **populated in Phase 2 (Resolve)**, not Phase 1 (Extract). After Phase 2 every field on a unit is effectively immutable. Shape: `[{ type: :controller, identifier: "OrdersController" }, ...]` |
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |

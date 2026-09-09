@@ -23,10 +23,71 @@
   ],
   "cycles": [],
   "bridges": [],
+  "cross_database_edges": [
+    {
+      "from": "Comment",
+      "to": "Post",
+      "via": "belongs_to",
+      "from_db": "analytics",
+      "to_db": "primary",
+      "through": null,
+      "through_db": null,
+      "disable_joins": false,
+      "kind": "association_across_databases"
+    },
+    {
+      "from": "Invoice",
+      "via": "foreign_key",
+      "from_db": "billing",
+      "through": null,
+      "through_db": null,
+      "disable_joins": false,
+      "kind": "foreign_key_across_databases",
+      "to": null,
+      "to_db": null,
+      "ambiguous_owners": ["Account", "LegacyAccount"]
+    }
+  ],
+  "volatile_dependencies": [
+    {
+      "from": "PostsController",
+      "from_type": "controller",
+      "to": "Post",
+      "to_type": "model",
+      "via": "code_reference",
+      "from_commits": 2,
+      "to_commits": 9,
+      "ratio": 4.5,
+      "pagerank": 0.4
+    }
+  ],
+  "undeclared_package_edges": [
+    {
+      "from": "PostsController",
+      "from_type": "controller",
+      "to": "BillingService",
+      "to_type": "service",
+      "via": "code_reference",
+      "from_package": "checkout",
+      "to_package": "billing"
+    },
+    {
+      "from": "Comment",
+      "from_type": "model",
+      "to": "AdminPanel",
+      "to_type": "controller",
+      "via": "belongs_to",
+      "from_package": ".",
+      "to_package": "admin"
+    }
+  ],
   "stats": {
     "orphan_count": 1,
     "dead_end_count": 1,
     "hub_count": 3,
-    "cycle_count": 0
+    "cycle_count": 0,
+    "cross_database_edge_count": 2,
+    "volatile_dependency_count": 1,
+    "undeclared_package_edge_count": 2
   }
 }

@@ -248,4 +248,22 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher).not_to be_relevant('.github/workflows/ci.yml')
     end
   end
+
+  describe '#whole_app_keys_for packages (#280)' do
+    it 'fires the packages re-run for any package.yml or packwerk.yml' do
+      expect(dispatcher.whole_app_keys_for('package.yml')).to include(:packages)
+      expect(dispatcher.whole_app_keys_for('packs/billing/package.yml')).to include(:packages)
+      expect(dispatcher.whole_app_keys_for('packwerk.yml')).to include(:packages)
+    end
+
+    it 'ignores package.yml under vendored or generated trees' do
+      expect(dispatcher.whole_app_keys_for('node_modules/x/package.yml')).not_to include(:packages)
+      expect(dispatcher.whole_app_keys_for('vendor/bundle/gems/x/package.yml')).not_to include(:packages)
+    end
+
+    it 'treats a package.yml as relevant to incremental extraction' do
+      expect(dispatcher.relevant?('packs/billing/package.yml')).to be(true)
+      expect(dispatcher.file_rules_for('packs/billing/package.yml')).to be_empty
+    end
+  end
 end

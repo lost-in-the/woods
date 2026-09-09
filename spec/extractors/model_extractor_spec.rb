@@ -531,6 +531,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       column = double('Column', name: 'slug', type: :string, sql_type: 'varchar(255)',
                                 limit: nil, null: true, default: nil)
       allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug])
+      connection = double('Connection', foreign_keys: [])
+      allow(model).to receive(:connection).and_return(connection)
       callback = double('Callback', filter: :set_slug, kind: :before)
       allow(model).to receive(:_before_save_callbacks).and_return([callback])
       stub_inlined_concern('Trackable', concern_code)
@@ -1023,7 +1025,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       # a polymorphic belongs_to yields an interface name ("Commentable"),
       # not a model — the NameError rescue never fires (#199).
       poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
-                                          class_name: 'Commentable', polymorphic?: true)
+                                          class_name: 'Commentable', polymorphic?: true, options: {})
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
 
@@ -1035,7 +1037,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
     it 'keeps the macro via label for a normal belongs_to' do
       normal = double('Assoc(author)', name: :author, macro: :belongs_to,
-                                       class_name: 'User', polymorphic?: false)
+                                       class_name: 'User', polymorphic?: false, options: {})
 
       deps = extractor.send(:extract_dependencies, model_with_associations(normal), nil)
 
@@ -1045,9 +1047,9 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
     it 'distinguishes polymorphic and normal associations on the same model' do
       poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
-                                          class_name: 'Commentable', polymorphic?: true)
+                                          class_name: 'Commentable', polymorphic?: true, options: {})
       normal = double('Assoc(author)', name: :author, macro: :belongs_to,
-                                       class_name: 'User', polymorphic?: false)
+                                       class_name: 'User', polymorphic?: false, options: {})
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly, normal), nil)
 
@@ -1058,7 +1060,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     it 'treats a reflection that lacks #polymorphic? as a plain association' do
       # Plain RSpec doubles answer respond_to?(:polymorphic?) with false
       # when the method is not stubbed — exercising the respond_to? guard.
-      habtm = double('Assoc(tags)', name: :tags, macro: :has_and_belongs_to_many, class_name: 'Tag')
+      habtm = double('Assoc(tags)', name: :tags, macro: :has_and_belongs_to_many, class_name: 'Tag',
+                                    options: {})
 
       deps = extractor.send(:extract_dependencies, model_with_associations(habtm), nil)
 
@@ -1160,6 +1163,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(a).to receive(:polymorphic?).and_return(false)
       allow(a).to receive(:foreign_key).and_return("#{name}_id")
       allow(a).to receive(:inverse_of).and_return(nil)
+      allow(a).to receive(:klass).and_return(double("Klass(#{class_name})"))
       a
     end
 
@@ -1208,6 +1212,205 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       expect(extractor.warnings.size).to eq(1)
       expect(extractor.warnings.first).to include('BrokenModel')
+    end
+  end
+
+  # ── multi-database metadata (#280) ────────────────────────────────
+
+  describe '#database_name_for' do
+    it 'returns nil when the class does not expose connection_db_config (Rails 6.0)' do
+      model = stub_bare_model('Post')
+
+      expect(extractor.send(:database_name_for, model)).to be_nil
+    end
+
+    it 'returns the resolved database name from connection_db_config (Rails 6.1+)' do
+      model = stub_bare_model('Event')
+      allow(model).to receive(:connection_db_config).and_return(double('DbConfig', name: 'analytics'))
+
+      expect(extractor.send(:database_name_for, model)).to eq('analytics')
+    end
+
+    it 'degrades to nil when connection_db_config raises' do
+      model = stub_bare_model('Broken')
+      allow(model).to receive(:connection_db_config).and_raise(StandardError, 'no connection')
+
+      expect(extractor.send(:database_name_for, model)).to be_nil
+    end
+  end
+
+  describe '#extract_metadata database fields' do
+    it 'records database and foreign keys with the target table resolved' do
+      model = stub_bare_model('Invoice')
+      allow(model).to receive_messages(
+        connection_db_config: double('DbConfig', name: 'billing'),
+        table_name: 'invoices',
+        table_exists?: true,
+        columns: [],
+        column_names: []
+      )
+      connection = double('Connection')
+      allow(model).to receive(:connection).and_return(connection)
+      allow(connection).to receive(:foreign_keys).with('invoices').and_return(
+        [double('FK', from_table: 'invoices', column: 'account_id', to_table: 'accounts')]
+      )
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [])
+
+      metadata = extractor.send(:extract_metadata, model, "class Invoice < ApplicationRecord\nend\n")
+
+      expect(metadata[:database]).to eq('billing')
+      expect(metadata[:foreign_keys]).to eq([{ from_table: 'invoices', to_table: 'accounts', column: 'account_id' }])
+    end
+
+    it 'records an empty foreign key list when the table does not exist' do
+      model = stub_bare_model('Ghost')
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      metadata = extractor.send(:extract_metadata, model, nil)
+
+      expect(metadata[:database]).to be_nil
+      expect(metadata[:foreign_keys]).to eq([])
+    end
+  end
+
+  describe '#extract_associations database annotation' do
+    let(:target_klass) do
+      klass = stub_bare_model('Account')
+      allow(klass).to receive(:connection_db_config).and_return(double('DbConfig', name: 'primary'))
+      klass
+    end
+
+    def reflection(name:, macro:, class_name:, options: {}, klass: target_klass, polymorphic: false,
+                   through_reflection: nil)
+      double('Reflection', name: name, macro: macro, class_name: class_name, options: options,
+                           polymorphic?: polymorphic, foreign_key: "#{name}_id", inverse_of: nil, klass: klass,
+                           through_reflection: through_reflection || double('ThroughReflection', klass: target_klass))
+    end
+
+    it 'records from_db, to_db, and disable_joins on each association' do
+      model = stub_bare_model('Invoice')
+      allow(model).to receive(:connection_db_config).and_return(double('DbConfig', name: 'billing'))
+      reflections = [
+        reflection(name: :account, macro: :belongs_to, class_name: 'Account'),
+        reflection(name: :plans, macro: :has_many, class_name: 'Plan',
+                   options: { through: :account, disable_joins: true })
+      ]
+      allow(model).to receive(:reflect_on_all_associations).and_return(reflections)
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations[0]).to include(name: :account, from_db: 'billing', to_db: 'primary', disable_joins: false)
+      expect(associations[1]).to include(name: :plans, from_db: 'billing', to_db: 'primary', disable_joins: true)
+      expect(associations[1][:options]).to include(through: :account, disable_joins: true)
+    end
+
+    it 'leaves to_db nil for a polymorphic association' do
+      model = stub_bare_model('Comment')
+      poly = reflection(name: :commentable, macro: :belongs_to, class_name: 'Commentable', polymorphic: true)
+      allow(model).to receive(:reflect_on_all_associations).and_return([poly])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(to_db: nil)
+    end
+
+    it 'leaves to_db nil when the target class cannot be resolved' do
+      model = stub_bare_model('Comment')
+      broken = reflection(name: :author, macro: :belongs_to, class_name: 'Author')
+      allow(broken).to receive(:klass).and_raise(NameError, 'uninitialized constant Author')
+      allow(model).to receive(:reflect_on_all_associations).and_return([broken])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(name: :author, to_db: nil)
+    end
+
+    it 'leaves through_db nil for an association with no through' do
+      model = stub_bare_model('Comment')
+      plain = reflection(name: :account, macro: :belongs_to, class_name: 'Account')
+      allow(model).to receive(:reflect_on_all_associations).and_return([plain])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: nil)
+    end
+
+    it "records through_db from the through reflection's class" do
+      model = stub_bare_model('Invoice')
+      through_klass = stub_bare_model('Subscription')
+      allow(through_klass).to receive(:connection_db_config).and_return(double('DbConfig', name: 'analytics'))
+      plans = reflection(name: :plans, macro: :has_many, class_name: 'Plan', options: { through: :subscriptions },
+                         through_reflection: double('ThroughReflection', klass: through_klass))
+      allow(model).to receive(:reflect_on_all_associations).and_return([plans])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: 'analytics')
+    end
+
+    it 'degrades through_db to nil when the through reflection cannot resolve its class' do
+      model = stub_bare_model('Invoice')
+      plans = reflection(name: :plans, macro: :has_many, class_name: 'Plan', options: { through: :subscriptions })
+      allow(plans).to receive(:through_reflection).and_raise(NameError, 'uninitialized constant Subscription')
+      allow(model).to receive(:reflect_on_all_associations).and_return([plans])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: nil)
+    end
+
+    it 'leaves through_db nil when the through model has no connection_db_config (Rails 6.0)' do
+      model = stub_bare_model('Invoice')
+      through_klass = stub_bare_model('Subscription')
+      plans = reflection(name: :plans, macro: :has_many, class_name: 'Plan', options: { through: :subscriptions },
+                         through_reflection: double('ThroughReflection', klass: through_klass))
+      allow(model).to receive(:reflect_on_all_associations).and_return([plans])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: nil)
+    end
+  end
+
+  describe '#extract_dependencies edge attributes' do
+    it 'carries through and disable_joins on the association edge only when present' do
+      model = stub_bare_model('Invoice')
+      plain = double('Reflection', name: :account, macro: :belongs_to, class_name: 'Account',
+                                   options: {}, polymorphic?: false)
+      through = double('Reflection', name: :plans, macro: :has_many, class_name: 'Plan',
+                                     options: { through: :account, disable_joins: true }, polymorphic?: false,
+                                     through_reflection: double('ThroughReflection', klass: stub_bare_model('Account')))
+      allow(model).to receive(:reflect_on_all_associations).and_return([plain, through])
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+
+      expected = [
+        { type: :model, target: 'Account', via: :belongs_to },
+        { type: :model, target: 'Plan', via: :has_many, through: 'account', disable_joins: true }
+      ]
+      expect(deps).to eq(expected)
+    end
+
+    it 'carries through_db on the edge when the through model resolves a database' do
+      model = stub_bare_model('Invoice')
+      through_klass = stub_bare_model('Account')
+      allow(through_klass).to receive(:connection_db_config).and_return(double('DbConfig', name: 'analytics'))
+      through = double('Reflection', name: :plans, macro: :has_many, class_name: 'Plan',
+                                     options: { through: :account }, polymorphic?: false,
+                                     through_reflection: double('ThroughReflection', klass: through_klass))
+      allow(model).to receive(:reflect_on_all_associations).and_return([through])
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+
+      expect(deps).to eq([
+                           { type: :model, target: 'Plan', via: :has_many, through: 'account',
+                             through_db: 'analytics' }
+                         ])
     end
   end
 end

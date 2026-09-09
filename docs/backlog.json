@@ -2297,5 +2297,164 @@
     ],
     "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
     "status": "open"
+  },
+  {
+    "id": "B-168",
+    "title": "Position Woods against Rubydex, rails-mcp-server, and ruby-lsp-rails in WHY_WOODS",
+    "severity": "low",
+    "category": "docs",
+    "layer": "docs",
+    "files": [
+      "docs/WHY_WOODS.md"
+    ],
+    "description": "Issue #280 item 6, docs half. WHY_WOODS argued only against static file reading and never named the 2026 alternatives. Acceptance: a comparison table with versions checked on 2026-09-08 that frames Rubydex as complementary on symbol references. Shipped on feat/graph-layers (commit a960e29).",
+    "status": "resolved"
+  },
+  {
+    "id": "B-169",
+    "title": "Database-partition layer: model database, FK targets, cross-database association edges",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/dependency_graph.rb",
+      "lib/woods/extractors/model_extractor.rb",
+      "lib/woods/graph_analyzer.rb"
+    ],
+    "description": "Issue #280 item 1. ModelExtractor regex-parses connects_to from source and misses inheritance from an abstract base class; no unit records its resolved database and association edges carry no database. Acceptance: metadata[:database] from connection_db_config (respond_to?-guarded), from_db/to_db/through/disable_joins on association edges, a cross_database_edges report in graph_analysis, additive node and edge attributes omitted when nil so unchanged apps serialize byte-for-byte.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-170",
+    "title": "volatile_dependencies report: edges into units that change more often than the dependent",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/graph_analyzer.rb",
+      "lib/woods/extractor.rb",
+      "lib/woods.rb"
+    ],
+    "description": "Issue #280 item 3. Churn (metadata[:git][:change_frequency]) and edges exist but are never combined. Acceptance: commit_count and change_frequency copied onto graph nodes in full and incremental runs (equivalence oracle green), a volatile_dependencies report ranked by dependency PageRank with a configurable volatile_dependency_ratio, short-circuited when no node carries git data, surfaced in SUMMARY.md and graph_analysis.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-171",
+    "title": "Packwerk package layer: package units, metadata[:package] on units, undeclared_package_edges report",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/package_extractor.rb",
+      "lib/woods/extractor.rb",
+      "lib/woods/path_dispatcher.rb",
+      "lib/woods/graph_analyzer.rb"
+    ],
+    "description": "Issue #280 item 2. No package.yml awareness anywhere in lib/. Acceptance: a file-based package unit type registered as whole-app (a package.yml change re-runs it and re-annotates membership), metadata[:package] on class-discovered units and units under root-relative extractor dirs, an undeclared_package_edges report. Enforcement stays with packwerk and pks. Known limitation recorded in B-175.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-172",
+    "title": "Woods::PublishedIndex tool-facing reader and woods:check:moved_messages",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/published_index.rb",
+      "lib/woods/checks/moved_messages.rb",
+      "lib/tasks/woods_checks.rake",
+      "docs/PUBLISHED_INDEX.md"
+    ],
+    "description": "Issue #280 item 4. Non-MCP readers (RuboCop cops, gate scripts) have no small Ruby API for the published generation. Acceptance: a facade over the active or a pinned generation exposing units, edges by via, and an external_dependency_checksum keyed on generation.json (pinned readers digest the pinned manifest), a documented cop example, and a check that reads two retained generations to find public methods that moved without a test_coverage edge following.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-173",
+    "title": "Plugin hooks for index freshness and the config/ci.rb docs line",
+    "severity": "medium",
+    "category": "config",
+    "layer": "plugin",
+    "files": [
+      "plugin/hooks/hooks.json",
+      "plugin/hooks/woods-post-edit.sh",
+      "plugin/hooks/woods-session-start.sh",
+      "docs/GETTING_STARTED.md"
+    ],
+    "description": "Issue #280 item 5. The watch daemon covers editor sessions; a claude -p run in a worktree has no daemon. Acceptance: an async PostToolUse hook running woods:incremental under a lock for graph-changing paths, reading cwd from the hook payload, a SessionStart hook that warns when the generation predates the last commit, hook schema confirmed against the Claude Code plugin reference, and a Rails 8.1 config/ci.rb step in the keep-current docs.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-174",
+    "title": "Agent-level index on/off ablation harness (woods:evaluate:ablation)",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "evaluation",
+    "files": [
+      "lib/woods/evaluation/ablation_runner.rb",
+      "lib/woods/evaluation/ablation_task_set.rb",
+      "lib/tasks/woods_evaluation.rake",
+      "docs/EVALUATION.md"
+    ],
+    "description": "Issue #280 item 6, evaluation half. woods:evaluate scores retrieval only. Acceptance: a task-set format, a runner that executes each task with the index on and off through an injected agent executor and a per-task check command, and a summary of resolution rate, tokens, and cost per condition.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-175",
+    "title": "Reach pack-resident file-based units: widen PathDispatcher and extractor dirs to packs/*/app and packs/*/lib",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/path_dispatcher.rb",
+      "lib/woods/extractors/service_extractor.rb"
+    ],
+    "description": "Follow-up from B-171 (plan review finding C4). PathDispatcher#relevant? matches only app/**.rb and every file rule's dirs are root-relative, so nothing under packs/*/app/** reaches a file-based extractor; only class-discovered types get metadata[:package] inside a pack. Acceptance: file rules and relevant? accept pack roots discovered from package.yml, incremental runs stay equivalent to full runs, and the B-171 limitation note is removed from EXTRACTOR_REFERENCE.",
+    "status": "ready",
+    "depends_on": [
+      "B-171"
+    ]
+  },
+  {
+    "id": "B-176",
+    "title": "Spec isolation: graph_analyzer_spec and extractor_spec leak Woods.configuration state under some seeds",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "graph",
+    "files": [
+      "spec/graph_analyzer_spec.rb",
+      "spec/extractor_spec.rb"
+    ],
+    "description": "Running spec/graph_analyzer_spec.rb and spec/extractor_spec.rb together with --seed 8230 fails one example (Extractor#remove_replaced_units typed identity) with NoMethodError: undefined method 'configuration' for module Woods inside Extractor#json_serialize. Each file passes alone and the full suite passes. Found during #280 Task 4; pre-existing. Acceptance: the pair passes under any seed, with the shared state reset in spec support rather than in either file.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-177",
+    "title": "Booted multi-database fixture for the dummy app so cross_database_edges is exercised end to end",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/dummy/config/database.yml",
+      "spec/integration/booted_extraction_spec.rb"
+    ],
+    "description": "The database-partition layer (#280, B-169, B-170) is covered by unit specs with stubbed connection_db_config; the dummy app has one database, so no booted lane proves a real connects_to, a reused table name across databases, an inherited connection, or a has_many :through with the through model on a third database. Acceptance: a second SQLite database in the dummy app with at least one model per case above, booted_extraction asserting the resulting cross_database_edges entries, and incremental_equivalence staying green.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-178",
+    "title": "Booted package mutation scenarios: full run, add a package, remove the last package, change package paths",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/integration/incremental_equivalence_spec.rb"
+    ],
+    "description": "Package membership (#280, B-171, B-172) has a unit-level regression on one Extractor instance; no booted lane mutates packwerk.yml or package.yml between incremental runs. Acceptance: the equivalence oracle covers a package added, the last package removed, and a package path changed, comparing full and incremental output after each mutation.",
+    "status": "ready",
+    "depends_on": [
+      "B-171"
+    ]
   }
 ]

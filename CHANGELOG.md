@@ -7,6 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Database-partition layer for multi-database apps (#280).** Model units record
+  `metadata[:database]` from `connection_db_config` (Rails 6.1+, `nil` on 6.0), so a model
+  that inherits `connects_to` from an abstract class reports the inherited database.
+  Association entries carry `from_db`, `to_db`, `through_db` (the has_many :through join
+  model's database, nil for a plain association), and `disable_joins`; `metadata[:foreign_keys]`
+  lists each foreign key's `from_table`, `to_table`, and `column` (the target table's owning
+  database is a graph-level lookup, not stored per model). The dependency graph gains additive
+  node keys (`database`, `table`, `foreign_key_tables`) and edge keys (`through`, `through_db`,
+  `disable_joins`); a graph with none of these serializes exactly as before.
+- **`cross_database_edges` report.** `GraphAnalyzer#analyze` lists association and
+  foreign-key edges that cross databases, with `kind` set to `join_through_across_databases`
+  when `disable_joins` is false and `from_db`, `through_db`, or `to_db` disagree (a nil
+  `through_db` falls back to comparing the two ends). A foreign key never resolves to an
+  owner living in its own source database, even when another database also claims the
+  table; only when every owner sits elsewhere, across more than one database, does the
+  entry come back with `to: nil` and an `ambiguous_owners` list instead of guessing.
+  Written to `graph_analysis.json`; exposed through `graph_analysis` in Task 10.
+- **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
+  gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
+  complementary on symbol references.
+- **Git commit facts land on graph nodes before analysis (#280).** Both extraction
+  paths copy `commit_count` and `change_frequency` from a unit's git metadata onto its
+  graph node: full extraction after git enrichment and before graph analysis
+  (`Extractor#annotate_graph_with_git_data`), incremental extraction as part of the
+  per-unit JSON patch (`Extractor#annotate_node_from_git`). A patch missing one of the
+  two keys leaves the node's existing value for that key alone rather than clearing it.
+
+  This gives `GraphAnalyzer` access to git facts without holding every unit in memory,
+  which an incremental run never does.
+- **`volatile_dependencies` report (#280).** Git churn and graph edges finally meet:
+  `GraphAnalyzer#analyze` lists edges whose dependency has at least
+  `config.volatile_dependency_ratio` (default `3.0`) times the dependent's commit count,
+  ranked by the dependency's PageRank. Young classes (fewer than 5 commits, or `new`)
+  are skipped, and the report is informational only. The top 20 are persisted in
+  `graph_analysis.json` (`stats.volatile_dependency_count` reports the full qualifying
+  total); the top 5 appear in `SUMMARY.md`. Each entry carries both ends' node types
+  (`from_type`/`to_type`). PageRank now runs inside `analyze`.
+- **`Woods::PublishedIndex` (#280).** A small read-only Ruby API over one published index
+  generation for RuboCop cops and gate scripts: look up units by identifier (optionally
+  scoped to a type, to avoid a same-identifier collision across type directories), iterate
+  edges with their attributes, build a table-to-database map, pin a retained `payloads/gen-N`
+  under the same retention lock protocol as `PayloadStore#prune`, and get a checksum keyed to
+  the pinned payload for `external_dependency_checksum`. Raises
+  `Woods::PublishedIndex::CorruptPointerError` for a `generation.json` that exists but will
+  not parse, rather than reporting zero published generations. `docs/PUBLISHED_INDEX.md`
+  includes a worked `Multidb/ForeignKeyAcrossDatabases` cop.
+- **Agent-level ablation harness (#280).** `woods:evaluate:ablation[task_set]` runs a task
+  set twice per task, with the index on and off, through any agent command that prints
+  `claude -p --output-format json` style output. Each trial runs in a disposable git
+  worktree checked out from a fixed baseline SHA, verifies Woods availability before
+  running, and enforces a per-trial timeout. Reports resolution rate, tokens, cost, turns,
+  and errors per condition with the delta, plus provenance (agent command, model, MCP
+  config, Woods generation, baseline SHA) per result. No Rails boot. This is a harness for
+  collecting paired runs, not causal evidence. `docs/EVALUATION.md` now documents
+  `woods:evaluate`, the baseline, and the ablation in one place.
+- **Plugin hooks for index freshness (#280).** The Claude Code plugin (2.3.0) ships two
+  opt-in hooks under `plugin/hooks/`: a `PostToolUse` hook that runs `woods:incremental`
+  in the background when an edit touches models, routes, migrations, schema, or a
+  `package.yml`, reading `cwd` from the hook payload so linked worktrees refresh their own
+  index; and a `SessionStart` hook that warns when the published generation predates the
+  last commit (scoped to commit timestamps, so it does not cover uncommitted edits or an
+  older checkout). Both do nothing until `WOODS_HOOKS_ENABLED=1` is set, honor
+  `WOODS_HOOKS_DISABLED=1`, and resolve the index directory the same no-boot way
+  `woods:watch_status` does (`WOODS_OUTPUT`, default `tmp/woods`). Lock contention batches
+  concurrent edits instead of dropping them: a busy hook appends its path to
+  `hook-pending.txt` and returns, and the lock holder drains it in a loop until empty
+  (mkdir-based lock on hosts without `flock`, reclaimed after `WOODS_HOOK_LOCK_STALE_SECONDS`,
+  default 1800, when a crashed run leaves it behind). Docs gain the Rails 8.1 `config/ci.rb` step
+  `step "Woods: refresh", "bin/rails woods:incremental"`.
+- **Packwerk package layer (#280).** A new `package` unit type reads every `package.yml`
+  `enforce_dependencies`, `layer`, `public_path`, `owner`, with a `package_dependency`
+  edge per declared dependency. Any `package.yml` change re-runs the extractor wholesale
+  during incremental extraction. Woods reports boundaries; `pks check` and
+  `packwerk check` keep enforcement. A pack-resident file-based unit (a service under
+  `packs/billing/app/services/`) is still not discovered by `PathDispatcher`, so it never
+  becomes a unit at all (follow-up B-175).
+- **Package membership on units (#280).** Every discovered app-owned unit under a package
+  root carries `metadata[:package]` and its graph node carries `package`, on full and
+  incremental runs alike; a `package.yml` change re-annotates the affected units in the
+  same incremental run.
+- **`undeclared_package_edges` report.** `GraphAnalyzer#analyze` lists every edge that
+  crosses a package boundary the source package never declared, read from the `package`
+  node attribute and each package unit's own `package_dependency` edges. `dependents`,
+  `lookup`, and `domain_clusters` already show the units; this shows the boundary an
+  agent is about to cross. Enforcement stays with `packwerk check` / `pks check`.
+- **`graph_analysis` exposes the cross-database and volatile-dependency reports.**
+  `analysis` accepts `cross_database_edges`, `volatile_dependencies`, and
+  `undeclared_package_edges`; `all` paginates them like every other section, and the
+  markdown and plain renderers print edge-shaped items on one line each.
+- **`woods:check:moved_messages` (#280).** Compares two retained payload generations through
+  `Woods::PublishedIndex` and lists every public method name that looks like it moved between
+  units while its `test_coverage` edge did not follow. Each row is a candidate move into a unit
+  without mapped tests, not a proven coverage loss. `WOODS_CHECK_STRICT=1` exits 1 for CI. No
+  Rails boot.
+
 ### Performance
 
 - **Controller and mailer chunk extraction parses each file once, not once per

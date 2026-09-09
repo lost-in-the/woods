@@ -30,6 +30,12 @@ namespace :woods do
     task :baseline, [:strategy] => :environment do |_t, args|
       Woods::EvaluationTasks.run_baseline(strategy: args[:strategy])
     end
+
+    desc 'Agent-level ablation: run a task set with the index on and off, ' \
+         'each trial in a disposable worktree (no Rails boot)'
+    task :ablation, [:task_set] do |_t, args|
+      Woods::EvaluationTasks.run_ablation(task_set_path: args[:task_set])
+    end
   end
 end
 
@@ -176,6 +182,18 @@ module Woods
       puts "  Mean MRR:    #{format('%.4f', count.positive? ? totals[:mrr] / count : 0.0)}"
       puts "  Mean Recall: #{format('%.4f', count.positive? ? totals[:recall] / count : 0.0)}"
       puts '=' * 50
+    end
+
+    # Run the agent-level ablation harness and write a JSON report. This
+    # collects paired on/off runs; it is not causal evidence, see
+    # docs/EVALUATION.md. Deliberately has no `:environment` prerequisite:
+    # the harness shells out to an agent command and never boots Rails.
+    #
+    # @param task_set_path [String, nil]
+    # @return [void]
+    def run_ablation(task_set_path: nil)
+      require 'woods/evaluation/ablation_task'
+      Evaluation::AblationTask.run(task_set_path: task_set_path, workdir: Dir.pwd)
     end
   end
 end

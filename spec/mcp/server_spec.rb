@@ -396,6 +396,40 @@ RSpec.describe Woods::MCP::Server do
       expect(data['hubs'].size).to eq(1)
       expect(data['hubs_offset']).to eq(1)
     end
+
+    it 'returns the cross-database and volatile sections (#280)' do
+      data = parse_response(call_tool(server, 'graph_analysis'))
+
+      expect(data['cross_database_edges'].first).to include('from' => 'Comment', 'to' => 'Post',
+                                                            'kind' => 'association_across_databases')
+      expect(data['volatile_dependencies'].first).to include('from' => 'PostsController', 'ratio' => 4.5)
+    end
+
+    it 'returns the undeclared package edges section (#280)' do
+      data = parse_response(call_tool(server, 'graph_analysis'))
+
+      expect(data['undeclared_package_edges'].first).to include(
+        'from' => 'PostsController', 'to' => 'BillingService',
+        'from_package' => 'checkout', 'to_package' => 'billing'
+      )
+    end
+
+    it 'accepts each new section name and paginates it' do
+      %w[cross_database_edges volatile_dependencies undeclared_package_edges].each do |section|
+        data = parse_response(call_tool(server, 'graph_analysis', analysis: section, limit: 1))
+
+        expect(data).to have_key(section)
+        expect(data).to have_key('stats')
+      end
+    end
+
+    it 'advertises the new sections in the analysis enum' do
+      tool = server.instance_variable_get(:@tools)['graph_analysis']
+      enum = tool.input_schema.to_h.dig(:properties, :analysis, :enum) ||
+             tool.input_schema.to_h.dig('properties', 'analysis', 'enum')
+
+      expect(enum).to include('cross_database_edges', 'volatile_dependencies', 'undeclared_package_edges', 'all')
+    end
   end
 
   describe 'tool: domain_clusters' do

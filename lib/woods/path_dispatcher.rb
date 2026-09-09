@@ -55,20 +55,28 @@ module Woods
     #   @return [Boolean] false to match only files directly inside +dirs+
     # @!attribute exact_paths
     #   @return [Array<String>, nil] exact relative paths that match
+    # @!attribute basenames
+    #   @return [Array<String>, nil] file basenames that match anywhere under Rails.root (honors +exclude+)
     Rule = Struct.new(
       :extractor_key, :method_name, :dirs, :extensions, :exclude,
-      :require_segment, :recursive, :exact_paths,
+      :require_segment, :recursive, :exact_paths, :basenames,
       keyword_init: true
     ) do
       # @param relative_path [String] Rails.root-relative path
       # @return [Boolean]
       def matches?(relative_path)
         return true if exact_paths&.include?(relative_path)
+        return basename_match?(relative_path) if basenames
 
         filters_pass?(relative_path) && under_a_directory?(relative_path)
       end
 
       private
+
+      def basename_match?(relative_path)
+        basenames.include?(File.basename(relative_path)) &&
+          exclude.to_a.none? { |segment| relative_path.include?(segment) }
+      end
 
       def filters_pass?(relative_path)
         (extensions.nil? || extensions.any? { |ext| relative_path.end_with?(ext) }) &&
@@ -195,7 +203,14 @@ module Woods
           # per-process while configuration can change, and `relevant?` is
           # correct either way because Gemfile.lock already triggers
           # :engines and :middleware.
-          whole_app_rule(:rails_source, [], exact_paths: %w[Gemfile.lock])
+          whole_app_rule(:rails_source, [], exact_paths: %w[Gemfile.lock]),
+          # Packwerk boundaries: a package.yml anywhere re-runs the package
+          # extractor wholesale (#280). Vendored and generated trees are the
+          # same ones packwerk excludes by default.
+          whole_app_rule(:packages, [],
+                         basenames: [Woods::Extractors::PackageExtractor::PACKAGE_FILE,
+                                     Woods::Extractors::PackageExtractor::PACKWERK_CONFIG],
+                         exclude: %w[node_modules/ vendor/ tmp/ bin/ script/])
         ]
       end
 

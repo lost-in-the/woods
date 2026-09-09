@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'json'
 require 'woods/mcp/tool_response_renderer'
 require 'woods/mcp/renderers/plain_renderer'
 
@@ -98,6 +99,99 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
       expect(renderer.render(:unknown, { a: 1 })).to eq('a: 1')
       expect(renderer.render(:unknown, [1, 2])).to include('1').and include('2')
       expect(renderer.render(:unknown, 'hi')).to eq('hi')
+    end
+  end
+
+  describe '#render_graph_analysis edge-shaped items (#280)' do
+    it 'renders from, to, via, and the remaining keys on one line' do
+      out = renderer.render(:graph_analysis, {
+                              'volatile_dependencies' => [
+                                { 'from' => 'Checkout', 'to' => 'PricingRules', 'via' => 'code_reference',
+                                  'from_commits' => 5, 'to_commits' => 30, 'ratio' => 6.0, 'pagerank' => 0.1 }
+                              ],
+                              'stats' => {}
+                            })
+
+      expect(out).to include('VOLATILE DEPENDENCIES:')
+      expect(out).to include('  Checkout -> PricingRules (code_reference): from_commits: 5, to_commits: 30, ' \
+                             'ratio: 6.0, pagerank: 0.1')
+    end
+
+    it 'renders an Array detail value joined, not as Ruby array syntax' do
+      fixture_path = File.expand_path('../../fixtures/woods/graph_analysis.json', __dir__)
+      ambiguous = JSON.parse(File.read(fixture_path)).fetch('cross_database_edges')
+                      .find { |edge| edge.key?('ambiguous_owners') }
+
+      out = renderer.render(:graph_analysis, { 'cross_database_edges' => [ambiguous], 'stats' => {} })
+
+      expect(out).to include('ambiguous_owners: Account, LegacyAccount')
+      expect(out).not_to include('["Account"')
+    end
+
+    it 'renders a nil endpoint as (unresolved), not a blank bold pair' do
+      out = renderer.render(:graph_analysis, {
+                              'cross_database_edges' => [
+                                { 'from' => 'Invoice', 'to' => nil, 'via' => 'foreign_key', 'kind' => 'x' }
+                              ],
+                              'stats' => {}
+                            })
+
+      expect(out).to include('  Invoice -> (unresolved) (foreign_key)')
+      expect(out).not_to include('****')
+    end
+
+    it 'renders an undeclared_package_edges entry generically, with no dedicated branch' do
+      out = renderer.render(:graph_analysis, {
+                              'undeclared_package_edges' => [
+                                { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'BillingService',
+                                  'to_type' => 'service', 'via' => 'code_reference', 'from_package' => 'checkout',
+                                  'to_package' => 'billing' }
+                              ],
+                              'stats' => { 'undeclared_package_edge_count' => 1 }
+                            })
+
+      expect(out).to include('UNDECLARED PACKAGE EDGES:')
+      expect(out).to include('  PostsController -> BillingService (code_reference): from_type: controller, ' \
+                             'to_type: service, from_package: checkout, to_package: billing')
+    end
+
+    it 'keeps existing sections byte-identical to the pre-#280 renderer (I13)' do
+      old_shape = {
+        'orphans' => ['PostsController'],
+        'dead_ends' => ['Post'],
+        'hubs' => [
+          { 'identifier' => 'Post', 'type' => 'model', 'dependent_count' => 2,
+            'dependents' => %w[Comment PostsController] },
+          { 'identifier' => 'Comment', 'type' => 'model', 'dependent_count' => 0, 'dependents' => [] },
+          { 'identifier' => 'PostsController', 'type' => 'controller', 'dependent_count' => 0, 'dependents' => [] }
+        ],
+        'cycles' => [], 'bridges' => [],
+        'stats' => { 'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0 }
+      }
+
+      # Captured by rendering this exact hash at 3498079 (task-10's base
+      # commit), before cross_database_edges/volatile_dependencies existed.
+      expected = <<~PLAIN.rstrip
+        Graph Analysis
+        #{'=' * 60}
+          orphan_count: 1
+          dead_end_count: 1
+          hub_count: 3
+          cycle_count: 0
+
+        ORPHANS:
+          PostsController
+
+        DEAD ENDS:
+          Post
+
+        HUBS:
+          Post (model) - 2 dependents
+          Comment (model) - 0 dependents
+          PostsController (controller) - 0 dependents
+      PLAIN
+
+      expect(renderer.render(:graph_analysis, old_shape)).to eq(expected)
     end
   end
 end

@@ -173,14 +173,16 @@ module Woods
             lines << ''
           end
 
-          %w[orphans dead_ends hubs cycles bridges].each do |section|
+          GRAPH_ANALYSIS_SECTIONS.each do |section|
             items = fetch_key(data, section)
             next unless items.is_a?(Array) && items.any?
 
             lines << "### #{section.tr('_', ' ').capitalize}"
             lines << ''
             items.each do |item|
-              lines << if item.is_a?(Hash) && item.key?('score')
+              lines << if item.is_a?(Hash) && item.key?('from')
+                         graph_edge_line(item, bold: true)
+                       elsif item.is_a?(Hash) && item.key?('score')
                          "- **#{item['identifier']}** (#{item['type']}) — score: #{item['score']}"
                        elsif item.is_a?(Hash)
                          "- **#{item['identifier']}** (#{item['type']}) — #{item['dependent_count']} dependents"
@@ -363,6 +365,40 @@ module Woods
         end
 
         private
+
+        # One line for an edge-shaped report item (from, to, via, then the
+        # remaining keys in the order the report emits them).
+        #
+        # @param item [Hash] string-keyed
+        # @param bold [Boolean] wrap the endpoints in ** for markdown
+        # @return [String]
+        def graph_edge_line(item, bold:)
+          detail = item.except('from', 'to', 'via')
+                       .map { |key, value| "#{key}: #{edge_value(value)}" }.join(', ')
+          line = "#{edge_endpoint(item['from'], bold: bold)} -> #{edge_endpoint(item['to'], bold: bold)} " \
+                 "(#{item['via']})"
+          detail.empty? ? "- #{line}" : "- #{line}: #{detail}"
+        end
+
+        # A resolved endpoint is bolded (when markdown calls for it); a nil
+        # endpoint (an ambiguous foreign-key owner, for example) is a plain
+        # placeholder, never an empty bold pair (`****`).
+        #
+        # @param value [String, nil]
+        # @param bold [Boolean]
+        # @return [String]
+        def edge_endpoint(value, bold:)
+          return '(unresolved)' if value.nil?
+
+          bold ? "**#{value}**" : value
+        end
+
+        # @param value [Object] a detail hash value; arrays (e.g. `ambiguous_owners`) join
+        #   as plain text instead of printing Ruby's `Array#inspect` syntax.
+        # @return [Object]
+        def edge_value(value)
+          value.is_a?(Array) ? value.join(', ') : value
+        end
 
         def render_traversal(label, data)
           root = fetch_key(data, :root)

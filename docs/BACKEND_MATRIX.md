@@ -306,7 +306,7 @@ Loads `dependency_graph.json` into a Ruby hash structure. Supports BFS traversal
 
 **Memory:** ~10MB for 2000 nodes with average 5 edges each.
 **Traversal:** < 1ms for depth-2 BFS.
-**Analysis:** `GraphAnalyzer` provides `orphans`, `dead_ends`, `hubs(limit:)`, `cycles`, `bridges(limit:, sample_size:)`, `domain_clusters`, and a combined `analyze` method.
+**Analysis:** `GraphAnalyzer` provides `orphans`, `dead_ends`, `hubs(limit:)`, `cycles`, `bridges(limit:, sample_size:)`, `domain_clusters`, `cross_database_edges`, `volatile_dependencies`, `undeclared_package_edges`, and a combined `analyze` method.
 
 ### Not implemented
 

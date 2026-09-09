@@ -144,7 +144,7 @@ module Woods
                   :cache_store, :cache_options,
                   :dump_retention_count
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
-                :context_format, :cache_enabled
+                :context_format, :cache_enabled, :volatile_dependency_ratio
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -202,6 +202,7 @@ module Woods
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @dump_retention_count = 3
+      @volatile_dependency_ratio = 3.0
     end
 
     def embedding_model=(value)
@@ -291,6 +292,19 @@ module Woods
     def cache_enabled=(value)
       validate_boolean!(:cache_enabled, value)
       @cache_enabled = value
+    end
+
+    # Commit-count ratio above which {Woods::GraphAnalyzer#volatile_dependencies}
+    # reports an edge. Stored as a Float.
+    #
+    # @param value [Numeric] must be greater than 1
+    # @raise [ConfigurationError] otherwise
+    def volatile_dependency_ratio=(value)
+      unless value.is_a?(Numeric) && value > 1
+        raise ConfigurationError, "volatile_dependency_ratio must be a number greater than 1, got #{value.inspect}"
+      end
+
+      @volatile_dependency_ratio = value.to_f
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

@@ -23,8 +23,11 @@ module Woods
   class GraphAnalyzer
     # Types that are naturally root nodes and should not be flagged as orphans.
     # Framework and gem sources are consumed but never referenced by application code
-    # in the dependency graph's reverse index.
-    EXCLUDED_ORPHAN_TYPES = %i[rails_source gem_source].freeze
+    # in the dependency graph's reverse index. Package units (#280) declare
+    # boundaries via metadata and `:package_dependency` edges to other
+    # packages; nothing points back at a leaf package in the reverse index,
+    # so it would otherwise be flagged as dead code it is not.
+    EXCLUDED_ORPHAN_TYPES = %i[rails_source gem_source package].freeze
 
     # How many rounds {#assign_orphaned_units} runs before it stops pulling
     # unnamespaced units into clusters through other unnamespaced units. The
@@ -34,9 +37,24 @@ module Woods
     # on large graphs.
     ORPHAN_ASSIGNMENT_ROUNDS = 10
 
+    # Edge labels that come from an Active Record association reflection.
+    # Only these can cross a database boundary through Rails itself.
+    ASSOCIATION_VIAS = %w[belongs_to has_many has_one has_and_belongs_to_many].freeze
+
+    # A dependency must change at least this many times more often than
+    # its dependent to be reported by {#volatile_dependencies}.
+    DEFAULT_VOLATILE_RATIO = 3.0
+
+    # A dependency with fewer commits in the last year than this is too
+    # young to judge; POODR's rule is about things that keep changing, and
+    # a class touched four times could be settling down.
+    VOLATILE_MIN_COMMITS = 5
+
     # @param dependency_graph [DependencyGraph] The graph to analyze
-    def initialize(dependency_graph)
+    # @param volatile_ratio [Numeric] see {#volatile_dependencies}
+    def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO)
       @graph = dependency_graph
+      @volatile_ratio = volatile_ratio.to_f
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -177,6 +195,92 @@ module Woods
         end
     end
 
+    # Association and foreign-key edges whose two ends resolve to different
+    # databases (#280).
+    #
+    # Reads only node attributes (`database`, `table`, `foreign_key_tables`)
+    # and edge attributes (`through`, `through_db`, `disable_joins`), so an
+    # incremental run that loaded the graph from disk computes exactly what
+    # a full run does.
+    #
+    # Scoped to primary nodes: identifiers as registered in {#graph_nodes}.
+    # A variant, the non-primary type registered under an identifier that
+    # collides across types, is not walked separately. Association edges are
+    # read with `type: :model`, so a variant sharing the identifier under a
+    # different type cannot contribute a crossing that belongs to it alone.
+    #
+    # A foreign key never picks a target owner that lives in `from_db`, even
+    # when another database also owns the table: an owner in the source
+    # database means the key resolves locally, whatever else claims the same
+    # table name. Only when every owner sits outside `from_db`, in more than
+    # one other database, does the entry come back ambiguous.
+    #
+    # `kind`:
+    # * `join_through_across_databases`: a `has_many :through` where
+    #   `disable_joins` is false and `from_db`, `through_db`, and `to_db` are
+    #   not all equal (a nil `through_db` falls back to comparing the two
+    #   ends). Rails will try to JOIN across connections; this is the
+    #   Uchitelle rule.
+    # * `association_across_databases`: any other association edge across
+    #   databases, including a through with `disable_joins`.
+    # * `foreign_key_across_databases`: a database-level foreign key whose
+    #   target table's owner (or every owner, when ambiguous) lives in
+    #   another database.
+    #
+    # @return [Array<Hash>] sorted by from, to, via
+    def cross_database_edges
+      @cross_database_edges ||= begin
+        nodes = graph_nodes
+        owners = table_owners(nodes)
+        entries = nodes.keys.sort.flat_map do |identifier|
+          meta = nodes[identifier]
+          from_db = meta[:database]
+          next [] unless from_db
+
+          association_crossings(identifier, from_db, nodes) +
+            foreign_key_crossings(identifier, from_db, meta, owners)
+        end
+        # Whole-hash dedup, not a `[from, to, via]` key: an ambiguous foreign
+        # key entry carries `to: nil` regardless of which table it names, so
+        # two distinct ambiguous foreign keys on the same model would
+        # otherwise collapse into one.
+        entries.uniq.sort_by { |e| [e[:from], e[:to], e[:via]] }
+      end
+    end
+
+    # Edges that point at something changing much faster than the thing
+    # that depends on it: "depend on things that change less often than
+    # you do" (POODR ch. 3), made checkable because the graph now carries
+    # commit counts (#280).
+    #
+    # Report only, never a gate: young classes produce false positives, so
+    # dependencies with fewer than {VOLATILE_MIN_COMMITS} commits or a
+    # `new` change frequency are skipped. Ranked by the dependency's
+    # PageRank so the most-depended-on volatile unit comes first. `limit`
+    # caps what this method hands back; {#analyze}'s
+    # `stats[:volatile_dependency_count]` reports the full qualifying count
+    # regardless of `limit`.
+    #
+    # @param limit [Integer] maximum entries
+    # @return [Array<Hash>] `{ from:, from_type:, to:, to_type:, via:, from_commits:, to_commits:, ratio:, pagerank: }`
+    def volatile_dependencies(limit: 20)
+      all_volatile_dependencies.first(limit)
+    end
+
+    # Edges that cross a Packwerk package boundary the source package never
+    # declared (#280).
+    #
+    # Membership comes from the `package` node attribute (Task 8); a
+    # declaration comes from a package unit's own `:package_dependency`
+    # edges (Task 7). Both are graph-only, so a full and an incremental run
+    # compute the same report. Enforcement stays with `packwerk check` /
+    # `pks check`; this only makes the undeclared boundary visible.
+    #
+    # @return [Array<Hash>] `{ from:, from_type:, to:, to_type:, via:, from_package:, to_package: }`, sorted
+    def undeclared_package_edges
+      @undeclared_package_edges ||= compute_undeclared_package_edges
+    end
+
     # Group units into semantic domains using namespace prefixes and graph connectivity.
     #
     # Strategy:
@@ -214,7 +318,7 @@ module Woods
       merge_small_clusters(clusters, min_size)
 
       # Step 4: Enrich each cluster with hub, entry points, boundary edges
-      pagerank_scores = @graph.pagerank
+      pagerank_scores = self.pagerank_scores
       enrich_clusters(clusters, nodes, pagerank_scores)
 
       # Sort by member count descending
@@ -233,6 +337,9 @@ module Woods
       computed_hubs = hubs
       computed_cycles = cycles
       computed_bridges = bridges(limit: 10)
+      computed_cross_database = cross_database_edges
+      computed_volatile = volatile_dependencies
+      computed_undeclared = undeclared_package_edges
 
       {
         orphans: computed_orphans,
@@ -240,11 +347,17 @@ module Woods
         hubs: computed_hubs,
         cycles: computed_cycles,
         bridges: computed_bridges,
+        cross_database_edges: computed_cross_database,
+        volatile_dependencies: computed_volatile,
+        undeclared_package_edges: computed_undeclared,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
           hub_count: computed_hubs.size,
-          cycle_count: computed_cycles.size
+          cycle_count: computed_cycles.size,
+          cross_database_edge_count: computed_cross_database.size,
+          volatile_dependency_count: all_volatile_dependencies.size,
+          undeclared_package_edge_count: computed_undeclared.size
         }
       }
     end
@@ -472,6 +585,198 @@ module Woods
     # @return [Hash] identifier => { type:, file_path:, namespace: }
     def graph_nodes
       @graph_nodes ||= graph_data[:nodes]
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Cross-database helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # table name => { database name => sorted identifiers of the model nodes
+    # in that database owning it }. Sorted identifier iteration makes a
+    # table owned by several nodes in one database resolve to the same
+    # first identifier every run; nodes with no table or no database
+    # contribute no ownership claim.
+    #
+    # @param nodes [Hash]
+    # @return [Hash{String => Hash{String => Array<String>}}]
+    def table_owners(nodes)
+      nodes.keys.sort.each_with_object({}) do |identifier, owners|
+        node = nodes[identifier]
+        table = node[:table]
+        database = node[:database]
+        next unless table && database
+
+        by_database = (owners[table] ||= {})
+        (by_database[database] ||= []) << identifier
+      end
+    end
+
+    # @return [Array<Hash>] association edges from `identifier` that land in another database
+    def association_crossings(identifier, from_db, nodes)
+      @graph.edge_records(identifier, type: :model).filter_map do |edge|
+        via = edge[:via].to_s
+        next unless ASSOCIATION_VIAS.include?(via)
+
+        target = nodes[edge[:target]]
+        to_db = target && target[:database]
+        through_db = edge[:through] ? edge[:through_db] : nil
+        databases = [from_db, to_db, through_db].compact.uniq
+        next if databases.size < 2
+
+        disable_joins = edge[:disable_joins] == true
+        kind = edge[:through] && !disable_joins ? 'join_through_across_databases' : 'association_across_databases'
+        {
+          from: identifier, to: edge[:target], via: via, from_db: from_db, to_db: to_db,
+          through: edge[:through], through_db: through_db, disable_joins: disable_joins, kind: kind
+        }
+      end
+    end
+
+    # @return [Array<Hash>] foreign keys from `identifier`'s table into a table owned by another database
+    def foreign_key_crossings(identifier, from_db, meta, owners)
+      Array(meta[:foreign_key_tables]).filter_map do |table|
+        foreign_key_crossing(identifier, from_db, table, owners)
+      end
+    end
+
+    # A single foreign key's crossing entry, or nil when an owner of `table`
+    # lives in `from_db` (the key resolves locally regardless of what else
+    # claims the table name) or when no node claims the table at all.
+    #
+    # @return [Hash, nil]
+    def foreign_key_crossing(identifier, from_db, table, owners)
+      by_database = owners[table]
+      return nil if by_database.nil? || by_database.key?(from_db)
+
+      base = {
+        from: identifier, via: 'foreign_key', from_db: from_db,
+        through: nil, through_db: nil, disable_joins: false, kind: 'foreign_key_across_databases'
+      }
+      databases = by_database.keys.sort
+      if databases.size == 1
+        owner_db = databases.first
+        base.merge(to: by_database[owner_db].first, to_db: owner_db)
+      else
+        base.merge(to: nil, to_db: nil, ambiguous_owners: by_database.values.flatten.sort)
+      end
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Volatile dependency helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # PageRank computed once per analyzer instance.
+    #
+    # @return [Hash{String => Float}]
+    def pagerank_scores
+      @pagerank_scores ||= @graph.pagerank
+    end
+
+    # Every qualifying edge, unranked by {#volatile_dependencies}'s `limit`.
+    # {#analyze} needs the full count separately from the persisted top 20.
+    #
+    # @return [Array<Hash>] sorted by pagerank, ratio, from, to, via
+    def all_volatile_dependencies
+      @all_volatile_dependencies ||= compute_volatile_dependencies
+    end
+
+    # Short-circuits to `[]`, skipping the PageRank computation entirely,
+    # when no node carries an Integer `commit_count` (git enrichment never
+    # ran): there is nothing to rank.
+    #
+    # @return [Array<Hash>]
+    def compute_volatile_dependencies
+      nodes = graph_nodes
+      return [] unless nodes.each_value.any? { |meta| meta[:commit_count].is_a?(Integer) }
+
+      scores = pagerank_scores
+      entries = nodes.keys.sort.flat_map do |from|
+        from_meta = nodes[from]
+        from_commits = from_meta[:commit_count]
+        next [] unless from_commits.is_a?(Integer)
+
+        @graph.edge_records(from, type: from_meta[:type]).filter_map do |edge|
+          volatile_entry(from, from_meta, from_commits, edge, nodes, scores)
+        end
+      end
+      entries.uniq { |e| [e[:from], e[:to], e[:via]] }
+             .sort_by { |e| [-e[:pagerank], -e[:ratio], e[:from], e[:to], e[:via]] }
+    end
+
+    # @return [Hash, nil] the report entry for one edge, or nil when it is not volatile
+    def volatile_entry(from, from_meta, from_commits, edge, nodes, scores)
+      to = edge[:target]
+      to_meta = nodes[to]
+      return nil unless to_meta
+
+      to_commits = to_meta[:commit_count]
+      return nil unless to_commits.is_a?(Integer) && to_commits >= VOLATILE_MIN_COMMITS
+      return nil if to_meta[:change_frequency] == 'new'
+
+      ratio = to_commits.to_f / [from_commits, 1].max
+      return nil if ratio < @volatile_ratio
+
+      {
+        from: from, from_type: from_meta[:type], to: to, to_type: to_meta[:type], via: edge[:via].to_s,
+        from_commits: from_commits, to_commits: to_commits,
+        ratio: ratio.round(2), pagerank: (scores[to] || 0.0).round(4)
+      }
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Package boundary helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # Short-circuits to `[]`, skipping declaration lookup entirely, when no
+    # node carries a `package` attribute (no package extraction ran).
+    #
+    # @return [Array<Hash>]
+    def compute_undeclared_package_edges
+      nodes = graph_nodes
+      return [] unless nodes.each_value.any? { |meta| meta.key?(:package) }
+
+      declared = package_declarations(nodes)
+      entries = nodes.keys.sort.flat_map do |from|
+        meta = nodes[from]
+        from_package = meta[:package]
+        next [] if from_package.nil? || meta[:type] == :package
+
+        @graph.edge_records(from, type: meta[:type]).filter_map do |edge|
+          undeclared_entry(from, meta, from_package, edge, nodes, declared)
+        end
+      end
+      entries.uniq.sort_by { |e| [e[:from], e[:to], e[:via]] }
+    end
+
+    # package identifier => Set of package identifiers it declares as
+    # dependencies, read from that package unit's own `:package_dependency`
+    # edges. A root package (`.`) declaring nothing is just another entry
+    # with an empty Set, no special-cased root handling.
+    #
+    # @param nodes [Hash]
+    # @return [Hash{String => Set<String>}]
+    def package_declarations(nodes)
+      nodes.each_with_object({}) do |(identifier, meta), declared|
+        next unless meta[:type] == :package
+
+        declared[identifier] = @graph.dependencies_of(identifier, via: :package_dependency).to_set
+      end
+    end
+
+    # @return [Hash, nil] the report entry, or nil when the edge stays inside declared boundaries
+    def undeclared_entry(from, from_meta, from_package, edge, nodes, declared)
+      to = edge[:target]
+      to_meta = nodes[to]
+      to_package = to_meta && to_meta[:package]
+      return nil if to_package.nil? || to_package == from_package
+
+      declared_deps = declared[from_package] || Set.new
+      return nil if declared_deps.include?(to_package)
+
+      {
+        from: from, from_type: from_meta[:type], to: to, to_type: to_meta[:type], via: edge[:via].to_s,
+        from_package: from_package, to_package: to_package
+      }
     end
 
     # ──────────────────────────────────────────────────────────────────────

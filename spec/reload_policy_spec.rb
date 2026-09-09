@@ -76,6 +76,14 @@ RSpec.describe Woods::ReloadPolicy do
       # LibExtractor skips generators, so nothing downstream reads them.
       expect(policy.classify('lib/generators/thing/thing_generator.rb')).to eq(:ignore)
     end
+
+    context 'with Packwerk package files (#280)' do
+      it 'demands a re-extraction, not a reload or restart' do
+        expect(policy.classify('package.yml')).to eq(:reextract)
+        expect(policy.classify('packs/billing/package.yml')).to eq(:reextract)
+        expect(policy.classify('packwerk.yml')).to eq(:reextract)
+      end
+    end
   end
 
   describe '#classify_all' do

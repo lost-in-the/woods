@@ -10,7 +10,7 @@ Woods runs in three phases across two environments:
 
 ```
 Inside Rails app (rake task):
-  1. Extract, 34 extractors introspect the live Rails environment
+  1. Extract, 35 extractors introspect the live Rails environment
   2. Resolve, dependency graph is built and enriched with git data
   3. Write, one JSON file per code unit to tmp/woods/
 
@@ -30,7 +30,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                    Rails Application                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐             │
 │  │ Extract  │──▶│ Resolve  │──▶│  Enrich  │             │
-│  │ 34 types │   │  graph   │   │   git    │             │
+│  │ 35 types │   │  graph   │   │   git    │             │
 │  └──────────┘   └──────────┘   └──────────┘             │
 │                                     │                    │
 │                                     ▼                    │
@@ -107,11 +107,11 @@ EXTRACTORS.each { |type, klass| @results[type] = klass.new.extract_all }
 # Phase 2: Resolve dependents
 # Second pass: if A.dependencies includes B, B.dependents gets a back-reference to A
 
-# Phase 3: Graph analysis
-# PageRank, orphans, dead ends, hubs, cycles, bridges
-
-# Phase 4: Enrich with git
+# Phase 3: Enrich with git
 # batch git log for all file paths → last_modified, contributors, change_frequency
+
+# Phase 4: Graph analysis
+# PageRank, orphans, dead ends, hubs, cycles, bridges
 
 # Phase 5: Write
 # One JSON file per unit + _index.json per type + dependency_graph.json + SUMMARY.md + manifest.json
@@ -134,7 +134,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the nine unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source` (gated by `include_framework_sources`). Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the ten unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `rails_source` (gated by `include_framework_sources`), and `package`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
 
 ---
 
@@ -159,7 +159,7 @@ graph.affected_by(["app/models/user.rb"])  # BFS over reverse edges
 
 ### PageRank scoring
 
-`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs.
+`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs. Package units (#280) add nodes and `package_dependency` edges to the graph, so scores shift slightly wherever they land.
 
 Scores feed into the retrieval ranker as one signal in the final ranking formula.
 
@@ -174,6 +174,9 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 | **Hubs** | Units with many dependents, architectural bottlenecks; changes here have high blast radius |
 | **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS. |
 | **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
+| **Cross-database edges** | Association or foreign-key edges whose two ends resolve to different databases. A `has_many :through` is reported as `join_through_across_databases` when `disable_joins` is false and `from_db`, `through_db` (the join model's database), or `to_db` disagree. A foreign key never resolves to an owner in the source database, even when another database also claims the table; when every owner sits elsewhere and they span more than one database, the entry comes back with `to: nil` and an `ambiguous_owners` list instead of guessing. Read from graph node and edge attributes, so full and incremental runs agree. Scoped to primary nodes (units registered in the graph), not variants. |
+| **Volatile dependencies** | Edges that point at a unit changing at least `volatile_dependency_ratio` times more often than the dependent (POODR: depend on things that change less often than you do). Dependencies with fewer than 5 commits or a `new` change frequency are skipped. Ranked by the dependency's PageRank; the persisted list keeps the top 20, while `stats[:volatile_dependency_count]` reports the full qualifying count. |
+| **Undeclared package edges** | Edges that cross a Packwerk package boundary the source package does not list in `dependencies`. Membership comes from each unit's `package` node attribute, declarations from the package unit's own `package_dependency` edges. Woods reports the boundary; enforcement stays with `packwerk check` / `pks check`. |
 
 Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.md`.
 
