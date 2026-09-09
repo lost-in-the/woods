@@ -546,6 +546,8 @@ release, so a hook killed mid-drain would otherwise leave a lock directory
 behind forever; each lock directory is reclaimed once its mtime is older than
 `WOODS_HOOK_LOCK_STALE_SECONDS` (default 1800), while a fresh one is still
 respected as busy.
+The age check needs `stat`; on a host with neither `flock` nor `stat`, a crashed
+pending-lock holder can still make the next hook wait until the hook timeout.
 
 The `SessionStart` warning compares two commit-adjacent timestamps only:
 the generation's `updated_at` against the last commit's time. It says

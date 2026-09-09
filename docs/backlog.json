@@ -2413,5 +2413,48 @@
     "depends_on": [
       "B-171"
     ]
+  },
+  {
+    "id": "B-176",
+    "title": "Spec isolation: graph_analyzer_spec and extractor_spec leak Woods.configuration state under some seeds",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "graph",
+    "files": [
+      "spec/graph_analyzer_spec.rb",
+      "spec/extractor_spec.rb"
+    ],
+    "description": "Running spec/graph_analyzer_spec.rb and spec/extractor_spec.rb together with --seed 8230 fails one example (Extractor#remove_replaced_units typed identity) with NoMethodError: undefined method 'configuration' for module Woods inside Extractor#json_serialize. Each file passes alone and the full suite passes. Found during #280 Task 4; pre-existing. Acceptance: the pair passes under any seed, with the shared state reset in spec support rather than in either file.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-177",
+    "title": "Booted multi-database fixture for the dummy app so cross_database_edges is exercised end to end",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/dummy/config/database.yml",
+      "spec/integration/booted_extraction_spec.rb"
+    ],
+    "description": "The database-partition layer (#280, B-169, B-170) is covered by unit specs with stubbed connection_db_config; the dummy app has one database, so no booted lane proves a real connects_to, a reused table name across databases, an inherited connection, or a has_many :through with the through model on a third database. Acceptance: a second SQLite database in the dummy app with at least one model per case above, booted_extraction asserting the resulting cross_database_edges entries, and incremental_equivalence staying green.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-178",
+    "title": "Booted package mutation scenarios: full run, add a package, remove the last package, change package paths",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/integration/incremental_equivalence_spec.rb"
+    ],
+    "description": "Package membership (#280, B-171, B-172) has a unit-level regression on one Extractor instance; no booted lane mutates packwerk.yml or package.yml between incremental runs. Acceptance: the equivalence oracle covers a package added, the last package removed, and a package path changed, comparing full and incremental output after each mutation.",
+    "status": "ready",
+    "depends_on": [
+      "B-171"
+    ]
   }
 ]
