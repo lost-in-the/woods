@@ -179,7 +179,7 @@ Three tools answered "what is in this Rails app" for coding agents in 2026. Wood
 
 Woods and Rubydex are complementary. Rubydex answers "where is this symbol referenced". Woods answers "what happens when this runs, and what does it touch". An agent can use both: Rubydex for references, Woods for behavior, boundaries, and blast radius.
 
-The database-partition layer is the one place Woods is alone. Rubydex is static, and the other two resolve associations without saying which database each side lives on. See [Extractor reference](EXTRACTOR_REFERENCE.md#modelextractor) for the fields.
+The database-partition layer, in progress on this branch, is the one place Woods will be alone. Rubydex is static, and the other two resolve associations without saying which database each side lives on. See [Extractor reference](EXTRACTOR_REFERENCE.md#modelextractor) for the fields.
 
 ---
 
