@@ -23,8 +23,11 @@ module Woods
   class GraphAnalyzer
     # Types that are naturally root nodes and should not be flagged as orphans.
     # Framework and gem sources are consumed but never referenced by application code
-    # in the dependency graph's reverse index.
-    EXCLUDED_ORPHAN_TYPES = %i[rails_source gem_source].freeze
+    # in the dependency graph's reverse index. Package units (#280) declare
+    # boundaries via metadata and `:package_dependency` edges to other
+    # packages; nothing points back at a leaf package in the reverse index,
+    # so it would otherwise be flagged as dead code it is not.
+    EXCLUDED_ORPHAN_TYPES = %i[rails_source gem_source package].freeze
 
     # How many rounds {#assign_orphaned_units} runs before it stops pulling
     # unnamespaced units into clusters through other unnamespaced units. The

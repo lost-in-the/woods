@@ -113,8 +113,8 @@ Extract first, then configure a project-scoped stdio server using the applicatio
 
 ### What does Woods extract?
 
-Woods runs **34 extractor classes** on every full extraction, there is no
-opt-in/opt-out. Between them they produce 38 distinct unit types (some
+Woods runs **35 extractor classes** on every full extraction, there is no
+opt-in/opt-out. Between them they produce 39 distinct unit types (some
 extractors emit more than one type. GraphQL alone produces four, and
 `RailsSourceExtractor` produces both `rails_source` and `gem_source`).
 Coverage

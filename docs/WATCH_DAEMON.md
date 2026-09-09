@@ -266,7 +266,7 @@ pay for one.
 The numbers above are fixture-app numbers. Below are the same measurements on a
 **1,940-unit app**: `apps/rails-8.0-large` in
 [woods-testbed](https://github.com/lost-in-the/woods-testbed), a hand-written
-kernel covering all 34 unit types plus a deterministically generated tree, run by
+kernel covering all 35 unit types plus a deterministically generated tree, run by
 `scripts/woods_bench.rb` in woods-testbed (Ruby 3.3.1 / Rails 8.0.5, in-container, 5 reps per
 scenario). See [woods-testbed#2](https://github.com/lost-in-the/woods-testbed/issues/2).
 

@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **34 extractor classes** producing **38 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **35 extractor classes** producing **39 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 41 files: 34 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 38 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 42 files: 35 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 39 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **34 extractor classes** producing **38 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 34 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 35 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -462,6 +462,42 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ---
 
+### PackageExtractor
+
+**What it captures:** Packwerk / pks package boundaries from every `package.yml`, one unit per package. No Rails boot is needed for the read itself.
+
+**Key details:**
+- Identifier is the package directory relative to `Rails.root` (`.` for the root package), the same name Packwerk uses
+- Honors `packwerk.yml` `package_paths` and `exclude`; without one, `**/` with the Packwerk default excludes (`bin`, `node_modules`, `script`, `tmp`, `vendor`)
+- `metadata`: `name`, `dependencies` (sorted), `enforce_dependencies` (`true`, `false`, or `"strict"`), `enforce_privacy`, `layer` (pks), `public_path`, `owner`
+- Each declared dependency becomes a `{ type: :package, target: <name>, via: :package_dependency }` edge
+- Package membership on other units (`metadata[:package]`) and the undeclared cross-package edge report are Task 8, not this extractor. Pack-resident file-based units are not yet discovered by `PathDispatcher` when only their `package.yml` changes (follow-up B-175)
+- Woods does not enforce anything. `pks check` and `packwerk check` own enforcement; Woods shows the boundary before an agent writes the cross-package call
+- Whole-app: any `package.yml` or `packwerk.yml` change re-runs the extractor wholesale
+
+**Example output (abbreviated):**
+
+```json
+{
+  "type": "package",
+  "identifier": "packs/billing",
+  "file_path": "packs/billing/package.yml",
+  "metadata": {
+    "name": "packs/billing",
+    "dependencies": [".", "packs/accounts"],
+    "enforce_dependencies": "strict",
+    "layer": "product",
+    "owner": "billing-team"
+  },
+  "dependencies": [
+    { "type": "package", "target": ".", "via": "package_dependency" },
+    { "type": "package", "target": "packs/accounts", "via": "package_dependency" }
+  ]
+}
+```
+
+---
+
 ### I18nExtractor
 
 **What it captures:** Locale files from `config/locales` with the full translation key hierarchy.
@@ -632,7 +668,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 34 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 35 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -649,7 +685,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 38 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib` |
+| `type` | Symbol | Unit category, one of the 39 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |

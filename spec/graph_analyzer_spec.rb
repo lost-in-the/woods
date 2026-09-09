@@ -36,6 +36,12 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(analyzer.orphans).not_to include('gems/devise/models')
     end
 
+    it 'excludes package types (#280)' do
+      graph.register(make_unit(type: :package, identifier: 'packs/billing'))
+
+      expect(analyzer.orphans).not_to include('packs/billing')
+    end
+
     it 'returns empty for empty graph' do
       expect(analyzer.orphans).to eq([])
     end

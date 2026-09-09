@@ -91,4 +91,4 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | Non-MCP Ruby access to a published index | [PUBLISHED_INDEX.md](PUBLISHED_INDEX.md) |
 | Evaluation harnesses | [EVALUATION.md](EVALUATION.md) |
 
-The current public surface is generated from 34 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.
+The current public surface is generated from 35 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.

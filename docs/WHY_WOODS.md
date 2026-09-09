@@ -114,7 +114,7 @@ foreign keys pulled live from the database. No more confusing `string` vs `text`
 **Route-to-controller binding.** Controller source gets a route block prepended showing
 exactly which HTTP verbs and paths map to which actions. URL → code is always explicit.
 
-**Dependency graph.** 34 extractors build a bidirectional graph: what each unit depends on,
+**Dependency graph.** 35 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
 **Two MCP servers.** The Index Server defines 29 schemas and registers 14 in the normal

@@ -10,7 +10,7 @@ Woods runs in three phases across two environments:
 
 ```
 Inside Rails app (rake task):
-  1. Extract, 34 extractors introspect the live Rails environment
+  1. Extract, 35 extractors introspect the live Rails environment
   2. Resolve, dependency graph is built and enriched with git data
   3. Write, one JSON file per code unit to tmp/woods/
 
@@ -30,7 +30,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                    Rails Application                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐             │
 │  │ Extract  │──▶│ Resolve  │──▶│  Enrich  │             │
-│  │ 34 types │   │  graph   │   │   git    │             │
+│  │ 35 types │   │  graph   │   │   git    │             │
 │  └──────────┘   └──────────┘   └──────────┘             │
 │                                     │                    │
 │                                     ▼                    │
@@ -134,7 +134,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the nine unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source` (gated by `include_framework_sources`). Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the ten unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `rails_source` (gated by `include_framework_sources`), and `package`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
 
 ---
 
@@ -159,7 +159,7 @@ graph.affected_by(["app/models/user.rb"])  # BFS over reverse edges
 
 ### PageRank scoring
 
-`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs.
+`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs. Package units (#280) add nodes and `package_dependency` edges to the graph, so scores shift slightly wherever they land.
 
 Scores feed into the retrieval ranker as one signal in the final ranking formula.
 

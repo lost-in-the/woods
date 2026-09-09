@@ -3431,4 +3431,20 @@ RSpec.describe Woods::Extractor do
       expect(File.read(File.join(output_dir, 'SUMMARY.md'))).not_to include('Volatile dependencies')
     end
   end
+
+  describe 'packages whole-app wiring (#280)' do
+    it 'registers the package type, extractor, and whole-app trigger' do
+      expect(described_class::EXTRACTORS[:packages]).to eq(Woods::Extractors::PackageExtractor)
+      expect(described_class::TYPE_TO_EXTRACTOR_KEY[:package]).to eq(:packages)
+      expect(described_class::EXTRACTOR_KEY_TO_TYPES[:packages]).to eq([:package])
+      expect(described_class::WHOLE_APP_EXTRACTORS[:packages]).to eq(:package)
+    end
+
+    it 'lists packages among the index reader type directories' do
+      require 'woods/mcp/index_reader'
+
+      expect(Woods::MCP::IndexReader::TYPE_DIRS).to include('packages')
+      expect(Woods::MCP::IndexReader::TYPE_TO_DIR['package']).to eq('packages')
+    end
+  end
 end

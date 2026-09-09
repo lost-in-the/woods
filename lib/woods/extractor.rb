@@ -48,6 +48,7 @@ require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
 require_relative 'extractors/poro_extractor'
 require_relative 'extractors/lib_extractor'
+require_relative 'extractors/package_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
@@ -132,7 +133,8 @@ module Woods
       test_mappings: Extractors::TestMappingExtractor,
       rails_source: Extractors::RailsSourceExtractor,
       poros: Extractors::PoroExtractor,
-      libs: Extractors::LibExtractor
+      libs: Extractors::LibExtractor,
+      packages: Extractors::PackageExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -184,7 +186,8 @@ module Woods
       # types are not all mapped.
       gem_source: :rails_source,
       poro: :poros,
-      lib: :libs
+      lib: :libs,
+      package: :packages
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -318,7 +321,12 @@ module Woods
       # {EXTRACTOR_KEY_TO_TYPES} (which wholesale replacement consults) lists
       # both. Participation is gated by `include_framework_sources` — see
       # {#skip_by_configuration?}.
-      rails_source: :rails_source
+      rails_source: :rails_source,
+      # A package root decides which package every other unit belongs to,
+      # and the undeclared-edge report reads the whole declared set, so any
+      # package.yml change re-runs the extractor wholesale (#280). Task 8
+      # re-annotates unit membership in the same run.
+      packages: :package
     }.freeze
 
     # Extractors whose output embeds the route table, and which therefore go

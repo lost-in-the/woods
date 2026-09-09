@@ -140,6 +140,9 @@ module Woods
       config/schedule.rb
     ].freeze
 
+    # Packwerk boundary files, read as bytes by PackageExtractor (#280).
+    REEXTRACT_BASENAMES = %w[package.yml packwerk.yml].freeze
+
     # What has to happen before this path can be re-extracted truthfully.
     #
     # @param relative_path [String] Rails.root-relative path
@@ -192,7 +195,8 @@ module Woods
     end
 
     def reextract?(path)
-      REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES)
+      REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
+        REEXTRACT_BASENAMES.include?(File.basename(path))
     end
 
     def under?(path, directories)
