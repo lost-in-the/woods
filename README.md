@@ -14,7 +14,7 @@
 >
 > `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for published versions lives on their tags. Until 2.0.0 is published, use this tree to review a source checkout, and use [v1.6.1](https://github.com/lost-in-the/woods/tree/v1.6.1) for the released gem.
 
-<!-- v2-unreleased-note:start -->
+<!-- release-state:version-banner -->
 > ### Version: `main` documents 2.0.0, which is not released yet
 >
 > | Line | Version | Documentation |
@@ -22,8 +22,8 @@
 > | Documented here | **2.0.0**, unreleased | this README and the [documentation index](docs/README.md) |
 > | Latest published gem | **1.6.1** | [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1) |
 >
-> `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 is published; the released constraint is `gem "woods", "~> 1.6"`. Everything below describes 2.0.0. If you already run 1.x, read [What's new in 2.0](#whats-new-in-20) and then [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md).
-<!-- v2-unreleased-note:end -->
+> Everything below describes 2.0.0. `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 is published. The released constraint stays `gem "woods", "~> 1.6"`.
+<!-- release-state:end -->
 
 Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
 

@@ -216,7 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checklist; `docs/UPGRADING_TO_2.md` covers the Notion physical-column re-sync,
   the new task exit codes, the incremental baseline guard, and `reload`'s
   write-access requirement; every claim that expires at tag time is wrapped in a
-  `v2-unreleased-note` fence, listed in the new release note in `docs/README.md`.
+  `release-state` fence, listed in the new release note in `docs/README.md`.
 
 ### Upgrade Notes
 

@@ -34,10 +34,14 @@ Gem::Specification.new do |spec|
 
   # Specify which files should be added to the gem
   #
-  # `lib/woods/release_v2/**` and `lib/tasks/release_v2.rake` are the audit
-  # ledger's own machinery (findings.json, surface-inventory tooling) — repo
-  # CI runs them straight from source via `release_v2:verify_surface_inventory`,
-  # which is unaffected by packaging exclusion. `docs/design`, `docs/security`,
+  # Two families of maintainer-only machinery are excluded. `lib/woods/release_v2/**`
+  # and `lib/tasks/release_v2.rake` are the audit ledger's own tooling
+  # (findings.json, surface inventory); `lib/woods/release/**` and
+  # `lib/tasks/release.rake` are the release flow's (release:prepare,
+  # release:reopen). Both only ever run from a source checkout of this
+  # repository, so repo CI runs them straight from source (for example
+  # `release_v2:verify_surface_inventory`), unaffected by packaging exclusion.
+  # `docs/design`, `docs/security`,
   # `docs/self-analysis`, and `docs/backlog.json`
   # are process/planning artifacts, not user-facing reference docs — excluded so
   # the packaged gem ships the same `docs/*.md` a user reads on GitHub, not the
@@ -55,7 +59,12 @@ Gem::Specification.new do |spec|
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md',
     'SECURITY.md'
-  ] - (Dir['lib/tasks/release_v2.rake'] + Dir['lib/woods/release_v2', 'lib/woods/release_v2/**/*'])
+  ] - (
+    Dir['lib/tasks/release_v2.rake'] +
+    Dir['lib/woods/release_v2', 'lib/woods/release_v2/**/*'] +
+    Dir['lib/tasks/release.rake'] +
+    Dir['lib/woods/release', 'lib/woods/release/**/*']
+  )
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
                         woods-mcp-http]

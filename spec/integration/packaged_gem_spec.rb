@@ -28,6 +28,9 @@ module PackagedGemSpec
   # tooling — is deliberately excluded from the packaged gem (it has no
   # purpose outside this repo's own CI, which runs it straight from source).
   RELEASE_V2_MACHINERY = %r{\Alib/(tasks/release_v2\.rake|woods/release_v2/)}
+  # The release flow's own machinery, for the same reason: `release:prepare` and
+  # `release:reopen` only ever run from a source checkout of this repository.
+  RELEASE_MACHINERY = %r{\Alib/(tasks/release\.rake|woods/release/)}
   SEMANTIC_REOPEN_BOOTSTRAP = <<~'RUBY'
     # Activate the installed gem's dependencies before instrumentation loads JSON.
     require 'woods'
@@ -108,6 +111,7 @@ RSpec.describe 'packaged gem' do
                          .select { |path| File.file?(path) }
                          .map { |path| Pathname(path).relative_path_from(Pathname(PackagedGemSpec::ROOT)).to_s }
     runtime_files = relative_lib_files.grep_v(PackagedGemSpec::RELEASE_V2_MACHINERY)
+                                      .grep_v(PackagedGemSpec::RELEASE_MACHINERY)
 
     expect(runtime_files).not_to be_empty
     expect(package_files).to include(*runtime_files)
@@ -118,6 +122,10 @@ RSpec.describe 'packaged gem' do
 
   it 'excludes the release_v2 audit machinery from the packaged gem' do
     expect(package_files.grep(PackagedGemSpec::RELEASE_V2_MACHINERY)).to be_empty
+  end
+
+  it 'excludes the maintainer release-flow machinery from the packaged gem' do
+    expect(package_files.grep(PackagedGemSpec::RELEASE_MACHINERY)).to be_empty
   end
 
   it 'excludes internal planning docs but keeps user-facing docs/*.md' do
