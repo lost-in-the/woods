@@ -242,12 +242,18 @@ RSpec.describe Woods::Evaluation::AblationRunner do
       end
     end
 
-    it 'requires the strict flag or no mcp-config reference for :off' do
+    it 'requires the strict flag and no mcp-config reference for :off' do
       probe = described_class::DEFAULT_WOODS_PROBE
 
       expect(probe.call(:off, '/tmp', 'agent --strict-mcp-config')).to be(true)
-      expect(probe.call(:off, '/tmp', 'agent')).to be(true)
+      expect(probe.call(:off, '/tmp', 'agent')).to be(false)
       expect(probe.call(:off, '/tmp', 'agent --mcp-config .mcp.json')).to be(false)
+    end
+
+    it 'fails the :off preflight when the agent command is wired to Woods, even with --strict-mcp-config' do
+      probe = described_class::DEFAULT_WOODS_PROBE
+
+      expect(probe.call(:off, '/tmp', 'agent --mcp-config .mcp.json --strict-mcp-config')).to be(false)
     end
   end
 end

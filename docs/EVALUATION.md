@@ -41,7 +41,7 @@ Every result carries the agent command that ran, the model the agent's JSON payl
 Before a trial runs, the harness checks that Woods is actually available or actually absent, distinguishing "MCP enabled" (the agent command is wired to reach the Woods MCP server) from "index present" (an index exists on disk in the checkout):
 
 - `on` requires both: an `--mcp-config` reference in the agent command, and a materialized index in the checkout.
-- `off` requires confirmation that MCP is truly unreachable: `--strict-mcp-config`, or no `--mcp-config` reference at all.
+- `off` requires confirmation that MCP is truly unreachable: `--strict-mcp-config` present, and no `--mcp-config` reference at all. Both flags together still fail, since `--mcp-config` wires the agent to Woods regardless of strict mode.
 
 A failed check aborts the trial and is counted as an error, the same as a reset failure. The default probe is injectable (`woods_probe:` on `AblationRunner.new`) for a host app with a different wiring convention.
 

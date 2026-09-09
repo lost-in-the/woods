@@ -47,8 +47,10 @@ module Woods
       # Verifies Woods availability before a trial runs, distinguishing "MCP
       # enabled" (the agent command is wired to reach the Woods MCP server)
       # from "index present" (an index actually exists in the checkout): the
-      # `:on` condition needs both, the `:off` condition needs to confirm
-      # MCP is truly unreachable.
+      # `:on` condition needs both. The `:off` condition needs both signals
+      # too, in the negative: `--strict-mcp-config` declared, and no
+      # `--mcp-config` reference at all. A command carrying both flags is
+      # still wired to Woods and fails preflight.
       DEFAULT_WOODS_PROBE = lambda do |condition, chdir, command|
         mcp_wired = command.include?('--mcp-config')
         strict = command.include?('--strict-mcp-config')
@@ -56,7 +58,7 @@ module Woods
         if condition == :on
           mcp_wired && index_present
         else
-          strict || !mcp_wired
+          strict && !mcp_wired
         end
       end
 
