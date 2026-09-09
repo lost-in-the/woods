@@ -28,6 +28,9 @@ module PackagedGemSpec
   # tooling — is deliberately excluded from the packaged gem (it has no
   # purpose outside this repo's own CI, which runs it straight from source).
   RELEASE_V2_MACHINERY = %r{\Alib/(tasks/release_v2\.rake|woods/release_v2/)}
+  # The release flow's own machinery, for the same reason: `release:prepare` and
+  # `release:reopen` only ever run from a source checkout of this repository.
+  RELEASE_MACHINERY = %r{\Alib/(tasks/release\.rake|woods/release/)}
   SEMANTIC_REOPEN_BOOTSTRAP = <<~'RUBY'
     # Activate the installed gem's dependencies before instrumentation loads JSON.
     require 'woods'
@@ -54,7 +57,7 @@ end
 RSpec.describe 'packaged gem' do
   before(:context) do
     @package_tmp = Dir.mktmpdir('woods-package-spec')
-    @artifact = ENV['WOODS_GEM_PATH'] || File.join(@package_tmp, 'woods-2.0.0.gem')
+    @artifact = ENV['WOODS_GEM_PATH'] || File.join(@package_tmp, "woods-#{Woods::VERSION}.gem")
 
     unless ENV['WOODS_GEM_PATH']
       output, status = Open3.capture2e(
@@ -108,6 +111,7 @@ RSpec.describe 'packaged gem' do
                          .select { |path| File.file?(path) }
                          .map { |path| Pathname(path).relative_path_from(Pathname(PackagedGemSpec::ROOT)).to_s }
     runtime_files = relative_lib_files.grep_v(PackagedGemSpec::RELEASE_V2_MACHINERY)
+                                      .grep_v(PackagedGemSpec::RELEASE_MACHINERY)
 
     expect(runtime_files).not_to be_empty
     expect(package_files).to include(*runtime_files)
@@ -118,6 +122,10 @@ RSpec.describe 'packaged gem' do
 
   it 'excludes the release_v2 audit machinery from the packaged gem' do
     expect(package_files.grep(PackagedGemSpec::RELEASE_V2_MACHINERY)).to be_empty
+  end
+
+  it 'excludes the maintainer release-flow machinery from the packaged gem' do
+    expect(package_files.grep(PackagedGemSpec::RELEASE_MACHINERY)).to be_empty
   end
 
   it 'excludes internal planning docs but keeps user-facing docs/*.md' do
@@ -143,12 +151,19 @@ RSpec.describe 'packaged gem' do
     File.write(readme_path, original) if original
   end
 
-  it 'uses immutable v2.0.0 source, changelog, and documentation metadata' do
+  # `main` carries the X.Y.Z.alpha development marker, which is never tagged, so
+  # the metadata URIs resolve to the branch. A release commit sets a tagged
+  # version and the same gemspec rule pins these to `v<VERSION>`; the rule's
+  # other branch is covered in spec/release_v2/gemspec_spec.rb.
+  it 'derives source, changelog, and documentation metadata from the version state' do
     metadata = @package.spec.metadata
+    release_ref = Woods::VERSION.end_with?('.alpha') ? 'main' : "v#{Woods::VERSION}"
 
-    expect(metadata.fetch('source_code_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0')
-    expect(metadata.fetch('changelog_uri')).to eq('https://github.com/lost-in-the/woods/blob/v2.0.0/CHANGELOG.md')
-    expect(metadata.fetch('documentation_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0/docs')
+    expect(metadata.fetch('source_code_uri')).to eq("https://github.com/lost-in-the/woods/tree/#{release_ref}")
+    expect(metadata.fetch('changelog_uri'))
+      .to eq("https://github.com/lost-in-the/woods/blob/#{release_ref}/CHANGELOG.md")
+    expect(metadata.fetch('documentation_uri'))
+      .to eq("https://github.com/lost-in-the/woods/tree/#{release_ref}/docs")
     changelog = File.read(File.join(@unpacked, 'CHANGELOG.md'))
     expect(changelog).to include('## [Unreleased]')
     expect(changelog).to include('Controller and mailer chunk extraction parses each file once')

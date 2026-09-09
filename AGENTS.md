@@ -12,6 +12,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for shared policy and [CLAUDE.md](CLAUDE
 4. For public behavior, read its canonical document from [docs/README.md](docs/README.md).
 5. For extractor or Rails-version work, inspect `spec/integration/booted_extraction_spec.rb` and the matching appraisal gemfiles.
 6. For a task, executable, config, or MCP change, inspect `plugin/skills/` before completion.
+7. For anything touching the version, the changelog, or a release, read `.claude/skills/release-flow/SKILL.md` first.
 
 ## Repository map
 
@@ -25,6 +26,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for shared policy and [CLAUDE.md](CLAUDE
 | Tests and Rails fixture | `spec/`, `spec/dummy/`, `gemfiles/` |
 | Public docs and skills | `README.md`, `docs/`, `plugin/skills/` |
 | Generated release evidence | `.Codex/release-v2/surface-inventory.json` |
+| Release flow | `lib/woods/release/`, `lib/tasks/release.rake`, `script/validate-release*` |
 
 ## Commands
 
@@ -122,6 +124,15 @@ Do not hand-edit generated evidence to make a check pass.
 
 Summarize and link from secondary pages; do not copy full setup blocks into FAQ or unrelated references.
 
+## Release flow
+
+`main` carries `X.Y.Z.alpha` between releases and never claims a released version. `.claude/skills/release-flow/SKILL.md` is the agent-facing contract; the release flow section of `CONTRIBUTING.md` is the runbook.
+
+- Never edit `lib/woods/version.rb` or a `release-state` documentation fence by hand.
+- Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings.
+- One command per transition: `bin/rake "release:prepare[<version>]"`, `bin/rake "release:reopen[<next>.alpha]"`.
+- Never create or push a tag, run `gem push`, or trigger the release workflow. Those are maintainer steps.
+
 ## Plugin pairing
 
 `plugin/` is published through the separate `lost-in-the/plugins` marketplace. If setup, configuration, executable, MCP, or diagnostic behavior changes:
@@ -139,5 +150,6 @@ Summarize and link from secondary pages; do not copy full setup blocks into FAQ 
 - [ ] Booted Rails/live backends were run when their behavior changed.
 - [ ] Generated public-surface evidence matches executable behavior.
 - [ ] Canonical docs, plugin skills, and changelog are synchronized.
+- [ ] `lib/woods/version.rb` and the `release-state` fences were left to the release tasks.
 - [ ] The full diff contains no unrelated edits, secrets, or generated local index data.
 - [ ] The PR reports exact validation evidence and compatibility/rollback impact.

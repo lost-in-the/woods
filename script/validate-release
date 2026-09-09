@@ -105,6 +105,19 @@ def literal_woods_version(node, full_path)
   [node.value.unescaped]
 end
 
+# `main` carries X.Y.Z.alpha between releases. The alpha is the development
+# marker: never tagged, never published. Reaching validation with one means the
+# release commit was skipped, so refuse before any git or network work.
+ALPHA_MARKER = '.alpha'
+
+def fail_alpha(subject, value)
+  fail_release(
+    "#{subject} #{value.inspect} is an alpha development marker. `main` carries X.Y.Z.alpha between releases: " \
+    'it is never tagged and never published. Cut a release commit with `bin/rake \"release:prepare[<version>]\"` ' \
+    'and tag that commit instead.'
+  )
+end
+
 def constant_path_names(node)
   names = []
   current = node
@@ -135,6 +148,7 @@ begin
   remote = ENV.fetch('RELEASE_REMOTE', 'origin')
 
   fail_release('release tag must be a version tag') unless tag.match?(/\Av[0-9A-Za-z][0-9A-Za-z._-]*\z/)
+  fail_alpha('release tag', tag) if tag.end_with?(ALPHA_MARKER)
   fail_release("release SHA #{release_sha.inspect} is not a full Git SHA") unless release_sha.match?(/\A[0-9a-f]{40}\z/)
 
   expected_head_sha = if trusted_checkout
@@ -158,6 +172,7 @@ begin
               "refs/tags/#{tag}"
             end
   version = release_version(release_file('lib/woods/version.rb', release_sha, trusted_checkout))
+  fail_alpha('Woods::VERSION', version) if version.end_with?(ALPHA_MARKER)
   expected_tag = "v#{version}"
   fail_release("release tag #{tag.inspect} must equal #{expected_tag}") unless tag == expected_tag
 

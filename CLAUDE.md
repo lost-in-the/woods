@@ -265,6 +265,12 @@ Key references:
 
 See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking items, implementing with TDD, marking resolved, and adding new work.
 
+## Release Flow
+
+`main` carries `X.Y.Z.alpha` between releases and never claims a released version. Never edit `lib/woods/version.rb` by hand, never hand-edit a `release-state` fence, and put changelog entries under `## [Unreleased]` only. One command per transition: `bin/rake "release:prepare[<version>]"` and `bin/rake "release:reopen[<next>.alpha]"`. Tagging and publication are maintainer steps; nothing is published from a laptop.
+
+See `.claude/skills/release-flow/SKILL.md` for the states, the refusals, and what to report, and the release flow section of `CONTRIBUTING.md` for the user-facing runbook.
+
 ## Gotchas
 
 Grouped by layer. Each bullet is one claim; the linked file is the source of truth.

@@ -216,7 +216,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checklist; `docs/UPGRADING_TO_2.md` covers the Notion physical-column re-sync,
   the new task exit codes, the incremental baseline guard, and `reload`'s
   write-access requirement; every claim that expires at tag time is wrapped in a
-  `v2-unreleased-note` fence, listed in the new release note in `docs/README.md`.
+  `release-state` fence, listed in the new release note in `docs/README.md`.
 
 ### Upgrade Notes
 
@@ -362,6 +362,22 @@ derive unit identifiers, which changes the index format's observable contract.
   daemon can't drift apart.
 
 ### Changed
+
+- **Release flow: `main` carries an alpha development marker.** `Woods::VERSION` is
+  `X.Y.Z.alpha` between releases, so `main` never claims a released version and the
+  gemspec points its source, changelog, and documentation URIs at the branch rather
+  than at a tag that does not exist. A release is an explicit commit plus a tag:
+  `bin/rake "release:prepare[<version>]"` bumps VERSION, folds `## [Unreleased]` into
+  `## [<version>] - <date>` with one block per `###` heading, restates the documentation
+  fences (renamed from `v2-unreleased-note` to `release-state`, now driven by VERSION
+  rather than by hand), regenerates the surface inventory, and prints the tag and
+  dispatch commands. `bin/rake "release:reopen[<next>.alpha]"` reopens development after
+  a release. `spec/release_v2/version_state_spec.rb` enforces the state on every commit,
+  both release validators refuse an alpha tag, and the `release` task `bundler/gem_tasks`
+  installs is blocked: nothing is published from a laptop. Betas and release candidates
+  are supported states, and RubyGems treats them as prereleases, so a `~> 1.6` or
+  `~> 2.0` constraint never resolves one. See the release flow section of
+  `CONTRIBUTING.md`.
 
 - **Dead code removed.** The unwired formatting adapters (Claude, GPT, Generic),
   console job/cache adapters, `StubBridge`, `HealthCheck`, `Instrumentation`,

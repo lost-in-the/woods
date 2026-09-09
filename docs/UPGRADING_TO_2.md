@@ -4,10 +4,10 @@ Woods 2.0 changes observable index identifiers, publication layout, vector-store
 
 This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
 
-<!-- v2-unreleased-note:start -->
+<!-- release-state:upgrade-availability -->
 > Run the published-gem upgrade only after RubyGems lists 2.0.0. Until then,
 > this guide supports planning and validation against a source checkout.
-<!-- v2-unreleased-note:end -->
+<!-- release-state:end -->
 
 ## Upgrade outcome
 
