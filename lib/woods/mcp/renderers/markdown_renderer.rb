@@ -373,11 +373,31 @@ module Woods
         # @param bold [Boolean] wrap the endpoints in ** for markdown
         # @return [String]
         def graph_edge_line(item, bold:)
-          wrap = bold ? '**' : ''
           detail = item.except('from', 'to', 'via')
-                       .map { |key, value| "#{key}: #{value}" }.join(', ')
-          line = "#{wrap}#{item['from']}#{wrap} -> #{wrap}#{item['to']}#{wrap} (#{item['via']})"
+                       .map { |key, value| "#{key}: #{edge_value(value)}" }.join(', ')
+          line = "#{edge_endpoint(item['from'], bold: bold)} -> #{edge_endpoint(item['to'], bold: bold)} " \
+                 "(#{item['via']})"
           detail.empty? ? "- #{line}" : "- #{line}: #{detail}"
+        end
+
+        # A resolved endpoint is bolded (when markdown calls for it); a nil
+        # endpoint (an ambiguous foreign-key owner, for example) is a plain
+        # placeholder, never an empty bold pair (`****`).
+        #
+        # @param value [String, nil]
+        # @param bold [Boolean]
+        # @return [String]
+        def edge_endpoint(value, bold:)
+          return '(unresolved)' if value.nil?
+
+          bold ? "**#{value}**" : value
+        end
+
+        # @param value [Object] a detail hash value; arrays (e.g. `ambiguous_owners`) join
+        #   as plain text instead of printing Ruby's `Array#inspect` syntax.
+        # @return [Object]
+        def edge_value(value)
+          value.is_a?(Array) ? value.join(', ') : value
         end
 
         def render_traversal(label, data)

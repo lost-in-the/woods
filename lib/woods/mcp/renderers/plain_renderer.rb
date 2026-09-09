@@ -242,9 +242,25 @@ module Woods
         # @return [String]
         def plain_edge_line(item)
           detail = item.except('from', 'to', 'via')
-                       .map { |key, value| "#{key}: #{value}" }.join(', ')
-          line = "#{item['from']} -> #{item['to']} (#{item['via']})"
+                       .map { |key, value| "#{key}: #{edge_value(value)}" }.join(', ')
+          line = "#{edge_endpoint(item['from'])} -> #{edge_endpoint(item['to'])} (#{item['via']})"
           detail.empty? ? line : "#{line}: #{detail}"
+        end
+
+        # A nil endpoint (an ambiguous foreign-key owner, for example) prints
+        # as a placeholder rather than an empty string.
+        #
+        # @param value [String, nil]
+        # @return [String]
+        def edge_endpoint(value)
+          value.nil? ? '(unresolved)' : value
+        end
+
+        # @param value [Object] a detail hash value; arrays (e.g. `ambiguous_owners`) join
+        #   as plain text instead of printing Ruby's `Array#inspect` syntax.
+        # @return [Object]
+        def edge_value(value)
+          value.is_a?(Array) ? value.join(', ') : value
         end
 
         def render_plain_traversal(label, data)

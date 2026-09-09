@@ -23,7 +23,7 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 ## By task shape
 
 - **Code review / change impact**: `lookup` the changed unit, then `dependents` at depth 1 before going deeper. Group results by relationship type and layer; report direct dependents separately from inferred downstream impact. A graph edge is not test coverage — select tests from mappings and repository search.
-- **Audit / architecture assessment**: `graph_analysis` for orphans, dead ends, hubs, cycles, and bridges; `domain_clusters` for architectural domains; `pagerank` for high-impact units worth reading first.
+- **Audit / architecture assessment**: `graph_analysis` for orphans, dead ends, hubs, cycles, bridges, cross-database edges, and volatile dependencies; `domain_clusters` for architectural domains; `pagerank` for high-impact units worth reading first.
 - **Investigating behavior / debugging**: `trace_flow` from the user-visible entry point (route, controller action, job, mailer, service), `lookup` at ambiguous steps, and verify anything conditional or dynamically dispatched in source and tests — do not infer call order from a dependency edge.
 - **Onboarding**: `structure` for the codebase overview, `lookup` and `dependencies`/`dependents` for a unit's neighborhood, and `domain_clusters` for the domain map, then the default loop on the units that matter.
 - **Conceptual questions**: `codebase_retrieve` when status says ready; govern with `budget` (never `limit`), then verify key units with `lookup`.

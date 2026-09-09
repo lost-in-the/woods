@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'json'
 require 'woods/mcp/tool_response_renderer'
 require 'woods/mcp/renderers/markdown_renderer'
 
@@ -137,6 +138,29 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
       expect(out).to include('### Cross database edges')
       expect(out).to include('- **Invoice** -> **Account** (has_many): from_db: billing, to_db: primary, ' \
                              'through: subscriptions, disable_joins: false, kind: join_through_across_databases')
+    end
+
+    it 'renders an Array detail value joined, not as Ruby array syntax' do
+      fixture_path = File.expand_path('../../fixtures/woods/graph_analysis.json', __dir__)
+      ambiguous = JSON.parse(File.read(fixture_path)).fetch('cross_database_edges')
+                      .find { |edge| edge.key?('ambiguous_owners') }
+
+      out = renderer.render(:graph_analysis, { 'cross_database_edges' => [ambiguous], 'stats' => {} })
+
+      expect(out).to include('ambiguous_owners: Account, LegacyAccount')
+      expect(out).not_to include('["Account"')
+    end
+
+    it 'renders a nil endpoint as (unresolved), not an empty bold pair' do
+      out = renderer.render(:graph_analysis, {
+                              'cross_database_edges' => [
+                                { 'from' => 'Invoice', 'to' => nil, 'via' => 'foreign_key', 'kind' => 'x' }
+                              ],
+                              'stats' => {}
+                            })
+
+      expect(out).to include('- **Invoice** -> (unresolved) (foreign_key)')
+      expect(out).not_to include('****')
     end
 
     it 'keeps existing sections byte-identical to the pre-#280 renderer (I13)' do
