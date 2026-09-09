@@ -468,7 +468,7 @@ RSpec.describe 'Index MCP tool contracts' do
     {
       'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0,
       'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1,
-      'undeclared_package_edge_count' => 2
+      'volatile_dependencies_limit' => 20, 'undeclared_package_edge_count' => 2
     }
   end
 

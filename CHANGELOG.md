@@ -458,6 +458,12 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **`graph_analysis.json` states its own volatile-dependency cap.**
+  `stats.volatile_dependencies_limit` (20) now sits beside
+  `stats.volatile_dependency_count`, so a reader of the truncated
+  `volatile_dependencies` array can tell a page from the whole population.
+  `docs/INTERNALS.md` gains a table mapping every analysis section to its stat
+  key and naming which sections the artifact caps.
 - **`graph_sha` is now a function of graph content, not of registration order.**
   `DependencyGraph#to_h` sorted neither the members of `reverse`, `file_map` and
   `type_index` nor the keys of any section, and the extractor wrote PageRank in
