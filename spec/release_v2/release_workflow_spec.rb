@@ -159,6 +159,9 @@ RSpec.describe 'release workflow contract' do
       expect(inputs.fetch('run-id')).to eq('${{ needs.release-context.outputs.ci-run-id }}')
       expect(inputs.fetch('github-token')).to eq('${{ github.token }}')
       expect(inputs.fetch('repository')).to eq('${{ github.repository }}')
+      # download-artifact v4 extracts an artifact-ids download into path/<artifact-name>/
+      # unless merge-multiple is set; the digest check and gem install run in dist/ itself.
+      expect(inputs.fetch('merge-multiple')).to eq(true), "#{job_name}: merge-multiple must be true"
       expect(run_commands(job)).to include('test -n "${ARTIFACT_DIGEST}"')
     end
   end
