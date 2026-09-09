@@ -3447,4 +3447,200 @@ RSpec.describe Woods::Extractor do
       expect(Woods::MCP::IndexReader::TYPE_TO_DIR['package']).to eq('packages')
     end
   end
+
+  # ── package membership (#280) ────────────────────────────────────────
+
+  describe 'package membership' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor) { described_class.new(output_dir: output_dir) }
+
+    def write_package(dir, yaml = "enforce_dependencies: true\n")
+      path = File.join(tmpdir, dir, 'package.yml')
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, yaml)
+    end
+
+    def app_unit(type, identifier, relative_path)
+      Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: File.join(tmpdir, relative_path))
+    end
+
+    # M5: keeps the written-JSON assertions below off a long nested
+    # `File.join(..., extractor.send(:collision_safe_filename, ...))` line.
+    def unit_json_path(type_dir, identifier)
+      filename = extractor.send(:collision_safe_filename, identifier)
+      File.join(output_dir, type_dir.to_s, filename)
+    end
+
+    # M5: a small helper keeps the reannotate/change-set specs below off a
+    # long constructor call, rather than disabling the line-length cop.
+    def change_set_for(*relative_paths)
+      Woods::ChangeSet.new(paths: relative_paths, root: Pathname.new(tmpdir))
+    end
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+    end
+
+    after { Woods.configuration = @original_config }
+
+    describe '#annotate_packages (full path)' do
+      it 'sets metadata[:package] from the longest matching package root and leaves the rest untouched' do
+        write_package('.')
+        write_package('packs/billing')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        user = app_unit(:model, 'User', 'app/models/user.rb')
+        gem_unit = Woods::ExtractedUnit.new(type: :rails_source, identifier: 'rails/x', file_path: '/gems/x.rb')
+        extractor.instance_variable_set(:@results, { models: [invoice, user], rails_source: [gem_unit] })
+
+        extractor.send(:annotate_packages)
+
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+        expect(user.metadata[:package]).to eq('.')
+        expect(gem_unit.metadata).not_to have_key(:package)
+      end
+
+      it 'adds no key at all when the app has no packages' do
+        user = app_unit(:model, 'User', 'app/models/user.rb')
+        extractor.instance_variable_set(:@results, { models: [user] })
+
+        extractor.send(:annotate_packages)
+
+        expect(user.metadata).not_to have_key(:package)
+      end
+    end
+
+    describe '#annotate_package' do
+      it 'resolves membership from an absolute file_path (the full-extraction and register_and_write shape)' do
+        write_package('packs/billing')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+
+        expect(extractor.send(:annotate_package, invoice)).to eq('packs/billing')
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+      end
+
+      it 'resolves membership from a Rails.root-relative file_path (the persisted-unit-JSON shape)' do
+        write_package('packs/billing')
+        invoice = Woods::ExtractedUnit.new(
+          type: :model, identifier: 'Invoice', file_path: 'packs/billing/app/models/invoice.rb'
+        )
+
+        expect(extractor.send(:annotate_package, invoice)).to eq('packs/billing')
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+      end
+    end
+
+    describe '#register_and_write (incremental path)' do
+      it 'annotates the unit and its node before writing' do
+        write_package('packs/billing')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+
+        extractor.send(:register_and_write, :models, [invoice], Set.new)
+
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+        written = JSON.parse(File.read(unit_json_path(:models, 'Invoice')))
+        expect(written['metadata']['package']).to eq('packs/billing')
+      end
+    end
+
+    describe '#reannotate_packages' do
+      def write_unit_json(type_dir, identifier, relative_path, metadata)
+        dir = File.join(output_dir, type_dir.to_s)
+        FileUtils.mkdir_p(dir)
+        File.write(File.join(dir, extractor.send(:collision_safe_filename, identifier)),
+                   JSON.generate(type: type_dir.to_s.singularize, identifier: identifier,
+                                 file_path: relative_path, metadata: metadata))
+      end
+
+      it 'rewrites every unit whose package changed and annotates its node when a package file changed' do
+        write_package('packs/billing')
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+        stale = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        stale.metadata = { package: 'packs/old' }
+        unchanged = app_unit(:model, 'User', 'app/models/user.rb')
+        extractor.dependency_graph.register(stale)
+        extractor.dependency_graph.register(unchanged)
+        write_unit_json(:models, 'Invoice', 'packs/billing/app/models/invoice.rb', { 'package' => 'packs/old' })
+        write_unit_json(:models, 'User', 'app/models/user.rb', {})
+        change_set = change_set_for('packs/billing/package.yml')
+        affected = Set.new
+
+        touched = extractor.send(:reannotate_packages, change_set, affected)
+
+        expect(touched).to eq(Set.new(['Invoice']))
+        expect(affected).to eq(Set.new([:models]))
+        rewritten = JSON.parse(File.read(unit_json_path(:models, 'Invoice')))
+        expect(rewritten['metadata']['package']).to eq('packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['User']).not_to have_key(:package)
+      end
+
+      it 'does nothing when no package file is in the change set' do
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+        change_set = change_set_for('app/models/user.rb')
+
+        expect(extractor.send(:reannotate_packages, change_set, Set.new)).to eq(Set.new)
+      end
+    end
+
+    describe 'package_resolver reset across full and incremental runs (rulings 2026-09-09)' do
+      # Mirrors #prepare_incremental_run's own reset lines: @package_resolver
+      # alone is not enough, its memoized PackageExtractor instance is cached
+      # in @incremental_extractors (via #extractor_for) and must go too, or a
+      # "later" run in this spec would resolve through a PackageExtractor
+      # that glob'd package.yml files before this phase's disk changes.
+      def reset_incremental_run!
+        extractor.instance_variable_set(:@package_resolver, nil)
+        extractor.instance_variable_set(:@incremental_extractors, nil)
+      end
+
+      it 'reflects the current package set on every run, never a memoized one from an earlier run' do
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+
+        # ── "full run": only the root package exists. extract_all resets
+        # @package_resolver before calling annotate_packages. ──
+        write_package('.')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        extractor.instance_variable_set(:@results, { models: [invoice] })
+        extractor.instance_variable_set(:@package_resolver, nil)
+        extractor.send(:annotate_packages)
+        extractor.dependency_graph.register(invoice)
+        expect(invoice.metadata[:package]).to eq('.')
+
+        # ── incremental: a package is added under Invoice. A stale
+        # memoized resolver (not reset) would still report root membership. ──
+        write_package('packs/billing')
+        reset_incremental_run!
+        extractor.send(:register_and_write, :models, [invoice], Set.new)
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+
+        # ── incremental: the last package is removed. ──
+        FileUtils.rm_f(File.join(tmpdir, 'packs/billing/package.yml'))
+        FileUtils.rm_f(File.join(tmpdir, 'package.yml'))
+        reset_incremental_run!
+        invoice_after_removal = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        extractor.send(:register_and_write, :models, [invoice_after_removal], Set.new)
+        expect(invoice_after_removal.metadata).not_to have_key(:package)
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).not_to have_key(:package)
+
+        # ── incremental: packwerk.yml narrows package_paths to a different
+        # tree, so Invoice's old root no longer counts even though its
+        # package.yml is restored, while the newly-configured root does. ──
+        write_package('packs/billing')
+        File.write(File.join(tmpdir, 'packwerk.yml'), "package_paths:\n  - packs/other/*\n")
+        write_package('packs/other/thing')
+        reset_incremental_run!
+        invoice_after_config_change = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        other = app_unit(:model, 'Thing', 'packs/other/thing/app/models/thing.rb')
+        extractor.send(:register_and_write, :models, [invoice_after_config_change, other], Set.new)
+        expect(invoice_after_config_change.metadata).not_to have_key(:package)
+        expect(other.metadata[:package]).to eq('packs/other/thing')
+      end
+    end
+  end
 end

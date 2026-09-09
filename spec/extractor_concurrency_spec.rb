@@ -71,7 +71,11 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
 
     before do
       Woods::Extractor::EXTRACTORS.each do |type, klass|
-        extractor_double = instance_double(klass, extract_all: fake_units.fetch(type, []))
+        # The packages extractor also answers #package_roots, called after
+        # Phase 1 alongside the #extract_all every other extractor needs here.
+        stubs = { extract_all: fake_units.fetch(type, []) }
+        stubs[:package_roots] = [] if klass == Woods::Extractors::PackageExtractor
+        extractor_double = instance_double(klass, **stubs)
         allow(klass).to receive(:new).and_return(extractor_double)
       end
 
@@ -130,9 +134,11 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
       end
       allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
 
-      # Track when the first thread-spawned extractor runs
+      # Track when the first thread-spawned extractor runs. Also answers
+      # #package_roots, which annotate_packages calls on the packages
+      # extractor after Phase 1.
       Woods::Extractor::EXTRACTORS.each_value do |klass|
-        extractor_double = double(extract_all: [])
+        extractor_double = double(extract_all: [], package_roots: [])
         allow(extractor_double).to receive(:extract_all) do
           first_thread_at ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)
           []

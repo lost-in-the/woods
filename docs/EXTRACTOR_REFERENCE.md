@@ -471,7 +471,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Honors `packwerk.yml` `package_paths` and `exclude`; without one, `**/` with the Packwerk default excludes (`bin`, `node_modules`, `script`, `tmp`, `vendor`)
 - `metadata`: `name`, `dependencies` (sorted), `enforce_dependencies` (`true`, `false`, or `"strict"`), `enforce_privacy`, `layer` (pks), `public_path`, `owner`
 - Each declared dependency becomes a `{ type: :package, target: <name>, via: :package_dependency }` edge
-- Package membership on other units (`metadata[:package]`) and the undeclared cross-package edge report are Task 8, not this extractor. Pack-resident file-based units are not yet discovered by `PathDispatcher` when only their `package.yml` changes (follow-up B-175)
+- Package membership on other units (`metadata[:package]`, below) does not depend on how a unit was discovered: any registered unit with a file path under a package root is annotated. The undeclared cross-package edge report remains a follow-up, not this extractor. Discovery is the separate open gap: a pack-resident file-based unit is not yet found by `PathDispatcher` when only its `package.yml` changes (follow-up B-175), so it carries no membership only because it has no unit at all yet, not because membership skips it
 - Woods does not enforce anything. `pks check` and `packwerk check` own enforcement; Woods shows the boundary before an agent writes the cross-package call
 - Whole-app: any `package.yml` or `packwerk.yml` change re-runs the extractor wholesale
 
@@ -495,6 +495,10 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
   ]
 }
 ```
+
+#### Package membership
+
+Every app-owned unit under a package root carries `metadata[:package]` with the package name (longest root wins; `.` when only a root package exists). Framework sources and units with no path never carry it. The graph node carries the same value as `package`. When a `package.yml` changes, an incremental run re-annotates every unit whose package changed in the same run, so `metadata[:package]` never lags behind the file that defines it.
 
 ---
 
@@ -690,7 +694,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
 | `source_code` | String | The full source code, potentially enriched: models have concerns inlined and schema prepended; controllers have a route context header prepended |
-| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor. Model units add `database`, `foreign_keys`, and per-association `from_db`/`to_db`/`disable_joins` (#280) |
+| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor. Model units add `database`, `foreign_keys`, and per-association `from_db`/`to_db`/`disable_joins` (#280). Any app-owned unit under a Packwerk package adds `package` (#280) |
 | `dependencies` | Array\<Hash\> | Forward edges: `[{ type: :model, target: "User", via: "belongs_to" }, ...]` |
 | `dependents` | Array\<Hash\> | Reverse edges: **populated in Phase 2 (Resolve)**, not Phase 1 (Extract). After Phase 2 every field on a unit is effectively immutable. Shape: `[{ type: :controller, identifier: "OrdersController" }, ...]` |
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |

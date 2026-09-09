@@ -396,6 +396,7 @@ module Woods
     def extract_all
       setup_output_directory
       ModelNameCache.reset!
+      @package_resolver = nil
       begin_payload!
 
       # Eager load once — all extractors need loaded classes for introspection.
@@ -411,6 +412,10 @@ module Woods
       # Phase 1.5: Deduplicate results
       Rails.logger.info '[Woods] Deduplicating results...'
       deduplicate_results
+
+      # Phase 1.6: Package membership. Runs before the graph is rebuilt so
+      # registration copies metadata[:package] onto the node (#280).
+      annotate_packages
 
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
       # `#remove`/`#unregister`, so surgical removal is now possible — but a
@@ -527,6 +532,7 @@ module Woods
 
       touched.merge(reconcile_class_based_types(affected_types))
       touched.merge(rerun_whole_app_extractors(change_set, affected_types))
+      touched.merge(reannotate_packages(change_set, affected_types))
       pruned = prune_vanished_units(change_set, affected_types)
       touched.merge(pruned)
 
@@ -664,6 +670,7 @@ module Woods
       @incremental_written = {}
       @incremental_extractors = nil
       @active_record_names = nil
+      @package_resolver = nil
     end
 
     # Write the graph and the derived artifacts after an incremental run.
@@ -1538,6 +1545,114 @@ module Woods
     def build_graph_analyzer
       ratio = Woods.configuration&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
       GraphAnalyzer.new(@dependency_graph, volatile_ratio: ratio)
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Package membership (#280)
+    # ──────────────────────────────────────────────────────────────────────
+
+    # The package extractor instance this run resolves membership through.
+    # Always built through {#extractor_for}, never `@extractors[:packages]`
+    # (the instance Phase 1 used to extract package units): reading that one
+    # would tie package-membership lookups to whichever instance happened to
+    # run first, instead of to this run's own memoized, on-demand build.
+    # Reset at the start of every run (both {#extract_all} and
+    # {#prepare_incremental_run}), so a later run never resolves membership
+    # against a prior run's package set.
+    #
+    # @return [Extractors::PackageExtractor]
+    def package_resolver
+      @package_resolver ||= extractor_for(:packages) || Extractors::PackageExtractor.new
+    end
+
+    # Set or clear metadata[:package] on one unit. Framework units and
+    # units with no path are never members. The key is deleted rather than
+    # set to nil so a unit outside every package serializes as before.
+    #
+    # `unit.file_path` may be absolute (the full path, before Phase 4.5
+    # relativization, and {#register_and_write}'s incremental path, before
+    # its own normalization) or Rails.root-relative (unit JSON already on
+    # disk); {Extractors::PackageExtractor#package_for} accepts either.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [String, nil] the package name
+    def annotate_package(unit)
+      return nil if %i[rails_source gem_source].include?(unit.type) || unit.file_path.nil?
+
+      package = package_resolver.package_for(unit.file_path)
+      if package
+        unit.metadata[:package] = package
+      else
+        unit.metadata.delete(:package)
+      end
+      package
+    end
+
+    # Full-path pass over every extracted unit. Skipped entirely when the
+    # app declares no packages, so a non-Packwerk app's output is unchanged
+    # (I5): no work, and no `package` key on any unit or node.
+    #
+    # @return [void]
+    def annotate_packages
+      return if package_resolver.package_roots.empty?
+
+      @results.each_value { |units| units.each { |unit| annotate_package(unit) } }
+    end
+
+    # Incremental counterpart: when a package file changed, membership of
+    # units this run never touched may have changed too (a new package
+    # root, a renamed package). Walk the payload's unit JSON, rewrite the
+    # ones whose package differs, and annotate their nodes. Bounded to runs
+    # where a package trigger fired, which is rare; every other run pays
+    # nothing.
+    #
+    # @param change_set [ChangeSet]
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers rewritten
+    def reannotate_packages(change_set, affected_types)
+      keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
+      return Set.new unless keys.include?(:packages)
+
+      Dir[payload_dir.join('*', '*.json').to_s].each_with_object(Set.new) do |file, touched|
+        next if File.basename(file) == '_index.json'
+
+        type_dir = File.basename(File.dirname(file))
+        next if %w[rails_source].include?(type_dir)
+
+        identifier = reannotate_unit_file(file, type_dir)
+        next unless identifier
+
+        touched.add(identifier)
+        affected_types&.add(type_dir.to_sym)
+      end
+    end
+
+    # @param file [String] absolute path to one unit JSON file
+    # @param type_dir [String] the extractor key directory it lives in
+    # @return [String, nil] the identifier when the file was rewritten
+    def reannotate_unit_file(file, type_dir)
+      data = JSON.parse(AtomicFile.read(file))
+      relative_path = data['file_path']
+      return nil if relative_path.nil? || relative_path.start_with?('/')
+
+      package = package_resolver.package_for(relative_path)
+      metadata = (data['metadata'] ||= {})
+      return nil if metadata['package'] == package
+
+      if package
+        metadata['package'] = package
+      else
+        metadata.delete('package')
+      end
+      AtomicFile.write(file, json_serialize(data))
+
+      identifier = data['identifier']
+      type = (data['type'] || type_dir.singularize).to_sym
+      @dependency_graph.annotate(identifier, type: type, package: package)
+      identifier
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[Woods] Could not re-annotate package on #{file}: #{e.message}"
+      nil
     end
 
     # Is this a path worth asking git about?
@@ -2950,6 +3065,7 @@ module Woods
       FileUtils.mkdir_p(type_dir)
 
       units.each_with_object(Set.new) do |unit, written|
+        annotate_package(unit)
         mark_dependents_dirty(unit.identifier)
         # Marked BEFORE registration: DependencyGraph#register inserts the
         # node before it iterates the unit's dependencies, so a malformed
