@@ -38,6 +38,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   This gives `GraphAnalyzer` access to git facts without holding every unit in memory,
   which an incremental run never does.
+- **`volatile_dependencies` report (#280).** Git churn and graph edges finally meet:
+  `GraphAnalyzer#analyze` lists edges whose dependency has at least
+  `config.volatile_dependency_ratio` (default `3.0`) times the dependent's commit count,
+  ranked by the dependency's PageRank. Young classes (fewer than 5 commits, or `new`)
+  are skipped, and the report is informational only. The top 20 are persisted in
+  `graph_analysis.json` (`stats.volatile_dependency_count` reports the full qualifying
+  total); the top 5 appear in `SUMMARY.md`. Each entry carries both ends' node types
+  (`from_type`/`to_type`). PageRank now runs inside `analyze`.
+- **`Woods::PublishedIndex` (#280).** A small read-only Ruby API over one published index
+  generation for RuboCop cops and gate scripts: look up units by identifier (optionally
+  scoped to a type, to avoid a same-identifier collision across type directories), iterate
+  edges with their attributes, build a table-to-database map, pin a retained `payloads/gen-N`
+  under the same retention lock protocol as `PayloadStore#prune`, and get a checksum keyed to
+  the pinned payload for `external_dependency_checksum`. Raises
+  `Woods::PublishedIndex::CorruptPointerError` for a `generation.json` that exists but will
+  not parse, rather than reporting zero published generations. `docs/PUBLISHED_INDEX.md`
+  includes a worked `Multidb/ForeignKeyAcrossDatabases` cop.
+- **Agent-level ablation harness (#280).** `woods:evaluate:ablation[task_set]` runs a task
+  set twice per task, with the index on and off, through any agent command that prints
+  `claude -p --output-format json` style output. Each trial runs in a disposable git
+  worktree checked out from a fixed baseline SHA, verifies Woods availability before
+  running, and enforces a per-trial timeout. Reports resolution rate, tokens, cost, turns,
+  and errors per condition with the delta, plus provenance (agent command, model, MCP
+  config, Woods generation, baseline SHA) per result. No Rails boot. This is a harness for
+  collecting paired runs, not causal evidence. `docs/EVALUATION.md` now documents
+  `woods:evaluate`, the baseline, and the ablation in one place.
+- **Plugin hooks for index freshness (#280).** The Claude Code plugin (2.3.0) ships two
+  opt-in hooks under `plugin/hooks/`: a `PostToolUse` hook that runs `woods:incremental`
+  in the background when an edit touches models, routes, migrations, schema, or a
+  `package.yml`, reading `cwd` from the hook payload so linked worktrees refresh their own
+  index; and a `SessionStart` hook that warns when the published generation predates the
+  last commit (scoped to commit timestamps, so it does not cover uncommitted edits or an
+  older checkout). Both do nothing until `WOODS_HOOKS_ENABLED=1` is set, honor
+  `WOODS_HOOKS_DISABLED=1`, and resolve the index directory the same no-boot way
+  `woods:watch_status` does (`WOODS_OUTPUT`, default `tmp/woods`). Lock contention batches
+  concurrent edits instead of dropping them: a busy hook appends its path to
+  `hook-pending.txt` and returns, and the lock holder drains it in a loop until empty
+  (mkdir-based lock on hosts without `flock`, reclaimed after `WOODS_HOOK_LOCK_STALE_SECONDS`,
+  default 1800, when a crashed run leaves it behind). Docs gain the Rails 8.1 `config/ci.rb` step
+  `step "Woods: refresh", "bin/rails woods:incremental"`.
+
 
 ### Performance
 
