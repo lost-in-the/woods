@@ -217,7 +217,10 @@ WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
 ```
 
 `WOODS_GIT_DIR` wins over whatever the worktree pointer says, and applies to
-every git call Woods makes, enrichment and manifest provenance alike.
+every git call Woods makes: per-unit enrichment, `manifest.json` provenance,
+and the diff range `woods:incremental` resolves. All three run through
+`Woods::GitCommand.argv`, so the override cannot reach two of them and miss the
+third.
 
 **`GIT_DIR` alone is not enough for a linked worktree.** Woods honors git's own
 `GIT_DIR` and `GIT_COMMON_DIR` because git does, but setting `GIT_DIR` to a

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'open3'
+require_relative 'git_command'
 
 module Woods
   # Resolves git provenance (branch + commit SHA) for the extracted codebase,
@@ -94,10 +95,7 @@ module Woods
     # @param args [Array<String>] git arguments
     # @return [Array<String>] full argv
     def git_argv(*args)
-      override = @env['WOODS_GIT_DIR']
-      return ['git', '-C', @root, *args] if override.nil? || override.empty?
-
-      ['git', '--git-dir', override, '--work-tree', @root, '-C', @root, *args]
+      GitCommand.argv(@root, *args, env: @env)
     end
 
     # Decide what to emit when git resolution produced nothing. A baked +GIT_*+

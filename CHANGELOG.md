@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`WOODS_GIT_DIR` names the canonical git directory outright.** It wins over
-  whatever repository Woods would otherwise find, for both per-unit git metadata
-  and `manifest.json` provenance. This is the escape hatch for a container that
+  whatever repository Woods would otherwise find, at all three of Woods's git
+  call sites: per-unit enrichment, `manifest.json` provenance, and the
+  `woods:incremental` diff range. All three build their command line with the
+  new `Woods::GitCommand.argv`. This is the escape hatch for a container that
   can mount the canonical git directory but not the host path a linked
   worktree's `gitdir:` pointer names.
 - **Database-partition layer for multi-database apps (#280).** Model units record

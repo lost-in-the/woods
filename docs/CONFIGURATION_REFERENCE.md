@@ -559,7 +559,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
 | `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |
-| `WOODS_GIT_DIR` | unset | Absolute path to the canonical git directory. Wins over the repository Woods would otherwise find, for every git call it makes: per-unit `commit_count` and `change_frequency`, and `manifest.json`'s `git_branch`/`git_sha`. |
+| `WOODS_GIT_DIR` | unset | Absolute path to the canonical git directory. Wins over the repository Woods would otherwise find, at all three of its git call sites: per-unit `commit_count`/`change_frequency` (enrichment), `manifest.json`'s `git_branch`/`git_sha` (provenance), and the `woods:incremental` diff range. All three build their command line with `Woods::GitCommand.argv`. |
 | `GIT_BRANCH`, `GIT_SHA` | unset | Provenance for a checkout with no `.git` at all (a source tarball, a Docker `COPY` that excludes it). Ignored when a `.git` is present but unresolvable, so a stale build arg cannot mask a worktree. |
 
 **`GIT_DIR` alone is not enough for a linked git worktree.** Woods runs git as a
