@@ -49,7 +49,7 @@ and stdio or Streamable HTTP endpoints directly.
 - [Why Woods](WHY_WOODS.md): the problems runtime introspection solves.
 - [Internals](INTERNALS.md): extraction, publication, graph, storage, retrieval, and MCP components.
 - [Extractor reference](EXTRACTOR_REFERENCE.md): what each extractor produces and the edge cases it handles.
-- [Reading a published index from Ruby](PUBLISHED_INDEX.md): the `Woods::PublishedIndex` API for cops and gate scripts, checksum-keyed RuboCop caches, and generation-to-generation checks.
+- [Reading a published index from Ruby](PUBLISHED_INDEX.md): the `Woods::PublishedIndex` Ruby API for cops, gate scripts, and `woods:check:*` tasks (including the moved-message check).
 - [Evaluation](EVALUATION.md): retrieval scoring, baselines, and the agent-level index on/off ablation.
 - [Backend matrix](BACKEND_MATRIX.md): implemented provider/store combinations and their operational requirements.
 - [Token benchmark](TOKEN_BENCHMARK.md): evidence behind Woods token-estimation defaults.
