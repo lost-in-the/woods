@@ -374,6 +374,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── graph_sha (B-180) ────────────────────────────────────────────────────
+  #
+  # `graph_sha` is the digest a consumer caches on: unchanged means "the graph
+  # you already processed". It covered `Set#to_a`, so a no-op round trip
+  # republished the same graph under a new digest and every such consumer
+  # redid its work. {IndexComparison} now compares it in every example; these
+  # two state the property directly.
+  describe 'graph_sha' do
+    def graph_sha(dir)
+      read_json(dir, 'graph_analysis.json')['graph_sha']
+    end
+
+    it 'returns to its baseline after a create and its delete' do
+      index_dir = Dir.mktmpdir('woods_diff_sha')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+      baseline = graph_sha(index_dir)
+
+      write_file('app/services/round_trip_service.rb', service_source('RoundTripService', dependency: 'Post'))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/services/round_trip_service.rb'])
+      expect(graph_sha(index_dir)).not_to eq(baseline)
+
+      delete_file('app/services/round_trip_service.rb')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/services/round_trip_service.rb'])
+      expect(graph_sha(index_dir)).to eq(baseline)
+    end
+
+    it 'matches a cold full extraction of the same tree' do
+      index_dir = Dir.mktmpdir('woods_diff_sha_full')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      write_file('app/services/matching_service.rb', service_source('MatchingService', dependency: 'Post'))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/services/matching_service.rb'])
+
+      expect(graph_sha(index_dir)).to eq(graph_sha(full_extraction))
+    end
+  end
+
   # ── SUMMARY.md totals (M4) ───────────────────────────────────────────────
   #
   # An incremental run used to ship the seeded previous generation's

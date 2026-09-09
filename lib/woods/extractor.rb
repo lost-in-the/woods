@@ -2016,7 +2016,10 @@ module Woods
 
     def write_dependency_graph
       graph_data = @dependency_graph.to_h
-      graph_data[:pagerank] = @dependency_graph.pagerank
+      # Key-sorted for the same reason `to_h` sorts its own sections: the
+      # digest published as `graph_sha` covers these bytes, so node
+      # registration order must not reach it (B-180).
+      graph_data[:pagerank] = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
 
       AtomicFile.write(
         payload_dir.join('dependency_graph.json'),

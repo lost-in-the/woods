@@ -744,21 +744,31 @@ module Woods
       @to_h ||= begin
         variants = self.class.relativize_variants(variant_records, root)
         base = {
-          nodes: self.class.relativize_nodes(primary_nodes, root),
-          edges: primary_edges,
-          reverse: @reverse.transform_values(&:to_a),
-          file_map: self.class.relativize_file_map(@file_map, root),
-          type_index: @type_index.transform_values(&:to_a),
+          nodes: key_sorted(self.class.relativize_nodes(primary_nodes, root)),
+          edges: key_sorted(primary_edges),
+          reverse: key_sorted(@reverse.transform_values { |ids| ids.to_a.sort }),
+          file_map: key_sorted(self.class.relativize_file_map(@file_map, root)),
+          type_index: key_sorted(@type_index.transform_values { |ids| ids.to_a.sort }),
           stats: {
             node_count: @nodes.each_value.sum(&:size),
             edge_count: @edges.each_value.sum { |by_type| by_type.each_value.sum(&:size) },
-            types: @type_index.transform_values(&:size)
+            types: key_sorted(@type_index.transform_values(&:size))
           }
         }
         variants.empty? ? base : base.merge(variants: variants)
       end
       detached_snapshot(@to_h)
     end
+
+    # A hash rebuilt in key order, so serialization is a function of the
+    # graph's content and not of the order its units happened to register.
+    #
+    # @param hash [Hash] keyed by identifier, path, or unit type
+    # @return [Hash] the same pairs, key-sorted
+    def key_sorted(hash)
+      hash.sort_by { |key, _| key.to_s }.to_h
+    end
+    private :key_sorted
 
     # A copy whose edge containers are the caller's alone.
     #
@@ -912,10 +922,11 @@ module Woods
       end
     end
 
-    # Serialization form: **arrays**, matching what `to_h` has always emitted.
+    # Serialization form: **sorted arrays**, matching what `to_h` has always
+    # emitted, minus the insertion order.
     def self.relativize_file_map(file_map, root)
       relocate_file_map(file_map) { |path| relativize(path, root) }
-        .transform_values(&:to_a)
+        .transform_values { |ids| ids.to_a.sort }
     end
 
     # In-memory form: **Sets**, which is the `@file_map` contract every path

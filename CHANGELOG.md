@@ -458,6 +458,12 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **`graph_sha` is now a function of graph content, not of registration order.**
+  `DependencyGraph#to_h` sorted neither the members of `reverse`, `file_map` and
+  `type_index` nor the keys of any section, and the extractor wrote PageRank in
+  node-registration order, so a no-op incremental run republished an identical
+  graph under a new digest and every consumer caching on `graph_sha` redid its
+  work. The incremental equivalence oracle now compares `graph_sha` as well.
 - Respect MySQL session quote modes throughout Console SQL checks, including
   `ANSI_QUOTES` and `NO_BACKSLASH_ESCAPES`, without rejecting ordinary escaped literals.
 - Preserve absolute Ruby constants through both AST backends and static-map resolution.
