@@ -87,15 +87,15 @@ module Woods
       private
 
       # @param signature [Array(String, Symbol)] `[method_name, kind]`
-      # @param sources [Array<String>] units that lost it
-      # @param destinations [Array<String>] units that gained it
+      # @param sources [Array<Array(String, String)>] `[identifier, type]` units that lost it
+      # @param destinations [Array<Array(String, String)>] `[identifier, type]` units that gained it
       # @param covered_before [Set<String>]
       # @param covered_after [Set<String>]
       # @return [Array<Finding>]
       def build_findings(signature, sources, destinations, covered_before, covered_after)
         name, kind = signature
 
-        sources.sort.product(destinations.sort).filter_map do |from_unit, to_unit|
+        sources.sort.product(destinations.sort).filter_map do |(from_unit, _from_type), (to_unit, _to_type)|
           next if from_unit == to_unit
 
           finding = Finding.new(method: name, kind: kind, from_unit: from_unit, to_unit: to_unit,
@@ -112,33 +112,42 @@ module Woods
         [signature_losses(before_methods, after_methods), signature_losses(after_methods, before_methods)]
       end
 
-      # Signatures an identifier has in +from+ but not in +to+, grouped by
-      # signature. "Removed" and "added" are the same computation with the
-      # two method-index hashes swapped, so both come from this one method.
+      # Signatures a `[identifier, type]` unit has in +from+ but not in +to+,
+      # grouped by signature. "Removed" and "added" are the same computation
+      # with the two method-index hashes swapped, so both come from this one
+      # method.
       #
-      # @param from [Hash{String => Set}]
-      # @param to [Hash{String => Set}]
-      # @return [Hash{Array(String, Symbol) => Array<String>}]
+      # @param from [Hash{Array(String, String) => Set}]
+      # @param to [Hash{Array(String, String) => Set}]
+      # @return [Hash{Array(String, Symbol) => Array<Array(String, String)>}]
       def signature_losses(from, to)
         losses = Hash.new { |hash, key| hash[key] = [] }
-        (from.keys | to.keys).each do |identifier|
-          lost = (from[identifier] || Set.new) - (to[identifier] || Set.new)
-          lost.each { |signature| losses[signature] << identifier }
+        (from.keys | to.keys).each do |unit_key|
+          lost = (from[unit_key] || Set.new) - (to[unit_key] || Set.new)
+          lost.each { |signature| losses[signature] << unit_key }
         end
         losses
       end
 
-      # identifier => Set of `[name, kind]` signatures, for units that list any.
+      # `[identifier, type]` => Set of `[name, kind]` signatures, for units
+      # that list any.
+      #
+      # Keyed on `[identifier, type]`, not identifier alone: an identifier a
+      # model and a service both use would otherwise resolve through
+      # `reader.unit(identifier)`'s untyped, collision-prone lookup, and the
+      # second entry processed would overwrite the first's slot in this hash.
+      # Typed lookup and a composite key keep each unit's own method list
+      # under its own type.
       #
       # @param reader [Woods::PublishedIndex]
-      # @return [Hash{String => Set<Array(String, Symbol)>}]
+      # @return [Hash{Array(String, String) => Set<Array(String, Symbol)>}]
       def method_index(reader)
         reader.units.each_with_object({}) do |entry, index|
-          data = reader.unit(entry['identifier'])
+          data = reader.unit(entry['identifier'], type: entry['type'])
           next unless data
 
           signatures = METHOD_KEYS.flat_map { |key| normalized_signatures(key, data.dig('metadata', key)) }
-          index[entry['identifier']] = signatures.to_set if signatures.any?
+          index[[entry['identifier'], entry['type']]] = signatures.to_set if signatures.any?
         end
       end
 

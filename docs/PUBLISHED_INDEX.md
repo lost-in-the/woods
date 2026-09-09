@@ -9,7 +9,7 @@ index = Woods::PublishedIndex.new(Rails.root.join('tmp/woods'))
 index.generation_number            # => 42
 index.unit('Order')                # => { "type" => "model", "identifier" => "Order", ... }
 index.units(type: 'model')         # => index entries with a "type" key
-index.edges(via: 'belongs_to')     # => [{ from: "Comment", to: "Post", via: "belongs_to", through: nil, disable_joins: false }]
+index.edges(via: 'belongs_to')     # => [{ from: "Comment", to: "Post", via: "belongs_to", through: nil, through_db: nil, disable_joins: false }]
 index.dependents_of('Post')        # => ["Comment", "PostsController"]
 index.table_database_map           # => { "orders" => "primary", "events" => "analytics" }
 index.external_dependency_checksum # => "9f2c81ad..." (changes on every publish)
@@ -43,7 +43,7 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `#close` | nil | Releases the retention lock; safe to call more than once |
 | `#unit(identifier, type: nil)` | Hash or nil | The unit JSON, string keys; see the collision note below |
 | `#units(type: nil)` | `Array<Hash>` | `_index.json` entries plus `"type"` |
-| `#edges(via: nil)`, `#each_edge` | `Array<Hash>` | Every forward edge with `through` and `disable_joins`; an identifier shared by more than one type contributes one edge per owning type, never folded into a single deduplicated entry |
+| `#edges(via: nil)`, `#each_edge` | `Array<Hash>` | Every forward edge with `through`, `through_db`, and `disable_joins`; an identifier shared by more than one type contributes one edge per owning type, never folded into a single deduplicated entry |
 | `#dependents_of(identifier, via: nil)` | `Array<String>` | Reverse index |
 | `#table_database_map` | `Hash` | Model table to database; empty on Rails 6.0 extractions |
 | `#external_dependency_checksum` | String | SHA-256 of the pinned payload's `manifest.json` |
@@ -71,7 +71,7 @@ RuboCop caches offenses per file and invalidates the cache when a cop's `externa
 
 ### Worked example: `Multidb/ForeignKeyAcrossDatabases`
 
-The cop flags an `add_foreign_key` in a migration whose two tables resolve to different databases. The table-to-database map comes from the index (`metadata.database` on model units), so the cop never boots Rails.
+The cop flags an `add_foreign_key` in a migration whose two tables resolve to different databases. The table-to-database map comes from the index (`metadata.database` on model units), so the cop never boots Rails. A `:through` association's edge carries the same join rule under `through_db`: the through model can resolve to a database that differs from either end, so a check built on `#edges` rather than `#table_database_map` needs that value to catch the same class of cross-database join.
 
 ```ruby
 # lib/rubocop/cop/multidb/foreign_key_across_databases.rb

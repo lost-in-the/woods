@@ -182,10 +182,10 @@ module Woods
     #
     # An identifier shared by more than one type contributes one edge per
     # owning type; two edges are never folded into one just because they look
-    # alike once reduced to `{from, to, via, through, disable_joins}`.
+    # alike once reduced to `{from, to, via, through, through_db, disable_joins}`.
     #
     # @param via [String, Symbol, nil] restrict to one relationship label
-    # @return [Array<Hash>] `{ from:, to:, via:, through:, disable_joins: }`
+    # @return [Array<Hash>] `{ from:, to:, via:, through:, through_db:, disable_joins: }`
     def edges(via: nil)
       wanted = via&.to_s
       EdgeShaper.call(@reader.raw_graph_data).select { |edge| wanted.nil? || edge[:via] == wanted }

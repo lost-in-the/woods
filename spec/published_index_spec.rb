@@ -36,7 +36,8 @@ RSpec.describe Woods::PublishedIndex do
     it 'iterates edges with from, to, via, and attributes' do
       edges = reader.edges
 
-      expect(edges).to include(from: 'Comment', to: 'Post', via: nil, through: nil, disable_joins: false)
+      expect(edges).to include(from: 'Comment', to: 'Post', via: nil, through: nil, through_db: nil,
+                               disable_joins: false)
       expect(reader.edges(via: 'belongs_to')).to eq([])
       expect { |probe| reader.each_edge(&probe) }.to yield_control.at_least(:once)
     end
@@ -268,6 +269,33 @@ RSpec.describe Woods::PublishedIndex do
         matches = index.edges.select { |e| e[:from] == 'Foo' && e[:to] == 'Bar' }
 
         expect(matches.size).to eq(2)
+        index.close
+      end
+    end
+  end
+
+  describe 'an edge carrying through_db' do
+    it 'round-trips through_db from an on-disk graph edge into #edges' do
+      Dir.mktmpdir('woods-published-index-through-db') do |dir|
+        File.write(File.join(dir, 'manifest.json'), JSON.generate('total_units' => 2))
+        File.write(File.join(dir, 'dependency_graph.json'), JSON.generate(
+                                                              'nodes' => {
+                                                                'Order' => { 'type' => 'model' },
+                                                                'Account' => { 'type' => 'model' }
+                                                              },
+                                                              'edges' => {
+                                                                'Order' => [{ 'target' => 'Account', 'via' => 'has_one',
+                                                                              'through' => 'billing',
+                                                                              'through_db' => 'analytics' }],
+                                                                'Account' => []
+                                                              },
+                                                              'reverse' => { 'Order' => [], 'Account' => ['Order'] }
+                                                            ))
+
+        index = described_class.new(dir)
+
+        expect(index.edges).to include(from: 'Order', to: 'Account', via: 'has_one', through: 'billing',
+                                       through_db: 'analytics', disable_joins: false)
         index.close
       end
     end

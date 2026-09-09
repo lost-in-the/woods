@@ -4,7 +4,7 @@ module Woods
   class PublishedIndex
     # Turns raw `dependency_graph.json` data into the flat, uniform edge shape
     # {PublishedIndex#edges} returns: `{ from:, to:, via:, through:,
-    # disable_joins: }`.
+    # through_db:, disable_joins: }`.
     #
     # Pulled out of {PublishedIndex} itself because this walk is pure data
     # shaping with no dependency on the pinned generation or its retention
@@ -18,7 +18,7 @@ module Woods
       #
       # @param graph [Hash] raw dependency graph data
       #   ({Woods::MCP::IndexReader#raw_graph_data})
-      # @return [Array<Hash>] `{ from:, to:, via:, through:, disable_joins: }`
+      # @return [Array<Hash>] `{ from:, to:, via:, through:, through_db:, disable_joins: }`
       def self.call(graph)
         primary = (graph['edges'] || {}).flat_map { |from, list| Array(list).map { |raw| edge_hash(from, raw) } }
         primary + variant_edges(graph)
@@ -49,9 +49,9 @@ module Woods
       def self.edge_hash(from, raw)
         if raw.is_a?(Hash)
           { from: from, to: raw['target'], via: raw['via'], through: raw['through'],
-            disable_joins: raw['disable_joins'] == true }
+            through_db: raw['through_db'], disable_joins: raw['disable_joins'] == true }
         else
-          { from: from, to: raw.to_s, via: nil, through: nil, disable_joins: false }
+          { from: from, to: raw.to_s, via: nil, through: nil, through_db: nil, disable_joins: false }
         end
       end
 

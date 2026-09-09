@@ -13,14 +13,30 @@ require 'woods/checks/moved_messages'
 # methods that happen to share a name and kind.
 RSpec.describe Woods::Checks::MovedMessages do
   # A reader double shaped like Woods::PublishedIndex: #units, #unit, #edges.
+  #
+  # `units:` normally maps identifier => single unit hash. A value that is a
+  # Hash of type => unit hash instead (no top-level `'type'` key of its own)
+  # models two units sharing one identifier, so `#unit` can answer per type
+  # the way the real `Woods::PublishedIndex#unit(identifier, type:)` does.
   def reader(units:, coverage_targets: [])
-    entries = units.keys.map { |identifier| { 'identifier' => identifier, 'type' => units[identifier]['type'] } }
+    by_key = units_by_key(units)
+    entries = by_key.map { |(identifier, type), _| { 'identifier' => identifier, 'type' => type } }
     coverage = coverage_targets.map do |target|
       { from: "spec/#{target.downcase}_spec.rb", to: target, via: 'test_coverage' }
     end
     instance_double(Woods::PublishedIndex, units: entries).tap do |double|
-      allow(double).to receive(:unit) { |identifier| units[identifier] }
+      allow(double).to receive(:unit) { |identifier, type: nil| by_key[[identifier, type]] }
       allow(double).to receive(:edges).with(via: 'test_coverage').and_return(coverage)
+    end
+  end
+
+  # `[identifier, type]` => unit hash, from `units:`'s normal identifier =>
+  # single unit hash, or, for an identifier two units share, identifier =>
+  # `{type => unit hash}` (no top-level `'type'` key of its own).
+  def units_by_key(units)
+    units.each_with_object({}) do |(identifier, value), index|
+      variants = value.key?('type') ? { value['type'] => value } : value
+      variants.each { |type, data| index[[identifier, type]] = data }
     end
   end
 
@@ -124,6 +140,29 @@ RSpec.describe Woods::Checks::MovedMessages do
 
     expect(findings.map(&:to_h)).to eq([
                                          { method: 'process', kind: :instance, from_unit: 'Alpha', to_unit: 'Beta',
+                                           covered_before: true, covered_after: false }
+                                       ])
+  end
+
+  it "indexes a model's methods under the model when a service shares its identifier" do
+    # 'Foo' names both a model and a service. Without a typed #unit lookup,
+    # the untyped fetch would return whichever type wins the collision for
+    # every entry sharing the identifier, and the second entry processed
+    # would overwrite the first's slot in the method index, an unrelated
+    # service losing 'normalize' looking like the model lost it instead.
+    before = reader(units: { 'Foo' => { 'model' => unit('model', 'instance_methods', 'normalize'),
+                                        'service' => unit('service', 'public_methods', 'normalize') },
+                             'Bar' => unit('service', 'public_methods') },
+                    coverage_targets: ['Foo'])
+    after = reader(units: { 'Foo' => { 'model' => unit('model', 'instance_methods', 'normalize'),
+                                       'service' => unit('service', 'public_methods') },
+                            'Bar' => unit('service', 'public_methods', 'normalize') },
+                   coverage_targets: ['Foo'])
+
+    findings = described_class.new(before: before, after: after).run
+
+    expect(findings.map(&:to_h)).to eq([
+                                         { method: 'normalize', kind: :instance, from_unit: 'Foo', to_unit: 'Bar',
                                            covered_before: true, covered_after: false }
                                        ])
   end

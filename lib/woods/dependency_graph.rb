@@ -966,17 +966,22 @@ module Woods
 
     # Edge attributes present in a dependency or persisted edge hash.
     #
+    # Driven off {EDGE_ATTRIBUTE_KEYS} so a new edge attribute needs adding to
+    # only that list, not a second hand-written branch here.
+    #
     # @param dep [Hash] string or symbol keys
     # @return [Hash{Symbol => Object}] empty when the edge carries none
     def self.edge_attributes(dep)
-      attrs = {}
-      through = dep[:through] || dep['through']
-      attrs[:through] = through.to_s unless through.nil? || through.to_s.empty?
-      through_db = dep[:through_db] || dep['through_db']
-      attrs[:through_db] = through_db.to_s unless through_db.nil? || through_db.to_s.empty?
-      disable_joins = dep.key?(:disable_joins) ? dep[:disable_joins] : dep['disable_joins']
-      attrs[:disable_joins] = true if disable_joins == true
-      attrs
+      EDGE_ATTRIBUTE_KEYS.each_with_object({}) do |key, attrs|
+        value = dep.key?(key) ? dep[key] : dep[key.to_s]
+        next if value.nil?
+
+        if key == :disable_joins
+          attrs[key] = true if value == true
+        else
+          attrs[key] = value.to_s unless value.to_s.empty?
+        end
+      end
     end
 
     # Load graph from persisted data
