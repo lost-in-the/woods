@@ -2,8 +2,32 @@
 
 require 'spec_helper'
 require 'woods/release/changelog'
+require 'woods/release/version_state'
 
 RSpec.describe Woods::Release::Changelog do
+  def unreleased_body(source)
+    source[/^## \[Unreleased\]\n(.*?)^## \[/m, 1]
+  end
+
+  def assert_foldable_alpha_changelog(real, state)
+    folded = described_class.fold(real, version: "#{state.base}.beta1", date: Date.new(2026, 9, 10))
+    section = folded[/^## \[#{Regexp.escape(state.base)}\.beta1\] - 2026-09-10\n(.*?)^## \[/m, 1]
+    headings = section.scan(/^### (.+)$/).flatten
+
+    expect(headings).to eq(headings.uniq)
+    expect(headings).not_to be_empty
+    expect(unreleased_body(folded)).to eq("\n")
+  end
+
+  def assert_folded_release_changelog(real, state)
+    section = real[/^## \[#{Regexp.escape(state.to_s)}\] - \d{4}-\d{2}-\d{2}\n(.*?)^## \[/m, 1]
+    headings = section.to_s.scan(/^### (.+)$/).flatten
+
+    expect(section).not_to be_nil
+    expect(headings).to eq(headings.uniq)
+    expect(unreleased_body(real).to_s.strip).to eq('')
+  end
+
   let(:source) do
     <<~MARKDOWN
       # Changelog
@@ -69,15 +93,19 @@ RSpec.describe Woods::Release::Changelog do
     expect(unreleased.strip).to eq('')
   end
 
-  it 'folds the real repository changelog into exactly one block per heading' do
+  # The one example here that reads this checkout, and it asserts only what is
+  # true of the state the checkout is in. An alpha still has an Unreleased
+  # section a release can fold; a released tree already carries the dated
+  # heading that fold produced, so folding it again is a duplicate release.
+  it 'agrees with the state the checked-in changelog is in' do
+    state = Woods::Release::VersionState.parse(Woods::VERSION)
     real = File.read(File.expand_path('../../CHANGELOG.md', __dir__), encoding: Encoding::UTF_8)
-    folded = described_class.fold(real, version: '2.0.0.beta1', date: Date.new(2026, 9, 10))
-    section = folded[/^## \[2\.0\.0\.beta1\] - 2026-09-10\n(.*?)^## \[1\.6\.1\]/m, 1]
-    headings = section.scan(/^### (.+)$/).flatten
 
-    expect(headings).to eq(headings.uniq)
-    expect(headings).to include('Added', 'Performance', 'Documentation')
-    expect(folded).to include('## [1.6.1] - 2026-07-22')
+    if state.alpha?
+      assert_foldable_alpha_changelog(real, state)
+    else
+      assert_folded_release_changelog(real, state)
+    end
   end
 
   it 'refuses to fold an empty Unreleased section' do

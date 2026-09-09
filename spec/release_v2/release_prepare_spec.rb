@@ -10,6 +10,17 @@ RSpec.describe Woods::Release::Preparer do
     release_file(root, 'CHANGELOG.md')[/^## \[#{Regexp.escape(version)}\] - \d{4}-\d{2}-\d{2}\n(.*?)^## \[/m, 1]
   end
 
+  # The transition the flow would cut next from a tree in this state.
+  def validate_next_transition(state)
+    parse = ->(version) { Woods::Release::VersionState.parse(version) }
+    if state.final?
+      major, minor, = state.base.split('.')
+      Woods::Release::VersionState.validate_reopen!(state, parse["#{major}.#{minor.to_i + 1}.0.alpha"])
+    else
+      Woods::Release::VersionState.validate_prepare!(state, parse[state.alpha? ? "#{state.base}.beta1" : state.base])
+    end
+  end
+
   def banner(root)
     Woods::Release::Notes.read_body(root, Woods::Release::Notes::FENCES.first)
   end
@@ -160,6 +171,26 @@ RSpec.describe Woods::Release::Preparer do
 
         expect(changelog_section(root, '2.0.0'))
           .to eq("\n### Added\n\n- an rc1 addition\n\n- a late addition\n\n")
+      end
+    end
+  end
+
+  # The one example here that reads this checkout. Every transition above runs
+  # against the fixture repository, so none of them care which state this tree
+  # is in. This one asserts only the invariants of the state it finds.
+  describe 'the checked-in tree' do
+    let(:root) { release_checkout_root }
+    let(:state) { Woods::Release::VersionState.parse(Woods::VERSION) }
+
+    it 'sits at a state the flow has a next transition for, with the changelog to match' do
+      expect(described_class.current_state(root)).to eq(state)
+      expect { validate_next_transition(state) }.not_to raise_error
+
+      if state.alpha?
+        expect(release_file(root, 'CHANGELOG.md')).not_to match(/^## \[#{Regexp.escape(state.base)}[^\]]*\] - /)
+      else
+        expect(release_file(root, 'CHANGELOG.md'))
+          .to match(/^## \[#{Regexp.escape(state.to_s)}\] - \d{4}-\d{2}-\d{2}$/)
       end
     end
   end

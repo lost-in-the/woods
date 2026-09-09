@@ -5,6 +5,7 @@ require 'fileutils'
 require 'json'
 require 'open3'
 require 'tmpdir'
+require 'woods/release/version_state'
 
 RSpec.describe 'release gemspec dependency contract' do
   let(:root) { File.expand_path('../..', __dir__) }
@@ -91,8 +92,16 @@ RSpec.describe 'release gemspec dependency contract' do
     end
   end
 
-  it 'ships main as the development marker on this branch' do
-    expect(Woods::VERSION).to end_with('.alpha')
-    expect(gemspec.metadata.fetch('source_code_uri')).to eq('https://github.com/lost-in-the/woods/tree/main')
+  # The rule, not a fixed state: this checkout is an alpha between releases and
+  # a beta, an rc, or a final release on a release commit, and the gemspec has
+  # to be right in whichever of those it is.
+  it 'points release metadata at the ref the checked-in version state names' do
+    state = Woods::Release::VersionState.parse(Woods::VERSION)
+    ref = state.alpha? ? 'main' : "v#{Woods::VERSION}"
+    metadata = gemspec.metadata
+
+    expect(metadata.fetch('source_code_uri')).to eq("https://github.com/lost-in-the/woods/tree/#{ref}")
+    expect(metadata.fetch('changelog_uri')).to eq("https://github.com/lost-in-the/woods/blob/#{ref}/CHANGELOG.md")
+    expect(metadata.fetch('documentation_uri')).to eq("https://github.com/lost-in-the/woods/tree/#{ref}/docs")
   end
 end

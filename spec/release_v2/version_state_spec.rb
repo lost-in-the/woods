@@ -17,10 +17,13 @@ RSpec.describe 'release version state' do
   let(:changelog) { File.read(File.join(root, 'CHANGELOG.md'), encoding: Encoding::UTF_8) }
 
   # Markdown only: the fences live in documentation, and the specs and the Notes
-  # registry both quote the marker as a plain string.
+  # registry both quote the marker as a plain string. The release fixture under
+  # spec/fixtures carries the same fences on purpose, so the transition specs
+  # can rewrite them without touching this checkout; it is not repository
+  # documentation and is not what this enforcement is about.
   def marked_documents(marker)
     stdout, stderr, status = Open3.capture3(
-      'git', 'grep', '-l', '--fixed-strings', marker, '--', '*.md', chdir: root
+      'git', 'grep', '-l', '--fixed-strings', marker, '--', '*.md', ':(exclude)spec/fixtures/**', chdir: root
     )
     raise stderr unless status.success? || status.exitstatus == 1
 
