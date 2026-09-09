@@ -575,7 +575,9 @@ module Woods
             name: 'graph_analysis',
             description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, bridges, ' \
                          'cross_database_edges (associations and foreign keys across databases), ' \
-                         'and volatile_dependencies (edges into units that change far more often than the dependent).',
+                         'volatile_dependencies (edges into units that change far more often than the dependent), ' \
+                         'and undeclared_package_edges (edges that cross a package boundary the source package ' \
+                         'never declared).',
             input_schema: {
               properties: {
                 analysis: {

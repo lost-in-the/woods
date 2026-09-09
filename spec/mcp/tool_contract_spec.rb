@@ -91,7 +91,8 @@ RSpec.describe 'Index MCP tool contracts' do
                                    properties: {
                                      'analysis' => enum_contract(
                                        %w[orphans dead_ends hubs cycles bridges
-                                          cross_database_edges volatile_dependencies all], nil, 10_000
+                                          cross_database_edges volatile_dependencies
+                                          undeclared_package_edges all], nil, 10_000
                                      ),
                                      'limit' => integer_contract(1, 1_000),
                                      'offset' => integer_contract(0, 1_000_000)
@@ -466,7 +467,8 @@ RSpec.describe 'Index MCP tool contracts' do
   def expected_graph_stats
     {
       'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0,
-      'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1
+      'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1,
+      'undeclared_package_edge_count' => 2
     }
   end
 
@@ -483,6 +485,7 @@ RSpec.describe 'Index MCP tool contracts' do
       'cycles' => [], 'bridges' => [],
       'cross_database_edges' => expected_cross_database_edges,
       'volatile_dependencies' => expected_volatile_dependencies,
+      'undeclared_package_edges' => expected_undeclared_package_edges,
       'stats' => expected_graph_stats
     }
   end
@@ -502,6 +505,15 @@ RSpec.describe 'Index MCP tool contracts' do
     [
       { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'Post', 'to_type' => 'model',
         'via' => 'code_reference', 'from_commits' => 2, 'to_commits' => 9, 'ratio' => 4.5, 'pagerank' => 0.4 }
+    ]
+  end
+
+  def expected_undeclared_package_edges
+    [
+      { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'BillingService', 'to_type' => 'service',
+        'via' => 'code_reference', 'from_package' => 'checkout', 'to_package' => 'billing' },
+      { 'from' => 'Comment', 'from_type' => 'model', 'to' => 'AdminPanel', 'to_type' => 'controller',
+        'via' => 'belongs_to', 'from_package' => '.', 'to_package' => 'admin' }
     ]
   end
 

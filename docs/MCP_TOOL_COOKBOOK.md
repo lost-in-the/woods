@@ -619,6 +619,20 @@ Static tools miss all of these because they only exist after Rails processes the
 
 ---
 
+### "Does this call cross a package boundary we never declared?"
+
+**Tool:** `graph_analysis` (Index Server)
+
+```json
+{
+  "analysis": "undeclared_package_edges"
+}
+```
+
+**What you'll get:** `from`, `from_type`, `to`, `to_type`, `via`, `from_package`, and `to_package` for every edge whose source package never lists the target package as a dependency. Enforcement stays with `packwerk check` / `pks check`; this only makes the boundary visible before you write the call.
+
+---
+
 ### "How does Rails implement has_many?"
 
 **Tool:** `framework` (Index Server)

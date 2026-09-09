@@ -114,7 +114,7 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 | `trace_flow` | Follow a request, job, mail, or other execution flow |
 | `framework` | Inspect relevant Rails or installed gem source |
 | `recent_changes` | Find indexed units changed recently |
-| `graph_analysis` | Structural reports: orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies |
+| `graph_analysis` | Structural reports: orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, undeclared package edges |
 | `domain_clusters` | Discover connected domains in the graph |
 | `pagerank` | Find structurally central units |
 | `reload` | Reload a newly published generation without restarting the client |

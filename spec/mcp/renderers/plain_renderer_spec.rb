@@ -140,6 +140,21 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
       expect(out).not_to include('****')
     end
 
+    it 'renders an undeclared_package_edges entry generically, with no dedicated branch' do
+      out = renderer.render(:graph_analysis, {
+                              'undeclared_package_edges' => [
+                                { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'BillingService',
+                                  'to_type' => 'service', 'via' => 'code_reference', 'from_package' => 'checkout',
+                                  'to_package' => 'billing' }
+                              ],
+                              'stats' => { 'undeclared_package_edge_count' => 1 }
+                            })
+
+      expect(out).to include('UNDECLARED PACKAGE EDGES:')
+      expect(out).to include('  PostsController -> BillingService (code_reference): from_type: controller, ' \
+                             'to_type: service, from_package: checkout, to_package: billing')
+    end
+
     it 'keeps existing sections byte-identical to the pre-#280 renderer (I13)' do
       old_shape = {
         'orphans' => ['PostsController'],

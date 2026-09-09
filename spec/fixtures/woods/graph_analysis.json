@@ -61,12 +61,33 @@
       "pagerank": 0.4
     }
   ],
+  "undeclared_package_edges": [
+    {
+      "from": "PostsController",
+      "from_type": "controller",
+      "to": "BillingService",
+      "to_type": "service",
+      "via": "code_reference",
+      "from_package": "checkout",
+      "to_package": "billing"
+    },
+    {
+      "from": "Comment",
+      "from_type": "model",
+      "to": "AdminPanel",
+      "to_type": "controller",
+      "via": "belongs_to",
+      "from_package": ".",
+      "to_package": "admin"
+    }
+  ],
   "stats": {
     "orphan_count": 1,
     "dead_end_count": 1,
     "hub_count": 3,
     "cycle_count": 0,
     "cross_database_edge_count": 2,
-    "volatile_dependency_count": 1
+    "volatile_dependency_count": 1,
+    "undeclared_package_edge_count": 2
   }
 }

@@ -405,8 +405,17 @@ RSpec.describe Woods::MCP::Server do
       expect(data['volatile_dependencies'].first).to include('from' => 'PostsController', 'ratio' => 4.5)
     end
 
+    it 'returns the undeclared package edges section (#280)' do
+      data = parse_response(call_tool(server, 'graph_analysis'))
+
+      expect(data['undeclared_package_edges'].first).to include(
+        'from' => 'PostsController', 'to' => 'BillingService',
+        'from_package' => 'checkout', 'to_package' => 'billing'
+      )
+    end
+
     it 'accepts each new section name and paginates it' do
-      %w[cross_database_edges volatile_dependencies].each do |section|
+      %w[cross_database_edges volatile_dependencies undeclared_package_edges].each do |section|
         data = parse_response(call_tool(server, 'graph_analysis', analysis: section, limit: 1))
 
         expect(data).to have_key(section)
@@ -419,7 +428,7 @@ RSpec.describe Woods::MCP::Server do
       enum = tool.input_schema.to_h.dig(:properties, :analysis, :enum) ||
              tool.input_schema.to_h.dig('properties', 'analysis', 'enum')
 
-      expect(enum).to include('cross_database_edges', 'volatile_dependencies', 'all')
+      expect(enum).to include('cross_database_edges', 'volatile_dependencies', 'undeclared_package_edges', 'all')
     end
   end
 
