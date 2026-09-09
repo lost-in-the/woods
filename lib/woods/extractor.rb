@@ -396,7 +396,14 @@ module Woods
     def extract_all
       setup_output_directory
       ModelNameCache.reset!
+      # @package_resolver alone is not enough: #package_resolver builds
+      # through #extractor_for, which memoizes into @incremental_extractors.
+      # Without this reset, a second full run on the same instance would
+      # resolve membership through the first run's PackageExtractor and its
+      # already-memoized (now stale) package_files/package_roots, missing a
+      # package added between the two runs.
       @package_resolver = nil
+      @incremental_extractors = nil
       begin_payload!
 
       # Eager load once — all extractors need loaded classes for introspection.
@@ -1617,7 +1624,7 @@ module Woods
         next if File.basename(file) == '_index.json'
 
         type_dir = File.basename(File.dirname(file))
-        next if %w[rails_source].include?(type_dir)
+        next if type_dir == 'rails_source' || PAYLOAD_DIRS.include?(type_dir)
 
         identifier = reannotate_unit_file(file, type_dir)
         next unless identifier
