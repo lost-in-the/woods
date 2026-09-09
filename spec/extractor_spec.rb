@@ -3380,4 +3380,55 @@ RSpec.describe Woods::Extractor do
       expect(extractor.dependency_graph.to_h[:nodes]['Comment'].keys).to contain_exactly(:type, :file_path, :namespace)
     end
   end
+
+  describe '#build_graph_analyzer volatile ratio' do
+    it 'passes the configured ratio to the analyzer' do
+      require 'woods'
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.volatile_dependency_ratio = 4.5
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, volatile_ratio: 4.5).and_call_original
+      extractor.send(:build_graph_analyzer)
+    ensure
+      Woods.configuration = original
+    end
+  end
+
+  describe '#write_structural_summary volatile dependencies (#280)' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor)  { described_class.new(output_dir: output_dir) }
+
+    before do
+      FileUtils.mkdir_p(output_dir)
+      require 'active_support'
+      require 'active_support/core_ext/numeric/time'
+      allow(Rails).to receive(:version).and_return('8.1.0')
+      unit = Woods::ExtractedUnit.new(type: :service, identifier: 'Checkout', file_path: '/app/services/checkout.rb')
+      extractor.instance_variable_set(:@results, { services: [unit] })
+    end
+
+    it 'lists the top volatile dependencies under the dependency overview' do
+      extractor.instance_variable_set(:@graph_analysis, {
+                                        hubs: [],
+                                        volatile_dependencies: [{ from: 'Checkout', to: 'PricingRules',
+                                                                  via: 'code_reference', from_commits: 5,
+                                                                  to_commits: 30, ratio: 6.0, pagerank: 0.1 }]
+                                      })
+
+      extractor.send(:write_structural_summary)
+
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+      expect(content).to include('- Volatile dependencies (top 1): Checkout -> PricingRules (5 vs 30 commits)')
+    end
+
+    it 'writes no volatile line when the report is empty' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], volatile_dependencies: [] })
+
+      extractor.send(:write_structural_summary)
+
+      expect(File.read(File.join(output_dir, 'SUMMARY.md'))).not_to include('Volatile dependencies')
+    end
+  end
 end

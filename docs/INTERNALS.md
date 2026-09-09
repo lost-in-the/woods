@@ -175,6 +175,7 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 | **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS. |
 | **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
 | **Cross-database edges** | Association or foreign-key edges whose two ends resolve to different databases. A `has_many :through` is reported as `join_through_across_databases` when `disable_joins` is false and `from_db`, `through_db` (the join model's database), or `to_db` disagree. A foreign key never resolves to an owner in the source database, even when another database also claims the table; when every owner sits elsewhere and they span more than one database, the entry comes back with `to: nil` and an `ambiguous_owners` list instead of guessing. Read from graph node and edge attributes, so full and incremental runs agree. Scoped to primary nodes (units registered in the graph), not variants. |
+| **Volatile dependencies** | Edges that point at a unit changing at least `volatile_dependency_ratio` times more often than the dependent (POODR: depend on things that change less often than you do). Dependencies with fewer than 5 commits or a `new` change frequency are skipped. Ranked by the dependency's PageRank; the persisted list keeps the top 20, while `stats[:volatile_dependency_count]` reports the full qualifying count. |
 
 Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.md`.
 

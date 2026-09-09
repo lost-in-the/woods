@@ -558,4 +558,79 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(report[:stats][:cross_database_edge_count]).to eq(1)
     end
   end
+
+  describe '#volatile_dependencies' do
+    def churned(identifier, commits, type: :model, dependencies: [], frequency: 'active')
+      make_unit(type: type, identifier: identifier, dependencies: dependencies,
+                metadata: { git: { commit_count: commits, change_frequency: frequency } })
+    end
+
+    it 'reports an edge whose dependency changes far more often than the dependent' do
+      graph.register(churned('PricingRules', 30))
+      graph.register(churned('Checkout', 5, type: :service, dependencies: [
+                               { type: :model, target: 'PricingRules', via: :code_reference }
+                             ]))
+
+      entries = analyzer.volatile_dependencies
+
+      expect(entries.size).to eq(1)
+      expect(entries.first).to include(from: 'Checkout', to: 'PricingRules', via: 'code_reference',
+                                       from_commits: 5, to_commits: 30, ratio: 6.0)
+      expect(entries.first[:pagerank]).to be > 0
+    end
+
+    it 'respects the configured ratio' do
+      graph.register(churned('PricingRules', 12))
+      graph.register(churned('Checkout', 5, type: :service, dependencies: [
+                               { type: :model, target: 'PricingRules', via: :code_reference }
+                             ]))
+
+      expect(described_class.new(graph, volatile_ratio: 2.0).volatile_dependencies.size).to eq(1)
+      expect(described_class.new(graph, volatile_ratio: 3.0).volatile_dependencies).to eq([])
+    end
+
+    it 'skips young dependencies, dependencies below the commit floor, and nodes without git data' do
+      graph.register(churned('Young', 2, frequency: 'new'))
+      graph.register(churned('Quiet', 4))
+      graph.register(make_unit(type: :model, identifier: 'Unknown'))
+      graph.register(churned('Consumer', 1, type: :service, dependencies: [
+                               { type: :model, target: 'Young', via: :code_reference },
+                               { type: :model, target: 'Quiet', via: :code_reference },
+                               { type: :model, target: 'Unknown', via: :code_reference }
+                             ]))
+
+      expect(analyzer.volatile_dependencies).to eq([])
+    end
+
+    it 'ranks by the dependency PageRank and honors the limit' do
+      graph.register(churned('Hub', 40))
+      graph.register(churned('Leaf', 40))
+      graph.register(churned('A', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+      graph.register(churned('B', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+      graph.register(churned('C', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Leaf', via: :code_reference }
+                             ]))
+
+      entries = analyzer.volatile_dependencies
+
+      expect(entries.first(2).map { |e| e[:to] }).to eq(%w[Hub Hub])
+      expect(analyzer.volatile_dependencies(limit: 1).size).to eq(1)
+    end
+
+    it 'is part of analyze with a count in stats' do
+      graph.register(churned('PricingRules', 30))
+      graph.register(churned('Checkout', 5, type: :service, dependencies: [
+                               { type: :model, target: 'PricingRules', via: :code_reference }
+                             ]))
+
+      report = analyzer.analyze
+
+      expect(report[:volatile_dependencies].size).to eq(1)
+      expect(report[:stats][:volatile_dependency_count]).to eq(1)
+    end
+  end
 end

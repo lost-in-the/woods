@@ -1523,10 +1523,13 @@ module Woods
     end
 
     # The one constructor for the analyzer both extraction paths use.
+    # `Woods.configuration` can be nil in specs that reset it; fall back to
+    # the analyzer's own default rather than raising mid-run.
     #
     # @return [GraphAnalyzer]
     def build_graph_analyzer
-      GraphAnalyzer.new(@dependency_graph)
+      ratio = Woods.configuration&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
+      GraphAnalyzer.new(@dependency_graph, volatile_ratio: ratio)
     end
 
     # Is this a path worth asking git about?
@@ -2095,6 +2098,12 @@ module Woods
         if significant_hubs&.any?
           hub_names = significant_hubs.map { |h| h[:identifier] }.join(', ')
           summary << "- Hub nodes (>20 dependents): #{hub_names}"
+        end
+
+        volatile = Array(@graph_analysis[:volatile_dependencies]).first(5)
+        if volatile.any?
+          lines = volatile.map { |v| "#{v[:from]} -> #{v[:to]} (#{v[:from_commits]} vs #{v[:to_commits]} commits)" }
+          summary << "- Volatile dependencies (top #{lines.size}): #{lines.join('; ')}"
         end
       end
 

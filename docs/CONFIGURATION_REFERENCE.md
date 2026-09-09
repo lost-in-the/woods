@@ -356,6 +356,7 @@ end
 | `precompute_flows` | Boolean | `false` | Pre-compute per-action request flow maps during extraction |
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
+| `volatile_dependency_ratio` | Float | `3.0` | A dependency whose commit count (last 365 days) exceeds the dependent's by this ratio appears in the `volatile_dependencies` report (top 20, ranked by PageRank). Must be greater than 1. Report only, never a gate. |
 
 ## Session tracer options
 

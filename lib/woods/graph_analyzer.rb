@@ -38,9 +38,20 @@ module Woods
     # Only these can cross a database boundary through Rails itself.
     ASSOCIATION_VIAS = %w[belongs_to has_many has_one has_and_belongs_to_many].freeze
 
+    # A dependency must change at least this many times more often than
+    # its dependent to be reported by {#volatile_dependencies}.
+    DEFAULT_VOLATILE_RATIO = 3.0
+
+    # A dependency with fewer commits in the last year than this is too
+    # young to judge; POODR's rule is about things that keep changing, and
+    # a class touched four times could be settling down.
+    VOLATILE_MIN_COMMITS = 5
+
     # @param dependency_graph [DependencyGraph] The graph to analyze
-    def initialize(dependency_graph)
+    # @param volatile_ratio [Numeric] see {#volatile_dependencies}
+    def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO)
       @graph = dependency_graph
+      @volatile_ratio = volatile_ratio.to_f
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -234,6 +245,25 @@ module Woods
       end
     end
 
+    # Edges that point at something changing much faster than the thing
+    # that depends on it: "depend on things that change less often than
+    # you do" (POODR ch. 3), made checkable because the graph now carries
+    # commit counts (#280).
+    #
+    # Report only, never a gate: young classes produce false positives, so
+    # dependencies with fewer than {VOLATILE_MIN_COMMITS} commits or a
+    # `new` change frequency are skipped. Ranked by the dependency's
+    # PageRank so the most-depended-on volatile unit comes first. `limit`
+    # caps what this method hands back; {#analyze}'s
+    # `stats[:volatile_dependency_count]` reports the full qualifying count
+    # regardless of `limit`.
+    #
+    # @param limit [Integer] maximum entries
+    # @return [Array<Hash>] `{ from:, from_type:, to:, to_type:, via:, from_commits:, to_commits:, ratio:, pagerank: }`
+    def volatile_dependencies(limit: 20)
+      all_volatile_dependencies.first(limit)
+    end
+
     # Group units into semantic domains using namespace prefixes and graph connectivity.
     #
     # Strategy:
@@ -271,7 +301,7 @@ module Woods
       merge_small_clusters(clusters, min_size)
 
       # Step 4: Enrich each cluster with hub, entry points, boundary edges
-      pagerank_scores = @graph.pagerank
+      pagerank_scores = self.pagerank_scores
       enrich_clusters(clusters, nodes, pagerank_scores)
 
       # Sort by member count descending
@@ -291,6 +321,7 @@ module Woods
       computed_cycles = cycles
       computed_bridges = bridges(limit: 10)
       computed_cross_database = cross_database_edges
+      computed_volatile = volatile_dependencies
 
       {
         orphans: computed_orphans,
@@ -299,12 +330,14 @@ module Woods
         cycles: computed_cycles,
         bridges: computed_bridges,
         cross_database_edges: computed_cross_database,
+        volatile_dependencies: computed_volatile,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
           hub_count: computed_hubs.size,
           cycle_count: computed_cycles.size,
-          cross_database_edge_count: computed_cross_database.size
+          cross_database_edge_count: computed_cross_database.size,
+          volatile_dependency_count: all_volatile_dependencies.size
         }
       }
     end
@@ -606,6 +639,68 @@ module Woods
       else
         base.merge(to: nil, to_db: nil, ambiguous_owners: by_database.values.flatten.sort)
       end
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Volatile dependency helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # PageRank computed once per analyzer instance.
+    #
+    # @return [Hash{String => Float}]
+    def pagerank_scores
+      @pagerank_scores ||= @graph.pagerank
+    end
+
+    # Every qualifying edge, unranked by {#volatile_dependencies}'s `limit`.
+    # {#analyze} needs the full count separately from the persisted top 20.
+    #
+    # @return [Array<Hash>] sorted by pagerank, ratio, from, to, via
+    def all_volatile_dependencies
+      @all_volatile_dependencies ||= compute_volatile_dependencies
+    end
+
+    # Short-circuits to `[]`, skipping the PageRank computation entirely,
+    # when no node carries an Integer `commit_count` (git enrichment never
+    # ran): there is nothing to rank.
+    #
+    # @return [Array<Hash>]
+    def compute_volatile_dependencies
+      nodes = graph_nodes
+      return [] unless nodes.each_value.any? { |meta| meta[:commit_count].is_a?(Integer) }
+
+      scores = pagerank_scores
+      entries = nodes.keys.sort.flat_map do |from|
+        from_meta = nodes[from]
+        from_commits = from_meta[:commit_count]
+        next [] unless from_commits.is_a?(Integer)
+
+        @graph.edge_records(from, type: from_meta[:type]).filter_map do |edge|
+          volatile_entry(from, from_meta, from_commits, edge, nodes, scores)
+        end
+      end
+      entries.uniq { |e| [e[:from], e[:to], e[:via]] }
+             .sort_by { |e| [-e[:pagerank], -e[:ratio], e[:from], e[:to], e[:via]] }
+    end
+
+    # @return [Hash, nil] the report entry for one edge, or nil when it is not volatile
+    def volatile_entry(from, from_meta, from_commits, edge, nodes, scores)
+      to = edge[:target]
+      to_meta = nodes[to]
+      return nil unless to_meta
+
+      to_commits = to_meta[:commit_count]
+      return nil unless to_commits.is_a?(Integer) && to_commits >= VOLATILE_MIN_COMMITS
+      return nil if to_meta[:change_frequency] == 'new'
+
+      ratio = to_commits.to_f / [from_commits, 1].max
+      return nil if ratio < @volatile_ratio
+
+      {
+        from: from, from_type: from_meta[:type], to: to, to_type: to_meta[:type], via: edge[:via].to_s,
+        from_commits: from_commits, to_commits: to_commits,
+        ratio: ratio.round(2), pagerank: (scores[to] || 0.0).round(4)
+      }
     end
 
     # ──────────────────────────────────────────────────────────────────────
