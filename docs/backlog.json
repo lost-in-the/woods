@@ -2322,7 +2322,7 @@
       "lib/woods/graph_analyzer.rb"
     ],
     "description": "Issue #280 item 1. ModelExtractor regex-parses connects_to from source and misses inheritance from an abstract base class; no unit records its resolved database and association edges carry no database. Acceptance: metadata[:database] from connection_db_config (respond_to?-guarded), from_db/to_db/through/disable_joins on association edges, a cross_database_edges report in graph_analysis, additive node and edge attributes omitted when nil so unchanged apps serialize byte-for-byte.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-170",
@@ -2336,7 +2336,7 @@
       "lib/woods.rb"
     ],
     "description": "Issue #280 item 3. Churn (metadata[:git][:change_frequency]) and edges exist but are never combined. Acceptance: commit_count and change_frequency copied onto graph nodes in full and incremental runs (equivalence oracle green), a volatile_dependencies report ranked by dependency PageRank with a configurable volatile_dependency_ratio, short-circuited when no node carries git data, surfaced in SUMMARY.md and graph_analysis.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-171",
@@ -2381,7 +2381,7 @@
       "docs/GETTING_STARTED.md"
     ],
     "description": "Issue #280 item 5. The watch daemon covers editor sessions; a claude -p run in a worktree has no daemon. Acceptance: an async PostToolUse hook running woods:incremental under a lock for graph-changing paths, reading cwd from the hook payload, a SessionStart hook that warns when the generation predates the last commit, hook schema confirmed against the Claude Code plugin reference, and a Rails 8.1 config/ci.rb step in the keep-current docs.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-174",
@@ -2396,7 +2396,7 @@
       "docs/EVALUATION.md"
     ],
     "description": "Issue #280 item 6, evaluation half. woods:evaluate scores retrieval only. Acceptance: a task-set format, a runner that executes each task with the index on and off through an injected agent executor and a per-task check command, and a summary of resolution rate, tokens, and cost per condition.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-175",
