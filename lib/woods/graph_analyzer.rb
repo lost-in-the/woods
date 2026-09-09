@@ -185,21 +185,33 @@ module Woods
     # databases (#280).
     #
     # Reads only node attributes (`database`, `table`, `foreign_key_tables`)
-    # and edge attributes (`through`, `disable_joins`), so an incremental run
-    # that loaded the graph from disk computes exactly what a full run does.
+    # and edge attributes (`through`, `through_db`, `disable_joins`), so an
+    # incremental run that loaded the graph from disk computes exactly what
+    # a full run does.
     #
     # Scoped to primary nodes: identifiers as registered in {#graph_nodes}.
     # A variant, the non-primary type registered under an identifier that
-    # collides across types, is not walked separately.
+    # collides across types, is not walked separately. Association edges are
+    # read with `type: :model`, so a variant sharing the identifier under a
+    # different type cannot contribute a crossing that belongs to it alone.
+    #
+    # A foreign key never picks a target owner that lives in `from_db`, even
+    # when another database also owns the table: an owner in the source
+    # database means the key resolves locally, whatever else claims the same
+    # table name. Only when every owner sits outside `from_db`, in more than
+    # one other database, does the entry come back ambiguous.
     #
     # `kind`:
-    # * `join_through_across_databases`: a `has_many :through` crossing
-    #   databases without `disable_joins: true`. Rails will try to JOIN
-    #   across connections; this is the Uchitelle rule.
+    # * `join_through_across_databases`: a `has_many :through` where
+    #   `disable_joins` is false and `from_db`, `through_db`, and `to_db` are
+    #   not all equal (a nil `through_db` falls back to comparing the two
+    #   ends). Rails will try to JOIN across connections; this is the
+    #   Uchitelle rule.
     # * `association_across_databases`: any other association edge across
     #   databases, including a through with `disable_joins`.
     # * `foreign_key_across_databases`: a database-level foreign key whose
-    #   target table lives in another database.
+    #   target table's owner (or every owner, when ambiguous) lives in
+    #   another database.
     #
     # @return [Array<Hash>] sorted by from, to, via
     def cross_database_edges
@@ -212,9 +224,13 @@ module Woods
           next [] unless from_db
 
           association_crossings(identifier, from_db, nodes) +
-            foreign_key_crossings(identifier, from_db, meta, nodes, owners)
+            foreign_key_crossings(identifier, from_db, meta, owners)
         end
-        entries.uniq { |e| [e[:from], e[:to], e[:via]] }.sort_by { |e| [e[:from], e[:to], e[:via]] }
+        # Whole-hash dedup, not a `[from, to, via]` key: an ambiguous foreign
+        # key entry carries `to: nil` regardless of which table it names, so
+        # two distinct ambiguous foreign keys on the same model would
+        # otherwise collapse into one.
+        entries.uniq.sort_by { |e| [e[:from], e[:to], e[:via]] }
       end
     end
 
@@ -522,48 +538,73 @@ module Woods
     # Cross-database helpers
     # ──────────────────────────────────────────────────────────────────────
 
-    # table name => identifier of the model node that owns it. Sorted
-    # iteration makes a duplicated table name resolve the same way every run.
+    # table name => { database name => sorted identifiers of the model nodes
+    # in that database owning it }. Sorted identifier iteration makes a
+    # table owned by several nodes in one database resolve to the same
+    # first identifier every run; nodes with no table or no database
+    # contribute no ownership claim.
     #
     # @param nodes [Hash]
-    # @return [Hash{String => String}]
+    # @return [Hash{String => Hash{String => Array<String>}}]
     def table_owners(nodes)
       nodes.keys.sort.each_with_object({}) do |identifier, owners|
-        table = nodes[identifier][:table]
-        owners[table] ||= identifier if table
+        node = nodes[identifier]
+        table = node[:table]
+        database = node[:database]
+        next unless table && database
+
+        by_database = (owners[table] ||= {})
+        (by_database[database] ||= []) << identifier
       end
     end
 
     # @return [Array<Hash>] association edges from `identifier` that land in another database
     def association_crossings(identifier, from_db, nodes)
-      @graph.edge_records(identifier).filter_map do |edge|
+      @graph.edge_records(identifier, type: :model).filter_map do |edge|
         via = edge[:via].to_s
         next unless ASSOCIATION_VIAS.include?(via)
 
         target = nodes[edge[:target]]
         to_db = target && target[:database]
-        next unless to_db && to_db != from_db
+        through_db = edge[:through] ? edge[:through_db] : nil
+        databases = [from_db, to_db, through_db].compact.uniq
+        next if databases.size < 2
 
         disable_joins = edge[:disable_joins] == true
+        kind = edge[:through] && !disable_joins ? 'join_through_across_databases' : 'association_across_databases'
         {
           from: identifier, to: edge[:target], via: via, from_db: from_db, to_db: to_db,
-          through: edge[:through], disable_joins: disable_joins,
-          kind: edge[:through] && !disable_joins ? 'join_through_across_databases' : 'association_across_databases'
+          through: edge[:through], through_db: through_db, disable_joins: disable_joins, kind: kind
         }
       end
     end
 
     # @return [Array<Hash>] foreign keys from `identifier`'s table into a table owned by another database
-    def foreign_key_crossings(identifier, from_db, meta, nodes, owners)
+    def foreign_key_crossings(identifier, from_db, meta, owners)
       Array(meta[:foreign_key_tables]).filter_map do |table|
-        owner = owners[table]
-        to_db = owner && nodes[owner][:database]
-        next unless to_db && to_db != from_db
+        foreign_key_crossing(identifier, from_db, table, owners)
+      end
+    end
 
-        {
-          from: identifier, to: owner, via: 'foreign_key', from_db: from_db, to_db: to_db,
-          through: nil, disable_joins: false, kind: 'foreign_key_across_databases'
-        }
+    # A single foreign key's crossing entry, or nil when an owner of `table`
+    # lives in `from_db` (the key resolves locally regardless of what else
+    # claims the table name) or when no node claims the table at all.
+    #
+    # @return [Hash, nil]
+    def foreign_key_crossing(identifier, from_db, table, owners)
+      by_database = owners[table]
+      return nil if by_database.nil? || by_database.key?(from_db)
+
+      base = {
+        from: identifier, via: 'foreign_key', from_db: from_db,
+        through: nil, through_db: nil, disable_joins: false, kind: 'foreign_key_across_databases'
+      }
+      databases = by_database.keys.sort
+      if databases.size == 1
+        owner_db = databases.first
+        base.merge(to: by_database[owner_db].first, to_db: owner_db)
+      else
+        base.merge(to: nil, to_db: nil, ambiguous_owners: by_database.values.flatten.sort)
       end
     end
 

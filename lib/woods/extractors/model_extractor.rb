@@ -562,7 +562,9 @@ module Woods
       #
       # `from_db` and `to_db` name the database each side resolves to (nil on
       # Rails 6.0, where `connection_db_config` does not exist, and nil on
-      # the target side for a polymorphic or unresolvable class).
+      # the target side for a polymorphic or unresolvable class). `through_db`
+      # names the database a has_many :through join model resolves to (#280),
+      # nil for a plain association.
       # `disable_joins` is the Rails 7.0+ option read from the reflection.
       def extract_associations(model)
         from_db = database_name_for(model)
@@ -573,6 +575,7 @@ module Woods
             target: assoc.class_name,
             options: extract_association_options(assoc),
             through: assoc.options[:through],
+            through_db: through_association_database(assoc),
             polymorphic: assoc.polymorphic?,
             foreign_key: assoc.foreign_key,
             inverse_of: assoc.inverse_of&.name,
@@ -733,13 +736,18 @@ module Woods
       # the interface name stays visible in the graph but is distinguishable
       # from a resolvable model reference.
       def extract_dependencies(model, source = nil)
-        # Associations point to other models. `through` and `disable_joins`
-        # ride on the edge so the graph can report a has_many :through that
-        # crosses databases without disable_joins (#280).
+        # Associations point to other models. `through`, `through_db`, and
+        # `disable_joins` ride on the edge so the graph can report a
+        # has_many :through that crosses databases without disable_joins,
+        # or whose join model itself sits on a third database (#280).
         deps = model.reflect_on_all_associations.filter_map do |assoc|
           via = polymorphic_reflection?(assoc) ? :polymorphic_interface : assoc.macro
           dep = { type: :model, target: assoc.class_name, via: via }
-          dep[:through] = assoc.options[:through].to_s if assoc.options[:through]
+          if assoc.options[:through]
+            dep[:through] = assoc.options[:through].to_s
+            through_db = through_association_database(assoc)
+            dep[:through_db] = through_db if through_db
+          end
           dep[:disable_joins] = true if assoc.options[:disable_joins] == true
           dep
         rescue NameError => e
@@ -820,6 +828,20 @@ module Woods
         return nil if polymorphic_reflection?(assoc)
 
         database_name_for(assoc.klass)
+      rescue StandardError
+        nil
+      end
+
+      # The database a has_many :through association's join model resolves
+      # to. Nil for a plain association, when the through reflection cannot
+      # resolve its class, and on Rails 6.0 (no connection_db_config).
+      #
+      # @param assoc [ActiveRecord::Reflection::AbstractReflection]
+      # @return [String, nil]
+      def through_association_database(assoc)
+        return nil unless assoc.options[:through]
+
+        database_name_for(assoc.through_reflection.klass)
       rescue StandardError
         nil
       end

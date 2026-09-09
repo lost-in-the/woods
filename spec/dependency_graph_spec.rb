@@ -1135,6 +1135,40 @@ RSpec.describe Woods::DependencyGraph do
                                                    ])
     end
 
+    it 'keeps through_db on the edge record' do
+      graph.register(make_unit(type: :model, identifier: 'Invoice', dependencies: [
+                                 { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                                   through_db: 'analytics' }
+                               ]))
+
+      expect(graph.to_h[:edges]['Invoice']).to eq([
+                                                    { target: 'Account', via: :has_many, through: 'subscriptions',
+                                                      through_db: 'analytics' }
+                                                  ])
+    end
+
+    it 'omits through_db when the dependency has none' do
+      graph.register(make_unit(type: :model, identifier: 'Order', dependencies: [
+                                 { type: :model, target: 'Invoice', via: :has_many, through: 'subscriptions' }
+                               ]))
+
+      expect(graph.to_h[:edges]['Order']).to eq([{ target: 'Invoice', via: :has_many, through: 'subscriptions' }])
+    end
+
+    it 'round-trips through_db through JSON' do
+      graph.register(make_unit(type: :model, identifier: 'Invoice', dependencies: [
+                                 { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                                   through_db: 'analytics' }
+                               ]))
+
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(restored.edge_records('Invoice')).to eq([
+                                                       { target: 'Account', via: :has_many,
+                                                         through: 'subscriptions', through_db: 'analytics' }
+                                                     ])
+    end
+
     it 'returns copies from #edge_records' do
       graph.register(make_unit(type: :model, identifier: 'Order',
                                dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))

@@ -12,14 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Database-partition layer for multi-database apps (#280).** Model units record
   `metadata[:database]` from `connection_db_config` (Rails 6.1+, `nil` on 6.0), so a model
   that inherits `connects_to` from an abstract class reports the inherited database.
-  Association entries carry `from_db`, `to_db`, and `disable_joins`; `metadata[:foreign_keys]`
-  lists each foreign key's `from_table`, `to_table`, and `column` (the target table's database
-  is a graph-level lookup, not stored per model). The dependency graph gains additive node keys
-  (`database`, `table`, `foreign_key_tables`) and edge keys (`through`, `disable_joins`);
-  a graph with none of these serializes exactly as before.
+  Association entries carry `from_db`, `to_db`, `through_db` (the has_many :through join
+  model's database, nil for a plain association), and `disable_joins`; `metadata[:foreign_keys]`
+  lists each foreign key's `from_table`, `to_table`, and `column` (the target table's owning
+  database is a graph-level lookup, not stored per model). The dependency graph gains additive
+  node keys (`database`, `table`, `foreign_key_tables`) and edge keys (`through`, `through_db`,
+  `disable_joins`); a graph with none of these serializes exactly as before.
 - **`cross_database_edges` report.** `GraphAnalyzer#analyze` lists association and
-  foreign-key edges that cross databases, with `kind` set to
-  `join_through_across_databases` when a `has_many :through` lacks `disable_joins: true`.
+  foreign-key edges that cross databases, with `kind` set to `join_through_across_databases`
+  when `disable_joins` is false and `from_db`, `through_db`, or `to_db` disagree (a nil
+  `through_db` falls back to comparing the two ends). A foreign key never resolves to an
+  owner living in its own source database, even when another database also claims the
+  table; only when every owner sits elsewhere, across more than one database, does the
+  entry come back with `to: nil` and an `ambiguous_owners` list instead of guessing.
   Written to `graph_analysis.json`; exposed through `graph_analysis` in Task 10.
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as

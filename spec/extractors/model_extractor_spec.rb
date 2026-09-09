@@ -1281,9 +1281,11 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       klass
     end
 
-    def reflection(name:, macro:, class_name:, options: {}, klass: target_klass, polymorphic: false)
+    def reflection(name:, macro:, class_name:, options: {}, klass: target_klass, polymorphic: false,
+                   through_reflection: nil)
       double('Reflection', name: name, macro: macro, class_name: class_name, options: options,
-                           polymorphic?: polymorphic, foreign_key: "#{name}_id", inverse_of: nil, klass: klass)
+                           polymorphic?: polymorphic, foreign_key: "#{name}_id", inverse_of: nil, klass: klass,
+                           through_reflection: through_reflection || double('ThroughReflection', klass: target_klass))
     end
 
     it 'records from_db, to_db, and disable_joins on each association' do
@@ -1323,6 +1325,52 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       expect(associations.first).to include(name: :author, to_db: nil)
     end
+
+    it 'leaves through_db nil for an association with no through' do
+      model = stub_bare_model('Comment')
+      plain = reflection(name: :account, macro: :belongs_to, class_name: 'Account')
+      allow(model).to receive(:reflect_on_all_associations).and_return([plain])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: nil)
+    end
+
+    it "records through_db from the through reflection's class" do
+      model = stub_bare_model('Invoice')
+      through_klass = stub_bare_model('Subscription')
+      allow(through_klass).to receive(:connection_db_config).and_return(double('DbConfig', name: 'analytics'))
+      plans = reflection(name: :plans, macro: :has_many, class_name: 'Plan', options: { through: :subscriptions },
+                         through_reflection: double('ThroughReflection', klass: through_klass))
+      allow(model).to receive(:reflect_on_all_associations).and_return([plans])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: 'analytics')
+    end
+
+    it 'degrades through_db to nil when the through reflection cannot resolve its class' do
+      model = stub_bare_model('Invoice')
+      plans = reflection(name: :plans, macro: :has_many, class_name: 'Plan', options: { through: :subscriptions })
+      allow(plans).to receive(:through_reflection).and_raise(NameError, 'uninitialized constant Subscription')
+      allow(model).to receive(:reflect_on_all_associations).and_return([plans])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: nil)
+    end
+
+    it 'leaves through_db nil when the through model has no connection_db_config (Rails 6.0)' do
+      model = stub_bare_model('Invoice')
+      through_klass = stub_bare_model('Subscription')
+      plans = reflection(name: :plans, macro: :has_many, class_name: 'Plan', options: { through: :subscriptions },
+                         through_reflection: double('ThroughReflection', klass: through_klass))
+      allow(model).to receive(:reflect_on_all_associations).and_return([plans])
+
+      associations = extractor.send(:extract_associations, model)
+
+      expect(associations.first).to include(through_db: nil)
+    end
   end
 
   describe '#extract_dependencies edge attributes' do
@@ -1331,7 +1379,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       plain = double('Reflection', name: :account, macro: :belongs_to, class_name: 'Account',
                                    options: {}, polymorphic?: false)
       through = double('Reflection', name: :plans, macro: :has_many, class_name: 'Plan',
-                                     options: { through: :account, disable_joins: true }, polymorphic?: false)
+                                     options: { through: :account, disable_joins: true }, polymorphic?: false,
+                                     through_reflection: double('ThroughReflection', klass: stub_bare_model('Account')))
       allow(model).to receive(:reflect_on_all_associations).and_return([plain, through])
       allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
                                            source_file_for: nil)
@@ -1343,6 +1392,25 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         { type: :model, target: 'Plan', via: :has_many, through: 'account', disable_joins: true }
       ]
       expect(deps).to eq(expected)
+    end
+
+    it 'carries through_db on the edge when the through model resolves a database' do
+      model = stub_bare_model('Invoice')
+      through_klass = stub_bare_model('Account')
+      allow(through_klass).to receive(:connection_db_config).and_return(double('DbConfig', name: 'analytics'))
+      through = double('Reflection', name: :plans, macro: :has_many, class_name: 'Plan',
+                                     options: { through: :account }, polymorphic?: false,
+                                     through_reflection: double('ThroughReflection', klass: through_klass))
+      allow(model).to receive(:reflect_on_all_associations).and_return([through])
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+
+      expect(deps).to eq([
+                           { type: :model, target: 'Plan', via: :has_many, through: 'account',
+                             through_db: 'analytics' }
+                         ])
     end
   end
 end

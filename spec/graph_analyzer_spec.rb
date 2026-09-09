@@ -410,7 +410,35 @@ RSpec.describe Woods::GraphAnalyzer do
 
       expected = [
         { from: 'Invoice', to: 'Account', via: 'has_many', from_db: 'billing', to_db: 'primary',
-          through: 'subscriptions', disable_joins: false, kind: 'join_through_across_databases' }
+          through: 'subscriptions', through_db: nil, disable_joins: false,
+          kind: 'join_through_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'falls back to comparing from_db and to_db when through_db is unknown' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions' }
+                           ]))
+
+      entry = analyzer.cross_database_edges.first
+
+      expect(entry).to include(through_db: nil, kind: 'join_through_across_databases')
+    end
+
+    it 'flags a through association whose join model lives on a third database' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                               through_db: 'analytics' }
+                           ]))
+
+      expected = [
+        { from: 'Invoice', to: 'Account', via: 'has_many', from_db: 'billing', to_db: 'primary',
+          through: 'subscriptions', through_db: 'analytics', disable_joins: false,
+          kind: 'join_through_across_databases' }
       ]
 
       expect(analyzer.cross_database_edges).to eq(expected)
@@ -434,10 +462,67 @@ RSpec.describe Woods::GraphAnalyzer do
 
       expected = [
         { from: 'Invoice', to: 'Account', via: 'foreign_key', from_db: 'billing', to_db: 'primary',
-          through: nil, disable_joins: false, kind: 'foreign_key_across_databases' }
+          through: nil, through_db: nil, disable_joins: false, kind: 'foreign_key_across_databases' }
       ]
 
       expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'omits ambiguous_owners when exactly one database owns the target table' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'accounts' }]))
+
+      expect(analyzer.cross_database_edges.first).not_to have_key(:ambiguous_owners)
+    end
+
+    it 'reports ambiguous_owners when the target table has owners in two other databases' do
+      graph.register(model('Account', database: 'primary', table: 'shared_accounts'))
+      graph.register(model('LegacyAccount', database: 'legacy', table: 'shared_accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'shared_accounts' }]))
+
+      expected = [
+        { from: 'Invoice', to: nil, via: 'foreign_key', from_db: 'billing', to_db: nil,
+          through: nil, through_db: nil, disable_joins: false,
+          ambiguous_owners: %w[Account LegacyAccount], kind: 'foreign_key_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'suppresses the crossing when one of the table owners lives in from_db' do
+      graph.register(model('Account', database: 'primary', table: 'shared_accounts'))
+      graph.register(model('BillingAccount', database: 'billing', table: 'shared_accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'shared_accounts' }]))
+
+      expect(analyzer.cross_database_edges).to eq([])
+    end
+
+    it 'keeps two distinct ambiguous foreign keys from the same model separate' do
+      graph.register(model('AccountA', database: 'primary', table: 'shared_accounts'))
+      graph.register(model('AccountB', database: 'legacy', table: 'shared_accounts'))
+      graph.register(model('ProductA', database: 'primary', table: 'shared_products'))
+      graph.register(model('ProductB', database: 'legacy', table: 'shared_products'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [
+                                        { column: 'account_id', to_table: 'shared_accounts' },
+                                        { column: 'product_id', to_table: 'shared_products' }
+                                      ]))
+
+      expect(analyzer.cross_database_edges.map { |e| e[:ambiguous_owners] }).to contain_exactly(
+        %w[AccountA AccountB], %w[ProductA ProductB]
+      )
+    end
+
+    it 'reads only :model type edges even when another type shares the identifier' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices'))
+      graph.register(make_unit(type: :service, identifier: 'Invoice',
+                               dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expect(analyzer.cross_database_edges).to eq([])
     end
 
     it 'ignores same-database edges, non-association edges, and nodes without a database' do

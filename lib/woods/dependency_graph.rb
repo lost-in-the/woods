@@ -36,8 +36,10 @@ module Woods
     ].freeze
 
     # Optional edge keys beyond target and via. `through` is the through
-    # association name; `disable_joins` is emitted only when true.
-    EDGE_ATTRIBUTE_KEYS = %i[through disable_joins].freeze
+    # association name; `through_db` is the through model's resolved
+    # database, emitted only when present; `disable_joins` is emitted only
+    # when true.
+    EDGE_ATTRIBUTE_KEYS = %i[through through_db disable_joins].freeze
 
     def initialize
       @nodes = {}      # identifier => { type => { type:, file_path:, namespace: } }
@@ -970,6 +972,8 @@ module Woods
       attrs = {}
       through = dep[:through] || dep['through']
       attrs[:through] = through.to_s unless through.nil? || through.to_s.empty?
+      through_db = dep[:through_db] || dep['through_db']
+      attrs[:through_db] = through_db.to_s unless through_db.nil? || through_db.to_s.empty?
       disable_joins = dep.key?(:disable_joins) ? dep[:disable_joins] : dep['disable_joins']
       attrs[:disable_joins] = true if disable_joins == true
       attrs
