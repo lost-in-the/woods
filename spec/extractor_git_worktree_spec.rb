@@ -15,7 +15,7 @@ require 'woods/git_provenance'
 # `rev-parse --git-dir` succeeds while no ref resolves, because the private
 # directory's `commondir` is a relative pointer that resolves outside the
 # mount. `git log` then exits 0 with no output, and every unit was written with
-# `commit_count: 0` and `change_frequency: new` — indistinguishable from a file
+# `commit_count: 0` and `change_frequency: new`, indistinguishable from a file
 # that was never committed, where a fully absent git directory correctly omits
 # the keys.
 #
