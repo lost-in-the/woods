@@ -32,6 +32,8 @@ module Woods
       # shipped in the gem for its whole life without ever being loaded, so
       # the retrieval-quality harness had no entry point at all (#212).
       load File.expand_path('../tasks/woods_evaluation.rake', __dir__)
+      # Read-only checks over retained generations (#280); no Rails boot.
+      load File.expand_path('../tasks/woods_checks.rake', __dir__)
     end
 
     initializer 'woods.session_tracer' do |app|

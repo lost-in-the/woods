@@ -157,4 +157,41 @@ added
 
 Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI runner that compares against an older baseline, or the older side of the comparison may no longer be published.
 
-(The `## Moved-message check` section is added in Task 12.)
+## Moved-message check
+
+`woods:check:moved_messages` opens two retained generations through `Woods::PublishedIndex` (block form, so both readers' retention locks always release) and reports every public method name that looks like it moved from one unit to another while a `:test_coverage` edge did not follow.
+
+Each row is a **candidate move into a unit without mapped tests**, never a proven coverage loss: the check matches on method name and kind alone, so two unrelated methods that happen to share both look identical to a real move. Reported only when the source unit was covered before and the destination is not covered after; a method that was never covered is not a regression this check owns. `WOODS_CHECK_STRICT=1` exits 1 on any finding, but the check stays heuristic either way, strict mode changes the exit code, not the confidence of a row.
+
+```bash
+bin/rails woods:check:moved_messages              # previous retained generation vs the published one
+bin/rails "woods:check:moved_messages[41,42]"     # explicit generations
+WOODS_CHECK_STRICT=1 bin/rails woods:check:moved_messages   # exit 1 on findings, for CI (still heuristic)
+WOODS_CHECK_JSON=1 bin/rails woods:check:moved_messages     # also print findings as JSON
+```
+
+With no `[from,to]` given, the generations default to the latest two from `available_generations` (a pure function, `Woods::Checks::GenerationResolution`, picks them); an index with fewer than two retained generations exits 1 with a message naming `WOODS_PAYLOAD_RETENTION` as the fix. A `generation.json` that will not parse raises `Woods::PublishedIndex::CorruptPointerError`, named by the task before it propagates, rather than being swallowed as "no findings".
+
+### Which key holds which method list
+
+The check reads three metadata keys and normalizes them to one `[name, kind]` shape before matching, so an instance method never collides with a class method of the same bare name:
+
+| Extractor family | Key | Shape |
+|---|---|---|
+| Services, POROs, managers, decorators, policies, validators, concerns, Pundit policies, lib units | `public_methods` | Regex-extracted; a class method is a bare name **prefixed with `self.`** (`"self.build"`), an instance method is bare (`"run"`) |
+| Services, POROs, managers, decorators, policies, validators, concerns, lib units | `class_methods` | Regex-extracted `def self.foo` names, prefix already stripped |
+| Concerns, models | `instance_methods` | Bare names; models get this from runtime introspection (`instance_methods(false)`, filtered), a wider list than the regex-based extractors produce |
+| Phlex components, ViewComponents | `public_methods` | Runtime introspection (`public_instance_methods(false)`); always bare, since these extractors only ever report instance methods |
+
+Model units carry both `instance_methods` and `class_methods` from runtime introspection, no `public_methods` key, and it is the widest of the method lists: every instance and class method the model responds to, not just the ones a source-regex can see.
+
+| Situation | Reported |
+|---|---|
+| `total` left `Checkout` (covered) and appeared in `Pricing` (not covered) | yes |
+| Same move, `Pricing` covered by a test_mapping unit | no |
+| `total` was never covered before the move | no |
+| Method renamed in place | no (nothing gained it) |
+| An instance method and a same-named class method swap units | no (kind mismatch) |
+| A `self.build` public method reappears as a `class_methods` entry named `build` | yes, `kind: :class` (normalized to the same signature) |
+
+Temporal snapshots (`snapshot_diff`, `unit_history`) store content hashes only, so they cannot see a moved method; that is why the check reads payload generations. Keep at least two retained generations (`WOODS_PAYLOAD_RETENTION`, default 3).
