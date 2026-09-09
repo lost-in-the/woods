@@ -61,6 +61,11 @@ Metrics/ClassLength:
     # path they diagnose — splitting them out would separate the fail-closed
     # decision from the state it is deciding about.
     - 'lib/woods/operator/pipeline_guard.rb'
+    # PublishedIndex is a single cohesive facade: generation resolution,
+    # the retention lock it holds for its whole lifetime, and the read
+    # methods that all depend on both. Splitting it would separate the
+    # lock from the state it protects.
+    - 'lib/woods/published_index.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'
