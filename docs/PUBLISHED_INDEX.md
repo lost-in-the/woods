@@ -30,6 +30,8 @@ Unlike `Woods::MCP::IndexReader`, a `PublishedIndex` never refreshes between cal
 
 Opening a numbered generation acquires that generation's `manifest.json` lock through the same retention protocol `Woods::PayloadStore#prune` respects (a shared advisory `flock`, taken read-only). The lock is held for the reader's whole lifetime, not just one read, so a publish's retention pass cannot remove the payload out from under a long-lived reader: `PayloadStore#prune` takes a non-blocking exclusive lock on the same file before removing a generation, and skips any generation it cannot lock. `#close` releases it (`ensure` in the block form), so a reader that is done reading stops holding the generation open.
 
+**Not thread-safe.** A `PublishedIndex` instance is meant for one script or cop process reading one generation; it keeps no mutex around its lock file or its underlying `Woods::MCP::IndexReader`. Give each thread its own reader rather than sharing one.
+
 ## API
 
 | Method | Returns | Notes |
@@ -39,7 +41,7 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `.available_generations(index_dir)` | `Array<Integer>` | Published generations, ascending: see below |
 | `#generation_number` | Integer | 0 for an index written flat (pre-2.0 layout) |
 | `#close` | nil | Releases the retention lock; safe to call more than once |
-| `#unit(identifier)` | Hash or nil | The unit JSON, string keys |
+| `#unit(identifier, type: nil)` | Hash or nil | The unit JSON, string keys; see the collision note below |
 | `#units(type: nil)` | `Array<Hash>` | `_index.json` entries plus `"type"` |
 | `#edges(via: nil)`, `#each_edge` | `Array<Hash>` | Every forward edge with `through` and `disable_joins`; an identifier shared by more than one type contributes one edge per owning type, never folded into a single deduplicated entry |
 | `#dependents_of(identifier, via: nil)` | `Array<String>` | Reverse index |
@@ -47,6 +49,10 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `#external_dependency_checksum` | String | SHA-256 of the pinned payload's `manifest.json` |
 
 The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit and graph shapes are the ones documented in [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
+
+### `#unit`: an identifier shared across types
+
+`Woods::MCP::IndexReader#find_unit` keys its identifier map on identifier alone. If two type directories both list the same identifier (a model and a service both named `Foo`, for example), whichever type sorts last in `Woods::MCP::IndexReader::TYPE_DIRS` silently wins, and `unit(identifier)` returns that one. Pass `type:` to read a specific type's unit file directly and skip the collision entirely; `#table_database_map` always does this internally (`type: 'model'`), so a same-named non-model unit can never shadow a model's `table_name`/`database`.
 
 ### `available_generations`: published means published
 
@@ -56,6 +62,8 @@ A generation is listed only when both hold:
 * its `payloads/gen-N` directory holds a `manifest.json`.
 
 A directory numbered above the pointer (a payload built but never bumped to) and a directory missing its manifest (an interrupted or corrupted publish) are never listed, and `.new(index_dir, generation: N)` raises `ArgumentError` for either. Retention itself is bounded by `WOODS_PAYLOAD_RETENTION` (default 3).
+
+A *missing* `generation.json` is not an error: it means a flat (pre-2.0) index, generation 0. A `generation.json` that **exists but will not parse** is different, a corrupt install, not an empty index, so `.available_generations` and `.new`/`.open` raise `Woods::PublishedIndex::CorruptPointerError` naming the file's path instead of silently reporting zero published generations.
 
 ## Keying a RuboCop cache on the index
 

@@ -9,11 +9,12 @@ require 'woods/published_index'
 
 RSpec.describe Woods::PublishedIndex do
   let(:fixture_dir) { File.expand_path('fixtures/woods', __dir__) }
-  let(:reader) { described_class.new(fixture_dir) }
-
-  after { reader.close if reader.respond_to?(:close) }
 
   describe 'over a flat index' do
+    let(:reader) { described_class.new(fixture_dir) }
+
+    after { reader.close }
+
     it 'reports generation 0 and the index root as payload_dir' do
       expect(reader.generation_number).to eq(0)
       expect(reader.payload_dir.to_s).to eq(fixture_dir)
@@ -122,6 +123,28 @@ RSpec.describe Woods::PublishedIndex do
       expect { described_class.new(@index_dir) }.to raise_error(ArgumentError, /gen-2/)
     end
 
+    it 'raises CorruptPointerError, not an empty list, when generation.json will not parse' do
+      pointer_path = File.join(@index_dir, 'generation.json')
+      File.write(pointer_path, '{not valid json')
+
+      expect { described_class.available_generations(@index_dir) }
+        .to raise_error(Woods::PublishedIndex::CorruptPointerError, /#{Regexp.escape(pointer_path)}/)
+      expect { described_class.new(@index_dir) }
+        .to raise_error(Woods::PublishedIndex::CorruptPointerError, /#{Regexp.escape(pointer_path)}/)
+    end
+
+    it 'releases the retention lock when construction fails after the lock is acquired' do
+      allow(Woods::MCP::IndexReader).to receive(:new).and_raise(StandardError, 'boom')
+
+      expect { described_class.new(@index_dir, generation: 1) }.to raise_error(StandardError, 'boom')
+
+      manifest_path = File.join(@index_dir, 'payloads', 'gen-1', 'manifest.json')
+      File.open(manifest_path, File::RDONLY) do |file|
+        expect(file.flock(File::LOCK_EX | File::LOCK_NB)).to eq(0)
+        file.flock(File::LOCK_UN)
+      end
+    end
+
     it 'holds a generation open against retention while pinned' do
       opened = described_class.new(@index_dir, generation: 1)
 
@@ -177,6 +200,48 @@ RSpec.describe Woods::PublishedIndex do
 
         index = described_class.new(dir)
         expect(index.table_database_map).to eq('posts' => 'primary')
+        index.close
+      end
+    end
+  end
+
+  describe '#unit with an explicit type' do
+    it 'reads that type directly, bypassing a same-identifier collision in another type' do
+      Dir.mktmpdir('woods-published-index-typed-unit') do |dir|
+        File.write(File.join(dir, 'manifest.json'), JSON.generate('total_units' => 2))
+
+        digest = Digest::SHA256.hexdigest('Foo')[0, 8]
+        filename = "Foo_#{digest}.json"
+
+        model_dir = File.join(dir, 'models')
+        FileUtils.mkdir_p(model_dir)
+        File.write(File.join(model_dir, '_index.json'),
+                   JSON.generate([{ 'identifier' => 'Foo', 'file_path' => 'app/models/foo.rb', 'namespace' => nil }]))
+        File.write(File.join(model_dir, filename), JSON.generate(
+                                                     'type' => 'model', 'identifier' => 'Foo',
+                                                     'file_path' => 'app/models/foo.rb',
+                                                     'metadata' => { 'table_name' => 'foos', 'database' => 'primary' }
+                                                   ))
+
+        service_dir = File.join(dir, 'services')
+        FileUtils.mkdir_p(service_dir)
+        File.write(File.join(service_dir, '_index.json'),
+                   JSON.generate([{ 'identifier' => 'Foo', 'file_path' => 'app/services/foo.rb',
+                                    'namespace' => nil }]))
+        File.write(File.join(service_dir, filename), JSON.generate(
+                                                       'type' => 'service', 'identifier' => 'Foo',
+                                                       'file_path' => 'app/services/foo.rb', 'metadata' => {}
+                                                     ))
+
+        index = described_class.new(dir)
+
+        # TYPE_DIRS lists services after models, so the untyped, identifier-only
+        # lookup lands on the service: exactly the collision `type:` exists to avoid.
+        expect(index.unit('Foo')).to include('type' => 'service')
+        expect(index.unit('Foo', type: 'model')).to include('type' => 'model', 'identifier' => 'Foo')
+        expect(index.unit('Foo', type: 'service')).to include('type' => 'service', 'identifier' => 'Foo')
+        expect(index.table_database_map).to eq('foos' => 'primary')
+
         index.close
       end
     end

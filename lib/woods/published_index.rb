@@ -1,12 +1,18 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'json'
 require 'pathname'
 require_relative 'generation'
 require_relative 'payload_store'
 require_relative 'mcp/index_reader'
+require_relative 'published_index/edge_shaper'
+require_relative 'published_index/generation_catalog'
+require_relative 'published_index/typed_unit_reader'
 
 module Woods
+  class Error < StandardError; end unless defined?(Woods::Error)
+
   # A small, stable Ruby API over a published Woods index for tools that are
   # not MCP clients: RuboCop cops, CI gate scripts, `woods:check:*` tasks (#280).
   #
@@ -32,6 +38,11 @@ module Woods
   # call {#close} explicitly; do not let an instance leak past the scope that
   # needs it.
   #
+  # **Not thread-safe.** A single instance is meant for one script or cop
+  # process reading one generation; it keeps no mutex around its lock file or
+  # its underlying {Woods::MCP::IndexReader}. Give each thread its own
+  # {PublishedIndex} rather than sharing one.
+  #
   # @example A cop keyed on the index
   #   Woods::PublishedIndex.open(Rails.root.join('tmp/woods')) do |index|
   #     index.table_database_map            # => { "orders" => "primary", "events" => "analytics" }
@@ -49,6 +60,11 @@ module Woods
   #   end
   #
   class PublishedIndex
+    # Raised when `generation.json` exists but cannot be parsed. Distinct from
+    # a *missing* pointer file, which means a flat (pre-2.0) index and is not
+    # an error.
+    class CorruptPointerError < Woods::Error; end
+
     # @return [Pathname] the index root passed to {#initialize}
     attr_reader :index_dir
 
@@ -61,36 +77,10 @@ module Woods
     #
     # @param index_dir [String, Pathname]
     # @return [Array<Integer>]
+    # @raise [CorruptPointerError] when `generation.json` exists but will not parse
     def self.available_generations(index_dir)
-      root = Pathname.new(index_dir.to_s)
-      pointer = Woods::Generation.new(output_dir: root).current
-      return [] if pointer.number.zero?
-
-      payloads = Woods::PayloadStore.new(root)
-      return [] unless payloads.root.directory?
-
-      payloads.root.children.filter_map { |child| published_generation_number(child, pointer.number) }.sort
+      GenerationCatalog.available(Pathname.new(index_dir.to_s))
     end
-
-    # A directory's generation number, when it qualifies as published: named
-    # `gen-<N>` for N at or below +pointer+, holding a `manifest.json`.
-    #
-    # @param child [Pathname]
-    # @param pointer [Integer] the currently published generation number
-    # @return [Integer, nil]
-    def self.published_generation_number(child, pointer)
-      return nil unless child.directory?
-
-      match = child.basename.to_s.match(/\Agen-(\d+)\z/)
-      return nil unless match
-
-      number = match[1].to_i
-      return nil if number > pointer
-      return nil unless child.join('manifest.json').file?
-
-      number
-    end
-    private_class_method :published_generation_number
 
     # Open a reader, yield it, and guarantee the generation lock is released.
     #
@@ -117,11 +107,11 @@ module Woods
     #   the currently published one
     # @raise [ArgumentError] when the index, or the requested generation, is
     #   not published
+    # @raise [CorruptPointerError] when `generation.json` exists but will not parse
     def initialize(index_dir, generation: nil)
       @index_dir = Pathname.new(index_dir.to_s)
       @lock_file = nil
-      @closed = false
-      pointer = Woods::Generation.new(output_dir: @index_dir).current
+      pointer = GenerationCatalog.pointer(@index_dir)
 
       if pointer.number.zero? && generation.nil?
         initialize_flat_index
@@ -129,14 +119,12 @@ module Woods
         initialize_generation(generation || pointer.number)
       end
 
-      @reader = Woods::MCP::IndexReader.new(@payload_dir.to_s, auto_refresh: false)
+      open_reader!
     end
 
     # @return [Integer] the generation being read; 0 for a flat index
-    attr_reader :generation_number
-
     # @return [Pathname] the directory the units are read from
-    attr_reader :payload_dir
+    attr_reader :generation_number, :payload_dir
 
     # Release the retention lock held on the pinned generation, if any.
     #
@@ -145,12 +133,9 @@ module Woods
     #
     # @return [void]
     def close
-      return if @closed
-
       @lock_file&.flock(File::LOCK_UN)
       @lock_file&.close
       @lock_file = nil
-      @closed = true
     end
 
     # @return [Hash] parsed manifest.json
@@ -158,10 +143,22 @@ module Woods
       @reader.manifest
     end
 
+    # Look up one unit by identifier.
+    #
+    # `Woods::MCP::IndexReader#find_unit` (used when +type+ is nil) keys its
+    # identifier map on identifier alone: if two type directories both list
+    # the same identifier, whichever type sorts last in
+    # `Woods::MCP::IndexReader::TYPE_DIRS` wins, silently. Pass +type+ to read
+    # that type's unit file directly and skip the collision.
+    #
     # @param identifier [String]
+    # @param type [String, Symbol, nil] singular type name; disambiguates an
+    #   identifier shared by more than one type
     # @return [Hash, nil] string-keyed unit, or nil
-    def unit(identifier)
-      @reader.find_unit(identifier)
+    def unit(identifier, type: nil)
+      return @reader.find_unit(identifier) if type.nil?
+
+      TypedUnitReader.call(@payload_dir, @reader, identifier, type.to_s)
     end
 
     # Index entries, each with a `'type'` key added.
@@ -191,7 +188,7 @@ module Woods
     # @return [Array<Hash>] `{ from:, to:, via:, through:, disable_joins: }`
     def edges(via: nil)
       wanted = via&.to_s
-      all_edges.select { |edge| wanted.nil? || edge[:via] == wanted }
+      EdgeShaper.call(@reader.raw_graph_data).select { |edge| wanted.nil? || edge[:via] == wanted }
     end
 
     # @yieldparam edge [Hash] see {#edges}
@@ -217,7 +214,7 @@ module Woods
     # @return [Hash{String => String}]
     def table_database_map
       units(type: 'model').each_with_object({}) do |entry, map|
-        data = unit(entry['identifier'])
+        data = unit(entry['identifier'], type: 'model')
         next unless data
 
         table = data.dig('metadata', 'table_name')
@@ -269,47 +266,22 @@ module Woods
     #
     # @return [void]
     def acquire_retention_lock!
-      file = File.open(@payload_dir.join('manifest.json').to_s, File::RDONLY) # rubocop:disable Style/FileOpen
-      file.flock(File::LOCK_SH)
-      @lock_file = file
+      @lock_file = File.open(@payload_dir.join('manifest.json').to_s, File::RDONLY)
+      @lock_file.flock(File::LOCK_SH)
     end
 
-    # @return [Array<Hash>] normalized edges from the primary edge map plus variants
-    def all_edges
-      graph = @reader.raw_graph_data
-      primary = (graph['edges'] || {}).flat_map { |from, list| Array(list).map { |raw| edge_hash(from, raw) } }
-      primary + variant_edges(graph)
-    end
-
-    # Edges owned by a type recorded only in the graph's `variants` section:
-    # an identifier that names units of more than one type keeps its other
-    # types' out-edges there, since the primary `edges` map holds only one
-    # type's edges per identifier.
+    # Build the underlying reader, releasing any retention lock already
+    # acquired ({#initialize_generation}) before letting the failure
+    # propagate. Without this a `PublishedIndex` that fails to finish
+    # constructing would leak an open advisory lock for the life of the
+    # process.
     #
-    # @param graph [Hash] raw dependency graph data
-    # @return [Array<Hash>]
-    def variant_edges(graph)
-      variant_records(graph).flat_map do |record|
-        Array(record['edges']).map { |raw| edge_hash(record['identifier'], raw) }
-      end
-    end
-
-    # @param graph [Hash] raw dependency graph data
-    # @return [Array<Hash>] entries from `variants` that name an identifier
-    def variant_records(graph)
-      Array(graph['variants']).select { |record| record.is_a?(Hash) && record['identifier'] }
-    end
-
-    # @param from [String]
-    # @param raw [String, Hash] a bare target (pre-via graphs) or an edge hash
-    # @return [Hash]
-    def edge_hash(from, raw)
-      if raw.is_a?(Hash)
-        { from: from, to: raw['target'], via: raw['via'], through: raw['through'],
-          disable_joins: raw['disable_joins'] == true }
-      else
-        { from: from, to: raw.to_s, via: nil, through: nil, disable_joins: false }
-      end
+    # @return [void]
+    def open_reader!
+      @reader = Woods::MCP::IndexReader.new(@payload_dir.to_s, auto_refresh: false)
+    rescue Exception # rubocop:disable Lint/RescueException -- release the lock for every failure mode, then re-raise unchanged
+      close
+      raise
     end
   end
 end
