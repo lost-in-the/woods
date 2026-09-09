@@ -202,4 +202,60 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       end
     end
   end
+
+  # ── The git directory override reaches the range lookup (B-186/B-181) ──
+  #
+  # `WOODS_GIT_DIR` exists because a container over a linked worktree can mount
+  # the canonical git directory but not the host path the worktree's `gitdir:`
+  # pointer names. Enrichment and manifest provenance both honour it. The
+  # incremental range lookup is the third git call Woods makes, and it ran
+  # `git -C <root>` directly, so `woods:incremental` still exited 1 in exactly
+  # the container the override was added for.
+  describe 'WOODS_GIT_DIR' do
+    let(:scratch) { Dir.mktmpdir('woods_incremental_override') }
+    let(:main_repo) { File.join(scratch, 'main') }
+    let(:worktree) { File.join(scratch, 'wt') }
+
+    before do
+      FileUtils.mkdir_p(File.join(main_repo, 'app', 'models'))
+      init_repo(main_repo)
+      File.write(File.join(main_repo, 'app/models/user.rb'), "class User; end\n")
+      run(main_repo, 'git', 'add', '-A')
+      run(main_repo, 'git', 'commit', '--quiet', '-m', 'initial')
+      File.write(File.join(main_repo, 'app/models/user.rb'), "class User\nend\n")
+      run(main_repo, 'git', 'add', '-A')
+      run(main_repo, 'git', 'commit', '--quiet', '-m', 'edit')
+      run(main_repo, 'git', 'worktree', 'add', '--quiet', worktree, '-b', 'feature')
+      break_commondir!
+    end
+
+    after { FileUtils.rm_rf(scratch) }
+
+    # The private git directory is right there; its commondir names a directory
+    # that exists and holds objects/ and refs/ but is not the repository. That
+    # is the shape B-186 was verified in.
+    def break_commondir!
+      private_gitdir = File.read(File.join(worktree, '.git')).sub('gitdir:', '').strip
+      unreachable = File.join(scratch, 'unreachable-common')
+      FileUtils.mkdir_p(File.join(unreachable, 'objects'))
+      FileUtils.mkdir_p(File.join(unreachable, 'refs'))
+      File.write(File.join(private_gitdir, 'commondir'), "#{unreachable}\n")
+    end
+
+    it 'reports a failure without the override, because no ref resolves' do
+      paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD', root: worktree)
+
+      expect(paths).to be_nil
+      expect(failure).to be_a(String)
+    end
+
+    it 'resolves the range when WOODS_GIT_DIR names the canonical git directory' do
+      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => File.join(main_repo, '.git')))
+
+      paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD', root: worktree)
+
+      expect(failure).to be_nil
+      expect(paths).to eq(['app/models/user.rb'])
+    end
+  end
 end

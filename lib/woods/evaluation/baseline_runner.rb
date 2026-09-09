@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../storage_identity'
+
 module Woods
   module Evaluation
     # Runs simple baseline strategies for comparison against the full
@@ -51,6 +53,12 @@ module Woods
 
       private
 
+      # Evaluation ground truth uses public names, not vector/metadata storage keys.
+      # Coexisting types count once because the evaluation contract is name-based.
+      def public_identifiers
+        @metadata_store.all_identifiers.map { |id| StorageIdentity.identifier(id) }.uniq
+      end
+
       # Grep strategy: substring match on unit identifiers.
       #
       # Extracts words from the query and matches identifiers that contain
@@ -60,7 +68,7 @@ module Woods
       # @param limit [Integer] Max results
       # @return [Array<String>]
       def run_grep(query, limit)
-        all_ids = @metadata_store.all_identifiers
+        all_ids = public_identifiers
         keywords = extract_keywords(query)
 
         return all_ids.first(limit) if keywords.empty?
@@ -85,7 +93,7 @@ module Woods
       # @return [Array<String>]
       def run_random(_query, limit)
         @random_mutex.synchronize do
-          @metadata_store.all_identifiers.sample(limit, random: @random)
+          public_identifiers.sample(limit, random: @random)
         end
       end
 
@@ -96,7 +104,7 @@ module Woods
       # @param limit [Integer] Max results
       # @return [Array<String>]
       def run_file_level(query, limit)
-        all_ids = @metadata_store.all_identifiers
+        all_ids = public_identifiers
         keywords = extract_keywords(query)
 
         return all_ids.first(limit) if keywords.empty?

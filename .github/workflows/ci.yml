@@ -124,6 +124,7 @@ jobs:
       WOODS_PG_URL: postgres://postgres:postgres@localhost:5432/woods_test
       WOODS_QDRANT_URL: http://localhost:6333
       WOODS_REDIS_URL: redis://localhost:6379/0
+      WOODS_MYSQL_URL: mysql2://root:woods@127.0.0.1:3306/woods_test
     services:
       # pgvector's own image — the stock postgres image has no vector extension,
       # so `CREATE EXTENSION vector` in ensure_schema! would fail.
@@ -146,6 +147,18 @@ jobs:
         image: qdrant/qdrant:v1.12.4
         ports:
           - 6333:6333
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: woods
+          MYSQL_DATABASE: woods_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -pwoods"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       redis:
         image: redis:7-alpine
         ports:
@@ -162,12 +175,6 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      # The RedisCacheStore live specs need the redis client gem, which no
-      # repository bundle carries (the gem is an application-side dependency
-      # of the store). Adding it to the ephemeral checkout here keeps the
-      # tracked gemfiles untouched until 2.0 ships.
-      - name: Add the redis client gem
-        run: bundle add redis
       - name: Wait for Qdrant
         run: |
           for i in $(seq 1 30); do
@@ -183,6 +190,7 @@ jobs:
         run: >-
           bundle exec rspec
           spec/integration/live_backends_spec.rb
+          spec/integration/console_sql_dialects_spec.rb
           spec/integration/solid_cache_compatibility_spec.rb
           spec/cache/redis_cache_store_live_spec.rb
           spec/session_tracer/redis_store_live_spec.rb
@@ -252,6 +260,8 @@ jobs:
           cache: npm
       - name: Install pinned Inspector
         run: npm ci --ignore-scripts
+      - name: Audit Inspector dependencies
+        run: npm audit --audit-level=moderate
       - name: Run MCP process contracts
         env:
           WOODS_RUN_HTTP_SERVER: '1'

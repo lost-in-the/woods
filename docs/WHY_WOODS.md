@@ -114,7 +114,7 @@ foreign keys pulled live from the database. No more confusing `string` vs `text`
 **Route-to-controller binding.** Controller source gets a route block prepended showing
 exactly which HTTP verbs and paths map to which actions. URL → code is always explicit.
 
-**Dependency graph.** 34 extractors build a bidirectional graph: what each unit depends on,
+**Dependency graph.** 35 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
 **Two MCP servers.** The Index Server defines 29 schemas and registers 14 in the normal
@@ -163,6 +163,23 @@ Woods is not a universal fit. Skip it when:
 - **Row-level data is the goal.** Woods extracts schema and structure, not data. If you need to index row content for retrieval (customer records, documents, audit events), a different pipeline is appropriate.
 - **Tiny apps that already fit in context.** A 20-model app may not benefit, the LLM can probably read every file. Woods' win scales with monolith size and concern depth.
 - **You want a hosted service.** Woods is a gem, not a SaaS. Extraction output lives on your machines and the MCP servers run on your hardware. There is no cloud component.
+
+---
+
+## How Woods compares to other Rails code tools
+
+Three tools answered "what is in this Rails app" for coding agents in 2026. Woods overlaps with each on structure and differs on runtime behavior.
+
+| Tool | Version checked | How it reads the app | Strong at | Does not cover |
+|---|---|---|---|---|
+| Rubydex (Shopify) | 0.4.1, announced 2026-05-12 | Rust static index of declarations, references, ancestors; experimental `rdx mcp` | Symbol references across a large tree, fast re-index, reported 15 to 80 percent token reduction | Resolved callbacks, inlined concerns, routes as Rails builds them, database partition, churn |
+| rails-mcp-server | 2.0.0 | Boots the app; `analyze_models`, `get_routes`, `get_schema` | Live model, route, and schema listings over MCP | Callback side effects, request flows, git churn, graph reports, persistent index with generations |
+| ruby-lsp-rails | 0.5.0.beta1 | Runtime server over `rails runner` for the editor | Model columns, association targets, route info at the cursor | A persistent index other tools can read, graph analysis, multi-database facts |
+| Woods | 2.0 | Boots the app once, publishes an atomic JSON generation, serves it without Rails | Resolved runtime behavior on top of structure: inlined concerns, callback side effects, flows, churn, PageRank; database partition and Packwerk boundaries are in progress on this branch | Symbol-level references inside method bodies (Rubydex is the better fit and is complementary) |
+
+Woods and Rubydex are complementary. Rubydex answers "where is this symbol referenced". Woods answers "what happens when this runs, and what does it touch". An agent can use both: Rubydex for references, Woods for behavior, boundaries, and blast radius.
+
+The database-partition layer, in progress on this branch, is the one place Woods will be alone. Rubydex is static, and the other two resolve associations without saying which database each side lives on. See [Extractor reference](EXTRACTOR_REFERENCE.md#modelextractor) for the fields.
 
 ---
 

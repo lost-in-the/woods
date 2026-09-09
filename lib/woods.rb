@@ -22,6 +22,8 @@
 #   end
 #
 require_relative 'woods/version'
+# Configuration's `component_paths` default lives with the discovery it feeds.
+require_relative 'woods/extractors/component_discovery'
 
 module Woods
   class Error < StandardError; end
@@ -142,9 +144,9 @@ module Woods
                   :notion_api_token, :notion_database_ids,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
-                  :dump_retention_count
+                  :dump_retention_count, :component_paths
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
-                :context_format, :cache_enabled
+                :context_format, :cache_enabled, :volatile_dependency_ratio
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -202,6 +204,10 @@ module Woods
       @cache_store = nil      # :redis, :solid_cache, :memory, or a CacheStore instance
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @dump_retention_count = 3
+      @volatile_dependency_ratio = 3.0
+      # Directories the component extractors walk before reading `descendants`,
+      # relative to Rails.root. See Extractors::ComponentDiscovery.
+      @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
     end
 
     def embedding_model=(value)
@@ -293,6 +299,19 @@ module Woods
       @cache_enabled = value
     end
 
+    # Commit-count ratio above which {Woods::GraphAnalyzer#volatile_dependencies}
+    # reports an edge. Stored as a Float.
+    #
+    # @param value [Numeric] must be greater than 1
+    # @raise [ConfigurationError] otherwise
+    def volatile_dependency_ratio=(value)
+      unless value.is_a?(Numeric) && value > 1
+        raise ConfigurationError, "volatile_dependency_ratio must be a number greater than 1, got #{value.inspect}"
+      end
+
+      @volatile_dependency_ratio = value.to_f
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -330,7 +349,7 @@ module Woods
 
     # Configure the module using a named preset and optional block customization.
     #
-    # Valid preset names: :local, :postgresql, :production
+    # Valid preset names: :local, :shared_filesystem, :postgresql, :production
     #
     # @param name [Symbol] Preset name
     # @yield [config] Optional block for further customization after preset is applied

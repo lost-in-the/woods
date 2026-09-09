@@ -2297,5 +2297,323 @@
     ],
     "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
     "status": "open"
+  },
+  {
+    "id": "B-168",
+    "title": "Position Woods against Rubydex, rails-mcp-server, and ruby-lsp-rails in WHY_WOODS",
+    "severity": "low",
+    "category": "docs",
+    "layer": "docs",
+    "files": [
+      "docs/WHY_WOODS.md"
+    ],
+    "description": "Issue #280 item 6, docs half. WHY_WOODS argued only against static file reading and never named the 2026 alternatives. Acceptance: a comparison table with versions checked on 2026-09-08 that frames Rubydex as complementary on symbol references. Shipped on feat/graph-layers (commit a960e29).",
+    "status": "resolved"
+  },
+  {
+    "id": "B-169",
+    "title": "Database-partition layer: model database, FK targets, cross-database association edges",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/dependency_graph.rb",
+      "lib/woods/extractors/model_extractor.rb",
+      "lib/woods/graph_analyzer.rb"
+    ],
+    "description": "Issue #280 item 1. ModelExtractor regex-parses connects_to from source and misses inheritance from an abstract base class; no unit records its resolved database and association edges carry no database. Acceptance: metadata[:database] from connection_db_config (respond_to?-guarded), from_db/to_db/through/disable_joins on association edges, a cross_database_edges report in graph_analysis, additive node and edge attributes omitted when nil so unchanged apps serialize byte-for-byte.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-170",
+    "title": "volatile_dependencies report: edges into units that change more often than the dependent",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/graph_analyzer.rb",
+      "lib/woods/extractor.rb",
+      "lib/woods.rb"
+    ],
+    "description": "Issue #280 item 3. Churn (metadata[:git][:change_frequency]) and edges exist but are never combined. Acceptance: commit_count and change_frequency copied onto graph nodes in full and incremental runs (equivalence oracle green), a volatile_dependencies report ranked by dependency PageRank with a configurable volatile_dependency_ratio, short-circuited when no node carries git data, surfaced in SUMMARY.md and graph_analysis.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-171",
+    "title": "Packwerk package layer: package units, metadata[:package] on units, undeclared_package_edges report",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/package_extractor.rb",
+      "lib/woods/extractor.rb",
+      "lib/woods/path_dispatcher.rb",
+      "lib/woods/graph_analyzer.rb"
+    ],
+    "description": "Issue #280 item 2. No package.yml awareness anywhere in lib/. Acceptance: a file-based package unit type registered as whole-app (a package.yml change re-runs it and re-annotates membership), metadata[:package] on class-discovered units and units under root-relative extractor dirs, an undeclared_package_edges report. Enforcement stays with packwerk and pks. Known limitation recorded in B-175.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-172",
+    "title": "Woods::PublishedIndex tool-facing reader and woods:check:moved_messages",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/published_index.rb",
+      "lib/woods/checks/moved_messages.rb",
+      "lib/tasks/woods_checks.rake",
+      "docs/PUBLISHED_INDEX.md"
+    ],
+    "description": "Issue #280 item 4. Non-MCP readers (RuboCop cops, gate scripts) have no small Ruby API for the published generation. Acceptance: a facade over the active or a pinned generation exposing units, edges by via, and an external_dependency_checksum keyed on generation.json (pinned readers digest the pinned manifest), a documented cop example, and a check that reads two retained generations to find public methods that moved without a test_coverage edge following.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-173",
+    "title": "Plugin hooks for index freshness and the config/ci.rb docs line",
+    "severity": "medium",
+    "category": "config",
+    "layer": "plugin",
+    "files": [
+      "plugin/hooks/hooks.json",
+      "plugin/hooks/woods-post-edit.sh",
+      "plugin/hooks/woods-session-start.sh",
+      "docs/GETTING_STARTED.md"
+    ],
+    "description": "Issue #280 item 5. The watch daemon covers editor sessions; a claude -p run in a worktree has no daemon. Acceptance: an async PostToolUse hook running woods:incremental under a lock for graph-changing paths, reading cwd from the hook payload, a SessionStart hook that warns when the generation predates the last commit, hook schema confirmed against the Claude Code plugin reference, and a Rails 8.1 config/ci.rb step in the keep-current docs.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-174",
+    "title": "Agent-level index on/off ablation harness (woods:evaluate:ablation)",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "evaluation",
+    "files": [
+      "lib/woods/evaluation/ablation_runner.rb",
+      "lib/woods/evaluation/ablation_task_set.rb",
+      "lib/tasks/woods_evaluation.rake",
+      "docs/EVALUATION.md"
+    ],
+    "description": "Issue #280 item 6, evaluation half. woods:evaluate scores retrieval only. Acceptance: a task-set format, a runner that executes each task with the index on and off through an injected agent executor and a per-task check command, and a summary of resolution rate, tokens, and cost per condition.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-175",
+    "title": "Reach pack-resident file-based units: widen PathDispatcher and extractor dirs to packs/*/app and packs/*/lib",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/path_dispatcher.rb",
+      "lib/woods/extractors/service_extractor.rb"
+    ],
+    "description": "Follow-up from B-171 (plan review finding C4). PathDispatcher#relevant? matches only app/**.rb and every file rule's dirs are root-relative, so nothing under packs/*/app/** reaches a file-based extractor; only class-discovered types get metadata[:package] inside a pack. Acceptance: file rules and relevant? accept pack roots discovered from package.yml, incremental runs stay equivalent to full runs, and the B-171 limitation note is removed from EXTRACTOR_REFERENCE.",
+    "status": "ready",
+    "depends_on": [
+      "B-171"
+    ]
+  },
+  {
+    "id": "B-176",
+    "title": "Spec isolation: graph_analyzer_spec and extractor_spec leak Woods.configuration state under some seeds",
+    "severity": "low",
+    "category": "test-gap",
+    "layer": "graph",
+    "files": [
+      "spec/graph_analyzer_spec.rb",
+      "spec/extractor_spec.rb"
+    ],
+    "description": "Running spec/graph_analyzer_spec.rb and spec/extractor_spec.rb together with --seed 8230 fails one example (Extractor#remove_replaced_units typed identity) with NoMethodError: undefined method 'configuration' for module Woods inside Extractor#json_serialize. Each file passes alone and the full suite passes. Found during #280 Task 4; pre-existing. Acceptance: the pair passes under any seed, with the shared state reset in spec support rather than in either file.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-177",
+    "title": "Booted multi-database fixture for the dummy app so cross_database_edges is exercised end to end",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/dummy/config/database.yml",
+      "spec/integration/booted_extraction_spec.rb"
+    ],
+    "description": "The database-partition layer (#280, B-169, B-170) is covered by unit specs with stubbed connection_db_config; the dummy app has one database, so no booted lane proves a real connects_to, a reused table name across databases, an inherited connection, or a has_many :through with the through model on a third database. Acceptance: a second SQLite database in the dummy app with at least one model per case above, booted_extraction asserting the resulting cross_database_edges entries, and incremental_equivalence staying green.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-178",
+    "title": "Booted package mutation scenarios: full run, add a package, remove the last package, change package paths",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "extraction",
+    "files": [
+      "spec/integration/incremental_equivalence_spec.rb"
+    ],
+    "description": "Package membership (#280, B-171, B-172) has a unit-level regression on one Extractor instance; no booted lane mutates packwerk.yml or package.yml between incremental runs. Acceptance: the equivalence oracle covers a package added, the last package removed, and a package path changed, comparing full and incremental output after each mutation.",
+    "status": "ready",
+    "depends_on": [
+      "B-171"
+    ]
+  },
+  {
+    "id": "B-179",
+    "title": "Optional changelog/ entry files so parallel branches stop conflicting in CHANGELOG.md",
+    "severity": "low",
+    "category": "tooling",
+    "layer": "infrastructure",
+    "files": [
+      "CHANGELOG.md",
+      "lib/woods/release/changelog.rb",
+      "lib/tasks/release.rake"
+    ],
+    "description": "Every branch appends to the same `## [Unreleased]` block, so two open pull requests that both add a changelog entry conflict on the same lines. RuboCop's `changelog/` directory is the established alternative: one file per entry, named `<type>_<slug>.md`, collected into the release section and deleted by the release task. `Woods::Release::Changelog.fold` already merges duplicate `###` headings, so entry files would slot in as an additional source of blocks before that merge rather than as a second mechanism. Discovered while building the release flow; deliberately out of scope there. Acceptance: `release:prepare` folds `changelog/*.md` alongside `## [Unreleased]`, deletes the files it consumed, refuses an entry file whose type is not one of the headings the changelog uses, and `spec/release_v2/version_state_spec.rb` fails when an entry file survives a release commit.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-180",
+    "title": "graph_sha changes after a no-op incremental run because reverse and type_index arrays keep insertion order",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "graph",
+    "files": [
+      "lib/woods/dependency_graph.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Verified on a 7k-unit host app: edit one model, run woods:incremental, revert, run again. Every graph section is byte-identical except reverse (12 keys) and type_index (1 key), which differ only in member order because DependencyGraph#to_h emits Set#to_a. graph_sha (Extractor, Digest over the serialized graph) therefore changes, so a consumer caching on graph_sha redoes work after a no-op. Acceptance: to_h sorts the member arrays of reverse, reverse_via, and type_index; a spec registers the same units in two orders and asserts identical to_h and graph_sha; the incremental equivalence oracle compares graph_sha as well.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-181",
+    "title": "Git enrichment override for containerized linked worktrees (WOODS_GIT_DIR or following the gitdir pointer)",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/git_provenance.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "In a linked git worktree the .git file holds an absolute host path (gitdir: ...). Inside a container that path is not mounted, git -C root rev-parse fails, provenance records unknown, and commit_count, change_frequency, and volatile_dependencies are all absent (verified: mounting the canonical gitdir at the same absolute path restored 213 of 223 models with git data and 544 volatile dependencies). Acceptance: document that git's own GIT_DIR and GIT_COMMON_DIR environment variables are honoured by every woods git call, add WOODS_GIT_DIR as an explicit override that wins when set, and when the gitdir pointer is unreachable log one warning naming the missing path instead of silently omitting the fields.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-182",
+    "title": "Persisted volatile_dependencies is capped at 20 with no marker in the artifact, and section names do not derive their stat keys",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "graph",
+    "files": [
+      "lib/woods/graph_analyzer.rb",
+      "docs/INTERNALS.md"
+    ],
+    "description": "graph_analysis.json keeps the top 20 volatile dependencies while stats.volatile_dependency_count carries the full total (544 on the verified host app); a reader of the array alone cannot tell it is truncated. Also, section names are plural (cross_database_edges, volatile_dependencies, undeclared_package_edges, hubs, orphans) while stat keys are singular (cross_database_edge_count, volatile_dependency_count, hub_count), which follows precedent but trips callers deriving the key from the section name. Acceptance: stats gains volatile_dependencies_limit (20) next to the count, and INTERNALS.md carries a table mapping every section to its stat key and states which sections are capped in the artifact.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-183",
+    "title": "dependents and dependencies MCP responses have no size ceiling or truncation marker at the default depth",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb",
+      "lib/woods/mcp/renderers/markdown_renderer.rb",
+      "lib/woods/mcp/renderers/plain_renderer.rb"
+    ],
+    "description": "Verified on a 7k-unit host app: dependents on a hub model at the default depth 2 returned about 178 KB (4523 lines) with no truncation marker, while graph_analysis in the same server prints a Showing N of M (truncated) line. The tool already takes depth, types, and via (depth: 1 with types: [model] cut the same call to 185 lines); it has no limit or offset. Rows carry no database, so in a multi-database app an agent cannot see which side of an edge lives where; lookup does show the unit's own database. Acceptance: a bounded default page with the same truncation line graph_analysis uses, limit and offset accepted like graph_analysis, the tool description naming depth, types, and via as the first-line controls, and database rendered on rows only when the graph contains more than one database name.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-184",
+    "title": "PhlexExtractor discovery is gated on descendants, so components outside the eager-load paths are never indexed",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/phlex_extractor.rb",
+      "lib/woods/extractors/view_component_extractor.rb"
+    ],
+    "description": "Cause isolated on the verified host app: a local component base one hop below Phlex::HTML lives under app/views/<namespace>/, which is autoloaded but not eager-loaded. PhlexExtractor collects component_base.descendants after eager_load!, so Phlex::HTML descendants went from 7 to 18 and exactly 18 components were indexed while 54 files define subclasses; the file lookup on line 124 (app/views/<name>.rb) would match every missing class but is never reached because discovery happens first. ViewComponent::Base is undefined there, so that extractor is not involved. Acceptance: discovery scans the component directories (app/components, app/views/components, app/views/**) for Ruby files whose class inherits from a Phlex or ViewComponent base, constantizes them through the autoloader before taking descendants, honours a configurable directory list, and a booted spec covers a component under an autoloaded but not eager-loaded subtree of app/views.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-185",
+    "title": "Full extraction about 30 percent slower than 1.5.0 on a 7k-unit app after the graph layers",
+    "severity": "low",
+    "category": "performance",
+    "layer": "graph",
+    "files": [
+      "lib/woods/graph_analyzer.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "34 s on 1.5.0 versus 44 s at f085276 for 4 percent more units, incremental 11 s for one model. Suspects: PageRank now runs inside analyze, the three new reports, git enrichment per unit. Acceptance: a profile of one full extraction on the dummy app plus the timing table from WATCH_DAEMON.md refreshed; any single phase over 15 percent of the total gets its own entry.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-186",
+    "title": "Git enrichment writes commit_count 0 and change_frequency new for every unit when git runs but cannot resolve refs",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/git_provenance.rb"
+    ],
+    "description": "Verified on a containerized linked worktree: with GIT_DIR pointing at the worktree's private git directory, rev-parse --git-dir succeeds but refs never resolve (the private gitdir's commondir is a relative pointer that resolves outside the mount; GIT_COMMON_DIR did not override it). Woods then emits commit_count 0 and change_frequency new on 213 of 223 models, indistinguishable from files that were never committed, whereas a fully absent git directory correctly omits the keys. An agent reading that index concludes every model is brand new and volatile_dependencies is silently empty. Acceptance: before enrichment, require git rev-parse HEAD to succeed; when it fails, omit the git keys for every unit, record provenance as unknown, and log one warning naming the cause; a spec covers a worktree whose commondir is unreachable. Pair with B-181 so the override path and the failure path are tested together.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-187",
+    "title": "RailsSourceExtractor is 55 percent of a full extraction of the fixture app",
+    "severity": "low",
+    "category": "performance",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/rails_source_extractor.rb"
+    ],
+    "description": "Phase timers around one cold extract_all of spec/dummy (7 reps, 190 ms at p50) put RailsSourceExtractor at 100 ms, 55 percent of the run and the only phase over 15 percent. Read with the fixture's shape: 119 of its 147 units are framework sources, a ratio no host application has, so the figure sizes the fixture rather than the extractor. Opened from B-185, whose named suspects the same profile cleared: GraphAnalyzer#analyze is 3.3 percent with PageRank inside it, git enrichment 12 percent, the dependents pass under a millisecond. Acceptance: the same phase profile taken on a host where framework sources are the minority, and either a measured cost per framework unit that justifies leaving it alone, or a change that lowers it without altering rails_source output.",
+    "status": "ready",
+    "depends_on": [
+      "B-185"
+    ]
+  },
+  {
+    "id": "B-188",
+    "title": "volatile_dependencies: tuning guidance and a hub-aware threshold so one hot hub does not qualify every dependent",
+    "severity": "low",
+    "category": "docs",
+    "layer": "graph",
+    "files": [
+      "docs/CONFIGURATION_REFERENCE.md",
+      "lib/woods/graph_analyzer.rb"
+    ],
+    "description": "On a 7k-unit host app the default volatile_dependency_ratio of 3.0 produced 544 qualifying pairs, and the top five all pointed at one 153-commit hub from dependents with 10 to 13 commits: a hub that hot makes almost every dependent qualify by ratio alone. The configuration reference defines the ratio but gives no tuning guidance. Acceptance: the reference explains how to read the count (start from stats.volatile_dependency_count, raise the ratio until the list is reviewable, 8 to 10 was right for that app) and the analyzer gains an optional minimum dependent commit count or a per-dependency cap so a single hub cannot fill the report; the report stays informational.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-189",
+    "title": "A shallow CI checkout passes the HEAD guard, so every unit reports change_frequency new",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/git_command.rb"
+    ],
+    "description": "B-186 made enrichment require git rev-parse HEAD to succeed before writing any churn figure. A shallow clone (fetch-depth 1, the CI default) passes that guard: HEAD resolves, git log succeeds, and it returns exactly one commit per file. Every unit then reports commit_count 1 and change_frequency new, which is the same misleading answer B-186 removed, arrived at by a different route, and volatile_dependencies is empty because nothing clears VOLATILE_MIN_COMMITS. Acceptance: detect the shallow case with git rev-parse --is-shallow-repository, and either omit the churn keys or mark them as measured over a truncated history; log one warning naming the depth remedy; a spec covers a shallow clone of the temporary fixture repository, asserting the keys are not silently wrong. TROUBLESHOOTING already tells a reader to fetch more history for missing git metadata; this makes the index say so itself.",
+    "status": "ready",
+    "depends_on": [
+      "B-186"
+    ]
   }
 ]

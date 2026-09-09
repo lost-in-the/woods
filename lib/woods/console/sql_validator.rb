@@ -44,12 +44,15 @@ module Woods
       # @return [Symbol, nil]
       attr_reader :dialect
 
-      def initialize(dialect: nil)
+      # mysql_modes contains the executing session's ANSI_QUOTES and
+      # NO_BACKSLASH_ESCAPES flags. nil conservatively validates all combinations.
+      def initialize(dialect: nil, mysql_modes: nil)
         unless dialect.nil? || KNOWN_DIALECTS.include?(dialect)
           raise ArgumentError, "Unknown dialect #{dialect.inspect}. Supported: #{KNOWN_DIALECTS.inspect}"
         end
 
         @dialect = dialect
+        @mysql_modes = mysql_modes
       end
       # Row-lock clauses that would take live row locks even under the
       # rolled-back SafeContext transaction (M5).
@@ -313,6 +316,8 @@ module Woods
       def validate!(sql)
         raise SqlValidationError, 'SQL is empty' if sql.nil? || sql.strip.empty?
 
+        return validate_dialect_variants!(sql) if unknown_grammar?
+
         normalized = sql.strip
 
         # Reject multiple statements (semicolons not inside string literals)
@@ -365,13 +370,36 @@ module Woods
 
       private
 
+      def unknown_grammar?
+        dialect.nil? || (dialect == :mysql && @mysql_modes.nil?)
+      end
+
+      def validate_dialect_variants!(sql)
+        if dialect.nil?
+          KNOWN_DIALECTS.each { |name| self.class.new(dialect: name).validate!(sql) }
+        else
+          SqlNoiseStripper::MYSQL_QUOTE_MODES.each do |mode|
+            self.class.new(dialect: :mysql, mysql_modes: mode).validate!(sql)
+          end
+        end
+        nil
+      end
+
+      def strip_validation_noise(sql)
+        SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect, **(@mysql_modes || {}))
+      end
+
+      def validation_dialect
+        dialect || :postgres
+      end
+
       # Check if the SQL contains multiple statements separated by semicolons.
       # Strips SQL comments and string literals before checking.
       #
       # @param sql [String]
       # @return [Boolean]
       def contains_multiple_statements?(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
         stripped.include?(';')
       end
 
@@ -395,7 +423,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a forbidden keyword is found
       def check_body_forbidden_keywords!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
 
         BODY_FORBIDDEN_REGEXES.each do |keyword, pattern|
           raise SqlValidationError, "Rejected: #{keyword} is not allowed" if stripped.match?(pattern)
@@ -420,7 +448,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a writable CTE body is found
       def check_writable_ctes!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
         each_as_body(stripped) do |body|
           next unless body.match?(WRITABLE_CTE_BODY_PATTERN)
 
@@ -466,7 +494,7 @@ module Woods
       def lock_clause_views(sql)
         dialects = dialect ? [dialect] : KNOWN_DIALECTS
         dialects.flat_map do |dialect_name|
-          stripped = SqlNoiseStripper.strip_noise(sql, dialect: dialect_name)
+          stripped = SqlNoiseStripper.strip_noise(sql, dialect: dialect_name, **(@mysql_modes || {}))
           [stripped.gsub(EXECUTABLE_COMMENT_PATTERN, ' '),
            stripped.gsub(EXECUTABLE_COMMENT_PATTERN) { Regexp.last_match[1] }]
         end
@@ -484,7 +512,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if DML follows the CTE list
       def check_with_attached_dml!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
         return unless stripped.match?(WITH_ATTACHED_DML_PATTERN)
 
         raise SqlValidationError,
@@ -536,7 +564,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a dangerous function is found
       def check_dangerous_functions!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
 
         DANGEROUS_FUNCTION_REGEXES.each do |func, pattern|
           raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if stripped.match?(pattern)
@@ -548,7 +576,7 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a non-allowlisted function is called
       def check_function_allowlist!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
 
         stripped.scan(FUNCTION_CALL_PATTERN) do
           match = Regexp.last_match
@@ -587,7 +615,7 @@ module Woods
       # @raise [SqlValidationError] if a forbidden keyword is found as a
       #   statement leader, or a DML keyword anywhere in the body
       def check_forbidden_keywords_in_body!(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = strip_validation_noise(sql)
 
         FORBIDDEN_BODY_REGEXES.each do |keyword, leader_pattern|
           next unless stripped.match?(leader_pattern)
@@ -616,7 +644,7 @@ module Woods
       # @return [Array<String>]
       def dml_body_views(sql)
         dialects = dialect ? [dialect] : KNOWN_DIALECTS
-        dialects.map { |dialect_name| SqlNoiseStripper.strip_noise(sql, dialect: dialect_name) }
+        dialects.map { |dialect_name| SqlNoiseStripper.strip_noise(sql, dialect: dialect_name, **(@mysql_modes || {})) }
       end
     end
   end

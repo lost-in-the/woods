@@ -639,7 +639,7 @@ RSpec.describe Woods::Console::SqlValidator do
     let(:mysql_literal_sql) { "SELECT * FROM notes WHERE body = 'customer\\'s request for update'" }
 
     it 'accepts a MySQL escaped-apostrophe literal containing FOR UPDATE under the MySQL dialect' do
-      expect { Woods::Console::SqlValidator.new(dialect: :mysql).validate!(mysql_literal_sql) }
+      expect { Woods::Console::SqlValidator.new(dialect: :mysql, mysql_modes: {}).validate!(mysql_literal_sql) }
         .not_to raise_error
     end
 

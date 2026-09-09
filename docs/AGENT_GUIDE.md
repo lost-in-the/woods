@@ -37,6 +37,9 @@ Identifiers are namespaced and typed. Never invent one from a filename when `sea
 | Inspect Rails or gem behavior | `framework` | current source files |
 | Find recently changed indexed units | `recent_changes` | git diff/history |
 | Discover architectural domains | `domain_clusters` | `graph_analysis` |
+| Check a join or foreign key across databases before writing it | `graph_analysis` with `analysis: "cross_database_edges"` | `lookup` on both models |
+| Find dependencies that change faster than their dependents | `graph_analysis` with `analysis: "volatile_dependencies"` | `recent_changes` |
+| See a Packwerk boundary before calling across it | `graph_analysis` with `analysis: "undeclared_package_edges"` | `lookup` on the package unit |
 | Find central or high-impact units | `pagerank` | `dependents` |
 | Ask a conceptual question | `codebase_retrieve` if status says ready | `lookup` and graph tools |
 | Refresh after a published extraction | `reload` | `woods_status` |
@@ -105,6 +108,11 @@ Start with identifier search. Add source or metadata only when name discovery fa
 `dependencies` means “what this unit uses.” `dependents` means “what uses this unit.” Both default to bounded breadth-first traversal and accept type or relationship filters.
 
 Start at depth 1 or 2. A deeper unfiltered traversal can obscure the direct evidence that matters. Common relationship values include associations (`belongs_to`, `has_many`, `has_one`), code references, renders, redirects, form actions, and navigation links.
+
+Both return at most 50 nodes and say so with a `Showing N of M (truncated)`
+line. Narrow with `depth`, `types` and `via` before paging with `limit` and
+`offset`: narrowing answers the question, paging only splits the same answer
+across turns. In a multi-database app each row names the unit's database.
 
 Use returned relationship labels as evidence. Do not infer call order from a dependency edge alone.
 

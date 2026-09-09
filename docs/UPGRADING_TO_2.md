@@ -4,9 +4,10 @@ Woods 2.0 changes observable index identifiers, publication layout, vector-store
 
 This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
 
-<!-- v2-unreleased-note:start -->
-> **2.0.0 is not published yet.** 1.6.1 is the latest released gem, and `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 ships. Read this runbook to plan the upgrade and to review a source checkout of the 2.0 line; run it against a published 2.0.0 gem. Documentation matching the released gem is on [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1).
-<!-- v2-unreleased-note:end -->
+<!-- release-state:upgrade-availability -->
+> Run the published-gem upgrade only after RubyGems lists 2.0.0. Until then,
+> this guide supports planning and validation against a source checkout.
+<!-- release-state:end -->
 
 ## Upgrade outcome
 
@@ -197,6 +198,36 @@ tmp/woods/
 Woods tasks, readers, exporters, and MCP servers resolve this automatically. Custom tooling must read `generation.json`, resolve its `payload` relative to the index root, reject paths that escape that root, and then read the payload files. A missing payload key represents the legacy flat layout.
 
 Graph consumers must also tolerate multiple typed variants for the same textual identifier. Do not collapse nodes by identifier alone when type is part of identity.
+
+The bundle requires patched MessagePack >=1.8.2 and JSON >=2.19.9, <3.
+JSON 3 removes an encoder option used by older supported Rails versions; keep the
+compatible JSON 2.x dependency when resolving the v2 bundle.
+
+Embedding preserves coexisting types with internal `@woods-unit:` storage keys
+(Base64-encoded JSON `[identifier, type]`, with the existing chunk suffix appended
+when needed). Public identifiers and source attribution stay unchanged. Unique
+ordinary names retain their previous keys; names beginning with this reserved
+prefix are escaped too. An incremental embed migrates an ambiguous legacy key only
+after storing its replacement vectors. Existing typed keys stay stable when one
+variant disappears. Normal mass-deletion guards still apply to vanished units.
+Custom vector consumers must treat storage IDs as opaque and use metadata for
+public identifiers. Evaluation baselines normalize storage keys back to public
+names and count same-named typed variants once, matching name-based ground truth.
+Older dumps remain readable; re-embed to recover variants
+that an older writer had already overwritten.
+
+SQLite migration 007 preserves snapshot rows and permits one row per
+`(snapshot_id, identifier, unit_type)`. JSON snapshot readers accept older untyped
+records, while new records preserve both names and types. Lost historical variants
+cannot be reconstructed from old snapshots. Back up `woods.sqlite3` and the whole
+index before upgrading: reverting code alone does not reverse this migration.
+Restore the matching backup or rebuild in a separate store when rolling back.
+
+Flow documents for identifiers containing literal underscores now use a digest to
+avoid collisions with namespaced controllers and combined action names. Read the
+published flow index instead of constructing filenames. A full extraction rebuilds
+precomputed flows consistently; use it when upgrading an index with existing flow
+artifacts.
 
 ## Reconnect MCP clients
 

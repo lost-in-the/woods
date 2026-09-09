@@ -21,7 +21,10 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 3.0.0'
 
-  release_ref = "v#{spec.version}"
+  # `main` carries X.Y.Z.alpha between releases, and that tree is never tagged,
+  # so an alpha's metadata URIs point at the branch. Every releasable version
+  # (betaN, rcN, final) is tagged v<VERSION> and pins its URIs to that tag.
+  release_ref = spec.version.to_s.end_with?('.alpha') ? 'main' : "v#{spec.version}"
   spec.metadata['homepage_uri'] = spec.homepage
   spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/#{release_ref}"
   spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/#{release_ref}/CHANGELOG.md"
@@ -31,11 +34,15 @@ Gem::Specification.new do |spec|
 
   # Specify which files should be added to the gem
   #
-  # `lib/woods/release_v2/**` and `lib/tasks/release_v2.rake` are the audit
-  # ledger's own machinery (findings.json, surface-inventory tooling) — repo
-  # CI runs them straight from source via `release_v2:verify_surface_inventory`,
-  # which is unaffected by packaging exclusion. `docs/design`, `docs/security`,
-  # `docs/self-analysis`, `docs/specs`, `docs/superpowers`, and `docs/backlog.json`
+  # Two families of maintainer-only machinery are excluded. `lib/woods/release_v2/**`
+  # and `lib/tasks/release_v2.rake` are the audit ledger's own tooling
+  # (findings.json, surface inventory); `lib/woods/release/**` and
+  # `lib/tasks/release.rake` are the release flow's (release:prepare,
+  # release:reopen). Both only ever run from a source checkout of this
+  # repository, so repo CI runs them straight from source (for example
+  # `release_v2:verify_surface_inventory`), unaffected by packaging exclusion.
+  # `docs/design`, `docs/security`,
+  # `docs/self-analysis`, and `docs/backlog.json`
   # are process/planning artifacts, not user-facing reference docs — excluded so
   # the packaged gem ships the same `docs/*.md` a user reads on GitHub, not the
   # audit trail that produced them.
@@ -52,7 +59,12 @@ Gem::Specification.new do |spec|
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md',
     'SECURITY.md'
-  ] - (Dir['lib/tasks/release_v2.rake'] + Dir['lib/woods/release_v2', 'lib/woods/release_v2/**/*'])
+  ] - (
+    Dir['lib/tasks/release_v2.rake'] +
+    Dir['lib/woods/release_v2', 'lib/woods/release_v2/**/*'] +
+    Dir['lib/tasks/release.rake'] +
+    Dir['lib/woods/release', 'lib/woods/release/**/*']
+  )
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
                         woods-mcp-http]
@@ -63,7 +75,9 @@ Gem::Specification.new do |spec|
   # pin blocks patch releases and user dependency resolution; the SDK-internal
   # touchpoints already guard shape drift defensively.
   spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
-  spec.add_dependency 'msgpack', '>= 1.5', '< 2'
+  # Older supported Active Support encoders pass quirks_mode, removed in JSON 3.
+  spec.add_dependency 'json', '>= 2.19.9', '< 3'
+  spec.add_dependency 'msgpack', '>= 1.8.2', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower

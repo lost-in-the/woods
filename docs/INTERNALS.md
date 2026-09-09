@@ -1,16 +1,16 @@
-# Woods Architecture
+# Woods internals
 
 This doc explains how Woods works from the inside, how extraction, storage, retrieval, and the two MCP servers fit together.
 
 ---
 
-## How Does Woods Work?
+## How does Woods work?
 
 Woods runs in three phases across two environments:
 
 ```
 Inside Rails app (rake task):
-  1. Extract, 34 extractors introspect the live Rails environment
+  1. Extract, 35 extractors introspect the live Rails environment
   2. Resolve, dependency graph is built and enriched with git data
   3. Write, one JSON file per code unit to tmp/woods/
 
@@ -23,14 +23,14 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 
 ---
 
-## Pipeline Overview
+## Pipeline overview
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                    Rails Application                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐             │
 │  │ Extract  │──▶│ Resolve  │──▶│  Enrich  │             │
-│  │ 34 types │   │  graph   │   │   git    │             │
+│  │ 35 types │   │  graph   │   │   git    │             │
 │  └──────────┘   └──────────┘   └──────────┘             │
 │                                     │                    │
 │                                     ▼                    │
@@ -58,7 +58,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 
 ---
 
-## What Is an ExtractedUnit?
+## What is an ExtractedUnit?
 
 `ExtractedUnit` is the universal currency of Woods. Extractors produce them, the dependency graph connects them, the embedding pipeline consumes them, and the retrieval pipeline returns them.
 
@@ -89,13 +89,13 @@ must not be presented as equivalent to runtime Rails extraction.
 
 ---
 
-## How Does Extraction Work?
+## How does extraction work?
 
-### Eager Loading
+### Eager loading
 
 Before any extractor runs, `Rails.application.eager_load!` is called once to load all application classes into memory. If `eager_load!` fails with a `NameError` (common when `app/graphql/` references an uninstalled gem. Zeitwerk processes directories alphabetically, so a failure in `graphql/` can prevent `models/` from loading), the orchestrator falls back to per-directory loading across the 19 directories in `EXTRACTION_DIRECTORIES`.
 
-### Five Phases
+### Five phases
 
 ```ruby
 # Phase 1: Extract
@@ -107,17 +107,17 @@ EXTRACTORS.each { |type, klass| @results[type] = klass.new.extract_all }
 # Phase 2: Resolve dependents
 # Second pass: if A.dependencies includes B, B.dependents gets a back-reference to A
 
-# Phase 3: Graph analysis
-# PageRank, orphans, dead ends, hubs, cycles, bridges
-
-# Phase 4: Enrich with git
+# Phase 3: Enrich with git
 # batch git log for all file paths → last_modified, contributors, change_frequency
+
+# Phase 4: Graph analysis
+# PageRank, orphans, dead ends, hubs, cycles, bridges
 
 # Phase 5: Write
 # One JSON file per unit + _index.json per type + dependency_graph.json + SUMMARY.md + manifest.json
 ```
 
-### Concurrent Mode
+### Concurrent mode
 
 Set `config.concurrent_extraction = true` to run extractors in parallel threads. Thread safety is ensured by:
 - Pre-computing `ModelNameCache` before threads start (avoids a `||=` race)
@@ -125,7 +125,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 - Results are collected via `Mutex`-protected hash
 - Dependency graph registration happens sequentially after all threads join
 
-### Incremental Extraction
+### Incremental extraction
 
 `extract_changed(changed_files)` re-extracts only the units affected by a set of changed files. It:
 1. Loads the existing `dependency_graph.json`
@@ -134,11 +134,11 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the nine unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source` (gated by `include_framework_sources`). Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the ten unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `rails_source` (gated by `include_framework_sources`), and `package`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
 
 ---
 
-## How Does the Dependency Graph Work?
+## How does the dependency graph work?
 
 The `DependencyGraph` is a directed graph where nodes are `ExtractedUnit` identifiers and edges are dependency relationships. It tracks:
 
@@ -157,13 +157,13 @@ graph.dependents_of("Order")   # => ["User", "OrdersController"]
 graph.affected_by(["app/models/user.rb"])  # BFS over reverse edges
 ```
 
-### PageRank Scoring
+### PageRank scoring
 
-`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs.
+`DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs. Package units (#280) add nodes and `package_dependency` edges to the graph, so scores shift slightly wherever they land.
 
 Scores feed into the retrieval ranker as one signal in the final ranking formula.
 
-### GraphAnalyzer: Structural Metrics
+### GraphAnalyzer: Structural metrics
 
 `GraphAnalyzer` computes read-only structural reports from the graph:
 
@@ -174,12 +174,39 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 | **Hubs** | Units with many dependents, architectural bottlenecks; changes here have high blast radius |
 | **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS. |
 | **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
+| **Cross-database edges** | Association or foreign-key edges whose two ends resolve to different databases. A `has_many :through` is reported as `join_through_across_databases` when `disable_joins` is false and `from_db`, `through_db` (the join model's database), or `to_db` disagree. A foreign key never resolves to an owner in the source database, even when another database also claims the table; when every owner sits elsewhere and they span more than one database, the entry comes back with `to: nil` and an `ambiguous_owners` list instead of guessing. Read from graph node and edge attributes, so full and incremental runs agree. Scoped to primary nodes (units registered in the graph), not variants. |
+| **Volatile dependencies** | Edges that point at a unit changing at least `volatile_dependency_ratio` times more often than the dependent (POODR: depend on things that change less often than you do). Dependencies with fewer than 5 commits or a `new` change frequency are skipped. Ranked by the dependency's PageRank; the persisted list keeps the top 20, while `stats.volatile_dependency_count` reports the full qualifying count and `stats.volatile_dependencies_limit` reports the cap. |
+| **Undeclared package edges** | Edges that cross a Packwerk package boundary the source package does not list in `dependencies`. Membership comes from each unit's `package` node attribute, declarations from the package unit's own `package_dependency` edges. Woods reports the boundary; enforcement stays with `packwerk check` / `pks check`. |
 
 Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.md`.
 
+#### Sections, their stat keys, and which are capped
+
+Section names are plural, stat keys are singular. Do not derive one from the
+other: `bridges` has no stat key at all, and `hub_count` counts the array as
+persisted rather than every hub in the graph.
+
+| Section in `graph_analysis.json` | Stat key | Capped in the artifact | What the stat counts |
+|---|---|---|---|
+| `orphans` | `stats.orphan_count` | no | every orphan |
+| `dead_ends` | `stats.dead_end_count` | no | every dead end |
+| `hubs` | `stats.hub_count` | yes, top 20 by dependent count | the persisted array, so it stops at 20 |
+| `cycles` | `stats.cycle_count` | no | every cycle found |
+| `bridges` | none | yes, top 10 by score | not counted |
+| `cross_database_edges` | `stats.cross_database_edge_count` | no | every crossing edge |
+| `volatile_dependencies` | `stats.volatile_dependency_count`, `stats.volatile_dependencies_limit` | yes, top 20 by the dependency's PageRank | the count is every qualifying edge; the limit is the cap |
+| `undeclared_package_edges` | `stats.undeclared_package_edge_count` | no | every undeclared crossing |
+
+A capped section means the array on disk is a page, not the population. Only
+`volatile_dependencies` publishes both numbers, so it is the only one where a
+reader can tell truncation from a short list without re-running the analysis.
+The `graph_analysis` MCP tool pages each section independently when given
+`limit` or `offset`, and its `Showing N of M (truncated)` line counts the array
+it read from disk, not the population the stat keys count.
+
 ---
 
-## How Does Retrieval Work?
+## How does retrieval work?
 
 Retrieval is a four-stage pipeline coordinated by `Retriever`:
 
@@ -187,7 +214,7 @@ Retrieval is a four-stage pipeline coordinated by `Retriever`:
 Query → [Classify] → [Execute] → [Rank] → [Assemble] → Context string
 ```
 
-### Stage 1: Query Classification (`QueryClassifier`)
+### Stage 1: Query classification (`QueryClassifier`)
 
 Classifies the query to determine:
 - **Intent**: lookup, explanation, tracing, search, framework
@@ -196,7 +223,7 @@ Classifies the query to determine:
 
 Classification determines which search strategy to use and whether framework source context is relevant.
 
-### Stage 2: Search Execution (`SearchExecutor`)
+### Stage 2: Search execution (`SearchExecutor`)
 
 Executes one or more search strategies based on classification:
 
@@ -219,7 +246,7 @@ Re-ranks candidates using multiple signals with weighted combination:
 
 Uses **Reciprocal Rank Fusion (RRF)** to merge ranked lists from multiple search strategies without score normalization.
 
-### Stage 4: Context Assembly (`ContextAssembler`)
+### Stage 4: Context assembly (`ContextAssembler`)
 
 Allocates token budget across layers:
 
@@ -235,7 +262,7 @@ Units that exceed the budget are truncated to their first semantic chunk. The as
 
 ---
 
-## What Storage Backends Are Available?
+## What storage backends are available?
 
 Woods uses three independent store abstractions:
 
@@ -247,7 +274,7 @@ Woods uses three independent store abstractions:
 
 The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax, no backend-specific SQL is written into the core.
 
-### Configuration Presets
+### Configuration presets
 
 ```ruby
 # Local development (SQLite + in-memory vector, single process)
@@ -292,11 +319,11 @@ end
 
 ---
 
-## Why Are There Two MCP Servers?
+## Why are there two MCP servers?
 
 The two servers have fundamentally different runtime requirements:
 
-### Index Server (`woods-mcp`)
+### Index server (`woods-mcp`)
 
 **29 schemas; 14 register in the packaged default. Two resources and two templates. Reads pre-extracted JSON without booting Rails.**
 
@@ -318,7 +345,7 @@ Note: pipeline management and feedback collection require specialized builder co
 
 The Index Server is safe to run anywhere, it has no database connection and makes no writes to the Rails application.
 
-### Console Server (`woods-console-mcp`)
+### Console server (`woods-console-mcp`)
 
 **31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process, no separate bridge process.**
 
@@ -335,7 +362,7 @@ Use the Console Server for:
 
 All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback, this is intentional defense-in-depth. See [MCP_SERVERS.md](MCP_SERVERS.md#console-server) for the full tool inventory and tier breakdown.
 
-### Which Should I Use?
+### Which should I use?
 
 | Task | Server |
 |------|--------|
@@ -349,11 +376,11 @@ All Console Server queries run inside a **rolled-back transaction** (`SafeContex
 
 ---
 
-## How Does Semantic Chunking Work?
+## How does semantic chunking work?
 
 Large units are split into semantic chunks before embedding. The `SemanticChunker` is type-aware, it doesn't split on arbitrary token counts.
 
-### Model Chunking
+### Model chunking
 
 Models are split into purpose-specific sections:
 
@@ -368,7 +395,7 @@ methods, remaining public and private methods
 
 Each chunk includes a header with the unit's identifier, type, and file path so it's self-contained when retrieved without the parent.
 
-### Controller Chunking
+### Controller chunking
 
 Controllers chunk per-action:
 
@@ -383,6 +410,6 @@ This matches how queries actually come in: "how does the create action work?" re
 
 Units below 200 estimated tokens stay as a single `:whole` chunk. Above that, the semantic chunker applies type-specific splitting, with a line-based fallback for units that are still too large. The fallback's per-chunk limits are not fixed constants, they derive from the embedding provider's input budget (`max_chars` from `max_input_tokens` scaled by the provider's chars-per-token ratio, or an exact `max_tokens` when a tokenizer is available), so a provider with a larger context yields larger chunk ceilings.
 
-### Why Not Just Split by Token Count?
+### Why not just split by token count?
 
 Token-count splits break semantic units arbitrarily, an `associations` section split mid-way loses context. Semantic splits align with how the code is actually understood: "tell me about the associations" maps to the associations chunk, not to arbitrary line ranges 150–300.

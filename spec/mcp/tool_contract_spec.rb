@@ -43,7 +43,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                    'identifier' => string_contract(1, 10_000),
                                    'depth' => integer_contract(0, 20),
                                    'types' => array_contract(1_000, 10_000),
-                                   'via' => union_contract
+                                   'via' => union_contract,
+                                   'limit' => integer_contract(1, 1_000),
+                                   'offset' => integer_contract(0, 1_000_000)
                                  }),
       'dependents' => contract(:always, { 'identifier' => 'Post' }, exact_data({
                                                                                  'root' => 'Post', 'found' => true,
@@ -61,7 +63,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                  'identifier' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20),
                                  'types' => array_contract(1_000, 10_000),
-                                 'via' => union_contract
+                                 'via' => union_contract,
+                                 'limit' => integer_contract(1, 1_000),
+                                 'offset' => integer_contract(0, 1_000_000)
                                }),
       'domain_clusters' => contract(:always, {}, exact_data({
                                                               'clusters' => [{ 'name' => 'Billing', 'member_count' => 2,
@@ -86,14 +90,13 @@ RSpec.describe 'Index MCP tool contracts' do
                               }),
       'graph_analysis' => contract(:always, { 'analysis' => 'orphans' }, exact_data({
                                                                                       'orphans' => ['PostsController'],
-                                                                                      'stats' => {
-                                                                                        'orphan_count' => 1, 'dead_end_count' => 1,
-                                                                                        'hub_count' => 3, 'cycle_count' => 0
-                                                                                      }
+                                                                                      'stats' => expected_graph_stats
                                                                                     }),
                                    properties: {
                                      'analysis' => enum_contract(
-                                       %w[orphans dead_ends hubs cycles bridges all], nil, 10_000
+                                       %w[orphans dead_ends hubs cycles bridges
+                                          cross_database_edges volatile_dependencies
+                                          undeclared_package_edges all], nil, 10_000
                                      ),
                                      'limit' => integer_contract(1, 1_000),
                                      'offset' => integer_contract(0, 1_000_000)
@@ -466,7 +469,11 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def expected_graph_stats
-    { 'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0 }
+    {
+      'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0,
+      'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1,
+      'volatile_dependencies_limit' => 20, 'undeclared_package_edge_count' => 2
+    }
   end
 
   def expected_graph_analysis
@@ -479,8 +486,39 @@ RSpec.describe 'Index MCP tool contracts' do
         { 'identifier' => 'Comment', 'type' => 'model', 'dependent_count' => 0, 'dependents' => [] },
         { 'identifier' => 'PostsController', 'type' => 'controller', 'dependent_count' => 0, 'dependents' => [] }
       ],
-      'cycles' => [], 'bridges' => [], 'stats' => expected_graph_stats
+      'cycles' => [], 'bridges' => [],
+      'cross_database_edges' => expected_cross_database_edges,
+      'volatile_dependencies' => expected_volatile_dependencies,
+      'undeclared_package_edges' => expected_undeclared_package_edges,
+      'stats' => expected_graph_stats
     }
+  end
+
+  def expected_cross_database_edges
+    [
+      { 'from' => 'Comment', 'to' => 'Post', 'via' => 'belongs_to', 'from_db' => 'analytics',
+        'to_db' => 'primary', 'through' => nil, 'through_db' => nil, 'disable_joins' => false,
+        'kind' => 'association_across_databases' },
+      { 'from' => 'Invoice', 'via' => 'foreign_key', 'from_db' => 'billing', 'through' => nil,
+        'through_db' => nil, 'disable_joins' => false, 'kind' => 'foreign_key_across_databases',
+        'to' => nil, 'to_db' => nil, 'ambiguous_owners' => %w[Account LegacyAccount] }
+    ]
+  end
+
+  def expected_volatile_dependencies
+    [
+      { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'Post', 'to_type' => 'model',
+        'via' => 'code_reference', 'from_commits' => 2, 'to_commits' => 9, 'ratio' => 4.5, 'pagerank' => 0.4 }
+    ]
+  end
+
+  def expected_undeclared_package_edges
+    [
+      { 'from' => 'PostsController', 'from_type' => 'controller', 'to' => 'BillingService', 'to_type' => 'service',
+        'via' => 'code_reference', 'from_package' => 'checkout', 'to_package' => 'billing' },
+      { 'from' => 'Comment', 'from_type' => 'model', 'to' => 'AdminPanel', 'to_type' => 'controller',
+        'via' => 'belongs_to', 'from_package' => '.', 'to_package' => 'admin' }
+    ]
   end
 
   def expected_summary
@@ -687,7 +725,11 @@ RSpec.describe 'Index MCP tool contracts' do
   def boundary_assertions
     {
       %w[dependencies depth] => :assert_dependencies_depth,
+      %w[dependencies limit] => :assert_traversal_limit,
+      %w[dependencies offset] => :assert_traversal_offset,
       %w[dependents depth] => :assert_dependents_depth,
+      %w[dependents limit] => :assert_traversal_limit,
+      %w[dependents offset] => :assert_traversal_offset,
       %w[graph_analysis offset] => :assert_graph_offset,
       %w[pagerank limit] => :assert_limited_results,
       %w[recent_changes limit] => :assert_limited_results,
@@ -707,6 +749,24 @@ RSpec.describe 'Index MCP tool contracts' do
     expected = value.zero? ? ['Post'] : %w[Post Comment PostsController]
     expect(data.fetch('nodes').keys).to eq(expected)
     expect(data.dig('nodes', 'Post', 'deps')).to eq(value.zero? ? [] : %w[Comment PostsController])
+  end
+
+  # `nodes_total` marks any partial answer; `nodes_truncated` marks one with
+  # more behind it. A last page carries the first and not the second.
+  def assert_traversal_limit(data, value, name)
+    full = contract_oracle.fetch(name).dig(:result, :data)
+    nodes = full.fetch('nodes')
+    expected = full.merge('nodes' => nodes.first(value).to_h)
+    expected = expected.merge('nodes_total' => nodes.size, 'nodes_truncated' => true) if nodes.size > value
+    expect(data).to eq(expected)
+  end
+
+  def assert_traversal_offset(data, value, name)
+    full = contract_oracle.fetch(name).dig(:result, :data)
+    nodes = full.fetch('nodes')
+    expected = full.merge('nodes' => nodes.to_a.drop(value).to_h)
+    expected = expected.merge('nodes_total' => nodes.size, 'nodes_offset' => value) if value.positive?
+    expect(data).to eq(expected)
   end
 
   def assert_graph_offset(data, value, _name)

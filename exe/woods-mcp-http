@@ -12,6 +12,13 @@
 # Requires a Rack-compatible server (e.g., puma). Uses `rackup` when available
 # and falls back to Rack 2's bundled handler registry for older Rails hosts.
 
+# A wrapper can exec this file directly, bypassing RubyGems' generated launcher.
+# Activate this installed gem before optional requires select dependency versions.
+# Source checkouts continue to use their calling bundle.
+Gem::Specification.find_all_by_name('woods').find do |spec|
+  File.realpath(spec.full_gem_path) == File.realpath(File.expand_path('..', __dir__))
+end&.activate
+
 # Suppress json-schema MultiJSON deprecation before any require chain that
 # could transitively load json-schema. See exe/woods-mcp for the full rationale.
 begin

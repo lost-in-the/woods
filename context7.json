@@ -9,7 +9,7 @@
   ],
   "rules": [
     "Install: add `gem 'woods', group: :development` to Gemfile, run `bundle install`, then `rails generate woods:install` to create the initializer.",
-    "Extract: `bundle exec rake woods:extract` boots Rails and runs all 34 extractors. Docker: `docker compose exec app bundle exec rake woods:extract`.",
+    "Extract: `bundle exec rake woods:extract` boots Rails and runs all 35 extractors. Docker: `docker compose exec app bundle exec rake woods:extract`.",
     "MCP Index Server: add to .mcp.json: {\"mcpServers\": {\"woods\": {\"command\": \"woods-mcp-start\", \"args\": [\"./tmp/woods\"]}}}. No Rails boot needed.",
     "Look up any unit: MCP tool `lookup` with `identifier` and `include_source: true`. Returns source with inlined concerns, schema header, callbacks.",
     "List callbacks: MCP tool `lookup` returns `metadata.callbacks` array with type, filter, kind, conditions, and side_effects in execution order.",

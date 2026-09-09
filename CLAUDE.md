@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. All major layers are complete: extraction (34 extractors + 7 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (35 extractors + 7 helpers), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
 
 ## Commands
 
@@ -125,9 +125,6 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - **`woods-testbed` `rails-8.0`**: default. Day-to-day Rails 8 validation. Fast, small, self-contained.
 - **`woods-testbed` `rails-7.2`**: when a change could plausibly behave differently on Rails 7 (Zeitwerk load paths, callback-chain internals, `eager_load!` error paths).
 - **`woods-testbed` `rails-6.0`**: the supported floor (`railties >= 6.0`, #135). Use when a change touches 6.0/6.1-era APIs (e.g. `connection_db_config`, `has_many_inversing` guards) or to validate the lowest end of the matrix. Boots on Ruby 3.0.
-- **`~/work/test_app`** (local-only host), when a change needs a committed integration spec, or maps cleanly to `spec/integration/` fixtures. No Docker, runs on Rails 8.1.
-- **A production-shaped MySQL host app** (local-only, see `.claude/rules/integration-testing.md`), only when a problem demands a large real codebase: namespace collisions, large callback chains, non-standard service directories, many-model PageRank behaviour.
-
 **Gotchas:**
 - `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
 - Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
@@ -136,7 +133,7 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - For the same reason, `woods:incremental` in a container exits 1 at changed-file-set resolution (a *git range* error) before ever reaching `prepare_incremental_run` — an exit-code-only probe of the incremental baseline guard is a false green. Supply `CHANGED_FILES=<paths>` so the run reaches the guard.
 - When byte-diffing unit JSON between two extractions, establish a full-vs-full control first: controllers with inline proc filters differ between any two processes (`Proc#inspect` embeds a memory address in the filter-chain annotation, B-167). Only differences beyond that control set are real divergence.
 
-See `.claude/rules/integration-testing.md` for the full host-app reference (it is local-only and gitignored; it names the local hosts).
+Keep host-specific paths, credentials, and session notes outside the repository. Use the companion testbed for reproducible runtime validation.
 
 ## Architecture
 
@@ -152,6 +149,7 @@ lib/
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
+│   ├── published_index.rb              # Read-only reader over one published generation (RuboCop cops, gate scripts)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator (strategy dispatch + type-rank reporting)
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
@@ -162,7 +160,7 @@ lib/
 │   ├── atomic_file.rb                   # Crash-safe temp+fsync+rename file writes (shared)
 │   ├── resolved_config.rb              # Frozen configuration snapshot
 │   ├── token_utils.rb                  # Token count estimation helpers
-│   ├── extractors/                      # 34 extractors + 7 helpers (shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting)
+│   ├── extractors/                      # 35 extractors + 7 helpers (shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -188,7 +186,9 @@ lib/
 │   ├── temporal/                        # Temporal snapshot system (SnapshotStore, diff, history)
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
-│   └── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
+│   ├── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
+│   ├── published_index/                 # PublishedIndex helpers (EdgeShaper, GenerationCatalog, TypedUnitReader)
+│   └── checks/                          # woods:check:* tasks (GenerationResolution, MovedMessages)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/
 │   └── woods.rake                       # Rake task definitions
@@ -250,7 +250,7 @@ bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb # Single file
 bundle exec rubocop -a
 ```
 
-After gem-level specs pass, validate in a host app if the change affects extraction output. See `.claude/rules/integration-testing.md` for host app validation workflow.
+After gem-level specs pass, validate in the companion testbed if the change affects extraction output.
 
 ## Documentation
 
@@ -265,23 +265,11 @@ Key references:
 
 See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking items, implementing with TDD, marking resolved, and adding new work.
 
-## Session Continuity
+## Release Flow
 
-At the end of a session, update `.claude/context/session-state.md` with breadcrumbs:
+`main` carries `X.Y.Z.alpha` between releases and never claims a released version. Never edit `lib/woods/version.rb` by hand, never hand-edit a `release-state` fence, and put changelog entries under `## [Unreleased]` only. One command per transition: `bin/rake "release:prepare[<version>]"` and `bin/rake "release:reopen[<next>.alpha]"`. Tagging and publication are maintainer steps; nothing is published from a laptop.
 
-- Which backlog items were touched (resolved or in-progress)
-- Which files were modified
-- Any gotchas discovered during the session
-
-At the start of a session, read `.claude/context/session-state.md` for context from the previous session.
-
-> **Local-only files.** `.claude/context/session-state.md` and
-> `.claude/rules/integration-testing.md` are intentionally gitignored
-> (see `.gitignore`), they're session-local and host-local notes, not
-> shared conventions. If either file is missing in a fresh clone, create
-> it (templates live in `.claude/skills/backlog-workflow/SKILL.md`'s
-> references and this section). `.claude/skills/backlog-workflow/SKILL.md`
-> is tracked, the workflow itself is shared.
+See `.claude/skills/release-flow/SKILL.md` for the states, the refusals, and what to report, and the release flow section of `CONTRIBUTING.md` for the user-facing runbook.
 
 ## Gotchas
 
@@ -323,7 +311,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   7. Reconcile class-based types **again** (pruning can un-know a class the first pass skipped).
   8. Refresh `dependents`, `metadata.git`, PageRank, `graph_analysis.json`.
 - The oracle is `spec/integration/incremental_equivalence_spec.rb` (`:booted_app`). Run it before and after touching the incremental path.
-- `Extractor::WHOLE_APP_EXTRACTORS` (route, middleware, engine, scheduled_job, state_machine, factory, event, database_view) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
+- `Extractor::WHOLE_APP_EXTRACTORS` (route, middleware, engine, scheduled_job, state_machine, factory, event, database_view, rails_source, packages) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
 - Wholesale replacement prunes by `(identifier, type)`, never by bare identifier (#225). Two units sharing an identifier across types are distinct graph nodes.
 - `Extractor#refresh(*keys)` (`woods:refresh`) is the by-name counterpart to the by-trigger path. Both must call `prepare_incremental_run` first or they inherit `@dependents_dirty`/`@incremental_written`.
 - Every Woods-written JSON artifact is read through `AtomicFile.read`. A bare `File.read` tags content with the process default external encoding (US-ASCII under `LANG=C`) and raises on multibyte bytes.

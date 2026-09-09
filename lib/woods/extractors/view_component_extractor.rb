@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
@@ -25,6 +26,7 @@ module Woods
     #   card = units.find { |u| u.identifier == "CardComponent" }
     #
     class ViewComponentExtractor
+      include ComponentDiscovery
       include SharedUtilityMethods
       include SharedDependencyScanner
       include RouteHelperResolver
@@ -49,6 +51,12 @@ module Woods
       # @return [Array<Class>]
       def discoverable_classes
         return [] unless @component_base
+
+        # Same reason PhlexExtractor walks first: `descendants` cannot see a
+        # component the eager load never reached (B-184). Skipped entirely
+        # when ViewComponent::Base is undefined, since @component_base is then
+        # nil and this app has no view components to find.
+        load_component_files
 
         # Previews are filtered here rather than only in {#extract_component},
         # because this set is also the incremental path's reconciliation input.

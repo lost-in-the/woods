@@ -143,13 +143,15 @@ module Woods
             lines << ''
           end
 
-          %w[orphans dead_ends hubs cycles bridges].each do |section|
+          GRAPH_ANALYSIS_SECTIONS.each do |section|
             items = fetch_key(data, section)
             next unless items.is_a?(Array) && items.any?
 
             lines << "#{section.tr('_', ' ').upcase}:"
             items.each do |item|
-              lines << if item.is_a?(Hash)
+              lines << if item.is_a?(Hash) && item.key?('from')
+                         "  #{plain_edge_line(item)}"
+                       elsif item.is_a?(Hash)
                          "  #{item['identifier']} (#{item['type']}) - #{item['dependent_count']} dependents"
                        else
                          "  #{item}"
@@ -236,6 +238,31 @@ module Woods
 
         private
 
+        # @param item [Hash] string-keyed edge-shaped report item
+        # @return [String]
+        def plain_edge_line(item)
+          detail = item.except('from', 'to', 'via')
+                       .map { |key, value| "#{key}: #{edge_value(value)}" }.join(', ')
+          line = "#{edge_endpoint(item['from'])} -> #{edge_endpoint(item['to'])} (#{item['via']})"
+          detail.empty? ? line : "#{line}: #{detail}"
+        end
+
+        # A nil endpoint (an ambiguous foreign-key owner, for example) prints
+        # as a placeholder rather than an empty string.
+        #
+        # @param value [String, nil]
+        # @return [String]
+        def edge_endpoint(value)
+          value.nil? ? '(unresolved)' : value
+        end
+
+        # @param value [Object] a detail hash value; arrays (e.g. `ambiguous_owners`) join
+        #   as plain text instead of printing Ruby's `Array#inspect` syntax.
+        # @return [Object]
+        def edge_value(value)
+          value.is_a?(Array) ? value.join(', ') : value
+        end
+
         def render_plain_traversal(label, data)
           root = fetch_key(data, :root)
           found = data[:found] || data['found']
@@ -254,9 +281,17 @@ module Woods
           nodes.each do |id, info|
             depth = fetch_key(info, :depth) || 0
             deps = fetch_key(info, :deps, [])
+            # Set by the reader only in a graph spanning more than one database.
+            database = fetch_key(info, :database)
             indent = '  ' * (depth + 1)
-            lines << "#{indent}#{id}"
+            lines << "#{indent}#{id}#{" [#{database}]" if database}"
             deps.each { |d| lines << "#{indent}  -> #{d}" }
+          end
+
+          if fetch_key(data, :nodes_total)
+            offset = fetch_key(data, :nodes_offset, 0)
+            position = offset.positive? ? " from offset #{offset}" : ''
+            lines << "  (showing #{nodes.size} of #{fetch_key(data, :nodes_total)}#{position}; truncated)"
           end
 
           lines.join("\n").rstrip

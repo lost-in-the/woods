@@ -998,4 +998,248 @@ RSpec.describe Woods::DependencyGraph do
       expect(restored.to_h).not_to have_key(:variants)
     end
   end
+
+  describe 'node attributes' do
+    def unit_with_metadata(type:, identifier:, metadata:, dependencies: [])
+      unit = make_unit(type: type, identifier: identifier, dependencies: dependencies)
+      unit.metadata = metadata
+      unit
+    end
+
+    it 'records database, table, foreign key tables, and package from unit metadata' do
+      graph.register(unit_with_metadata(
+                       type: :model, identifier: 'Invoice',
+                       metadata: {
+                         table_name: 'invoices', database: :billing, package: 'packs/billing',
+                         foreign_keys: [{ column: 'plan_id', to_table: 'plans' },
+                                        { column: 'account_id', to_table: 'accounts' }]
+                       }
+                     ))
+
+      node = graph.to_h[:nodes]['Invoice']
+      expect(node).to include(database: 'billing', table: 'invoices', package: 'packs/billing',
+                              foreign_key_tables: %w[accounts plans])
+    end
+
+    it 'adds no attribute keys when the metadata carries none' do
+      graph.register(make_unit(type: :service, identifier: 'Checkout'))
+
+      expect(graph.to_h[:nodes]['Checkout'].keys).to contain_exactly(:type, :file_path, :namespace)
+    end
+
+    it 'records table only for model units and enforce_dependencies only for package units' do
+      graph.register(unit_with_metadata(type: :service, identifier: 'Reports',
+                                        metadata: { table_name: 'reports', enforce_dependencies: true }))
+      graph.register(unit_with_metadata(type: :package, identifier: 'packs/billing',
+                                        metadata: { enforce_dependencies: 'strict' }))
+
+      expect(graph.to_h[:nodes]['Reports'].keys).to contain_exactly(:type, :file_path, :namespace)
+      expect(graph.to_h[:nodes]['packs/billing']).to include(enforce_dependencies: 'strict')
+    end
+
+    it 'records commit_count and change_frequency from git metadata' do
+      graph.register(unit_with_metadata(type: :model, identifier: 'User',
+                                        metadata: { git: { commit_count: 12, change_frequency: :hot } }))
+
+      expect(graph.to_h[:nodes]['User']).to include(commit_count: 12, change_frequency: 'hot')
+    end
+
+    it 'round-trips node attributes through JSON' do
+      graph.register(unit_with_metadata(type: :model, identifier: 'Invoice',
+                                        metadata: { table_name: 'invoices', database: 'billing',
+                                                    git: { commit_count: 3, change_frequency: 'stable' } }))
+
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(restored.to_h[:nodes]['Invoice']).to include(
+        database: 'billing', table: 'invoices', commit_count: 3, change_frequency: 'stable'
+      )
+    end
+
+    it 'round-trips variant node attributes through JSON' do
+      view = unit_with_metadata(type: :database_view, identifier: 'reports',
+                                metadata: { database: 'analytics' })
+      factory = unit_with_metadata(type: :factory, identifier: 'reports', metadata: { package: 'packs/qa' })
+      graph.register(view)
+      graph.register(factory)
+
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(restored.node('reports', type: :database_view)).to include(database: 'analytics')
+      expect(restored.node('reports', type: :factory)).to include(package: 'packs/qa')
+    end
+
+    describe '#annotate' do
+      it 'adds attributes to an existing node' do
+        graph.register(make_unit(type: :model, identifier: 'User'))
+
+        node = graph.annotate('User', type: :model, commit_count: '12', change_frequency: :hot)
+
+        expect(node).to include(commit_count: 12, change_frequency: 'hot')
+        expect(graph.to_h[:nodes]['User']).to include(commit_count: 12, change_frequency: 'hot')
+      end
+
+      it 'removes an attribute when the value is nil' do
+        graph.register(unit_with_metadata(type: :model, identifier: 'User', metadata: { package: 'packs/a' }))
+
+        graph.annotate('User', type: :model, package: nil)
+
+        expect(graph.to_h[:nodes]['User']).not_to have_key(:package)
+      end
+
+      it 'returns nil for a node that is not registered' do
+        expect(graph.annotate('Ghost', type: :model, commit_count: 1)).to be_nil
+      end
+
+      it 'rejects an unknown attribute key' do
+        graph.register(make_unit(type: :model, identifier: 'User'))
+
+        expect { graph.annotate('User', type: :model, colour: 'red') }.to raise_error(ArgumentError, /colour/)
+      end
+    end
+  end
+
+  describe 'edge attributes' do
+    it 'keeps through and disable_joins on the edge record' do
+      graph.register(make_unit(type: :model, identifier: 'Order', dependencies: [
+                                 { type: :model, target: 'Invoice', via: :has_many, through: :subscriptions,
+                                   disable_joins: true }
+                               ]))
+
+      expect(graph.to_h[:edges]['Order']).to eq([
+                                                  { target: 'Invoice', via: :has_many, through: 'subscriptions',
+                                                    disable_joins: true }
+                                                ])
+    end
+
+    it 'omits edge attribute keys when the dependency has none' do
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [
+                                 { type: :model, target: 'User', via: :belongs_to, disable_joins: false }
+                               ]))
+
+      expect(graph.to_h[:edges]['Order']).to eq([{ target: 'User', via: :belongs_to }])
+    end
+
+    it 'round-trips edge attributes through JSON' do
+      graph.register(make_unit(type: :model, identifier: 'Order', dependencies: [
+                                 { type: :model, target: 'Invoice', via: :has_many, through: 'subscriptions',
+                                   disable_joins: true }
+                               ]))
+
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(restored.edge_records('Order')).to eq([
+                                                     { target: 'Invoice', via: :has_many, through: 'subscriptions',
+                                                       disable_joins: true }
+                                                   ])
+    end
+
+    it 'keeps through_db on the edge record' do
+      graph.register(make_unit(type: :model, identifier: 'Invoice', dependencies: [
+                                 { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                                   through_db: 'analytics' }
+                               ]))
+
+      expect(graph.to_h[:edges]['Invoice']).to eq([
+                                                    { target: 'Account', via: :has_many, through: 'subscriptions',
+                                                      through_db: 'analytics' }
+                                                  ])
+    end
+
+    it 'omits through_db when the dependency has none' do
+      graph.register(make_unit(type: :model, identifier: 'Order', dependencies: [
+                                 { type: :model, target: 'Invoice', via: :has_many, through: 'subscriptions' }
+                               ]))
+
+      expect(graph.to_h[:edges]['Order']).to eq([{ target: 'Invoice', via: :has_many, through: 'subscriptions' }])
+    end
+
+    it 'round-trips through_db through JSON' do
+      graph.register(make_unit(type: :model, identifier: 'Invoice', dependencies: [
+                                 { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                                   through_db: 'analytics' }
+                               ]))
+
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(restored.edge_records('Invoice')).to eq([
+                                                       { target: 'Account', via: :has_many,
+                                                         through: 'subscriptions', through_db: 'analytics' }
+                                                     ])
+    end
+
+    it 'returns copies from #edge_records' do
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))
+
+      graph.edge_records('Order').first[:target] = 'Mutated'
+
+      expect(graph.dependencies_of('Order')).to eq(['User'])
+    end
+  end
+
+  # ── B-180: serialization is a pure function of graph content ────────────
+  #
+  # Verified on a 7k-unit host app: edit one model, run woods:incremental,
+  # revert, run again. Every graph section was byte-identical except `reverse`
+  # and `type_index`, whose members came back in a different order because
+  # `to_h` emitted `Set#to_a`. The digest the extractor publishes as
+  # `graph_sha` therefore changed after a no-op, so a consumer caching on it
+  # redid its work.
+  describe 'serialization determinism' do
+    def determinism_units
+      [
+        make_unit(type: :model, identifier: 'User'),
+        make_unit(type: :model, identifier: 'Account',
+                  dependencies: [{ type: :model, target: 'User', via: :belongs_to }]),
+        make_unit(type: :model, identifier: 'Order',
+                  dependencies: [{ type: :model, target: 'User', via: :belongs_to },
+                                 { type: :model, target: 'Account', via: :code_reference }]),
+        make_unit(type: :service, identifier: 'Billing::Charge',
+                  dependencies: [{ type: :model, target: 'Order', via: :code_reference },
+                                 { type: :model, target: 'User', via: :code_reference }]),
+        make_unit(type: :job, identifier: 'ChargeJob',
+                  dependencies: [{ type: :service, target: 'Billing::Charge', via: :code_reference },
+                                 { type: :model, target: 'User', via: :code_reference }])
+      ]
+    end
+
+    def graph_from(units)
+      described_class.new.tap { |g| units.each { |unit| g.register(unit) } }
+    end
+
+    it 'emits the same hash for two registration orders' do
+      units = determinism_units
+
+      expect(graph_from(units).to_h).to eq(graph_from(units.reverse).to_h)
+    end
+
+    it 'emits the same JSON bytes for two registration orders' do
+      units = determinism_units
+
+      expect(JSON.generate(graph_from(units).to_h))
+        .to eq(JSON.generate(graph_from(units.reverse).to_h))
+    end
+
+    it 'sorts the members of reverse' do
+      units = determinism_units
+
+      expect(graph_from(units.reverse).to_h[:reverse]['User']).to eq(%w[Account ChargeJob Order Billing::Charge].sort)
+    end
+
+    it 'sorts the members of type_index' do
+      units = determinism_units
+
+      expect(graph_from(units.reverse).to_h[:type_index][:model]).to eq(%w[Account Order User])
+    end
+
+    it 'sorts the members of file_map' do
+      shared = '/app/models/shared.rb'
+      units = [make_unit(type: :model, identifier: 'Zebra', file_path: shared),
+               make_unit(type: :model, identifier: 'Ant', file_path: shared)]
+
+      expect(graph_from(units).to_h[:file_map][shared]).to eq(%w[Ant Zebra])
+    end
+  end
 end

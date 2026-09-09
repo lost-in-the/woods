@@ -31,7 +31,7 @@ module Woods
         engines view_templates migrations action_cable_channels
         scheduled_jobs rake_tasks state_machines events decorators
         database_views caching factories test_mappings rails_source
-        poros libs ruby_classes ruby_modules ruby_methods ruby_files
+        poros libs packages ruby_classes ruby_modules ruby_methods ruby_files
       ].freeze
 
       # Singular type name for each directory (used in search filtering).
@@ -274,6 +274,7 @@ module Woods
         @raw_graph_data = nil
         @normalized_graph_edges = nil
         @graph_node_types = nil
+        remove_instance_variable(:@multi_database_graph) if defined?(@multi_database_graph)
       end
 
       # The directory the current read resolves payload artifacts against —
@@ -1068,6 +1069,20 @@ module Woods
         end
       end
 
+      # Does the graph span more than one database?
+      #
+      # Nodes carry `database` only from Rails 6.1 on, and only for models, so
+      # an app with one database (or none recorded) answers false and the
+      # traversal shape is unchanged for it.
+      #
+      # @return [Boolean]
+      def multi_database_graph?
+        return @multi_database_graph if defined?(@multi_database_graph)
+
+        databases = (raw_graph_data['nodes'] || {}).each_value.filter_map { |node| node['database'] }
+        @multi_database_graph = databases.uniq.size > 1
+      end
+
       # @return [Array<Hash>] the graph's `variants` section, empty when the
       #   graph has no identifier shared across types (and for every graph
       #   written before the section existed)
@@ -1274,6 +1289,9 @@ module Woods
           # unchanged for every node in an index with no shared identifiers.
           node_types = graph_node_types[current] || []
           entry[:types] = node_types if node_types.size > 1
+          # Likewise: a single-database app learns nothing from a column that
+          # answers the same thing on every row (B-183).
+          entry[:database] = node_meta&.dig('database') if multi_database_graph?
           result_nodes[current] = entry
 
           next unless will_expand

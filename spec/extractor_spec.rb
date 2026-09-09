@@ -2277,6 +2277,64 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── graph_sha stability ─────────────────────────────────────────────
+
+  describe 'graph_sha' do
+    def graph_sha_for(units)
+      dir = Dir.mktmpdir('woods_graph_sha')
+      (@sha_dirs ||= []) << dir
+      graph = Woods::DependencyGraph.new
+      units.each { |unit| graph.register(unit) }
+
+      writer = described_class.new(output_dir: dir)
+      writer.instance_variable_set(:@dependency_graph, graph)
+      writer.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      writer.send(:write_dependency_graph)
+      writer.send(:write_graph_analysis)
+
+      JSON.parse(File.read(File.join(dir, 'graph_analysis.json')))['graph_sha']
+    end
+
+    def unit_for(type, identifier, targets)
+      unit = Woods::ExtractedUnit.new(type: type, identifier: identifier,
+                                      file_path: File.join(tmpdir, "#{identifier.underscore}.rb"))
+      unit.dependencies = targets.map { |target| { type: :model, target: target, via: :code_reference } }
+      unit
+    end
+
+    let(:units) do
+      [unit_for(:model, 'User', []),
+       unit_for(:model, 'Account', ['User']),
+       unit_for(:model, 'Order', %w[User Account]),
+       unit_for(:service, 'Billing::Charge', %w[Order User]),
+       unit_for(:job, 'ChargeJob', %w[Billing::Charge User])]
+    end
+
+    before do
+      require 'woods'
+      require 'active_support'
+      require 'active_support/core_ext/time'
+      Woods.configuration ||= Woods::Configuration.new
+    end
+
+    after do
+      (@sha_dirs || []).each { |dir| FileUtils.rm_rf(dir) }
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    # B-180: a consumer caching on graph_sha redid its work after a no-op
+    # incremental run, because the digest covered Set insertion order.
+    it 'is identical for two registration orders of the same units' do
+      expect(graph_sha_for(units)).to eq(graph_sha_for(units.reverse))
+    end
+
+    it 'still differs when the graph content differs' do
+      extra = units + [unit_for(:model, 'Invoice', ['Order'])]
+
+      expect(graph_sha_for(units)).not_to eq(graph_sha_for(extra))
+    end
+  end
+
   # ── write_graph_analysis ────────────────────────────────────────────
 
   describe '#write_graph_analysis' do
@@ -3268,6 +3326,433 @@ RSpec.describe Woods::Extractor do
       File.binwrite(File.join(type_dir, extractor.send(:collision_safe_filename, 'Foo')), payload)
 
       expect { extractor.send(:regenerate_type_index, :models) }.not_to raise_error
+    end
+  end
+
+  # ── git attributes on graph nodes (#280) ─────────────────────────────
+
+  describe '#annotate_graph_with_git_data' do
+    it 'copies commit_count and change_frequency from unit metadata onto the node' do
+      require 'woods'
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post',
+                                      file_path: File.join(tmpdir, 'app/models/post.rb'))
+      bare = Woods::ExtractedUnit.new(type: :model, identifier: 'Comment',
+                                      file_path: File.join(tmpdir, 'app/models/comment.rb'))
+      extractor.instance_variable_set(:@results, { models: [unit, bare] })
+      extractor.dependency_graph.register(unit)
+      extractor.dependency_graph.register(bare)
+      # Git enrichment lands after registration, so the metadata is set here
+      # to prove annotate copies it rather than register.
+      unit.metadata = { git: { commit_count: 14, change_frequency: :hot } }
+
+      extractor.send(:annotate_graph_with_git_data)
+
+      nodes = extractor.dependency_graph.to_h[:nodes]
+      expect(nodes['Post']).to include(commit_count: 14, change_frequency: 'hot')
+      expect(nodes['Comment'].keys).to contain_exactly(:type, :file_path, :namespace)
+    end
+  end
+
+  describe '#rewrite_unit_json_of_type git node annotation (#280)' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 'annotates the node with the git data it patched into the unit JSON' do
+      path = File.join(tmpdir, 'app/models/post.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: path)
+      extractor.dependency_graph.register(unit)
+      dir = File.join(tmpdir, 'output', 'models')
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, extractor.send(:collision_safe_filename, 'Post')),
+                 JSON.generate(identifier: 'Post', metadata: {}))
+
+      extractor.send(:rewrite_unit_json_of_type, 'Post', :model, Set.new,
+                     refresh_dependents: false,
+                     git_data: { 'app/models/post.rb' => { 'commit_count' => 7, 'change_frequency' => 'active' } })
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Post']).to include(commit_count: 7, change_frequency: 'active')
+    end
+
+    it 'leaves an existing attribute alone when the patched git data is missing that key (#280)' do
+      path = File.join(tmpdir, 'app/models/post.rb')
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: path)
+      extractor.dependency_graph.register(unit)
+      extractor.dependency_graph.annotate('Post', type: :model, commit_count: 3, change_frequency: 'warm')
+      dir = File.join(tmpdir, 'output', 'models')
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, extractor.send(:collision_safe_filename, 'Post')),
+                 JSON.generate(identifier: 'Post', metadata: {}))
+
+      # This batch's git data carries only commit_count: change_frequency is
+      # absent from the hash entirely, not present-and-nil.
+      extractor.send(:rewrite_unit_json_of_type, 'Post', :model, Set.new,
+                     refresh_dependents: false,
+                     git_data: { 'app/models/post.rb' => { 'commit_count' => 9 } })
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Post']).to include(commit_count: 9, change_frequency: 'warm')
+    end
+  end
+
+  describe '#build_graph_analyzer' do
+    it 'returns a GraphAnalyzer over the current graph' do
+      require 'woods'
+      Woods.configuration ||= Woods::Configuration.new
+
+      expect(extractor.send(:build_graph_analyzer)).to be_a(Woods::GraphAnalyzer)
+    end
+  end
+
+  # Characterization: no current caller sets metadata[:git] before registration
+  # (the incremental git second pass annotates through annotate_node_from_git).
+  # These specs pin the guarantee for a future caller that does.
+  describe '#register_and_write git node annotation (#280)' do
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it "annotates the node from the unit's own metadata[:git] when a caller has already set it" do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post',
+                                      file_path: File.join(tmpdir, 'app/models/post.rb'))
+      unit.metadata[:git] = { commit_count: 9, change_frequency: 'warm' }
+
+      extractor.send(:register_and_write, :models, [unit], Set.new)
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Post']).to include(commit_count: 9, change_frequency: 'warm')
+    end
+
+    it 'does not annotate the node when the unit carries no git metadata' do
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Comment',
+                                      file_path: File.join(tmpdir, 'app/models/comment.rb'))
+
+      extractor.send(:register_and_write, :models, [unit], Set.new)
+
+      expect(extractor.dependency_graph.to_h[:nodes]['Comment'].keys).to contain_exactly(:type, :file_path, :namespace)
+    end
+  end
+
+  describe '#build_graph_analyzer volatile ratio' do
+    it 'passes the configured ratio to the analyzer' do
+      require 'woods'
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.volatile_dependency_ratio = 4.5
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, volatile_ratio: 4.5).and_call_original
+      extractor.send(:build_graph_analyzer)
+    ensure
+      Woods.configuration = original
+    end
+  end
+
+  describe '#write_structural_summary volatile dependencies (#280)' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor)  { described_class.new(output_dir: output_dir) }
+
+    before do
+      FileUtils.mkdir_p(output_dir)
+      require 'active_support'
+      require 'active_support/core_ext/numeric/time'
+      allow(Rails).to receive(:version).and_return('8.1.0')
+      unit = Woods::ExtractedUnit.new(type: :service, identifier: 'Checkout', file_path: '/app/services/checkout.rb')
+      extractor.instance_variable_set(:@results, { services: [unit] })
+    end
+
+    it 'lists the top volatile dependencies under the dependency overview' do
+      extractor.instance_variable_set(:@graph_analysis, {
+                                        hubs: [],
+                                        volatile_dependencies: [{ from: 'Checkout', to: 'PricingRules',
+                                                                  via: 'code_reference', from_commits: 5,
+                                                                  to_commits: 30, ratio: 6.0, pagerank: 0.1 }]
+                                      })
+
+      extractor.send(:write_structural_summary)
+
+      content = File.read(File.join(output_dir, 'SUMMARY.md'))
+      expect(content).to include('- Volatile dependencies (top 1): Checkout -> PricingRules (5 vs 30 commits)')
+    end
+
+    it 'writes no volatile line when the report is empty' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], volatile_dependencies: [] })
+
+      extractor.send(:write_structural_summary)
+
+      expect(File.read(File.join(output_dir, 'SUMMARY.md'))).not_to include('Volatile dependencies')
+    end
+  end
+
+  describe 'packages whole-app wiring (#280)' do
+    it 'registers the package type, extractor, and whole-app trigger' do
+      expect(described_class::EXTRACTORS[:packages]).to eq(Woods::Extractors::PackageExtractor)
+      expect(described_class::TYPE_TO_EXTRACTOR_KEY[:package]).to eq(:packages)
+      expect(described_class::EXTRACTOR_KEY_TO_TYPES[:packages]).to eq([:package])
+      expect(described_class::WHOLE_APP_EXTRACTORS[:packages]).to eq(:package)
+    end
+
+    it 'lists packages among the index reader type directories' do
+      require 'woods/mcp/index_reader'
+
+      expect(Woods::MCP::IndexReader::TYPE_DIRS).to include('packages')
+      expect(Woods::MCP::IndexReader::TYPE_TO_DIR['package']).to eq('packages')
+    end
+  end
+
+  # ── package membership (#280) ────────────────────────────────────────
+
+  describe 'package membership' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor) { described_class.new(output_dir: output_dir) }
+
+    def write_package(dir, yaml = "enforce_dependencies: true\n")
+      path = File.join(tmpdir, dir, 'package.yml')
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, yaml)
+    end
+
+    def app_unit(type, identifier, relative_path)
+      Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: File.join(tmpdir, relative_path))
+    end
+
+    # M5: keeps the written-JSON assertions below off a long nested
+    # `File.join(..., extractor.send(:collision_safe_filename, ...))` line.
+    def unit_json_path(type_dir, identifier)
+      filename = extractor.send(:collision_safe_filename, identifier)
+      File.join(output_dir, type_dir.to_s, filename)
+    end
+
+    # M5: a small helper keeps the reannotate/change-set specs below off a
+    # long constructor call, rather than disabling the line-length cop.
+    def change_set_for(*relative_paths)
+      Woods::ChangeSet.new(paths: relative_paths, root: Pathname.new(tmpdir))
+    end
+
+    before do
+      require 'woods'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.mkdir_p(output_dir)
+    end
+
+    after { Woods.configuration = @original_config }
+
+    describe '#annotate_packages (full path)' do
+      it 'sets metadata[:package] from the longest matching package root and leaves the rest untouched' do
+        write_package('.')
+        write_package('packs/billing')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        user = app_unit(:model, 'User', 'app/models/user.rb')
+        gem_unit = Woods::ExtractedUnit.new(type: :rails_source, identifier: 'rails/x', file_path: '/gems/x.rb')
+        extractor.instance_variable_set(:@results, { models: [invoice, user], rails_source: [gem_unit] })
+
+        extractor.send(:annotate_packages)
+
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+        expect(user.metadata[:package]).to eq('.')
+        expect(gem_unit.metadata).not_to have_key(:package)
+      end
+
+      it 'adds no key at all when the app has no packages' do
+        user = app_unit(:model, 'User', 'app/models/user.rb')
+        extractor.instance_variable_set(:@results, { models: [user] })
+
+        extractor.send(:annotate_packages)
+
+        expect(user.metadata).not_to have_key(:package)
+      end
+    end
+
+    describe '#annotate_package' do
+      it 'resolves membership from an absolute file_path (the full-extraction and register_and_write shape)' do
+        write_package('packs/billing')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+
+        expect(extractor.send(:annotate_package, invoice)).to eq('packs/billing')
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+      end
+
+      it 'resolves membership from a Rails.root-relative file_path (the persisted-unit-JSON shape)' do
+        write_package('packs/billing')
+        invoice = Woods::ExtractedUnit.new(
+          type: :model, identifier: 'Invoice', file_path: 'packs/billing/app/models/invoice.rb'
+        )
+
+        expect(extractor.send(:annotate_package, invoice)).to eq('packs/billing')
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+      end
+    end
+
+    describe '#register_and_write (incremental path)' do
+      it 'annotates the unit and its node before writing' do
+        write_package('packs/billing')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+
+        extractor.send(:register_and_write, :models, [invoice], Set.new)
+
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+        written = JSON.parse(File.read(unit_json_path(:models, 'Invoice')))
+        expect(written['metadata']['package']).to eq('packs/billing')
+      end
+    end
+
+    describe '#reannotate_packages' do
+      def write_unit_json(type_dir, identifier, relative_path, metadata)
+        dir = File.join(output_dir, type_dir.to_s)
+        FileUtils.mkdir_p(dir)
+        File.write(File.join(dir, extractor.send(:collision_safe_filename, identifier)),
+                   JSON.generate(type: type_dir.to_s.singularize, identifier: identifier,
+                                 file_path: relative_path, metadata: metadata))
+      end
+
+      it 'rewrites every unit whose package changed and annotates its node when a package file changed' do
+        write_package('packs/billing')
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+        stale = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        stale.metadata = { package: 'packs/old' }
+        unchanged = app_unit(:model, 'User', 'app/models/user.rb')
+        extractor.dependency_graph.register(stale)
+        extractor.dependency_graph.register(unchanged)
+        write_unit_json(:models, 'Invoice', 'packs/billing/app/models/invoice.rb', { 'package' => 'packs/old' })
+        write_unit_json(:models, 'User', 'app/models/user.rb', {})
+        # A flow document under the non-per-type PAYLOAD_DIRS directory, with a
+        # file_path that would resolve to a package if it were mistaken for a
+        # unit file. Never touched: it's not walked at all (Minor, review
+        # round 2).
+        flow_path = File.join(output_dir, 'flows', 'checkout.json')
+        FileUtils.mkdir_p(File.dirname(flow_path))
+        flow_json = JSON.generate(
+          identifier: 'CheckoutFlow',
+          file_path: 'packs/billing/app/controllers/checkout_controller.rb',
+          metadata: {}
+        )
+        File.write(flow_path, flow_json)
+        change_set = change_set_for('packs/billing/package.yml')
+        affected = Set.new
+
+        touched = extractor.send(:reannotate_packages, change_set, affected)
+
+        expect(touched).to eq(Set.new(['Invoice']))
+        expect(affected).to eq(Set.new([:models]))
+        rewritten = JSON.parse(File.read(unit_json_path(:models, 'Invoice')))
+        expect(rewritten['metadata']['package']).to eq('packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['User']).not_to have_key(:package)
+        expect(File.read(flow_path)).to eq(flow_json)
+      end
+
+      it 'does nothing when no package file is in the change set' do
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+        change_set = change_set_for('app/models/user.rb')
+
+        expect(extractor.send(:reannotate_packages, change_set, Set.new)).to eq(Set.new)
+      end
+    end
+
+    describe 'package_resolver reset across full and incremental runs (rulings 2026-09-09)' do
+      # Mirrors #prepare_incremental_run's own reset lines: @package_resolver
+      # alone is not enough, its memoized PackageExtractor instance is cached
+      # in @incremental_extractors (via #extractor_for) and must go too, or a
+      # "later" run in this spec would resolve through a PackageExtractor
+      # that glob'd package.yml files before this phase's disk changes.
+      def reset_incremental_run!
+        extractor.instance_variable_set(:@package_resolver, nil)
+        extractor.instance_variable_set(:@incremental_extractors, nil)
+      end
+
+      it 'reflects the current package set on every run, never a memoized one from an earlier run' do
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(output_dir))
+
+        # ── "full run": only the root package exists. extract_all resets
+        # @package_resolver before calling annotate_packages. ──
+        write_package('.')
+        invoice = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        extractor.instance_variable_set(:@results, { models: [invoice] })
+        extractor.instance_variable_set(:@package_resolver, nil)
+        extractor.send(:annotate_packages)
+        extractor.dependency_graph.register(invoice)
+        expect(invoice.metadata[:package]).to eq('.')
+
+        # ── incremental: a package is added under Invoice. A stale
+        # memoized resolver (not reset) would still report root membership. ──
+        write_package('packs/billing')
+        reset_incremental_run!
+        extractor.send(:register_and_write, :models, [invoice], Set.new)
+        expect(invoice.metadata[:package]).to eq('packs/billing')
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+
+        # ── incremental: the last package is removed. ──
+        FileUtils.rm_f(File.join(tmpdir, 'packs/billing/package.yml'))
+        FileUtils.rm_f(File.join(tmpdir, 'package.yml'))
+        reset_incremental_run!
+        invoice_after_removal = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        extractor.send(:register_and_write, :models, [invoice_after_removal], Set.new)
+        expect(invoice_after_removal.metadata).not_to have_key(:package)
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).not_to have_key(:package)
+
+        # ── incremental: packwerk.yml narrows package_paths to a different
+        # tree, so Invoice's old root no longer counts even though its
+        # package.yml is restored, while the newly-configured root does. ──
+        write_package('packs/billing')
+        File.write(File.join(tmpdir, 'packwerk.yml'), "package_paths:\n  - packs/other/*\n")
+        write_package('packs/other/thing')
+        reset_incremental_run!
+        invoice_after_config_change = app_unit(:model, 'Invoice', 'packs/billing/app/models/invoice.rb')
+        other = app_unit(:model, 'Thing', 'packs/other/thing/app/models/thing.rb')
+        extractor.send(:register_and_write, :models, [invoice_after_config_change, other], Set.new)
+        expect(invoice_after_config_change.metadata).not_to have_key(:package)
+        expect(other.metadata[:package]).to eq('packs/other/thing')
+      end
+    end
+
+    describe '#extract_all rebuilds the package resolver on every full run (review round 2, Critical)' do
+      let(:fake_models_class) do
+        path = File.join(tmpdir, 'packs/billing/app/models/invoice.rb')
+        unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Invoice', file_path: path)
+        Class.new { define_method(:extract_all) { [unit] } }
+      end
+
+      let(:fake_empty_class) do
+        Class.new do
+          def extract_all
+            []
+          end
+        end
+      end
+
+      before do
+        require 'active_support'
+        require 'active_support/isolated_execution_state'
+        require 'active_support/core_ext/time'
+        require 'active_support/core_ext/string/inflections'
+        Woods.configuration.concurrent_extraction = false
+        allow(Time).to receive(:current).and_return(Time.now)
+        allow(Rails).to receive(:version).and_return('8.0.0')
+        allow(extractor).to receive(:safe_eager_load!)
+        allow(extractor).to receive(:git_available?).and_return(false)
+        stub_const('Woods::Extractor::EXTRACTORS',
+                   { models: fake_models_class, rails_source: fake_empty_class,
+                     packages: Woods::Extractors::PackageExtractor })
+      end
+
+      it 'annotates a package created between two full runs on the same instance, not the first run\'s stale set' do
+        extractor.extract_all
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).not_to have_key(:package)
+
+        write_package('packs/billing')
+        extractor.extract_all
+
+        expect(extractor.dependency_graph.to_h[:nodes]['Invoice']).to include(package: 'packs/billing')
+      end
     end
   end
 end

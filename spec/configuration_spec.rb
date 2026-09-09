@@ -367,4 +367,24 @@ RSpec.describe Woods::Configuration do
       end.not_to raise_error
     end
   end
+
+  describe '#volatile_dependency_ratio' do
+    it 'defaults to 3.0' do
+      expect(described_class.new.volatile_dependency_ratio).to eq(3.0)
+    end
+
+    it 'accepts a number greater than 1 and stores it as a Float' do
+      config = described_class.new
+      config.volatile_dependency_ratio = 2
+
+      expect(config.volatile_dependency_ratio).to eq(2.0)
+    end
+
+    it 'rejects a ratio at or below 1 and non-numeric values' do
+      config = described_class.new
+
+      expect { config.volatile_dependency_ratio = 1 }.to raise_error(Woods::ConfigurationError, /greater than 1/)
+      expect { config.volatile_dependency_ratio = 'high' }.to raise_error(Woods::ConfigurationError, /greater than 1/)
+    end
+  end
 end

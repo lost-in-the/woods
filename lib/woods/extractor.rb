@@ -48,6 +48,7 @@ require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
 require_relative 'extractors/poro_extractor'
 require_relative 'extractors/lib_extractor'
+require_relative 'extractors/package_extractor'
 require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
@@ -132,7 +133,8 @@ module Woods
       test_mappings: Extractors::TestMappingExtractor,
       rails_source: Extractors::RailsSourceExtractor,
       poros: Extractors::PoroExtractor,
-      libs: Extractors::LibExtractor
+      libs: Extractors::LibExtractor,
+      packages: Extractors::PackageExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -184,7 +186,8 @@ module Woods
       # types are not all mapped.
       gem_source: :rails_source,
       poro: :poros,
-      lib: :libs
+      lib: :libs,
+      package: :packages
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -318,7 +321,12 @@ module Woods
       # {EXTRACTOR_KEY_TO_TYPES} (which wholesale replacement consults) lists
       # both. Participation is gated by `include_framework_sources` — see
       # {#skip_by_configuration?}.
-      rails_source: :rails_source
+      rails_source: :rails_source,
+      # A package root decides which package every other unit belongs to,
+      # and the undeclared-edge report reads the whole declared set, so any
+      # package.yml change re-runs the extractor wholesale (#280). Task 8
+      # re-annotates unit membership in the same run.
+      packages: :package
     }.freeze
 
     # Extractors whose output embeds the route table, and which therefore go
@@ -388,6 +396,14 @@ module Woods
     def extract_all
       setup_output_directory
       ModelNameCache.reset!
+      # @package_resolver alone is not enough: #package_resolver builds
+      # through #extractor_for, which memoizes into @incremental_extractors.
+      # Without this reset, a second full run on the same instance would
+      # resolve membership through the first run's PackageExtractor and its
+      # already-memoized (now stale) package_files/package_roots, missing a
+      # package added between the two runs.
+      @package_resolver = nil
+      @incremental_extractors = nil
       begin_payload!
 
       # Eager load once — all extractors need loaded classes for introspection.
@@ -404,6 +420,10 @@ module Woods
       Rails.logger.info '[Woods] Deduplicating results...'
       deduplicate_results
 
+      # Phase 1.6: Package membership. Runs before the graph is rebuilt so
+      # registration copies metadata[:package] onto the node (#280).
+      annotate_packages
+
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
       # `#remove`/`#unregister`, so surgical removal is now possible — but a
       # full extraction has just registered every unit including duplicates,
@@ -416,13 +436,15 @@ module Woods
       Rails.logger.info '[Woods] Resolving dependents...'
       resolve_dependents
 
-      # Phase 3: Graph analysis (PageRank, structural metrics)
-      Rails.logger.info '[Woods] Analyzing dependency graph...'
-      @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
-
-      # Phase 4: Enrich with git data
+      # Phase 3: Enrich with git data. Runs BEFORE analysis now: the
+      # volatile_dependencies report reads commit counts off graph nodes.
       Rails.logger.info '[Woods] Enriching with git data...'
       enrich_with_git_data
+      annotate_graph_with_git_data
+
+      # Phase 4: Graph analysis (PageRank, structural metrics)
+      Rails.logger.info '[Woods] Analyzing dependency graph...'
+      @graph_analysis = build_graph_analyzer.analyze
 
       # Phase 4.5: Normalize file_path to relative paths
       Rails.logger.info '[Woods] Normalizing file paths...'
@@ -517,6 +539,7 @@ module Woods
 
       touched.merge(reconcile_class_based_types(affected_types))
       touched.merge(rerun_whole_app_extractors(change_set, affected_types))
+      touched.merge(reannotate_packages(change_set, affected_types))
       pruned = prune_vanished_units(change_set, affected_types)
       touched.merge(pruned)
 
@@ -654,6 +677,7 @@ module Woods
       @incremental_written = {}
       @incremental_extractors = nil
       @active_record_names = nil
+      @package_resolver = nil
     end
 
     # Write the graph and the derived artifacts after an incremental run.
@@ -931,7 +955,7 @@ module Woods
     # @return [void]
     # @raise [StandardError] whatever GraphAnalyzer or the write raised
     def write_incremental_graph_analysis
-      @graph_analysis = GraphAnalyzer.new(@dependency_graph).analyze
+      @graph_analysis = build_graph_analyzer.analyze
       write_graph_analysis
     rescue StandardError => e
       Rails.logger.error "[Woods] Incremental graph analysis failed: #{e.message}"
@@ -1498,6 +1522,146 @@ module Woods
       end
     end
 
+    # Copy git facts onto graph nodes so the analyzer can read them without
+    # the units (an incremental run never holds every unit in memory).
+    #
+    # @return [void]
+    # build_file_metadata always emits commit_count and change_frequency together
+    # and non-nil, so no nil compaction is needed here (contrast annotate_node_from_git).
+    def annotate_graph_with_git_data
+      @results.each_value do |units|
+        units.each do |unit|
+          git = unit.metadata[:git]
+          next unless git.is_a?(Hash)
+
+          @dependency_graph.annotate(
+            unit.identifier,
+            type: unit.type,
+            commit_count: git[:commit_count],
+            change_frequency: git[:change_frequency]
+          )
+        end
+      end
+    end
+
+    # The one constructor for the analyzer both extraction paths use.
+    # `Woods.configuration` can be nil in specs that reset it; fall back to
+    # the analyzer's own default rather than raising mid-run.
+    #
+    # @return [GraphAnalyzer]
+    def build_graph_analyzer
+      ratio = Woods.configuration&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
+      GraphAnalyzer.new(@dependency_graph, volatile_ratio: ratio)
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Package membership (#280)
+    # ──────────────────────────────────────────────────────────────────────
+
+    # The package extractor instance this run resolves membership through.
+    # Always built through {#extractor_for}, never `@extractors[:packages]`
+    # (the instance Phase 1 used to extract package units): reading that one
+    # would tie package-membership lookups to whichever instance happened to
+    # run first, instead of to this run's own memoized, on-demand build.
+    # Reset at the start of every run (both {#extract_all} and
+    # {#prepare_incremental_run}), so a later run never resolves membership
+    # against a prior run's package set.
+    #
+    # @return [Extractors::PackageExtractor]
+    def package_resolver
+      @package_resolver ||= extractor_for(:packages) || Extractors::PackageExtractor.new
+    end
+
+    # Set or clear metadata[:package] on one unit. Framework units and
+    # units with no path are never members. The key is deleted rather than
+    # set to nil so a unit outside every package serializes as before.
+    #
+    # `unit.file_path` may be absolute (the full path, before Phase 4.5
+    # relativization, and {#register_and_write}'s incremental path, before
+    # its own normalization) or Rails.root-relative (unit JSON already on
+    # disk); {Extractors::PackageExtractor#package_for} accepts either.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [String, nil] the package name
+    def annotate_package(unit)
+      return nil if %i[rails_source gem_source].include?(unit.type) || unit.file_path.nil?
+
+      package = package_resolver.package_for(unit.file_path)
+      if package
+        unit.metadata[:package] = package
+      else
+        unit.metadata.delete(:package)
+      end
+      package
+    end
+
+    # Full-path pass over every extracted unit. Skipped entirely when the
+    # app declares no packages, so a non-Packwerk app's output is unchanged
+    # (I5): no work, and no `package` key on any unit or node.
+    #
+    # @return [void]
+    def annotate_packages
+      return if package_resolver.package_roots.empty?
+
+      @results.each_value { |units| units.each { |unit| annotate_package(unit) } }
+    end
+
+    # Incremental counterpart: when a package file changed, membership of
+    # units this run never touched may have changed too (a new package
+    # root, a renamed package). Walk the payload's unit JSON, rewrite the
+    # ones whose package differs, and annotate their nodes. Bounded to runs
+    # where a package trigger fired, which is rare; every other run pays
+    # nothing.
+    #
+    # @param change_set [ChangeSet]
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers rewritten
+    def reannotate_packages(change_set, affected_types)
+      keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
+      return Set.new unless keys.include?(:packages)
+
+      Dir[payload_dir.join('*', '*.json').to_s].each_with_object(Set.new) do |file, touched|
+        next if File.basename(file) == '_index.json'
+
+        type_dir = File.basename(File.dirname(file))
+        next if type_dir == 'rails_source' || PAYLOAD_DIRS.include?(type_dir)
+
+        identifier = reannotate_unit_file(file, type_dir)
+        next unless identifier
+
+        touched.add(identifier)
+        affected_types&.add(type_dir.to_sym)
+      end
+    end
+
+    # @param file [String] absolute path to one unit JSON file
+    # @param type_dir [String] the extractor key directory it lives in
+    # @return [String, nil] the identifier when the file was rewritten
+    def reannotate_unit_file(file, type_dir)
+      data = JSON.parse(AtomicFile.read(file))
+      relative_path = data['file_path']
+      return nil if relative_path.nil? || relative_path.start_with?('/')
+
+      package = package_resolver.package_for(relative_path)
+      metadata = (data['metadata'] ||= {})
+      return nil if metadata['package'] == package
+
+      if package
+        metadata['package'] = package
+      else
+        metadata.delete('package')
+      end
+      AtomicFile.write(file, json_serialize(data))
+
+      identifier = data['identifier']
+      type = (data['type'] || type_dir.singularize).to_sym
+      @dependency_graph.annotate(identifier, type: type, package: package)
+      identifier
+    rescue JSON::ParserError => e
+      Rails.logger.warn "[Woods] Could not re-annotate package on #{file}: #{e.message}"
+      nil
+    end
+
     # Is this a path worth asking git about?
     #
     # A gem-owned unit (an engine model) carries its real path. Outside
@@ -1623,17 +1787,60 @@ module Woods
       path.start_with?(prefix) ? path.sub(prefix, '') : path
     end
 
+    # Can this run's git calls produce real facts?
+    #
+    # `rev-parse --git-dir` alone is not enough. Over a linked worktree whose
+    # private git directory is reachable but whose `commondir` is not, it
+    # answers while every ref lookup fails and `git log` exits 0 with nothing
+    # to say. Enrichment then wrote `commit_count: 0` and
+    # `change_frequency: new` onto every unit, which reads exactly like a file
+    # that was never committed, where an absent git directory correctly omits
+    # the keys (B-186). HEAD has to resolve.
+    #
+    # Memoized, so the warning below is emitted at most once per run.
+    #
+    # @return [Boolean]
     def git_available?
       return @git_available if defined?(@git_available)
 
-      @git_available = begin
-        _output, _error, status = Open3.capture3(
-          'git', '-C', Rails.root.to_s, 'rev-parse', '--git-dir'
-        )
-        status.success?
-      rescue StandardError
-        false
-      end
+      _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
+      @git_available = status.success?
+      warn_unresolvable_git(error) unless @git_available
+      @git_available
+    rescue StandardError
+      @git_available = false
+    end
+
+    # Say once why no unit will carry git metadata, but only when there is a
+    # working tree to explain. No `.git` at the root is the ordinary source
+    # tarball or `COPY`-without-`.git` case, and it is not a fault.
+    #
+    # @param error [String] git's own stderr
+    # @return [void]
+    def warn_unresolvable_git(error)
+      return unless File.exist?(File.join(Rails.root.to_s, '.git'))
+
+      cause = error.to_s.lines.first.to_s.strip
+      Rails.logger.warn(
+        '[Woods] git cannot resolve HEAD for this working tree, so no unit will carry git ' \
+        "metadata: #{cause}. Over a linked worktree in a container, mount the canonical git " \
+        'directory and point WOODS_GIT_DIR at it; GIT_DIR alone is not enough, because the ' \
+        "worktree's private git directory reaches the shared one through a relative pointer."
+      )
+    end
+
+    # The git command line every enrichment call runs.
+    #
+    # `-C <root>` keeps the result independent of the process working
+    # directory. `WOODS_GIT_DIR` wins when set: it names the canonical git
+    # directory directly, which is the escape hatch for a container that can
+    # mount that directory but not the host path a worktree pointer names
+    # (B-181).
+    #
+    # @param args [Array<String>] git arguments
+    # @return [Array<String>] full argv
+    def git_argv(*args)
+      GitCommand.argv(Rails.root, *args)
     end
 
     # Safe git command execution — no shell interpolation
@@ -1641,7 +1848,7 @@ module Woods
     # @param args [Array<String>] Git command arguments
     # @return [String] Command output (empty string on failure)
     def run_git(*args)
-      output, _error, status = Open3.capture3('git', '-C', Rails.root.to_s, *args)
+      output, _error, status = Open3.capture3(*git_argv(*args))
       status.success? ? output.strip : ''
     rescue StandardError
       ''
@@ -1852,7 +2059,10 @@ module Woods
 
     def write_dependency_graph
       graph_data = @dependency_graph.to_h
-      graph_data[:pagerank] = @dependency_graph.pagerank
+      # Key-sorted for the same reason `to_h` sorts its own sections: the
+      # digest published as `graph_sha` covers these bytes, so node
+      # registration order must not reach it (B-180).
+      graph_data[:pagerank] = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
 
       AtomicFile.write(
         payload_dir.join('dependency_graph.json'),
@@ -2064,6 +2274,12 @@ module Woods
         if significant_hubs&.any?
           hub_names = significant_hubs.map { |h| h[:identifier] }.join(', ')
           summary << "- Hub nodes (>20 dependents): #{hub_names}"
+        end
+
+        volatile = Array(@graph_analysis[:volatile_dependencies]).first(5)
+        if volatile.any?
+          lines = volatile.map { |v| "#{v[:from]} -> #{v[:to]} (#{v[:from_commits]} vs #{v[:to_commits]} commits)" }
+          summary << "- Volatile dependencies (top #{lines.size}): #{lines.join('; ')}"
         end
       end
 
@@ -2902,6 +3118,7 @@ module Woods
       FileUtils.mkdir_p(type_dir)
 
       units.each_with_object(Set.new) do |unit, written|
+        annotate_package(unit)
         mark_dependents_dirty(unit.identifier)
         # Marked BEFORE registration: DependencyGraph#register inserts the
         # node before it iterates the unit's dependencies, so a malformed
@@ -3058,7 +3275,10 @@ module Woods
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
-      (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git)) if git
+      if git
+        (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
+        annotate_node_from_git(identifier, type, git)
+      end
 
       return if JSON.generate(data) == before
 
@@ -3080,6 +3300,29 @@ module Woods
       return nil unless node && node[:file_path]
 
       git_data[normalize_file_path(node[:file_path])]
+    end
+
+    # Mirror of {#annotate_graph_with_git_data} for one incrementally
+    # patched unit. Git data arrives symbol-keyed from {#batch_git_data} and
+    # string-keyed when a caller hands in parsed JSON; both are accepted.
+    #
+    # Unlike {#annotate_graph_with_git_data}, a missing key is never forwarded
+    # as an explicit `nil`: {DependencyGraph#annotate} treats `nil` as
+    # "clear this attribute", and this batch's git data can be missing one of
+    # the two keys without meaning the other's last-known value is gone.
+    #
+    # @param identifier [String]
+    # @param type [Symbol]
+    # @param git [Hash]
+    # @return [void]
+    def annotate_node_from_git(identifier, type, git)
+      attributes = {
+        commit_count: git[:commit_count] || git['commit_count'],
+        change_frequency: git[:change_frequency] || git['change_frequency']
+      }.compact
+      return if attributes.empty?
+
+      @dependency_graph.annotate(identifier, type: type, **attributes)
     end
 
     # Batch-fetch git metadata for the units written by this run, in a single

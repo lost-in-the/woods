@@ -9,5 +9,7 @@ RSpec::Core::RakeTask.new(:spec)
 # Tasks with :environment dependency (extract, flow, etc.) only work in Rails apps via Railtie.
 load File.expand_path('lib/tasks/woods.rake', __dir__)
 load File.expand_path('lib/tasks/release_v2.rake', __dir__)
+# Loaded last: it replaces the publish tasks bundler/gem_tasks defines.
+load File.expand_path('lib/tasks/release.rake', __dir__)
 
 task default: :spec

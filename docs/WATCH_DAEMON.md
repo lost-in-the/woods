@@ -261,12 +261,57 @@ The daemon's own footprint is small; the cost of option (b) is the booted app,
 not Woods. That is why (a) is worth keeping available for hosts that already
 pay for one.
 
+#### Where a full extraction of the fixture app spends its time
+
+One cold `extract_all` over `spec/dummy`, 147 units of which 119 are framework
+sources, 7 repetitions, Ruby 4.0.6 / Rails 8.0.5.1, phase timers around the
+orchestrator's own methods. Total **190 ms** at p50.
+
+Every share below is that phase's milliseconds over the 190 ms total, so the
+top-level rows add up to the total. Indented rows break their parent down and
+are already counted in it.
+
+| Phase | ms | share of 190 ms |
+|---|---|---|
+| extraction | 115 | 60.5% |
+| &nbsp;&nbsp;of which `RailsSourceExtractor` | 100 | 52.6% |
+| &nbsp;&nbsp;of which `ModelExtractor` | 4.4 | 2.3% |
+| &nbsp;&nbsp;of which every other extractor | 10 | 5.3% |
+| `write_results` | 23 | 12.1% |
+| git enrichment | 22 | 11.6% |
+| graph analysis (`GraphAnalyzer#analyze`) | 6.1 | 3.2% |
+| &nbsp;&nbsp;of which PageRank | 3.9 | 2.1% |
+| manifest, graph and analysis writes | 6.9 | 3.6% |
+| orphan sweep | 2.6 | 1.4% |
+| dedupe, package annotation, dependents, path normalisation, publish | 0.6 | 0.3% |
+| not attributed to a timed phase | 13.8 | 7.3% |
+| **total** | **190** | **100%** |
+
+The unattributed row is the orchestration between the timed phases: output
+directory setup, the `ModelNameCache` reset, rebuilding the graph from the
+deduped results, and the payload bookkeeping. It is named rather than dropped so
+the column is a real accounting.
+
+**The graph layers are not where the time goes.** PageRank moving inside
+`analyze`, and the three reports added beside it, come to 3.2% of the run
+together. Git enrichment, the other suspect, is 11.6%: real, but not a phase to
+rewrite. The dependents pass and path normalisation are below a millisecond
+each.
+
+One phase clears 15%: `RailsSourceExtractor`, at 52.6%. Read it with the
+fixture's shape, though. 119 of 147 units *are* framework sources here, so this
+figure is a property of a fixture app with almost no application code, not a
+finding about a real host. Turning it off is one flag
+(`include_framework_sources`), and it does not touch the incremental path at
+all. Filed as B-187 rather than acted on here: sizing it needs a host where
+framework sources are the minority.
+
 ### Measured at scale
 
 The numbers above are fixture-app numbers. Below are the same measurements on a
 **1,940-unit app**: `apps/rails-8.0-large` in
 [woods-testbed](https://github.com/lost-in-the/woods-testbed), a hand-written
-kernel covering all 34 unit types plus a deterministically generated tree, run by
+kernel covering all 35 extractors plus a deterministically generated tree, run by
 `scripts/woods_bench.rb` in woods-testbed (Ruby 3.3.1 / Rails 8.0.5, in-container, 5 reps per
 scenario). See [woods-testbed#2](https://github.com/lost-in-the/woods-testbed/issues/2).
 
@@ -510,6 +555,51 @@ containerized daemon, so it can misread liveness in either direction for up to
 `STALE_AFTER` (the timestamp check still bounds it, and the heartbeat keeps a
 live daemon inside that bound). Run `watch_status` on the same side as the
 daemon; a cross-namespace liveness protocol isn't worth its complexity here.
+
+### Hooks for agent sessions
+
+The daemon covers a human's editor session. A `claude -p` run in a worktree
+with no daemon needs a different trigger, so the Woods plugin ships two
+hooks (`plugin/hooks/hooks.json`), both shipped disabled:
+
+| Hook | When | What it does |
+|---|---|---|
+| `PostToolUse` (`Edit`, `Write`, `MultiEdit`), async | An edit under `app/models`, `config/routes*`, `db/migrate`, `db/*_migrate`, `db/schema.rb`, `db/structure.sql`, or any `package.yml` / `packwerk.yml` | Appends the path to `hook-pending.txt` under a lock, then runs `CHANGED_FILES=<paths> woods:incremental` for whatever is pending, output to `hook.log` |
+| `SessionStart` (`startup`, `resume`) | Session begins | Prints a warning when `generation.json`'s `updated_at` predates `git log -1` |
+
+Both read `cwd` from the hook payload, not `CLAUDE_PROJECT_DIR`, which stays
+at the launch root inside a worktree. Both do nothing until
+`tmp/woods/generation.json` exists, and neither runs at all until
+`WOODS_HOOKS_ENABLED=1` is set; `WOODS_HOOKS_DISABLED=1` turns them back off
+without touching that setting. `woods:incremental` still stands down under a
+`:running` daemon, so a hook and a daemon on the same worktree never
+contend. `WOODS_HOOK_RAKE` sets the command prefix (Docker:
+`docker compose exec -T app bundle exec rake`); `WOODS_OUTPUT` points the
+hooks at a non-default index directory, the same variable
+`woods:incremental`/`woods:watch_status` already read.
+
+A hook invocation that finds another one already draining the pending file
+does not wait for it: it appends its own path and returns, and the
+in-progress drainer picks that path up on its next pass, looping until a
+drain comes back empty. The one gap this leaves is an append that lands
+between the drainer's last (empty) drain and its releasing the lock: that
+edit is delayed to the next graph-changing edit rather than lost outright,
+and the `SessionStart` warning is the backstop for it.
+
+On a host without `flock`, the mkdir-based fallback lock has no kernel-enforced
+release, so a hook killed mid-drain would otherwise leave a lock directory
+behind forever; each lock directory is reclaimed once its mtime is older than
+`WOODS_HOOK_LOCK_STALE_SECONDS` (default 1800), while a fresh one is still
+respected as busy.
+The age check needs `stat`; on a host with neither `flock` nor `stat`, a crashed
+pending-lock holder can still make the next hook wait until the hook timeout.
+
+The `SessionStart` warning compares two commit-adjacent timestamps only:
+the generation's `updated_at` against the last commit's time. It says
+nothing about uncommitted changes in the working tree, and a checkout
+sitting on an older commit than the one that produced the generation can
+still read as fresh under this check. Treat a quiet session start as "not
+behind the last commit," not as a general freshness guarantee.
 
 ### Reader multiplicity is free
 

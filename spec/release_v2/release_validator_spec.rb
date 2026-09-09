@@ -19,26 +19,28 @@ RSpec.describe 'release validation' do
     output.strip
   end
 
-  def write_release_files(repository, changelog: "## [2.0.0] - 2026-08-20\n")
+  def write_release_files(repository, version: '2.0.0', changelog: nil)
+    changelog ||= "## [#{version}] - 2026-08-20\n"
     FileUtils.mkdir_p(File.join(repository, 'lib/woods'))
     File.write(File.join(repository, 'lib/woods/version.rb'), <<~RUBY)
       module Woods
-        VERSION = '2.0.0'
+        VERSION = '#{version}'
       end
     RUBY
     File.write(File.join(repository, 'CHANGELOG.md'), changelog)
   end
 
-  def build_repository(changelog: "## [2.0.0] - 2026-08-20\n", tag_type: :lightweight)
+  def build_repository(version: '2.0.0', changelog: nil, tag_type: :lightweight)
+    tag = "v#{version}"
     Dir.mktmpdir('woods-release-validator') do |repository|
       git('init', '-b', 'main', chdir: repository)
       git('config', 'user.email', 'release-test@example.invalid', chdir: repository)
       git('config', 'user.name', 'Release Test', chdir: repository)
-      write_release_files(repository, changelog: changelog)
+      write_release_files(repository, version: version, changelog: changelog)
       git('add', '.', chdir: repository)
       git('commit', '-m', 'release candidate', chdir: repository)
       git('update-ref', 'refs/remotes/origin/main', 'HEAD', chdir: repository)
-      tag_args = tag_type == :annotated ? ['-a', 'v2.0.0', '-m', 'release v2.0.0'] : ['v2.0.0']
+      tag_args = tag_type == :annotated ? ['-a', tag, '-m', "release #{tag}"] : [tag]
       git('tag', *tag_args, chdir: repository)
       yield repository
     end
@@ -228,6 +230,14 @@ RSpec.describe 'release validation' do
     expect(calls).to be_empty
   end
 
+  it 'rejects an alpha development tag before querying GitHub' do
+    _stdout, stderr, status, _outputs, calls = validate_ci_run(env: { 'RELEASE_TAG' => 'v2.1.0.alpha' })
+
+    expect(status).not_to be_success
+    expect(stderr).to include('RELEASE_TAG "v2.1.0.alpha" is an alpha development marker')
+    expect(calls).to be_empty
+  end
+
   it 'rejects CI run data that does not describe the exact successful tag push' do
     invalid_runs = [
       [ci_run('id' => 99_999), 'returned run ID 99999, expected 12345'],
@@ -285,6 +295,69 @@ RSpec.describe 'release validation' do
       expect(status).to be_success, stderr
       expect(stdout).to include('v2.0.0')
       expect(stdout).to include('2026-08-20')
+    end
+  end
+
+  it 'accepts a prerelease tag with its own dated changelog entry' do
+    build_repository(version: '2.0.0.beta1') do |repository|
+      stdout, stderr, status = validate(repository, tag: 'v2.0.0.beta1')
+
+      expect(status).to be_success, stderr
+      expect(stdout).to include('v2.0.0.beta1', '2026-08-20')
+    end
+  end
+
+  it 'rejects a prerelease without its own dated changelog section' do
+    build_repository(version: '2.0.0.rc1', changelog: "## [Unreleased]\n\n## [1.6.1] - 2026-07-22\n") do |repository|
+      _stdout, stderr, status = validate(repository, tag: 'v2.0.0.rc1')
+
+      expect(status).not_to be_success
+      expect(stderr).to include('missing dated CHANGELOG.md section for 2.0.0.rc1')
+    end
+  end
+
+  # RubyGems lists prereleases in the versions API alongside stable releases, so
+  # the published-version check needs no prerelease special case: re-cutting an
+  # already-pushed beta has to fail exactly like re-cutting a stable release.
+  it 'rejects an already-published prerelease' do
+    build_repository(version: '2.0.0.beta1') do |repository|
+      published = [{ 'number' => '2.0.0.beta1' }, { 'number' => '1.6.1' }]
+      _stdout, stderr, status = validate(repository, tag: 'v2.0.0.beta1', published_versions: published)
+
+      expect(status).not_to be_success
+      expect(stderr).to include('woods 2.0.0.beta1 is already published')
+    end
+  end
+
+  it 'accepts a prerelease that is not yet published while its siblings are' do
+    build_repository(version: '2.0.0.beta2') do |repository|
+      published = [{ 'number' => '2.0.0.beta1' }, { 'number' => '1.6.1' }]
+      _stdout, stderr, status = validate(repository, tag: 'v2.0.0.beta2', published_versions: published)
+
+      expect(status).to be_success, stderr
+    end
+  end
+
+  # `main` carries X.Y.Z.alpha between releases. It is the development marker:
+  # never tagged, never published. A tag or a VERSION carrying it means the
+  # release commit was skipped, so validation stops before any network call.
+  it 'rejects an alpha development tag outright' do
+    build_repository(version: '2.0.0.alpha') do |repository|
+      _stdout, stderr, status = validate(repository, tag: 'v2.0.0.alpha')
+
+      expect(status).not_to be_success
+      expect(stderr).to include('release tag "v2.0.0.alpha" is an alpha development marker')
+      expect(stderr).to include('never published')
+    end
+  end
+
+  it 'rejects an alpha Woods::VERSION even when the tag hides it' do
+    build_repository(version: '2.0.0.alpha') do |repository|
+      git('tag', 'v2.0.0', chdir: repository)
+      _stdout, stderr, status = validate(repository, tag: 'v2.0.0')
+
+      expect(status).not_to be_success
+      expect(stderr).to include('Woods::VERSION "2.0.0.alpha" is an alpha development marker')
     end
   end
 

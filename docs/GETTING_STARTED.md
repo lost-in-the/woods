@@ -108,7 +108,7 @@ For example:
 
 > Use Woods to find `Order`, inspect its resolved callbacks and associations, and list the first two levels of code that depend on it. Cite the Woods identifiers you used.
 
-The Index schema inventory totals 29 tools. Fourteen register in a normal packaged launch; `codebase_retrieve` is among them but returns a configuration error until embeddings are enabled. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
+The Index schema inventory totals 29 schemas. Fourteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but returns a configuration error until embeddings are enabled. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
 
 ## Optional next steps
 
@@ -153,6 +153,8 @@ On startup it reconciles changes made since the last successful generation. Whil
 When dependencies, initializers, database configuration, credentials, or schema change, Rails cannot safely reload all captured state. The watcher records a degraded reason and exits with status 75 so the process manager can restart it. Docker bind mounts may require polling; follow [Watch daemon](WATCH_DAEMON.md).
 
 The watcher maintains the structural index. If semantic retrieval is enabled, also run `bin/rails woods:embed_incremental` to update vectors. Without a resident watcher, run `bin/rails woods:incremental` after changes. Use a full `woods:extract` after major upgrades or when validation reports drift. CI and shared-artifact patterns are covered in [Incremental extraction](INCREMENTAL_EXTRACTION.md).
+
+On Rails 8.1, `config/ci.rb` can refresh the index before any gate that reads it: `step "Woods: refresh", "bin/rails woods:incremental"`. With the Claude Code plugin installed, an opt-in `PostToolUse` hook refreshes the index after graph-changing edits and an opt-in `SessionStart` hook warns when it predates the last commit; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](WATCH_DAEMON.md#hooks-for-agent-sessions).
 
 ### Enable the Console Server
 

@@ -1,6 +1,6 @@
 ---
 name: woods-diagnose
-description: Use when Woods extraction, index validation, MCP connection, semantic retrieval, storage, or Console access is failing or stale.
+description: Diagnose Woods failures layer by layer — Rails boot, published index, MCP process and path, semantic retrieval, Console — changing nothing until the failing layer is identified. Use when Woods extraction, index validation, an MCP connection, retrieval, storage, or Console access fails or looks stale, or when expected tools are missing from a connected server.
 ---
 
 # Woods diagnosis
@@ -12,7 +12,7 @@ bundle info woods
 git status --short --branch
 ```
 
-This skill targets Woods 2.0.0 or later.
+This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Diagnose against capabilities the recorded installed version actually provides.
 
 ## 1. Check Rails
 
@@ -56,13 +56,15 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 
 - OpenAI: verify the key exists without printing it.
 - Ollama: verify the service and configured model locally.
-- Stale vectors: run the documented embed refresh.
+- Stale vectors or missing same-name types: follow the installed version's upgrade guide and run the documented embed refresh; do not rename public identifiers or edit vector IDs by hand.
 - Dimension mismatch: rebuild into a store matching the configured model; do not suppress the preflight.
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
 
 ## 5. Check Console separately
 
 Console failures are live Rails/config/security failures, not Index failures. Verify authorized environment, Rails boot, `WOODS_CONSOLE_CONFIG` or direct `cwd`, blocked-table policy, credentials, and stderr.
+
+For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
 
 Nine tools are normal. Eleven appear only with `console_embedded_read_tools`. Do not chase Tier 2/3 or `console_eval`; they do not register in supported packaged modes. Never work around redaction, credential scanning, SQL validation, or a block.
 

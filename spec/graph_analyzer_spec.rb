@@ -6,13 +6,14 @@ RSpec.describe Woods::GraphAnalyzer do
   let(:graph) { Woods::DependencyGraph.new }
   let(:analyzer) { described_class.new(graph) }
 
-  def make_unit(type:, identifier:, file_path: nil, dependencies: [])
+  def make_unit(type:, identifier:, file_path: nil, dependencies: [], metadata: {})
     unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: file_path || "/app/#{identifier.underscore}.rb"
     )
     unit.dependencies = dependencies
+    unit.metadata = metadata
     unit
   end
 
@@ -33,6 +34,12 @@ RSpec.describe Woods::GraphAnalyzer do
 
       expect(analyzer.orphans).not_to include('rails/activerecord/callbacks')
       expect(analyzer.orphans).not_to include('gems/devise/models')
+    end
+
+    it 'excludes package types (#280)' do
+      graph.register(make_unit(type: :package, identifier: 'packs/billing'))
+
+      expect(analyzer.orphans).not_to include('packs/billing')
     end
 
     it 'returns empty for empty graph' do
@@ -392,6 +399,367 @@ RSpec.describe Woods::GraphAnalyzer do
           expect(boundary_keys).to eq(boundary_keys.sort)
         end
       end
+    end
+  end
+
+  describe '#cross_database_edges' do
+    def model(identifier, database:, table:, dependencies: [], foreign_keys: [])
+      make_unit(type: :model, identifier: identifier, dependencies: dependencies,
+                metadata: { database: database, table_name: table, foreign_keys: foreign_keys })
+    end
+
+    it 'flags a has_many :through across databases without disable_joins as a join' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions' }
+                           ]))
+
+      expected = [
+        { from: 'Invoice', to: 'Account', via: 'has_many', from_db: 'billing', to_db: 'primary',
+          through: 'subscriptions', through_db: nil, disable_joins: false,
+          kind: 'join_through_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'falls back to comparing from_db and to_db when through_db is unknown' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions' }
+                           ]))
+
+      entry = analyzer.cross_database_edges.first
+
+      expect(entry).to include(through_db: nil, kind: 'join_through_across_databases')
+    end
+
+    it 'flags a through association whose join model lives on a third database' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                               through_db: 'analytics' }
+                           ]))
+
+      expected = [
+        { from: 'Invoice', to: 'Account', via: 'has_many', from_db: 'billing', to_db: 'primary',
+          through: 'subscriptions', through_db: 'analytics', disable_joins: false,
+          kind: 'join_through_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'downgrades the same edge to an association when disable_joins is set' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                               disable_joins: true }
+                           ]))
+
+      expect(analyzer.cross_database_edges.first).to include(disable_joins: true,
+                                                             kind: 'association_across_databases')
+    end
+
+    it 'flags a foreign key whose target table lives in another database' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'accounts' }]))
+
+      expected = [
+        { from: 'Invoice', to: 'Account', via: 'foreign_key', from_db: 'billing', to_db: 'primary',
+          through: nil, through_db: nil, disable_joins: false, kind: 'foreign_key_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'omits ambiguous_owners when exactly one database owns the target table' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'accounts' }]))
+
+      expect(analyzer.cross_database_edges.first).not_to have_key(:ambiguous_owners)
+    end
+
+    it 'reports ambiguous_owners when the target table has owners in two other databases' do
+      graph.register(model('Account', database: 'primary', table: 'shared_accounts'))
+      graph.register(model('LegacyAccount', database: 'legacy', table: 'shared_accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'shared_accounts' }]))
+
+      expected = [
+        { from: 'Invoice', to: nil, via: 'foreign_key', from_db: 'billing', to_db: nil,
+          through: nil, through_db: nil, disable_joins: false,
+          ambiguous_owners: %w[Account LegacyAccount], kind: 'foreign_key_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'suppresses the crossing when one of the table owners lives in from_db' do
+      graph.register(model('Account', database: 'primary', table: 'shared_accounts'))
+      graph.register(model('BillingAccount', database: 'billing', table: 'shared_accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'shared_accounts' }]))
+
+      expect(analyzer.cross_database_edges).to eq([])
+    end
+
+    it 'keeps two distinct ambiguous foreign keys from the same model separate' do
+      graph.register(model('AccountA', database: 'primary', table: 'shared_accounts'))
+      graph.register(model('AccountB', database: 'legacy', table: 'shared_accounts'))
+      graph.register(model('ProductA', database: 'primary', table: 'shared_products'))
+      graph.register(model('ProductB', database: 'legacy', table: 'shared_products'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [
+                                        { column: 'account_id', to_table: 'shared_accounts' },
+                                        { column: 'product_id', to_table: 'shared_products' }
+                                      ]))
+
+      expect(analyzer.cross_database_edges.map { |e| e[:ambiguous_owners] }).to contain_exactly(
+        %w[AccountA AccountB], %w[ProductA ProductB]
+      )
+    end
+
+    it 'reads only :model type edges even when another type shares the identifier' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices'))
+      graph.register(make_unit(type: :service, identifier: 'Invoice',
+                               dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expect(analyzer.cross_database_edges).to eq([])
+    end
+
+    it 'ignores same-database edges, non-association edges, and nodes without a database' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('User', database: 'primary', table: 'users',
+                                   dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+      graph.register(make_unit(type: :service, identifier: 'Checkout',
+                               dependencies: [{ type: :model, target: 'Account', via: :code_reference }]))
+      graph.register(model('Legacy', database: nil, table: 'legacy',
+                                     dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expect(analyzer.cross_database_edges).to eq([])
+    end
+
+    it 'sorts entries by from, to, via so two runs publish the same list' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Zeta', database: 'billing', table: 'zetas',
+                                   dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+      graph.register(model('Alpha', database: 'billing', table: 'alphas',
+                                    dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expect(analyzer.cross_database_edges.map { |e| e[:from] }).to eq(%w[Alpha Zeta])
+    end
+
+    it 'is part of analyze with a count in stats' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      report = analyzer.analyze
+
+      expect(report[:cross_database_edges].size).to eq(1)
+      expect(report[:stats][:cross_database_edge_count]).to eq(1)
+    end
+  end
+
+  describe '#volatile_dependencies' do
+    def churned(identifier, commits, type: :model, dependencies: [], frequency: 'active')
+      make_unit(type: type, identifier: identifier, dependencies: dependencies,
+                metadata: { git: { commit_count: commits, change_frequency: frequency } })
+    end
+
+    it 'reports an edge whose dependency changes far more often than the dependent' do
+      graph.register(churned('PricingRules', 30))
+      graph.register(churned('Checkout', 5, type: :service, dependencies: [
+                               { type: :model, target: 'PricingRules', via: :code_reference }
+                             ]))
+
+      entries = analyzer.volatile_dependencies
+
+      expect(entries.size).to eq(1)
+      expect(entries.first).to include(from: 'Checkout', to: 'PricingRules', via: 'code_reference',
+                                       from_commits: 5, to_commits: 30, ratio: 6.0)
+      expect(entries.first[:pagerank]).to be > 0
+    end
+
+    it 'respects the configured ratio' do
+      graph.register(churned('PricingRules', 12))
+      graph.register(churned('Checkout', 5, type: :service, dependencies: [
+                               { type: :model, target: 'PricingRules', via: :code_reference }
+                             ]))
+
+      expect(described_class.new(graph, volatile_ratio: 2.0).volatile_dependencies.size).to eq(1)
+      expect(described_class.new(graph, volatile_ratio: 3.0).volatile_dependencies).to eq([])
+    end
+
+    it 'skips young dependencies, dependencies below the commit floor, and nodes without git data' do
+      graph.register(churned('Young', 2, frequency: 'new'))
+      graph.register(churned('Quiet', 4))
+      graph.register(make_unit(type: :model, identifier: 'Unknown'))
+      graph.register(churned('Consumer', 1, type: :service, dependencies: [
+                               { type: :model, target: 'Young', via: :code_reference },
+                               { type: :model, target: 'Quiet', via: :code_reference },
+                               { type: :model, target: 'Unknown', via: :code_reference }
+                             ]))
+
+      expect(analyzer.volatile_dependencies).to eq([])
+    end
+
+    it 'ranks by the dependency PageRank and honors the limit' do
+      graph.register(churned('Hub', 40))
+      graph.register(churned('Leaf', 40))
+      graph.register(churned('A', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+      graph.register(churned('B', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+      graph.register(churned('C', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Leaf', via: :code_reference }
+                             ]))
+
+      entries = analyzer.volatile_dependencies
+
+      expect(entries.first(2).map { |e| e[:to] }).to eq(%w[Hub Hub])
+      expect(analyzer.volatile_dependencies(limit: 1).size).to eq(1)
+    end
+
+    it 'is part of analyze with a count in stats' do
+      graph.register(churned('PricingRules', 30))
+      graph.register(churned('Checkout', 5, type: :service, dependencies: [
+                               { type: :model, target: 'PricingRules', via: :code_reference }
+                             ]))
+
+      report = analyzer.analyze
+
+      expect(report[:volatile_dependencies].size).to eq(1)
+      expect(report[:stats][:volatile_dependency_count]).to eq(1)
+    end
+
+    it 'caps the persisted list at 20 while stats counts every qualifying edge' do
+      graph.register(churned('Hub', 30))
+      25.times do |i|
+        graph.register(churned(format('Dep%02d', i), 5, type: :service, dependencies: [
+                                 { type: :model, target: 'Hub', via: :code_reference }
+                               ]))
+      end
+
+      report = analyzer.analyze
+
+      expect(report[:volatile_dependencies].size).to eq(20)
+      expect(report[:stats][:volatile_dependency_count]).to eq(25)
+      expect(report[:stats][:volatile_dependency_count]).to be > 20
+    end
+
+    # B-182: a reader of the array alone could not tell it was truncated,
+    # because only the full count was published beside it.
+    it 'publishes the cap beside the count so a truncated array is detectable' do
+      graph.register(churned('Hub', 30))
+      25.times do |i|
+        graph.register(churned(format('Dep%02d', i), 5, type: :service, dependencies: [
+                                 { type: :model, target: 'Hub', via: :code_reference }
+                               ]))
+      end
+
+      stats = analyzer.analyze[:stats]
+
+      expect(stats[:volatile_dependencies_limit]).to eq(described_class::DEFAULT_VOLATILE_LIMIT)
+      expect(stats[:volatile_dependencies_limit]).to eq(20)
+    end
+
+    it 'publishes the cap even when nothing was truncated' do
+      graph.register(churned('Hub', 30))
+      graph.register(churned('Dep', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+
+      stats = analyzer.analyze[:stats]
+
+      expect(stats[:volatile_dependency_count]).to eq(1)
+      expect(stats[:volatile_dependencies_limit]).to eq(20)
+    end
+  end
+
+  describe '#undeclared_package_edges' do
+    def package(name, dependencies: [])
+      make_unit(type: :package, identifier: name, file_path: "/app/#{name}/package.yml",
+                dependencies: dependencies.map { |d| { type: :package, target: d, via: :package_dependency } })
+    end
+
+    def member(identifier, package_name, dependencies: [], type: :model)
+      make_unit(type: type, identifier: identifier, dependencies: dependencies, metadata: { package: package_name })
+    end
+
+    it 'reports an edge into a package the source package never declared' do
+      graph.register(package('packs/billing'))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('Invoice', 'packs/billing',
+                            dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expected = { from: 'Invoice', from_type: :model, to: 'Account', to_type: :model, via: 'belongs_to',
+                   from_package: 'packs/billing', to_package: 'packs/accounts' }
+
+      expect(analyzer.undeclared_package_edges).to eq([expected])
+    end
+
+    it 'stays silent for a declared dependency, an intra-package edge, and an unpackaged unit' do
+      graph.register(package('packs/billing', dependencies: ['packs/accounts']))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('Plan', 'packs/billing'))
+      graph.register(member('Invoice', 'packs/billing', dependencies: [
+                              { type: :model, target: 'Account', via: :belongs_to },
+                              { type: :model, target: 'Plan', via: :has_many },
+                              { type: :service, target: 'Mailer', via: :code_reference }
+                            ]))
+      graph.register(make_unit(type: :service, identifier: 'Mailer'))
+
+      expect(analyzer.undeclared_package_edges).to eq([])
+    end
+
+    it 'never reports the package declaration edges themselves' do
+      graph.register(package('packs/billing', dependencies: ['packs/accounts']))
+      graph.register(package('packs/accounts'))
+
+      expect(analyzer.undeclared_package_edges).to eq([])
+    end
+
+    it 'treats the root package like any other package' do
+      graph.register(package('.'))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('LegacyReport', '.',
+                            dependencies: [{ type: :model, target: 'Account', via: :code_reference }]))
+
+      expected = { from: 'LegacyReport', from_type: :model, to: 'Account', to_type: :model, via: 'code_reference',
+                   from_package: '.', to_package: 'packs/accounts' }
+
+      expect(analyzer.undeclared_package_edges).to eq([expected])
+    end
+
+    it 'short-circuits to an empty list when no node carries a package attribute' do
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))
+
+      expect(analyzer.undeclared_package_edges).to eq([])
+    end
+
+    it 'is part of analyze with a count in stats' do
+      graph.register(package('packs/billing'))
+      graph.register(package('packs/accounts'))
+      graph.register(member('Account', 'packs/accounts'))
+      graph.register(member('Invoice', 'packs/billing',
+                            dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      report = analyzer.analyze
+
+      expect(report[:undeclared_package_edges].size).to eq(1)
+      expect(report[:stats][:undeclared_package_edge_count]).to eq(1)
     end
   end
 end

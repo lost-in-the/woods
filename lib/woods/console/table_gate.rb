@@ -32,10 +32,10 @@ module Woods
 
       def active? = !(@blocked_bare.empty? && @blocked_qualified.empty?)
 
-      def check_sql!(sql)
+      def check_sql!(sql, dialect: nil, mysql_modes: nil)
         return unless active? && sql&.length&.positive?
 
-        SqlTableScanner.identifiers_in(sql).each do |raw|
+        SqlTableScanner.identifiers_in(sql, dialect: dialect, mysql_modes: mysql_modes).each do |raw|
           raise TableGateError, reject_message(raw) if blocked?(raw)
         end
       end

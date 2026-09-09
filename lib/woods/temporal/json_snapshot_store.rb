@@ -96,20 +96,13 @@ module Woods
                     .reverse
                     .first(limit)
 
-        entries = snapshots.filter_map do |snap|
-          unit = snap[:units]&.[](identifier)
-          next unless unit
-
-          {
-            git_sha: snap[:git_sha],
-            extracted_at: snap[:extracted_at],
-            git_branch: snap[:git_branch],
-            unit_type: unit[:unit_type],
-            source_hash: unit[:source_hash],
-            metadata_hash: unit[:metadata_hash],
-            dependencies_hash: unit[:dependencies_hash]
-          }
-        end
+        entries = snapshots.flat_map do |snap|
+          snap[:units].values.select { |unit| unit[:identifier] == identifier }.map do |unit|
+            unit.except(:identifier).merge(
+              git_sha: snap[:git_sha], extracted_at: snap[:extracted_at], git_branch: snap[:git_branch]
+            )
+          end
+        end.first(limit)
 
         mark_changed_entries(entries)
       end
@@ -193,7 +186,8 @@ module Woods
           id = mget(uh, 'identifier')
           next if id.nil?
 
-          [id, {
+          [JSON.generate([id, mget(uh, 'type').to_s]), {
+            identifier: id,
             unit_type: mget(uh, 'type').to_s,
             source_hash: mget(uh, 'source_hash'),
             metadata_hash: mget(uh, 'metadata_hash'),
@@ -213,27 +207,26 @@ module Woods
             if data_a[:source_hash] != data_b[:source_hash] ||
                data_a[:metadata_hash] != data_b[:metadata_hash] ||
                data_a[:dependencies_hash] != data_b[:dependencies_hash]
-              modified << { identifier: identifier, unit_type: data_b[:unit_type] }
+              modified << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
             end
           else
-            added << { identifier: identifier, unit_type: data_b[:unit_type] }
+            added << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
           end
         end
 
         units_a.each do |identifier, data_a|
-          deleted << { identifier: identifier, unit_type: data_a[:unit_type] } unless units_b.key?(identifier)
+          deleted << { identifier: data_a[:identifier], unit_type: data_a[:unit_type] } unless units_b.key?(identifier)
         end
 
         { added: added, modified: modified, deleted: deleted }
       end
 
       def mark_changed_entries(entries)
-        entries.each_with_index do |entry, i|
-          entry[:changed] = if i == entries.size - 1
-                              true
-                            else
-                              entry[:source_hash] != entries[i + 1][:source_hash]
-                            end
+        entries.group_by { |entry| entry[:unit_type] }.each_value do |versions|
+          versions.each_with_index do |entry, index|
+            older = versions[index + 1]
+            entry[:changed] = older.nil? || entry[:source_hash] != older[:source_hash]
+          end
         end
         entries
       end
@@ -309,13 +302,15 @@ module Woods
       def symbolize_units(units)
         return {} unless units
 
-        units.transform_values do |v|
-          {
+        units.to_h do |key, v|
+          identifier = v['identifier'] || key
+          [JSON.generate([identifier, v['unit_type']]), {
+            identifier: identifier,
             unit_type: v['unit_type'],
             source_hash: v['source_hash'],
             metadata_hash: v['metadata_hash'],
             dependencies_hash: v['dependencies_hash']
-          }
+          }]
         end
       end
     end

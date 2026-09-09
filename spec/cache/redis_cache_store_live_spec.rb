@@ -18,9 +18,8 @@
 # created outside this test run. Exact-key teardown protects other test runs;
 # it cannot make the production clear operation safe on a shared dev cache.
 #
-# The live-backends CI lane provides the service (redis:7-alpine) and installs
-# the redis client gem with `bundle add redis` before running, since no
-# repository bundle carries it.
+# The live-backends CI lane provides the service (redis:7-alpine);
+# gemfiles/live_backends.gemfile declares the Redis client dependency.
 #
 # NOTE: the require is load-guarded because the default suite still *loads*
 # every spec file (tag filters apply at example selection), and requiring an

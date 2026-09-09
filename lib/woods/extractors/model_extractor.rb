@@ -411,6 +411,7 @@ module Woods
           # Core identifiers
           table_name: model.table_name,
           primary_key: model.primary_key,
+          database: database_name_for(model),
 
           # Relationships and behaviors
           associations: extract_associations(model),
@@ -447,6 +448,11 @@ module Woods
                    else
                      []
                    end,
+
+          # Foreign keys as the connection reports them. The target table's
+          # database is a graph-level concern, resolved by the
+          # cross_database_edges report, not stored per model here (#280).
+          foreign_keys: extract_foreign_keys(model),
 
           # ActiveStorage / ActionText
           active_storage_attachments: extract_active_storage_attachments(source),
@@ -553,7 +559,15 @@ module Woods
       # Extract all associations with full details.
       # Broken associations (e.g. missing class_name) are skipped with a warning
       # instead of aborting the entire model extraction.
+      #
+      # `from_db` and `to_db` name the database each side resolves to (nil on
+      # Rails 6.0, where `connection_db_config` does not exist, and nil on
+      # the target side for a polymorphic or unresolvable class). `through_db`
+      # names the database a has_many :through join model resolves to (#280),
+      # nil for a plain association.
+      # `disable_joins` is the Rails 7.0+ option read from the reflection.
       def extract_associations(model)
+        from_db = database_name_for(model)
         model.reflect_on_all_associations.filter_map do |assoc|
           {
             name: assoc.name,
@@ -561,9 +575,13 @@ module Woods
             target: assoc.class_name,
             options: extract_association_options(assoc),
             through: assoc.options[:through],
+            through_db: through_association_database(assoc),
             polymorphic: assoc.polymorphic?,
             foreign_key: assoc.foreign_key,
-            inverse_of: assoc.inverse_of&.name
+            inverse_of: assoc.inverse_of&.name,
+            from_db: from_db,
+            to_db: association_target_database(assoc),
+            disable_joins: assoc.options[:disable_joins] == true
           }
         rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association #{assoc.name}: #{e.message}"
@@ -576,7 +594,7 @@ module Woods
           :dependent, :through, :source, :source_type,
           :foreign_key, :primary_key, :inverse_of,
           :counter_cache, :touch, :optional, :required,
-          :class_name, :as, :foreign_type
+          :class_name, :as, :foreign_type, :disable_joins
         )
       end
 
@@ -718,10 +736,20 @@ module Woods
       # the interface name stays visible in the graph but is distinguishable
       # from a resolvable model reference.
       def extract_dependencies(model, source = nil)
-        # Associations point to other models
+        # Associations point to other models. `through`, `through_db`, and
+        # `disable_joins` ride on the edge so the graph can report a
+        # has_many :through that crosses databases without disable_joins,
+        # or whose join model itself sits on a third database (#280).
         deps = model.reflect_on_all_associations.filter_map do |assoc|
           via = polymorphic_reflection?(assoc) ? :polymorphic_interface : assoc.macro
-          { type: :model, target: assoc.class_name, via: via }
+          dep = { type: :model, target: assoc.class_name, via: via }
+          if assoc.options[:through]
+            dep[:through] = assoc.options[:through].to_s
+            through_db = through_association_database(assoc)
+            dep[:through_db] = through_db if through_db
+          end
+          dep[:disable_joins] = true if assoc.options[:disable_joins] == true
+          dep
         rescue NameError => e
           @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
           nil
@@ -769,6 +797,70 @@ module Woods
       # @return [Boolean]
       def polymorphic_reflection?(assoc)
         assoc.respond_to?(:polymorphic?) && assoc.polymorphic?
+      end
+
+      # The database a class resolves to, by runtime reflection.
+      #
+      # `connection_db_config` (Rails 6.1+) climbs to the abstract class that
+      # declared `connects_to`, so a concrete model that inherits its
+      # connection answers with the inherited database. This is what a
+      # regex over `connects_to database:` in the source could never see.
+      # Rails 6.0 has no `connection_db_config`; the answer degrades to nil.
+      #
+      # @param klass [Class]
+      # @return [String, nil]
+      def database_name_for(klass)
+        return nil unless klass.respond_to?(:connection_db_config)
+
+        config = klass.connection_db_config
+        config.respond_to?(:name) ? config.name.to_s : nil
+      rescue StandardError
+        nil
+      end
+
+      # The database an association's target resolves to. Nil for a
+      # polymorphic interface (no single class) and for a target that does
+      # not constantize.
+      #
+      # @param assoc [ActiveRecord::Reflection::AbstractReflection]
+      # @return [String, nil]
+      def association_target_database(assoc)
+        return nil if polymorphic_reflection?(assoc)
+
+        database_name_for(assoc.klass)
+      rescue StandardError
+        nil
+      end
+
+      # The database a has_many :through association's join model resolves
+      # to. Nil for a plain association, when the through reflection cannot
+      # resolve its class, and on Rails 6.0 (no connection_db_config).
+      #
+      # @param assoc [ActiveRecord::Reflection::AbstractReflection]
+      # @return [String, nil]
+      def through_association_database(assoc)
+        return nil unless assoc.options[:through]
+
+        database_name_for(assoc.through_reflection.klass)
+      rescue StandardError
+        nil
+      end
+
+      # Foreign keys declared on the model's table, as the connection
+      # reports them. The target table's database is intentionally not
+      # resolved here, that is left to the graph-level cross_database_edges
+      # report, which resolves it from table owners.
+      #
+      # @param model [Class]
+      # @return [Array<Hash>] `{ from_table:, to_table:, column: }`
+      def extract_foreign_keys(model)
+        return [] unless model.table_exists?
+
+        model.connection.foreign_keys(model.table_name).map do |fk|
+          { from_table: fk.from_table.to_s, to_table: fk.to_table.to_s, column: fk.column.to_s }
+        end
+      rescue StandardError
+        []
       end
 
       # Build a parse-friendly composite for callback side-effect analysis.

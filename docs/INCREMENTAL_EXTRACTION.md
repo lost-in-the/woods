@@ -177,8 +177,9 @@ cheap, which is what makes wholesale replacement the right shape.
 | `app/**/*.rb` | events |
 | `spec/factories/**`, `test/factories/**` | factories |
 | `db/views/**/*.sql` | database_views |
+| any `package.yml`, `packwerk.yml` | packages |
 
-Two of these deserve a note:
+Three of these deserve a note:
 
 - **Routes cascade.** `ROUTE_CONSUMER_EXTRACTORS` embed the route table, controllers write each action's routes into unit metadata and into the action
   chunks, and everything using `RouteHelperResolver` resolves navigation edges
@@ -188,6 +189,11 @@ Two of these deserve a note:
 - **Database views are wholesale, not per file.** Scenic keeps only the highest
   `_vNN` of each view, so pointing the per-file method at
   `db/views/foo_v01.sql` would index a version a full extraction drops.
+- **Packages don't yet claim their members.** `PackageExtractor` (#280) only
+  produces `package` units from `package.yml`; it does not annotate which
+  package every other unit belongs to. A pack-resident file-based unit is not
+  discovered by `PathDispatcher` through its package boundary today
+  (follow-up B-175).
 
 ### Class-based types
 
@@ -317,7 +323,7 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml` | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
 | `:ignore` | everything else | Not extraction input. |
@@ -395,7 +401,8 @@ owns the definition of "the two indexes agree" and documents every exclusion.
 - **Git metadata for untouched units.** An incremental run refreshes
   `metadata.git` on the units it wrote. A unit nothing touched keeps the git
   metadata from the last run that did, which goes stale as commits land on
-  other files.
+  other files. The same holds for the node attributes `commit_count` and
+  `change_frequency` that feed the `volatile_dependencies` report.
 - **Snapshots stay full-extraction-only.** They hash the full unit set, and an
   incremental run only holds changed units in memory.
 - **A divergence floor is still worth keeping.** Incremental correctness is a

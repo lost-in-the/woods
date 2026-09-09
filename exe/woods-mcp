@@ -11,6 +11,13 @@
 # them via the Model Context Protocol (stdio transport).
 # Does NOT require Rails — only reads pre-extracted data.
 
+# A wrapper can exec this file directly, bypassing RubyGems' generated launcher.
+# Activate this installed gem before optional requires select dependency versions.
+# Source checkouts continue to use their calling bundle.
+Gem::Specification.find_all_by_name('woods').find do |spec|
+  File.realpath(spec.full_gem_path) == File.realpath(File.expand_path('..', __dir__))
+end&.activate
+
 # Suppress json-schema MultiJSON deprecation notice that would otherwise pollute
 # stderr during MCP stdio transport. The deprecation fires the first time
 # +json-schema+ is required — earlier revisions set the flag *after* the
