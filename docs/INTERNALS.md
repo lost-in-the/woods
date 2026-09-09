@@ -1,10 +1,10 @@
-# Woods Architecture
+# Woods internals
 
 This doc explains how Woods works from the inside, how extraction, storage, retrieval, and the two MCP servers fit together.
 
 ---
 
-## How Does Woods Work?
+## How does Woods work?
 
 Woods runs in three phases across two environments:
 
@@ -23,7 +23,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 
 ---
 
-## Pipeline Overview
+## Pipeline overview
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 
 ---
 
-## What Is an ExtractedUnit?
+## What is an ExtractedUnit?
 
 `ExtractedUnit` is the universal currency of Woods. Extractors produce them, the dependency graph connects them, the embedding pipeline consumes them, and the retrieval pipeline returns them.
 
@@ -89,13 +89,13 @@ must not be presented as equivalent to runtime Rails extraction.
 
 ---
 
-## How Does Extraction Work?
+## How does extraction work?
 
-### Eager Loading
+### Eager loading
 
 Before any extractor runs, `Rails.application.eager_load!` is called once to load all application classes into memory. If `eager_load!` fails with a `NameError` (common when `app/graphql/` references an uninstalled gem. Zeitwerk processes directories alphabetically, so a failure in `graphql/` can prevent `models/` from loading), the orchestrator falls back to per-directory loading across the 19 directories in `EXTRACTION_DIRECTORIES`.
 
-### Five Phases
+### Five phases
 
 ```ruby
 # Phase 1: Extract
@@ -117,7 +117,7 @@ EXTRACTORS.each { |type, klass| @results[type] = klass.new.extract_all }
 # One JSON file per unit + _index.json per type + dependency_graph.json + SUMMARY.md + manifest.json
 ```
 
-### Concurrent Mode
+### Concurrent mode
 
 Set `config.concurrent_extraction = true` to run extractors in parallel threads. Thread safety is ensured by:
 - Pre-computing `ModelNameCache` before threads start (avoids a `||=` race)
@@ -125,7 +125,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 - Results are collected via `Mutex`-protected hash
 - Dependency graph registration happens sequentially after all threads join
 
-### Incremental Extraction
+### Incremental extraction
 
 `extract_changed(changed_files)` re-extracts only the units affected by a set of changed files. It:
 1. Loads the existing `dependency_graph.json`
@@ -138,7 +138,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 
 ---
 
-## How Does the Dependency Graph Work?
+## How does the dependency graph work?
 
 The `DependencyGraph` is a directed graph where nodes are `ExtractedUnit` identifiers and edges are dependency relationships. It tracks:
 
@@ -157,13 +157,13 @@ graph.dependents_of("Order")   # => ["User", "OrdersController"]
 graph.affected_by(["app/models/user.rb"])  # BFS over reverse edges
 ```
 
-### PageRank Scoring
+### PageRank scoring
 
 `DependencyGraph#pagerank` computes importance scores using the reverse edge structure: units with many dependents score higher. This matches the intuition that "important" units are the ones many other units depend on, the same insight as Google's PageRank applied to code graphs.
 
 Scores feed into the retrieval ranker as one signal in the final ranking formula.
 
-### GraphAnalyzer: Structural Metrics
+### GraphAnalyzer: Structural metrics
 
 `GraphAnalyzer` computes read-only structural reports from the graph:
 
@@ -179,7 +179,7 @@ Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.m
 
 ---
 
-## How Does Retrieval Work?
+## How does retrieval work?
 
 Retrieval is a four-stage pipeline coordinated by `Retriever`:
 
@@ -187,7 +187,7 @@ Retrieval is a four-stage pipeline coordinated by `Retriever`:
 Query → [Classify] → [Execute] → [Rank] → [Assemble] → Context string
 ```
 
-### Stage 1: Query Classification (`QueryClassifier`)
+### Stage 1: Query classification (`QueryClassifier`)
 
 Classifies the query to determine:
 - **Intent**: lookup, explanation, tracing, search, framework
@@ -196,7 +196,7 @@ Classifies the query to determine:
 
 Classification determines which search strategy to use and whether framework source context is relevant.
 
-### Stage 2: Search Execution (`SearchExecutor`)
+### Stage 2: Search execution (`SearchExecutor`)
 
 Executes one or more search strategies based on classification:
 
@@ -219,7 +219,7 @@ Re-ranks candidates using multiple signals with weighted combination:
 
 Uses **Reciprocal Rank Fusion (RRF)** to merge ranked lists from multiple search strategies without score normalization.
 
-### Stage 4: Context Assembly (`ContextAssembler`)
+### Stage 4: Context assembly (`ContextAssembler`)
 
 Allocates token budget across layers:
 
@@ -235,7 +235,7 @@ Units that exceed the budget are truncated to their first semantic chunk. The as
 
 ---
 
-## What Storage Backends Are Available?
+## What storage backends are available?
 
 Woods uses three independent store abstractions:
 
@@ -247,7 +247,7 @@ Woods uses three independent store abstractions:
 
 The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax, no backend-specific SQL is written into the core.
 
-### Configuration Presets
+### Configuration presets
 
 ```ruby
 # Local development (SQLite + in-memory vector, single process)
@@ -292,11 +292,11 @@ end
 
 ---
 
-## Why Are There Two MCP Servers?
+## Why are there two MCP servers?
 
 The two servers have fundamentally different runtime requirements:
 
-### Index Server (`woods-mcp`)
+### Index server (`woods-mcp`)
 
 **29 schemas; 14 register in the packaged default. Two resources and two templates. Reads pre-extracted JSON without booting Rails.**
 
@@ -318,7 +318,7 @@ Note: pipeline management and feedback collection require specialized builder co
 
 The Index Server is safe to run anywhere, it has no database connection and makes no writes to the Rails application.
 
-### Console Server (`woods-console-mcp`)
+### Console server (`woods-console-mcp`)
 
 **31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process, no separate bridge process.**
 
@@ -335,7 +335,7 @@ Use the Console Server for:
 
 All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback, this is intentional defense-in-depth. See [MCP_SERVERS.md](MCP_SERVERS.md#console-server) for the full tool inventory and tier breakdown.
 
-### Which Should I Use?
+### Which should I use?
 
 | Task | Server |
 |------|--------|
@@ -349,11 +349,11 @@ All Console Server queries run inside a **rolled-back transaction** (`SafeContex
 
 ---
 
-## How Does Semantic Chunking Work?
+## How does semantic chunking work?
 
 Large units are split into semantic chunks before embedding. The `SemanticChunker` is type-aware, it doesn't split on arbitrary token counts.
 
-### Model Chunking
+### Model chunking
 
 Models are split into purpose-specific sections:
 
@@ -368,7 +368,7 @@ methods, remaining public and private methods
 
 Each chunk includes a header with the unit's identifier, type, and file path so it's self-contained when retrieved without the parent.
 
-### Controller Chunking
+### Controller chunking
 
 Controllers chunk per-action:
 
@@ -383,6 +383,6 @@ This matches how queries actually come in: "how does the create action work?" re
 
 Units below 200 estimated tokens stay as a single `:whole` chunk. Above that, the semantic chunker applies type-specific splitting, with a line-based fallback for units that are still too large. The fallback's per-chunk limits are not fixed constants, they derive from the embedding provider's input budget (`max_chars` from `max_input_tokens` scaled by the provider's chars-per-token ratio, or an exact `max_tokens` when a tokenizer is available), so a provider with a larger context yields larger chunk ceilings.
 
-### Why Not Just Split by Token Count?
+### Why not just split by token count?
 
 Token-count splits break semantic units arbitrarily, an `associations` section split mid-way loses context. Semantic splits align with how the code is actually understood: "tell me about the associations" maps to the associations chunk, not to arbitrary line ranges 150–300.

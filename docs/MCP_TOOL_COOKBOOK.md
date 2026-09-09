@@ -2,6 +2,53 @@
 
 Scenario-based examples showing which tool to use, what parameters to pass, and what you'll get back. Each section answers a natural question you might ask while working in a Rails codebase.
 
+## Scenario index
+
+**Understanding Your Codebase**
+- ["What models do we have?"](#what-models-do-we-have)
+- ["How is the User model structured?"](#how-is-the-user-model-structured)
+- ["What callbacks fire when Order saves?"](#what-callbacks-fire-when-order-saves)
+- ["Show me User with all concerns inlined"](#show-me-user-with-all-concerns-inlined)
+- ["What depends on User?"](#what-depends-on-user)
+- ["What views link to OrdersController?"](#what-views-link-to-orderscontroller)
+- ["What does User depend on?"](#what-does-user-depend-on)
+- ["Find all controllers that handle payments"](#find-all-controllers-that-handle-payments)
+- ["Which controller handles POST /checkout?"](#which-controller-handles-post-checkout)
+- ["What jobs does CheckoutService trigger?"](#what-jobs-does-checkoutservice-trigger)
+- ["Where does UsersController redirect to?"](#where-does-userscontroller-redirect-to)
+- ["What methods does Rails generate on Order at runtime?"](#what-methods-does-rails-generate-on-order-at-runtime)
+- ["What changed recently?"](#what-changed-recently)
+**Debugging**
+- ["What happens when POST /orders is called?"](#what-happens-when-post-orders-is-called)
+- ["Why is this page slow?"](#why-is-this-page-slow)
+**Architecture Analysis**
+- ["Find dead code in our codebase"](#find-dead-code-in-our-codebase)
+- ["What are the most important models?"](#what-are-the-most-important-models)
+- ["Are there circular dependencies?"](#are-there-circular-dependencies)
+- ["What are the key integration points?"](#what-are-the-key-integration-points)
+- ["Which units are structural dead ends?"](#which-units-are-structural-dead-ends)
+- ["How does Rails implement has_many?"](#how-does-rails-implement-has_many)
+**Data Exploration (Console Server)**
+- [Scope predicates](#scope-predicates)
+- ["How many active users do we have?"](#how-many-active-users-do-we-have)
+- ["Show me a sample order"](#show-me-a-sample-order)
+- ["What's the User table schema?"](#whats-the-user-table-schema)
+- ["What are the average order totals by status?"](#what-are-the-average-order-totals-by-status)
+- ["Find all email addresses for users who joined last month"](#find-all-email-addresses-for-users-who-joined-last-month)
+- ["Run a custom SQL query"](#run-a-custom-sql-query)
+**Semantic Search**
+- ["Find code related to subscription billing"](#find-code-related-to-subscription-billing)
+**Pipeline Management**
+- ["Check if the index is stale"](#check-if-the-index-is-stale)
+- ["Trigger a re-extraction without restarting the server"](#trigger-a-re-extraction-without-restarting-the-server)
+**Temporal Snapshots**
+- ["What changed between last week and now?"](#what-changed-between-last-week-and-now)
+- ["How has the User model evolved?"](#how-has-the-user-model-evolved)
+**CI Integration**
+- [GitHub Actions for Incremental Extraction](#github-actions-for-incremental-extraction)
+**Retrieval Feedback**
+- ["Rate a retrieval result and report a gap"](#rate-a-retrieval-result-and-report-a-gap)
+
 ## Conditional Tools & Wiring
 
 The Index Server defines **29 schemas**: the packaged executable registers **14**, while **15** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.

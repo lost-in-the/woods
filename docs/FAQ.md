@@ -2,6 +2,55 @@
 
 ---
 
+## Question index
+
+**General**
+- [Does Woods work without Rails?](#does-woods-work-without-rails)
+- [What Rails versions does Woods support?](#what-rails-versions-does-woods-support)
+- [Does Woods work with MySQL?](#does-woods-work-with-mysql)
+- [How large a codebase can Woods handle?](#how-large-a-codebase-can-woods-handle)
+- [Does extraction modify my database?](#does-extraction-modify-my-database)
+- [Can I run Woods in production?](#can-i-run-woods-in-production)
+**Setup**
+- [How do I install Woods?](#how-do-i-install-woods)
+- [What is the minimum configuration?](#what-is-the-minimum-configuration)
+- [How do I set up Woods in my MCP client?](#how-do-i-set-up-woods-in-my-mcp-client)
+**Extraction**
+- [What does Woods extract?](#what-does-woods-extract)
+- [Why does Woods inline concerns?](#why-does-woods-inline-concerns)
+- [How do I update the index after code changes?](#how-do-i-update-the-index-after-code-changes)
+- [How do I add semantic search with embeddings?](#how-do-i-add-semantic-search-with-embeddings)
+- [Why do some extractor types re-run wholesale on incremental runs?](#why-do-some-extractor-types-re-run-wholesale-on-incremental-runs)
+- [How long does extraction take?](#how-long-does-extraction-take)
+**MCP Servers**
+- [What's the difference between the Index Server and the Console Server?](#whats-the-difference-between-the-index-server-and-the-console-server)
+- [Why do I only see 9 console tools?](#why-do-i-only-see-9-console-tools)
+- [Is the Console Server safe to use?](#is-the-console-server-safe-to-use)
+- [How do I get access to SQL and structured query tools?](#how-do-i-get-access-to-sql-and-structured-query-tools)
+- [Why do my parallel tool calls all fail when only one has a bad argument?](#why-do-my-parallel-tool-calls-all-fail-when-only-one-has-a-bad-argument)
+**Docker**
+- [Does extraction run inside or outside the container?](#does-extraction-run-inside-or-outside-the-container)
+- [Why does the Index Server say no published manifest exists after extraction?](#why-does-the-index-server-say-no-published-manifest-exists-after-extraction)
+- [How do I configure the Console Server with Docker?](#how-do-i-configure-the-console-server-with-docker)
+**Storage and Embeddings**
+- [What storage backends does Woods support?](#what-storage-backends-does-woods-support)
+- [What embedding providers does Woods support?](#what-embedding-providers-does-woods-support)
+- [What are the storage presets?](#what-are-the-storage-presets)
+- [What happens if I change my embedding model after indexing?](#what-happens-if-i-change-my-embedding-model-after-indexing)
+**Retrieval**
+- [How does semantic search work?](#how-does-semantic-search-work)
+- [What is the `codebase_retrieve` tool for?](#what-is-the-codebase_retrieve-tool-for)
+- [How do I improve retrieval quality?](#how-do-i-improve-retrieval-quality)
+**Temporal Snapshots**
+- [What are temporal snapshots?](#what-are-temporal-snapshots)
+**Session Tracing**
+- [What does the session tracer do?](#what-does-the-session-tracer-do)
+**Operations**
+- [How do I keep the index in sync in CI?](#how-do-i-keep-the-index-in-sync-in-ci)
+- [How do I check if the index is healthy?](#how-do-i-check-if-the-index-is-healthy)
+- [Can I add custom extractors?](#can-i-add-custom-extractors)
+- [How do I exclude sensitive directories from extraction?](#how-do-i-exclude-sensitive-directories-from-extraction)
+
 ## General
 
 ### Does Woods work without Rails?
@@ -263,10 +312,13 @@ All backends work with both MySQL and PostgreSQL application databases. pgvector
 
 ### What embedding providers does Woods support?
 
-Two embedding providers are supported:
+Three embedding providers are supported:
 
 - **OpenAI**: `text-embedding-3-small` (1536 dimensions, default) or `text-embedding-3-large`. Requires an `OPENAI_API_KEY`. Billed per token.
 - **Ollama**: Any locally installed model (e.g., `nomic-embed-text`, `bge-m3`, `mxbai-embed-large`). Runs locally, no API key or cost. Requires Ollama to be running at `localhost:11434`.
+- **Fake** (`:fake`): deterministic vectors with no network or service, for exercising the embed pipeline in tests and smoke checks. See [Configuration reference](CONFIGURATION_REFERENCE.md).
+
+A provider object responding to `#embed` and `#embed_batch` can also be injected directly.
 
 ```ruby
 # OpenAI

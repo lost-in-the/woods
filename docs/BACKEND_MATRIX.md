@@ -6,7 +6,7 @@ Decision guidance for picking a vector store, metadata store, graph store, and e
 
 ---
 
-## Persistence Story
+## Persistence story
 
 Every backend combination falls into one of three shapes based on how data survives process boundaries. The right shape depends on whether the embed process and the query process share a Ruby VM, a filesystem, or neither.
 
@@ -31,7 +31,7 @@ The shape determines the capability matrix:
 
 ---
 
-## Vector Stores
+## Vector stores
 
 ### Database compatibility
 
@@ -44,7 +44,7 @@ The vector store you can use depends on the primary database your Rails app uses
 
 **Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of InnoDB / MyISAM and cannot be added via plugin. Woods does not emulate vector search in MySQL, the gem only ships adapters that delegate to a real vector engine. The shipped pairing for MySQL apps is `:qdrant` for vectors with Woods' own `:sqlite` metadata store; Woods never stores metadata in your application database.
 
-### pgvector (PostgreSQL Extension)
+### pgvector (PostgreSQL extension)
 
 **What it is:** PostgreSQL extension that adds vector similarity search directly to Postgres.
 
@@ -197,7 +197,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 
 ---
 
-## Embedding Providers
+## Embedding providers
 
 ### OpenAI text-embedding-3-small
 
@@ -223,7 +223,7 @@ These are aspirational; setting `config.vector_store` to any of them raises `Arg
 
 **Best for:** When retrieval quality is paramount and cost is not a concern.
 
-### Ollama (Self-hosted)
+### Ollama (self-hosted)
 
 | Model | Native context | Dimensions | Weights | Notes |
 |---|---|---|---|---|
@@ -253,7 +253,7 @@ contract tests; it does not represent semantic quality. Other values raise
 - **Voyage Code 3 / Code 2**: code-specialized embeddings (1024/1536 dims, up to 32K token context). Would be the best-quality option for code retrieval if implemented; there is no `Woods::Embedding::Provider::Voyage` today.
 - **Anthropic**: Anthropic does not currently offer a standalone embedding API. Monitor for availability.
 
-### Embedding Selection Guidance (implemented providers only)
+### Embedding selection guidance (implemented providers only)
 
 | Priority | Recommendation |
 |----------|---------------|
@@ -267,7 +267,7 @@ contract tests; it does not represent semantic quality. Other values raise
 
 ---
 
-## Metadata Stores
+## Metadata stores
 
 `build_metadata_store` accepts `:in_memory` and `:sqlite`. Nothing else is implemented.
 
@@ -284,7 +284,7 @@ contract tests; it does not represent semantic quality. Other values raise
 - Single writer at a time
 - No network access
 
-### In-Memory
+### In-memory
 
 **Best for:** Testing, evaluation, small codebases.
 
@@ -296,11 +296,11 @@ A PostgreSQL or MySQL metadata store (JSONB/JSON columns, generated columns, ful
 
 ---
 
-## Graph Stores
+## Graph stores
 
 `build_graph_store` accepts `:in_memory` only.
 
-### In-Memory (the only shipped graph store)
+### In-memory (the only shipped graph store)
 
 Loads `dependency_graph.json` into a Ruby hash structure. Supports BFS traversal with visited set, PageRank scoring, and structural analysis via `GraphAnalyzer` (orphan detection, dead-end detection, hub identification, cycle detection, bridge detection). Suitable for up to ~5000 nodes.
 
@@ -314,7 +314,7 @@ A recursive-CTE graph store (MySQL 8.0+ or PostgreSQL, storing edges in a table 
 
 ---
 
-## Background Job Integration
+## Background job integration
 
 Indexing can be triggered synchronously (rake task, inline) or from a background job. The pipeline itself is job-system-agnostic, it's synchronous Ruby, and the wrapper below is just scheduling and concurrency control. Use `Woods.extract!` for a full run; incremental runs need a changed-file list, so a job usually just shells out to `rake woods:incremental` (which computes that list from git) rather than calling `Woods.extract_changed!` directly.
 
@@ -334,7 +334,7 @@ class WoodsJob
 end
 ```
 
-### Solid Queue (Rails 8)
+### Solid queue (Rails 8)
 
 ```ruby
 class WoodsJob < ApplicationJob
@@ -372,9 +372,9 @@ Woods.extract!
 
 ---
 
-## Recommended Stack Combinations
+## Recommended stack combinations
 
-### Starter (Local Dependencies)
+### Starter (local dependencies)
 
 ```ruby
 Woods.configure_with_preset(:local)
@@ -389,7 +389,7 @@ Woods.configure_with_preset(:local)
 `ollama pull nomic-embed-text`.
 **Tradeoff:** Lower retrieval quality, CPU-bound embedding, single-user.
 
-### Rails 8 Standard
+### Rails 8 standard
 
 ```ruby
 Woods.configure_with_preset(:postgresql) do |config|
@@ -406,7 +406,7 @@ end
 **Setup:** `bundle add pgvector` + enable extension
 **Tradeoff:** All-in-one database, good quality, API dependency for embeddings.
 
-### MySQL + Qdrant (Classic Rails)
+### MySQL + Qdrant (classic Rails)
 
 ```ruby
 # No dedicated :mysql preset exists. Use :production and reuse your MySQL
@@ -429,7 +429,7 @@ end
 **Setup:** Add Qdrant to docker-compose.
 **Tradeoff:** Leverages existing MySQL infrastructure for the app; Qdrant handles vector search, which MySQL can't do natively. Most natural fit for established Rails apps on MySQL/Percona with Docker and Sidekiq.
 
-### Fully Self-Hosted
+### Fully self-hosted
 
 ```ruby
 # No dedicated :self_hosted preset exists. Use :production, then override
@@ -457,7 +457,7 @@ end
 
 ---
 
-## Cost and Scale Guidance
+## Cost and scale guidance
 
 Embedding and vector-storage cost are not the bottleneck for a single-codebase index, the numbers below are the reasoning, not a budgeting exercise.
 

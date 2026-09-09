@@ -149,7 +149,9 @@ RSpec.describe 'packaged gem' do
     expect(metadata.fetch('source_code_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0')
     expect(metadata.fetch('changelog_uri')).to eq('https://github.com/lost-in-the/woods/blob/v2.0.0/CHANGELOG.md')
     expect(metadata.fetch('documentation_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0/docs')
-    expect(File.read(File.join(@unpacked, 'CHANGELOG.md'))).to include('## [2.0.0] - 2026-08-20')
+    changelog = File.read(File.join(@unpacked, 'CHANGELOG.md'))
+    expect(changelog).to include('## [Unreleased]')
+    expect(changelog).to include('Controller and mailer chunk extraction parses each file once')
   end
 
   # The every-PR tier (see the package-smoke job in ci.yml and the

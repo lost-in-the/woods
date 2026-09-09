@@ -10,9 +10,45 @@ Woods.configure do |config|
 end
 ```
 
-## Common Configuration Patterns
+## Options index
 
-### CI-Only Extraction (Skip Framework Sources)
+- [Common configuration patterns](#common-configuration-patterns)
+  - [CI-only extraction (skip framework sources)](#ci-only-extraction-skip-framework-sources)
+  - [Docker extraction with environment-based paths](#docker-extraction-with-environment-based-paths)
+  - [Environment-conditional embedding provider](#environment-conditional-embedding-provider)
+- [Core options](#core-options)
+- [Embedding options](#embedding-options)
+  - [OpenAI embeddings](#openai-embeddings)
+  - [Ollama embeddings](#ollama-embeddings)
+  - [Fake embeddings (CI / sandboxes / offline hosts)](#fake-embeddings-ci--sandboxes--offline-hosts)
+  - [Injecting a provider object](#injecting-a-provider-object)
+- [Storage options](#storage-options)
+  - [pgvector (PostgreSQL)](#pgvector-postgresql)
+  - [Qdrant](#qdrant)
+  - [SQLite metadata](#sqlite-metadata)
+  - [In-memory metadata](#in-memory-metadata)
+- [Retrieval cache options](#retrieval-cache-options)
+- [Deployment shapes](#deployment-shapes)
+  - [Shape 2 setup (`:shared_filesystem`)](#shape-2-setup-shared_filesystem)
+- [Presets](#presets)
+- [Pipeline options](#pipeline-options)
+- [Session tracer options](#session-tracer-options)
+- [Gem indexing](#gem-indexing)
+- [Extractors](#extractors)
+- [Console MCP options](#console-mcp-options)
+- [Environment variables](#environment-variables)
+  - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
+  - [Rake tasks](#rake-tasks)
+  - [HTTP transport (`woods-mcp-http`)](#http-transport-woods-mcp-http)
+  - [Console server (`woods-console-mcp`)](#console-server-woods-console-mcp)
+  - [Watch daemon (`woods:watch`)](#watch-daemon-woodswatch)
+  - [Extraction rake tasks](#extraction-rake-tasks)
+  - [Exporters](#exporters)
+- [Database compatibility](#database-compatibility)
+
+## Common configuration patterns
+
+### CI-only extraction (skip framework sources)
 
 `config.extractors` cannot select a subset of extractors, it's accepted for
 forward compatibility only (see [Extractors](#extractors) below). To speed up
@@ -27,7 +63,7 @@ Woods.configure do |config|
 end
 ```
 
-### Docker Extraction with Environment-Based Paths
+### Docker extraction with environment-based paths
 
 ```ruby
 Woods.configure do |config|
@@ -36,7 +72,7 @@ Woods.configure do |config|
 end
 ```
 
-### Environment-Conditional Embedding Provider
+### Environment-conditional embedding provider
 
 ```ruby
 Woods.configure do |config|
@@ -58,7 +94,7 @@ end
 
 ---
 
-## Core Options
+## Core options
 
 Columns:
 
@@ -79,7 +115,7 @@ Columns:
 | `vector_store` / `metadata_store` / `graph_store` / `embedding_provider` | Symbol | n/a | preset-derived | Adapter types. Set by presets; override individually to mix stacks. |
 | chars-per-token ratio (used by ContextAssembler, TextPreparer, Builder, cost_model) | Float | `4.0` (OpenAI) / `1.5` (Ollama) | computed | Derived from the active embedding provider via `Woods::TokenUtils.chars_per_token_for(...)`. Not directly user-settable; change `embedding_provider` to change the ratio. |
 
-## Embedding Options
+## Embedding options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -87,7 +123,7 @@ Columns:
 | `embedding_model` | String | `'text-embedding-3-small'` | Model name for the embedding provider |
 | `embedding_options` | Hash | `nil` | Provider-specific options (see below) |
 
-### OpenAI Embeddings
+### OpenAI embeddings
 
 ```ruby
 config.embedding_provider = :openai
@@ -98,7 +134,7 @@ config.embedding_options = {
 }
 ```
 
-### Ollama Embeddings
+### Ollama embeddings
 
 ```ruby
 config.embedding_provider = :ollama
@@ -122,7 +158,7 @@ gem 'tokenizers', '~> 0.5'
 
 See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full model comparison and the procedure for adding a new model to the registry.
 
-### Fake Embeddings (CI / sandboxes / offline hosts)
+### Fake embeddings (CI / sandboxes / offline hosts)
 
 ```ruby
 config.embedding_provider = :fake
@@ -131,7 +167,7 @@ config.embedding_options = { dims: 128 }  # optional; default 128
 
 `:fake` wires `Woods::Embedding::Provider::Fake`, a deterministic bag-of-words hashing provider that needs no network endpoint, so `rake woods:embed` and `rake woods:retrieve` run in CI, sandboxes, and offline hosts. Vectors are L2-normalized, so cosine similarity stays mechanically meaningful (texts sharing vocabulary rank closer), but they are **not semantically meaningful embeddings**: use `:fake` for pipeline smoke tests, never for production retrieval quality. It pairs with any configured store stack: `:in_memory` everywhere for a self-contained smoke run, or the same pgvector/Qdrant + SQLite stores a real provider would use (MySQL-backed hosts pair with Qdrant exactly as in the [backend matrix](BACKEND_MATRIX.md); the provider itself never touches the database).
 
-### Injecting a Provider Object
+### Injecting a provider object
 
 Anything responding to `#embed` and `#embed_batch` can be assigned directly, it is used as-is and wrapped in the same retry/circuit-breaker resilience stack as the built-in adapters:
 
@@ -139,7 +175,7 @@ Anything responding to `#embed` and `#embed_batch` can be assigned directly, it 
 config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
 ```
 
-## Storage Options
+## Storage options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -178,7 +214,7 @@ config.vector_store_options = {
 }
 ```
 
-### SQLite Metadata
+### SQLite metadata
 
 ```ruby
 config.metadata_store = :sqlite
@@ -193,7 +229,7 @@ without it raises `Woods::ConfigurationError` with install
 instructions. For MySQL/Postgres-only hosts, use `:in_memory` (below)
 unless cross-process metadata persistence matters.
 
-### In-Memory Metadata
+### In-memory metadata
 
 ```ruby
 config.metadata_store = :in_memory
@@ -204,7 +240,7 @@ it. The `_index.json` manifest under `output_dir` is the durable
 metadata for the index MCP server, so this is a reasonable default
 for hosts that don't bundle `sqlite3`.
 
-## Retrieval Cache Options
+## Retrieval cache options
 
 The optional cache wraps both embedding-provider calls and assembled retrieval
 contexts. It is disabled by default and is separate from the Index Server's
@@ -241,7 +277,7 @@ overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
 
-## Deployment Shapes
+## Deployment shapes
 
 Woods supports three deployment shapes, pick the preset that matches yours.
 
@@ -313,7 +349,7 @@ Woods.configure_with_preset(:local) do |config|
 end
 ```
 
-## Pipeline Options
+## Pipeline options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -321,7 +357,7 @@ end
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
 
-## Session Tracer Options
+## Session tracer options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -341,7 +377,7 @@ config.session_store = Woods::SessionTracer::FileStore.new(
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```
 
-## Gem Indexing
+## Gem indexing
 
 `config.add_gem` is accepted for forward compatibility but **not implemented**: nothing in the
 extraction path reads the registered gem configs, and calling it emits a warning.
@@ -406,7 +442,7 @@ Leave it at its default. The full list of what always runs:
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
-## Console MCP Options
+## Console MCP options
 
 These options configure the Console MCP server (live database queries via
 MCP). See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for the full
@@ -428,11 +464,11 @@ deployment guide including defense layers.
 | `console_unsafe_eval_confirmation` | `Confirmation` | `nil` | Legacy option retained for compatibility; passing it fails closed. |
 | `console_unsafe_eval_audit_log_path` | String/Pathname | `nil` | Legacy option retained for compatibility; passing it fails closed. |
 
-## Environment Variables
+## Environment variables
 
 These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block, most exist so the MCP servers, rake tasks, and exporters can self-configure or override config without an initializer edit.
 
-### Index Server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)
+### Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -467,7 +503,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_MCP_HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated origin allow-list. |
 | `WOODS_MCP_HTTP_STATELESS` | `1` (stateless) | Set to `0`/`false`/`no` to restore session-based mode. |
 
-### Console Server (`woods-console-mcp`)
+### Console server (`woods-console-mcp`)
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -513,7 +549,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 
-## Database Compatibility
+## Database compatibility
 
 All storage options work with both MySQL and PostgreSQL, except:
 

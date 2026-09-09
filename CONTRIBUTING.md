@@ -29,6 +29,8 @@ bin/rubocop
 
 Create a branch from current `main`. Keep each pull request to one logical change and preserve unrelated formatting and refactors for separate work.
 
+`main` is the development branch: it holds work for the next release and can run ahead of the latest published gem. Releases are cut from version tags by the guarded workflow in the [release section below](#at-release-cutting-the-200-tag); documentation matching a published gem lives on that release's tag.
+
 ## Understand the repository
 
 | Path | Responsibility |
@@ -41,7 +43,7 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 | `spec/` | Unit, contract, and opt-in integration specs |
 | `spec/dummy/` | Booted Rails fixture application |
 | `docs/` | User, agent, operational, and reference documentation |
-| `plugin/skills/` | Distributed Woods setup/configuration/diagnosis skills |
+| `plugin/skills/` | Distributed Woods skills (setup/upgrade, MCP configuration, investigation, agent enablement, diagnosis) |
 
 <!-- v2-unreleased-note:start -->
 Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/main/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
@@ -142,7 +144,7 @@ Update the canonical owner for any changed contract:
 | Major-version behavior | `docs/UPGRADING_TO_2.md` |
 | Failure diagnosis | `docs/TROUBLESHOOTING.md` |
 
-If a rake task, executable, MCP tool/argument, config key, setup step, or diagnosis path changes, inspect all three distributed skills under `plugin/skills/`. Update affected skills in the same Woods PR and bump `plugin/.claude-plugin/plugin.json` when skill content changes.
+If a rake task, executable, MCP tool/argument, config key, setup step, or diagnosis path changes, inspect all five distributed skills under `plugin/skills/`. Update affected skills in the same Woods PR and bump `plugin/.claude-plugin/plugin.json` when skill content changes.
 
 The plugin is published through the [`lost-in-the/plugins`](https://github.com/lost-in-the/plugins) marketplace as a git-subdir reference. Open and cross-link a paired marketplace PR when compatibility metadata, the entry, or its ref must change. Skills must check the installed Woods version and must not document unreleased capabilities as available.
 
@@ -172,3 +174,27 @@ Do not use empty assertions or output-only tests. A regression test must fail be
 - Prefer explicit structured errors over suppressing a failure.
 
 By contributing, you agree that your contribution is licensed under the [MIT License](LICENSE.txt).
+
+## At release: cutting the 2.0.0 tag
+
+The release documentation is prepared by this PR; publication remains a separate
+step. Before tagging, verify the following against the final merge commit:
+
+| Step | What to verify |
+|---|---|
+| Version and date | Confirm `Woods::VERSION` and the dated changelog heading match the intended release; update the packaged-gem date assertion if the date changes |
+| Changelog | Fold all pending entries into the release section with one block per `###` heading, leaving an empty `[Unreleased]` section |
+| Publication claims | Until publication succeeds, keep the README and upgrade guide explicit about published-gem availability; contributor instructions stay linked to `main` |
+| Contracts | Run `bin/rake release_v2:verify_surface_inventory`, `bin/rspec spec/release_v2`, and `bin/rspec spec/integration/packaged_gem_spec.rb` |
+
+### After the flip merges: tag and publish
+
+The flip commit lands on `main` through a reviewed pull request like any other change. `main` is the development branch — it holds work for the next release and can run ahead of the published gem — so a release is pinned by its tag, never by a branch:
+
+| Step | Command | What guards it |
+|---|---|---|
+| Tag the flip merge commit | `git tag v2.0.0 <merge-sha> && git push origin v2.0.0` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history, match `Woods::VERSION`, and match the dated `CHANGELOG.md` heading |
+| Trigger the release workflow | `gh api --method POST repos/lost-in-the/woods/dispatches -f event_type=release -F 'client_payload[tag]=v2.0.0' -F 'client_payload[ci_run_id]=<id>'` where `<id>` is the green CI run on the tagged SHA (requires Contents write) | `.github/workflows/release.yml` re-validates the named CI run through the API, verifies the artifact digest, and runs secret-free candidate package tests before publishing |
+| Verify publication | `gem info woods --remote` shows the new version; the README gem badge updates on its own | just before pushing, the workflow re-runs `script/verify-release-tag` so a tag that moved since validation aborts the publish |
+
+Nothing is published from a laptop: the workflow builds and pushes the gem from the validated CI artifact, so the bytes on RubyGems are the bytes CI tested.
