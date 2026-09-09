@@ -2471,5 +2471,119 @@
     "description": "Every branch appends to the same `## [Unreleased]` block, so two open pull requests that both add a changelog entry conflict on the same lines. RuboCop's `changelog/` directory is the established alternative: one file per entry, named `<type>_<slug>.md`, collected into the release section and deleted by the release task. `Woods::Release::Changelog.fold` already merges duplicate `###` headings, so entry files would slot in as an additional source of blocks before that merge rather than as a second mechanism. Discovered while building the release flow; deliberately out of scope there. Acceptance: `release:prepare` folds `changelog/*.md` alongside `## [Unreleased]`, deletes the files it consumed, refuses an entry file whose type is not one of the headings the changelog uses, and `spec/release_v2/version_state_spec.rb` fails when an entry file survives a release commit.",
     "status": "ready",
     "depends_on": []
+  },
+  {
+    "id": "B-180",
+    "title": "graph_sha changes after a no-op incremental run because reverse and type_index arrays keep insertion order",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "graph",
+    "files": [
+      "lib/woods/dependency_graph.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Verified on a 7k-unit host app: edit one model, run woods:incremental, revert, run again. Every graph section is byte-identical except reverse (12 keys) and type_index (1 key), which differ only in member order because DependencyGraph#to_h emits Set#to_a. graph_sha (Extractor, Digest over the serialized graph) therefore changes, so a consumer caching on graph_sha redoes work after a no-op. Acceptance: to_h sorts the member arrays of reverse, reverse_via, and type_index; a spec registers the same units in two orders and asserts identical to_h and graph_sha; the incremental equivalence oracle compares graph_sha as well.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-181",
+    "title": "Git enrichment override for containerized linked worktrees (WOODS_GIT_DIR or following the gitdir pointer)",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/git_provenance.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "In a linked git worktree the .git file holds an absolute host path (gitdir: ...). Inside a container that path is not mounted, git -C root rev-parse fails, provenance records unknown, and commit_count, change_frequency, and volatile_dependencies are all absent (verified: mounting the canonical gitdir at the same absolute path restored 213 of 223 models with git data and 544 volatile dependencies). Acceptance: document that git's own GIT_DIR and GIT_COMMON_DIR environment variables are honoured by every woods git call, add WOODS_GIT_DIR as an explicit override that wins when set, and when the gitdir pointer is unreachable log one warning naming the missing path instead of silently omitting the fields.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-182",
+    "title": "Persisted volatile_dependencies is capped at 20 with no marker in the artifact, and section names do not derive their stat keys",
+    "severity": "low",
+    "category": "docs",
+    "layer": "graph",
+    "files": [
+      "lib/woods/graph_analyzer.rb",
+      "docs/INTERNALS.md"
+    ],
+    "description": "graph_analysis.json keeps the top 20 volatile dependencies while stats.volatile_dependency_count carries the full total (544 on the verified host app); a reader of the array alone cannot tell it is truncated. Also, section names are plural (cross_database_edges, volatile_dependencies, undeclared_package_edges, hubs, orphans) while stat keys are singular (cross_database_edge_count, volatile_dependency_count, hub_count), which follows precedent but trips callers deriving the key from the section name. Acceptance: stats gains volatile_dependencies_limit (20) next to the count, and INTERNALS.md carries a table mapping every section to its stat key and states which sections are capped in the artifact.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-183",
+    "title": "dependents and dependencies MCP responses have no size ceiling or truncation marker at the default depth",
+    "severity": "medium",
+    "category": "feature",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb",
+      "lib/woods/mcp/renderers/markdown_renderer.rb",
+      "lib/woods/mcp/renderers/plain_renderer.rb"
+    ],
+    "description": "Verified on a 7k-unit host app: dependents on a hub model at the default depth 2 returned about 178 KB (4523 lines) with no truncation marker, while graph_analysis in the same server prints a Showing N of M (truncated) line. The tool already takes depth, types, and via (depth: 1 with types: [model] cut the same call to 185 lines); it has no limit or offset. Rows carry no database, so in a multi-database app an agent cannot see which side of an edge lives where; lookup does show the unit's own database. Acceptance: a bounded default page with the same truncation line graph_analysis uses, limit and offset accepted like graph_analysis, the tool description naming depth, types, and via as the first-line controls, and database rendered on rows only when the graph contains more than one database name.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-184",
+    "title": "PhlexExtractor discovery is gated on descendants, so components outside the eager-load paths are never indexed",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/phlex_extractor.rb",
+      "lib/woods/extractors/view_component_extractor.rb"
+    ],
+    "description": "Cause isolated on the verified host app: a local component base one hop below Phlex::HTML lives under app/views/<namespace>/, which is autoloaded but not eager-loaded. PhlexExtractor collects component_base.descendants after eager_load!, so Phlex::HTML descendants went from 7 to 18 and exactly 18 components were indexed while 54 files define subclasses; the file lookup on line 124 (app/views/<name>.rb) would match every missing class but is never reached because discovery happens first. ViewComponent::Base is undefined there, so that extractor is not involved. Acceptance: discovery scans the component directories (app/components, app/views/components, app/views/**) for Ruby files whose class inherits from a Phlex or ViewComponent base, constantizes them through the autoloader before taking descendants, honours a configurable directory list, and a booted spec covers a component under an autoloaded but not eager-loaded subtree of app/views.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-185",
+    "title": "Full extraction about 30 percent slower than 1.5.0 on a 7k-unit app after the graph layers",
+    "severity": "low",
+    "category": "performance",
+    "layer": "graph",
+    "files": [
+      "lib/woods/graph_analyzer.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "34 s on 1.5.0 versus 44 s at f085276 for 4 percent more units, incremental 11 s for one model. Suspects: PageRank now runs inside analyze, the three new reports, git enrichment per unit. Acceptance: a profile of one full extraction on the dummy app plus the timing table from WATCH_DAEMON.md refreshed; any single phase over 15 percent of the total gets its own entry.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-186",
+    "title": "Git enrichment writes commit_count 0 and change_frequency new for every unit when git runs but cannot resolve refs",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/git_provenance.rb"
+    ],
+    "description": "Verified on a containerized linked worktree: with GIT_DIR pointing at the worktree's private git directory, rev-parse --git-dir succeeds but refs never resolve (the private gitdir's commondir is a relative pointer that resolves outside the mount; GIT_COMMON_DIR did not override it). Woods then emits commit_count 0 and change_frequency new on 213 of 223 models, indistinguishable from files that were never committed, whereas a fully absent git directory correctly omits the keys. An agent reading that index concludes every model is brand new and volatile_dependencies is silently empty. Acceptance: before enrichment, require git rev-parse HEAD to succeed; when it fails, omit the git keys for every unit, record provenance as unknown, and log one warning naming the cause; a spec covers a worktree whose commondir is unreachable. Pair with B-181 so the override path and the failure path are tested together.",
+    "status": "resolved",
+    "depends_on": []
+  },
+  {
+    "id": "B-187",
+    "title": "RailsSourceExtractor is 55 percent of a full extraction of the fixture app",
+    "severity": "low",
+    "category": "performance",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/rails_source_extractor.rb"
+    ],
+    "description": "Phase timers around one cold extract_all of spec/dummy (7 reps, 190 ms at p50) put RailsSourceExtractor at 100 ms, 55 percent of the run and the only phase over 15 percent. Read with the fixture's shape: 119 of its 147 units are framework sources, a ratio no host application has, so the figure sizes the fixture rather than the extractor. Opened from B-185, whose named suspects the same profile cleared: GraphAnalyzer#analyze is 3.3 percent with PageRank inside it, git enrichment 12 percent, the dependents pass under a millisecond. Acceptance: the same phase profile taken on a host where framework sources are the minority, and either a measured cost per framework unit that justifies leaving it alone, or a change that lowers it without altering rails_source output.",
+    "status": "ready",
+    "depends_on": [
+      "B-185"
+    ]
   }
 ]
