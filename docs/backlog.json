@@ -2585,5 +2585,35 @@
     "depends_on": [
       "B-185"
     ]
+  },
+  {
+    "id": "B-188",
+    "title": "volatile_dependencies: tuning guidance and a hub-aware threshold so one hot hub does not qualify every dependent",
+    "severity": "low",
+    "category": "docs",
+    "layer": "graph",
+    "files": [
+      "docs/CONFIGURATION_REFERENCE.md",
+      "lib/woods/graph_analyzer.rb"
+    ],
+    "description": "On a 7k-unit host app the default volatile_dependency_ratio of 3.0 produced 544 qualifying pairs, and the top five all pointed at one 153-commit hub from dependents with 10 to 13 commits: a hub that hot makes almost every dependent qualify by ratio alone. The configuration reference defines the ratio but gives no tuning guidance. Acceptance: the reference explains how to read the count (start from stats.volatile_dependency_count, raise the ratio until the list is reviewable, 8 to 10 was right for that app) and the analyzer gains an optional minimum dependent commit count or a per-dependency cap so a single hub cannot fill the report; the report stays informational.",
+    "status": "ready",
+    "depends_on": []
+  },
+  {
+    "id": "B-189",
+    "title": "A shallow CI checkout passes the HEAD guard, so every unit reports change_frequency new",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/git_command.rb"
+    ],
+    "description": "B-186 made enrichment require git rev-parse HEAD to succeed before writing any churn figure. A shallow clone (fetch-depth 1, the CI default) passes that guard: HEAD resolves, git log succeeds, and it returns exactly one commit per file. Every unit then reports commit_count 1 and change_frequency new, which is the same misleading answer B-186 removed, arrived at by a different route, and volatile_dependencies is empty because nothing clears VOLATILE_MIN_COMMITS. Acceptance: detect the shallow case with git rev-parse --is-shallow-repository, and either omit the churn keys or mark them as measured over a truncated history; log one warning naming the depth remedy; a spec covers a shallow clone of the temporary fixture repository, asserting the keys are not silently wrong. TROUBLESHOOTING already tells a reader to fetch more history for missing git metadata; this makes the index say so itself.",
+    "status": "ready",
+    "depends_on": [
+      "B-186"
+    ]
   }
 ]
