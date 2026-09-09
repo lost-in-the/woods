@@ -174,6 +174,7 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 | **Hubs** | Units with many dependents, architectural bottlenecks; changes here have high blast radius |
 | **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS. |
 | **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
+| **Cross-database edges** | Association or foreign-key edges whose two ends resolve to different databases. A `has_many :through` across databases without `disable_joins: true` is reported as `join_through_across_databases`. Read from graph node and edge attributes, so full and incremental runs agree. Scoped to primary nodes (units registered in the graph), not variants. |
 
 Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.md`.
 

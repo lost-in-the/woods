@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a graph-level lookup, not stored per model). The dependency graph gains additive node keys
   (`database`, `table`, `foreign_key_tables`) and edge keys (`through`, `disable_joins`);
   a graph with none of these serializes exactly as before.
+- **`cross_database_edges` report.** `GraphAnalyzer#analyze` lists association and
+  foreign-key edges that cross databases, with `kind` set to
+  `join_through_across_databases` when a `has_many :through` lacks `disable_joins: true`.
+  Written to `graph_analysis.json`; exposed through `graph_analysis` in Task 10.
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
   complementary on symbol references.

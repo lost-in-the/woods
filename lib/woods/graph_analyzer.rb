@@ -34,6 +34,10 @@ module Woods
     # on large graphs.
     ORPHAN_ASSIGNMENT_ROUNDS = 10
 
+    # Edge labels that come from an Active Record association reflection.
+    # Only these can cross a database boundary through Rails itself.
+    ASSOCIATION_VIAS = %w[belongs_to has_many has_one has_and_belongs_to_many].freeze
+
     # @param dependency_graph [DependencyGraph] The graph to analyze
     def initialize(dependency_graph)
       @graph = dependency_graph
@@ -177,6 +181,43 @@ module Woods
         end
     end
 
+    # Association and foreign-key edges whose two ends resolve to different
+    # databases (#280).
+    #
+    # Reads only node attributes (`database`, `table`, `foreign_key_tables`)
+    # and edge attributes (`through`, `disable_joins`), so an incremental run
+    # that loaded the graph from disk computes exactly what a full run does.
+    #
+    # Scoped to primary nodes: identifiers as registered in {#graph_nodes}.
+    # A variant, the non-primary type registered under an identifier that
+    # collides across types, is not walked separately.
+    #
+    # `kind`:
+    # * `join_through_across_databases`: a `has_many :through` crossing
+    #   databases without `disable_joins: true`. Rails will try to JOIN
+    #   across connections; this is the Uchitelle rule.
+    # * `association_across_databases`: any other association edge across
+    #   databases, including a through with `disable_joins`.
+    # * `foreign_key_across_databases`: a database-level foreign key whose
+    #   target table lives in another database.
+    #
+    # @return [Array<Hash>] sorted by from, to, via
+    def cross_database_edges
+      @cross_database_edges ||= begin
+        nodes = graph_nodes
+        owners = table_owners(nodes)
+        entries = nodes.keys.sort.flat_map do |identifier|
+          meta = nodes[identifier]
+          from_db = meta[:database]
+          next [] unless from_db
+
+          association_crossings(identifier, from_db, nodes) +
+            foreign_key_crossings(identifier, from_db, meta, nodes, owners)
+        end
+        entries.uniq { |e| [e[:from], e[:to], e[:via]] }.sort_by { |e| [e[:from], e[:to], e[:via]] }
+      end
+    end
+
     # Group units into semantic domains using namespace prefixes and graph connectivity.
     #
     # Strategy:
@@ -233,6 +274,7 @@ module Woods
       computed_hubs = hubs
       computed_cycles = cycles
       computed_bridges = bridges(limit: 10)
+      computed_cross_database = cross_database_edges
 
       {
         orphans: computed_orphans,
@@ -240,11 +282,13 @@ module Woods
         hubs: computed_hubs,
         cycles: computed_cycles,
         bridges: computed_bridges,
+        cross_database_edges: computed_cross_database,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
           hub_count: computed_hubs.size,
-          cycle_count: computed_cycles.size
+          cycle_count: computed_cycles.size,
+          cross_database_edge_count: computed_cross_database.size
         }
       }
     end
@@ -472,6 +516,55 @@ module Woods
     # @return [Hash] identifier => { type:, file_path:, namespace: }
     def graph_nodes
       @graph_nodes ||= graph_data[:nodes]
+    end
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Cross-database helpers
+    # ──────────────────────────────────────────────────────────────────────
+
+    # table name => identifier of the model node that owns it. Sorted
+    # iteration makes a duplicated table name resolve the same way every run.
+    #
+    # @param nodes [Hash]
+    # @return [Hash{String => String}]
+    def table_owners(nodes)
+      nodes.keys.sort.each_with_object({}) do |identifier, owners|
+        table = nodes[identifier][:table]
+        owners[table] ||= identifier if table
+      end
+    end
+
+    # @return [Array<Hash>] association edges from `identifier` that land in another database
+    def association_crossings(identifier, from_db, nodes)
+      @graph.edge_records(identifier).filter_map do |edge|
+        via = edge[:via].to_s
+        next unless ASSOCIATION_VIAS.include?(via)
+
+        target = nodes[edge[:target]]
+        to_db = target && target[:database]
+        next unless to_db && to_db != from_db
+
+        disable_joins = edge[:disable_joins] == true
+        {
+          from: identifier, to: edge[:target], via: via, from_db: from_db, to_db: to_db,
+          through: edge[:through], disable_joins: disable_joins,
+          kind: edge[:through] && !disable_joins ? 'join_through_across_databases' : 'association_across_databases'
+        }
+      end
+    end
+
+    # @return [Array<Hash>] foreign keys from `identifier`'s table into a table owned by another database
+    def foreign_key_crossings(identifier, from_db, meta, nodes, owners)
+      Array(meta[:foreign_key_tables]).filter_map do |table|
+        owner = owners[table]
+        to_db = owner && nodes[owner][:database]
+        next unless to_db && to_db != from_db
+
+        {
+          from: identifier, to: owner, via: 'foreign_key', from_db: from_db, to_db: to_db,
+          through: nil, disable_joins: false, kind: 'foreign_key_across_databases'
+        }
+      end
     end
 
     # ──────────────────────────────────────────────────────────────────────

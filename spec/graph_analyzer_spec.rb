@@ -6,13 +6,14 @@ RSpec.describe Woods::GraphAnalyzer do
   let(:graph) { Woods::DependencyGraph.new }
   let(:analyzer) { described_class.new(graph) }
 
-  def make_unit(type:, identifier:, file_path: nil, dependencies: [])
+  def make_unit(type:, identifier:, file_path: nil, dependencies: [], metadata: {})
     unit = Woods::ExtractedUnit.new(
       type: type,
       identifier: identifier,
       file_path: file_path || "/app/#{identifier.underscore}.rb"
     )
     unit.dependencies = dependencies
+    unit.metadata = metadata
     unit
   end
 
@@ -392,6 +393,84 @@ RSpec.describe Woods::GraphAnalyzer do
           expect(boundary_keys).to eq(boundary_keys.sort)
         end
       end
+    end
+  end
+
+  describe '#cross_database_edges' do
+    def model(identifier, database:, table:, dependencies: [], foreign_keys: [])
+      make_unit(type: :model, identifier: identifier, dependencies: dependencies,
+                metadata: { database: database, table_name: table, foreign_keys: foreign_keys })
+    end
+
+    it 'flags a has_many :through across databases without disable_joins as a join' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions' }
+                           ]))
+
+      expected = [
+        { from: 'Invoice', to: 'Account', via: 'has_many', from_db: 'billing', to_db: 'primary',
+          through: 'subscriptions', disable_joins: false, kind: 'join_through_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'downgrades the same edge to an association when disable_joins is set' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices', dependencies: [
+                             { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',
+                               disable_joins: true }
+                           ]))
+
+      expect(analyzer.cross_database_edges.first).to include(disable_joins: true,
+                                                             kind: 'association_across_databases')
+    end
+
+    it 'flags a foreign key whose target table lives in another database' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      foreign_keys: [{ column: 'account_id', to_table: 'accounts' }]))
+
+      expected = [
+        { from: 'Invoice', to: 'Account', via: 'foreign_key', from_db: 'billing', to_db: 'primary',
+          through: nil, disable_joins: false, kind: 'foreign_key_across_databases' }
+      ]
+
+      expect(analyzer.cross_database_edges).to eq(expected)
+    end
+
+    it 'ignores same-database edges, non-association edges, and nodes without a database' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('User', database: 'primary', table: 'users',
+                                   dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+      graph.register(make_unit(type: :service, identifier: 'Checkout',
+                               dependencies: [{ type: :model, target: 'Account', via: :code_reference }]))
+      graph.register(model('Legacy', database: nil, table: 'legacy',
+                                     dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expect(analyzer.cross_database_edges).to eq([])
+    end
+
+    it 'sorts entries by from, to, via so two runs publish the same list' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Zeta', database: 'billing', table: 'zetas',
+                                   dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+      graph.register(model('Alpha', database: 'billing', table: 'alphas',
+                                    dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      expect(analyzer.cross_database_edges.map { |e| e[:from] }).to eq(%w[Alpha Zeta])
+    end
+
+    it 'is part of analyze with a count in stats' do
+      graph.register(model('Account', database: 'primary', table: 'accounts'))
+      graph.register(model('Invoice', database: 'billing', table: 'invoices',
+                                      dependencies: [{ type: :model, target: 'Account', via: :belongs_to }]))
+
+      report = analyzer.analyze
+
+      expect(report[:cross_database_edges].size).to eq(1)
+      expect(report[:stats][:cross_database_edge_count]).to eq(1)
     end
   end
 end
