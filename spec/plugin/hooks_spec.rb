@@ -68,7 +68,7 @@ RSpec.describe 'plugin hooks (#280)' do
   def restricted_bin(dir, without:)
     bin = File.join(dir, 'restricted-bin')
     FileUtils.mkdir_p(bin)
-    %w[cat mkdir rmdir sed tr git ruby date sleep jq touch].each do |tool|
+    %w[cat mkdir rmdir sed tr git ruby date sleep jq touch stat].each do |tool|
       next if without.include?(tool)
 
       real = `which #{tool}`.strip
@@ -257,6 +257,68 @@ RSpec.describe 'plugin hooks (#280)' do
           expect(contents).to include('app/models/a.rb woods:incremental')
           expect(contents).to include('app/models/b.rb woods:incremental')
           expect(contents.lines.size).to eq(2)
+        end
+      end
+
+      # A directory-based lock has no kernel-enforced release, unlike flock:
+      # a hook killed mid-drain leaves `hook.lock.d` or `hook-pending.lock.d`
+      # behind forever. Every later hook must reclaim a lock directory once
+      # it is old enough to be certain the crash already happened, and must
+      # still respect one that is merely in active, legitimate use.
+      context 'stale mkdir lock recovery (crash mid-drain)' do
+        def backdate(path, seconds_ago:)
+          FileUtils.mkdir_p(path)
+          stale_time = Time.now - seconds_ago
+          File.utime(stale_time, stale_time, path)
+        end
+
+        it 'reclaims a stale run lock directory left by a crashed drain' do
+          Dir.mktmpdir('woods-hook') do |dir|
+            tmp_dir = make_app(dir)
+            rake, log, = recorder(dir)
+            bin = restricted_bin(dir, without: ['flock'])
+            env = base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin)
+            backdate(File.join(tmp_dir, 'hook.lock.d'), seconds_ago: 3600)
+
+            _out, err, status = run_hook(post_edit, edit_payload(dir, 'app/models/user.rb'), env)
+
+            expect(status).to be_success, err
+            expect(File.read(log)).to include('app/models/user.rb woods:incremental')
+          end
+        end
+
+        it 'reclaims a stale pending lock directory instead of spinning until the hook timeout' do
+          Dir.mktmpdir('woods-hook') do |dir|
+            tmp_dir = make_app(dir)
+            rake, log, = recorder(dir)
+            bin = restricted_bin(dir, without: ['flock'])
+            env = base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin)
+            backdate(File.join(tmp_dir, 'hook-pending.lock.d'), seconds_ago: 3600)
+
+            err = status = nil
+            Timeout.timeout(5) do
+              _out, err, status = run_hook(post_edit, edit_payload(dir, 'app/models/user.rb'), env)
+            end
+
+            expect(status).to be_success, err
+            expect(File.read(log)).to include('app/models/user.rb woods:incremental')
+          end
+        end
+
+        it 'still respects a fresh run lock directory instead of reclaiming it' do
+          Dir.mktmpdir('woods-hook') do |dir|
+            tmp_dir = make_app(dir)
+            rake, log, = recorder(dir)
+            bin = restricted_bin(dir, without: ['flock'])
+            env = base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin)
+            FileUtils.mkdir_p(File.join(tmp_dir, 'hook.lock.d')) # fresh mtime
+
+            _out, err, status = run_hook(post_edit, edit_payload(dir, 'app/models/user.rb'), env)
+
+            expect(status).to be_success, err
+            expect(File.exist?(log)).to be(false)
+            expect(File.read(File.join(tmp_dir, 'hook-pending.txt'))).to include('app/models/user.rb')
+          end
         end
       end
     end

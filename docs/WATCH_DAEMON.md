@@ -541,6 +541,12 @@ between the drainer's last (empty) drain and its releasing the lock: that
 edit is delayed to the next graph-changing edit rather than lost outright,
 and the `SessionStart` warning is the backstop for it.
 
+On a host without `flock`, the mkdir-based fallback lock has no kernel-enforced
+release, so a hook killed mid-drain would otherwise leave a lock directory
+behind forever; each lock directory is reclaimed once its mtime is older than
+`WOODS_HOOK_LOCK_STALE_SECONDS` (default 1800), while a fresh one is still
+respected as busy.
+
 The `SessionStart` warning compares two commit-adjacent timestamps only:
 the generation's `updated_at` against the last commit's time. It says
 nothing about uncommitted changes in the working tree, and a checkout
