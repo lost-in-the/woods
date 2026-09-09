@@ -2366,7 +2366,7 @@
       "docs/PUBLISHED_INDEX.md"
     ],
     "description": "Issue #280 item 4. Non-MCP readers (RuboCop cops, gate scripts) have no small Ruby API for the published generation. Acceptance: a facade over the active or a pinned generation exposing units, edges by via, and an external_dependency_checksum keyed on generation.json (pinned readers digest the pinned manifest), a documented cop example, and a check that reads two retained generations to find public methods that moved without a test_coverage edge following.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-173",
