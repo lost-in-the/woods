@@ -35,17 +35,17 @@ module Woods
     # lossy — e.g. `bar.baz` and `bar_baz` both {.safe_segment} to `bar_baz`,
     # so writing them under one name means the second write clobbers the
     # first and `flow_index.json` points both entries at that one file. The
-    # ordinary `::` → `__` namespace transform does NOT by itself count as
-    # lossy ({.lossy_segment?} looks past it) — it is the one substitution
-    # every identifier-to-filename convention in this file already makes, so
-    # a namespaced controller keeps its plain name.
+    # namespace transform keeps its legacy spelling. Literal underscores in
+    # either input are digested, preventing both namespace and separator
+    # collisions, including an action that resembles another file's digest.
     #
     # @param controller_id [String] e.g. "Admin::UsersController"
     # @param action [String] e.g. "index"
     # @return [String] e.g. "Admin__UsersController_index.json"
     def self.flow_filename(controller_id, action)
       base = "#{safe_segment(controller_id)}_#{safe_segment(action)}"
-      return "#{base}.json" unless lossy_segment?(controller_id) || lossy_segment?(action)
+      ambiguous = controller_id.to_s.include?('_') || action.to_s.include?('_')
+      return "#{base}.json" unless ambiguous || lossy_segment?(controller_id) || lossy_segment?(action)
 
       digest = Digest::SHA256.hexdigest("#{controller_id}##{action}")[0, 8]
       "#{base}_#{digest}.json"
@@ -55,8 +55,7 @@ module Woods
     # `::` → `__` namespace transform — i.e. whether some OTHER character
     # got folded to `_`. That residual loss is what makes two different
     # inputs land on the same segment (`bar.baz` and `bar_baz` both become
-    # `bar_baz`); the namespace transform alone does not, since it is
-    # applied uniformly and every caller already expects it.
+    # `bar_baz`). Literal underscores are handled separately by flow_filename.
     #
     # @param value [String]
     # @return [Boolean]

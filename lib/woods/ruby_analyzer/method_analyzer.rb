@@ -63,7 +63,7 @@ module Woods
         body_children = (node.children || [])[body_offset..] || []
 
         visibility_tracker = VisibilityTracker.new
-        inner_ns = namespace_stack + [name]
+        inner_ns = fqn.split('::')
 
         body_children.each do |child|
           next unless child.is_a?(Ast::Node)

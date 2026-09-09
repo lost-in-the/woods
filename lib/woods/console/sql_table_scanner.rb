@@ -46,7 +46,7 @@ module Woods
             "(?<jschema_dq>[^"]+)" |
             (?<jschema_bare>\w+)
           )
-          \.
+          \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
@@ -89,7 +89,7 @@ module Woods
             "(?<schema_dq>[^"]+)" |
             (?<schema_bare>\w+)
           )
-          \.
+          \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
@@ -127,7 +127,7 @@ module Woods
             "(?<schema_dq>[^"]+)" |
             (?<schema_bare>\w+)
           )
-          \.
+          \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
@@ -141,14 +141,10 @@ module Woods
       # stripped before scanning. Both JOIN-style and ANSI-89 comma-join syntax
       # are handled.
       #
-      # Literals are stripped under BOTH supported dialects and the scans
-      # unioned. This scanner backs TableGate, so it may over-detect but must
-      # never under-detect: stripping with the wrong dialect's escape rules
-      # can swallow a real FROM clause — e.g. MySQL's `\'` escape applied on
-      # a PostgreSQL host (where backslash is literal under
-      # standard_conforming_strings) folds `'x\' FROM blocked WHERE y = '`
-      # into one literal, hiding `blocked` from the gate while PostgreSQL
-      # genuinely reads that table.
+      # A known adapter restricts the dialect, but not its session quote modes.
+      # Without known session settings, MySQL scans every quote-mode combination. An unknown
+      # adapter also scans PostgreSQL. This may over-detect, but must not hide a
+      # table merely because the server uses a different quote interpretation.
       #
       # MySQL executable comments (`/*! ... */`) are scanned under both of
       # their possible semantics (see .executable_comment_views) so a table
@@ -156,13 +152,13 @@ module Woods
       #
       # @param sql [String, nil] the SQL string to scan
       # @return [Array<String>] identifiers in first-encounter order, deduplicated
-      def self.identifiers_in(sql)
+      def self.identifiers_in(sql, dialect: nil, mysql_modes: nil)
         return [] if sql.nil? || sql.empty?
 
         results = []
-        %i[postgres mysql].each do |dialect|
-          stripped = strip_noise(sql, dialect: dialect)
-          executable_comment_views(stripped).each do |view|
+        (dialect ? [dialect] : %i[postgres mysql]).each do |dialect|
+          views = SqlNoiseStripper.security_views(sql, dialect: dialect, mysql_modes: mysql_modes)
+          views.flat_map { |stripped| executable_comment_views(stripped) }.each do |view|
             collect_join_identifiers(view, results)
             collect_from_identifiers(view, results)
             collect_table_statement_identifiers(view, results)
@@ -170,16 +166,6 @@ module Woods
         end
         results.uniq
       end
-
-      # @api private
-      # Comments and literals must be stripped in a single combined pass —
-      # stripping them separately lets a comment marker inside a literal
-      # (`'-- '`) hide a real FROM clause from the gate. See
-      # {SqlNoiseStripper.strip_noise}.
-      def self.strip_noise(sql, dialect:)
-        SqlNoiseStripper.strip_noise(sql, dialect: dialect)
-      end
-      private_class_method :strip_noise
 
       # @api private
       # Every view of the stripped SQL the FROM/JOIN scans must consider for

@@ -241,12 +241,11 @@ module Woods
       # @param entries [Array<Hash>]
       # @return [Array<Hash>]
       def mark_changed_entries(entries)
-        entries.each_with_index do |entry, i|
-          entry[:changed] = if i == entries.size - 1
-                              true # Oldest version is always "changed" (first appearance)
-                            else
-                              entry[:source_hash] != entries[i + 1][:source_hash]
-                            end
+        entries.group_by { |entry| entry[:unit_type] }.each_value do |versions|
+          versions.each_with_index do |entry, index|
+            older = versions[index + 1]
+            entry[:changed] = older.nil? || entry[:source_hash] != older[:source_hash]
+          end
         end
         entries
       end
@@ -407,7 +406,8 @@ module Woods
         rows = @db.execute(sql, [snapshot_id])
 
         rows.to_h do |row|
-          [row['identifier'], {
+          [[row['identifier'], row['unit_type']], {
+            identifier: row['identifier'],
             unit_type: row['unit_type'],
             source_hash: row['source_hash'],
             metadata_hash: row['metadata_hash'],
@@ -434,16 +434,16 @@ module Woods
             if data_a[:source_hash] != data_b[:source_hash] ||
                data_a[:metadata_hash] != data_b[:metadata_hash] ||
                data_a[:dependencies_hash] != data_b[:dependencies_hash]
-              modified << { identifier: identifier, unit_type: data_b[:unit_type] }
+              modified << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
             end
           else
-            added << { identifier: identifier, unit_type: data_b[:unit_type] }
+            added << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
           end
         end
 
         # Units in A but not B → deleted
         units_a.each do |identifier, data_a|
-          deleted << { identifier: identifier, unit_type: data_a[:unit_type] } unless units_b.key?(identifier)
+          deleted << { identifier: data_a[:identifier], unit_type: data_a[:unit_type] } unless units_b.key?(identifier)
         end
 
         { added: added, modified: modified, deleted: deleted }

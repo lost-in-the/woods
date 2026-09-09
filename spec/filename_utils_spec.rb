@@ -48,8 +48,8 @@ RSpec.describe Woods::FilenameUtils do
       underscored = described_class.flow_filename('FooController', 'bar_baz')
 
       expect(dotted).not_to eq(underscored)
-      # The lossless one keeps its pretty name; only the lossy one is digested.
-      expect(underscored).to eq('FooController_bar_baz.json')
+      # Literal underscores also need a digest to distinguish namespace and delimiter encodings.
+      expect(underscored).to match(/\AFooController_bar_baz_[0-9a-f]{8}\.json\z/)
       expect(dotted).to match(/\AFooController_bar_baz_[0-9a-f]{8}\.json\z/)
     end
   end

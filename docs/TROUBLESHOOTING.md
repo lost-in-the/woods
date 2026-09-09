@@ -782,3 +782,10 @@ config.notion_database_ids = {
 
 ---
 
+## Units with the same name but different types
+
+After upgrading, run embedding again if semantic results omit a factory or database
+view sharing the same name. Current writers distinguish typed storage identities;
+public names remain unchanged. Snapshot migration 007 runs automatically and keeps
+existing rows, but cannot recover variants lost by older writers. See the
+[upgrade guide](UPGRADING_TO_2.md) for storage, flow rebuild, and rollback details.

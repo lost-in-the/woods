@@ -10,9 +10,9 @@
 [![CI](https://github.com/lost-in-the/woods/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lost-in-the/woods/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
 
-> **Version 2.0.0 is the current release** — a major update from 1.x that changes index identifiers, the publication layout, and the MCP surface. Read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating from 1.x; the full history is in the [CHANGELOG](CHANGELOG.md).
+> **This tree documents version 2.0.0** — a major update from 1.x that changes index identifiers, the publication layout, and the MCP surface. Read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating from 1.x; the full history is in the [CHANGELOG](CHANGELOG.md).
 >
-> `main` is the development branch and can run ahead of the latest published gem. Documentation matching a specific release lives on its tag ([v2.0.0](https://github.com/lost-in-the/woods/tree/v2.0.0)); the gem badge above always shows the latest published version.
+> `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for published versions lives on their tags. Until 2.0.0 is published, use this tree to review a source checkout, and use [v1.6.1](https://github.com/lost-in-the/woods/tree/v1.6.1) for the released gem.
 
 Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
 

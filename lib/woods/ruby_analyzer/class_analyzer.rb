@@ -33,28 +33,28 @@ module Woods
       def analyze(source:, file_path:)
         root = @parser.parse(source)
         units = []
-        extract_definitions(root, source, file_path, [], units)
+        extract_definitions(root, source, file_path, [], units, [])
         units
       end
 
       private
 
-      def extract_definitions(node, source, file_path, namespace_stack, units)
+      def extract_definitions(node, source, file_path, namespace_stack, units, scopes)
         return unless node.is_a?(Ast::Node)
 
         case node.type
         when :class
-          process_definition(node, :ruby_class, source, file_path, namespace_stack, units)
+          process_definition(node, :ruby_class, source, file_path, namespace_stack, units, scopes)
         when :module
-          process_definition(node, :ruby_module, source, file_path, namespace_stack, units)
+          process_definition(node, :ruby_module, source, file_path, namespace_stack, units, scopes)
         else
           (node.children || []).each do |child|
-            extract_definitions(child, source, file_path, namespace_stack, units)
+            extract_definitions(child, source, file_path, namespace_stack, units, scopes)
           end
         end
       end
 
-      def process_definition(node, type, source, file_path, namespace_stack, units)
+      def process_definition(node, type, source, file_path, namespace_stack, units, scopes)
         name = node.method_name
         fqn = build_fqn(name, namespace_stack)
         namespace = build_namespace(name, namespace_stack)
@@ -70,6 +70,7 @@ module Woods
         unit.namespace = namespace
         unit.source_code = extract_source(node, source)
         unit.metadata = {
+          lexical_scopes: [fqn] + scopes,
           superclass: superclass,
           includes: includes,
           extends: extends,
@@ -80,22 +81,17 @@ module Woods
         units << unit
 
         # Recurse into body for nested definitions
-        inner_ns = namespace_stack + fqn_parts(name)
+        inner_ns = fqn.split('::')
         children.each do |child|
-          extract_definitions(child, source, file_path, inner_ns, units)
+          extract_definitions(child, source, file_path, inner_ns, units, [fqn] + scopes)
         end
       end
 
       # Build namespace string (everything except the leaf name).
       def build_namespace(name, namespace_stack)
-        parts = namespace_stack + fqn_parts(name)
+        parts = build_fqn(name, namespace_stack).split('::')
         parts.pop # Remove leaf
         parts.empty? ? nil : parts.join('::')
-      end
-
-      # Split a name that may contain :: into parts.
-      def fqn_parts(name)
-        name.to_s.split('::')
       end
 
       # Extract superclass name from a class node.

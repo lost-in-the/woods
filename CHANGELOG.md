@@ -347,6 +347,20 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- Respect MySQL session quote modes throughout Console SQL checks, including
+  `ANSI_QUOTES` and `NO_BACKSLASH_ESCAPES`, without rejecting ordinary escaped literals.
+- Preserve absolute Ruby constants through both AST backends and static-map resolution.
+- Compare evaluation baselines against public names after typed storage transitions.
+
+- Preserve coexisting typed units through embedding, checkpoints, retrieval and
+  snapshots. SQLite migration 007 retains old snapshot rows; older JSON snapshots
+  remain readable. Remove metadata when the corresponding vanished vectors are pruned.
+- Keep precomputed flows for namespaced and underscore-named controllers separately
+  addressable, and resolve known lexical module dependencies in the static self-map.
+- Remove machine-specific session and host instructions from shared contributor context.
+- Keep release-inventory drift tests from temporarily modifying real source and guide files.
+
+
 - **Wrapper-nested classes no longer collide on one identifier.** A file under
   a managed autoload path is now named for the constant its path spells
   (Zeitwerk-governed naming): `app/services/domain/container/parser.rb`
@@ -1680,6 +1694,19 @@ derive unit identifiers, which changes the index format's observable contract.
   migration race) never executed anywhere. The `live-backends` job now
   lists it; that job already provides the ephemeral `redis` client install,
   the redis service, and `WOODS_REDIS_URL`.
+
+### Security
+
+- Preserve Console blocked-table boundaries for MySQL adjacent subtraction and
+  whitespace/comment-separated qualified table names. Validate every SQL safety
+  check with the active dialect and exercise PostgreSQL/MySQL Console requests in CI.
+- Require MessagePack 1.8.2 or newer for the patched runtime buffer implementation.
+- Require patched JSON 2.x (>=2.19.9, <3) so older supported Rails encoders
+  retain their `quirks_mode` compatibility. Activate installed Index executables
+  before optional libraries can select conflicting dependency versions.
+- Update Inspector transitive dependencies `fast-uri` and `qs` to patched versions
+  and audit the pinned Node dependency tree in CI.
+
 
 ## [1.6.1] - 2026-07-22
 

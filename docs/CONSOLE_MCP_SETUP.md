@@ -814,3 +814,16 @@ console_count(model: "Order", scope: { status: "pending" })
 ```
 
 The timeout is set per-transaction in `SafeContext` and is not currently configurable via `Woods.configure`. To change it, pass `timeout_ms:` to `SafeContext.new` directly if you are constructing the server programmatically.
+
+## Database dialect validation
+
+Blocked-table matching normalizes qualified identifiers even when whitespace or
+comments surround the schema separator. SQL validation uses the connected adapter's
+quote and comment rules. MySQL also reads the executing session's `ANSI_QUOTES`
+and `NO_BACKSLASH_ESCAPES` settings for validation, protected-column scanning, and
+table gating; adjacent subtraction operators are not assumed to begin a comment.
+Direct scanner callers without session settings use conservative quote-mode scans.
+The contributor live-backend lane exercises these boundaries
+through Console requests against PostgreSQL and MySQL. Keep read tools disabled
+unless live SQL access is needed, and retain the configured blocked-table and
+redaction policies when diagnosing a rejected request.

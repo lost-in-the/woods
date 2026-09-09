@@ -1,6 +1,6 @@
 # Contributing to Woods
 
-Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents working from a source checkout should also read the repository's [AGENTS.md](https://github.com/lost-in-the/woods/blob/v2.0.0/AGENTS.md).
+Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents working from a source checkout should also read the repository's [AGENTS.md](https://github.com/lost-in-the/woods/blob/main/AGENTS.md).
 
 ## Choose the right channel
 
@@ -41,7 +41,7 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 | `docs/` | User, agent, operational, and reference documentation |
 | `plugin/skills/` | Distributed Woods skills (setup/upgrade, MCP configuration, investigation, agent enablement, diagnosis) |
 
-Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/v2.0.0/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
+Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/main/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
 
 ### Agent orientation and static self-map
 
@@ -90,6 +90,8 @@ bin/rubocop
 
 Before requesting review, run the full unit suite and style check unless the PR explains why one cannot run.
 
+Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces the aggregate line floor and measures branches, but does not enforce a branch floor. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
+
 ### Rails version matrix
 
 The gem supports Ruby 3.0 or later and Rails 6.0 through 8.x. CI separates fast unit coverage from real Rails boots:
@@ -107,17 +109,17 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
 
 When adding a Rails line, update `Appraisals`, the corresponding hand-maintained gemfile, and `.github/workflows/ci.yml`. For Rails below 7.1, copy an existing 6.x gemfile so its sqlite3 and concurrent-ruby compatibility pins are preserved.
 
-### Live storage backends
+### Live storage and SQL dialects
 
 The opt-in `live-backends` lane verifies behavior against PostgreSQL/pgvector and Qdrant that doubles cannot prove, including batch conflicts, delete addressing, filter translation, and extension setup.
 
 ```bash
 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile bundle install
 WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
-  bin/rspec spec/integration/live_backends_spec.rb
+  bin/rspec spec/integration/live_backends_spec.rb spec/integration/console_sql_dialects_spec.rb
 ```
 
-The lane expects reachable PostgreSQL/pgvector and Qdrant services. Configure endpoints with `WOODS_PG_URL` and `WOODS_QDRANT_URL`. New adapter behavior that depends on a real server belongs in this lane.
+The lane expects reachable PostgreSQL/pgvector, MySQL, and Qdrant services. Configure endpoints with `WOODS_PG_URL`, `WOODS_MYSQL_URL`, and `WOODS_QDRANT_URL`. The Console contracts exercise blocked-table enforcement and legitimate SQL on both database dialects. New adapter behavior that depends on a real server belongs in this lane.
 
 ## Keep public surfaces synchronized
 
@@ -169,17 +171,15 @@ By contributing, you agree that your contribution is licensed under the [MIT Lic
 
 ## At release: cutting the 2.0.0 tag
 
-> Executed for 2.0.0 on 2026-09-02 (the release-flip commit). Kept as the template for the next major: while `main` documents an unreleased version, wrap every claim that depends on that gap in a `v2-unreleased-note` HTML comment fence, so tagging is a search, not a re-read. Do all four steps in the release commit:
+The release documentation is prepared by this PR; publication remains a separate
+step. Before tagging, verify the following against the final merge commit:
 
-| Step | What to change |
+| Step | What to verify |
 |---|---|
-| Find every fence | `grep -rn "v2-unreleased-note" README.md CONTRIBUTING.md docs/` lists all of them. There are four: the `README.md` version banner, the "not published yet" note in `UPGRADING_TO_2.md`, and two around repository links in `CONTRIBUTING.md` |
-| Delete the two version notes | Remove the fenced block whole in `README.md` and in `UPGRADING_TO_2.md`. Both name 1.6.1 and link the `tree/v1.6.1` tag, which is what expires |
-| Repoint the `CONTRIBUTING.md` links | Keep the prose, delete the fence markers and the reminder comment, and move `blob/main/AGENTS.md` and `blob/main/CLAUDE.md` back to `blob/v2.0.0/` |
-| Fold the changelog | Move `CHANGELOG.md`'s `[Unreleased]` entries into the release section so each `###` heading appears exactly once there (merge duplicates rather than appending a second block), stamp the release date, and leave an empty `[Unreleased]` for the next line of work |
-| Re-verify | Run `bundle exec rake release_v2:verify_surface_inventory`, `bin/rspec spec/release_v2`, and `bin/rspec spec/integration/packaged_gem_spec.rb`, which pins the gemspec's `v2.0.0` metadata URIs and checks every local `README.md` link |
-
-`README.md`'s "What's new in 2.0" table and its upgrade checklist describe released behavior and stay as they are.
+| Version and date | Confirm `Woods::VERSION` and the dated changelog heading match the intended release; update the packaged-gem date assertion if the date changes |
+| Changelog | Fold all pending entries into the release section with one block per `###` heading, leaving an empty `[Unreleased]` section |
+| Publication claims | Until publication succeeds, keep the README and upgrade guide explicit about published-gem availability; contributor instructions stay linked to `main` |
+| Contracts | Run `bin/rake release_v2:verify_surface_inventory`, `bin/rspec spec/release_v2`, and `bin/rspec spec/integration/packaged_gem_spec.rb` |
 
 ### After the flip merges: tag and publish
 

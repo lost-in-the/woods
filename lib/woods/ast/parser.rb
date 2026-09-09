@@ -332,7 +332,7 @@ module Woods
       end
 
       def convert_prism_constant_path(prism_node, _source)
-        parent_text = (extract_const_path_text(prism_node.parent) if prism_node.parent)
+        parent_text = prism_node.parent ? extract_const_path_text(prism_node.parent) : ''
         const_name = prism_node.respond_to?(:name) ? prism_node.name.to_s : prism_node.child.name.to_s
 
         Node.new(
@@ -470,7 +470,7 @@ module Woods
         when Prism::ConstantReadNode
           node.name.to_s
         when Prism::ConstantPathNode
-          parent = node.parent ? extract_const_path_text(node.parent) : nil
+          parent = node.parent ? extract_const_path_text(node.parent) : ''
           const_name = node.respond_to?(:name) ? node.name.to_s : node.child.name.to_s
           [parent, const_name].compact.join('::')
         end
@@ -648,6 +648,8 @@ module Woods
         return nil unless node.is_a?(::Parser::AST::Node)
 
         case node.type
+        when :cbase
+          ''
         when :const
           parent = node.children[0] ? extract_parser_const_name(node.children[0]) : nil
           [parent, node.children[1].to_s].compact.join('::')

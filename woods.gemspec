@@ -35,7 +35,7 @@ Gem::Specification.new do |spec|
   # ledger's own machinery (findings.json, surface-inventory tooling) — repo
   # CI runs them straight from source via `release_v2:verify_surface_inventory`,
   # which is unaffected by packaging exclusion. `docs/design`, `docs/security`,
-  # `docs/self-analysis`, `docs/design`, and `docs/backlog.json`
+  # `docs/self-analysis`, and `docs/backlog.json`
   # are process/planning artifacts, not user-facing reference docs — excluded so
   # the packaged gem ships the same `docs/*.md` a user reads on GitHub, not the
   # audit trail that produced them.
@@ -63,7 +63,9 @@ Gem::Specification.new do |spec|
   # pin blocks patch releases and user dependency resolution; the SDK-internal
   # touchpoints already guard shape drift defensively.
   spec.add_dependency 'mcp', '>= 1.2', '< 2.0'
-  spec.add_dependency 'msgpack', '>= 1.5', '< 2'
+  # Older supported Active Support encoders pass quirks_mode, removed in JSON 3.
+  spec.add_dependency 'json', '>= 2.19.9', '< 3'
+  spec.add_dependency 'msgpack', '>= 1.8.2', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower
