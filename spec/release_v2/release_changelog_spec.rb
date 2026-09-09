@@ -103,4 +103,115 @@ RSpec.describe Woods::Release::Changelog do
     expect { described_class.fold(source, version: '1.6.1', date: Date.new(2026, 9, 10)) }
       .to raise_error(described_class::DuplicateRelease, /1\.6\.1/)
   end
+
+  describe 'folding a final release over its own prereleases' do
+    let(:with_prereleases) do
+      <<~MARKDOWN
+        # Changelog
+
+        ## [Unreleased]
+
+        ### Fixed
+
+        - a fix found after rc1
+
+        ### Added
+
+        - a late addition
+
+        ## [2.0.0.rc1] - 2026-09-05
+
+        ### Added
+
+        - an rc1 addition
+
+        ### Performance
+
+        - an rc1 speedup
+
+        ## [2.0.0.beta1] - 2026-09-01
+
+        ### Added
+
+        - a beta1 addition
+
+        ## [1.6.1] - 2026-07-22
+
+        ### Fixed
+
+        - an old fix
+      MARKDOWN
+    end
+
+    it 'merges every prerelease section of the same base into the release, oldest entries first' do
+      folded = described_class.fold(with_prereleases, version: '2.0.0', date: Date.new(2026, 9, 20))
+      section = folded[/^## \[2\.0\.0\] - 2026-09-20\n(.*?)^## \[1\.6\.1\]/m, 1]
+
+      expect(section).to eq(<<~MARKDOWN)
+
+        ### Added
+
+        - a beta1 addition
+
+        - an rc1 addition
+
+        - a late addition
+
+        ### Performance
+
+        - an rc1 speedup
+
+        ### Fixed
+
+        - a fix found after rc1
+
+      MARKDOWN
+    end
+
+    it 'removes the prerelease headings so the shipped notes live in one place' do
+      folded = described_class.fold(with_prereleases, version: '2.0.0', date: Date.new(2026, 9, 20))
+
+      expect(folded).not_to include('## [2.0.0.rc1]')
+      expect(folded).not_to include('## [2.0.0.beta1]')
+      expect(folded).to include('## [1.6.1] - 2026-07-22')
+      expect(folded[/^## \[Unreleased\]\n(.*?)^## \[/m, 1]).to eq("\n")
+    end
+
+    it 'releases a final version whose Unreleased section is empty from its prereleases alone' do
+      empty = with_prereleases.sub(/^## \[Unreleased\]\n.*?(?=^## \[2\.0\.0\.rc1\])/m, "## [Unreleased]\n\n")
+      folded = described_class.fold(empty, version: '2.0.0', date: Date.new(2026, 9, 20))
+      section = folded[/^## \[2\.0\.0\] - 2026-09-20\n(.*?)^## \[1\.6\.1\]/m, 1]
+
+      expect(section.scan(/^### (.+)$/).flatten).to eq(%w[Added Performance])
+      expect(section).to include('- a beta1 addition', '- an rc1 addition', '- an rc1 speedup')
+    end
+
+    it 'leaves a prerelease of another base alone' do
+      folded = described_class.fold(with_prereleases.sub('2.0.0.beta1', '1.7.0.beta1'),
+                                    version: '2.0.0', date: Date.new(2026, 9, 20))
+
+      expect(folded).to include('## [1.7.0.beta1] - 2026-09-01')
+      expect(folded).not_to include('## [2.0.0.rc1]')
+    end
+
+    it 'refuses a prerelease whose Unreleased section is empty, even with an earlier prerelease section' do
+      empty = with_prereleases.sub(/^## \[Unreleased\]\n.*?(?=^## \[2\.0\.0\.rc1\])/m, "## [Unreleased]\n\n")
+
+      expect { described_class.fold(empty, version: '2.0.0.rc2', date: Date.new(2026, 9, 20)) }
+        .to raise_error(described_class::EmptyUnreleasedSection, /nothing to release/)
+    end
+
+    it 'refuses a final release with neither Unreleased entries nor a prerelease section' do
+      bare = "# Changelog\n\n## [Unreleased]\n\n## [1.6.1] - 2026-07-22\n"
+
+      expect { described_class.fold(bare, version: '2.0.0', date: Date.new(2026, 9, 20)) }
+        .to raise_error(described_class::EmptyUnreleasedSection, /nothing to release/)
+    end
+  end
+
+  it 'dates a fold in UTC by default' do
+    folded = described_class.fold(source, version: '2.0.0.beta1')
+
+    expect(folded).to include("## [2.0.0.beta1] - #{Time.now.utc.strftime('%Y-%m-%d')}")
+  end
 end

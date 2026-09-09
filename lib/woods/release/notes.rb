@@ -45,37 +45,50 @@ module Woods
         end
       end
 
-      # Rewrites every fence into the state `version` declares.
+      # The new source of every document whose fences change, computed without
+      # touching the tree so a caller can validate everything before writing.
       #
-      # @return [Array<String>] the repository-relative paths that changed
-      def apply!(root:, version:)
+      # `changelog:` lets a release pass the folded changelog it has not written
+      # yet, so the banner names the same published gem the committed tree will.
+      #
+      # @return [Hash{String => String}] repository-relative path to new source
+      def rewrites(root:, version:, changelog: nil)
         state = VersionState.parse(version)
-        previous = previous_stable_version(root)
+        previous = Changelog.latest_stable_version(changelog || read(root, 'CHANGELOG.md'))
 
         FENCES.group_by { |fence| fence.fetch(:path) }.filter_map do |path, fences|
-          full_path = File.join(root, path)
-          original = File.read(full_path, encoding: Encoding::UTF_8)
+          original = read(root, path)
           updated = fences.reduce(original) do |source, fence|
             body = fence_body(source, fence)
             raise MissingFence, "#{path}: no #{MARKER}:#{fence.fetch(:id)} fence" if body.nil?
 
             replace_body(source, fence, expected_body(fence, body, state, previous))
           end
-          next if updated == original
+          [path, updated] unless updated == original
+        end.to_h
+      end
 
-          File.write(full_path, updated)
+      # Rewrites every fence into the state `version` declares.
+      #
+      # @return [Array<String>] the repository-relative paths that changed
+      def apply!(root:, version:)
+        rewrites(root: root, version: version).map do |path, source|
+          File.write(File.join(root, path), source)
           path
         end
       end
 
       # @return [String, nil] the fence body, or nil when the fence is absent
       def read_body(root, fence)
-        source = File.read(File.join(root, fence.fetch(:path)), encoding: Encoding::UTF_8)
-        fence_body(source, fence)
+        fence_body(read(root, fence.fetch(:path)), fence)
+      end
+
+      def read(root, path)
+        File.read(File.join(root, path), encoding: Encoding::UTF_8)
       end
 
       def previous_stable_version(root)
-        Changelog.latest_stable_version(File.read(File.join(root, 'CHANGELOG.md'), encoding: Encoding::UTF_8))
+        Changelog.latest_stable_version(read(root, 'CHANGELOG.md'))
       end
 
       def fence_pattern(fence)

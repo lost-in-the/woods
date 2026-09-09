@@ -28,26 +28,37 @@ module Woods
       VERSION_ASSIGNMENT = /^(?<indent>\s*)VERSION = '(?<version>[^']+)'$/
       REPOSITORY = 'lost-in-the/woods'
 
-      # The outcome of a transition, including the commands the maintainer runs next.
-      Result = Struct.new(:previous, :target, :changed_paths, :report, keyword_init: true)
+      # The outcome of a transition, including the commands the maintainer runs
+      # next. The report is rendered from `changed_paths` on demand.
+      Result = Struct.new(:previous, :target, :changed_paths, :render, keyword_init: true) do
+        def report
+          render.call(changed_paths)
+        end
+      end
 
       class << self
         # Builds a release commit for `version` in the working tree at `root`.
         #
+        # Every rewrite is computed before any of it is written. The changelog
+        # fold and the fence rewrite both refuse for reasons only visible after
+        # the version transition validates, and a refusal that had already
+        # rewritten VERSION would leave a half-released tree behind.
+        #
         # @return [Result]
-        def prepare(root:, version:, date: Date.today)
+        def prepare(root:, version:, date: Time.now.utc.to_date)
           target = VersionState.parse(version)
           previous = current_state(root)
           VersionState.validate_prepare!(previous, target)
           assert_clean!(root)
 
-          changed = [write_version(root, target), fold_changelog(root, target, date)]
-          changed.concat(Notes.apply!(root: root, version: target.to_s))
-          Result.new(previous: previous, target: target, changed_paths: changed.uniq.sort,
-                     report: prepare_report(previous, target, changed))
+          changelog = Changelog.fold(read(root, CHANGELOG_PATH), version: target.to_s, date: date)
+          rewrites = { VERSION_PATH => version_source(root, target), CHANGELOG_PATH => changelog }
+          rewrites.merge!(Notes.rewrites(root: root, version: target.to_s, changelog: changelog))
+          result(previous, target, write(root, rewrites)) { |changed| prepare_report(previous, target, changed) }
         end
 
-        # Reopens development at the next `.alpha` after a final release.
+        # Reopens development at the next `.alpha` after a final release. The
+        # changelog is already folded, so only VERSION and the fences move.
         #
         # @return [Result]
         def reopen(root:, version:)
@@ -56,10 +67,9 @@ module Woods
           VersionState.validate_reopen!(previous, target)
           assert_clean!(root)
 
-          changed = [write_version(root, target)]
-          changed.concat(Notes.apply!(root: root, version: target.to_s))
-          Result.new(previous: previous, target: target, changed_paths: changed.uniq.sort,
-                     report: reopen_report(previous, target, changed))
+          rewrites = { VERSION_PATH => version_source(root, target) }
+          rewrites.merge!(Notes.rewrites(root: root, version: target.to_s))
+          result(previous, target, write(root, rewrites)) { |changed| reopen_report(previous, target, changed) }
         end
 
         # @return [VersionState] the state the checkout is currently in
@@ -82,18 +92,27 @@ module Woods
                 "the working tree has uncommitted changes; commit or discard them first:\n#{output.rstrip}"
         end
 
-        def write_version(root, target)
-          path = File.join(root, VERSION_PATH)
-          source = File.read(path, encoding: Encoding::UTF_8)
-          File.write(path, source.sub(VERSION_ASSIGNMENT) { "#{Regexp.last_match(:indent)}VERSION = '#{target}'" })
-          VERSION_PATH
+        def result(previous, target, changed, &render)
+          Result.new(previous: previous, target: target, changed_paths: changed, render: render)
         end
 
-        def fold_changelog(root, target, date)
-          path = File.join(root, CHANGELOG_PATH)
-          source = File.read(path, encoding: Encoding::UTF_8)
-          File.write(path, Changelog.fold(source, version: target.to_s, date: date))
-          CHANGELOG_PATH
+        def read(root, path)
+          File.read(File.join(root, path), encoding: Encoding::UTF_8)
+        end
+
+        # @return [Array<String>] the paths whose content actually moved
+        def write(root, rewrites)
+          rewrites.filter_map do |path, source|
+            next if read(root, path) == source
+
+            File.write(File.join(root, path), source)
+            path
+          end.sort
+        end
+
+        def version_source(root, target)
+          read(root, VERSION_PATH)
+            .sub(VERSION_ASSIGNMENT) { "#{Regexp.last_match(:indent)}VERSION = '#{target}'" }
         end
 
         def prepare_report(previous, target, changed)

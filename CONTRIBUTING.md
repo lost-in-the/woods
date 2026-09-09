@@ -205,7 +205,9 @@ One command per transition. It never commits, tags, pushes, or publishes.
 | Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
 | After the release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
 
-`release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands.
+`release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands. Every rewrite is computed before any of it is written, so a refusal leaves the working tree untouched.
+
+A final release also absorbs every prerelease section of its own base version. Cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into `## [2.0.0] - <date>` and removes their headings, prerelease entries first and anything written after them second, so the notes a user reads for 2.0.0 are the whole story rather than three fragments. An empty `## [Unreleased]` is therefore legitimate for a final release cut straight from a release candidate. A beta or a release candidate has nothing to absorb, so an empty Unreleased section refuses: there is nothing new to publish.
 
 Review the diff and run the release contracts:
 

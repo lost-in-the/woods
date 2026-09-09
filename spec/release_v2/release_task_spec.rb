@@ -44,7 +44,7 @@ RSpec.describe 'release rake tasks' do
     result = Woods::Release::Preparer::Result.new(
       previous: Woods::Release::VersionState.parse('2.0.0.alpha'),
       target: Woods::Release::VersionState.parse('2.0.0.beta1'),
-      changed_paths: ['CHANGELOG.md'], report: 'prepared'
+      changed_paths: ['CHANGELOG.md'], render: ->(_changed) { 'prepared' }
     )
     allow(Woods::Release::Preparer).to receive(:prepare)
       .with(root: root, version: '2.0.0.beta1').and_return(result)
@@ -61,7 +61,7 @@ RSpec.describe 'release rake tasks' do
     result = Woods::Release::Preparer::Result.new(
       previous: Woods::Release::VersionState.parse('2.0.0'),
       target: Woods::Release::VersionState.parse('2.1.0.alpha'),
-      changed_paths: ['README.md'], report: 'reopened'
+      changed_paths: ['README.md'], render: ->(_changed) { 'reopened' }
     )
     allow(Woods::Release::Preparer).to receive(:reopen)
       .with(root: root, version: '2.1.0.alpha').and_return(result)

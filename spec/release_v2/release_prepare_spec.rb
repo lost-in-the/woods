@@ -125,6 +125,45 @@ RSpec.describe Woods::Release::Preparer do
     end
   end
 
+  describe 'a final release folding its own prereleases' do
+    let(:with_rc) do
+      <<~MARKDOWN
+        # Changelog
+
+        ## [Unreleased]
+
+        ## [2.0.0.rc1] - 2026-09-05
+
+        ### Added
+
+        - an rc1 addition
+
+        ## [1.6.1] - 2026-07-22
+      MARKDOWN
+    end
+
+    it 'releases from an empty Unreleased section by absorbing the prerelease sections' do
+      with_release_repository(version: '2.0.0.rc1', changelog: with_rc) do |root|
+        described_class.prepare(root: root, version: '2.0.0', date: date)
+
+        expect(read_release_version(root)).to eq('2.0.0')
+        expect(changelog_section(root, '2.0.0')).to include('### Added', '- an rc1 addition')
+        expect(release_file(root, 'CHANGELOG.md')).not_to include('## [2.0.0.rc1]')
+      end
+    end
+
+    it 'keeps prerelease entries ahead of entries written after the prerelease' do
+      changelog = with_rc.sub("## [Unreleased]\n", "## [Unreleased]\n\n### Added\n\n- a late addition\n")
+
+      with_release_repository(version: '2.0.0.rc1', changelog: changelog) do |root|
+        described_class.prepare(root: root, version: '2.0.0', date: date)
+
+        expect(changelog_section(root, '2.0.0'))
+          .to eq("\n### Added\n\n- an rc1 addition\n\n- a late addition\n\n")
+      end
+    end
+  end
+
   describe 'refusals' do
     it 'refuses to prepare a release on a dirty working tree' do
       with_release_repository(version: '2.0.0.alpha') do |root|
@@ -158,6 +197,61 @@ RSpec.describe Woods::Release::Preparer do
         expect { described_class.prepare(root: root, version: '2.1.0.beta1', date: date) }
           .to raise_error(Woods::Release::VersionState::InvalidTransition, /main is developing 2\.0\.0/)
         expect(release_file(root, 'CHANGELOG.md')).not_to include('## [2.1.0.beta1]')
+      end
+    end
+
+    it 'refuses a prerelease whose Unreleased section is empty' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n## [2.0.0.beta1] - 2026-09-01\n\n## [1.6.1] - 2026-07-22\n"
+
+      with_release_repository(version: '2.0.0.beta1', changelog: changelog) do |root|
+        expect { described_class.prepare(root: root, version: '2.0.0.beta2', date: date) }
+          .to raise_error(Woods::Release::Changelog::EmptyUnreleasedSection, /nothing to release/)
+      end
+    end
+
+    # The refusals that fire after the transition validates (an empty Unreleased,
+    # a stray entry, a missing fence) used to run with VERSION already rewritten,
+    # so a refused prepare left a half-released tree behind.
+    it 'writes nothing when a refusal fires after the transition validates' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n## [1.6.1] - 2026-07-22\n"
+
+      with_release_repository(version: '2.0.0.alpha', changelog: changelog) do |root|
+        before = release_repository_digest(root)
+
+        expect { described_class.prepare(root: root, version: '2.0.0.beta1', date: date) }
+          .to raise_error(Woods::Release::Changelog::EmptyUnreleasedSection)
+
+        expect(release_repository_digest(root)).to eq(before)
+        expect(release_git(root, 'status', '--porcelain')).to eq('')
+      end
+    end
+
+    it 'writes nothing when an entry sits outside a heading in Unreleased' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n- a stray entry\n\n## [1.6.1] - 2026-07-22\n"
+
+      with_release_repository(version: '2.0.0.alpha', changelog: changelog) do |root|
+        before = release_repository_digest(root)
+
+        expect { described_class.prepare(root: root, version: '2.0.0.beta1', date: date) }
+          .to raise_error(Woods::Release::Changelog::UnclassifiedEntries)
+
+        expect(release_repository_digest(root)).to eq(before)
+        expect(release_git(root, 'status', '--porcelain')).to eq('')
+      end
+    end
+
+    it 'writes nothing when a registered fence has been removed' do
+      with_release_repository(version: '2.0.0.alpha') do |root|
+        path = File.join(root, 'README.md')
+        File.write(path, release_file(root, 'README.md').sub('<!-- release-state:version-banner -->', ''))
+        commit_release_repository_changes(root, message: 'break a fence')
+        before = release_repository_digest(root)
+
+        expect { described_class.prepare(root: root, version: '2.0.0.beta1', date: date) }
+          .to raise_error(Woods::Release::Notes::MissingFence)
+
+        expect(release_repository_digest(root)).to eq(before)
+        expect(release_git(root, 'status', '--porcelain')).to eq('')
       end
     end
 

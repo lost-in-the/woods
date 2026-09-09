@@ -45,6 +45,14 @@ module ReleaseRepositoryHelper
     File.read(File.join(root, 'lib/woods/version.rb'))[/VERSION = '([^']+)'/, 1]
   end
 
+  # Every file the release flow may write, by content, so a refused transition
+  # can be shown to have touched nothing.
+  def release_repository_digest(root)
+    Dir.glob(File.join(root, '**', '*'), File::FNM_DOTMATCH)
+       .select { |path| File.file?(path) && !path.include?("#{File::SEPARATOR}.git#{File::SEPARATOR}") }
+       .sort.to_h { |path| [path.delete_prefix("#{root}#{File::SEPARATOR}"), File.binread(path)] }
+  end
+
   def release_file(root, path)
     File.read(File.join(root, path), encoding: Encoding::UTF_8)
   end

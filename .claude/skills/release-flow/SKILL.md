@@ -61,6 +61,16 @@ Unreleased behind, restates the fences, regenerates the surface inventory, and
 prints the tag and dispatch commands. `release:reopen` sets the next alpha and
 restores the alpha documentation state; it leaves the changelog alone.
 
+Every rewrite is computed before any of it is written, so a refusal leaves the
+working tree untouched. Never "finish" a refused prepare by hand.
+
+A **final** release also absorbs every prerelease section of its own base
+version: cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into
+`## [2.0.0] - <date>` and removes their headings, prerelease entries first and
+anything written after them second. So an empty `## [Unreleased]` is legitimate
+for a final release cut straight from a release candidate, and is a refusal for
+a beta or a release candidate, which has nothing to absorb.
+
 It refuses a version that moves backwards, a version whose base is not the line
 `main` is developing (`2.0.0.alpha` releases only `2.0.0`), an alpha target for
 `prepare`, and a non-alpha target for `reopen`.
@@ -107,7 +117,8 @@ stays independent.
 | `release:prepare refused: the working tree has uncommitted changes` | uncommitted work | commit or discard first |
 | `does not come after the current version` | target moves backwards | pick a later version |
 | `main is developing X.Y.Z` | target base does not match the alpha | release the base `main` is on, or reopen at a new base first |
-| `the Unreleased section is empty; nothing to release` | no entries collected | there is nothing to release |
+| `the Unreleased section is empty; nothing to release` | a beta or rc with no entries since the last one | there is nothing new to publish |
+| `the Unreleased section is empty and no X.Y.Z prerelease section exists` | a final release with nothing to ship | there is nothing to release |
 | `entries sit outside a ### heading in Unreleased` | an entry with no `###` block | file it under a heading |
 | `release tag ... is an alpha development marker` | an alpha reached a validator | the release commit was skipped; run `release:prepare` |
 | `version-banner does not match the ... state` | a fence was hand-edited | re-run the task for the current VERSION |
