@@ -632,5 +632,20 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(report[:volatile_dependencies].size).to eq(1)
       expect(report[:stats][:volatile_dependency_count]).to eq(1)
     end
+
+    it 'caps the persisted list at 20 while stats counts every qualifying edge' do
+      graph.register(churned('Hub', 30))
+      25.times do |i|
+        graph.register(churned(format('Dep%02d', i), 5, type: :service, dependencies: [
+                                 { type: :model, target: 'Hub', via: :code_reference }
+                               ]))
+      end
+
+      report = analyzer.analyze
+
+      expect(report[:volatile_dependencies].size).to eq(20)
+      expect(report[:stats][:volatile_dependency_count]).to eq(25)
+      expect(report[:stats][:volatile_dependency_count]).to be > 20
+    end
   end
 end
