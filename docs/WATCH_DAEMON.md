@@ -261,6 +261,39 @@ The daemon's own footprint is small; the cost of option (b) is the booted app,
 not Woods. That is why (a) is worth keeping available for hosts that already
 pay for one.
 
+#### Where a full extraction of the fixture app spends its time
+
+One cold `extract_all` over `spec/dummy`, 147 units of which 119 are framework
+sources, 7 repetitions, Ruby 4.0.6 / Rails 8.0.5.1, phase timers around the
+orchestrator's own methods. Total **190 ms** at p50.
+
+| Phase | ms | share |
+|---|---|---|
+| extraction | 115 | 63% |
+| &nbsp;&nbsp;of which `RailsSourceExtractor` | 100 | 55% |
+| &nbsp;&nbsp;of which `ModelExtractor` | 4.4 | 2.4% |
+| &nbsp;&nbsp;of which every other extractor | 10 | 5% |
+| `write_results` | 23 | 13% |
+| git enrichment | 22 | 12% |
+| graph analysis (`GraphAnalyzer#analyze`) | 6.1 | 3.3% |
+| &nbsp;&nbsp;of which PageRank | 3.9 | 2.1% |
+| manifest, graph and analysis writes | 6.9 | 3.8% |
+| orphan sweep | 2.6 | 1.4% |
+| dedupe, package annotation, dependents, path normalisation, publish | 0.6 | 0.3% |
+
+**The graph layers are not where the time goes.** PageRank moving inside
+`analyze`, and the three reports added beside it, come to 3.3% of the run
+together. Git enrichment, the other suspect, is 12%: real, but not a phase to
+rewrite. The dependents pass and path normalisation are below a millisecond
+each.
+
+One phase clears 15%: `RailsSourceExtractor`, at 55%. Read it with the fixture's
+shape, though. 119 of 147 units *are* framework sources here, so this figure is
+a property of a fixture app with almost no application code, not a finding about
+a real host. Turning it off is one flag (`include_framework_sources`), and it
+does not touch the incremental path at all. Filed as B-187 rather than acted on
+here: sizing it needs a host where framework sources are the minority.
+
 ### Measured at scale
 
 The numbers above are fixture-app numbers. Below are the same measurements on a

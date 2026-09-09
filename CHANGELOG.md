@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table; only when every owner sits elsewhere, across more than one database, does the
   entry come back with `to: nil` and an `ambiguous_owners` list instead of guessing.
   Written to `graph_analysis.json`; exposed through `graph_analysis` in Task 10.
+- **A phase breakdown of one full extraction of the fixture app**, in
+  `docs/WATCH_DAEMON.md`. Graph analysis, PageRank included, is 3.3% of the run;
+  git enrichment is 12%; the one phase over 15% is `RailsSourceExtractor`, which
+  is 55% only because 119 of the fixture's 147 units are framework sources.
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
   complementary on symbol references.
