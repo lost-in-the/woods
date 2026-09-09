@@ -22,6 +22,7 @@ module Woods
     # terminate.
     class AblationTimedExecutor
       TERM_GRACE_SECONDS = 2
+      REAP_GRACE_SECONDS = 2
       POLL_INTERVAL = 0.05
 
       # @param executor [#call] `call(command, chdir:)` returning `[stdout, stderr, success]`
@@ -35,21 +36,22 @@ module Woods
       def call(command, chdir:)
         Timeout.timeout(@timeout) { @executor.call(command, chdir: chdir) }
       rescue Timeout::Error
-        terminate_process
-        ['', "timed out after #{@timeout}s", false]
+        ['', "timed out after #{@timeout}s#{terminate_process}", false]
       end
 
       private
 
+      # @return [String] empty, or a note that the pid outlived the reap
+      #   grace period, appended to the timeout message
       def terminate_process
         pid = executor_pid
-        return unless pid
+        return '' unless pid
 
         Process.kill('TERM', pid)
         Process.kill('KILL', pid) unless process_exited?(pid, within: TERM_GRACE_SECONDS)
-        Process.wait(pid)
+        reap(pid, within: REAP_GRACE_SECONDS) ? '' : " (pid #{pid} did not reap within #{REAP_GRACE_SECONDS}s)"
       rescue Errno::ESRCH, Errno::ECHILD
-        nil
+        ''
       end
 
       def executor_pid
@@ -67,6 +69,22 @@ module Woods
           sleep POLL_INTERVAL
         end
         false
+      end
+
+      # Polls a non-blocking wait instead of a plain Process.wait (#280
+      # review, minor): a pid some other bug left un-reapable must not hang
+      # the whole trial forever just because we tried to clean up after it.
+      def reap(pid, within:)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + within
+        until Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+          reaped_pid, = Process.wait2(pid, Process::WNOHANG)
+          return true if reaped_pid
+
+          sleep POLL_INTERVAL
+        end
+        false
+      rescue Errno::ECHILD
+        true
       end
     end
   end

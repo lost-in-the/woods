@@ -36,4 +36,21 @@ RSpec.describe Woods::Evaluation::AblationExecutor do
 
     expect(executor.pid).to be_a(Integer)
   end
+
+  it 'captures output larger than one pipe buffer on both streams without deadlocking' do
+    Dir.mktmpdir do |dir|
+      script = File.join(dir, 'big_output.rb')
+      File.write(script, <<~RUBY)
+        $stdout.write('o' * 200_000)
+        $stderr.write('e' * 200_000)
+      RUBY
+      executor = described_class.new
+
+      stdout, stderr, success = executor.call("ruby #{script}", chdir: dir)
+
+      expect(success).to be(true)
+      expect(stdout.bytesize).to eq(200_000)
+      expect(stderr.bytesize).to eq(200_000)
+    end
+  end
 end
