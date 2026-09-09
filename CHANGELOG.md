@@ -104,7 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without mapped tests, not a proven coverage loss. `WOODS_CHECK_STRICT=1` exits 1 for CI. No
   Rails boot.
 
-
 ### Performance
 
 - **Controller and mailer chunk extraction parses each file once, not once per
