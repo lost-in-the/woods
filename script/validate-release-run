@@ -59,6 +59,13 @@ begin
 
   fail_validation('CI_RUN_ID must be a positive integer') unless run_id.match?(/\A[1-9]\d*\z/)
   fail_validation('RELEASE_TAG must be a version tag') unless tag.match?(/\Av[0-9A-Za-z][0-9A-Za-z._-]*\z/)
+  # `main` carries X.Y.Z.alpha between releases: the development marker is never
+  # tagged and never published, so refuse it before spending an API call.
+  if tag.end_with?('.alpha')
+    fail_validation(
+      "RELEASE_TAG #{tag.inspect} is an alpha development marker, which is never tagged and never published"
+    )
+  end
   unless repository.match?(%r{\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z})
     fail_validation('GITHUB_REPOSITORY must be an owner/name pair')
   end
