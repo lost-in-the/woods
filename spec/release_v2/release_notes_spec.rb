@@ -12,7 +12,7 @@ RSpec.describe Woods::Release::Notes do
     described_class.read_body(root, described_class::FENCES.last)
   end
 
-  it 'leaves the checked-in fences alone when they already match the version' do
+  it 'leaves the fences alone when they already match the version' do
     with_release_repository(version: '2.0.0.alpha', commit: false) do |root|
       expect(described_class.apply!(root: root, version: '2.0.0.alpha')).to be_empty
       expect(described_class.mismatches(root: root, version: '2.0.0.alpha')).to be_empty
@@ -99,6 +99,27 @@ RSpec.describe Woods::Release::Notes do
 
       expect { described_class.apply!(root: root, version: '2.0.0') }
         .to raise_error(described_class::MissingFence, /README\.md: no release-state:version-banner fence/)
+    end
+  end
+
+  # The one example here that reads this checkout. Every rewrite above runs
+  # against the fixture repository, so none of them care which state this tree
+  # is in. This one asserts only that the checked-in fences say what the
+  # checked-in VERSION declares.
+  describe 'the checked-in fences' do
+    let(:root) { release_checkout_root }
+    let(:state) { Woods::Release::VersionState.parse(Woods::VERSION) }
+
+    it 'say what the checked-in version declares' do
+      expect(described_class.mismatches(root: root, version: Woods::VERSION)).to be_empty
+
+      if state.final?
+        expect(banner(root)).to eq('')
+      elsif state.prerelease?
+        expect(banner(root)).to include("#{state} is published as a prerelease")
+      else
+        expect(banner(root)).to include("`main` documents #{state.base}, which is not released yet")
+      end
     end
   end
 

@@ -4,11 +4,17 @@ require 'fileutils'
 require 'open3'
 require 'tmpdir'
 
-# Builds a throwaway git repository holding copies of exactly the files the
-# release flow rewrites, so `release:prepare` and the release-state fences can be
-# exercised end to end without mutating this checkout.
+# Builds a throwaway git repository holding a canned changelog and canned fenced
+# documents, so `release:prepare` and the release-state fences can be exercised
+# end to end without reading this checkout.
+#
+# The fixture is deliberately not a copy of the repository files. Copying them
+# made every transition spec assume the checked-in tree was an alpha with a
+# non-empty Unreleased section, so the release commit that moved the tree to a
+# prerelease could not pass its own specs.
 module ReleaseRepositoryHelper
-  SOURCE_ROOT = File.expand_path('../..', __dir__)
+  CHECKOUT_ROOT = File.expand_path('../..', __dir__)
+  FIXTURE_ROOT = File.expand_path('../fixtures/release_repository', __dir__)
   RELEASE_FILES = %w[
     lib/woods/version.rb
     CHANGELOG.md
@@ -17,17 +23,26 @@ module ReleaseRepositoryHelper
     docs/UPGRADING_TO_2.md
   ].freeze
 
+  # @return [String] this checkout, for the invariant checks that read the tree
+  #   the suite is running in rather than the fixture
+  def release_checkout_root
+    CHECKOUT_ROOT
+  end
+
+  def build_release_repository(root, version: '2.0.0.alpha', changelog: nil, commit: true)
+    RELEASE_FILES.each do |path|
+      FileUtils.mkdir_p(File.join(root, File.dirname(path)))
+      FileUtils.cp(File.join(FIXTURE_ROOT, path), File.join(root, path))
+    end
+    write_release_version(root, version)
+    File.write(File.join(root, 'CHANGELOG.md'), changelog) if changelog
+    commit_release_repository(root) if commit
+    root
+  end
+
   def with_release_repository(version: '2.0.0.alpha', changelog: nil, commit: true)
     Dir.mktmpdir('woods-release-repository') do |root|
-      RELEASE_FILES.each do |path|
-        FileUtils.mkdir_p(File.join(root, File.dirname(path)))
-        FileUtils.cp(File.join(SOURCE_ROOT, path), File.join(root, path))
-      end
-      write_release_version(root, version)
-      File.write(File.join(root, 'CHANGELOG.md'), changelog) if changelog
-      commit_release_repository(root) if commit
-
-      yield root
+      yield build_release_repository(root, version: version, changelog: changelog, commit: commit)
     end
   end
 

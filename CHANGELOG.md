@@ -470,6 +470,20 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **The release contract specs pass in every version state.** `spec/release_v2`
+  copied this checkout's `CHANGELOG.md`, `README.md`, `CONTRIBUTING.md`, and
+  `docs/UPGRADING_TO_2.md` into its temporary repository, so eleven examples
+  assumed the checked-in tree was an alpha with a non-empty Unreleased section.
+  A release commit produced by `release:prepare` therefore could not pass its
+  own specs, which defeats the flow. The transition specs now run against a
+  self-contained fixture (`spec/fixtures/release_repository`), each of them
+  keeps one example that reads this checkout and asserts only the invariants of
+  the state it finds, and `spec/release_v2/release_state_matrix_spec.rb`
+  generates the alpha, prerelease, and final states from the fixture in one run
+  and checks all three plus the running checkout against the same invariants.
+  The gemspec metadata example asserts the ref rule (`tree/main` for an alpha,
+  `tree/v<VERSION>` otherwise) instead of a fixed state.
+
 - **Components outside the eager-load paths are indexed.** `PhlexExtractor` and
   `ViewComponentExtractor` discovered units from `component_base.descendants`
   after `eager_load!`, so a component under an autoloaded but not eager-loaded
