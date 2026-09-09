@@ -27,7 +27,7 @@ bin/rubocop
 
 Create a branch from current `main`. Keep each pull request to one logical change and preserve unrelated formatting and refactors for separate work.
 
-`main` is the development branch: it holds work for the next release and can run ahead of the latest published gem. Releases are cut from version tags by the guarded workflow in the [release section below](#at-release-cutting-the-200-tag); documentation matching a published gem lives on that release's tag.
+`main` is the development branch: it holds work for the next release and can run ahead of the latest published gem. Releases are cut from version tags by the guarded workflow in the [release section below](#release-flow); documentation matching a published gem lives on that release's tag.
 
 ## Understand the repository
 
@@ -173,26 +173,68 @@ Do not use empty assertions or output-only tests. A regression test must fail be
 
 By contributing, you agree that your contribution is licensed under the [MIT License](LICENSE.txt).
 
-## At release: cutting the 2.0.0 tag
+## Release flow
 
-The release documentation is prepared by this PR; publication remains a separate
-step. Before tagging, verify the following against the final merge commit:
+`main` is the development branch and never claims a released version. Between releases it carries the alpha development marker. Every release, including a beta or a release candidate, is an explicit commit plus a tag, cut by one rake task and published only by the guarded workflow.
 
-| Step | What to verify |
+| State | `Woods::VERSION` | Tagged | On RubyGems | Documentation links point at |
+|---|---|---|---|---|
+| Development | `X.Y.Z.alpha` | never | never | `main` |
+| Beta | `X.Y.Z.betaN` | `vX.Y.Z.betaN` | prerelease | the tag |
+| Release candidate | `X.Y.Z.rcN` | `vX.Y.Z.rcN` | prerelease | the tag |
+| Release | `X.Y.Z` | `vX.Y.Z` | stable | the tag |
+
+RubyGems treats any letter in a version as a prerelease, so a `~> 1.6` or `~> 2.0` constraint never resolves a beta or a release candidate. Adopting one is explicit: `gem "woods", "2.0.0.beta1"`.
+
+`spec/release_v2/version_state_spec.rb` enforces this table on every commit. VERSION is either an alpha or the changelog carries its dated heading, and the four `release-state` documentation fences match the state VERSION declares.
+
+### During feature work
+
+- Do not edit `lib/woods/version.rb` by hand.
+- Put changelog entries under `## [Unreleased]` only, beneath one of its `###` headings. Duplicate headings are merged at release time, in the order they first appear.
+- Leave the `release-state` fences alone. `release:prepare` rewrites them.
+
+### Preparing a release
+
+One command per transition. It never commits, tags, pushes, or publishes.
+
+| Transition | Command |
 |---|---|
-| Version and date | Confirm `Woods::VERSION` and the dated changelog heading match the intended release; update the packaged-gem date assertion if the date changes |
-| Changelog | Fold all pending entries into the release section with one block per `###` heading, leaving an empty `[Unreleased]` section |
-| Publication claims | Until publication succeeds, keep the README and upgrade guide explicit about published-gem availability; contributor instructions stay linked to `main` |
-| Contracts | Run `bin/rake release_v2:verify_surface_inventory`, `bin/rspec spec/release_v2`, and `bin/rspec spec/integration/packaged_gem_spec.rb` |
+| Alpha to the first beta | `bin/rake "release:prepare[2.0.0.beta1]"` |
+| Beta to the next beta or a release candidate | `bin/rake "release:prepare[2.0.0.rc1]"` |
+| Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
+| After the release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
 
-### After the flip merges: tag and publish
+`release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands.
 
-The flip commit lands on `main` through a reviewed pull request like any other change. `main` is the development branch — it holds work for the next release and can run ahead of the published gem — so a release is pinned by its tag, never by a branch:
+Review the diff and run the release contracts:
+
+```bash
+bin/rspec spec/release_v2
+bin/rake release_v2:verify_surface_inventory
+bin/rspec spec/integration/packaged_gem_spec.rb
+```
+
+Then commit and open a pull request. The release commit lands on `main` through review like any other change.
+
+### After the release commit merges
+
+A release is pinned by its tag, never by a branch:
 
 | Step | Command | What guards it |
 |---|---|---|
-| Tag the flip merge commit | `git tag v2.0.0 <merge-sha> && git push origin v2.0.0` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history, match `Woods::VERSION`, and match the dated `CHANGELOG.md` heading |
-| Trigger the release workflow | `gh api --method POST repos/lost-in-the/woods/dispatches -f event_type=release -F 'client_payload[tag]=v2.0.0' -F 'client_payload[ci_run_id]=<id>'` where `<id>` is the green CI run on the tagged SHA (requires Contents write) | `.github/workflows/release.yml` re-validates the named CI run through the API, verifies the artifact digest, and runs secret-free candidate package tests before publishing |
-| Verify publication | `gem info woods --remote` shows the new version; the README gem badge updates on its own | just before pushing, the workflow re-runs `script/verify-release-tag` so a tag that moved since validation aborts the publish |
+| Tag the merge commit | `git tag v<version> <merge-sha> && git push origin v<version>` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history, match `Woods::VERSION`, match the dated `CHANGELOG.md` heading, and not be an alpha |
+| Trigger the release workflow | `gh api --method POST repos/lost-in-the/woods/dispatches -f event_type=release -F 'client_payload[tag]=v<version>' -F 'client_payload[ci_run_id]=<id>'` where `<id>` is the green CI run on the tagged SHA (requires Contents write) | `.github/workflows/release.yml` re-validates the named CI run through the API, verifies the artifact digest, and runs secret-free candidate package tests before publishing |
+| Verify publication | `gem info woods --remote` shows the new version; for a prerelease, `gem info woods --remote --prerelease`. The README gem badge updates on its own | just before pushing, the workflow re-runs `script/verify-release-tag` so a tag that moved since validation aborts the publish |
 
-Nothing is published from a laptop: the workflow builds and pushes the gem from the validated CI artifact, so the bytes on RubyGems are the bytes CI tested.
+Nothing is published from a laptop: the workflow builds and pushes the gem from the validated CI artifact, so the bytes on RubyGems are the bytes CI tested. `rake release` and `rake release:rubygem_push`, which `bundler/gem_tasks` installs, are blocked for that reason.
+
+After a final release publishes, reopen development with `release:reopen` in a follow-up pull request.
+
+### Stable branches
+
+A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the only branch. There is no stable branch today.
+
+### What coding agents may do
+
+Agents may run `release:prepare` and `release:reopen` when asked, report the commands those tasks print, and prepare the pull request. Agents must not edit `lib/woods/version.rb` or the `release-state` fences by hand, create or push tags, dispatch the release workflow, or run any form of `gem push`. See `.claude/skills/release-flow/SKILL.md`.
