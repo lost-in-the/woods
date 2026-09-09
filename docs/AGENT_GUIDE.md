@@ -37,6 +37,8 @@ Identifiers are namespaced and typed. Never invent one from a filename when `sea
 | Inspect Rails or gem behavior | `framework` | current source files |
 | Find recently changed indexed units | `recent_changes` | git diff/history |
 | Discover architectural domains | `domain_clusters` | `graph_analysis` |
+| Check a join or foreign key across databases before writing it | `graph_analysis` with `analysis: "cross_database_edges"` | `lookup` on both models |
+| Find dependencies that change faster than their dependents | `graph_analysis` with `analysis: "volatile_dependencies"` | `recent_changes` |
 | Find central or high-impact units | `pagerank` | `dependents` |
 | Ask a conceptual question | `codebase_retrieve` if status says ready | `lookup` and graph tools |
 | Refresh after a published extraction | `reload` | `woods_status` |

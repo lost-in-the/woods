@@ -14,6 +14,13 @@ module Woods
     class ToolResponseRenderer
       VALID_FORMATS = %i[claude markdown plain json].freeze
 
+      # Sections of graph_analysis.json in display order. Shared by the
+      # graph_analysis tool (enum and pagination) and the text renderers.
+      GRAPH_ANALYSIS_SECTIONS = %w[
+        orphans dead_ends hubs cycles bridges
+        cross_database_edges volatile_dependencies
+      ].freeze
+
       # Factory method to build the appropriate renderer for a format.
       #
       # @param format [Symbol] One of :claude, :markdown, :plain, :json

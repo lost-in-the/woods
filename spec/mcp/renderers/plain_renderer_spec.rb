@@ -100,4 +100,59 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
       expect(renderer.render(:unknown, 'hi')).to eq('hi')
     end
   end
+
+  describe '#render_graph_analysis edge-shaped items (#280)' do
+    it 'renders from, to, via, and the remaining keys on one line' do
+      out = renderer.render(:graph_analysis, {
+                              'volatile_dependencies' => [
+                                { 'from' => 'Checkout', 'to' => 'PricingRules', 'via' => 'code_reference',
+                                  'from_commits' => 5, 'to_commits' => 30, 'ratio' => 6.0, 'pagerank' => 0.1 }
+                              ],
+                              'stats' => {}
+                            })
+
+      expect(out).to include('VOLATILE DEPENDENCIES:')
+      expect(out).to include('  Checkout -> PricingRules (code_reference): from_commits: 5, to_commits: 30, ' \
+                             'ratio: 6.0, pagerank: 0.1')
+    end
+
+    it 'keeps existing sections byte-identical to the pre-#280 renderer (I13)' do
+      old_shape = {
+        'orphans' => ['PostsController'],
+        'dead_ends' => ['Post'],
+        'hubs' => [
+          { 'identifier' => 'Post', 'type' => 'model', 'dependent_count' => 2,
+            'dependents' => %w[Comment PostsController] },
+          { 'identifier' => 'Comment', 'type' => 'model', 'dependent_count' => 0, 'dependents' => [] },
+          { 'identifier' => 'PostsController', 'type' => 'controller', 'dependent_count' => 0, 'dependents' => [] }
+        ],
+        'cycles' => [], 'bridges' => [],
+        'stats' => { 'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0 }
+      }
+
+      # Captured by rendering this exact hash at 3498079 (task-10's base
+      # commit), before cross_database_edges/volatile_dependencies existed.
+      expected = <<~PLAIN.rstrip
+        Graph Analysis
+        #{'=' * 60}
+          orphan_count: 1
+          dead_end_count: 1
+          hub_count: 3
+          cycle_count: 0
+
+        ORPHANS:
+          PostsController
+
+        DEAD ENDS:
+          Post
+
+        HUBS:
+          Post (model) - 2 dependents
+          Comment (model) - 0 dependents
+          PostsController (controller) - 0 dependents
+      PLAIN
+
+      expect(renderer.render(:graph_analysis, old_shape)).to eq(expected)
+    end
+  end
 end

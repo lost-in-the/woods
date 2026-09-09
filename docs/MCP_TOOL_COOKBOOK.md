@@ -27,6 +27,8 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 - ["Are there circular dependencies?"](#are-there-circular-dependencies)
 - ["What are the key integration points?"](#what-are-the-key-integration-points)
 - ["Which units are structural dead ends?"](#which-units-are-structural-dead-ends)
+- ["Which associations cross a database boundary?"](#which-associations-cross-a-database-boundary)
+- ["What do we depend on that changes faster than we do?"](#what-do-we-depend-on-that-changes-faster-than-we-do)
 - ["How does Rails implement has_many?"](#how-does-rails-implement-has_many)
 **Data Exploration (Console Server)**
 - [Scope predicates](#scope-predicates)
@@ -584,6 +586,36 @@ Static tools miss all of these because they only exist after Rails processes the
 ```
 
 **What you'll get:** Units that have no forward dependencies, leaf nodes. These tend to be pure utility classes or simple value objects.
+
+---
+
+### "Which associations cross a database boundary?"
+
+**Tool:** `graph_analysis` (Index Server)
+
+```json
+{
+  "analysis": "cross_database_edges",
+  "limit": 20
+}
+```
+
+**What you'll get:** `from`, `to`, `via`, `from_db`, `to_db`, `through`, `through_db`, `disable_joins`, and `kind`. A `kind` of `join_through_across_databases` is a `has_many :through` that Rails will try to JOIN across connections; add `disable_joins: true`. `foreign_key_across_databases` is a database constraint whose target table lives elsewhere; an `ambiguous_owners` list means more than one database owns that table name and the target could not be resolved.
+
+---
+
+### "What do we depend on that changes faster than we do?"
+
+**Tool:** `graph_analysis` (Index Server)
+
+```json
+{
+  "analysis": "volatile_dependencies",
+  "limit": 10
+}
+```
+
+**What you'll get:** Edges whose dependency has at least `volatile_dependency_ratio` (default 3) times the dependent's commit count over the last year, ranked by the dependency's PageRank. A report, not a gate: young units are skipped and the ratio is configurable.
 
 ---
 

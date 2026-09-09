@@ -573,12 +573,14 @@ module Woods
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'graph_analysis',
-            description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, and bridges.',
+            description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, bridges, ' \
+                         'cross_database_edges (associations and foreign keys across databases), ' \
+                         'and volatile_dependencies (edges into units that change far more often than the dependent).',
             input_schema: {
               properties: {
                 analysis: {
                   type: 'string',
-                  enum: %w[orphans dead_ends hubs cycles bridges all],
+                  enum: ToolResponseRenderer::GRAPH_ANALYSIS_SECTIONS + %w[all],
                   description: 'Which analysis to return. Default: all'
                 },
                 limit: { type: 'integer', description: 'Limit results per section (default: 20)' },
@@ -595,7 +597,7 @@ module Woods
             result = if section == 'all'
                        if limit || effective_offset.positive?
                          truncated = data.dup
-                         %w[orphans dead_ends hubs cycles bridges].each do |key|
+                         ToolResponseRenderer::GRAPH_ANALYSIS_SECTIONS.each do |key|
                            paginate.call(truncated, key, limit, effective_offset)
                          end
                          truncated
@@ -603,7 +605,7 @@ module Woods
                          data
                        end
                      else
-                       single = { section => data[section], 'stats' => data['stats'] }
+                       single = { section => data[section] || [], 'stats' => data['stats'] }
                        paginate.call(single, section, limit, effective_offset) if limit || effective_offset.positive?
                        single
                      end

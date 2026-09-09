@@ -123,6 +123,65 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
     end
   end
 
+  describe '#render_graph_analysis edge-shaped items (#280)' do
+    it 'renders from, to, via, and the remaining keys on one line' do
+      out = renderer.render(:graph_analysis, {
+                              'cross_database_edges' => [
+                                { 'from' => 'Invoice', 'to' => 'Account', 'via' => 'has_many',
+                                  'from_db' => 'billing', 'to_db' => 'primary', 'through' => 'subscriptions',
+                                  'disable_joins' => false, 'kind' => 'join_through_across_databases' }
+                              ],
+                              'stats' => { 'cross_database_edge_count' => 1 }
+                            })
+
+      expect(out).to include('### Cross database edges')
+      expect(out).to include('- **Invoice** -> **Account** (has_many): from_db: billing, to_db: primary, ' \
+                             'through: subscriptions, disable_joins: false, kind: join_through_across_databases')
+    end
+
+    it 'keeps existing sections byte-identical to the pre-#280 renderer (I13)' do
+      old_shape = {
+        'orphans' => ['PostsController'],
+        'dead_ends' => ['Post'],
+        'hubs' => [
+          { 'identifier' => 'Post', 'type' => 'model', 'dependent_count' => 2,
+            'dependents' => %w[Comment PostsController] },
+          { 'identifier' => 'Comment', 'type' => 'model', 'dependent_count' => 0, 'dependents' => [] },
+          { 'identifier' => 'PostsController', 'type' => 'controller', 'dependent_count' => 0, 'dependents' => [] }
+        ],
+        'cycles' => [], 'bridges' => [],
+        'stats' => { 'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0 }
+      }
+
+      # Captured by rendering this exact hash at 3498079 (task-10's base
+      # commit), before cross_database_edges/volatile_dependencies existed.
+      expected = <<~MARKDOWN.rstrip
+        ## Graph Analysis
+
+        - **orphan_count:** 1
+        - **dead_end_count:** 1
+        - **hub_count:** 3
+        - **cycle_count:** 0
+
+        ### Orphans
+
+        - PostsController
+
+        ### Dead ends
+
+        - Post
+
+        ### Hubs
+
+        - **Post** (model) — 2 dependents
+        - **Comment** (model) — 0 dependents
+        - **PostsController** (controller) — 0 dependents
+      MARKDOWN
+
+      expect(renderer.render(:graph_analysis, old_shape)).to eq(expected)
+    end
+  end
+
   describe '#render_default' do
     it 'renders a hash as markdown-style bold keys' do
       out = renderer.render(:totally_unknown, { a: 1, b: 2 })

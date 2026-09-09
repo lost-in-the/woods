@@ -173,14 +173,16 @@ module Woods
             lines << ''
           end
 
-          %w[orphans dead_ends hubs cycles bridges].each do |section|
+          GRAPH_ANALYSIS_SECTIONS.each do |section|
             items = fetch_key(data, section)
             next unless items.is_a?(Array) && items.any?
 
             lines << "### #{section.tr('_', ' ').capitalize}"
             lines << ''
             items.each do |item|
-              lines << if item.is_a?(Hash) && item.key?('score')
+              lines << if item.is_a?(Hash) && item.key?('from')
+                         graph_edge_line(item, bold: true)
+                       elsif item.is_a?(Hash) && item.key?('score')
                          "- **#{item['identifier']}** (#{item['type']}) — score: #{item['score']}"
                        elsif item.is_a?(Hash)
                          "- **#{item['identifier']}** (#{item['type']}) — #{item['dependent_count']} dependents"
@@ -363,6 +365,20 @@ module Woods
         end
 
         private
+
+        # One line for an edge-shaped report item (from, to, via, then the
+        # remaining keys in the order the report emits them).
+        #
+        # @param item [Hash] string-keyed
+        # @param bold [Boolean] wrap the endpoints in ** for markdown
+        # @return [String]
+        def graph_edge_line(item, bold:)
+          wrap = bold ? '**' : ''
+          detail = item.except('from', 'to', 'via')
+                       .map { |key, value| "#{key}: #{value}" }.join(', ')
+          line = "#{wrap}#{item['from']}#{wrap} -> #{wrap}#{item['to']}#{wrap} (#{item['via']})"
+          detail.empty? ? "- #{line}" : "- #{line}: #{detail}"
+        end
 
         def render_traversal(label, data)
           root = fetch_key(data, :root)
