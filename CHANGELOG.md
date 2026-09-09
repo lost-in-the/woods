@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
+  gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
+  complementary on symbol references.
+
 ### Performance
 
 - **Controller and mailer chunk extraction parses each file once, not once per
