@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   but the job gained `+ Redis` in its name, so every release dispatch failed at
   release-context with nothing published. The prefix now matches, and a spec checks every
   required contract job against the names in `ci.yml` so a rename cannot drift again.
+- **Release candidate jobs find the downloaded artifact.** `actions/download-artifact` with
+  `artifact-ids` extracts into `dist/<artifact-name>/`, so the digest check and the install
+  in `dist/` failed with a missing file on every dispatch since the switch to artifact ids.
+  Both downloads now set `merge-multiple: true`; the workflow spec requires it.
 
 ## [2.0.0.beta1] - 2026-09-09
 

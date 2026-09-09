@@ -87,6 +87,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.release-context.outputs.artifact-id }}
           path: dist
+          merge-multiple: true
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ needs.release-context.outputs.ci-run-id }}
@@ -152,6 +153,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.release-context.outputs.artifact-id }}
           path: dist
+          merge-multiple: true
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ needs.release-context.outputs.ci-run-id }}
