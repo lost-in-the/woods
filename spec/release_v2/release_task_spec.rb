@@ -44,13 +44,14 @@ RSpec.describe 'release rake tasks' do
     result = Woods::Release::Preparer::Result.new(
       previous: Woods::Release::VersionState.parse('2.0.0.alpha'),
       target: Woods::Release::VersionState.parse('2.0.0.beta1'),
-      changed_paths: ['CHANGELOG.md'], render: ->(_changed) { 'prepared' }
+      changed_paths: ['CHANGELOG.md'], render: ->(changed) { "Changed: #{changed.join(', ')}" }
     )
     allow(Woods::Release::Preparer).to receive(:prepare)
       .with(root: root, version: '2.0.0.beta1').and_return(result)
 
     with_release_tasks do |application|
-      expect { application['release:prepare'].invoke('2.0.0.beta1') }.to output(/prepared/).to_stdout
+      expect { application['release:prepare'].invoke('2.0.0.beta1') }
+        .to output(%r{Changed: \.Codex/release-v2/surface-inventory\.json, CHANGELOG\.md}).to_stdout
     end
 
     expect(Woods::Release::Preparer).to have_received(:prepare)
@@ -61,13 +62,14 @@ RSpec.describe 'release rake tasks' do
     result = Woods::Release::Preparer::Result.new(
       previous: Woods::Release::VersionState.parse('2.0.0'),
       target: Woods::Release::VersionState.parse('2.1.0.alpha'),
-      changed_paths: ['README.md'], render: ->(_changed) { 'reopened' }
+      changed_paths: ['README.md'], render: ->(changed) { "Reopened: #{changed.join(', ')}" }
     )
     allow(Woods::Release::Preparer).to receive(:reopen)
       .with(root: root, version: '2.1.0.alpha').and_return(result)
 
     with_release_tasks do |application|
-      expect { application['release:reopen'].invoke('2.1.0.alpha') }.to output(/reopened/).to_stdout
+      expect { application['release:reopen'].invoke('2.1.0.alpha') }
+        .to output(/Reopened: README\.md/).to_stdout
     end
   end
 
@@ -95,6 +97,17 @@ RSpec.describe 'release rake tasks' do
         .to raise_error(SystemExit).and output(/release:prepare/).to_stderr
       expect { application['release:rubygem_push'].invoke }
         .to raise_error(SystemExit).and output(/dispatch workflow/).to_stderr
+    end
+  end
+
+  # A blocked task with no comment vanishes from `rake -T`, so the next person
+  # rediscovers it by running it. Keep it listed, and say what to run instead.
+  it 'keeps the blocked tasks visible in the task list with a pointer to the flow' do
+    with_release_tasks do |application|
+      %w[release release:rubygem_push].each do |name|
+        expect(application[name].comment).to include('BLOCKED'), "#{name} is not listed as blocked"
+        expect(application[name].comment).to include('release:prepare')
+      end
     end
   end
 end

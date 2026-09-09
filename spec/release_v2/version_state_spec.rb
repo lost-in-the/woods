@@ -70,4 +70,16 @@ RSpec.describe 'release version state' do
 
     expect(claims).to be_empty
   end
+
+  # Two fences with the same id in one document would let `apply!` rewrite the
+  # first and silently leave the second in the previous state.
+  it 'declares each release-state fence id exactly once across the repository' do
+    ids = marked_documents("<!-- #{Woods::Release::Notes::MARKER}:").flat_map do |path|
+      File.read(File.join(root, path), encoding: Encoding::UTF_8)
+          .scan(/<!-- #{Woods::Release::Notes::MARKER}:([a-z][a-z-]*) -->/).flatten
+    end
+    duplicated = ids.reject { |id| id == 'end' }.tally.select { |_id, count| count > 1 }
+
+    expect(duplicated).to be_empty
+  end
 end

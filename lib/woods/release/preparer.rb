@@ -34,6 +34,14 @@ module Woods
         def report
           render.call(changed_paths)
         end
+
+        # Folds in a file the caller changed after the transition (the rake task
+        # regenerates the surface inventory), so the report lists everything the
+        # reviewer will see in the diff.
+        def with_changed(paths)
+          Result.new(previous: previous, target: target, render: render,
+                     changed_paths: (changed_paths + Array(paths)).uniq.sort)
+        end
       end
 
       class << self

@@ -11,8 +11,10 @@ namespace :release do
   task :prepare, [:version] do |_task, args|
     Woods::Release::RakeSupport.run('release:prepare', args[:version]) do |root, version|
       result = Woods::Release::Preparer.prepare(root: root, version: version)
+      # After the documentation edits, never before: the inventory records what
+      # the docs claim.
       Rake::Task['release_v2:write_surface_inventory'].invoke
-      result
+      result.with_changed(Woods::Release::RakeSupport::SURFACE_INVENTORY_PATH)
     end
   end
 
@@ -29,10 +31,12 @@ end
 # repository_dispatch workflow publishes the exact bytes CI tested.
 Woods::Release::RakeSupport.block_task(
   'release',
-  'rake release would tag and publish from this machine. Use bin/rake "release:prepare[<version>]", ' \
-  'then tag the merge commit and trigger the dispatch workflow.'
+  description: 'BLOCKED: aborts, because nothing is published from a laptop; run release:prepare instead',
+  message: 'rake release would tag and publish from this machine. Use bin/rake "release:prepare[<version>]", ' \
+           'then tag the merge commit and trigger the dispatch workflow.'
 )
 Woods::Release::RakeSupport.block_task(
   'release:rubygem_push',
-  'nothing is published from a laptop. The dispatch workflow pushes the gem bytes CI tested.'
+  description: 'BLOCKED: aborts, because the dispatch workflow publishes the gem; run release:prepare instead',
+  message: 'nothing is published from a laptop. The dispatch workflow pushes the gem bytes CI tested.'
 )
