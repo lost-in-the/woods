@@ -21,6 +21,24 @@ module Woods
   #   affected = graph.affected_by(["app/models/user.rb"])
   #
   class DependencyGraph
+    # Optional node keys beyond type, file_path, and namespace. Each is
+    # omitted when the unit carries no value, so a graph with no such facts
+    # serializes byte-for-byte as it always has. Values are normalized to
+    # strings (or Integer/Array/Boolean where noted) so a full and an
+    # incremental run write identical JSON.
+    #
+    # database, table, foreign_key_tables: model units (Task 3)
+    # package: any app-owned unit under a Packwerk package (Task 8)
+    # enforce_dependencies: package units (Task 7)
+    # commit_count, change_frequency: git enrichment (Task 5)
+    NODE_ATTRIBUTE_KEYS = %i[
+      database table foreign_key_tables package enforce_dependencies commit_count change_frequency
+    ].freeze
+
+    # Optional edge keys beyond target and via. `through` is the through
+    # association name; `disable_joins` is emitted only when true.
+    EDGE_ATTRIBUTE_KEYS = %i[through disable_joins].freeze
+
     def initialize
       @nodes = {}      # identifier => { type => { type:, file_path:, namespace: } }
       @edges = {}      # identifier => { type => [{ target:, via: }] }
@@ -57,10 +75,10 @@ module Woods
         type: unit.type,
         file_path: unit.file_path,
         namespace: unit.namespace
-      }
+      }.merge(node_attributes_from(unit))
 
       (@edges[unit.identifier] ||= {})[unit.type] =
-        unit.dependencies.map { |d| { target: d[:target], via: d[:via] } }
+        unit.dependencies.map { |d| { target: d[:target], via: d[:via] }.merge(self.class.edge_attributes(d)) }
       (@file_map[unit.file_path] ||= Set.new).add(unit.identifier) if unit.file_path
 
       # Type index for filtering (Set-based for O(1) insert)
@@ -250,6 +268,48 @@ module Woods
       primary
     end
     private :remove_all
+
+    # Set or clear optional attributes on an existing node.
+    #
+    # Used after registration for facts that arrive later than the unit's
+    # metadata: git enrichment runs after every unit is registered, and an
+    # incremental run patches git data into unit JSON well after
+    # {#register}. A nil value removes the key, so a node whose fact went
+    # away serializes without it, exactly as a fresh registration would.
+    #
+    # @param identifier [String]
+    # @param type [Symbol] the registered type to annotate
+    # @param attributes [Hash{Symbol => Object}] keys from {NODE_ATTRIBUTE_KEYS}
+    # @return [Hash, nil] the node, or nil when (identifier, type) is unknown
+    # @raise [ArgumentError] on a key outside {NODE_ATTRIBUTE_KEYS}
+    def annotate(identifier, type:, **attributes)
+      node = @nodes.dig(identifier, type)
+      return nil unless node
+
+      @to_h = nil
+      attributes.each do |key, value|
+        raise ArgumentError, "Unknown node attribute #{key.inspect}" unless NODE_ATTRIBUTE_KEYS.include?(key)
+
+        if value.nil?
+          node.delete(key)
+        else
+          node[key] = self.class.normalize_node_attribute(key, value)
+        end
+      end
+      node
+    end
+
+    # Forward edge records with their attributes, as copies.
+    #
+    # {#dependencies_of} answers with targets only; the analyzer reports that
+    # read `through` and `disable_joins` need the whole record.
+    #
+    # @param identifier [String]
+    # @param type [Symbol, nil] one registered type, or every one when nil
+    # @return [Array<Hash>] `{ target:, via:, through?, disable_joins? }`
+    def edge_records(identifier, type: nil)
+      edges_for(identifier, type).map(&:dup)
+    end
 
     # Identifiers defined by a given file path.
     #
@@ -573,6 +633,33 @@ module Woods
       @suffix_groups = groups
     end
 
+    # Node attributes a unit's metadata supplies at registration time.
+    #
+    # `table` is taken only from model units and `enforce_dependencies` only
+    # from package units, so an unrelated extractor that happens to use one
+    # of those metadata keys cannot leak into the graph.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [Hash{Symbol => Object}] normalized, nil-free
+    def node_attributes_from(unit)
+      metadata = unit.respond_to?(:metadata) && unit.metadata.is_a?(Hash) ? unit.metadata : {}
+      attrs = {}
+      attrs[:database] = metadata[:database] unless metadata[:database].nil?
+      attrs[:table] = metadata[:table_name] if unit.type == :model && !metadata[:table_name].nil?
+      tables = Array(metadata[:foreign_keys]).filter_map { |fk| fk[:to_table] || fk['to_table'] if fk.is_a?(Hash) }
+      attrs[:foreign_key_tables] = tables if tables.any?
+      attrs[:package] = metadata[:package] unless metadata[:package].nil?
+      if unit.type == :package && !metadata[:enforce_dependencies].nil?
+        attrs[:enforce_dependencies] = metadata[:enforce_dependencies]
+      end
+      git = metadata[:git]
+      if git.is_a?(Hash)
+        attrs[:commit_count] = git[:commit_count] unless git[:commit_count].nil?
+        attrs[:change_frequency] = git[:change_frequency] unless git[:change_frequency].nil?
+      end
+      attrs.to_h { |key, value| [key, self.class.normalize_node_attribute(key, value)] }
+    end
+
     # One PageRank power iteration over precomputed resolvable-edge weights.
     #
     # Iteration order (node insertion order, reverse-Set insertion order) is
@@ -724,10 +811,11 @@ module Woods
             identifier: identifier,
             type: type,
             file_path: node[:file_path],
-            namespace: node[:namespace],
+            namespace: node[:namespace]
+          }.merge(node.slice(*NODE_ATTRIBUTE_KEYS)).merge(
             # Copied like {#primary_edges} — see EXTB-11.
             edges: (@edges[identifier]&.[](type) || []).map(&:dup)
-          }
+          )
         end
       end
       records.sort_by { |record| [record[:identifier], record[:type].to_s] }
@@ -847,6 +935,46 @@ module Woods
       end
     end
 
+    # Canonical value for a node attribute, applied on registration, on
+    # {#annotate}, and on load, so both extraction paths and a JSON round
+    # trip agree.
+    #
+    # @param key [Symbol] one of {NODE_ATTRIBUTE_KEYS}
+    # @param value [Object]
+    # @return [Object]
+    def self.normalize_node_attribute(key, value)
+      case key
+      when :foreign_key_tables then Array(value).map(&:to_s).uniq.sort
+      when :commit_count then value.to_i
+      when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
+      else value.to_s
+      end
+    end
+
+    # Node attributes present in a persisted node hash (string or symbol keys).
+    #
+    # @param node [Hash]
+    # @return [Hash{Symbol => Object}]
+    def self.persisted_node_attributes(node)
+      NODE_ATTRIBUTE_KEYS.each_with_object({}) do |key, attrs|
+        value = node.key?(key) ? node[key] : node[key.to_s]
+        attrs[key] = normalize_node_attribute(key, value) unless value.nil?
+      end
+    end
+
+    # Edge attributes present in a dependency or persisted edge hash.
+    #
+    # @param dep [Hash] string or symbol keys
+    # @return [Hash{Symbol => Object}] empty when the edge carries none
+    def self.edge_attributes(dep)
+      attrs = {}
+      through = dep[:through] || dep['through']
+      attrs[:through] = through.to_s unless through.nil? || through.to_s.empty?
+      disable_joins = dep.key?(:disable_joins) ? dep[:disable_joins] : dep['disable_joins']
+      attrs[:disable_joins] = true if disable_joins == true
+      attrs
+    end
+
     # Load graph from persisted data
     #
     # After JSON round-trip all keys become strings. This method normalizes
@@ -933,7 +1061,7 @@ module Woods
           type: type,
           file_path: absolutize(record[:file_path] || record['file_path'], root),
           namespace: record[:namespace] || record['namespace']
-        }
+        }.merge(persisted_node_attributes(record))
         (edges[identifier] ||= {})[type] = normalize_edges(record[:edges] || record['edges'])
       end
     end
@@ -975,7 +1103,7 @@ module Woods
         type: (node[:type] || node['type'])&.to_sym,
         file_path: node[:file_path] || node['file_path'],
         namespace: node[:namespace] || node['namespace']
-      }
+      }.merge(persisted_node_attributes(node))
     end
 
     # Normalize edge data from either old format (bare strings) or new format (hashes).
@@ -1008,6 +1136,7 @@ module Woods
           { target: edge, via: nil }
         elsif edge.is_a?(Hash)
           { target: edge[:target] || edge['target'], via: (edge[:via] || edge['via'])&.to_sym }
+            .merge(edge_attributes(edge))
         else
           { target: edge.to_s, via: nil }
         end
