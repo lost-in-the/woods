@@ -50,6 +50,11 @@ module Woods
     # a class touched four times could be settling down.
     VOLATILE_MIN_COMMITS = 5
 
+    # How many volatile-dependency entries {#analyze} keeps. Published as
+    # `stats[:volatile_dependencies_limit]` so a reader of the array alone
+    # can tell whether it was truncated (B-182).
+    DEFAULT_VOLATILE_LIMIT = 20
+
     # @param dependency_graph [DependencyGraph] The graph to analyze
     # @param volatile_ratio [Numeric] see {#volatile_dependencies}
     def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO)
@@ -259,11 +264,12 @@ module Woods
     # PageRank so the most-depended-on volatile unit comes first. `limit`
     # caps what this method hands back; {#analyze}'s
     # `stats[:volatile_dependency_count]` reports the full qualifying count
-    # regardless of `limit`.
+    # regardless of `limit`, and `stats[:volatile_dependencies_limit]` reports
+    # the cap, so a reader of the array alone can tell it was truncated.
     #
     # @param limit [Integer] maximum entries
     # @return [Array<Hash>] `{ from:, from_type:, to:, to_type:, via:, from_commits:, to_commits:, ratio:, pagerank: }`
-    def volatile_dependencies(limit: 20)
+    def volatile_dependencies(limit: DEFAULT_VOLATILE_LIMIT)
       all_volatile_dependencies.first(limit)
     end
 
@@ -357,6 +363,7 @@ module Woods
           cycle_count: computed_cycles.size,
           cross_database_edge_count: computed_cross_database.size,
           volatile_dependency_count: all_volatile_dependencies.size,
+          volatile_dependencies_limit: DEFAULT_VOLATILE_LIMIT,
           undeclared_package_edge_count: computed_undeclared.size
         }
       }

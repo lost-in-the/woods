@@ -316,6 +316,86 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  # B-183: `dependents` on a hub model at the default depth returned about
+  # 178 KB with no truncation marker, while `graph_analysis` in the same
+  # server printed a "Showing N of M (truncated)" line.
+  describe 'tool: dependents and dependencies paging' do
+    let(:wide_dir) { Dir.mktmpdir('woods-traverse-paging') }
+    let(:wide_server) { described_class.build(index_dir: wide_dir, response_format: :json) }
+
+    before do
+      File.write(File.join(wide_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+      dependents = Array.new(120) { |i| format('Dep%03d', i) }
+      nodes = { 'Hub' => { 'type' => 'model' } }
+      dependents.each { |id| nodes[id] = { 'type' => 'service' } }
+      File.write(
+        File.join(wide_dir, 'dependency_graph.json'),
+        JSON.pretty_generate(
+          nodes: nodes,
+          edges: dependents.to_h { |id| [id, [{ 'target' => 'Hub', 'via' => 'code_reference' }]] },
+          reverse: { 'Hub' => dependents }
+        )
+      )
+    end
+
+    after { FileUtils.remove_entry(wide_dir) if File.directory?(wide_dir) }
+
+    it 'bounds the default page and marks it truncated' do
+      data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub'))
+
+      expect(data['nodes'].size).to eq(Woods::MCP::Server::DEFAULT_TRAVERSAL_LIMIT)
+      expect(data['nodes_total']).to eq(121)
+      expect(data['nodes_truncated']).to be true
+    end
+
+    it 'accepts limit and offset like graph_analysis' do
+      data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', limit: 5, offset: 2))
+
+      expect(data['nodes'].size).to eq(5)
+      expect(data['nodes_offset']).to eq(2)
+      expect(data['nodes_total']).to eq(121)
+    end
+
+    # The marker keyed on `total > offset + limit`, so the *last* page came
+    # back looking exactly like an unpaged complete answer: no total, no
+    # offset, nothing to say 70 nodes were skipped.
+    it 'marks the last page rather than rendering it as a complete answer' do
+      data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', limit: 50, offset: 100))
+
+      expect(data['nodes'].size).to eq(21)
+      expect(data['nodes_total']).to eq(121)
+      expect(data['nodes_offset']).to eq(100)
+    end
+
+    it 'marks a page that is short of the total even at offset zero' do
+      data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', limit: 121))
+
+      expect(data).not_to have_key('nodes_total')
+    end
+
+    it 'leaves a page that fits unmarked' do
+      data = parse_response(call_tool(server, 'dependents', identifier: 'Post'))
+
+      expect(data).not_to have_key('nodes_total')
+      expect(data).not_to have_key('nodes_truncated')
+      expect(data).not_to have_key('nodes_offset')
+    end
+
+    it 'bounds dependencies the same way' do
+      data = parse_response(call_tool(wide_server, 'dependencies', identifier: 'Dep000', limit: 1))
+
+      expect(data['nodes'].size).to eq(1)
+      expect(data['nodes_total']).to eq(2)
+    end
+
+    it 'names depth, types and via first in both descriptions' do
+      %w[dependents dependencies].each do |name|
+        description = wide_server.instance_variable_get(:@tools)[name].description
+        expect(description).to match(/depth.*types.*via/m), name
+      end
+    end
+  end
+
   describe 'tool: structure' do
     it 'returns manifest by default' do
       response = call_tool(server, 'structure')

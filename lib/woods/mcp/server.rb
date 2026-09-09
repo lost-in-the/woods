@@ -64,6 +64,13 @@ module Woods
       # Human-readable pipeline names for the `already_running` message.
       PIPELINE_LABELS = { extraction: 'Extraction', embedding: 'Embedding' }.freeze
 
+      # How many traversal nodes `dependents` and `dependencies` return when
+      # the caller names no limit. A hub at the default depth 2 used to return
+      # about 178 KB with nothing saying it had been anything but complete. The
+      # controls that actually shrink the answer are `depth`, `types` and
+      # `via`; `limit` and `offset` only page what those leave (B-183).
+      DEFAULT_TRAVERSAL_LIMIT = 50
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -146,12 +153,18 @@ module Woods
           define_search_tool(server, reader, respond, respond_err, renderer)
           define_traversal_tool(server, reader, respond, renderer,
                                 name: 'dependencies',
-                                description: 'Traverse forward dependencies of a unit (what it depends on). Returns a BFS tree with depth.',
+                                description: 'Traverse forward dependencies of a unit (what it depends on). ' \
+                                             'Narrow with depth, types and via first: they shrink the answer, ' \
+                                             'while limit and offset only page it. Returns a BFS tree with ' \
+                                             "depth, bounded to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default.",
                                 reader_method: :traverse_dependencies,
                                 render_key: :dependencies)
           define_traversal_tool(server, reader, respond, renderer,
                                 name: 'dependents',
-                                description: 'Traverse reverse dependencies of a unit (what depends on it). Returns a BFS tree with depth.',
+                                description: 'Traverse reverse dependencies of a unit (what depends on it). ' \
+                                             'Narrow with depth, types and via first: they shrink the answer, ' \
+                                             'while limit and offset only page it. Returns a BFS tree with ' \
+                                             "depth, bounded to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default.",
                                 reader_method: :traverse_dependents,
                                 render_key: :dependents)
           define_structure_tool(server, reader, respond, renderer)
@@ -378,6 +391,37 @@ module Woods
           container["#{key}_offset"] = offset if offset.positive?
         end
 
+        # Page a traversal result's `nodes` hash in place, in BFS order.
+        #
+        # Mirrors {#paginate_section}'s metadata keys (`nodes_total`,
+        # `nodes_truncated`, `nodes_offset`) so both renderers print the one
+        # truncation line they already had for `graph_analysis`. A page that
+        # holds every node adds no keys at all, so a small result renders
+        # exactly as it did before the bound existed (B-183).
+        #
+        # `nodes_total` marks *any* partial answer, not only one with more
+        # behind it. Keying it on `total > offset + limit` left the last page
+        # of a walk indistinguishable from a complete one: 21 nodes of 121,
+        # with nothing saying 100 were skipped. `nodes_truncated` still means
+        # what it always did, "there is more after this page".
+        #
+        # @param result [Hash] traversal result, mutated
+        # @param limit [Integer] maximum nodes to retain
+        # @param offset [Integer] nodes to skip from the front
+        # @return [void]
+        def paginate_traversal_nodes(result, limit, offset)
+          nodes = result[:nodes]
+          return unless nodes.is_a?(Hash)
+
+          total = nodes.size
+          return if offset.zero? && total <= limit
+
+          result[:nodes] = nodes.to_a.drop(offset).take(limit).to_h
+          result[:nodes_total] = total if offset.positive? || total > limit
+          result[:nodes_truncated] = true if total > offset + limit
+          result[:nodes_offset] = offset if offset.positive?
+        end
+
         def define_lookup_tool(server, reader, respond, respond_err, renderer)
           coerce = method(:coerce_array)
           server.define_tool(
@@ -511,6 +555,7 @@ module Woods
         def define_traversal_tool(server, reader, respond, renderer, name:, description:, reader_method:, render_key:)
           coerce = method(:coerce_array)
           coerce_int = method(:coerce_integer)
+          paginate_nodes = method(:paginate_traversal_nodes)
           server.define_tool(
             name: name,
             description: description,
@@ -532,19 +577,25 @@ module Woods
                                "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
                                'Known values: link_to, redirect_to, form_action, render, code_reference, ' \
                                'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface.'
-                }
+                },
+                limit: { type: 'integer',
+                         description: "Maximum nodes to return (default: #{DEFAULT_TRAVERSAL_LIMIT})" },
+                offset: { type: 'integer', description: 'Skip this many nodes (default: 0)' }
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil|
             types = coerce.call(types)
             via = coerce.call(via)
             depth = coerce_int.call(depth)
+            limit = coerce_int.call(limit)
+            offset = coerce_int.call(offset)
             result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via)
             if result[:found] == false
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
+            paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             respond.call(renderer.render(render_key, result))
           end
         end

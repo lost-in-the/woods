@@ -35,6 +35,7 @@ end
 - [Session tracer options](#session-tracer-options)
 - [Gem indexing](#gem-indexing)
 - [Extractors](#extractors)
+  - [Component directories](#component-directories)
 - [Console MCP options](#console-mcp-options)
 - [Environment variables](#environment-variables)
   - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
@@ -443,6 +444,45 @@ Leave it at its default. The full list of what always runs:
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
+### Component directories
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `component_paths` | Array&lt;String&gt; | `["app/components", "app/views/components", "app/views"]` | Directories `PhlexExtractor` and `ViewComponentExtractor` walk before reading `descendants`, relative to `Rails.root`. |
+
+Both component extractors discover their units from
+`component_base.descendants`, which only knows classes something has already
+loaded. Rails leaves `app/views` out of both `autoload_paths` and
+`eager_load_paths`, so an app that keeps components beside their templates and
+opts that subtree into autoloading has components that resolve by name and are
+absent from `descendants` for the whole extraction. Woods asks the autoloader
+for each file under these directories first.
+
+```ruby
+Woods.configure do |config|
+  # Components live under app/ui/ in this app, nowhere else.
+  config.component_paths = %w[app/ui]
+end
+```
+
+`nil` means the defaults above. An explicitly empty array means walk nothing,
+which is how an app that keeps no components (or eager-loads all of them) opts
+out of the walk entirely:
+
+```ruby
+Woods.configure { |config| config.component_paths = [] }
+```
+
+Nested entries collapse into their ancestor, so the default list walks
+`app/components` and `app/views` and never hands a file under
+`app/views/components` to the autoloader twice.
+
+A file is loaded only when a Rails autoload path owns it, so the constant its
+path implies is the one Zeitwerk manages. A directory that is not autoloaded is
+walked and skipped; one `Rails.logger.debug` line per extraction says how many
+files that was, so the misconfiguration is visible instead of looking like an
+app with no components.
+
 ## Console MCP options
 
 These options configure the Console MCP server (live database queries via
@@ -533,6 +573,26 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
 | `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |
+| `WOODS_GIT_DIR` | unset | Absolute path to the canonical git directory. Wins over the repository Woods would otherwise find, at all three of its git call sites: per-unit `commit_count`/`change_frequency` (enrichment), `manifest.json`'s `git_branch`/`git_sha` (provenance), and the `woods:incremental` diff range. All three build their command line with `Woods::GitCommand.argv`. |
+| `GIT_BRANCH`, `GIT_SHA` | unset | Provenance for a checkout with no `.git` at all (a source tarball, a Docker `COPY` that excludes it). Ignored when a `.git` is present but unresolvable, so a stale build arg cannot mask a worktree. |
+
+**`GIT_DIR` alone is not enough for a linked git worktree.** Woods runs git as a
+subprocess, so git's own `GIT_DIR` and `GIT_COMMON_DIR` are honored wherever git
+honors them. But pointing `GIT_DIR` at a worktree's *private* git directory only
+moves the failure: that directory reaches the shared object store through a
+relative `commondir` pointer, which still resolves outside a container mount,
+and `GIT_COMMON_DIR` does not override it. `git rev-parse --git-dir` then
+succeeds while no ref resolves.
+
+Woods refuses to enrich in that state rather than writing `commit_count: 0` and
+`change_frequency: "new"` on every unit: the git keys are omitted, provenance is
+`"unknown"`, and one warning names the cause. Point `WOODS_GIT_DIR` at the
+canonical git directory (the one a worktree's `gitdir:` pointer ultimately leads
+to) and mount it:
+
+```bash
+WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
+```
 
 ### Exporters
 

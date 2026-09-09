@@ -1178,4 +1178,68 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.dependencies_of('Order')).to eq(['User'])
     end
   end
+
+  # ── B-180: serialization is a pure function of graph content ────────────
+  #
+  # Verified on a 7k-unit host app: edit one model, run woods:incremental,
+  # revert, run again. Every graph section was byte-identical except `reverse`
+  # and `type_index`, whose members came back in a different order because
+  # `to_h` emitted `Set#to_a`. The digest the extractor publishes as
+  # `graph_sha` therefore changed after a no-op, so a consumer caching on it
+  # redid its work.
+  describe 'serialization determinism' do
+    def determinism_units
+      [
+        make_unit(type: :model, identifier: 'User'),
+        make_unit(type: :model, identifier: 'Account',
+                  dependencies: [{ type: :model, target: 'User', via: :belongs_to }]),
+        make_unit(type: :model, identifier: 'Order',
+                  dependencies: [{ type: :model, target: 'User', via: :belongs_to },
+                                 { type: :model, target: 'Account', via: :code_reference }]),
+        make_unit(type: :service, identifier: 'Billing::Charge',
+                  dependencies: [{ type: :model, target: 'Order', via: :code_reference },
+                                 { type: :model, target: 'User', via: :code_reference }]),
+        make_unit(type: :job, identifier: 'ChargeJob',
+                  dependencies: [{ type: :service, target: 'Billing::Charge', via: :code_reference },
+                                 { type: :model, target: 'User', via: :code_reference }])
+      ]
+    end
+
+    def graph_from(units)
+      described_class.new.tap { |g| units.each { |unit| g.register(unit) } }
+    end
+
+    it 'emits the same hash for two registration orders' do
+      units = determinism_units
+
+      expect(graph_from(units).to_h).to eq(graph_from(units.reverse).to_h)
+    end
+
+    it 'emits the same JSON bytes for two registration orders' do
+      units = determinism_units
+
+      expect(JSON.generate(graph_from(units).to_h))
+        .to eq(JSON.generate(graph_from(units.reverse).to_h))
+    end
+
+    it 'sorts the members of reverse' do
+      units = determinism_units
+
+      expect(graph_from(units.reverse).to_h[:reverse]['User']).to eq(%w[Account ChargeJob Order Billing::Charge].sort)
+    end
+
+    it 'sorts the members of type_index' do
+      units = determinism_units
+
+      expect(graph_from(units.reverse).to_h[:type_index][:model]).to eq(%w[Account Order User])
+    end
+
+    it 'sorts the members of file_map' do
+      shared = '/app/models/shared.rb'
+      units = [make_unit(type: :model, identifier: 'Zebra', file_path: shared),
+               make_unit(type: :model, identifier: 'Ant', file_path: shared)]
+
+      expect(graph_from(units).to_h[:file_map][shared]).to eq(%w[Ant Zebra])
+    end
+  end
 end

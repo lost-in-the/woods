@@ -188,6 +188,50 @@ bundle exec rake woods:extract
 
 ---
 
+### Every unit reports `commit_count: 0` and `change_frequency: "new"`
+
+**Symptom:** Not a few units, all of them, in an application whose files clearly
+have history. `volatile_dependencies` comes back empty at the same time.
+
+**Cause:** git ran but could not resolve any ref. The usual shape is a
+containerized linked worktree: `GIT_DIR` points at the worktree's *private*
+git directory, `git rev-parse --git-dir` succeeds, and every ref lookup fails,
+because that private directory reaches the shared object store through a
+relative `commondir` pointer that resolves outside the mount. `git log` then
+exits 0 with no output, and zero commits is indistinguishable from a file that
+was never committed.
+
+Woods now requires `git rev-parse HEAD` to succeed before enriching anything.
+When it does not, the git keys are omitted from every unit, provenance records
+`"unknown"`, and one warning names git's own reason. Absent keys mean "not
+known"; they never mean "brand new".
+
+**Fix:** Point `WOODS_GIT_DIR` at the *canonical* git directory, the one the
+worktree's `gitdir:` pointer ultimately leads to, and make sure it is mounted:
+
+```bash
+# docker-compose.yml, mounting the parent repository's git directory
+#   volumes:
+#     - /path/to/repo/.git:/canonical-git:ro
+WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
+```
+
+`WOODS_GIT_DIR` wins over whatever the worktree pointer says, and applies to
+every git call Woods makes: per-unit enrichment, `manifest.json` provenance,
+and the diff range `woods:incremental` resolves. All three run through
+`Woods::GitCommand.argv`, so the override cannot reach two of them and miss the
+third.
+
+**`GIT_DIR` alone is not enough for a linked worktree.** Woods honors git's own
+`GIT_DIR` and `GIT_COMMON_DIR` because git does, but setting `GIT_DIR` to a
+worktree's private git directory only moves the failure: the `commondir`
+pointer inside it is relative, so it still resolves to a path that is not
+mounted, and `GIT_COMMON_DIR` does not override it. Either mount the canonical
+git directory at the same absolute path the pointer names, or use
+`WOODS_GIT_DIR`.
+
+---
+
 ### `woods:incremental` exits 1 with "could not resolve the git diff range"
 
 **Symptom:** A CI job fails with `ERROR: could not resolve the git diff range "..."` instead of indexing.
@@ -249,6 +293,12 @@ retries after a later filesystem event.
 **Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory, often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg).
 
 **Fix:** Make the worktree's git directory reachable from the extraction environment, for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly. Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
+
+When the canonical git directory is mounted but not at the path the pointer
+names, set `WOODS_GIT_DIR` to where it actually is. It wins over the pointer for
+provenance and for unit-level git metadata both. Setting git's own `GIT_DIR` to
+the worktree's private git directory does not work: its `commondir` pointer is
+relative and resolves outside the mount.
 
 ---
 

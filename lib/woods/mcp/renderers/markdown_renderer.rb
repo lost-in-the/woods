@@ -421,13 +421,31 @@ module Woods
             # Present only where one identifier names units of several types,
             # so the reader is told rather than shown one of them silently.
             types = fetch_key(info, :types)
+            # Likewise for the database: the reader sets it only in a graph
+            # spanning more than one.
+            database = fetch_key(info, :database)
             indent = '  ' * depth
             suffix = types ? " (#{Array(types).join(', ')})" : ''
+            suffix += " [#{database}]" if database
             lines << "#{indent}- **#{id}**#{suffix}"
             deps.each { |d| lines << "#{indent}  - #{d}" }
           end
 
+          lines << '' << truncation_note(data, nodes.size) if fetch_key(data, :nodes_total)
+
           lines.join("\n").rstrip
+        end
+
+        # The line `graph_analysis` prints over a paged section, reused
+        # verbatim for a paged traversal (B-183).
+        #
+        # @param data [Hash] the paged payload
+        # @param shown [Integer] entries in the page
+        # @return [String]
+        def truncation_note(data, shown)
+          offset = fetch_key(data, :nodes_offset, 0)
+          position = offset.positive? ? " from offset #{offset}" : ''
+          "_Showing #{shown} of #{fetch_key(data, :nodes_total)}#{position} (truncated)_"
         end
 
         def render_metadata_section(metadata)

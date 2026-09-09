@@ -43,7 +43,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                    'identifier' => string_contract(1, 10_000),
                                    'depth' => integer_contract(0, 20),
                                    'types' => array_contract(1_000, 10_000),
-                                   'via' => union_contract
+                                   'via' => union_contract,
+                                   'limit' => integer_contract(1, 1_000),
+                                   'offset' => integer_contract(0, 1_000_000)
                                  }),
       'dependents' => contract(:always, { 'identifier' => 'Post' }, exact_data({
                                                                                  'root' => 'Post', 'found' => true,
@@ -61,7 +63,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                  'identifier' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20),
                                  'types' => array_contract(1_000, 10_000),
-                                 'via' => union_contract
+                                 'via' => union_contract,
+                                 'limit' => integer_contract(1, 1_000),
+                                 'offset' => integer_contract(0, 1_000_000)
                                }),
       'domain_clusters' => contract(:always, {}, exact_data({
                                                               'clusters' => [{ 'name' => 'Billing', 'member_count' => 2,
@@ -468,7 +472,7 @@ RSpec.describe 'Index MCP tool contracts' do
     {
       'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0,
       'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1,
-      'undeclared_package_edge_count' => 2
+      'volatile_dependencies_limit' => 20, 'undeclared_package_edge_count' => 2
     }
   end
 
@@ -721,7 +725,11 @@ RSpec.describe 'Index MCP tool contracts' do
   def boundary_assertions
     {
       %w[dependencies depth] => :assert_dependencies_depth,
+      %w[dependencies limit] => :assert_traversal_limit,
+      %w[dependencies offset] => :assert_traversal_offset,
       %w[dependents depth] => :assert_dependents_depth,
+      %w[dependents limit] => :assert_traversal_limit,
+      %w[dependents offset] => :assert_traversal_offset,
       %w[graph_analysis offset] => :assert_graph_offset,
       %w[pagerank limit] => :assert_limited_results,
       %w[recent_changes limit] => :assert_limited_results,
@@ -741,6 +749,24 @@ RSpec.describe 'Index MCP tool contracts' do
     expected = value.zero? ? ['Post'] : %w[Post Comment PostsController]
     expect(data.fetch('nodes').keys).to eq(expected)
     expect(data.dig('nodes', 'Post', 'deps')).to eq(value.zero? ? [] : %w[Comment PostsController])
+  end
+
+  # `nodes_total` marks any partial answer; `nodes_truncated` marks one with
+  # more behind it. A last page carries the first and not the second.
+  def assert_traversal_limit(data, value, name)
+    full = contract_oracle.fetch(name).dig(:result, :data)
+    nodes = full.fetch('nodes')
+    expected = full.merge('nodes' => nodes.first(value).to_h)
+    expected = expected.merge('nodes_total' => nodes.size, 'nodes_truncated' => true) if nodes.size > value
+    expect(data).to eq(expected)
+  end
+
+  def assert_traversal_offset(data, value, name)
+    full = contract_oracle.fetch(name).dig(:result, :data)
+    nodes = full.fetch('nodes')
+    expected = full.merge('nodes' => nodes.to_a.drop(value).to_h)
+    expected = expected.merge('nodes_total' => nodes.size, 'nodes_offset' => value) if value.positive?
+    expect(data).to eq(expected)
   end
 
   def assert_graph_offset(data, value, _name)

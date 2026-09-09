@@ -653,6 +653,34 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(report[:stats][:volatile_dependency_count]).to eq(25)
       expect(report[:stats][:volatile_dependency_count]).to be > 20
     end
+
+    # B-182: a reader of the array alone could not tell it was truncated,
+    # because only the full count was published beside it.
+    it 'publishes the cap beside the count so a truncated array is detectable' do
+      graph.register(churned('Hub', 30))
+      25.times do |i|
+        graph.register(churned(format('Dep%02d', i), 5, type: :service, dependencies: [
+                                 { type: :model, target: 'Hub', via: :code_reference }
+                               ]))
+      end
+
+      stats = analyzer.analyze[:stats]
+
+      expect(stats[:volatile_dependencies_limit]).to eq(described_class::DEFAULT_VOLATILE_LIMIT)
+      expect(stats[:volatile_dependencies_limit]).to eq(20)
+    end
+
+    it 'publishes the cap even when nothing was truncated' do
+      graph.register(churned('Hub', 30))
+      graph.register(churned('Dep', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+
+      stats = analyzer.analyze[:stats]
+
+      expect(stats[:volatile_dependency_count]).to eq(1)
+      expect(stats[:volatile_dependencies_limit]).to eq(20)
+    end
   end
 
   describe '#undeclared_package_edges' do

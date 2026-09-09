@@ -281,9 +281,17 @@ module Woods
           nodes.each do |id, info|
             depth = fetch_key(info, :depth) || 0
             deps = fetch_key(info, :deps, [])
+            # Set by the reader only in a graph spanning more than one database.
+            database = fetch_key(info, :database)
             indent = '  ' * (depth + 1)
-            lines << "#{indent}#{id}"
+            lines << "#{indent}#{id}#{" [#{database}]" if database}"
             deps.each { |d| lines << "#{indent}  -> #{d}" }
+          end
+
+          if fetch_key(data, :nodes_total)
+            offset = fetch_key(data, :nodes_offset, 0)
+            position = offset.positive? ? " from offset #{offset}" : ''
+            lines << "  (showing #{nodes.size} of #{fetch_key(data, :nodes_total)}#{position}; truncated)"
           end
 
           lines.join("\n").rstrip

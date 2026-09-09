@@ -257,6 +257,12 @@ The `metadata.inlined_concerns` array lists which concerns were resolved:
 
 **What you'll get:** A BFS tree of everything that references `User`, controllers, services, jobs, mailers, up to 2 hops out. Set `depth: 1` for direct dependents only.
 
+The answer is bounded to 50 nodes. When it is cut, the response ends with a
+`Showing N of M (truncated)` line, the same one `graph_analysis` prints. Reach
+for `depth`, `types` and `via` first: they make the answer smaller. `limit` and
+`offset` only page what those leave, so a hub read one page at a time still
+costs every page.
+
 To find only which jobs depend on `User`:
 
 ```json
@@ -266,6 +272,10 @@ To find only which jobs depend on `User`:
   "types": ["job"]
 }
 ```
+
+In a multi-database app each row also names the unit's database, so you can see
+which side of an edge lives where. A single-database index prints no such
+column.
 
 ---
 

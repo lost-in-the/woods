@@ -88,6 +88,7 @@
     "cycle_count": 0,
     "cross_database_edge_count": 2,
     "volatile_dependency_count": 1,
+    "volatile_dependencies_limit": 20,
     "undeclared_package_edge_count": 2
   }
 }

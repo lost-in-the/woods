@@ -2277,6 +2277,64 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── graph_sha stability ─────────────────────────────────────────────
+
+  describe 'graph_sha' do
+    def graph_sha_for(units)
+      dir = Dir.mktmpdir('woods_graph_sha')
+      (@sha_dirs ||= []) << dir
+      graph = Woods::DependencyGraph.new
+      units.each { |unit| graph.register(unit) }
+
+      writer = described_class.new(output_dir: dir)
+      writer.instance_variable_set(:@dependency_graph, graph)
+      writer.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      writer.send(:write_dependency_graph)
+      writer.send(:write_graph_analysis)
+
+      JSON.parse(File.read(File.join(dir, 'graph_analysis.json')))['graph_sha']
+    end
+
+    def unit_for(type, identifier, targets)
+      unit = Woods::ExtractedUnit.new(type: type, identifier: identifier,
+                                      file_path: File.join(tmpdir, "#{identifier.underscore}.rb"))
+      unit.dependencies = targets.map { |target| { type: :model, target: target, via: :code_reference } }
+      unit
+    end
+
+    let(:units) do
+      [unit_for(:model, 'User', []),
+       unit_for(:model, 'Account', ['User']),
+       unit_for(:model, 'Order', %w[User Account]),
+       unit_for(:service, 'Billing::Charge', %w[Order User]),
+       unit_for(:job, 'ChargeJob', %w[Billing::Charge User])]
+    end
+
+    before do
+      require 'woods'
+      require 'active_support'
+      require 'active_support/core_ext/time'
+      Woods.configuration ||= Woods::Configuration.new
+    end
+
+    after do
+      (@sha_dirs || []).each { |dir| FileUtils.rm_rf(dir) }
+      Woods.configuration = Woods::Configuration.new
+    end
+
+    # B-180: a consumer caching on graph_sha redid its work after a no-op
+    # incremental run, because the digest covered Set insertion order.
+    it 'is identical for two registration orders of the same units' do
+      expect(graph_sha_for(units)).to eq(graph_sha_for(units.reverse))
+    end
+
+    it 'still differs when the graph content differs' do
+      extra = units + [unit_for(:model, 'Invoice', ['Order'])]
+
+      expect(graph_sha_for(units)).not_to eq(graph_sha_for(extra))
+    end
+  end
+
   # ── write_graph_analysis ────────────────────────────────────────────
 
   describe '#write_graph_analysis' do

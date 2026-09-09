@@ -1787,17 +1787,60 @@ module Woods
       path.start_with?(prefix) ? path.sub(prefix, '') : path
     end
 
+    # Can this run's git calls produce real facts?
+    #
+    # `rev-parse --git-dir` alone is not enough. Over a linked worktree whose
+    # private git directory is reachable but whose `commondir` is not, it
+    # answers while every ref lookup fails and `git log` exits 0 with nothing
+    # to say. Enrichment then wrote `commit_count: 0` and
+    # `change_frequency: new` onto every unit, which reads exactly like a file
+    # that was never committed, where an absent git directory correctly omits
+    # the keys (B-186). HEAD has to resolve.
+    #
+    # Memoized, so the warning below is emitted at most once per run.
+    #
+    # @return [Boolean]
     def git_available?
       return @git_available if defined?(@git_available)
 
-      @git_available = begin
-        _output, _error, status = Open3.capture3(
-          'git', '-C', Rails.root.to_s, 'rev-parse', '--git-dir'
-        )
-        status.success?
-      rescue StandardError
-        false
-      end
+      _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
+      @git_available = status.success?
+      warn_unresolvable_git(error) unless @git_available
+      @git_available
+    rescue StandardError
+      @git_available = false
+    end
+
+    # Say once why no unit will carry git metadata, but only when there is a
+    # working tree to explain. No `.git` at the root is the ordinary source
+    # tarball or `COPY`-without-`.git` case, and it is not a fault.
+    #
+    # @param error [String] git's own stderr
+    # @return [void]
+    def warn_unresolvable_git(error)
+      return unless File.exist?(File.join(Rails.root.to_s, '.git'))
+
+      cause = error.to_s.lines.first.to_s.strip
+      Rails.logger.warn(
+        '[Woods] git cannot resolve HEAD for this working tree, so no unit will carry git ' \
+        "metadata: #{cause}. Over a linked worktree in a container, mount the canonical git " \
+        'directory and point WOODS_GIT_DIR at it; GIT_DIR alone is not enough, because the ' \
+        "worktree's private git directory reaches the shared one through a relative pointer."
+      )
+    end
+
+    # The git command line every enrichment call runs.
+    #
+    # `-C <root>` keeps the result independent of the process working
+    # directory. `WOODS_GIT_DIR` wins when set: it names the canonical git
+    # directory directly, which is the escape hatch for a container that can
+    # mount that directory but not the host path a worktree pointer names
+    # (B-181).
+    #
+    # @param args [Array<String>] git arguments
+    # @return [Array<String>] full argv
+    def git_argv(*args)
+      GitCommand.argv(Rails.root, *args)
     end
 
     # Safe git command execution — no shell interpolation
@@ -1805,7 +1848,7 @@ module Woods
     # @param args [Array<String>] Git command arguments
     # @return [String] Command output (empty string on failure)
     def run_git(*args)
-      output, _error, status = Open3.capture3('git', '-C', Rails.root.to_s, *args)
+      output, _error, status = Open3.capture3(*git_argv(*args))
       status.success? ? output.strip : ''
     rescue StandardError
       ''
@@ -2016,7 +2059,10 @@ module Woods
 
     def write_dependency_graph
       graph_data = @dependency_graph.to_h
-      graph_data[:pagerank] = @dependency_graph.pagerank
+      # Key-sorted for the same reason `to_h` sorts its own sections: the
+      # digest published as `graph_sha` covers these bytes, so node
+      # registration order must not reach it (B-180).
+      graph_data[:pagerank] = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
 
       AtomicFile.write(
         payload_dir.join('dependency_graph.json'),

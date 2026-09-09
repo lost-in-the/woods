@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`WOODS_GIT_DIR` names the canonical git directory outright.** It wins over
+  whatever repository Woods would otherwise find, at all three of Woods's git
+  call sites: per-unit enrichment, `manifest.json` provenance, and the
+  `woods:incremental` diff range. All three build their command line with the
+  new `Woods::GitCommand.argv`. This is the escape hatch for a container that
+  can mount the canonical git directory but not the host path a linked
+  worktree's `gitdir:` pointer names.
 - **Database-partition layer for multi-database apps (#280).** Model units record
   `metadata[:database]` from `connection_db_config` (Rails 6.1+, `nil` on 6.0), so a model
   that inherits `connects_to` from an abstract class reports the inherited database.
@@ -26,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table; only when every owner sits elsewhere, across more than one database, does the
   entry come back with `to: nil` and an `ambiguous_owners` list instead of guessing.
   Written to `graph_analysis.json`; exposed through `graph_analysis` in Task 10.
+- **A phase breakdown of one full extraction of the fixture app**, in
+  `docs/WATCH_DAEMON.md`. Graph analysis, PageRank included, is 3.2% of the run;
+  git enrichment is 11.6%; the one phase over 15% is `RailsSourceExtractor`,
+  which is 52.6% only because 119 of the fixture's 147 units are framework
+  sources.
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
   complementary on symbol references.
@@ -458,6 +470,49 @@ derive unit identifiers, which changes the index format's observable contract.
 
 ### Fixed
 
+- **Components outside the eager-load paths are indexed.** `PhlexExtractor` and
+  `ViewComponentExtractor` discovered units from `component_base.descendants`
+  after `eager_load!`, so a component under an autoloaded but not eager-loaded
+  subtree of `app/views` was never a descendant and never indexed. Both now ask
+  the autoloader for every Ruby file under the component directories first, and
+  the directory list is configurable through `config.component_paths` (default
+  `app/components`, `app/views/components`, `app/views`; an empty array walks
+  nothing). Nested directories collapse into their ancestor, and one debug line
+  per run reports files whose directory is not on an autoload path. The
+  ViewComponent path is skipped entirely when `ViewComponent::Base` is
+  undefined.
+- **Git enrichment refuses to invent history it cannot read.** Over a
+  containerized linked worktree, `git rev-parse --git-dir` succeeds while no ref
+  resolves (the private git directory reaches the shared one through a relative
+  `commondir` pointer), `git log` exits 0 with no output, and every unit was
+  written with `commit_count: 0` and `change_frequency: "new"`,
+  indistinguishable from a file that was never committed. Enrichment now
+  requires `git rev-parse HEAD` to succeed: when it does not, the git keys are
+  omitted from every unit, provenance records `"unknown"`, and one warning names
+  git's own reason. `docs/TROUBLESHOOTING.md` and
+  `docs/CONFIGURATION_REFERENCE.md` state that `GIT_DIR` alone is not enough for
+  a linked worktree.
+- **`dependents` and `dependencies` are bounded and say when they truncate.**
+  Both tools now return at most 50 traversal nodes by default, accept `limit`
+  and `offset` like `graph_analysis`, and print the same
+  `Showing N of M (truncated)` line; their descriptions name `depth`, `types`
+  and `via` as the controls that shrink an answer rather than page it. Every
+  partial answer carries `nodes_total`, the last page of a walk included, so a
+  page is never mistaken for a complete result. Rows carry the unit's database,
+  but only in a graph that spans more than one, so a single-database index
+  renders exactly as before.
+- **`graph_analysis.json` states its own volatile-dependency cap.**
+  `stats.volatile_dependencies_limit` (20) now sits beside
+  `stats.volatile_dependency_count`, so a reader of the truncated
+  `volatile_dependencies` array can tell a page from the whole population.
+  `docs/INTERNALS.md` gains a table mapping every analysis section to its stat
+  key and naming which sections the artifact caps.
+- **`graph_sha` is now a function of graph content, not of registration order.**
+  `DependencyGraph#to_h` sorted neither the members of `reverse`, `file_map` and
+  `type_index` nor the keys of any section, and the extractor wrote PageRank in
+  node-registration order, so a no-op incremental run republished an identical
+  graph under a new digest and every consumer caching on `graph_sha` redid its
+  work. The incremental equivalence oracle now compares `graph_sha` as well.
 - Respect MySQL session quote modes throughout Console SQL checks, including
   `ANSI_QUOTES` and `NO_BACKSLASH_ESCAPES`, without rejecting ordinary escaped literals.
 - Preserve absolute Ruby constants through both AST backends and static-map resolution.

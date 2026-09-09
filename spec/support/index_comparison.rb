@@ -14,9 +14,11 @@ require 'woods/generation'
 # Three kinds of difference are deliberately tolerated, and nothing else:
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
-#    `generated_at` plus the digest that covers it in `graph_analysis.json`,
-#    and `generated_at` inside each flow document (M3 flow equivalence).
-#    A unit an incremental run correctly left alone keeps an older stamp.
+#    `generated_at` in `graph_analysis.json`, and `generated_at` inside each
+#    flow document (M3 flow equivalence). A unit an incremental run correctly
+#    left alone keeps an older stamp. `graph_sha` is *not* excluded: it
+#    digests `dependency_graph.json`, whose serialization is a pure function
+#    of graph content (B-180), so the two runs must publish the same digest.
 # 2. **Ordering inside `dependents`** — a full extraction appends in
 #    extractor-iteration order, an incremental one in graph order. Both are
 #    the same multiset.
@@ -37,7 +39,7 @@ require 'woods/generation'
 module IndexComparison # rubocop:disable Metrics/ModuleLength
   VOLATILE_UNIT_KEYS = %w[extracted_at].freeze
   VOLATILE_MANIFEST_KEYS = %w[extracted_at].freeze
-  VOLATILE_ANALYSIS_KEYS = %w[generated_at graph_sha].freeze
+  VOLATILE_ANALYSIS_KEYS = %w[generated_at].freeze
   VOLATILE_FLOW_KEYS = %w[generated_at].freeze
 
   module_function

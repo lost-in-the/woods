@@ -22,6 +22,7 @@
 # binmode, so the read side must go through AtomicFile.read to match.
 require 'woods/atomic_file'
 require 'woods/generation'
+require 'woods/git_command'
 
 namespace :woods do
   # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
@@ -272,8 +273,10 @@ namespace :woods do
   def woods_changed_paths_for_range(range, root: Rails.root)
     require 'open3'
     output, error, status = Open3.capture3(
-      'git', '-C', root.to_s, '-c', 'core.quotePath=false',
-      'diff', '--name-status', '-z', '--no-renames', range
+      *Woods::GitCommand.argv(
+        root, '-c', 'core.quotePath=false',
+        'diff', '--name-status', '-z', '--no-renames', range
+      )
     )
     return [woods_parse_git_diff_name_status(output), nil] if status.success?
 
