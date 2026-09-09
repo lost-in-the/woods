@@ -417,6 +417,92 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
     }
   end
 
+  # ── B-183 ────────────────────────────────────────────────────────────────
+  #
+  # `dependents` grew a bounded page, a truncation line, and a database column.
+  # None of the three may move a byte of the output an ordinary small
+  # single-database result already produced, so the literals below were
+  # captured before the change and are compared exactly.
+  describe 'a small single-database traversal result' do
+    let(:small_result) do
+      {
+        'root' => 'Comment',
+        'found' => true,
+        'nodes' => {
+          'Comment' => { 'type' => 'model', 'depth' => 0, 'deps' => %w[Post Author] },
+          'Post' => { 'type' => 'model', 'depth' => 1, 'deps' => [] },
+          'Author' => { 'type' => 'model', 'depth' => 1, 'deps' => [] }
+        }
+      }
+    end
+
+    it 'renders markdown byte for byte as before' do
+      expect(described_class.for(:markdown).render(:dependents, small_result))
+        .to eq("## Dependents of Comment\n\n- **Comment**\n  - Post\n  - Author\n  - **Post**\n  - **Author**")
+    end
+
+    it 'renders plain text byte for byte as before' do
+      expect(described_class.for(:plain).render(:dependents, small_result))
+        .to eq("Dependents of Comment\n#{'=' * 60}\n  Comment\n    -> Post\n    -> Author\n    Post\n    Author")
+    end
+
+    it 'renders the claude format byte for byte as before' do
+      expect(described_class.for(:claude).render(:dependents, small_result))
+        .to eq("<dependents root=\"Comment\">\n## Dependents of Comment\n\n- **Comment**\n  - Post\n  " \
+               "- Author\n  - **Post**\n  - **Author**\n</dependents>")
+    end
+  end
+
+  describe 'a truncated traversal result' do
+    let(:truncated_result) do
+      {
+        'root' => 'Hub',
+        'found' => true,
+        'nodes' => { 'Hub' => { 'type' => 'model', 'depth' => 0, 'deps' => ['Dep000'] } },
+        'nodes_total' => 121,
+        'nodes_truncated' => true,
+        'nodes_offset' => 2
+      }
+    end
+
+    it 'prints the graph_analysis truncation line in markdown' do
+      expect(described_class.for(:markdown).render(:dependents, truncated_result))
+        .to include('_Showing 1 of 121 from offset 2 (truncated)_')
+    end
+
+    it 'prints the graph_analysis truncation line in plain text' do
+      expect(described_class.for(:plain).render(:dependents, truncated_result))
+        .to include('(showing 1 of 121 from offset 2; truncated)')
+    end
+  end
+
+  describe 'a traversal result in a multi-database graph' do
+    let(:multi_db_result) do
+      {
+        'root' => 'Comment',
+        'found' => true,
+        'nodes' => {
+          'Comment' => { 'type' => 'model', 'depth' => 0, 'deps' => ['Post'], 'database' => 'analytics' },
+          'Post' => { 'type' => 'model', 'depth' => 1, 'deps' => [], 'database' => 'primary' }
+        }
+      }
+    end
+
+    it 'names each row\'s database in markdown' do
+      result = described_class.for(:markdown).render(:dependents, multi_db_result)
+
+      expect(result).to include('- **Comment** [analytics]')
+      expect(result).to include('- **Post** [primary]')
+    end
+
+    it 'names each row\'s database in plain text' do
+      result = described_class.for(:plain).render(:dependents, multi_db_result)
+
+      expect(result).to include('Comment [analytics]')
+      expect(result).to include('Post [primary]')
+    end
+  end
+
   def traversal_fixture
     {
       'root' => 'Comment',

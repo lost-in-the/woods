@@ -514,6 +514,55 @@ RSpec.describe Woods::MCP::IndexReader do
       end
     end
 
+    # B-183: in a multi-database app an agent reading a traversal cannot see
+    # which side of an edge lives where. `lookup` already shows a unit's own
+    # database; the traversal rows did not.
+    describe 'the database of each row' do
+      let(:tmp_dir) { Dir.mktmpdir('woods-traverse-database') }
+      let(:reader) { described_class.new(tmp_dir) }
+
+      def write_graph(databases)
+        nodes = { 'Order' => { 'type' => 'model' }, 'Account' => { 'type' => 'model' } }
+        databases.each { |identifier, db| nodes[identifier]['database'] = db }
+        File.write(File.join(tmp_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+        File.write(
+          File.join(tmp_dir, 'dependency_graph.json'),
+          JSON.pretty_generate(
+            nodes: nodes,
+            edges: { 'Order' => [{ 'target' => 'Account', 'via' => 'belongs_to' }] },
+            reverse: { 'Account' => ['Order'] }
+          )
+        )
+      end
+
+      after { FileUtils.remove_entry(tmp_dir) if File.directory?(tmp_dir) }
+
+      it 'names it on every row when the graph holds more than one database' do
+        write_graph('Order' => 'billing', 'Account' => 'primary')
+
+        result = reader.traverse_dependencies('Order', depth: 1)
+
+        expect(result[:nodes]['Order'][:database]).to eq('billing')
+        expect(result[:nodes]['Account'][:database]).to eq('primary')
+      end
+
+      it 'omits it when the graph holds one database' do
+        write_graph('Order' => 'primary', 'Account' => 'primary')
+
+        result = reader.traverse_dependencies('Order', depth: 1)
+
+        expect(result[:nodes]['Order']).not_to have_key(:database)
+      end
+
+      it 'omits it when the graph names no database at all' do
+        write_graph({})
+
+        result = reader.traverse_dependencies('Order', depth: 1)
+
+        expect(result[:nodes]['Order']).not_to have_key(:database)
+      end
+    end
+
     # `nodes` and `edges` carry the primary type; an identifier naming units
     # of several types puts the rest in `variants`. A traversal reading only
     # the primary reports one unit's dependencies as the identifier's whole

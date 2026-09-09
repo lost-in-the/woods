@@ -108,8 +108,8 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 | `woods_status` | Index health, generation, counts, and retrieval readiness |
 | `search` | Discover identifiers by regex, prefix, suffix, source, or metadata |
 | `lookup` | Fetch one exact unit with source, metadata, and relationships |
-| `dependencies` | Traverse what a unit depends on |
-| `dependents` | Traverse what depends on a unit |
+| `dependencies` | Traverse what a unit depends on (`depth`, `types`, `via` narrow; `limit`, `offset` page) |
+| `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `limit`, `offset` page) |
 | `structure` | Summarize structural relationships around a unit |
 | `trace_flow` | Follow a request, job, mail, or other execution flow |
 | `framework` | Inspect relevant Rails or installed gem source |
