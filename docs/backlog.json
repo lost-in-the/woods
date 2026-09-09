@@ -2456,5 +2456,20 @@
     "depends_on": [
       "B-171"
     ]
+  },
+  {
+    "id": "B-179",
+    "title": "Optional changelog/ entry files so parallel branches stop conflicting in CHANGELOG.md",
+    "severity": "low",
+    "category": "tooling",
+    "layer": "infrastructure",
+    "files": [
+      "CHANGELOG.md",
+      "lib/woods/release/changelog.rb",
+      "lib/tasks/release.rake"
+    ],
+    "description": "Every branch appends to the same `## [Unreleased]` block, so two open pull requests that both add a changelog entry conflict on the same lines. RuboCop's `changelog/` directory is the established alternative: one file per entry, named `<type>_<slug>.md`, collected into the release section and deleted by the release task. `Woods::Release::Changelog.fold` already merges duplicate `###` headings, so entry files would slot in as an additional source of blocks before that merge rather than as a second mechanism. Discovered while building the release flow; deliberately out of scope there. Acceptance: `release:prepare` folds `changelog/*.md` alongside `## [Unreleased]`, deletes the files it consumed, refuses an entry file whose type is not one of the headings the changelog uses, and `spec/release_v2/version_state_spec.rb` fails when an entry file survives a release commit.",
+    "status": "ready",
+    "depends_on": []
   }
 ]
