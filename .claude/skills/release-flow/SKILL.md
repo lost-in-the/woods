@@ -1,6 +1,6 @@
 ---
 name: release-flow
-description: Woods release flow — the version states `main` moves through, the one command per transition, and the line between what an agent may run and what only a maintainer does. Use when asked to cut, prepare, tag, or publish a release, to bump the version, to fold the changelog, or when a release check fails (an alpha tag refused, a stale `release-state` fence, a missing dated changelog heading).
+description: Woods release flow: the version states `main` moves through, the one command per transition, and the line between what an agent may run and what only a maintainer does. Use when asked to cut, prepare, tag, or publish a release, to bump the version, to fold the changelog, or when a release check fails (an alpha tag refused, a stale `release-state` fence, a missing dated changelog heading).
 ---
 
 # Release Flow
