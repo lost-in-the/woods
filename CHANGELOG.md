@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Release validation names the live-backends CI job as it is called.** The release
+  validator required a CI job named `Live backends (pgvector + Qdrant + Solid Cache)`,
+  but the job gained `+ Redis` in its name, so every release dispatch failed at
+  release-context with nothing published. The prefix now matches, and a spec checks every
+  required contract job against the names in `ci.yml` so a rename cannot drift again.
+
 ## [2.0.0.beta1] - 2026-09-09
 
 ### Added
