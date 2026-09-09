@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0.beta1] - 2026-09-09
+
 ### Added
 
 - **`WOODS_GIT_DIR` names the canonical git directory outright.** It wins over
@@ -115,6 +117,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   units while its `test_coverage` edge did not follow. Each row is a candidate move into a unit
   without mapped tests, not a proven coverage loss. `WOODS_CHECK_STRICT=1` exits 1 for CI. No
   Rails boot.
+
+- **MCP 2026-07-28 support** (B-111–B-114). The gemspec now requires `mcp >= 1.2, < 2.0`,
+  the release that added the 2026-07-28 protocol revision.
+  - **Stateless Streamable HTTP by default.** `woods-mcp-http` no longer mints
+    `Mcp-Session-Id`, so restarting it (gem upgrade, machine sleep, worktree rebuild) is
+    invisible to connected clients instead of invalidating every session, and several
+    instances can serve one volume-mounted index without sticky routing. Set
+    `WOODS_MCP_HTTP_STATELESS=0` for a client that still needs sessions, the GET SSE
+    stream, or DELETE teardown — a transitional escape hatch, since all three are gone
+    from the specification.
+  - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
+    `pipeline_embed` return a durable task handle to clients that declare the extension:
+    poll with `tasks/get`. Cancellation is not advertised: `tasks/cancel` returns
+    `Method not found` because Woods cannot safely stop work already holding the
+    pipeline lock or prevent it from publishing. Records live on disk under
+    `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
+    mid-run can reconnect — even to a restarted server — and collect the result, and a
+    task whose owning process died resolves to `failed` instead of leaving an agent
+    polling forever. Clients that do not declare the extension get the previous
+    fire-and-forget behaviour, unchanged.
+  - **Cache hints and deterministic tool ordering.** List and read results carry
+    `ttlMs` (default 10s, `WOODS_MCP_CACHE_TTL_MS`) and `cacheScope: "private"`, and tools
+    are advertised in sorted order so a host with optional integrations wired presents the
+    same tool block as one without.
+  - **`server/discover`** is answered, advertising supported versions, capabilities and
+    the Tasks extension.
+
+- **`embedding_provider = :fake`** — the deterministic bag-of-words provider is now a
+  first-class citizen (promoted from spec support), and `Builder` also accepts an injected
+  provider object responding to `#embed`/`#embed_batch`. `woods:embed` → `woods:retrieve`
+  now runs fully offline; `woods:retrieve` resolves all four backends through the
+  configuration instead of hardcoding Ollama + in-memory stores (#178).
+- **Notion sync manifest** — unchanged pages cost zero API calls on re-sync; changed pages
+  update by cached page id without a title query; `WOODS_NOTION_FORCE=1` bypasses for one
+  run (#207).
+- **`woods:validate`** warns for units whose `file_path` resolves neither as written nor
+  under `Rails.root` (#169).
+
+- **`rake woods:watch` — a resident extraction daemon** (#164, phase 2). Watches the app and
+  keeps the index current as files change, instead of as-fresh-as-the-last-explicit-run. One
+  cycle is watch → debounce → classify → reload if needed → extract → publish. Freshness was
+  pull-based because every sync from a cold process pays a full Rails boot; a process that
+  stays booted removes that tax without giving up runtime-true extraction. Development only —
+  it adds no network listener. See `docs/WATCH_DAEMON.md`.
+  - **Restart triggers, Spring-style.** A change to `Gemfile.lock`, `config/**`, or the schema
+    stops the daemon with a degraded status and exit `75` for a supervisor, because Rails'
+    reloader re-runs none of it.
+  - **Failure posture.** A failed reload (the mid-edit syntax error) publishes a degraded
+    status naming the reason and leaves the index intact at its last good generation. The
+    daemon never crash-loops, never publishes a partial write, and never advances the
+    generation over work that didn't land.
+  - **Storm handling.** Above a changed-file threshold (default 50) a branch switch falls back
+    to one full extraction rather than N incremental steps.
+  - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
+    scan otherwise — which is also the right choice inside a container, where native FS events
+    don't cross bind mounts reliably.
+- **Multi-instance operation across worktrees** (#164, phase 4). Worktrees stay disjoint by
+  construction (own `Rails.root`, own `tmp/woods`), so the work is within one worktree: the
+  daemon, a manual `woods:extract`, and a hook-triggered `woods:incremental` now share the
+  existing `PipelineLock`. The daemon yields to another writer and carries its paths into the
+  next cycle rather than losing them; manual runs wait up to 30 s and then proceed with a
+  warning rather than hanging a terminal; and `woods:incremental` skips entirely when a live
+  daemon is already watching the tree (`WOODS_IGNORE_WATCH=1` overrides). New
+  `rake woods:watch_status` exits 0 when a daemon is alive, so a worktree hook can revive one
+  without parsing anything. `Woods::Watch::Daemon`'s `idle_timeout` (off by default) stops a
+  daemon in a dormant slot so it stops holding a booted app's memory.
+- **An MCP freshness contract** (#164, phase 3). `woods_status` now reports the index
+  `generation` (number, when it moved, what moved it), whether the **working tree** is dirty
+  plus a fingerprint of it, and the watch daemon's state (`running` / `degraded` + reason /
+  `stopped` / `absent`). `git_sha_matches_head` only ever saw *committed* HEAD, so an agent
+  forty uncommitted edits deep was told the index matched while every answer described the
+  tree before those edits.
+- **`IndexReader` self-refreshes on a generation change**, making the MCP `reload` tool an
+  optimization rather than a correctness requirement. A long-lived server used to hold
+  whatever it read at boot, so an agent working alongside a running extraction silently got
+  answers describing the tree as of the last server start. The check costs one `File.stat` of
+  a ~100-byte file per read. `IndexReader#with_pinned_generation` extends it across a sequence
+  of reads. Indexes with no generation file behave exactly as before.
+- **`Woods::Generation`** — a monotonic marker for "which version of the index is on disk",
+  written atomically as the last step of a successful run by *every* extraction mode (full,
+  incremental, targeted refresh, daemon cycle). Never advanced by a run that failed or changed
+  nothing, so staleness stays honest.
+- **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
+  named extractors wholesale against an already-booted app, replacing every unit of the types
+  they own. The unit types with no per-file entry point — routes, middleware, engines,
+  scheduled jobs, state machines, factories, events, database views — were only reachable by
+  full extraction from a cold boot, which was an artifact of the boot cost rather than
+  anything inherent: in a booted process re-running one extractor takes seconds. A routes
+  refresh cascades to the extractors that embed the route table. Any extractor key is
+  accepted, so `refresh(:models)` is a legitimate way to re-derive models after a schema
+  change.
+- **`Woods::ReloadPolicy`** — the reload-trigger inventory (#164). Classifies a changed path
+  as `:ignore`, `:reextract` (Woods reads bytes; no Rails involvement), `:reload` (an
+  autoloaded constant changed) or `:restart` (boot-captured state changed — initializers,
+  `config/**`, `Gemfile.lock`, schema). Consumed by `Watch::Daemon` on every cycle, and
+  tested against the `railties >= 6.0` support matrix. `spec/reload_policy_spec.rb` derives
+  its samples from the `PathDispatcher` rules themselves, so the two cannot drift apart
+  silently.
+- **Differential test harness for incremental extraction**
+  (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
+  randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at
+  every step, that the incrementally-maintained index matches a cold full extraction: same
+  units, same unit content, same graph, PageRank recomputed. Tune with `WOODS_DIFF_OPS` and
+  `WOODS_DIFF_SEEDS`; runs in CI on every Rails-matrix row.
+- `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
+  present from vanished) shared by every entry point, so the git-diff caller and the watch
+  daemon can't drift apart.
 
 ### Performance
 
@@ -263,115 +372,6 @@ derive unit identifiers, which changes the index format's observable contract.
 - **New environment variables**: `WOODS_ALLOW_PURGE` (override the vector purge guard,
   above) and `WOODS_NOTION_FORCE` (bypass the Notion sync manifest for one run, forcing
   a full re-push).
-
-### Added
-
-- **MCP 2026-07-28 support** (B-111–B-114). The gemspec now requires `mcp >= 1.2, < 2.0`,
-  the release that added the 2026-07-28 protocol revision.
-  - **Stateless Streamable HTTP by default.** `woods-mcp-http` no longer mints
-    `Mcp-Session-Id`, so restarting it (gem upgrade, machine sleep, worktree rebuild) is
-    invisible to connected clients instead of invalidating every session, and several
-    instances can serve one volume-mounted index without sticky routing. Set
-    `WOODS_MCP_HTTP_STATELESS=0` for a client that still needs sessions, the GET SSE
-    stream, or DELETE teardown — a transitional escape hatch, since all three are gone
-    from the specification.
-  - **Tasks extension** (`io.modelcontextprotocol/tasks`). `pipeline_extract` and
-    `pipeline_embed` return a durable task handle to clients that declare the extension:
-    poll with `tasks/get`. Cancellation is not advertised: `tasks/cancel` returns
-    `Method not found` because Woods cannot safely stop work already holding the
-    pipeline lock or prevent it from publishing. Records live on disk under
-    `<index_dir>/tasks/`, so a run reports real success or failure, a client that drops
-    mid-run can reconnect — even to a restarted server — and collect the result, and a
-    task whose owning process died resolves to `failed` instead of leaving an agent
-    polling forever. Clients that do not declare the extension get the previous
-    fire-and-forget behaviour, unchanged.
-  - **Cache hints and deterministic tool ordering.** List and read results carry
-    `ttlMs` (default 10s, `WOODS_MCP_CACHE_TTL_MS`) and `cacheScope: "private"`, and tools
-    are advertised in sorted order so a host with optional integrations wired presents the
-    same tool block as one without.
-  - **`server/discover`** is answered, advertising supported versions, capabilities and
-    the Tasks extension.
-
-- **`embedding_provider = :fake`** — the deterministic bag-of-words provider is now a
-  first-class citizen (promoted from spec support), and `Builder` also accepts an injected
-  provider object responding to `#embed`/`#embed_batch`. `woods:embed` → `woods:retrieve`
-  now runs fully offline; `woods:retrieve` resolves all four backends through the
-  configuration instead of hardcoding Ollama + in-memory stores (#178).
-- **Notion sync manifest** — unchanged pages cost zero API calls on re-sync; changed pages
-  update by cached page id without a title query; `WOODS_NOTION_FORCE=1` bypasses for one
-  run (#207).
-- **`woods:validate`** warns for units whose `file_path` resolves neither as written nor
-  under `Rails.root` (#169).
-
-- **`rake woods:watch` — a resident extraction daemon** (#164, phase 2). Watches the app and
-  keeps the index current as files change, instead of as-fresh-as-the-last-explicit-run. One
-  cycle is watch → debounce → classify → reload if needed → extract → publish. Freshness was
-  pull-based because every sync from a cold process pays a full Rails boot; a process that
-  stays booted removes that tax without giving up runtime-true extraction. Development only —
-  it adds no network listener. See `docs/WATCH_DAEMON.md`.
-  - **Restart triggers, Spring-style.** A change to `Gemfile.lock`, `config/**`, or the schema
-    stops the daemon with a degraded status and exit `75` for a supervisor, because Rails'
-    reloader re-runs none of it.
-  - **Failure posture.** A failed reload (the mid-edit syntax error) publishes a degraded
-    status naming the reason and leaves the index intact at its last good generation. The
-    daemon never crash-loops, never publishes a partial write, and never advances the
-    generation over work that didn't land.
-  - **Storm handling.** Above a changed-file threshold (default 50) a branch switch falls back
-    to one full extraction rather than N incremental steps.
-  - **Two watcher backends.** The `listen` gem when the host has it; a dependency-free polling
-    scan otherwise — which is also the right choice inside a container, where native FS events
-    don't cross bind mounts reliably.
-- **Multi-instance operation across worktrees** (#164, phase 4). Worktrees stay disjoint by
-  construction (own `Rails.root`, own `tmp/woods`), so the work is within one worktree: the
-  daemon, a manual `woods:extract`, and a hook-triggered `woods:incremental` now share the
-  existing `PipelineLock`. The daemon yields to another writer and carries its paths into the
-  next cycle rather than losing them; manual runs wait up to 30 s and then proceed with a
-  warning rather than hanging a terminal; and `woods:incremental` skips entirely when a live
-  daemon is already watching the tree (`WOODS_IGNORE_WATCH=1` overrides). New
-  `rake woods:watch_status` exits 0 when a daemon is alive, so a worktree hook can revive one
-  without parsing anything. `Woods::Watch::Daemon`'s `idle_timeout` (off by default) stops a
-  daemon in a dormant slot so it stops holding a booted app's memory.
-- **An MCP freshness contract** (#164, phase 3). `woods_status` now reports the index
-  `generation` (number, when it moved, what moved it), whether the **working tree** is dirty
-  plus a fingerprint of it, and the watch daemon's state (`running` / `degraded` + reason /
-  `stopped` / `absent`). `git_sha_matches_head` only ever saw *committed* HEAD, so an agent
-  forty uncommitted edits deep was told the index matched while every answer described the
-  tree before those edits.
-- **`IndexReader` self-refreshes on a generation change**, making the MCP `reload` tool an
-  optimization rather than a correctness requirement. A long-lived server used to hold
-  whatever it read at boot, so an agent working alongside a running extraction silently got
-  answers describing the tree as of the last server start. The check costs one `File.stat` of
-  a ~100-byte file per read. `IndexReader#with_pinned_generation` extends it across a sequence
-  of reads. Indexes with no generation file behave exactly as before.
-- **`Woods::Generation`** — a monotonic marker for "which version of the index is on disk",
-  written atomically as the last step of a successful run by *every* extraction mode (full,
-  incremental, targeted refresh, daemon cycle). Never advanced by a run that failed or changed
-  nothing, so staleness stays honest.
-- **`Extractor#refresh(*keys)` and `rake "woods:refresh[routes]"`** (#164, phase 1). Re-runs
-  named extractors wholesale against an already-booted app, replacing every unit of the types
-  they own. The unit types with no per-file entry point — routes, middleware, engines,
-  scheduled jobs, state machines, factories, events, database views — were only reachable by
-  full extraction from a cold boot, which was an artifact of the boot cost rather than
-  anything inherent: in a booted process re-running one extractor takes seconds. A routes
-  refresh cascades to the extractors that embed the route table. Any extractor key is
-  accepted, so `refresh(:models)` is a legitimate way to re-derive models after a schema
-  change.
-- **`Woods::ReloadPolicy`** — the reload-trigger inventory (#164). Classifies a changed path
-  as `:ignore`, `:reextract` (Woods reads bytes; no Rails involvement), `:reload` (an
-  autoloaded constant changed) or `:restart` (boot-captured state changed — initializers,
-  `config/**`, `Gemfile.lock`, schema). Consumed by `Watch::Daemon` on every cycle, and
-  tested against the `railties >= 6.0` support matrix. `spec/reload_policy_spec.rb` derives
-  its samples from the `PathDispatcher` rules themselves, so the two cannot drift apart
-  silently.
-- **Differential test harness for incremental extraction**
-  (`spec/integration/incremental_equivalence_spec.rb`, tagged `:booted_app`). Applies
-  randomized create/modify/delete/rename sequences to a booted fixture app and asserts, at
-  every step, that the incrementally-maintained index matches a cold full extraction: same
-  units, same unit content, same graph, PageRank recomputed. Tune with `WOODS_DIFF_OPS` and
-  `WOODS_DIFF_SEEDS`; runs in CI on every Rails-matrix row.
-- `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
-  present from vanished) shared by every entry point, so the git-diff caller and the watch
-  daemon can't drift apart.
 
 ### Changed
 
@@ -1886,7 +1886,6 @@ derive unit identifiers, which changes the index format's observable contract.
   before optional libraries can select conflicting dependency versions.
 - Update Inspector transitive dependencies `fast-uri` and `qs` to patched versions
   and audit the pinned Node dependency tree in CI.
-
 
 ## [1.6.1] - 2026-07-22
 
