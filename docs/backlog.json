@@ -2351,7 +2351,7 @@
       "lib/woods/graph_analyzer.rb"
     ],
     "description": "Issue #280 item 2. No package.yml awareness anywhere in lib/. Acceptance: a file-based package unit type registered as whole-app (a package.yml change re-runs it and re-annotates membership), metadata[:package] on class-discovered units and units under root-relative extractor dirs, an undeclared_package_edges report. Enforcement stays with packwerk and pks. Known limitation recorded in B-175.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-172",
