@@ -16,7 +16,7 @@ module Woods
     #   the tree the reader is on. Only the git ref inside a woods repository URL
     #   is rewritten; the prose is left alone.
     module Notes # rubocop:disable Metrics/ModuleLength
-      class MissingFence < StandardError; end
+      class MissingFence < Error; end
 
       MARKER = 'release-state'
       REPOSITORY_URL = 'https://github.com/lost-in-the/woods'

@@ -56,6 +56,18 @@ module ReleaseRepositoryHelper
     output.strip
   end
 
+  def commit_release_repository_changes(root, message: 'release step')
+    release_git(root, 'add', '-A')
+    release_git(root, 'commit', '-m', message)
+  end
+
+  def add_unreleased_entry(root, heading, entry)
+    path = File.join(root, 'CHANGELOG.md')
+    source = File.read(path, encoding: Encoding::UTF_8)
+    File.write(path, source.sub("## [Unreleased]\n", "## [Unreleased]\n\n### #{heading}\n\n#{entry}\n"))
+    commit_release_repository_changes(root, message: 'add an entry')
+  end
+
   def commit_release_repository(root)
     release_git(root, 'init', '-b', 'main')
     release_git(root, 'config', 'user.email', 'release-test@example.invalid')
