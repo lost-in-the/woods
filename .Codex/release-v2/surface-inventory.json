@@ -1074,7 +1074,12 @@
     ],
     "docs/UNBLOCKED_INTEGRATION.md": [],
     "docs/UPGRADING_TO_2.md": [],
-    "docs/WATCH_DAEMON.md": [],
+    "docs/WATCH_DAEMON.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 35
+      }
+    ],
     "docs/WHY_WOODS.md": [
       {
         "surface": "extractor_registrations",
