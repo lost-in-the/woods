@@ -21,7 +21,10 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 3.0.0'
 
-  release_ref = "v#{spec.version}"
+  # `main` carries X.Y.Z.alpha between releases, and that tree is never tagged,
+  # so an alpha's metadata URIs point at the branch. Every releasable version
+  # (betaN, rcN, final) is tagged v<VERSION> and pins its URIs to that tag.
+  release_ref = spec.version.to_s.end_with?('.alpha') ? 'main' : "v#{spec.version}"
   spec.metadata['homepage_uri'] = spec.homepage
   spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/#{release_ref}"
   spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/#{release_ref}/CHANGELOG.md"

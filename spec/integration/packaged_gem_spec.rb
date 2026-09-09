@@ -54,7 +54,7 @@ end
 RSpec.describe 'packaged gem' do
   before(:context) do
     @package_tmp = Dir.mktmpdir('woods-package-spec')
-    @artifact = ENV['WOODS_GEM_PATH'] || File.join(@package_tmp, 'woods-2.0.0.gem')
+    @artifact = ENV['WOODS_GEM_PATH'] || File.join(@package_tmp, "woods-#{Woods::VERSION}.gem")
 
     unless ENV['WOODS_GEM_PATH']
       output, status = Open3.capture2e(
@@ -143,12 +143,19 @@ RSpec.describe 'packaged gem' do
     File.write(readme_path, original) if original
   end
 
-  it 'uses immutable v2.0.0 source, changelog, and documentation metadata' do
+  # `main` carries the X.Y.Z.alpha development marker, which is never tagged, so
+  # the metadata URIs resolve to the branch. A release commit sets a tagged
+  # version and the same gemspec rule pins these to `v<VERSION>`; the rule's
+  # other branch is covered in spec/release_v2/gemspec_spec.rb.
+  it 'derives source, changelog, and documentation metadata from the version state' do
     metadata = @package.spec.metadata
+    release_ref = Woods::VERSION.end_with?('.alpha') ? 'main' : "v#{Woods::VERSION}"
 
-    expect(metadata.fetch('source_code_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0')
-    expect(metadata.fetch('changelog_uri')).to eq('https://github.com/lost-in-the/woods/blob/v2.0.0/CHANGELOG.md')
-    expect(metadata.fetch('documentation_uri')).to eq('https://github.com/lost-in-the/woods/tree/v2.0.0/docs')
+    expect(metadata.fetch('source_code_uri')).to eq("https://github.com/lost-in-the/woods/tree/#{release_ref}")
+    expect(metadata.fetch('changelog_uri'))
+      .to eq("https://github.com/lost-in-the/woods/blob/#{release_ref}/CHANGELOG.md")
+    expect(metadata.fetch('documentation_uri'))
+      .to eq("https://github.com/lost-in-the/woods/tree/#{release_ref}/docs")
     changelog = File.read(File.join(@unpacked, 'CHANGELOG.md'))
     expect(changelog).to include('## [Unreleased]')
     expect(changelog).to include('Controller and mailer chunk extraction parses each file once')
