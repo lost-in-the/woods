@@ -320,4 +320,32 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       expect(File.read(File.join(flow_payload_dir, 'dependency_graph.json'))).to eq(before_graph)
     end
   end
+
+  describe 'multi-database metadata (#280)' do
+    let(:post) { find_unit(:models, 'Post') }
+    let(:comment) { find_unit(:models, 'Comment') }
+    let(:expected_database) { ActiveRecord::Base.respond_to?(:connection_db_config) ? 'primary' : nil }
+
+    it 'records the database a model resolves to, or nil where Rails cannot say' do
+      expect(post['metadata']['database']).to eq(expected_database)
+    end
+
+    it 'annotates association entries with both databases and the disable_joins flag' do
+      assoc = comment['metadata']['associations'].find { |a| a['name'] == 'post' }
+
+      expect(assoc).to include('from_db' => expected_database, 'to_db' => expected_database, 'disable_joins' => false)
+    end
+
+    it 'records foreign keys as an array' do
+      expect(comment['metadata']['foreign_keys']).to be_an(Array)
+    end
+
+    it 'carries the database and table onto the model graph node' do
+      graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
+      node = graph['nodes']['Post']
+
+      expect(node['table']).to eq('posts')
+      expect(node['database']).to eq(expected_database)
+    end
+  end
 end

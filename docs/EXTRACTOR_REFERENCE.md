@@ -66,6 +66,47 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
+- **Database partition (multi-DB apps).** `metadata[:database]` is `klass.connection_db_config.name` (Rails 6.1+; `nil` on 6.0). Because reflection climbs to the abstract class that declared `connects_to`, a concrete model that only inherits its connection still reports the right database. Each association entry carries `from_db`, `to_db`, and `disable_joins`; `metadata[:foreign_keys]` lists `{ from_table, to_table, column }`, the target table's database is resolved separately by the graph-level `cross_database_edges` report (see [Architecture](ARCHITECTURE.md#graphanalyzer-structural-metrics)), not stored per model. The graph node carries `database`, `table`, and `foreign_key_tables`, and association edges carry `through` and `disable_joins`. `consolidate_dependencies` keeps the first edge per `[type, target]`, so a model with two associations to the same target keeps only the first edge's `through`/`disable_joins`.
+
+**Multi-database configuration Woods reads.** Woods needs nothing beyond the Rails configuration the app already has. Both shapes below produce `metadata[:database]` values of `primary` and `analytics`.
+
+MySQL:
+
+```yaml
+# config/database.yml
+production:
+  primary:
+    adapter: mysql2
+    database: shop_production
+  analytics:
+    adapter: mysql2
+    database: shop_analytics_production
+    migrations_paths: db/analytics_migrate
+```
+
+PostgreSQL:
+
+```yaml
+# config/database.yml
+production:
+  primary:
+    adapter: postgresql
+    database: shop_production
+  analytics:
+    adapter: postgresql
+    database: shop_analytics_production
+    migrations_paths: db/analytics_migrate
+```
+
+```ruby
+# app/models/analytics_record.rb
+class AnalyticsRecord < ApplicationRecord
+  self.abstract_class = true
+  connects_to database: { writing: :analytics, reading: :analytics }
+end
+
+class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
+```
 
 **Edge cases:**
 - STI subclasses are extracted separately from their parent (each has its own identifier)
@@ -82,8 +123,9 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
   "namespace": null,
   "source_code": "# == Schema Information\n# id :bigint\n# user_id :bigint\n# status :string\n# total_cents :integer\n#\nclass Order < ApplicationRecord\n  belongs_to :user\n  has_many :line_items\n  ...\nend\n\n# ┌───────────────────────────────────────────────────────────────────┐\n# │ Included from: Auditable                                          │\n# └───────────────────────────────────────────────────────────────────┘\n#   module Auditable\n#     ...\n#   end\n# ──────────────────────── End Auditable ────────────────────────────",
   "metadata": {
+    "database": "primary",
     "associations": [
-      { "type": "belongs_to", "name": "user", "target": "User" },
+      { "type": "belongs_to", "name": "user", "target": "User", "from_db": "primary", "to_db": "primary", "disable_joins": false },
       { "type": "has_many", "name": "line_items", "target": "LineItem" }
     ],
     "callbacks": [
@@ -612,7 +654,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
 | `source_code` | String | The full source code, potentially enriched: models have concerns inlined and schema prepended; controllers have a route context header prepended |
-| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor |
+| `metadata` | Hash | Type-specific structured data, associations, callbacks, actions, fields, etc. Keys and structure vary by extractor. Model units add `database`, `foreign_keys`, and per-association `from_db`/`to_db`/`disable_joins` (#280) |
 | `dependencies` | Array\<Hash\> | Forward edges: `[{ type: :model, target: "User", via: "belongs_to" }, ...]` |
 | `dependents` | Array\<Hash\> | Reverse edges: **populated in Phase 2 (Resolve)**, not Phase 1 (Extract). After Phase 2 every field on a unit is effectively immutable. Shape: `[{ type: :controller, identifier: "OrdersController" }, ...]` |
 | `chunks` | Array\<Hash\> | Semantic sub-sections for large units. Each chunk: `{ chunk_index:, identifier:, content:, content_hash:, estimated_tokens: }` |

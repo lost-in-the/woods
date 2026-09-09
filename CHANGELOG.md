@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Database-partition layer for multi-database apps (#280).** Model units record
+  `metadata[:database]` from `connection_db_config` (Rails 6.1+, `nil` on 6.0), so a model
+  that inherits `connects_to` from an abstract class reports the inherited database.
+  Association entries carry `from_db`, `to_db`, and `disable_joins`; `metadata[:foreign_keys]`
+  lists each foreign key's `from_table`, `to_table`, and `column` (the target table's database
+  is a graph-level lookup, not stored per model). The dependency graph gains additive node keys
+  (`database`, `table`, `foreign_key_tables`) and edge keys (`through`, `disable_joins`);
+  a graph with none of these serializes exactly as before.
 - **Positioning against Rubydex, rails-mcp-server, and ruby-lsp-rails.** `docs/WHY_WOODS.md`
   gains a comparison table with versions checked on 2026-09-08, and frames Rubydex as
   complementary on symbol references.
