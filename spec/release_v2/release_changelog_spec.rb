@@ -73,7 +73,6 @@ RSpec.describe Woods::Release::Changelog do
       ### Added
 
       - first added entry
-
       - second added entry
 
       ### Performance
@@ -182,9 +181,7 @@ RSpec.describe Woods::Release::Changelog do
         ### Added
 
         - a beta1 addition
-
         - an rc1 addition
-
         - a late addition
 
         ### Performance

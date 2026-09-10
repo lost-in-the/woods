@@ -25,6 +25,8 @@ bin/rake spec
 bin/rubocop
 ```
 
+`Gemfile.lock` is gitignored, so a fresh worktree (as opposed to a clone) needs it copied in from an existing checkout before running any `bin/*` command.
+
 Create a branch from current `main`. Keep each pull request to one logical change and preserve unrelated formatting and refactors for separate work.
 
 `main` is the development branch: it holds work for the next release and can run ahead of the latest published gem. Releases are cut from version tags by the guarded workflow in the [release section below](#release-flow); documentation matching a published gem lives on that release's tag.
@@ -232,6 +234,55 @@ A release is pinned by its tag, never by a branch:
 Nothing is published from a laptop: the workflow builds and pushes the gem from the validated CI artifact, so the bytes on RubyGems are the bytes CI tested. `rake release` and `rake release:rubygem_push`, which `bundler/gem_tasks` installs, are blocked for that reason.
 
 After a final release publishes, reopen development with `release:reopen` in a follow-up pull request.
+
+### When a dispatch fails
+
+`release-context` and `publish` both check out `github.sha`, the default
+branch's tip at dispatch time, not the tag: `release-context` re-validates the
+named CI run, checks the live `release` environment, and runs
+`script/validate-release`; `publish` runs `script/verify-release-tag` and
+pushes the downloaded artifact. Only `package-test` checks out
+`needs.release-context.outputs.release-sha`, the tag's own commit, because
+that is what CI actually built and tested. The gem bytes `publish` pushes were
+built by CI at `release-sha`; `publish` never rebuilds them.
+
+That split decides the fix for a failed dispatch:
+
+| What failed | Lives in | Fix |
+|---|---|---|
+| `script/validate-release-run`, `script/validate-release`, `script/verify-release-tag`, or the workflow files themselves | main, read at `github.sha` | merge the fix to main, then re-dispatch at the same tag; the tag never moves |
+| Live `release` environment settings (protection rule, admin bypass) | GitHub environment configuration, not the tree | fix the setting directly; no commit or re-dispatch needed |
+| Anything under `spec/` or `lib/` that `package-test` actually runs against the candidate | the tagged commit, read at `release-sha` | a main-only fix does not reach the candidate; merge it, then move the tag to the new main tip and get a fresh CI run on it |
+
+Both failure classes happened in the beta1 dispatch: a `REQUIRED_CI_JOBS`
+prefix left behind by a `ci.yml` job rename was a validator fix that needed
+only a merge and a re-dispatch; two `packaged_gem_spec.rb` smoke failures
+traced to hard-coded `2.0.0` literals needed the tag moved to the commit that
+fixed them, because the candidate job runs the spec file at the tag.
+
+**Moving a tag is acceptable only before publication.** Once `publish` has
+pushed the gem to RubyGems, the tag is the permanent, immutable record of what
+was published; move it before that point only, with
+`git tag -f v<version> <new-sha> && git push --force origin v<version>` run by
+the maintainer, followed by a fresh CI run on the new tag SHA before
+re-dispatching.
+
+### Publishing the GitHub Release entry
+
+The workflow deliberately creates no GitHub Release: the API cannot bind an
+existing tag to an expected commit atomically, so automating it would race the
+tag's own verification. Once `gem info woods --remote` (or `--remote
+--prerelease`) confirms publication, create the entry by hand:
+
+```bash
+gh release create v<version> --verify-tag --notes-file <file>            # release
+gh release create v<version> --verify-tag --prerelease --notes-file <file> # beta or rc
+```
+
+`--verify-tag` refuses if the tag is missing or moved. Write `<file>` as a
+short body that links `CHANGELOG.md` at the tag itself (not at `main`) and
+anchors straight to that version's dated heading, so the note a reader lands
+on always matches the bytes RubyGems published.
 
 ### Stable branches
 

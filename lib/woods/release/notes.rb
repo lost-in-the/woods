@@ -49,7 +49,7 @@ module Woods
           body = read_body(root, fence)
           next "#{fence.fetch(:path)}: no #{MARKER}:#{fence.fetch(:id)} fence" if body.nil?
 
-          mismatch_for(fence, body, state, previous)
+          mismatch_for(fence, body, state, previous, root)
         end
       end
 
@@ -70,7 +70,7 @@ module Woods
             body = fence_body(source, fence)
             raise MissingFence, "#{path}: no #{MARKER}:#{fence.fetch(:id)} fence" if body.nil?
 
-            replace_body(source, fence, expected_body(fence, body, state, previous))
+            replace_body(source, fence, expected_body(fence, body, state, previous, root))
           end
           [path, updated] unless updated == original
         end.to_h
@@ -125,16 +125,16 @@ module Woods
         end
       end
 
-      def expected_body(fence, body, state, previous)
+      def expected_body(fence, body, state, previous, root)
         case fence.fetch(:kind)
-        when :note then public_send(fence.fetch(:builder), state, previous, fence)
+        when :note then public_send(fence.fetch(:builder), state, previous, fence, root)
         when :ref
           body.gsub(REPOSITORY_REF) { "#{Regexp.last_match(1)}#{state.release_ref}#{Regexp.last_match(3)}" }
         end
       end
 
-      def mismatch_for(fence, body, state, previous)
-        expected = expected_body(fence, body, state, previous)
+      def mismatch_for(fence, body, state, previous, root)
+        expected = expected_body(fence, body, state, previous, root)
         return if body == expected
 
         case fence.fetch(:kind)
@@ -148,11 +148,11 @@ module Woods
       # The README version banner. It owns every version claim in the README, so
       # nothing above it goes stale at a release. Empty once the documented
       # version is released: the gem badge is then the whole story.
-      def version_banner(state, previous, _fence = nil)
+      def version_banner(state, previous, _fence, root)
         return '' if state.final?
 
         blocks = [
-          documents_paragraph(state, previous),
+          documents_paragraph(state, previous, root),
           BRANCH_PARAGRAPH,
           version_table(state, previous),
           "> #{banner_constraint(state, previous)}"
@@ -160,10 +160,10 @@ module Woods
         "#{blocks.join("\n>\n")}\n"
       end
 
-      def documents_paragraph(state, previous)
+      def documents_paragraph(state, previous, root)
         documented = state.documented_version
         sentences = ["> **This tree documents version #{documented}.**"]
-        sentences << upgrade_sentence(documented, previous) if major_bump?(documented, previous)
+        sentences << upgrade_sentence(documented, previous) if major_bump?(documented, previous, root)
         sentences << 'The full history is in the [CHANGELOG](CHANGELOG.md).'
         sentences.join(' ')
       end
@@ -174,10 +174,16 @@ module Woods
           'before updating.'
       end
 
-      def major_bump?(documented, previous)
+      # The upgrade guide the banner would link to may not exist yet: the
+      # fence table only tracks `docs/UPGRADING_TO_2.md`, so a major bump
+      # past 2.x derives a path (`docs/UPGRADING_TO_3.md`, ...) nothing has
+      # authored. Linking it anyway would ship a 404 in the banner.
+      def major_bump?(documented, previous, root)
         return false unless previous
+        return false if documented.split('.').first == previous.split('.').first
 
-        documented.split('.').first != previous.split('.').first
+        guide_path = File.join(root, "docs/UPGRADING_TO_#{documented.split('.').first}.md")
+        File.exist?(guide_path)
       end
 
       def version_table(state, previous)
@@ -216,7 +222,7 @@ module Woods
       # The guide is about one target version, not about whatever `main` is
       # developing, so the note is empty once that target ships or once
       # development moves past it.
-      def upgrade_availability(state, _previous, fence)
+      def upgrade_availability(state, _previous, fence, _root)
         target = fence.fetch(:target)
         return '' unless state.documented_version == target
         return '' if state.final?

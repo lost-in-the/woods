@@ -158,6 +158,17 @@ RSpec.describe Woods::Release::Notes do
         expect(banner(root)).not_to include('UPGRADING_TO')
       end
     end
+
+    it 'omits the upgrade-guide link on a major bump whose guide file does not exist yet' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n## [2.0.0] - 2026-09-10\n"
+
+      with_release_repository(version: '2.0.0', changelog: changelog, commit: false) do |root|
+        described_class.apply!(root: root, version: '3.0.0.alpha')
+
+        expect(banner(root)).to include('> **This tree documents version 3.0.0.** The full history is in')
+        expect(banner(root)).not_to include('UPGRADING_TO')
+      end
+    end
   end
 
   describe 'the upgrade guide fence' do

@@ -64,6 +64,16 @@ restores the alpha documentation state; it leaves the changelog alone.
 Every rewrite is computed before any of it is written, so a refusal leaves the
 working tree untouched. Never "finish" a refused prepare by hand.
 
+`release:prepare` also runs `release:preflight` and prints its report before
+the tag and dispatch commands: three advisory, no-write checks for the live
+prerequisites a dispatch cannot verify until it is already running (the
+`release` environment's protection rule and admin-bypass setting, via `gh
+api`; whether `REQUIRED_CI_JOBS` in `script/validate-release-run` still
+matches `ci.yml`'s job names; whether both `download-artifact` steps in
+`release.yml` set `merge-multiple: true`). A `WARNING` does not block
+`prepare`; a missing or failing `gh` shows `SKIPPED` rather than failing it.
+Run it alone with `bin/rake release:preflight`.
+
 A **final** release also absorbs every prerelease section of its own base
 version: cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into
 `## [2.0.0] - <date>` and removes their headings, prerelease entries first and
@@ -123,6 +133,41 @@ stays independent.
 | `release tag ... is an alpha development marker` | an alpha reached a validator | the release commit was skipped; run `release:prepare` |
 | `version-banner does not match the ... state` | a fence was hand-edited | re-run the task for the current VERSION |
 | `surface-inventory.json is stale` | a public surface changed | `bin/rake release_v2:write_surface_inventory` |
+
+## 8. When a dispatch fails
+
+`release-context` and `publish` read `github.sha` (main's tip at dispatch
+time) for the validators, `script/verify-release-tag`, the workflow files, and
+the live `release` environment. Only `package-test` reads `release-sha` (the
+tag's own commit), because that is the code CI actually tested; `publish`
+pushes the artifact CI built at that commit without rebuilding it.
+
+| What failed | Fix |
+|---|---|
+| `script/validate-release-run`, `script/validate-release`, `script/verify-release-tag`, `ci.yml`, `release.yml` | merge to main, re-dispatch at the same tag; the tag does not move |
+| The live `release` environment (protection rule, admin bypass) | fix the setting directly; no re-dispatch needed |
+| `spec/` or `lib/` that `package-test` runs against the candidate | merge the fix, then the maintainer moves the tag to the new main tip, waits for a fresh CI run, and re-dispatches |
+
+**Moving a tag is a maintainer step, and only before `publish` has pushed the
+gem.** After publication the tag is permanent. Report which class a failure
+belongs to; do not guess at a tag move yourself.
+
+## 9. Publishing the GitHub Release entry
+
+The workflow creates no GitHub Release (`.github/workflows/release.yml` has
+no such step, and `spec/release_v2/release_workflow_spec.rb` asserts none
+exists), because the API cannot atomically bind an existing tag to an
+expected commit. Once RubyGems shows the version published, the maintainer
+runs:
+
+```bash
+gh release create v<version> --verify-tag --notes-file <file>              # final release
+gh release create v<version> --verify-tag --prerelease --notes-file <file> # beta or rc
+```
+
+`<file>` links `CHANGELOG.md` at the tag (never at `main`) and anchors to
+that version's dated heading. Agents may draft `<file>`'s contents; running
+`gh release create` and choosing when to run it are maintainer steps.
 
 ## Anti-patterns
 

@@ -150,10 +150,15 @@ module Woods
       end
 
       # @api private
+      #
+      # Joined with a single newline, not a blank line: each block's content
+      # is already a tight bullet list, and a blank line between two merged
+      # occurrences of the same heading would split one list into two
+      # paragraphs instead of continuing it.
       def merge_blocks(blocks)
         blocks.reject { |_heading, content| content.empty? }
               .group_by(&:first)
-              .map { |heading, group| [heading, group.map(&:last).join("\n\n")] }
+              .map { |heading, group| [heading, group.map(&:last).join("\n")] }
       end
 
       # @api private

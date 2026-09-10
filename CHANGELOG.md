@@ -7,8 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`release:prepare` runs a live preflight before printing the tag and dispatch
+  commands.** The new `release:preflight` task (also runnable standalone) checks, via
+  `gh api`, that the live `release` environment still requires review and disallows admin
+  bypass; that `REQUIRED_CI_JOBS` in `script/validate-release-run` still matches
+  `ci.yml`'s job names; and that both `release.yml` download-artifact steps set
+  `merge-multiple: true`. Every check is advisory: a missing or failing `gh` skips with a
+  note rather than blocking prepare. CONTRIBUTING.md and the release-flow skill also gained
+  a "when a dispatch fails" guide (which failures a main merge alone fixes versus which need
+  the tag moved, and only before publication) and the documented final step for creating the
+  GitHub Release entry by hand, which the workflow deliberately never automates.
+- **A release_v2 spec greps `spec/` for hard-coded current-version literals** (`'= 2.0.0'`,
+  `"2.0.0\n"`, `gem_version: '2.0.0'`-shaped strings), built from `Woods::VERSION`'s base, so
+  the next version bump cannot leave one behind the way the beta1 cut did.
+
 ### Fixed
 
+- **The Changed list only names the surface inventory when regenerating it actually moved
+  it.** `release:prepare` used to list `.Codex/release-v2/surface-inventory.json`
+  unconditionally, even on the ordinary run where nothing in the public surface changed.
+- **The release banner no longer links an upgrade guide that does not exist yet.** A major
+  version bump past `docs/UPGRADING_TO_2.md`'s own major derived a
+  `docs/UPGRADING_TO_<major>.md` link without checking the file exists.
+- **Changelog entries merged from a duplicate heading no longer carry a stray blank line.**
+  Two occurrences of the same `###` heading in one `## [Unreleased]` cycle folded into a
+  release section with a blank line between their bullets, splitting one list into two; they
+  now join tight.
 - **Release validation names the live-backends CI job as it is called.** The release
   validator required a CI job named `Live backends (pgvector + Qdrant + Solid Cache)`,
   but the job gained `+ Redis` in its name, so every release dispatch failed at
