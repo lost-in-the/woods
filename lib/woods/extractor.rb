@@ -533,8 +533,11 @@ module Woods
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       affected_types = Set.new
 
-      # Blast radius from the pre-change graph.
-      affected_ids = profile_phase('blast radius') { @dependency_graph.affected_by(change_set.absolute_paths) }
+      # Blast radius from the pre-change graph, bounded by
+      # `incremental_blast_radius_depth` (nil = the unbounded closure).
+      affected_ids = profile_phase('blast radius') do
+        @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
+      end
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
       touched = profile_phase('re-extraction') do
@@ -683,6 +686,21 @@ module Woods
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time
       Rails.logger.info "[Woods] [profile] #{name} in #{elapsed.round(2)}s"
       result
+    end
+
+    # How many reverse hops {#extract_changed} walks from the changed files
+    # before it stops re-extracting dependents.
+    #
+    # Unbounded by default. A unit outside the cap keeps its content, and the
+    # one derived field a re-extraction elsewhere can change (`dependents`)
+    # is refreshed regardless: {#register_and_write} marks every target of a
+    # re-extracted unit's edges, before and after registration, so a unit
+    # that gains or loses an inbound edge is rewritten by
+    # {#finalize_incremental_unit_json} whether or not the walk reached it.
+    #
+    # @return [Integer, nil]
+    def blast_radius_depth
+      Woods.configuration&.incremental_blast_radius_depth
     end
 
     # @return [Boolean] whether phase timing is enabled for this process

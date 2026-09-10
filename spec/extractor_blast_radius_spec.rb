@@ -92,4 +92,50 @@ RSpec.describe Woods::Extractor, 'incremental blast radius' do
   it 'reports every unit in the closure as touched' do
     expect(extractor.extract_changed([changed_path]).sort).to eq(%w[ChainA ChainB ChainC ChainD])
   end
+
+  # The cap is opt-in. `nil` (the default) keeps the unbounded closure the
+  # examples above pin; an Integer bounds the walk at that many reverse hops
+  # from the changed file's own units.
+  context 'when incremental_blast_radius_depth is 1' do
+    before { Woods.configuration.incremental_blast_radius_depth = 1 }
+
+    it 're-extracts the direct dependents and nothing deeper' do
+      expect(re_extracted).to eq(%w[ChainB])
+    end
+
+    it 'leaves the deeper units out of the touched set' do
+      expect(extractor.extract_changed([changed_path]).sort).to eq(%w[ChainA ChainB])
+    end
+
+    # The cap is only safe if a unit outside it still gets the one derived
+    # field a re-extraction elsewhere can change. ChainC is at depth 2, so it
+    # is not re-extracted; when the re-extracted ChainB starts depending on
+    # it, ChainC's `dependents` list has to be rewritten anyway.
+    it 'still refreshes the dependents of a depth-2 unit the depth-1 unit now points at' do
+      refreshed = []
+      allow(extractor).to receive(:finalize_incremental_unit_json).and_call_original
+      allow(extractor).to receive(:rewrite_unit_json) do |identifier, _types, refresh_dependents:, **|
+        refreshed << identifier if refresh_dependents
+      end
+      allow(extractor).to receive(:re_extract_unit) do |unit_id, affected_types: nil|
+        extractor.send(:register_and_write, :models, [rewired_chain_b], affected_types) if unit_id == 'ChainB'
+        unit_id
+      end
+
+      extractor.extract_changed([changed_path])
+
+      expect(refreshed).to include('ChainC')
+    end
+  end
+
+  # ChainB, re-extracted with a fresh edge to ChainC.
+  def rewired_chain_b
+    unit = Woods::ExtractedUnit.new(
+      type: :model,
+      identifier: 'ChainB',
+      file_path: rails_root.join('app/models/chain_b.rb').to_s
+    )
+    unit.dependencies = [{ type: :model, target: 'ChainC', via: :belongs_to }]
+    unit
+  end
 end

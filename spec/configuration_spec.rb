@@ -425,4 +425,28 @@ RSpec.describe Woods::Configuration do
         .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
     end
   end
+
+  describe '#incremental_blast_radius_depth' do
+    it 'defaults to nil, the unbounded closure' do
+      expect(described_class.new.incremental_blast_radius_depth).to be_nil
+    end
+
+    it 'accepts a positive Integer' do
+      config = described_class.new
+      config.incremental_blast_radius_depth = 1
+
+      expect(config.incremental_blast_radius_depth).to eq(1)
+    end
+
+    it 'rejects zero, negatives, and non-Integers' do
+      config = described_class.new
+
+      expect { config.incremental_blast_radius_depth = 0 }
+        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.incremental_blast_radius_depth = -2 }
+        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.incremental_blast_radius_depth = 'deep' }
+        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+    end
+  end
 end
