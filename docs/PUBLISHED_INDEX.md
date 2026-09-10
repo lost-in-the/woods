@@ -65,6 +65,22 @@ A directory numbered above the pointer (a payload built but never bumped to) and
 
 A *missing* `generation.json` is not an error: it means a flat (pre-2.0) index, generation 0. A `generation.json` that **exists but will not parse** is different, a corrupt install, not an empty index, so `.available_generations` and `.new`/`.open` raise `Woods::PublishedIndex::CorruptPointerError` naming the file's path instead of silently reporting zero published generations.
 
+### Durability: the pointer is the commit point
+
+The pointer is not only what makes a generation *visible*, it is what makes it *durable*.
+
+Payload files are written through `Woods::AtomicFile.write` with `durable: false`: a temp file, a chmod to the final mode, and a rename, but no `fsync`. Immediately before `generation.json` is written, the writer flushes the whole payload directory once with `Woods::AtomicFile.sync_directory_tree`, and then writes the pointer durably.
+
+So the contract a reader can rely on is:
+
+> When `generation.json` is durable, every file in the payload it names is durable.
+
+What that gives up is an individual payload file being durable *before* the pointer exists. Nothing reads a payload file in that window: every reader resolves through the pointer, and a crash there leaves an unreferenced partial payload that the next run prunes. The saving is large, since two forced flushes per file is about 8.9ms each on btrfs, or 71s for 8000 units against 1s for one flush.
+
+`sync_directory_tree` tries `syncfs(2)` through Fiddle, then `sync -f <dir>`, then a bare `sync`, then an `fsync` on every file in the tree. The last resort is what keeps this honest: the chain never silently does nothing, it only gets slower.
+
+A file whose readers do **not** resolve through the pointer keeps its own `fsync`: `generation.json` itself, the watch daemon's `watch_status.json`, the update check cache, the Obsidian and Unblocked exports, Notion sync state, temporal snapshots, `checkpoint.json`, and MCP task records. Set `durable_payload_writes = true` to pay the per-file `fsync` on payload files as well; it cannot disable the publish flush.
+
 ## Keying a RuboCop cache on the index
 
 RuboCop caches offenses per file and invalidates the cache when a cop's `external_dependency_checksum` changes. `rubocop-rails` uses this to re-run schema-aware cops when `db/schema.rb` changes. The same pattern works against Woods: the pinned payload's `manifest.json` is rewritten through `AtomicFile` on every publish, so its digest is the checksum.

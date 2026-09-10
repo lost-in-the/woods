@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest and summary, publish) was unattributed, so a slow run could only be split by
   guessing. One `[Woods] [profile] <phase> in N.NNs` line per phase, on the monotonic
   clock. Off by default and free when off.
+- **`durable_payload_writes` restores the per-file `fsync` on payload files.** Boolean,
+  default `false`. Off is not the weaker setting: readers resolve only through
+  `generation.json`, and every publish now flushes the whole payload before writing that
+  pointer, so the contract holds either way. Turning the key on buys exactly one thing, an
+  individual payload file being durable before the pointer exists, and pays two forced
+  flushes per file (about 8.9ms each on btrfs) for it. It cannot disable the publish
+  flush, which has no opt-out.
+
 - **`incremental_blast_radius_depth` bounds how far an incremental run re-extracts.**
   `extract_changed` walked the unbounded transitive dependent closure of every changed
   file, so one edit to a widely referenced unit re-extracted most of the app. The new key
@@ -41,6 +49,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   200 units unbounded and 2 under a depth of 1.
 
 ### Changed
+
+- **Payload durability moved from every file to the generation pointer.** `AtomicFile.write`
+  fsynced the temp file and the containing directory for every file it wrote, so a full
+  extraction of a large application paid two forced flushes 8323 times: 71.3s of the write
+  phase for 8000 files on btrfs, against 1.0s for one filesystem flush. Payload writes (unit
+  files, type indexes, the dependency graph, the graph analysis, the manifest, the summary,
+  the flow documents) now skip both, and `publish_generation` calls the new
+  `AtomicFile.sync_directory_tree` on the payload directory immediately before writing
+  `generation.json`.
+
+  The guarantee that replaces the old one: **when `generation.json` is durable, every file
+  in the payload it names is durable.** What is given up is an individual payload file being
+  durable before the pointer exists, and nothing reads a payload file in that window, since
+  every reader resolves through the pointer and a crash there leaves an unreferenced partial
+  payload the next run prunes. `generation.json` itself, the watch daemon's status file, the
+  update check cache, the Obsidian and Unblocked exports, Notion sync state, temporal
+  snapshots, embedding checkpoints, MCP task records and the gem mapper's own output all
+  keep the per-file fsync: their readers do not go through the pointer.
+
+  `sync_directory_tree` tries `syncfs(2)` through Fiddle, then `sync -f <dir>`, then a bare
+  `sync`, then an `fsync` on every file in the tree, and returns which one ran. The last
+  resort is what keeps this honest: the chain never silently does nothing, it only gets
+  slower. Fiddle is required inside a rescue and stays out of the gemspec, since it is a
+  bundled gem from Ruby 3.5. `bench/atomic_write_bench.rb` measures all four modes.
+
+- **Seeding a payload creates each directory once rather than once per file.**
+  `PayloadStore#clone` ran `FileUtils.mkdir_p` before every file it replicated.
+  `Pathname#find` visits a directory before its children, so the directory branch had
+  already created every parent a file could need. 8001 files across four type directories
+  on btrfs: 0.906s before, 0.847s after.
 
 - **Cycle detection is capped, and says so.** `GraphAnalyzer#analyze` runs on every
   extraction regardless of the change set, and enumerating every cycle was the largest
