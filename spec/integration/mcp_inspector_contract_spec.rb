@@ -9,6 +9,10 @@ require 'socket'
 require 'tmpdir'
 
 RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
+  described_inspector_version = JSON.parse(
+    File.read(File.expand_path('../../package.json', __dir__))
+  ).dig('devDependencies', '@modelcontextprotocol/inspector')
+
   let(:gem_root) { File.expand_path('../..', __dir__) }
   let(:fixture_dir) { File.join(gem_root, 'spec/fixtures/woods') }
   let(:inspector) { File.join(gem_root, 'node_modules/.bin/mcp-inspector') }
@@ -210,13 +214,13 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
     }
   end
 
-  it 'keeps modern stdio conformance pending on the Inspector 2.2.0 logging request' do
+  it "resolves modern stdio conformance on Inspector #{described_inspector_version} with no legacy logging fallback" do
     write_inspector_config(stdio_server, protocol_era: 'modern')
-    _command, _stdout, stderr, status = capture_inspector('initialize')
-    expect(stderr).to include("Method 'logging/setLevel' is not supported by the negotiated protocol version")
+    _command, stdout, stderr, status = capture_inspector('initialize')
 
-    pending('Inspector 2.2.0 sends legacy logging/setLevel after negotiating modern 2026-07-28')
     expect(status).to be_success
+    expect(stderr).not_to include("Method 'logging/setLevel' is not supported by the negotiated protocol version")
+    expect(JSON.parse(stdout).dig('result', 'protocolVersion')).to eq('2026-07-28')
   end
 
   it 'reaps the HTTP child inside the spawn helper when readiness fails' do
@@ -230,24 +234,24 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
     expect(child).not_to be_alive
   end
 
-  it 'validates stdio through Inspector 2.2.0 as an explicitly legacy smoke' do
+  it "validates stdio through Inspector #{described_inspector_version} as an explicitly legacy smoke" do
     write_inspector_config(stdio_server, protocol_era: 'legacy')
     assert_inspector_surface
   end
 
-  it 'keeps modern HTTP conformance pending on the Inspector 2.2.0 logging request' do
+  it "resolves modern HTTP conformance on Inspector #{described_inspector_version} with no legacy logging fallback" do
     base, stdin, output, wait_thread = start_inspector_http
     write_inspector_config(inspector_http_server(base), protocol_era: 'modern')
-    _command, _stdout, stderr, status = capture_inspector('initialize')
-    expect(stderr).to include("Method 'logging/setLevel' is not supported by the negotiated protocol version")
+    _command, stdout, stderr, status = capture_inspector('initialize')
 
-    pending('Inspector 2.2.0 sends legacy logging/setLevel after negotiating modern 2026-07-28')
     expect(status).to be_success
+    expect(stderr).not_to include("Method 'logging/setLevel' is not supported by the negotiated protocol version")
+    expect(JSON.parse(stdout).dig('result', 'protocolVersion')).to eq('2026-07-28')
   ensure
     stop_http_server(wait_thread, stdin, output)
   end
 
-  it 'validates HTTP through Inspector 2.2.0 as an explicitly legacy smoke' do
+  it "validates HTTP through Inspector #{described_inspector_version} as an explicitly legacy smoke" do
     base, stdin, output, wait_thread = start_inspector_http
     write_inspector_config(inspector_http_server(base), protocol_era: 'legacy')
     assert_inspector_surface
@@ -257,7 +261,7 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
 
   it 'records the one-shot CLI limitation for discovery and Tasks instead of faking coverage' do
     package = JSON.parse(File.read(File.join(gem_root, 'node_modules/@modelcontextprotocol/inspector/package.json')))
-    expect(package.fetch('version')).to eq('2.2.0')
+    expect(package.fetch('version')).to eq(described_inspector_version)
 
     _stdout, stderr, status = Open3.capture3(
       inspector_env,
