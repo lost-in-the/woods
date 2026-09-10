@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0.beta2] - 2026-09-10
+
 ### Added
 
 - **`release:prepare` runs a live preflight before printing the tag and dispatch

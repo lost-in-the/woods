@@ -5,8 +5,8 @@ Woods 2.0 changes observable index identifiers, publication layout, vector-store
 This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
 
 <!-- release-state:upgrade-availability -->
-> RubyGems lists 2.0.0.beta1 as a prerelease. Pin it explicitly with
-> `gem "woods", "2.0.0.beta1"`; `~> 2.0` resolves only once
+> RubyGems lists 2.0.0.beta2 as a prerelease. Pin it explicitly with
+> `gem "woods", "2.0.0.beta2"`; `~> 2.0` resolves only once
 > 2.0.0 is published.
 <!-- release-state:end -->
 

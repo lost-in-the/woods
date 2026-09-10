@@ -15,15 +15,15 @@
 >
 > `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for a published version lives on its tag.
 >
-> ### Version: 2.0.0.beta1 is published as a prerelease; `main` documents 2.0.0
+> ### Version: 2.0.0.beta2 is published as a prerelease; `main` documents 2.0.0
 >
 > | Line | Version | Documentation |
 > |---|---|---|
 > | Documented here | **2.0.0**, unreleased | this README and the [documentation index](docs/README.md) |
-> | Latest prerelease | **2.0.0.beta1** | [the v2.0.0.beta1 tag](https://github.com/lost-in-the/woods/tree/v2.0.0.beta1) |
+> | Latest prerelease | **2.0.0.beta2** | [the v2.0.0.beta2 tag](https://github.com/lost-in-the/woods/tree/v2.0.0.beta2) |
 > | Latest published gem | **1.6.1** | [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1) |
 >
-> RubyGems treats 2.0.0.beta1 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Install it explicitly with `gem "woods", "2.0.0.beta1"`. The released constraint stays `gem "woods", "~> 1.6"`.
+> RubyGems treats 2.0.0.beta2 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Install it explicitly with `gem "woods", "2.0.0.beta2"`. The released constraint stays `gem "woods", "~> 1.6"`.
 <!-- release-state:end -->
 
 Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
