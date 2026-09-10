@@ -419,8 +419,10 @@ RSpec.describe Woods::Configuration do
 
       expect { config.graph_cycle_limit = 0 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
       expect { config.graph_cycle_limit = -1 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
-      expect { config.graph_cycle_max_length = 2.5 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
-      expect { config.graph_cycle_max_length = 'lots' }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.graph_cycle_max_length = 2.5 }
+        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.graph_cycle_max_length = 'lots' }
+        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
     end
   end
 end
