@@ -3439,18 +3439,31 @@ RSpec.describe Woods::Extractor do
     end
   end
 
-  describe '#build_graph_analyzer volatile ratio' do
-    it 'passes the configured ratio to the analyzer' do
+  describe '#build_graph_analyzer configuration' do
+    around do |example|
       require 'woods'
       original = Woods.configuration
       Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'passes the configured ratio to the analyzer' do
       Woods.configuration.volatile_dependency_ratio = 4.5
 
       expect(Woods::GraphAnalyzer).to receive(:new)
-        .with(extractor.dependency_graph, volatile_ratio: 4.5).and_call_original
+        .with(extractor.dependency_graph, hash_including(volatile_ratio: 4.5)).and_call_original
       extractor.send(:build_graph_analyzer)
-    ensure
-      Woods.configuration = original
+    end
+
+    it 'passes the configured cycle caps to the analyzer' do
+      Woods.configuration.graph_cycle_limit = 7
+      Woods.configuration.graph_cycle_max_length = 9
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, hash_including(cycle_limit: 7, cycle_max_length: 9)).and_call_original
+      extractor.send(:build_graph_analyzer)
     end
   end
 

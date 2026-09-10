@@ -1591,8 +1591,14 @@ module Woods
     #
     # @return [GraphAnalyzer]
     def build_graph_analyzer
-      ratio = Woods.configuration&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
-      GraphAnalyzer.new(@dependency_graph, volatile_ratio: ratio)
+      config = Woods.configuration
+      ratio = config&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
+      GraphAnalyzer.new(
+        @dependency_graph,
+        volatile_ratio: ratio,
+        cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
+        cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
+      )
     end
 
     # ──────────────────────────────────────────────────────────────────────

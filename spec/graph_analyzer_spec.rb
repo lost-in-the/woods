@@ -139,6 +139,73 @@ RSpec.describe Woods::GraphAnalyzer do
     end
   end
 
+  describe '#cycles caps' do
+    # Ten disjoint 2-node cycles, so the count cap has something to bite on.
+    def register_disjoint_cycles(count)
+      count.times do |i|
+        graph.register(make_unit(type: :model, identifier: "A#{i}",
+                                 dependencies: [{ type: :model, target: "B#{i}" }]))
+        graph.register(make_unit(type: :model, identifier: "B#{i}",
+                                 dependencies: [{ type: :model, target: "A#{i}" }]))
+      end
+    end
+
+    # One cycle of +length+ nodes: N0 -> N1 -> ... -> N(length-1) -> N0.
+    def register_long_cycle(length)
+      length.times do |i|
+        graph.register(make_unit(type: :model, identifier: "N#{i}",
+                                 dependencies: [{ type: :model, target: "N#{(i + 1) % length}" }]))
+      end
+    end
+
+    it 'defaults to no truncation on a graph inside both caps' do
+      register_disjoint_cycles(3)
+
+      expect(analyzer.cycles.size).to eq(3)
+      expect(analyzer.cycle_limit_reached?).to be(false)
+    end
+
+    it 'stops enumerating at cycle_limit and reports the truncation' do
+      register_disjoint_cycles(10)
+      capped = described_class.new(graph, cycle_limit: 4)
+
+      expect(capped.cycles.size).to eq(4)
+      expect(capped.cycle_limit_reached?).to be(true)
+    end
+
+    it 'skips cycles longer than cycle_max_length without stopping the scan' do
+      register_long_cycle(12)
+      register_disjoint_cycles(2)
+      capped = described_class.new(graph, cycle_max_length: 5)
+
+      expect(capped.cycles.map(&:size)).to all(be <= 6)
+      expect(capped.cycles.size).to eq(2)
+      expect(capped.cycle_limit_reached?).to be(true)
+    end
+
+    it 'publishes cycle_limit_reached in the analyze stats' do
+      register_disjoint_cycles(10)
+
+      expect(described_class.new(graph).analyze[:stats][:cycle_limit_reached]).to be(false)
+      expect(described_class.new(graph, cycle_limit: 4).analyze[:stats][:cycle_limit_reached]).to be(true)
+    end
+
+    it 'rotates to the same signature regardless of where the cycle was entered' do
+      analyzer_a = described_class.new(graph)
+
+      expect(analyzer_a.send(:normalize_cycle_signature, %w[A B C A]))
+        .to eq(analyzer_a.send(:normalize_cycle_signature, %w[B C A B]))
+      expect(analyzer_a.send(:normalize_cycle_signature, %w[A B C A]))
+        .not_to eq(analyzer_a.send(:normalize_cycle_signature, %w[A C B A]))
+    end
+
+    it 'keys signatures by a fixed-width digest rather than the joined path' do
+      signature = described_class.new(graph).send(:normalize_cycle_signature, %w[Alpha Beta Gamma Alpha])
+
+      expect(signature).to match(/\A[0-9a-f]{64}\z/)
+    end
+  end
+
   describe '#bridges' do
     it 'identifies nodes on many shortest paths' do
       # A -> B -> C -> D (B and C are bridges)

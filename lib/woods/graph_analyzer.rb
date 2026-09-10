@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'set'
 
 module Woods
@@ -55,11 +56,30 @@ module Woods
     # can tell whether it was truncated (B-182).
     DEFAULT_VOLATILE_LIMIT = 20
 
+    # How many distinct cycles {#detect_cycles} enumerates before it stops.
+    # The DFS finds one cycle per back-edge, and a dense graph has tens of
+    # thousands of them; nobody reads past the first few hundred, and the
+    # per-cycle signature work is what made analysis the fixed floor of every
+    # incremental run. `nil` means no cap.
+    DEFAULT_CYCLE_LIMIT = 500
+
+    # The longest cycle {#detect_cycles} will record, counted in distinct
+    # nodes. A back-edge deep in a DFS closes a cycle as long as the path,
+    # which on a large graph is thousands of nodes: unreadable as a report and
+    # expensive to canonicalize. `nil` means no cap.
+    DEFAULT_CYCLE_MAX_LENGTH = 50
+
     # @param dependency_graph [DependencyGraph] The graph to analyze
     # @param volatile_ratio [Numeric] see {#volatile_dependencies}
-    def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO)
+    # @param cycle_limit [Integer, nil] see {DEFAULT_CYCLE_LIMIT}
+    # @param cycle_max_length [Integer, nil] see {DEFAULT_CYCLE_MAX_LENGTH}
+    def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO,
+                   cycle_limit: DEFAULT_CYCLE_LIMIT, cycle_max_length: DEFAULT_CYCLE_MAX_LENGTH)
       @graph = dependency_graph
       @volatile_ratio = volatile_ratio.to_f
+      @cycle_limit = cycle_limit
+      @cycle_max_length = cycle_max_length
+      @cycle_limit_reached = false
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -145,6 +165,19 @@ module Woods
     #   For example: ["A", "B", "C", "A"]
     def cycles
       @cycles ||= detect_cycles
+    end
+
+    # Whether {#cycles} is a truncated view of the graph's cycles.
+    #
+    # True when either cap fired: the count cap stopped enumeration, or at
+    # least one cycle was longer than the length cap and was skipped. A reader
+    # of the array alone cannot tell, so this is published as
+    # `stats[:cycle_limit_reached]` alongside it.
+    #
+    # @return [Boolean]
+    def cycle_limit_reached?
+      cycles
+      @cycle_limit_reached
     end
 
     # Units that bridge different types in the graph.
@@ -361,6 +394,7 @@ module Woods
           dead_end_count: computed_dead_ends.size,
           hub_count: computed_hubs.size,
           cycle_count: computed_cycles.size,
+          cycle_limit_reached: cycle_limit_reached?,
           cross_database_edge_count: computed_cross_database.size,
           volatile_dependency_count: all_volatile_dependencies.size,
           volatile_dependencies_limit: DEFAULT_VOLATILE_LIMIT,
@@ -802,6 +836,7 @@ module Woods
     # @return [Array<Array<String>>] Detected cycles
     def detect_cycles
       nodes = graph_nodes
+      @cycle_limit_reached = false
       return [] if nodes.empty?
 
       white = 0
@@ -813,53 +848,48 @@ module Woods
       found_cycles = []
       seen_cycle_signatures = Set.new
 
-      nodes.keys.sort.each do |start_node|
-        next unless color[start_node] == white
+      catch(:cycle_limit) do
+        nodes.keys.sort.each do |start_node|
+          next unless color[start_node] == white
 
-        # Iterative DFS using an explicit stack.
-        # Each entry is [node, :enter] or [node, :exit].
-        stack = [[start_node, :enter]]
+          # Iterative DFS using an explicit stack.
+          # Each entry is [node, :enter] or [node, :exit].
+          stack = [[start_node, :enter]]
 
-        # Track the current DFS path for cycle extraction.
-        path = []
+          # Track the current DFS path for cycle extraction.
+          path = []
 
-        while stack.any?
-          node, action = stack.pop
+          while stack.any?
+            node, action = stack.pop
 
-          if action == :exit
-            color[node] = black
-            path.pop
-            next
-          end
-
-          # :enter action
-          next unless color[node] == white
-
-          color[node] = gray
-          path.push(node)
-          stack.push([node, :exit])
-
-          # Not sorted, deliberately: this list is the unit's own declared
-          # dependency order, which is identical in a full and an incremental
-          # run, so sorting it would change nothing any test can observe.
-          neighbors = @graph.dependencies_of(node)
-          neighbors.each do |neighbor|
-            case color[neighbor]
-            when white
-              parent[neighbor] = node
-              stack.push([neighbor, :enter])
-            when gray
-              # Found a cycle — extract it from the path
-              cycle = extract_cycle_from_path(path, neighbor)
-              if cycle
-                sig = normalize_cycle_signature(cycle)
-                unless seen_cycle_signatures.include?(sig)
-                  seen_cycle_signatures.add(sig)
-                  found_cycles << cycle
-                end
-              end
+            if action == :exit
+              color[node] = black
+              path.pop
+              next
             end
-            # black nodes are fully explored, skip them
+
+            # :enter action
+            next unless color[node] == white
+
+            color[node] = gray
+            path.push(node)
+            stack.push([node, :exit])
+
+            # Not sorted, deliberately: this list is the unit's own declared
+            # dependency order, which is identical in a full and an incremental
+            # run, so sorting it would change nothing any test can observe.
+            neighbors = @graph.dependencies_of(node)
+            neighbors.each do |neighbor|
+              case color[neighbor]
+              when white
+                parent[neighbor] = node
+                stack.push([neighbor, :enter])
+              when gray
+                # Found a cycle — extract it from the path
+                collect_cycle(path, neighbor, found_cycles, seen_cycle_signatures)
+              end
+              # black nodes are fully explored, skip them
+            end
           end
         end
       end
@@ -869,16 +899,52 @@ module Woods
       found_cycles
     end
 
-    # Extracts a cycle from the current DFS path when a back-edge to
-    # +cycle_start+ is found.
+    # Record the cycle closed by a back-edge to +cycle_start+.
+    #
+    # Skips a cycle longer than the length cap and one already recorded under
+    # another rotation. Throws +:cycle_limit+ once the count cap is full,
+    # which ends the whole scan in {#detect_cycles}.
     #
     # @param path [Array<String>] Current DFS path
     # @param cycle_start [String] The node that closes the cycle
-    # @return [Array<String>, nil] The cycle path ending with cycle_start repeated,
-    #   or nil if cycle_start is not in the path
-    def extract_cycle_from_path(path, cycle_start)
+    # @param found_cycles [Array<Array<String>>] Accumulator
+    # @param seen [Set<String>] Signatures already recorded
+    # @return [void]
+    def collect_cycle(path, cycle_start, found_cycles, seen)
+      cycle = extract_cycle_from_path(path, cycle_start, max_length: @cycle_max_length)
+      if cycle == :too_long
+        @cycle_limit_reached = true
+        return
+      end
+      return unless cycle
+
+      signature = normalize_cycle_signature(cycle)
+      return if seen.include?(signature)
+
+      seen.add(signature)
+      found_cycles << cycle
+      return unless @cycle_limit && found_cycles.size >= @cycle_limit
+
+      @cycle_limit_reached = true
+      throw :cycle_limit
+    end
+
+    # Extracts a cycle from the current DFS path when a back-edge to
+    # +cycle_start+ is found.
+    #
+    # The length check runs on indexes, before the slice: an over-long cycle
+    # costs nothing beyond the +index+ lookup that found it.
+    #
+    # @param path [Array<String>] Current DFS path
+    # @param cycle_start [String] The node that closes the cycle
+    # @param max_length [Integer, nil] Longest cycle to build, in distinct nodes
+    # @return [Array<String>, Symbol, nil] The cycle path ending with cycle_start
+    #   repeated; +:too_long+ when it exceeds +max_length+; nil when cycle_start
+    #   is not in the path
+    def extract_cycle_from_path(path, cycle_start, max_length: nil)
       start_index = path.index(cycle_start)
       return nil unless start_index
+      return :too_long if max_length && (path.size - start_index) > max_length
 
       path[start_index..] + [cycle_start]
     end
@@ -886,17 +952,20 @@ module Woods
     # Normalize a cycle so that duplicate rotations are treated as the same cycle.
     # For example, [A, B, C, A] and [B, C, A, B] are the same cycle.
     #
+    # Keyed by digest rather than by the joined path: the set holds one
+    # 64-byte key per cycle instead of a string as long as the cycle, so
+    # membership stays constant-cost however deep the DFS went.
+    #
     # @param cycle [Array<String>] Cycle path with repeated last element
-    # @return [String] Canonical string representation
+    # @return [String] Canonical hex digest of the rotated loop
     def normalize_cycle_signature(cycle)
       # Remove the trailing repeated element to get the raw loop
       loop_nodes = cycle[0..-2]
-      return loop_nodes.join('->') if loop_nodes.empty?
+      return Digest::SHA256.hexdigest('') if loop_nodes.empty?
 
       # Rotate so the lexicographically smallest element is first
       min_index = loop_nodes.each_with_index.min_by { |node, _i| node }.last
-      rotated = loop_nodes.rotate(min_index)
-      rotated.join('->')
+      Digest::SHA256.hexdigest(loop_nodes.rotate(min_index).join('->'))
     end
 
     # ──────────────────────────────────────────────────────────────────────

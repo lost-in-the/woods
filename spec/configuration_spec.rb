@@ -387,4 +387,40 @@ RSpec.describe Woods::Configuration do
       expect { config.volatile_dependency_ratio = 'high' }.to raise_error(Woods::ConfigurationError, /greater than 1/)
     end
   end
+
+  describe '#graph_cycle_limit and #graph_cycle_max_length' do
+    it 'defaults to the analyzer constants' do
+      config = described_class.new
+
+      expect(config.graph_cycle_limit).to eq(Woods::GraphAnalyzer::DEFAULT_CYCLE_LIMIT)
+      expect(config.graph_cycle_max_length).to eq(Woods::GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH)
+    end
+
+    it 'accepts a positive Integer' do
+      config = described_class.new
+      config.graph_cycle_limit = 25
+      config.graph_cycle_max_length = 12
+
+      expect(config.graph_cycle_limit).to eq(25)
+      expect(config.graph_cycle_max_length).to eq(12)
+    end
+
+    it 'accepts nil to remove the cap' do
+      config = described_class.new
+      config.graph_cycle_limit = nil
+      config.graph_cycle_max_length = nil
+
+      expect(config.graph_cycle_limit).to be_nil
+      expect(config.graph_cycle_max_length).to be_nil
+    end
+
+    it 'rejects zero, negatives, and non-Integers' do
+      config = described_class.new
+
+      expect { config.graph_cycle_limit = 0 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.graph_cycle_limit = -1 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.graph_cycle_max_length = 2.5 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.graph_cycle_max_length = 'lots' }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+    end
+  end
 end
