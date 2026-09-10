@@ -15,9 +15,9 @@
       "allowedVersions": "~> 0.5.0"
     },
     {
-      "description": "release.yml pins the release Ruby on purpose (release_workflow_spec); bump CI Rubies elsewhere.",
+      "description": "Ruby pins under .github/workflows are curated by hand: the matrix names each supported Ruby, and the tooling jobs plus release.yml stay on 3.3 (release_workflow_spec locks it). Bump them deliberately when the floor moves.",
       "matchFileNames": [
-        ".github/workflows/release.yml"
+        ".github/workflows/**"
       ],
       "matchDepNames": [
         "ruby"
