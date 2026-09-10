@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot fixture, so the first prerelease failed them (Bundler never resolves a prerelease
   from an unpinned requirement). They now use `Woods::VERSION`. The candidate host also
   installs `webrick` so `woods-mcp-http` finds a Rack handler on Rubies that no longer ship one.
+- **Inspector contract specs track the pinned `@modelcontextprotocol/inspector` version instead
+  of a literal.** Bumping the dev dependency to 2.6.0 fixed the SDK bug where Inspector sent a
+  legacy `logging/setLevel` call after negotiating the modern 2026-07-28 protocol, so the two
+  `pending` stdio/HTTP examples in `mcp_inspector_contract_spec.rb` asserted a stderr message
+  that no longer occurs. Those examples now assert a clean modern handshake, and every version
+  literal in that file reads from `package.json` instead. `sdk_dependency_spec.rb`'s deliberate
+  version-and-integrity trip wire is bumped to match the new pin.
 
 ## [2.0.0.beta1] - 2026-09-09
 
