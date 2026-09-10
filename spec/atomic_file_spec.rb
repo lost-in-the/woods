@@ -2,6 +2,8 @@
 
 require 'spec_helper'
 require 'tmpdir'
+require 'fileutils'
+require 'logger'
 require 'pathname'
 require 'json'
 require 'woods/atomic_file'
@@ -67,6 +69,60 @@ RSpec.describe Woods::AtomicFile do
       described_class.write(File.join(@dir, 'note.md'), 'data')
     end
 
+    # The durability model this gem publishes under: readers resolve only
+    # through `generation.json`, so a payload file has no reader until the
+    # pointer names it. `durable: false` drops the two forced flushes and
+    # keeps everything that makes the write atomic (tempfile, chmod, rename).
+    describe 'durable:' do
+      it 'writes the same bytes and the same mode as the durable path' do
+        durable = File.join(@dir, 'durable.json')
+        deferred = File.join(@dir, 'deferred.json')
+        content = JSON.generate('identifier' => 'User', 'note' => 'em dash \u2014 here')
+
+        described_class.write(durable, content)
+        described_class.write(deferred, content, durable: false)
+
+        expect(File.binread(deferred)).to eq(File.binread(durable))
+        expect(File.stat(deferred).mode & 0o777).to eq(File.stat(durable).mode & 0o777)
+      end
+
+      it 'honours an explicit mode while non-durable' do
+        path = File.join(@dir, 'wide.json')
+        described_class.write(path, 'data', mode: 0o644, durable: false)
+        expect(File.stat(path).mode & 0o777).to eq(0o644)
+      end
+
+      it 'does not fsync the temp file or the directory' do
+        fsyncs = 0
+        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        expect(described_class).not_to receive(:fsync_directory)
+
+        described_class.write(File.join(@dir, 'deferred.json'), 'data', durable: false)
+
+        expect(fsyncs).to eq(0)
+      end
+
+      it 'still fsyncs both when durable (the default)' do
+        fsyncs = 0
+        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
+
+        described_class.write(File.join(@dir, 'durable.json'), 'data')
+
+        expect(fsyncs).to eq(1)
+      end
+
+      it 'cleans up and preserves the target when a non-durable rename fails' do
+        path = File.join(@dir, 'note.md')
+        File.write(path, 'original')
+        allow(File).to receive(:rename).and_raise(Errno::EACCES)
+
+        expect { described_class.write(path, 'new', durable: false) }.to raise_error(Errno::EACCES)
+        expect(File.read(path)).to eq('original')
+        expect(Dir.children(@dir).reject { |f| f == 'note.md' }).to be_empty
+      end
+    end
+
     it 'uses unique temporary names for concurrent writers' do
       path = File.join(@dir, 'note.md')
       temporary_paths = Queue.new
@@ -103,6 +159,87 @@ RSpec.describe Woods::AtomicFile do
       expect(File.read(path)).to eq('original')
       leftovers = Dir.children(@dir).reject { |f| f == 'note.md' }
       expect(leftovers).to be_empty
+    end
+  end
+
+  # One filesystem flush for a whole payload, replacing thousands of per-file
+  # ones. The chain must never silently do nothing: if every faster strategy
+  # is unavailable, the per-file fsync pass still runs.
+  describe '.sync_directory_tree' do
+    def build_tree
+      FileUtils.mkdir_p(File.join(@dir, 'models'))
+      FileUtils.mkdir_p(File.join(@dir, 'flows', 'nested'))
+      File.write(File.join(@dir, 'manifest.json'), '{}')
+      File.write(File.join(@dir, 'models', 'User.json'), '{}')
+      File.write(File.join(@dir, 'flows', 'nested', 'show.json'), '{}')
+    end
+
+    it 'returns :syncfs and stops there when syncfs succeeds' do
+      allow(described_class).to receive(:syncfs).and_return(:syncfs)
+      expect(described_class).not_to receive(:sync_f)
+      expect(described_class).not_to receive(:plain_sync)
+
+      expect(described_class.sync_directory_tree(@dir)).to eq(:syncfs)
+    end
+
+    it 'falls back to sync -f when syncfs is unavailable' do
+      allow(described_class).to receive(:syncfs).and_return(nil)
+      allow(described_class).to receive(:sync_f).and_return(:sync_f)
+      expect(described_class).not_to receive(:plain_sync)
+
+      expect(described_class.sync_directory_tree(@dir)).to eq(:sync_f)
+    end
+
+    it 'falls back to a plain sync when sync -f fails' do
+      allow(described_class).to receive(:syncfs).and_return(nil)
+      allow(described_class).to receive(:sync_f).and_return(nil)
+      allow(described_class).to receive(:plain_sync).and_return(:sync)
+
+      expect(described_class.sync_directory_tree(@dir)).to eq(:sync)
+    end
+
+    it 'runs a per-file fsync pass over every file when nothing faster works' do
+      build_tree
+      allow(described_class).to receive(:syncfs).and_return(nil)
+      allow(described_class).to receive(:sync_f).and_return(nil)
+      allow(described_class).to receive(:plain_sync).and_return(nil)
+      synced = []
+      allow(described_class).to receive(:fsync_path) { |path| synced << path }
+
+      expect(described_class.sync_directory_tree(@dir)).to eq(:fsync_pass)
+      expect(synced).to include(
+        File.join(@dir, 'manifest.json'),
+        File.join(@dir, 'models', 'User.json'),
+        File.join(@dir, 'flows', 'nested', 'show.json'),
+        File.join(@dir, 'models'),
+        File.join(@dir, 'flows', 'nested'),
+        @dir,
+        # The directory entry naming the tree lives in the parent.
+        File.dirname(@dir)
+      )
+    end
+
+    it 'reports the strategy it ran at debug level' do
+      logger = instance_double(Logger, debug: nil)
+      stub_const('Rails', double('Rails', logger: logger))
+      allow(described_class).to receive(:syncfs).and_return(:syncfs)
+
+      described_class.sync_directory_tree(@dir)
+
+      expect(logger).to have_received(:debug) do |&block|
+        expect(block.call).to include('syncfs')
+      end
+    end
+
+    it 'is a no-op returning nil for a directory that does not exist' do
+      expect(described_class).not_to receive(:syncfs)
+      expect(described_class.sync_directory_tree(File.join(@dir, 'gone'))).to be_nil
+    end
+
+    it 'accepts a Pathname and really flushes a real directory' do
+      build_tree
+      expect(%i[syncfs sync_f sync fsync_pass])
+        .to include(described_class.sync_directory_tree(Pathname(@dir)))
     end
   end
 

@@ -828,7 +828,11 @@ module Woods
     # @return [void]
     def publish_generation(reason)
       generation = Generation.new(output_dir: @output_dir)
-      marker = generation.bump!(reason: reason, payload: publishable_payload_name(generation))
+      # Resolve (and if necessary rename) the payload first, so the flush
+      # below covers the directory under the name the pointer will carry.
+      payload = publishable_payload_name(generation)
+      profile_phase('payload sync') { sync_payload }
+      marker = generation.bump!(reason: reason, payload: payload)
       prune_payloads(marker.number)
       marker
     rescue StandardError => e
@@ -982,6 +986,47 @@ module Woods
     # @return [Array<String>] every directory name a payload can contain
     def payload_entry_dirs
       EXTRACTORS.keys.map(&:to_s) + PAYLOAD_DIRS
+    end
+
+    # Whether payload files pay for their own durability as they are written.
+    #
+    # False by default and false on every host that has not asked otherwise:
+    # {#sync_payload} makes the whole payload durable in one flush before the
+    # pointer names it, so a per-file fsync buys only the window in which
+    # nothing can read the file anyway. `durable_payload_writes = true`
+    # restores the per-file cost for a host that wants it; it does not, and
+    # cannot, remove the publish flush.
+    #
+    # @return [Boolean]
+    def payload_writes_durable?
+      Woods.configuration&.durable_payload_writes ? true : false
+    end
+
+    # One filesystem flush that makes this run's whole payload durable,
+    # immediately before the pointer that names it is written durably.
+    #
+    # This is the guarantee that replaces the per-file fsync {#write_results}
+    # used to pay for every unit: **when `generation.json` is durable, every
+    # file in the payload it names is durable.** What is given up is an
+    # individual payload file being durable before the pointer exists, and
+    # nobody reads a payload file in that window: every reader resolves
+    # through the pointer, and a crash leaves an unreferenced partial payload
+    # that the next run prunes.
+    #
+    # Unconditional on purpose. `durable_payload_writes` decides whether the
+    # per-file fsyncs are *also* paid; it can never turn this off, because
+    # that would be the one change that actually weakens the contract.
+    # {Woods::AtomicFile.sync_directory_tree} degrades through `sync -f`, a
+    # bare `sync`, and finally a per-file fsync pass, so the flush cannot
+    # silently become a no-op either.
+    #
+    # A run that degraded to a flat publish has no payload directory;
+    # {#payload_dir} then returns the output directory, which is the tree that
+    # needs flushing in exactly the same way.
+    #
+    # @return [Symbol, nil] the strategy {Woods::AtomicFile} used
+    def sync_payload
+      AtomicFile.sync_directory_tree(payload_dir)
     end
 
     # The pointer to publish, or nil when this run built no payload directory.
@@ -1370,12 +1415,14 @@ module Woods
         annotated.each do |unit|
           AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
-            json_serialize(unit.to_h)
+            json_serialize(unit.to_h),
+            durable: payload_writes_durable?
           )
         end
         AtomicFile.write(
           type_dir.join('_index.json'),
-          json_serialize(type_index_entries(units))
+          json_serialize(type_index_entries(units)),
+          durable: payload_writes_durable?
         )
       end
     end
@@ -1584,7 +1631,7 @@ module Woods
         end
         next if JSON.generate(data) == before
 
-        AtomicFile.write(path, json_serialize(data))
+        AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
       end
     end
 
@@ -1808,7 +1855,7 @@ module Woods
       else
         metadata.delete('package')
       end
-      AtomicFile.write(file, json_serialize(data))
+      AtomicFile.write(file, json_serialize(data), durable: payload_writes_durable?)
 
       identifier = data['identifier']
       type = (data['type'] || type_dir.singularize).to_sym
@@ -1872,7 +1919,7 @@ module Woods
       payload = json_serialize(unit.to_h)
       return if identical_on_disk?(path, payload)
 
-      AtomicFile.write(path, payload)
+      AtomicFile.write(path, payload, durable: payload_writes_durable?)
     end
 
     # The serialized `extracted_at` scalar as {ExtractedUnit#to_h} +
@@ -2117,14 +2164,16 @@ module Woods
         units.each do |unit|
           AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
-            json_serialize(unit.to_h)
+            json_serialize(unit.to_h),
+            durable: payload_writes_durable?
           )
         end
 
         # Also write a type index for fast lookups
         AtomicFile.write(
           type_dir.join('_index.json'),
-          json_serialize(type_index_entries(units))
+          json_serialize(type_index_entries(units)),
+          durable: payload_writes_durable?
         )
       end
     end
@@ -2227,7 +2276,7 @@ module Woods
       # to compute it. AtomicFile writes in binary mode and reads back as
       # UTF-8, so the two digests are the same either way.
       @graph_sha = Digest::SHA256.hexdigest(payload)
-      AtomicFile.write(payload_dir.join('dependency_graph.json'), payload)
+      AtomicFile.write(payload_dir.join('dependency_graph.json'), payload, durable: payload_writes_durable?)
     end
 
     # The digest of the dependency graph this run wrote.
@@ -2250,7 +2299,8 @@ module Woods
 
       AtomicFile.write(
         payload_dir.join('graph_analysis.json'),
-        json_serialize(enriched)
+        json_serialize(enriched),
+        durable: payload_writes_durable?
       )
     end
 
@@ -2295,7 +2345,8 @@ module Woods
 
       AtomicFile.write(
         payload_dir.join('manifest.json'),
-        json_serialize(manifest)
+        json_serialize(manifest),
+        durable: payload_writes_durable?
       )
     end
 
@@ -2477,7 +2528,8 @@ module Woods
 
       AtomicFile.write(
         payload_dir.join('SUMMARY.md'),
-        summary.join("\n")
+        summary.join("\n"),
+        durable: payload_writes_durable?
       )
     end
 
@@ -2547,7 +2599,8 @@ module Woods
 
       AtomicFile.write(
         type_dir.join('_index.json'),
-        json_serialize(index)
+        json_serialize(index),
+        durable: payload_writes_durable?
       )
     end
 
@@ -3463,7 +3516,7 @@ module Woods
 
       return if JSON.generate(data) == before
 
-      AtomicFile.write(path, json_serialize(data))
+      AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
       affected_types&.add(extractor_key)
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"

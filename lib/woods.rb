@@ -150,7 +150,7 @@ module Woods
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio,
                 :graph_cycle_limit, :graph_cycle_max_length,
-                :incremental_blast_radius_depth
+                :incremental_blast_radius_depth, :durable_payload_writes
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -214,6 +214,10 @@ module Woods
       # nil = the unbounded transitive closure. See the setter for why the
       # default is not a small number.
       @incremental_blast_radius_depth = nil
+      # false = payload files are written without a per-file fsync and the
+      # whole payload is flushed once before `generation.json` is written.
+      # See the setter.
+      @durable_payload_writes = false
       # Directories the component extractors walk before reading `descendants`,
       # relative to Rails.root. See Extractors::ComponentDiscovery.
       @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
@@ -281,6 +285,29 @@ module Woods
       end
 
       @extractors = value
+    end
+
+    # Force an fsync on every payload file as it is written, on top of the
+    # single flush the publish already performs.
+    #
+    # Off by default, and off is not a weaker guarantee. Readers resolve only
+    # through `generation.json`; a payload file has no reader until that
+    # pointer names it, and {Woods::Extractor#sync_payload} makes the whole
+    # payload durable before the pointer is written. Turning this on buys
+    # exactly one thing: an individual payload file being durable before the
+    # pointer exists.
+    #
+    # It costs a lot for it. Two forced flushes per file, 8.9ms each on btrfs:
+    # 8000 units is 71s of writing against 1s.
+    #
+    # Turning it on cannot disable the publish flush. That flush *is* the
+    # durability contract, so it has no opt-out.
+    #
+    # @param value [Boolean]
+    # @raise [Woods::ConfigurationError] when value is not a boolean
+    def durable_payload_writes=(value)
+      validate_boolean!(:durable_payload_writes, value)
+      @durable_payload_writes = value
     end
 
     # @param value [Boolean] Must be true or false

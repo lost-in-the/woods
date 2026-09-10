@@ -206,9 +206,10 @@ module Woods
 
     # Assemble a flow for one entry point and write the JSON file.
     #
-    # Written via {Woods::AtomicFile} (temp + fsync + rename) like every
-    # other index artifact — a plain +File.write+ interrupted mid-write left
-    # a torn partial for the MCP read side to trip over.
+    # Written via {Woods::AtomicFile} (temp + rename) like every other index
+    # artifact. A plain +File.write+ interrupted mid-write left a torn
+    # partial for the MCP read side to trip over. Not durable by default: see
+    # {#durable_writes?}.
     #
     # @param assembler [FlowAssembler]
     # @param entry_point [String]
@@ -222,7 +223,7 @@ module Woods
 
       filename = Woods::FilenameUtils.flow_filename(controller_id, action)
 
-      Woods::AtomicFile.write(File.join(@flows_dir, filename), canonical_json(flow.to_h))
+      Woods::AtomicFile.write(File.join(@flows_dir, filename), canonical_json(flow.to_h), durable: durable_writes?)
 
       # Relative — this value is persisted (flow_index.json and the unit's
       # metadata[:flow_paths]), so it must not carry this machine's root.
@@ -236,7 +237,20 @@ module Woods
     # @param flow_map [Hash{String => String}]
     def write_flow_index(flow_map)
       index_path = File.join(@flows_dir, 'flow_index.json')
-      Woods::AtomicFile.write(index_path, canonical_json(flow_map))
+      Woods::AtomicFile.write(index_path, canonical_json(flow_map), durable: durable_writes?)
+    end
+
+    # Whether a flow document pays for its own fsync as it is written.
+    #
+    # False by default. A flow document is a payload file: nothing reads it
+    # until +generation.json+ names the payload, and
+    # {Woods::AtomicFile.sync_directory_tree} flushes the whole payload before
+    # that pointer is written. `durable_payload_writes = true` buys the
+    # per-file fsync back for a host that wants it.
+    #
+    # @return [Boolean]
+    def durable_writes?
+      Woods.configuration&.durable_payload_writes ? true : false
     end
 
     # Emit deterministic pretty JSON — keys recursively sorted so two runs

@@ -99,6 +99,10 @@ module Woods
       return unless from.directory?
 
       to = Pathname.new(target.to_s)
+      # The one directory `find` never offers: it yields the root as `.`, and
+      # a caller seeding a subtree (Extractor#seed_payload_from_flat_root)
+      # passes a target that does not exist yet.
+      FileUtils.mkdir_p(to.to_s)
       from.find do |entry|
         relative = entry.relative_path_from(from)
         next if relative.to_s == '.'
@@ -211,11 +215,20 @@ module Woods
       end
     end
 
+    # `Pathname#find` is a pre-order walk: a directory is always visited
+    # before anything inside it. So the directory branch has already created
+    # every parent a file could need, and the `mkdir_p` the file branch used
+    # to run was one stat-heavy syscall chain per unit re-proving what the
+    # previous entry established. On a payload of 8000+ files that was the
+    # bulk of the incremental seed.
+    #
+    # @param entry [Pathname] source entry, as `find` yielded it
+    # @param destination [Pathname] where it belongs in the target
+    # @return [void]
     def replicate(entry, destination)
       if entry.directory?
         FileUtils.mkdir_p(destination.to_s)
       else
-        FileUtils.mkdir_p(destination.dirname.to_s)
         link_or_copy(entry, destination)
       end
     end
