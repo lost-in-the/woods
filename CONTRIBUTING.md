@@ -1,7 +1,7 @@
 # Contributing to Woods
 
 <!-- release-state:contributing-intro -->
-Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents working from a source checkout should also read the repository's [AGENTS.md](https://github.com/lost-in-the/woods/blob/v2.0.0.beta1/AGENTS.md).
+Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements, MCP compatibility work, documentation, and focused performance changes. This guide covers the shared contribution contract. Coding agents working from a source checkout should also read the repository's [AGENTS.md](https://github.com/lost-in-the/woods/blob/v2.0.0.beta2/AGENTS.md).
 <!-- release-state:end -->
 
 ## Choose the right channel
@@ -46,7 +46,7 @@ Create a branch from current `main`. Keep each pull request to one logical chang
 | `plugin/skills/` | Distributed Woods skills (setup/upgrade, MCP configuration, investigation, agent enablement, diagnosis) |
 
 <!-- release-state:contributing-architecture -->
-Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/v2.0.0.beta1/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
+Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/v2.0.0.beta2/CLAUDE.md) for architecture and implementation gotchas before changing runtime behavior.
 <!-- release-state:end -->
 
 ### Agent orientation and static self-map
