@@ -1,4 +1,28 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>lost-in-the/.github"]
+  "extends": [
+    "github>lost-in-the/.github"
+  ],
+  "packageRules": [
+    {
+      "description": "tokenizers 0.6+ needs Ruby 3.3; the gem floor is 3.0 and CI runs 3.1 and 3.2. Lift when the floor moves.",
+      "matchDatasources": [
+        "rubygems"
+      ],
+      "matchPackageNames": [
+        "tokenizers"
+      ],
+      "allowedVersions": "~> 0.5.0"
+    },
+    {
+      "description": "release.yml pins the release Ruby on purpose (release_workflow_spec); bump CI Rubies elsewhere.",
+      "matchFileNames": [
+        ".github/workflows/release.yml"
+      ],
+      "matchDepNames": [
+        "ruby"
+      ],
+      "enabled": false
+    }
+  ]
 }
