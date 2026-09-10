@@ -170,7 +170,7 @@ RSpec.describe Woods::Release::Preparer do
         described_class.prepare(root: root, version: '2.0.0', date: date)
 
         expect(changelog_section(root, '2.0.0'))
-          .to eq("\n### Added\n\n- an rc1 addition\n\n- a late addition\n\n")
+          .to eq("\n### Added\n\n- an rc1 addition\n- a late addition\n\n")
       end
     end
   end
