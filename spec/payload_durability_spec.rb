@@ -14,7 +14,7 @@ require 'active_support/core_ext/time/calculations'
 #
 # Readers resolve only through `generation.json`, so no payload file has a
 # reader until the pointer names it. Per-file fsync on those files buys
-# nothing and costs 8.9ms each on btrfs — 8323 units is over a minute of
+# nothing and costs 8.9ms each on btrfs: 8323 units is over a minute of
 # forced flushes. The guarantee that replaces it: when the pointer is durable,
 # every file in the payload it names is durable, because one filesystem flush
 # runs before the pointer write.

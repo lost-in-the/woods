@@ -1009,7 +1009,7 @@ module Woods
     # used to pay for every unit: **when `generation.json` is durable, every
     # file in the payload it names is durable.** What is given up is an
     # individual payload file being durable before the pointer exists, and
-    # nobody reads a payload file in that window — every reader resolves
+    # nobody reads a payload file in that window: every reader resolves
     # through the pointer, and a crash leaves an unreferenced partial payload
     # that the next run prunes.
     #

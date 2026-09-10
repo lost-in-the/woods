@@ -118,7 +118,7 @@ module Woods
 
     # Resolved once per process, and nil for the whole process when it cannot
     # be. `dlopen` is not free, and a failed `require 'fiddle'` prints a
-    # bundled-gem warning on every attempt from Ruby 3.5 onward — a publish
+    # bundled-gem warning on every attempt from Ruby 3.5 onward, and a publish
     # must not emit one line of noise per generation.
     #
     # @return [Fiddle::Function, nil]

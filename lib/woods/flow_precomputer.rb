@@ -207,7 +207,7 @@ module Woods
     # Assemble a flow for one entry point and write the JSON file.
     #
     # Written via {Woods::AtomicFile} (temp + rename) like every other index
-    # artifact — a plain +File.write+ interrupted mid-write left a torn
+    # artifact. A plain +File.write+ interrupted mid-write left a torn
     # partial for the MCP read side to trip over. Not durable by default: see
     # {#durable_writes?}.
     #
