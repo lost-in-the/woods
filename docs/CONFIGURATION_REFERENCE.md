@@ -361,6 +361,18 @@ end
 | `graph_cycle_limit` | Integer or `nil` | `500` | How many distinct cycles `GraphAnalyzer` enumerates before it stops. Cycle detection finds one cycle per DFS back-edge, so a dense graph has tens of thousands of them and enumerating every one is the largest single cost of the analysis that runs on every extraction. Set to `nil` for exhaustive enumeration. |
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
 
+| `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
+
+`incremental_blast_radius_depth` is unbounded by default because a unit two hops
+out really can have content that depends on the changed file. An STI grandchild
+(`SportsCar < Car < Vehicle`) inherits its grandparent's associations,
+validations and callback chain, and a nested `has_many :through` resolves
+through the same kind of chain, while the graph only records the one-hop
+superclass reference each source file mentions. Set the key on a tree you know
+has neither shape; the units it stops re-extracting still get their `dependents`
+list refreshed, and `spec/integration/incremental_equivalence_spec.rb` holds a
+depth of 1 to full-extraction equivalence.
+
 When either cap fires, `graph_analysis.json` reports `stats.cycle_limit_reached: true`
 alongside `stats.cycle_count`, so a reader of the `cycles` array can tell a truncated
 view from a short one. Enumeration stops at the cap rather than counting past it, so

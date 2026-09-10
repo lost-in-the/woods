@@ -71,6 +71,8 @@
     "graph_store=",
     "include_framework_sources",
     "include_framework_sources=",
+    "incremental_blast_radius_depth",
+    "incremental_blast_radius_depth=",
     "max_context_tokens",
     "max_context_tokens=",
     "metadata_store",
@@ -983,7 +985,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 105,
+    "configuration_attributes": 107,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

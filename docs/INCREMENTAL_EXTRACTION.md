@@ -82,7 +82,8 @@ same rooting rule the manifest's git provenance follows.
 step before it.
 
 1. **Blast radius** from the *pre-change* graph, so dependents of a file that
-   just disappeared still get re-extracted.
+   just disappeared still get re-extracted. Unbounded by default; see
+   [Bounding the blast radius](#bounding-the-blast-radius).
 2. **Reconcile changed paths.** Every changed path that still exists is handed
    to the file-based extractors that claim it (`PathDispatcher`), and units the
    path no longer produces are dropped. This is what indexes a file the index
@@ -129,6 +130,33 @@ controller delta gets the same flow treatment a full run gives (see
 A run that changed nothing **does not rewrite the manifest**. The manifest
 timestamp drives `woods_status.staleness_seconds`, and touching it after a no-op
 would report the index as freshly synced when nothing was re-read.
+
+## Bounding the blast radius
+
+`incremental_blast_radius_depth` caps how many reverse hops step 1 walks.
+`nil`, the default, keeps the unbounded transitive closure: every unit that
+reaches the changed file, at any depth, is re-extracted.
+
+The reason to cap it is cost. A unit's extracted content is mostly a function
+of its own source and its own reflection, so on most graphs the deep half of
+the closure re-derives bytes that do not change. On a 200-service chain in the
+dummy app, one leaf edit re-extracts 200 units unbounded and 2 at a depth
+of 1.
+
+The reason the default is not capped is that "mostly" is not "always". An STI
+grandchild reads its grandparent's reflection: `SportsCar < Car < Vehicle`
+inherits `Vehicle`'s associations, validations and callback chain, and a
+nested `has_many :through` resolves through the same kind of chain. The graph
+records only the one-hop superclass reference each source file mentions, so
+that grandchild sits two hops out while its content depends on hop zero. Set
+the key on a tree you know has neither shape.
+
+What the cap never affects is `dependents`. Edges change only when a unit is
+re-extracted, and the run marks every target of a re-extracted unit's edges,
+before and after registration, so a unit that gains or loses an inbound edge
+is rewritten by the second pass whether or not the walk reached it.
+`spec/integration/incremental_equivalence_spec.rb` holds a depth of 1 to
+full-extraction equivalence, including that case.
 
 ## Dispatch inventory
 
@@ -273,6 +301,18 @@ them for its **delta**:
 - **Untouched controllers' entries carry forward** from the previous
   generation, which payload seeding hardlinks into the run's payload
   directory.
+
+Re-assembly is scoped further, because a flow document only reaches
+`FlowPrecomputer::DEFAULT_MAX_DEPTH` units. The run walks the pre-change graph
+to that same depth from its changed files; a re-extracted controller inside
+that radius is re-assembled, and one outside it takes its
+`metadata[:flow_paths]` back from the previous index without paying for the
+assembly. Three cases opt out and re-assemble every re-extracted controller: a
+targeted `Extractor#refresh`, which has no change set; a routes re-run, which
+replaces every controller and moves the route a flow document carries without
+touching any dependency edge; and a controller whose action set no longer
+matches the previous index, which is how an action inherited from further up a
+controller chain than the radius reaches still lands.
 
 After the index is rewritten, a **dedicated flow-artifact sweep** removes
 every `flows/` document no index entry references. It validates against
