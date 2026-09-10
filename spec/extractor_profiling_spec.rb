@@ -116,8 +116,8 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
       extractor.extract_changed(['app/models/user.rb'])
 
       expect(profiled_phases).to eq(
-        ['payload seed', 'previous graph load', 'eager load', 'blast radius', 're-extraction',
-         'type index', 'graph analysis', 'flows', 'manifest and summary', 'publish']
+        ['payload seed', 'previous graph load', 'eager load', 'blast radius', 'flow radius',
+         're-extraction', 'type index', 'graph analysis', 'flows', 'manifest and summary', 'publish']
       )
     end
 

@@ -517,4 +517,48 @@ RSpec.describe Woods::FlowPrecomputer do
       end
     end
   end
+
+  describe '#recompute_delta with carried identifiers' do
+    # A re-extracted controller loses metadata[:flow_paths] whether or not
+    # its flows moved, so a carried controller still gets its annotation
+    # back: read out of the index entries it keeps, with no assembly.
+    it 'annotates a carried controller from the previous index without assembling it' do
+      FileUtils.mkdir_p(File.join(output_dir, 'flows'))
+      File.write(
+        File.join(output_dir, 'flows', 'flow_index.json'),
+        JSON.generate('CarriedController#index' => 'flows/CarriedController_index.json',
+                      'CarriedController#show' => 'flows/CarriedController_show.json')
+      )
+      assembler = instance_double(Woods::FlowAssembler)
+      allow(assembler).to receive(:assemble)
+      allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
+
+      annotations = described_class.new(units: [], graph: graph, output_dir: output_dir)
+                                   .recompute_delta(touched_units: [],
+                                                    carried_identifiers: ['CarriedController'])
+
+      expect(assembler).not_to have_received(:assemble)
+      expect(annotations).to eq(
+        'CarriedController' => {
+          'index' => 'flows/CarriedController_index.json',
+          'show' => 'flows/CarriedController_show.json'
+        }
+      )
+    end
+
+    it 'leaves a carried controller entries in the rewritten index' do
+      FileUtils.mkdir_p(File.join(output_dir, 'flows'))
+      File.write(
+        File.join(output_dir, 'flows', 'flow_index.json'),
+        JSON.generate('CarriedController#index' => 'flows/CarriedController_index.json')
+      )
+      allow(Woods::FlowAssembler).to receive(:new).and_return(instance_double(Woods::FlowAssembler))
+
+      described_class.new(units: [], graph: graph, output_dir: output_dir)
+                     .recompute_delta(touched_units: [], carried_identifiers: ['CarriedController'])
+
+      index = JSON.parse(File.read(File.join(output_dir, 'flows', 'flow_index.json')))
+      expect(index).to eq('CarriedController#index' => 'flows/CarriedController_index.json')
+    end
+  end
 end

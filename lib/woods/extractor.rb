@@ -538,6 +538,7 @@ module Woods
       affected_ids = profile_phase('blast radius') do
         @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
       end
+      @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
       touched = profile_phase('re-extraction') do
@@ -703,6 +704,29 @@ module Woods
       Woods.configuration&.incremental_blast_radius_depth
     end
 
+    # The units a controller's flow document could reach from this run's
+    # changed files, read off the pre-change graph.
+    #
+    # {FlowAssembler} stops expanding at {FlowPrecomputer::DEFAULT_MAX_DEPTH},
+    # so a controller further than that from everything the run changed
+    # assembles the same document it already has. The bound is the
+    # assembler's own constant, not a second literal: raising the assembly
+    # depth widens this walk with it.
+    #
+    # Reverse reachability is the same relation the refresh already rested on
+    # (`touched` is itself the graph's reverse closure), so this narrows the
+    # distance without changing the edge set behind the decision.
+    #
+    # @param change_set [Woods::ChangeSet]
+    # @return [Set<String>]
+    def flow_scope_for(change_set)
+      return Set.new unless Woods.configuration.precompute_flows
+
+      @dependency_graph.affected_by(
+        change_set.absolute_paths, max_depth: FlowPrecomputer::DEFAULT_MAX_DEPTH
+      ).to_set
+    end
+
     # @return [Boolean] whether phase timing is enabled for this process
     def profiling?
       ENV.fetch('WOODS_PROFILE', nil) == '1'
@@ -734,6 +758,10 @@ module Woods
 
       @dependents_dirty = Set.new
       @incremental_written = {}
+      # nil = no scope was computed for this run, so every re-extracted
+      # controller has its flows reassembled. {#refresh} leaves it that way.
+      @flow_scope = nil
+      @previous_flow_index_entries = nil
       @incremental_extractors = nil
       @active_record_names = nil
       @package_resolver = nil
@@ -1392,12 +1420,16 @@ module Woods
       removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
       return if reextracted.empty? && removed.empty?
 
-      Rails.logger.info "[Woods] Refreshing flows for #{reextracted.size} controller(s), " \
-                        "#{removed.size} removed..."
+      reassemble, carried = partition_flow_controllers(
+        reextracted.filter_map { |id| unit_from_payload(:controllers, id) }
+      )
+      Rails.logger.info "[Woods] Refreshing flows for #{reassemble.size} controller(s), " \
+                        "#{carried.size} carried forward, #{removed.size} removed..."
       precomputer = FlowPrecomputer.new(units: [], graph: @dependency_graph, output_dir: payload_dir.to_s)
       annotations = precomputer.recompute_delta(
-        touched_units: reextracted.filter_map { |id| unit_from_payload(:controllers, id) },
-        removed_identifiers: removed.to_a
+        touched_units: reassemble,
+        removed_identifiers: removed.to_a,
+        carried_identifiers: carried.map(&:identifier)
       )
       patch_flow_annotations(annotations)
       sweep_orphaned_flow_files
@@ -1408,6 +1440,52 @@ module Woods
       # the annotated files to match. A failure here raises like every
       # other refresh failure.
       regenerate_type_index(:controllers) if annotations.any?
+    end
+
+    # Split the run's re-extracted controllers into the ones whose flow
+    # documents have to be reassembled and the ones that only need their
+    # annotation back.
+    #
+    # A controller is reassembled when the run changed something its flow can
+    # reach ({#flow_scope_for}), or when its own action set no longer matches
+    # the previous generation's index. The second test is what catches an
+    # action arriving from further up a controller inheritance chain than the
+    # flow radius reaches, and a controller the index has never seen.
+    #
+    # Without a scope (a targeted {#refresh}, or a routes re-run) everything
+    # is reassembled, which is what this path always did.
+    #
+    # @param units [Array<ExtractedUnit>] the run's re-extracted controllers
+    # @return [Array(Array<ExtractedUnit>, Array<ExtractedUnit>)]
+    def partition_flow_controllers(units)
+      return [units, []] if @flow_scope.nil?
+
+      previous = previous_flow_index_actions
+      units.partition do |unit|
+        @flow_scope.include?(unit.identifier) || flow_actions_of(unit) != previous[unit.identifier]
+      end
+    end
+
+    # The actions a unit's metadata declares, as the index records them.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [Set<String>]
+    def flow_actions_of(unit)
+      Array(unit.metadata[:actions] || unit.metadata['actions']).to_set(&:to_s)
+    end
+
+    # The previous generation's flow index, grouped by controller.
+    #
+    # @return [Hash{String => Set<String>}] controller identifier to its
+    #   recorded action names, defaulting to an empty set
+    # @raise [Woods::ExtractionError] when the index is missing or corrupt
+    def previous_flow_index_actions
+      previous_flow_index_entries.keys.each_with_object(Hash.new { Set.new }) do |entry_point, grouped|
+        controller, action = entry_point.to_s.split('#', 2)
+        next unless action
+
+        grouped[controller] = grouped[controller] + [action]
+      end
     end
 
     # Does the run's seeded payload hold a flow family at all? An absent
@@ -1435,11 +1513,21 @@ module Woods
     # @return [Set<String>]
     # @raise [Woods::ExtractionError] when the index is missing or corrupt
     def previous_flow_index_controllers
+      previous_flow_index_entries.keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first }
+    end
+
+    # The previous generation's flow index itself, read once per run: both
+    # the removal set and the reassembly partition are derived from it.
+    #
+    # @return [Hash{String => String}] entry point to relative document path
+    # @raise [Woods::ExtractionError] when the index is missing or corrupt
+    def previous_flow_index_entries
+      return @previous_flow_index_entries if @previous_flow_index_entries
+
       index_path = payload_dir.join('flows', 'flow_index.json')
       raise Woods::ExtractionError, 'flows/ is populated but flow_index.json is missing' unless index_path.exist?
 
-      JSON.parse(AtomicFile.read(index_path))
-          .keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first }
+      @previous_flow_index_entries = JSON.parse(AtomicFile.read(index_path))
     rescue JSON::ParserError => e
       raise Woods::ExtractionError, "previous flow_index.json does not parse: #{e.message}"
     end
@@ -2894,6 +2982,11 @@ module Woods
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
+      # A routes re-run replaces every controller, and a flow document
+      # carries the route itself, which no dependency edge connects to the
+      # controller. Nothing about that is reachable by a graph walk, so the
+      # run drops its flow scope and reassembles every touched controller.
+      @flow_scope = nil if keys.include?(:routes)
 
       keys.each_with_object(Set.new) do |key, touched|
         touched.merge(replace_type_wholesale(key, affected_types))
