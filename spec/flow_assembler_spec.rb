@@ -651,4 +651,109 @@ RSpec.describe Woods::FlowAssembler do
       end
     end
   end
+
+  # One FlowAssembler serves every controller and action of a precompute run.
+  # Without memoization a unit reached from N controllers was globbed off
+  # disk, JSON-parsed and AST-parsed N times over.
+  describe 'per-instance memoization' do
+    let(:assembler) { described_class.new(graph: graph, extracted_dir: extracted_dir) }
+
+    def write_two_controllers_sharing_a_service
+      %w[AController BController].each do |controller|
+        write_unit(controller, metadata: { 'actions' => %w[index show] }, source_code: <<~RUBY)
+          class #{controller} < ApplicationController
+            def index
+              SharedService.call(params)
+            end
+
+            def show
+              SharedService.call(params)
+            end
+          end
+        RUBY
+      end
+
+      write_unit('SharedService', type: 'service', source_code: <<~RUBY)
+        class SharedService
+          def call
+            Post.where(id: id).first
+          end
+        end
+      RUBY
+    end
+
+    it 'reads a unit from disk once however many flows reach it' do
+      write_two_controllers_sharing_a_service
+      stub_graph_defaults
+      allow(graph).to receive(:node_exists?).with('SharedService').and_return(true)
+
+      reads = Hash.new(0)
+      allow(File).to receive(:read).and_wrap_original do |original, path, **kwargs|
+        reads[File.basename(path.to_s)] += 1
+        original.call(path, **kwargs)
+      end
+
+      %w[AController#index AController#show BController#index BController#show].each do |entry|
+        assembler.assemble(entry)
+      end
+
+      shared = reads.find { |filename, _| filename.start_with?('SharedService') }
+      expect(shared).not_to be_nil
+      expect(shared.last).to eq(1)
+    end
+
+    it 'parses a unit\'s source once however many flows reach it' do
+      write_two_controllers_sharing_a_service
+      stub_graph_defaults
+      allow(graph).to receive(:node_exists?).with('SharedService').and_return(true)
+
+      parser = assembler.instance_variable_get(:@parser)
+      parses = 0
+      allow(parser).to receive(:parse).and_wrap_original do |original, source|
+        parses += 1
+        original.call(source)
+      end
+
+      %w[AController#index AController#show BController#index BController#show].each do |entry|
+        assembler.assemble(entry)
+      end
+
+      # One whole-source parse per distinct unit: two controllers and the
+      # service, whatever the number of actions traced through them.
+      expect(parses).to eq(3)
+    end
+
+    it 'reuses the entry unit for the route rather than re-reading it' do
+      write_unit('PostsController',
+                 metadata: { 'routes' => { 'create' => [{ 'verb' => 'POST', 'path' => '/posts' }] } },
+                 source_code: <<~RUBY)
+                   class PostsController < ApplicationController
+                     def create
+                       head :created
+                     end
+                   end
+                 RUBY
+      stub_graph_defaults
+
+      reads = Hash.new(0)
+      allow(File).to receive(:read).and_wrap_original do |original, path, **kwargs|
+        reads[File.basename(path.to_s)] += 1
+        original.call(path, **kwargs)
+      end
+
+      flow = assembler.assemble('PostsController#create')
+
+      expect(flow.route).to eq(verb: 'POST', path: '/posts')
+      expect(reads.values.sum).to eq(1)
+    end
+
+    it 'bounds the unit cache so a long run cannot grow it without limit' do
+      stub_graph_defaults
+      cap = Woods::FlowAssembler::MEMO_LIMIT
+
+      (cap + 5).times { |i| assembler.send(:load_unit, "Absent#{i}") }
+
+      expect(assembler.instance_variable_get(:@unit_cache).size).to eq(cap)
+    end
+  end
 end

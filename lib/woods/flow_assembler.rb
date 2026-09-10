@@ -4,7 +4,6 @@ require 'digest'
 require 'json'
 require 'set'
 require_relative 'ast/parser'
-require_relative 'ast/method_extractor'
 require_relative 'flow_analysis/operation_extractor'
 require_relative 'flow_document'
 
@@ -25,15 +24,25 @@ module Woods
   #   puts flow.to_markdown
   #
   class FlowAssembler
+    # How many entries each per-instance memo holds before the oldest is
+    # dropped. One assembler serves a whole precompute run (every controller,
+    # every action), so an unbounded memo would hold the source and the parsed
+    # AST of every unit the run ever reached. A thousand covers the shared
+    # services a large app's flows keep landing on without pinning the whole
+    # index in memory.
+    MEMO_LIMIT = 1_000
+
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
     def initialize(graph:, extracted_dir:)
       @graph = graph
       @extracted_dir = extracted_dir
       @parser = Ast::Parser.new
-      @method_extractor = Ast::MethodExtractor.new(parser: @parser)
       @operation_extractor = FlowAnalysis::OperationExtractor.new
       @resolved_targets = {}
+      @unit_cache = {}
+      @ast_cache = {}
+      @method_node_cache = {}
     end
 
     # Assemble an execution flow from the given entry point.
@@ -114,7 +123,7 @@ module Woods
         file_path = unit_data[:file_path]
 
         # Extract operations from the relevant method
-        operations = extract_operations(source_code, method_name, metadata, unit_type)
+        operations = extract_operations(unit_id, source_code, method_name, metadata, unit_type)
 
         step = {
           unit: identifier,
@@ -146,17 +155,73 @@ module Woods
     # one the callee actually defines locally (inherited, dynamically
     # defined, or metaprogrammed) — losing the trace entirely would be worse
     # than over-including it.
-    def extract_operations(source_code, method_name, metadata, unit_type)
+    def extract_operations(unit_id, source_code, method_name, metadata, unit_type)
       operations = []
 
       # For controllers, prepend before_action callbacks
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
-      scope_node = method_name && @method_extractor.extract_method(source_code, method_name)
-      scope_node ||= @parser.parse(source_code)
+      scope_node = method_node(unit_id, source_code, method_name)
+      scope_node ||= parsed_source(unit_id, source_code)
       operations.concat(@operation_extractor.extract(scope_node))
 
       operations
+    end
+
+    # The unit's whole parsed source, parsed once per assembler instance.
+    #
+    # A unit reached from several controllers used to be re-parsed once per
+    # action of every controller that reached it, and Prism dominates the
+    # flow run's cost on a large app.
+    #
+    # @param unit_id [String] cache key; a unit's source is fixed for a run
+    # @param source_code [String] the unit's source
+    # @return [Ast::Node] root node
+    def parsed_source(unit_id, source_code)
+      memoize(@ast_cache, unit_id) { @parser.parse(source_code) }
+    end
+
+    # The `def` node for +method_name+, from a per-unit index built off the
+    # memoized parse.
+    #
+    # First definition wins for a name defined more than once, matching
+    # {Ast::MethodExtractor#extract_method}'s first-match lookup.
+    #
+    # @param unit_id [String] cache key
+    # @param source_code [String] the unit's source
+    # @param method_name [String, nil] the method the caller invoked
+    # @return [Ast::Node, nil] nil when no method was named, or the unit does
+    #   not define one by that name
+    def method_node(unit_id, source_code, method_name)
+      return nil unless method_name
+
+      nodes = memoize(@method_node_cache, unit_id) do
+        parsed_source(unit_id, source_code).find_all(:def).each_with_object({}) do |node, index|
+          index[node.method_name] ||= node
+        end
+      end
+
+      nodes[method_name.to_s]
+    end
+
+    # Read +key+ from +cache+, computing and storing it on a miss.
+    #
+    # Least-recently-used, using the fact that a Ruby Hash iterates in
+    # insertion order: a hit re-inserts the key at the young end, and
+    # +Hash#shift+ drops the old end once the cache is over {MEMO_LIMIT}.
+    # A nil value is a real answer (most call targets are not units) and is
+    # cached like any other.
+    #
+    # @param cache [Hash]
+    # @param key [Object]
+    # @return [Object] the cached or freshly computed value
+    def memoize(cache, key)
+      return cache[key] = cache.delete(key) if cache.key?(key)
+
+      value = yield
+      cache[key] = value
+      cache.shift while cache.size > MEMO_LIMIT
+      value
     end
 
     # Prepend before_action callbacks from controller metadata.
@@ -296,13 +361,27 @@ module Woods
       end
     end
 
-    # Load an ExtractedUnit's data from its JSON file on disk.
+    # Load an ExtractedUnit's data from its JSON file on disk, memoized per
+    # assembler instance.
+    #
+    # The glob and the JSON parse used to run once per expansion, so a unit
+    # reached from many controllers paid for both once per action of every one
+    # of them. The memo also makes {#extract_route} free: the entry unit it
+    # asks for is the one {#expand} just loaded.
+    #
+    # @param unit_id [String] Unit identifier
+    # @return [Hash, nil] symbolized unit data, or nil when no file matched
+    def load_unit(unit_id)
+      memoize(@unit_cache, unit_id) { read_unit(unit_id) }
+    end
+
+    # The disk half of {#load_unit}.
     #
     # Uses {Extractor#collision_safe_filename} convention (with SHA256 digest suffix).
     # Falls back to legacy {Extractor#safe_filename} for older indexes.
     # Searches across type subdirectories since the extractor writes to
     # `<output_dir>/<type>/<filename>.json`.
-    def load_unit(unit_id)
+    def read_unit(unit_id)
       base = unit_id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
       digest = Digest::SHA256.hexdigest(unit_id)[0, 8]
       filenames = [
