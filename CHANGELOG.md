@@ -22,6 +22,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A release_v2 spec greps `spec/` for hard-coded current-version literals** (`'= 2.0.0'`,
   `"2.0.0\n"`, `gem_version: '2.0.0'`-shaped strings), built from `Woods::VERSION`'s base, so
   the next version bump cannot leave one behind the way the beta1 cut did.
+- **`WOODS_PROFILE=1` logs a timing line per extraction phase.** The per-extractor
+  lines already reported extraction itself; everything after it (payload seed, previous
+  graph load, eager load, blast radius, re-extraction, type index, graph analysis, flows,
+  manifest and summary, publish) was unattributed, so a slow run could only be split by
+  guessing. One `[Woods] [profile] <phase> in N.NNs` line per phase, on the monotonic
+  clock. Off by default and free when off.
+
+### Changed
+
+- **Cycle detection is capped, and says so.** `GraphAnalyzer#analyze` runs on every
+  extraction regardless of the change set, and enumerating every cycle was the largest
+  part of it: one cycle per DFS back-edge, uncapped in count and in length, each
+  canonicalized by joining a path that on a deep DFS is thousands of nodes long. Two new
+  config keys bound it, `graph_cycle_limit` (default 500) and `graph_cycle_max_length`
+  (default 50, in distinct nodes); either firing sets the new
+  `stats.cycle_limit_reached` in `graph_analysis.json`. Set either to `nil` to remove
+  its cap and restore exhaustive enumeration. Signatures are now keyed by a digest of
+  the rotated cycle rather than the joined path. On a synthetic 8201-node graph, cycle
+  detection went from 8.6s to 0.4s.
+- **Bridge detection reuses its work.** `bfs_shortest_path` carries parent pointers
+  instead of enqueueing a copy of the path so far for every node it reaches, and forward
+  adjacency resolves through a per-analyzer memo instead of being re-derived on each of
+  the 200 sampled traversals. Output is unchanged. On the same graph, bridges went from
+  2.2s to 0.6s and the whole report from 3.1s to 1.0s.
+- **Flow assembly caches loaded units and parsed sources.** One `FlowAssembler` serves a
+  whole precompute run, but nothing was cached across it: a unit's JSON was re-globbed
+  and re-parsed on every expansion, and its source re-parsed once per action of every
+  controller that reached it. Three per-instance LRU memos (unit data, whole-source AST,
+  and the method index derived from it) bound at 1000 entries each. On 435 controllers x
+  7 actions over 3000 services, precompute went from 20.5s to 3.8s.
+- **The manifest and `SUMMARY.md` read each type index once.** Both derive their totals
+  from the per-type `_index.json` files and run back to back at the end of every
+  incremental run, so every index was globbed, read and parsed twice. An unreadable index
+  still drops that type from both, now with one warning instead of two.
+- **`graph_sha` is digested from the bytes written.** `graph_analysis.json`'s digest of
+  `dependency_graph.json` came from reading the file back off disk, one whole-file read
+  per run of an artifact that on a large app is tens of megabytes, to digest bytes the
+  run had just serialized. The value is unchanged.
 
 ### Fixed
 
