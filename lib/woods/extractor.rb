@@ -404,6 +404,7 @@ module Woods
       # package added between the two runs.
       @package_resolver = nil
       @incremental_extractors = nil
+      @persisted_index_stats = nil
       profile_phase('payload seed') { begin_payload! }
 
       # Eager load once — all extractors need loaded classes for introspection.
@@ -717,6 +718,7 @@ module Woods
       @incremental_extractors = nil
       @active_record_names = nil
       @package_resolver = nil
+      @persisted_index_stats = nil
     end
 
     # Write the graph and the derived artifacts after an incremental run.
@@ -2179,27 +2181,49 @@ module Woods
     end
 
     # Unit and chunk counts derived from the per-type _index.json files on
-    # disk — the source of truth after an incremental run, where only the
+    # disk: the source of truth after an incremental run, where only the
     # affected units were re-extracted.
     #
     # @return [Array(Hash{Symbol => Integer}, Integer)] counts by type, total chunk count
     def persisted_counts
-      counts = {}
-      chunks = 0
+      stats = persisted_index_stats
+      [stats.transform_values { |type_stats| type_stats[:count] },
+       stats.sum { |_type, type_stats| type_stats[:chunks] }]
+    end
 
-      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
-        entries = JSON.parse(AtomicFile.read(index_path))
-        counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
-        chunks += entries.sum { |e| e['chunk_count'].to_i }
+    # One pass over the persisted per-type _index.json files.
+    #
+    # {#persisted_counts} feeds the manifest and {#persisted_summary_stats}
+    # feeds SUMMARY.md, they run back to back at the end of every incremental
+    # run, and each used to parse every type index for itself. Reading once and
+    # deriving both is also what keeps the two artifacts from disagreeing about
+    # totals, which was previously a property of them using the same source
+    # rather than the same read.
+    #
+    # An unreadable index drops that whole type from the manifest and the
+    # summary alike, with one warning rather than the two the separate passes
+    # emitted. Sorted for determinism, since the glob order is the
+    # filesystem's.
+    #
+    # Memoized per run: invalidated at the start of {#extract_all} and
+    # {#prepare_incremental_run}, and again whenever {#regenerate_type_index}
+    # rewrites an index underneath it.
+    #
+    # @return [Hash{Symbol => Hash}] type => `{ count:, chunks:, namespaces: }`
+    def persisted_index_stats
+      @persisted_index_stats ||= Dir[payload_dir.join('*/_index.json').to_s].each_with_object({}) do |path, stats|
+        entries = JSON.parse(AtomicFile.read(path))
+        stats[File.basename(File.dirname(path)).to_sym] = {
+          count: entries.size,
+          chunks: entries.sum { |entry| entry['chunk_count'].to_i },
+          namespaces: namespace_histogram(entries.map { |entry| entry['namespace'] })
+        }
       rescue JSON::ParserError => e
-        # An unreadable index silently drops that whole type from the manifest
-        # counts — warn rather than undercount without a trace.
-        type = File.basename(File.dirname(index_path))
-        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in manifest counts: #{e.message}")
-        next
+        type = File.basename(File.dirname(path))
+        Rails.logger.warn(
+          "[Woods] Skipping unreadable #{type}/_index.json in manifest counts and summary totals: #{e.message}"
+        )
       end
-
-      [counts, chunks]
     end
 
     # Capture a temporal snapshot after extraction completes.
@@ -2355,32 +2379,14 @@ module Woods
     end
 
     # The incremental path's counterpart to {#results_summary_stats}: the same
-    # shape read back from the persisted per-type _index.json files, the source
-    # {#persisted_counts} uses for the manifest — so the two artifacts cannot
-    # disagree about totals. Sorted for determinism, since the glob order is
-    # the filesystem's.
+    # shape, read back through {#persisted_index_stats}. A type whose index is
+    # empty is left out, where the manifest still counts it as zero.
     #
-    # @return [Hash{Symbol => Hash}, nil] nil when the payload holds no type
-    #   indexes at all, so a bare index writes no summary — matching the full
-    #   path's early return when it extracted nothing
+    # @return [Hash{Symbol => Hash}, nil] nil when the payload holds no
+    #   non-empty type index, so a bare index writes no summary, matching the
+    #   full path's early return when it extracted nothing
     def persisted_summary_stats
-      stats = {}
-
-      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
-        entries = JSON.parse(AtomicFile.read(index_path))
-        next if entries.empty?
-
-        stats[File.basename(File.dirname(index_path)).to_sym] = {
-          count: entries.size,
-          chunks: entries.sum { |e| e['chunk_count'].to_i },
-          namespaces: namespace_histogram(entries.map { |e| e['namespace'] })
-        }
-      rescue JSON::ParserError => e
-        # Same posture as {#persisted_counts}: an unreadable index drops that
-        # type from the manifest and the summary alike, so the two still agree.
-        type = File.basename(File.dirname(index_path))
-        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in summary totals: #{e.message}")
-      end
+      stats = persisted_index_stats.reject { |_type, type_stats| type_stats[:count].zero? }
 
       stats.empty? ? nil : stats
     end
@@ -2398,6 +2404,10 @@ module Woods
     def regenerate_type_index(type_key)
       type_dir = payload_dir.join(type_key.to_s)
       return unless type_dir.directory?
+
+      # This run's counts and summary totals are read from the index files;
+      # rewriting one invalidates whatever was read before.
+      @persisted_index_stats = nil
 
       # Scan existing unit JSON files (exclude _index.json)
       index = Dir[type_dir.join('*.json')].filter_map do |file|
