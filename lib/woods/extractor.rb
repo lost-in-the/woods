@@ -405,6 +405,7 @@ module Woods
       @package_resolver = nil
       @incremental_extractors = nil
       @persisted_index_stats = nil
+      @graph_sha = nil
       profile_phase('payload seed') { begin_payload! }
 
       # Eager load once — all extractors need loaded classes for introspection.
@@ -719,6 +720,7 @@ module Woods
       @active_record_names = nil
       @package_resolver = nil
       @persisted_index_stats = nil
+      @graph_sha = nil
     end
 
     # Write the graph and the derived artifacts after an incremental run.
@@ -2113,10 +2115,23 @@ module Woods
       # registration order must not reach it (B-180).
       graph_data[:pagerank] = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
 
-      AtomicFile.write(
-        payload_dir.join('dependency_graph.json'),
-        json_serialize(graph_data)
-      )
+      payload = json_serialize(graph_data)
+      # The bytes about to land on disk are the bytes `graph_sha` covers, so
+      # keep the digest here rather than reading a whole large-app graph back
+      # to compute it. AtomicFile writes in binary mode and reads back as
+      # UTF-8, so the two digests are the same either way.
+      @graph_sha = Digest::SHA256.hexdigest(payload)
+      AtomicFile.write(payload_dir.join('dependency_graph.json'), payload)
+    end
+
+    # The digest of the dependency graph this run wrote.
+    #
+    # Falls back to reading the file for a caller that writes the analysis
+    # without having written the graph in the same run.
+    #
+    # @return [String] hex SHA256 of dependency_graph.json
+    def graph_sha
+      @graph_sha || Digest::SHA256.hexdigest(AtomicFile.read(payload_dir.join('dependency_graph.json')))
     end
 
     def write_graph_analysis
@@ -2124,9 +2139,7 @@ module Woods
 
       enriched = @graph_analysis.merge(
         generated_at: Time.current.iso8601,
-        graph_sha: Digest::SHA256.hexdigest(
-          AtomicFile.read(payload_dir.join('dependency_graph.json'))
-        )
+        graph_sha: graph_sha
       )
 
       AtomicFile.write(

@@ -2387,6 +2387,29 @@ RSpec.describe Woods::Extractor do
       extractor.send(:write_graph_analysis)
     end
 
+    # The bytes write_dependency_graph just serialized are the bytes on disk,
+    # so re-reading a graph the size of a large app's only to digest it was a
+    # whole-file read per run for nothing.
+    it 'digests the bytes write_dependency_graph wrote rather than re-reading the file' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_dependency_graph)
+
+      expect(Woods::AtomicFile).not_to receive(:read)
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      on_disk = File.read(File.join(output_dir, 'dependency_graph.json'))
+      expect(output['graph_sha']).to eq(Digest::SHA256.hexdigest(on_disk))
+    end
+
+    it 'falls back to reading the file when this run wrote no graph' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expect(output['graph_sha']).to eq(Digest::SHA256.hexdigest('{"nodes":{},"edges":[]}'))
+    end
+
     it 'preserves original analysis data alongside staleness metadata' do
       extractor.instance_variable_set(:@graph_analysis, { hubs: %w[User Post], orphans: ['Legacy'] })
       extractor.send(:write_graph_analysis)
