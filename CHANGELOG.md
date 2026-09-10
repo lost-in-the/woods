@@ -65,8 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every reader resolves through the pointer and a crash there leaves an unreferenced partial
   payload the next run prunes. `generation.json` itself, the watch daemon's status file, the
   update check cache, the Obsidian and Unblocked exports, Notion sync state, temporal
-  snapshots, embedding checkpoints, MCP task records and the gem mapper's own output all
-  keep the per-file fsync: their readers do not go through the pointer.
+  snapshots, embedding checkpoints and MCP task records all keep the per-file fsync: their
+  readers do not go through the pointer. The gem mapper's self-map publishes through the
+  same pointer but keeps its per-file fsync for now; it is a small payload and adopts the
+  single flush in a follow-up.
 
   `sync_directory_tree` tries `syncfs(2)` through Fiddle, then `sync -f <dir>`, then a bare
   `sync`, then an `fsync` on every file in the tree, and returns which one ran. The last

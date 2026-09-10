@@ -287,8 +287,6 @@ module Woods
       @extractors = value
     end
 
-    # @param value [Boolean] Must be true or false
-    # @raise [ConfigurationError] if value is not a boolean
     # Force an fsync on every payload file as it is written, on top of the
     # single flush the publish already performs.
     #
@@ -312,6 +310,8 @@ module Woods
       @durable_payload_writes = value
     end
 
+    # @param value [Boolean] Must be true or false
+    # @raise [ConfigurationError] if value is not a boolean
     def pretty_json=(value)
       validate_boolean!(:pretty_json, value)
       @pretty_json = value
