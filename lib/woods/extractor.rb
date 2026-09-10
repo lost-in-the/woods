@@ -1370,12 +1370,14 @@ module Woods
         annotated.each do |unit|
           AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
-            json_serialize(unit.to_h)
+            json_serialize(unit.to_h),
+            durable: false
           )
         end
         AtomicFile.write(
           type_dir.join('_index.json'),
-          json_serialize(type_index_entries(units))
+          json_serialize(type_index_entries(units)),
+          durable: false
         )
       end
     end
@@ -1584,7 +1586,7 @@ module Woods
         end
         next if JSON.generate(data) == before
 
-        AtomicFile.write(path, json_serialize(data))
+        AtomicFile.write(path, json_serialize(data), durable: false)
       end
     end
 
@@ -1808,7 +1810,7 @@ module Woods
       else
         metadata.delete('package')
       end
-      AtomicFile.write(file, json_serialize(data))
+      AtomicFile.write(file, json_serialize(data), durable: false)
 
       identifier = data['identifier']
       type = (data['type'] || type_dir.singularize).to_sym
@@ -1872,7 +1874,7 @@ module Woods
       payload = json_serialize(unit.to_h)
       return if identical_on_disk?(path, payload)
 
-      AtomicFile.write(path, payload)
+      AtomicFile.write(path, payload, durable: false)
     end
 
     # The serialized `extracted_at` scalar as {ExtractedUnit#to_h} +
@@ -2117,14 +2119,16 @@ module Woods
         units.each do |unit|
           AtomicFile.write(
             type_dir.join(collision_safe_filename(unit.identifier)),
-            json_serialize(unit.to_h)
+            json_serialize(unit.to_h),
+            durable: false
           )
         end
 
         # Also write a type index for fast lookups
         AtomicFile.write(
           type_dir.join('_index.json'),
-          json_serialize(type_index_entries(units))
+          json_serialize(type_index_entries(units)),
+          durable: false
         )
       end
     end
@@ -2227,7 +2231,7 @@ module Woods
       # to compute it. AtomicFile writes in binary mode and reads back as
       # UTF-8, so the two digests are the same either way.
       @graph_sha = Digest::SHA256.hexdigest(payload)
-      AtomicFile.write(payload_dir.join('dependency_graph.json'), payload)
+      AtomicFile.write(payload_dir.join('dependency_graph.json'), payload, durable: false)
     end
 
     # The digest of the dependency graph this run wrote.
@@ -2250,7 +2254,8 @@ module Woods
 
       AtomicFile.write(
         payload_dir.join('graph_analysis.json'),
-        json_serialize(enriched)
+        json_serialize(enriched),
+        durable: false
       )
     end
 
@@ -2295,7 +2300,8 @@ module Woods
 
       AtomicFile.write(
         payload_dir.join('manifest.json'),
-        json_serialize(manifest)
+        json_serialize(manifest),
+        durable: false
       )
     end
 
@@ -2477,7 +2483,8 @@ module Woods
 
       AtomicFile.write(
         payload_dir.join('SUMMARY.md'),
-        summary.join("\n")
+        summary.join("\n"),
+        durable: false
       )
     end
 
@@ -2547,7 +2554,8 @@ module Woods
 
       AtomicFile.write(
         type_dir.join('_index.json'),
-        json_serialize(index)
+        json_serialize(index),
+        durable: false
       )
     end
 
@@ -3463,7 +3471,7 @@ module Woods
 
       return if JSON.generate(data) == before
 
-      AtomicFile.write(path, json_serialize(data))
+      AtomicFile.write(path, json_serialize(data), durable: false)
       affected_types&.add(extractor_key)
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
