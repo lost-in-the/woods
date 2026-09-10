@@ -21,7 +21,10 @@ module Woods
       #
       # @yield Block to trace
       # @return [Array<Hash>] Collected trace events
+      # @raise [ArgumentError] if no block is given
       def self.record(&block)
+        raise ArgumentError, 'block required' unless block
+
         traces = []
 
         trace = TracePoint.new(:call, :return) do |tp|

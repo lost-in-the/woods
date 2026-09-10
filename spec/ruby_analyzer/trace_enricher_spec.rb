@@ -17,6 +17,21 @@ RSpec.describe Woods::RubyAnalyzer::TraceEnricher do
   end
 
   describe '.record' do
+    it 'rejects a missing block before creating a trace' do
+      traces = []
+      allow(TracePoint).to receive(:new).and_wrap_original do |original, *events, &callback|
+        original.call(*events, &callback).tap { |trace| traces << trace }
+      end
+
+      aggregate_failures do
+        expect { described_class.record }.to raise_error(ArgumentError, 'block required')
+        expect(traces).to be_empty
+        expect(traces.any?(&:enabled?)).to be(false)
+      end
+    ensure
+      traces&.each(&:disable)
+    end
+
     it 'captures trace data from a block' do
       trace_data = described_class.record do
         # Define and call a simple method
