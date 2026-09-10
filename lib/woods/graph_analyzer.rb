@@ -212,6 +212,7 @@ module Woods
 
       pairs.each do |source, target|
         path = bfs_shortest_path(source, target)
+
         next unless path && path.size > 2
 
         # Credit intermediate nodes (exclude source and target)
@@ -996,7 +997,25 @@ module Woods
       pairs.to_a
     end
 
+    # Forward adjacency, resolved once per node per analyzer instance.
+    #
+    # {#bridges} runs `sample_size` whole-graph traversals, and
+    # `DependencyGraph#dependencies_of` sorts and flattens the node's edge
+    # buckets on every call, so an uncached BFS re-derived the same adjacency
+    # list up to 200 times per node. Populated on demand rather than up front:
+    # a traversal that never reaches a node should not pay for it.
+    #
+    # @return [Hash{String => Array<String>}]
+    def adjacency
+      @adjacency ||= Hash.new { |cache, identifier| cache[identifier] = @graph.dependencies_of(identifier) }
+    end
+
     # BFS shortest path between two nodes, following forward edges.
+    #
+    # Carries parent pointers rather than a path per queue entry. The old form
+    # allocated a copy of the path so far for every node it enqueued, which on
+    # a large graph is a full array per node per traversal; the path is now
+    # built once, for the one node that matched.
     #
     # @param source [String] Starting node identifier
     # @param target [String] Target node identifier
@@ -1004,24 +1023,39 @@ module Woods
     def bfs_shortest_path(source, target)
       return [source] if source == target
 
-      visited = Set.new([source])
-      queue = [[source, [source]]]
+      parents = { source => nil }
+      queue = [source]
+      head = 0
 
-      while queue.any?
-        current, path = queue.shift
+      while head < queue.size
+        current = queue[head]
+        head += 1
 
-        @graph.dependencies_of(current).each do |neighbor|
-          next if visited.include?(neighbor)
+        adjacency[current].each do |neighbor|
+          next if parents.key?(neighbor)
 
-          new_path = path + [neighbor]
-          return new_path if neighbor == target
+          parents[neighbor] = current
+          return path_to(parents, neighbor) if neighbor == target
 
-          visited.add(neighbor)
-          queue.push([neighbor, new_path])
+          queue.push(neighbor)
         end
       end
 
       nil
+    end
+
+    # Walk parent pointers back to the source and reverse.
+    #
+    # @param parents [Hash{String => String, nil}] node => the node it was reached from
+    # @param node [String] the end of the path
+    # @return [Array<String>] source-first path ending at +node+
+    def path_to(parents, node)
+      path = []
+      while node
+        path << node
+        node = parents[node]
+      end
+      path.reverse
     end
   end
 end
