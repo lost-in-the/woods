@@ -67,6 +67,60 @@ RSpec.describe Woods::AtomicFile do
       described_class.write(File.join(@dir, 'note.md'), 'data')
     end
 
+    # The durability model this gem publishes under: readers resolve only
+    # through `generation.json`, so a payload file has no reader until the
+    # pointer names it. `durable: false` drops the two forced flushes and
+    # keeps everything that makes the write atomic (tempfile, chmod, rename).
+    describe 'durable:' do
+      it 'writes the same bytes and the same mode as the durable path' do
+        durable = File.join(@dir, 'durable.json')
+        deferred = File.join(@dir, 'deferred.json')
+        content = JSON.generate('identifier' => 'User', 'note' => 'em dash \u2014 here')
+
+        described_class.write(durable, content)
+        described_class.write(deferred, content, durable: false)
+
+        expect(File.binread(deferred)).to eq(File.binread(durable))
+        expect(File.stat(deferred).mode & 0o777).to eq(File.stat(durable).mode & 0o777)
+      end
+
+      it 'honours an explicit mode while non-durable' do
+        path = File.join(@dir, 'wide.json')
+        described_class.write(path, 'data', mode: 0o644, durable: false)
+        expect(File.stat(path).mode & 0o777).to eq(0o644)
+      end
+
+      it 'does not fsync the temp file or the directory' do
+        fsyncs = 0
+        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        expect(described_class).not_to receive(:fsync_directory)
+
+        described_class.write(File.join(@dir, 'deferred.json'), 'data', durable: false)
+
+        expect(fsyncs).to eq(0)
+      end
+
+      it 'still fsyncs both when durable (the default)' do
+        fsyncs = 0
+        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
+
+        described_class.write(File.join(@dir, 'durable.json'), 'data')
+
+        expect(fsyncs).to eq(1)
+      end
+
+      it 'cleans up and preserves the target when a non-durable rename fails' do
+        path = File.join(@dir, 'note.md')
+        File.write(path, 'original')
+        allow(File).to receive(:rename).and_raise(Errno::EACCES)
+
+        expect { described_class.write(path, 'new', durable: false) }.to raise_error(Errno::EACCES)
+        expect(File.read(path)).to eq('original')
+        expect(Dir.children(@dir).reject { |f| f == 'note.md' }).to be_empty
+      end
+    end
+
     it 'uses unique temporary names for concurrent writers' do
       path = File.join(@dir, 'note.md')
       temporary_paths = Queue.new

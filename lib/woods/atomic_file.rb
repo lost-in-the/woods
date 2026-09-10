@@ -25,11 +25,30 @@ module Woods
     # one: the watch daemon's +watch_status.json+, read by host-side hooks
     # through a bind mount).
     #
+    # +durable:+ chooses when the bytes are forced to the disk, never whether
+    # the write is atomic. Both paths go tempfile, chmod, rename, so a reader
+    # sees the old content or the new content and never a torn partial.
+    # +durable: false+ drops the two forced flushes (the temp file's own
+    # +fsync+ and the containing directory's), which is the whole cost of the
+    # write on a journalling filesystem: roughly 8.9ms per file against
+    # 0.11ms without, measured on btrfs.
+    #
+    # It is only safe for a file with no reader until something else commits
+    # it. Woods' payload files qualify: every reader resolves through
+    # +generation.json+, and that pointer is written durably after
+    # {.sync_directory_tree} has flushed the payload it names. A file whose
+    # readers do not go through the pointer (the watch daemon's status, the
+    # update check's cache, an export, an embedding checkpoint) must stay
+    # durable.
+    #
     # @param path [String, Pathname] destination path
     # @param content [String] file content
     # @param mode [Integer] permissions for the written file (default 0600)
+    # @param durable [Boolean] force the bytes to disk before returning
+    #   (default true). Pass false only for a file that something else makes
+    #   durable before any reader can resolve it.
     # @return [void]
-    def write(path, content, mode: 0o600)
+    def write(path, content, mode: 0o600, durable: true)
       path = path.to_s
       FileUtils.mkdir_p(File.dirname(path))
       tmp = Tempfile.new('.woods-', File.dirname(path))
@@ -38,13 +57,13 @@ module Woods
       tmp.binmode
       tmp.write(content)
       tmp.flush
-      tmp.fsync
+      tmp.fsync if durable
       tmp.close
       # Chmod the temp file so the destination is born with its final
       # permissions — never observed more open or more closed in between.
       File.chmod(mode, tmp.path)
       File.rename(tmp.path, path)
-      fsync_directory(File.dirname(path))
+      fsync_directory(File.dirname(path)) if durable
     rescue StandardError
       tmp&.close
       tmp&.unlink
