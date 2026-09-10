@@ -8,10 +8,10 @@
 #   large host app that made it the fixed floor of every incremental run. Two
 #   phases dominate:
 #
-#   1. #cycles   — one cycle per DFS back-edge, each canonicalized into a
+#   1. #cycles   (one cycle per DFS back-edge, each canonicalized into a
 #                  signature. Uncapped, a dense graph yields tens of thousands
-#                  of them, most thousands of nodes long.
-#   2. #bridges  — 200 whole-graph BFS runs for sampled betweenness.
+#                  of them, most thousands of nodes long)
+#   2. #bridges  (200 whole-graph BFS runs for sampled betweenness)
 #
 #   The bench builds a synthetic graph in the shape of a large Rails app
 #   (8201 units, 4 outgoing edges each, 30% of them pointing at one of 50

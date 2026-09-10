@@ -886,7 +886,7 @@ module Woods
                 parent[neighbor] = node
                 stack.push([neighbor, :enter])
               when gray
-                # Found a cycle — extract it from the path
+                # Found a cycle: extract it from the path
                 collect_cycle(path, neighbor, found_cycles, seen_cycle_signatures)
               end
               # black nodes are fully explored, skip them

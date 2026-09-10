@@ -664,8 +664,8 @@ module Woods
     # Time one phase of a run and log how long it took, when WOODS_PROFILE=1.
     #
     # The per-extractor lines (see {#extract_all_sequential}) already report
-    # extraction itself. Everything after it — the graph load, the analysis,
-    # the flows, the publish — was unattributed, so a slow run could only be
+    # extraction itself. Everything after it (the graph load, the analysis,
+    # the flows, the publish) was unattributed, so a slow run could only be
     # split by guessing. Off by default and free when off: the block is
     # yielded directly, with no timing and no log line. Timed on the
     # monotonic clock, so a wall-clock adjustment mid-run cannot produce a
