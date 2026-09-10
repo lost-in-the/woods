@@ -1811,42 +1811,6 @@ RSpec.describe Woods::Extractor do
       after_generation = Woods::Generation.new(output_dir: output_dir).current.number
       expect(after_generation).to eq(before_generation)
     end
-
-    # The analysis is a pure function of the graph, and `graph_sha` already
-    # digests the graph bytes this run wrote, so an unchanged digest means
-    # the seeded graph_analysis.json is the answer. Reading that digest back
-    # costs a JSON parse of one small file against a whole-graph analysis.
-    context 'when the graph did not change' do
-      def seed_analysis(sha)
-        dir = extractor.send(:payload_dir)
-        FileUtils.mkdir_p(dir)
-        File.write(File.join(dir, 'dependency_graph.json'), '{"nodes":{}}')
-        File.write(File.join(dir, 'graph_analysis.json'),
-                   JSON.generate('orphans' => ['Stale'], 'graph_sha' => sha))
-      end
-
-      it 'carries the previous analysis forward instead of recomputing it' do
-        seed_analysis('placeholder')
-        seed_analysis(extractor.send(:graph_sha))
-
-        expect(Woods::GraphAnalyzer).not_to receive(:new)
-
-        extractor.send(:write_incremental_graph_analysis)
-
-        analysis = JSON.parse(File.read(File.join(extractor.send(:payload_dir), 'graph_analysis.json')))
-        expect(analysis['orphans']).to eq(['Stale'])
-      end
-
-      it 'still recomputes when the digest moved' do
-        seed_analysis('a-digest-from-some-other-graph')
-        allow(extractor).to receive(:write_graph_analysis)
-        allow(Woods::GraphAnalyzer).to receive(:new).and_return(instance_double(Woods::GraphAnalyzer, analyze: {}))
-
-        extractor.send(:write_incremental_graph_analysis)
-
-        expect(Woods::GraphAnalyzer).to have_received(:new)
-      end
-    end
   end
 
   # ── estimated_tokens_from ────────────────────────────────────────────

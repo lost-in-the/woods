@@ -1046,48 +1046,11 @@ module Woods
     # @return [void]
     # @raise [StandardError] whatever GraphAnalyzer or the write raised
     def write_incremental_graph_analysis
-      return if carried_graph_analysis?
-
       @graph_analysis = build_graph_analyzer.analyze
       write_graph_analysis
     rescue StandardError => e
       Rails.logger.error "[Woods] Incremental graph analysis failed: #{e.message}"
       raise
-    end
-
-    # Was the seeded generation's analysis computed over exactly this graph?
-    #
-    # The analysis is a pure function of the graph, and `graph_sha` already
-    # digests the bytes {#write_dependency_graph} wrote a moment ago, so the
-    # comparison costs one parse of a small file rather than the whole-graph
-    # pass it decides against (0.7ms against 1.0s on an 8201-node synthetic
-    # graph, and analysis on a real host graph is far slower than that). A
-    # run that touched only unit contents leaves the graph alone, so it pays
-    # for nothing.
-    #
-    # The seeded file is already in this run's payload directory, so
-    # carrying it forward is not writing it again. The values are still
-    # loaded, because {#write_structural_summary} reads hubs and volatile
-    # dependencies off them and would otherwise drop those lines.
-    #
-    # Two things this deliberately does not detect: an unparseable analysis
-    # (recompute, do not fail), and a change to the analyzer's own knobs
-    # (`graph_cycle_limit` and friends) with the graph unchanged, which takes
-    # effect on the next run that moves the graph, or on a full extraction.
-    #
-    # @return [Boolean]
-    def carried_graph_analysis?
-      path = payload_dir.join('graph_analysis.json')
-      return false unless path.exist?
-
-      previous = JSON.parse(AtomicFile.read(path), symbolize_names: true)
-      return false unless previous[:graph_sha] == graph_sha
-
-      @graph_analysis = previous
-      Rails.logger.info '[Woods] Graph unchanged this run, carrying graph_analysis.json forward'
-      true
-    rescue JSON::ParserError
-      false
     end
 
     # ──────────────────────────────────────────────────────────────────────
