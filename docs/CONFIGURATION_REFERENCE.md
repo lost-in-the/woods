@@ -362,6 +362,7 @@ end
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
 
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
+| `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
 
 `incremental_blast_radius_depth` is unbounded by default because a unit two hops
 out really can have content that depends on the changed file. An STI grandchild
@@ -372,6 +373,19 @@ superclass reference each source file mentions. Set the key on a tree you know
 has neither shape; the units it stops re-extracting still get their `dependents`
 list refreshed, and `spec/integration/incremental_equivalence_spec.rb` holds a
 depth of 1 to full-extraction equivalence.
+
+`durable_payload_writes` is off by default, and off is not the weaker
+guarantee. Readers resolve only through `generation.json`, so a payload file
+has no reader until that pointer names it. Every publish flushes the whole
+payload directory once (`syncfs`, else `sync -f`, else `sync`, else a per-file
+`fsync` pass) *before* writing the pointer, which makes the contract: when
+`generation.json` is durable, every file in the payload it names is durable.
+A crash before that leaves an unreferenced partial payload the next run prunes.
+
+Turning the key on buys exactly one thing: an individual payload file being
+durable before the pointer exists. It costs two forced flushes per file, about
+8.9ms each on btrfs, so 8000 units is roughly 71s of writing against 1s. It
+cannot disable the publish flush, which has no opt-out.
 
 When either cap fires, `graph_analysis.json` reports `stats.cycle_limit_reached: true`
 alongside `stats.cycle_count`, so a reader of the `cycles` array can tell a truncated

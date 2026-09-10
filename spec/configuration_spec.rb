@@ -426,6 +426,26 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#durable_payload_writes' do
+    it 'defaults to false: the payload is made durable in one flush at publish time' do
+      expect(described_class.new.durable_payload_writes).to be(false)
+    end
+
+    it 'accepts true for a host that wants per-file fsync back' do
+      config = described_class.new
+      config.durable_payload_writes = true
+
+      expect(config.durable_payload_writes).to be(true)
+    end
+
+    it 'rejects a non-boolean' do
+      config = described_class.new
+
+      expect { config.durable_payload_writes = 'yes' }
+        .to raise_error(Woods::ConfigurationError, /durable_payload_writes must be true or false/)
+    end
+  end
+
   describe '#incremental_blast_radius_depth' do
     it 'defaults to nil, the unbounded closure' do
       expect(described_class.new.incremental_blast_radius_depth).to be_nil

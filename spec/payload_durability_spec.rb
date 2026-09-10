@@ -150,6 +150,53 @@ RSpec.describe 'payload durability' do
     end
   end
 
+  # The escape hatch, for a host that wants the old cost back. It buys back
+  # per-file durability during the write; it can never take the publish flush
+  # away, because that is the guarantee itself.
+  describe 'durable_payload_writes = true' do
+    before do
+      Woods.configuration.durable_payload_writes = true
+      extractor.send(:begin_payload!)
+      models = [unit(:model, 'User')]
+      models.each { |built| extractor.dependency_graph.register(built) }
+      extractor.instance_variable_set(:@results, { model: models })
+    end
+
+    it 'writes payload files durably again' do
+      extractor.send(:write_results)
+      extractor.send(:write_dependency_graph)
+
+      expect(payload_writes).not_to be_empty
+      expect(payload_writes.reject { |write| write[:durable] == true }).to be_empty
+    end
+
+    it 'makes FlowPrecomputer write durably again' do
+      graph = Woods::DependencyGraph.new
+      controller = unit(:controller, 'OrdersController')
+      controller.metadata = { actions: ['index'] }
+      graph.register(controller)
+
+      Woods::FlowPrecomputer.new(units: [controller], graph: graph, output_dir: output_dir).precompute
+
+      flow_writes = writes.select { |write| write[:path].include?('/flows/') }
+      expect(flow_writes).not_to be_empty
+      expect(flow_writes.reject { |write| write[:durable] == true }).to be_empty
+    end
+
+    it 'still flushes the payload before the pointer write' do
+      allow(Woods::AtomicFile).to receive(:sync_directory_tree) do |directory|
+        events << [:sync, directory.to_s]
+        :syncfs
+      end
+
+      extractor.send(:publish_generation, 'full')
+
+      sync_at = events.index { |kind, _| kind == :sync }
+      pointer_at = events.index { |kind, path| kind == :write && path.end_with?('generation.json') }
+      expect(sync_at).to be < pointer_at
+    end
+  end
+
   # Files whose readers do not resolve through `generation.json` keep the
   # per-file fsync: nothing else ever makes them durable.
   describe 'writers outside the payload' do

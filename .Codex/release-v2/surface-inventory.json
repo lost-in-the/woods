@@ -49,6 +49,8 @@
     "context_format=",
     "dump_retention_count",
     "dump_retention_count=",
+    "durable_payload_writes",
+    "durable_payload_writes=",
     "embedding_model",
     "embedding_model=",
     "embedding_options",
@@ -985,7 +987,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 107,
+    "configuration_attributes": 109,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
