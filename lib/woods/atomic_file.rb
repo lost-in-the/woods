@@ -157,6 +157,12 @@ module Woods
         fsync_path(entry)
       end
       fsync_path(directory)
+      # The directory entry that names this tree lives in the parent, so a
+      # freshly created (or renamed) payload directory is only durable once
+      # the parent is flushed too. The three faster strategies flush a whole
+      # filesystem and cover this for free; only the scoped pass has to say
+      # it.
+      fsync_path(File.dirname(directory))
       :fsync_pass
     end
 

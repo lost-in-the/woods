@@ -33,6 +33,9 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
     @original_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.concurrent_extraction = false
+    # The payload flush is real work against the real filesystem; the phase
+    # line is what this spec is about, not the syscall.
+    allow(Woods::AtomicFile).to receive(:sync_directory_tree).and_return(:syncfs)
   end
 
   after do
@@ -54,7 +57,7 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
        deduplicate_results annotate_packages resolve_dependents enrich_with_git_data
        annotate_graph_with_git_data normalize_file_paths write_results
        sweep_orphaned_unit_files write_dependency_graph write_graph_analysis
-       write_manifest write_structural_summary capture_snapshot publish_generation
+       write_manifest write_structural_summary capture_snapshot
        log_summary].each do |phase|
       allow(extractor).to receive(phase)
     end
@@ -68,7 +71,7 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
     )
     %i[safe_eager_load! finalize_incremental_unit_json regenerate_type_index
        write_dependency_graph write_incremental_graph_analysis refresh_incremental_flows
-       write_manifest write_structural_summary publish_generation].each do |phase|
+       write_manifest write_structural_summary].each do |phase|
       allow(extractor).to receive(phase)
     end
     %i[reconcile_class_based_types rerun_whole_app_extractors reannotate_packages
@@ -106,7 +109,7 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       expect(profiled_phases).to eq(
         ['payload seed', 'eager load', 'extraction', 'graph analysis', 'write results',
-         'flows', 'manifest and summary', 'publish']
+         'flows', 'manifest and summary', 'payload sync', 'publish']
       )
     end
 
@@ -117,7 +120,8 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       expect(profiled_phases).to eq(
         ['payload seed', 'previous graph load', 'eager load', 'blast radius', 'flow radius',
-         're-extraction', 'type index', 'graph analysis', 'flows', 'manifest and summary', 'publish']
+         're-extraction', 'type index', 'graph analysis', 'flows', 'manifest and summary',
+         'payload sync', 'publish']
       )
     end
 

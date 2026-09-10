@@ -213,7 +213,9 @@ RSpec.describe Woods::AtomicFile do
         File.join(@dir, 'flows', 'nested', 'show.json'),
         File.join(@dir, 'models'),
         File.join(@dir, 'flows', 'nested'),
-        @dir
+        @dir,
+        # The directory entry naming the tree lives in the parent.
+        File.dirname(@dir)
       )
     end
 

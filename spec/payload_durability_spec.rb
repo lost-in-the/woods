@@ -26,6 +26,8 @@ RSpec.describe 'payload durability' do
 
   # Every AtomicFile.write this example makes, as { path:, durable: }.
   let(:writes) { [] }
+  # The same writes plus the payload flush, in the order they happened.
+  let(:events) { [] }
 
   before do
     stub_const('Rails', double('Rails'))
@@ -36,6 +38,7 @@ RSpec.describe 'payload durability' do
     Woods.configuration = Woods::Configuration.new
     allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content, **options|
       writes << { path: path.to_s, durable: options.fetch(:durable, true) }
+      events << [:write, path.to_s]
       original.call(path, content, **options)
     end
   end
@@ -103,6 +106,47 @@ RSpec.describe 'payload durability' do
       flow_writes = writes.select { |write| write[:path].include?('/flows/') }
       expect(flow_writes.length).to be >= 2
       expect(flow_writes.reject { |write| write[:durable] == false }).to be_empty
+    end
+  end
+
+  # The guarantee that replaces per-file fsync. It is an ordering guarantee,
+  # so ordering is what the spec pins.
+  describe 'publishing a generation' do
+    before do
+      allow(Woods::AtomicFile).to receive(:sync_directory_tree) do |directory|
+        events << [:sync, directory.to_s]
+        :syncfs
+      end
+    end
+
+    it 'flushes the payload directory before writing the pointer' do
+      extractor.send(:begin_payload!)
+      payload = extractor.send(:payload_dir).to_s
+
+      extractor.send(:publish_generation, 'full')
+
+      sync_at = events.index { |kind, _| kind == :sync }
+      pointer_at = events.index { |kind, path| kind == :write && path.end_with?('generation.json') }
+      expect(sync_at).not_to be_nil
+      expect(pointer_at).not_to be_nil
+      expect(sync_at).to be < pointer_at
+      expect(events[sync_at][1]).to eq(payload)
+    end
+
+    it 'keeps generation.json itself durable' do
+      extractor.send(:begin_payload!)
+      extractor.send(:publish_generation, 'full')
+
+      pointer = writes.find { |write| write[:path].end_with?('generation.json') }
+      expect(pointer[:durable]).to be(true)
+    end
+
+    it 'flushes the flat output directory when the run built no payload' do
+      FileUtils.mkdir_p(output_dir)
+
+      extractor.send(:publish_generation, 'full')
+
+      expect(events.find { |kind, _| kind == :sync }[1]).to eq(output_dir)
     end
   end
 

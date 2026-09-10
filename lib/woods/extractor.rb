@@ -828,7 +828,11 @@ module Woods
     # @return [void]
     def publish_generation(reason)
       generation = Generation.new(output_dir: @output_dir)
-      marker = generation.bump!(reason: reason, payload: publishable_payload_name(generation))
+      # Resolve (and if necessary rename) the payload first, so the flush
+      # below covers the directory under the name the pointer will carry.
+      payload = publishable_payload_name(generation)
+      profile_phase('payload sync') { sync_payload }
+      marker = generation.bump!(reason: reason, payload: payload)
       prune_payloads(marker.number)
       marker
     rescue StandardError => e
@@ -982,6 +986,33 @@ module Woods
     # @return [Array<String>] every directory name a payload can contain
     def payload_entry_dirs
       EXTRACTORS.keys.map(&:to_s) + PAYLOAD_DIRS
+    end
+
+    # One filesystem flush that makes this run's whole payload durable,
+    # immediately before the pointer that names it is written durably.
+    #
+    # This is the guarantee that replaces the per-file fsync {#write_results}
+    # used to pay for every unit: **when `generation.json` is durable, every
+    # file in the payload it names is durable.** What is given up is an
+    # individual payload file being durable before the pointer exists, and
+    # nobody reads a payload file in that window — every reader resolves
+    # through the pointer, and a crash leaves an unreferenced partial payload
+    # that the next run prunes.
+    #
+    # Unconditional on purpose. `durable_payload_writes` decides whether the
+    # per-file fsyncs are *also* paid; it can never turn this off, because
+    # that would be the one change that actually weakens the contract.
+    # {Woods::AtomicFile.sync_directory_tree} degrades through `sync -f`, a
+    # bare `sync`, and finally a per-file fsync pass, so the flush cannot
+    # silently become a no-op either.
+    #
+    # A run that degraded to a flat publish has no payload directory;
+    # {#payload_dir} then returns the output directory, which is the tree that
+    # needs flushing in exactly the same way.
+    #
+    # @return [Symbol, nil] the strategy {Woods::AtomicFile} used
+    def sync_payload
+      AtomicFile.sync_directory_tree(payload_dir)
     end
 
     # The pointer to publish, or nil when this run built no payload directory.
