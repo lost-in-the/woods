@@ -237,17 +237,20 @@ After a final release publishes, reopen development with `release:reopen` in a f
 
 ### When a dispatch fails
 
-`release-context` checks out `github.sha`, the default branch's tip at dispatch
-time, not the tag: it re-validates the named CI run, checks the live `release`
-environment, and runs `script/validate-release`. The `package-test` and
-`publish` jobs instead check out `needs.release-context.outputs.release-sha`,
-the tag's own commit, because that is what CI actually built and tested.
+`release-context` and `publish` both check out `github.sha`, the default
+branch's tip at dispatch time, not the tag: `release-context` re-validates the
+named CI run, checks the live `release` environment, and runs
+`script/validate-release`; `publish` runs `script/verify-release-tag` and
+pushes the downloaded artifact. Only `package-test` checks out
+`needs.release-context.outputs.release-sha`, the tag's own commit, because
+that is what CI actually built and tested. The gem bytes `publish` pushes were
+built by CI at `release-sha`; `publish` never rebuilds them.
 
 That split decides the fix for a failed dispatch:
 
 | What failed | Lives in | Fix |
 |---|---|---|
-| `script/validate-release-run`, `script/validate-release`, or the workflow files themselves | main, read at `github.sha` | merge the fix to main, then re-dispatch at the same tag; the tag never moves |
+| `script/validate-release-run`, `script/validate-release`, `script/verify-release-tag`, or the workflow files themselves | main, read at `github.sha` | merge the fix to main, then re-dispatch at the same tag; the tag never moves |
 | Live `release` environment settings (protection rule, admin bypass) | GitHub environment configuration, not the tree | fix the setting directly; no commit or re-dispatch needed |
 | Anything under `spec/` or `lib/` that `package-test` actually runs against the candidate | the tagged commit, read at `release-sha` | a main-only fix does not reach the candidate; merge it, then move the tag to the new main tip and get a fresh CI run on it |
 

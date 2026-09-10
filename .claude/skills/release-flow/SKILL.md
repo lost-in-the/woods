@@ -136,14 +136,15 @@ stays independent.
 
 ## 8. When a dispatch fails
 
-`release-context` reads `github.sha` (main's tip at dispatch time) for the
-validator, the workflow files, and the live `release` environment.
-`package-test` and `publish` instead read `release-sha` (the tag's own
-commit), because that is the code CI actually tested.
+`release-context` and `publish` read `github.sha` (main's tip at dispatch
+time) for the validators, `script/verify-release-tag`, the workflow files, and
+the live `release` environment. Only `package-test` reads `release-sha` (the
+tag's own commit), because that is the code CI actually tested; `publish`
+pushes the artifact CI built at that commit without rebuilding it.
 
 | What failed | Fix |
 |---|---|
-| `script/validate-release-run`, `script/validate-release`, `ci.yml`, `release.yml` | merge to main, re-dispatch at the same tag; the tag does not move |
+| `script/validate-release-run`, `script/validate-release`, `script/verify-release-tag`, `ci.yml`, `release.yml` | merge to main, re-dispatch at the same tag; the tag does not move |
 | The live `release` environment (protection rule, admin bypass) | fix the setting directly; no re-dispatch needed |
 | `spec/` or `lib/` that `package-test` runs against the candidate | merge the fix, then the maintainer moves the tag to the new main tip, waits for a fresh CI run, and re-dispatches |
 
