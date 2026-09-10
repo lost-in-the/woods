@@ -2387,6 +2387,29 @@ RSpec.describe Woods::Extractor do
       extractor.send(:write_graph_analysis)
     end
 
+    # The bytes write_dependency_graph just serialized are the bytes on disk,
+    # so re-reading a graph the size of a large app's only to digest it was a
+    # whole-file read per run for nothing.
+    it 'digests the bytes write_dependency_graph wrote rather than re-reading the file' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_dependency_graph)
+
+      expect(Woods::AtomicFile).not_to receive(:read)
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      on_disk = File.read(File.join(output_dir, 'dependency_graph.json'))
+      expect(output['graph_sha']).to eq(Digest::SHA256.hexdigest(on_disk))
+    end
+
+    it 'falls back to reading the file when this run wrote no graph' do
+      extractor.instance_variable_set(:@graph_analysis, { hubs: [], orphans: [] })
+      extractor.send(:write_graph_analysis)
+
+      output = JSON.parse(File.read(File.join(output_dir, 'graph_analysis.json')))
+      expect(output['graph_sha']).to eq(Digest::SHA256.hexdigest('{"nodes":{},"edges":[]}'))
+    end
+
     it 'preserves original analysis data alongside staleness metadata' do
       extractor.instance_variable_set(:@graph_analysis, { hubs: %w[User Post], orphans: ['Legacy'] })
       extractor.send(:write_graph_analysis)
@@ -3439,18 +3462,113 @@ RSpec.describe Woods::Extractor do
     end
   end
 
-  describe '#build_graph_analyzer volatile ratio' do
-    it 'passes the configured ratio to the analyzer' do
+  # write_manifest and write_structural_summary both derive their totals from
+  # the per-type _index.json files, and ran back to back: every index was
+  # parsed twice per incremental run.
+  describe '#persisted_counts and #persisted_summary_stats share one pass' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:extractor) { described_class.new(output_dir: output_dir) }
+
+    def seed_type_index(type, entries)
+      dir = File.join(output_dir, type.to_s)
+      FileUtils.mkdir_p(dir)
+      File.write(File.join(dir, '_index.json'), JSON.generate(entries))
+    end
+
+    before do
+      seed_type_index(:models, [{ 'identifier' => 'User', 'namespace' => nil, 'chunk_count' => 2 },
+                                { 'identifier' => 'Admin::Note', 'namespace' => 'Admin', 'chunk_count' => 3 }])
+      seed_type_index(:services, [{ 'identifier' => 'Checkout', 'namespace' => nil, 'chunk_count' => 1 }])
+    end
+
+    it 'reads each _index.json once for both callers' do
+      reads = Hash.new(0)
+      allow(Woods::AtomicFile).to receive(:read).and_wrap_original do |original, path|
+        reads[path.to_s] += 1
+        original.call(path)
+      end
+
+      extractor.send(:persisted_counts)
+      extractor.send(:persisted_summary_stats)
+
+      index_reads = reads.select { |path, _| path.end_with?('_index.json') }
+      expect(index_reads.size).to eq(2)
+      expect(index_reads.values).to all(eq(1))
+    end
+
+    it 'returns the same counts and totals as before' do
+      counts, chunks = extractor.send(:persisted_counts)
+
+      expect(counts).to eq(models: 2, services: 1)
+      expect(chunks).to eq(6)
+    end
+
+    it 'returns the same summary shape as before' do
+      stats = extractor.send(:persisted_summary_stats)
+
+      expect(stats[:models]).to eq(count: 2, chunks: 5, namespaces: { '(root)' => 1, 'Admin' => 1 })
+      expect(stats[:services]).to eq(count: 1, chunks: 1, namespaces: { '(root)' => 1 })
+    end
+
+    it 'omits an empty type from the summary but keeps it in the counts' do
+      seed_type_index(:jobs, [])
+
+      expect(extractor.send(:persisted_counts).first).to include(jobs: 0)
+      expect(extractor.send(:persisted_summary_stats)).not_to have_key(:jobs)
+    end
+
+    it 'returns nil from the summary when the payload holds no type indexes' do
+      empty = described_class.new(output_dir: File.join(tmpdir, 'empty'))
+
+      expect(empty.send(:persisted_summary_stats)).to be_nil
+    end
+
+    it 'warns and skips a type whose index will not parse' do
+      File.write(File.join(output_dir, 'models', '_index.json'), 'not json')
+
+      expect(Rails.logger).to receive(:warn).with(/Skipping unreadable models/)
+      counts, = extractor.send(:persisted_counts)
+
+      expect(counts).to eq(services: 1)
+    end
+
+    it 're-reads after a type index is regenerated' do
+      expect(extractor.send(:persisted_counts).first).to include(models: 2)
+
+      FileUtils.mkdir_p(File.join(output_dir, 'models'))
+      unit = { 'type' => 'model', 'identifier' => 'User', 'file_path' => 'app/models/user.rb', 'chunks' => [] }
+      File.write(File.join(output_dir, 'models', 'User_abcd1234.json'), JSON.generate(unit))
+      extractor.send(:regenerate_type_index, :models)
+
+      expect(extractor.send(:persisted_counts).first).to include(models: 1)
+    end
+  end
+
+  describe '#build_graph_analyzer configuration' do
+    around do |example|
       require 'woods'
       original = Woods.configuration
       Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'passes the configured ratio to the analyzer' do
       Woods.configuration.volatile_dependency_ratio = 4.5
 
       expect(Woods::GraphAnalyzer).to receive(:new)
-        .with(extractor.dependency_graph, volatile_ratio: 4.5).and_call_original
+        .with(extractor.dependency_graph, hash_including(volatile_ratio: 4.5)).and_call_original
       extractor.send(:build_graph_analyzer)
-    ensure
-      Woods.configuration = original
+    end
+
+    it 'passes the configured cycle caps to the analyzer' do
+      Woods.configuration.graph_cycle_limit = 7
+      Woods.configuration.graph_cycle_max_length = 9
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, hash_including(cycle_limit: 7, cycle_max_length: 9)).and_call_original
+      extractor.send(:build_graph_analyzer)
     end
   end
 

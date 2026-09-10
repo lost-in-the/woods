@@ -404,16 +404,20 @@ module Woods
       # package added between the two runs.
       @package_resolver = nil
       @incremental_extractors = nil
-      begin_payload!
+      @persisted_index_stats = nil
+      @graph_sha = nil
+      profile_phase('payload seed') { begin_payload! }
 
       # Eager load once — all extractors need loaded classes for introspection.
-      safe_eager_load!
+      profile_phase('eager load') { safe_eager_load! }
 
       # Phase 1: Extract all units
-      if Woods.configuration.concurrent_extraction
-        extract_all_concurrent
-      else
-        extract_all_sequential
+      profile_phase('extraction') do
+        if Woods.configuration.concurrent_extraction
+          extract_all_concurrent
+        else
+          extract_all_sequential
+        end
       end
 
       # Phase 1.5: Deduplicate results
@@ -444,7 +448,7 @@ module Woods
 
       # Phase 4: Graph analysis (PageRank, structural metrics)
       Rails.logger.info '[Woods] Analyzing dependency graph...'
-      @graph_analysis = build_graph_analyzer.analyze
+      @graph_analysis = profile_phase('graph analysis') { build_graph_analyzer.analyze }
 
       # Phase 4.5: Normalize file_path to relative paths
       Rails.logger.info '[Woods] Normalizing file paths...'
@@ -452,7 +456,7 @@ module Woods
 
       # Phase 5: Write output
       Rails.logger.info '[Woods] Writing output...'
-      write_results
+      profile_phase('write results') { write_results }
 
       # Phase 5.1: Sweep unit files no current unit accounts for (#177). Must
       # run after write_results — the just-written set is what defines
@@ -478,15 +482,17 @@ module Woods
       # being opt-in does not excuse it.
       if Woods.configuration.precompute_flows
         Rails.logger.info '[Woods] Precomputing request flows...'
-        precompute_flows
+        profile_phase('flows') { precompute_flows }
       end
 
       write_dependency_graph
       write_graph_analysis
-      write_manifest
-      write_structural_summary
+      profile_phase('manifest and summary') do
+        write_manifest
+        write_structural_summary
+      end
       capture_snapshot
-      publish_generation('full')
+      profile_phase('publish') { publish_generation('full') }
 
       log_summary
 
@@ -528,13 +534,17 @@ module Woods
       affected_types = Set.new
 
       # Blast radius from the pre-change graph.
-      affected_ids = @dependency_graph.affected_by(change_set.absolute_paths)
+      affected_ids = profile_phase('blast radius') { @dependency_graph.affected_by(change_set.absolute_paths) }
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
-      touched = reconcile_changed_paths(change_set, affected_types)
+      touched = profile_phase('re-extraction') do
+        acc = reconcile_changed_paths(change_set, affected_types)
 
-      (affected_ids - touched.to_a).each do |unit_id|
-        touched.add(unit_id) if re_extract_unit(unit_id, affected_types: affected_types)
+        (affected_ids - acc.to_a).each do |unit_id|
+          acc.add(unit_id) if re_extract_unit(unit_id, affected_types: affected_types)
+        end
+
+        acc
       end
 
       touched.merge(reconcile_class_based_types(affected_types))
@@ -571,8 +581,10 @@ module Woods
       finalize_incremental_unit_json(affected_types)
 
       # Regenerate type indexes for affected types
-      affected_types.each do |type_key|
-        regenerate_type_index(type_key)
+      profile_phase('type index') do
+        affected_types.each do |type_key|
+          regenerate_type_index(type_key)
+        end
       end
 
       finalize_incremental_run(touched)
@@ -651,6 +663,33 @@ module Woods
 
     private
 
+    # Time one phase of a run and log how long it took, when WOODS_PROFILE=1.
+    #
+    # The per-extractor lines (see {#extract_all_sequential}) already report
+    # extraction itself. Everything after it (the graph load, the analysis,
+    # the flows, the publish) was unattributed, so a slow run could only be
+    # split by guessing. Off by default and free when off: the block is
+    # yielded directly, with no timing and no log line. Timed on the
+    # monotonic clock, so a wall-clock adjustment mid-run cannot produce a
+    # negative phase.
+    #
+    # @param name [String] phase name, as it appears in the log line
+    # @return [Object] whatever the block returned
+    def profile_phase(name)
+      return yield unless profiling?
+
+      start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result = yield
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time
+      Rails.logger.info "[Woods] [profile] #{name} in #{elapsed.round(2)}s"
+      result
+    end
+
+    # @return [Boolean] whether phase timing is enabled for this process
+    def profiling?
+      ENV.fetch('WOODS_PROFILE', nil) == '1'
+    end
+
     # Load the persisted graph and reset the per-run bookkeeping that the
     # incremental helpers read. Shared by {#extract_changed} and {#refresh};
     # calling either without this leaves `@dependents_dirty` and
@@ -665,19 +704,23 @@ module Woods
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run
-      begin_payload!(strict: true)
+      profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
       ensure_incremental_baseline!(graph_path)
-      @dependency_graph = DependencyGraph.from_h(JSON.parse(AtomicFile.read(graph_path))) if graph_path.exist?
+      profile_phase('previous graph load') do
+        @dependency_graph = DependencyGraph.from_h(JSON.parse(AtomicFile.read(graph_path))) if graph_path.exist?
+      end
 
       ModelNameCache.reset!
-      safe_eager_load!
+      profile_phase('eager load') { safe_eager_load! }
 
       @dependents_dirty = Set.new
       @incremental_written = {}
       @incremental_extractors = nil
       @active_record_names = nil
       @package_resolver = nil
+      @persisted_index_stats = nil
+      @graph_sha = nil
     end
 
     # Write the graph and the derived artifacts after an incremental run.
@@ -713,11 +756,13 @@ module Woods
         return
       end
 
-      write_incremental_graph_analysis
-      refresh_incremental_flows(touched)
-      write_manifest(incremental: true)
-      write_structural_summary
-      publish_generation(reason)
+      profile_phase('graph analysis') { write_incremental_graph_analysis }
+      profile_phase('flows') { refresh_incremental_flows(touched) }
+      profile_phase('manifest and summary') do
+        write_manifest(incremental: true)
+        write_structural_summary
+      end
+      profile_phase('publish') { publish_generation(reason) }
 
       return unless Woods.configuration.enable_snapshots
 
@@ -1550,8 +1595,14 @@ module Woods
     #
     # @return [GraphAnalyzer]
     def build_graph_analyzer
-      ratio = Woods.configuration&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
-      GraphAnalyzer.new(@dependency_graph, volatile_ratio: ratio)
+      config = Woods.configuration
+      ratio = config&.volatile_dependency_ratio || GraphAnalyzer::DEFAULT_VOLATILE_RATIO
+      GraphAnalyzer.new(
+        @dependency_graph,
+        volatile_ratio: ratio,
+        cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
+        cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
+      )
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2064,10 +2115,23 @@ module Woods
       # registration order must not reach it (B-180).
       graph_data[:pagerank] = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
 
-      AtomicFile.write(
-        payload_dir.join('dependency_graph.json'),
-        json_serialize(graph_data)
-      )
+      payload = json_serialize(graph_data)
+      # The bytes about to land on disk are the bytes `graph_sha` covers, so
+      # keep the digest here rather than reading a whole large-app graph back
+      # to compute it. AtomicFile writes in binary mode and reads back as
+      # UTF-8, so the two digests are the same either way.
+      @graph_sha = Digest::SHA256.hexdigest(payload)
+      AtomicFile.write(payload_dir.join('dependency_graph.json'), payload)
+    end
+
+    # The digest of the dependency graph this run wrote.
+    #
+    # Falls back to reading the file for a caller that writes the analysis
+    # without having written the graph in the same run.
+    #
+    # @return [String] hex SHA256 of dependency_graph.json
+    def graph_sha
+      @graph_sha || Digest::SHA256.hexdigest(AtomicFile.read(payload_dir.join('dependency_graph.json')))
     end
 
     def write_graph_analysis
@@ -2075,9 +2139,7 @@ module Woods
 
       enriched = @graph_analysis.merge(
         generated_at: Time.current.iso8601,
-        graph_sha: Digest::SHA256.hexdigest(
-          AtomicFile.read(payload_dir.join('dependency_graph.json'))
-        )
+        graph_sha: graph_sha
       )
 
       AtomicFile.write(
@@ -2132,27 +2194,49 @@ module Woods
     end
 
     # Unit and chunk counts derived from the per-type _index.json files on
-    # disk — the source of truth after an incremental run, where only the
+    # disk: the source of truth after an incremental run, where only the
     # affected units were re-extracted.
     #
     # @return [Array(Hash{Symbol => Integer}, Integer)] counts by type, total chunk count
     def persisted_counts
-      counts = {}
-      chunks = 0
+      stats = persisted_index_stats
+      [stats.transform_values { |type_stats| type_stats[:count] },
+       stats.sum { |_type, type_stats| type_stats[:chunks] }]
+    end
 
-      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
-        entries = JSON.parse(AtomicFile.read(index_path))
-        counts[File.basename(File.dirname(index_path)).to_sym] = entries.size
-        chunks += entries.sum { |e| e['chunk_count'].to_i }
+    # One pass over the persisted per-type _index.json files.
+    #
+    # {#persisted_counts} feeds the manifest and {#persisted_summary_stats}
+    # feeds SUMMARY.md, they run back to back at the end of every incremental
+    # run, and each used to parse every type index for itself. Reading once and
+    # deriving both is also what keeps the two artifacts from disagreeing about
+    # totals, which was previously a property of them using the same source
+    # rather than the same read.
+    #
+    # An unreadable index drops that whole type from the manifest and the
+    # summary alike, with one warning rather than the two the separate passes
+    # emitted. Sorted for determinism, since the glob order is the
+    # filesystem's.
+    #
+    # Memoized per run: invalidated at the start of {#extract_all} and
+    # {#prepare_incremental_run}, and again whenever {#regenerate_type_index}
+    # rewrites an index underneath it.
+    #
+    # @return [Hash{Symbol => Hash}] type => `{ count:, chunks:, namespaces: }`
+    def persisted_index_stats
+      @persisted_index_stats ||= Dir[payload_dir.join('*/_index.json').to_s].each_with_object({}) do |path, stats|
+        entries = JSON.parse(AtomicFile.read(path))
+        stats[File.basename(File.dirname(path)).to_sym] = {
+          count: entries.size,
+          chunks: entries.sum { |entry| entry['chunk_count'].to_i },
+          namespaces: namespace_histogram(entries.map { |entry| entry['namespace'] })
+        }
       rescue JSON::ParserError => e
-        # An unreadable index silently drops that whole type from the manifest
-        # counts — warn rather than undercount without a trace.
-        type = File.basename(File.dirname(index_path))
-        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in manifest counts: #{e.message}")
-        next
+        type = File.basename(File.dirname(path))
+        Rails.logger.warn(
+          "[Woods] Skipping unreadable #{type}/_index.json in manifest counts and summary totals: #{e.message}"
+        )
       end
-
-      [counts, chunks]
     end
 
     # Capture a temporal snapshot after extraction completes.
@@ -2308,32 +2392,14 @@ module Woods
     end
 
     # The incremental path's counterpart to {#results_summary_stats}: the same
-    # shape read back from the persisted per-type _index.json files, the source
-    # {#persisted_counts} uses for the manifest — so the two artifacts cannot
-    # disagree about totals. Sorted for determinism, since the glob order is
-    # the filesystem's.
+    # shape, read back through {#persisted_index_stats}. A type whose index is
+    # empty is left out, where the manifest still counts it as zero.
     #
-    # @return [Hash{Symbol => Hash}, nil] nil when the payload holds no type
-    #   indexes at all, so a bare index writes no summary — matching the full
-    #   path's early return when it extracted nothing
+    # @return [Hash{Symbol => Hash}, nil] nil when the payload holds no
+    #   non-empty type index, so a bare index writes no summary, matching the
+    #   full path's early return when it extracted nothing
     def persisted_summary_stats
-      stats = {}
-
-      Dir[payload_dir.join('*/_index.json').to_s].each do |index_path|
-        entries = JSON.parse(AtomicFile.read(index_path))
-        next if entries.empty?
-
-        stats[File.basename(File.dirname(index_path)).to_sym] = {
-          count: entries.size,
-          chunks: entries.sum { |e| e['chunk_count'].to_i },
-          namespaces: namespace_histogram(entries.map { |e| e['namespace'] })
-        }
-      rescue JSON::ParserError => e
-        # Same posture as {#persisted_counts}: an unreadable index drops that
-        # type from the manifest and the summary alike, so the two still agree.
-        type = File.basename(File.dirname(index_path))
-        Rails.logger.warn("[Woods] Skipping unreadable #{type}/_index.json in summary totals: #{e.message}")
-      end
+      stats = persisted_index_stats.reject { |_type, type_stats| type_stats[:count].zero? }
 
       stats.empty? ? nil : stats
     end
@@ -2351,6 +2417,10 @@ module Woods
     def regenerate_type_index(type_key)
       type_dir = payload_dir.join(type_key.to_s)
       return unless type_dir.directory?
+
+      # This run's counts and summary totals are read from the index files;
+      # rewriting one invalidates whatever was read before.
+      @persisted_index_stats = nil
 
       # Scan existing unit JSON files (exclude _index.json)
       index = Dir[type_dir.join('*.json')].filter_map do |file|

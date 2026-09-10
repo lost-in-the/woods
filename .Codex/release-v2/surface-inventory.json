@@ -63,6 +63,10 @@
     "extractors=",
     "gem_configs",
     "gem_configs=",
+    "graph_cycle_limit",
+    "graph_cycle_limit=",
+    "graph_cycle_max_length",
+    "graph_cycle_max_length=",
     "graph_store",
     "graph_store=",
     "include_framework_sources",
@@ -979,7 +983,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 101,
+    "configuration_attributes": 105,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

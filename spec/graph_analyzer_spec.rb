@@ -139,6 +139,138 @@ RSpec.describe Woods::GraphAnalyzer do
     end
   end
 
+  describe '#cycles caps' do
+    # Ten disjoint 2-node cycles, so the count cap has something to bite on.
+    def register_disjoint_cycles(count)
+      count.times do |i|
+        graph.register(make_unit(type: :model, identifier: "A#{i}",
+                                 dependencies: [{ type: :model, target: "B#{i}" }]))
+        graph.register(make_unit(type: :model, identifier: "B#{i}",
+                                 dependencies: [{ type: :model, target: "A#{i}" }]))
+      end
+    end
+
+    # One cycle of +length+ nodes: N0 -> N1 -> ... -> N(length-1) -> N0.
+    def register_long_cycle(length)
+      length.times do |i|
+        graph.register(make_unit(type: :model, identifier: "N#{i}",
+                                 dependencies: [{ type: :model, target: "N#{(i + 1) % length}" }]))
+      end
+    end
+
+    it 'defaults to no truncation on a graph inside both caps' do
+      register_disjoint_cycles(3)
+
+      expect(analyzer.cycles.size).to eq(3)
+      expect(analyzer.cycle_limit_reached?).to be(false)
+    end
+
+    it 'stops enumerating at cycle_limit and reports the truncation' do
+      register_disjoint_cycles(10)
+      capped = described_class.new(graph, cycle_limit: 4)
+
+      expect(capped.cycles.size).to eq(4)
+      expect(capped.cycle_limit_reached?).to be(true)
+    end
+
+    it 'skips cycles longer than cycle_max_length without stopping the scan' do
+      register_long_cycle(12)
+      register_disjoint_cycles(2)
+      capped = described_class.new(graph, cycle_max_length: 5)
+
+      expect(capped.cycles.map(&:size)).to all(be <= 6)
+      expect(capped.cycles.size).to eq(2)
+      expect(capped.cycle_limit_reached?).to be(true)
+    end
+
+    it 'publishes cycle_limit_reached in the analyze stats' do
+      register_disjoint_cycles(10)
+
+      expect(described_class.new(graph).analyze[:stats][:cycle_limit_reached]).to be(false)
+      expect(described_class.new(graph, cycle_limit: 4).analyze[:stats][:cycle_limit_reached]).to be(true)
+    end
+
+    it 'rotates to the same signature regardless of where the cycle was entered' do
+      analyzer_a = described_class.new(graph)
+
+      expect(analyzer_a.send(:normalize_cycle_signature, %w[A B C A]))
+        .to eq(analyzer_a.send(:normalize_cycle_signature, %w[B C A B]))
+      expect(analyzer_a.send(:normalize_cycle_signature, %w[A B C A]))
+        .not_to eq(analyzer_a.send(:normalize_cycle_signature, %w[A C B A]))
+    end
+
+    it 'keys signatures by a fixed-width digest rather than the joined path' do
+      signature = described_class.new(graph).send(:normalize_cycle_signature, %w[Alpha Beta Gamma Alpha])
+
+      expect(signature).to match(/\A[0-9a-f]{64}\z/)
+    end
+  end
+
+  describe '#bfs_shortest_path' do
+    def chain(*identifiers)
+      identifiers.each_cons(2) do |from, to|
+        graph.register(make_unit(type: :model, identifier: from,
+                                 dependencies: [{ type: :model, target: to }]))
+      end
+      graph.register(make_unit(type: :model, identifier: identifiers.last))
+    end
+
+    it 'returns the path through a chain, source first and target last' do
+      chain('A', 'B', 'C', 'D')
+
+      expect(analyzer.send(:bfs_shortest_path, 'A', 'D')).to eq(%w[A B C D])
+    end
+
+    it 'returns the source alone when source and target are the same node' do
+      chain('A', 'B')
+
+      expect(analyzer.send(:bfs_shortest_path, 'A', 'A')).to eq(['A'])
+    end
+
+    it 'returns nil when the target is unreachable' do
+      chain('A', 'B')
+      graph.register(make_unit(type: :model, identifier: 'Z'))
+
+      expect(analyzer.send(:bfs_shortest_path, 'A', 'Z')).to be_nil
+    end
+
+    it 'takes the shorter of two routes to the same target' do
+      graph.register(make_unit(type: :model, identifier: 'A',
+                               dependencies: [{ type: :model, target: 'Long1' },
+                                              { type: :model, target: 'Short' }]))
+      graph.register(make_unit(type: :model, identifier: 'Long1',
+                               dependencies: [{ type: :model, target: 'Long2' }]))
+      graph.register(make_unit(type: :model, identifier: 'Long2',
+                               dependencies: [{ type: :model, target: 'Target' }]))
+      graph.register(make_unit(type: :model, identifier: 'Short',
+                               dependencies: [{ type: :model, target: 'Target' }]))
+      graph.register(make_unit(type: :model, identifier: 'Target'))
+
+      expect(analyzer.send(:bfs_shortest_path, 'A', 'Target')).to eq(%w[A Short Target])
+    end
+  end
+
+  describe '#bridges adjacency reuse' do
+    it 'asks the graph for a node\'s dependencies at most once across the whole run' do
+      12.times do |i|
+        graph.register(make_unit(type: :model, identifier: "N#{i}",
+                                 dependencies: [{ type: :model, target: "N#{(i + 1) % 12}" }]))
+      end
+
+      counts = Hash.new(0)
+      original = graph.method(:dependencies_of)
+      allow(graph).to receive(:dependencies_of) do |identifier, **kwargs|
+        counts[identifier] += 1
+        original.call(identifier, **kwargs)
+      end
+
+      analyzer.bridges(limit: 5, sample_size: 40)
+
+      expect(counts).not_to be_empty
+      expect(counts.values.max).to eq(1)
+    end
+  end
+
   describe '#bridges' do
     it 'identifies nodes on many shortest paths' do
       # A -> B -> C -> D (B and C are bridges)

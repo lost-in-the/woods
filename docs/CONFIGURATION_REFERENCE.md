@@ -358,6 +358,14 @@ end
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
 | `volatile_dependency_ratio` | Float | `3.0` | A dependency whose commit count (last 365 days) exceeds the dependent's by this ratio appears in the `volatile_dependencies` report (top 20, ranked by PageRank). Must be greater than 1. Report only, never a gate. |
+| `graph_cycle_limit` | Integer or `nil` | `500` | How many distinct cycles `GraphAnalyzer` enumerates before it stops. Cycle detection finds one cycle per DFS back-edge, so a dense graph has tens of thousands of them and enumerating every one is the largest single cost of the analysis that runs on every extraction. Set to `nil` for exhaustive enumeration. |
+| `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
+
+When either cap fires, `graph_analysis.json` reports `stats.cycle_limit_reached: true`
+alongside `stats.cycle_count`, so a reader of the `cycles` array can tell a truncated
+view from a short one. Enumeration stops at the cap rather than counting past it, so
+there is no full population count to publish. Both caps must be a positive Integer or
+`nil`; anything else raises `Woods::ConfigurationError`.
 
 ## Session tracer options
 
@@ -573,6 +581,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
 | `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |
+| `WOODS_PROFILE` | unset | Set to `"1"` to log one `[Woods] [profile] <phase> in N.NNs` line per run phase (payload seed, previous graph load, eager load, extraction or blast radius and re-extraction, type index, graph analysis, flows, manifest and summary, publish). Complements the per-extractor timing lines, which cover extraction only. Off by default and free when off. |
 | `WOODS_GIT_DIR` | unset | Absolute path to the canonical git directory. Wins over the repository Woods would otherwise find, at all three of its git call sites: per-unit `commit_count`/`change_frequency` (enrichment), `manifest.json`'s `git_branch`/`git_sha` (provenance), and the `woods:incremental` diff range. All three build their command line with `Woods::GitCommand.argv`. |
 | `GIT_BRANCH`, `GIT_SHA` | unset | Provenance for a checkout with no `.git` at all (a source tarball, a Docker `COPY` that excludes it). Ignored when a `.git` is present but unresolvable, so a stale build arg cannot mask a worktree. |
 

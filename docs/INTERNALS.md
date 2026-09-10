@@ -172,7 +172,7 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 | **Orphans** | Units with no dependents, potential dead code or public entry points. Framework sources are excluded (they're naturally unreferenced in the reverse index). |
 | **Dead ends** | Units with no dependencies, self-contained leaf nodes (value objects, standalone utilities) |
 | **Hubs** | Units with many dependents, architectural bottlenecks; changes here have high blast radius |
-| **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS. |
+| **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS, and capped: `graph_cycle_limit` (default 500) bounds how many are enumerated and `graph_cycle_max_length` (default 50) skips one longer than that. Either cap firing sets `stats.cycle_limit_reached`. Set both to `nil` for exhaustive enumeration. |
 | **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
 | **Cross-database edges** | Association or foreign-key edges whose two ends resolve to different databases. A `has_many :through` is reported as `join_through_across_databases` when `disable_joins` is false and `from_db`, `through_db` (the join model's database), or `to_db` disagree. A foreign key never resolves to an owner in the source database, even when another database also claims the table; when every owner sits elsewhere and they span more than one database, the entry comes back with `to: nil` and an `ambiguous_owners` list instead of guessing. Read from graph node and edge attributes, so full and incremental runs agree. Scoped to primary nodes (units registered in the graph), not variants. |
 | **Volatile dependencies** | Edges that point at a unit changing at least `volatile_dependency_ratio` times more often than the dependent (POODR: depend on things that change less often than you do). Dependencies with fewer than 5 commits or a `new` change frequency are skipped. Ranked by the dependency's PageRank; the persisted list keeps the top 20, while `stats.volatile_dependency_count` reports the full qualifying count and `stats.volatile_dependencies_limit` reports the cap. |
@@ -191,15 +191,18 @@ persisted rather than every hub in the graph.
 | `orphans` | `stats.orphan_count` | no | every orphan |
 | `dead_ends` | `stats.dead_end_count` | no | every dead end |
 | `hubs` | `stats.hub_count` | yes, top 20 by dependent count | the persisted array, so it stops at 20 |
-| `cycles` | `stats.cycle_count` | no | every cycle found |
+| `cycles` | `stats.cycle_count`, `stats.cycle_limit_reached` | yes, `graph_cycle_limit` cycles of at most `graph_cycle_max_length` nodes | the count is the persisted array; the flag says whether either cap fired |
 | `bridges` | none | yes, top 10 by score | not counted |
 | `cross_database_edges` | `stats.cross_database_edge_count` | no | every crossing edge |
 | `volatile_dependencies` | `stats.volatile_dependency_count`, `stats.volatile_dependencies_limit` | yes, top 20 by the dependency's PageRank | the count is every qualifying edge; the limit is the cap |
 | `undeclared_package_edges` | `stats.undeclared_package_edge_count` | no | every undeclared crossing |
 
-A capped section means the array on disk is a page, not the population. Only
-`volatile_dependencies` publishes both numbers, so it is the only one where a
-reader can tell truncation from a short list without re-running the analysis.
+A capped section means the array on disk is a page, not the population.
+`volatile_dependencies` publishes both numbers and `cycles` publishes a
+truncation flag, so those two are the ones where a reader can tell truncation
+from a short list without re-running the analysis. Cycle enumeration stops at
+the cap rather than counting past it, which is why `cycles` gets a flag and not
+a population count.
 The `graph_analysis` MCP tool pages each section independently when given
 `limit` or `offset`, and its `Showing N of M (truncated)` line counts the array
 it read from disk, not the population the stat keys count.

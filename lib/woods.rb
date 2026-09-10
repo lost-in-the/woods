@@ -24,6 +24,8 @@
 require_relative 'woods/version'
 # Configuration's `component_paths` default lives with the discovery it feeds.
 require_relative 'woods/extractors/component_discovery'
+# Configuration defaults the cycle caps to the analyzer's own constants.
+require_relative 'woods/graph_analyzer'
 
 module Woods
   class Error < StandardError; end
@@ -146,7 +148,8 @@ module Woods
                   :cache_store, :cache_options,
                   :dump_retention_count, :component_paths
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
-                :context_format, :cache_enabled, :volatile_dependency_ratio
+                :context_format, :cache_enabled, :volatile_dependency_ratio,
+                :graph_cycle_limit, :graph_cycle_max_length
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -205,6 +208,8 @@ module Woods
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @dump_retention_count = 3
       @volatile_dependency_ratio = 3.0
+      @graph_cycle_limit = GraphAnalyzer::DEFAULT_CYCLE_LIMIT
+      @graph_cycle_max_length = GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
       # Directories the component extractors walk before reading `descendants`,
       # relative to Rails.root. See Extractors::ComponentDiscovery.
       @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
@@ -312,6 +317,24 @@ module Woods
       @volatile_dependency_ratio = value.to_f
     end
 
+    # How many distinct cycles {Woods::GraphAnalyzer#cycles} enumerates before
+    # it stops. `nil` removes the cap and restores exhaustive enumeration.
+    #
+    # @param value [Integer, nil] must be a positive Integer, or nil
+    # @raise [ConfigurationError] otherwise
+    def graph_cycle_limit=(value)
+      @graph_cycle_limit = validate_optional_positive_integer!(:graph_cycle_limit, value)
+    end
+
+    # The longest cycle {Woods::GraphAnalyzer#cycles} records, in distinct
+    # nodes. `nil` removes the cap.
+    #
+    # @param value [Integer, nil] must be a positive Integer, or nil
+    # @raise [ConfigurationError] otherwise
+    def graph_cycle_max_length=(value)
+      @graph_cycle_max_length = validate_optional_positive_integer!(:graph_cycle_max_length, value)
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -324,6 +347,15 @@ module Woods
     end
 
     private
+
+    # @return [Integer, nil] +value+ when it is nil or a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def validate_optional_positive_integer!(name, value)
+      return value if value.nil?
+      return value if value.is_a?(Integer) && value.positive?
+
+      raise ConfigurationError, "#{name} must be a positive Integer or nil, got #{value.inspect}"
+    end
 
     def validate_boolean!(name, value)
       return if value.is_a?(TrueClass) || value.is_a?(FalseClass)
