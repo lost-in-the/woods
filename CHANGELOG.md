@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `TraceEnricher.record` rejects calls without a block before creating a
+  TracePoint, preventing an enabled hook from leaking into subsequent execution (#308).
+
 - **The Changed list only names the surface inventory when regenerating it actually moved
   it.** `release:prepare` used to list `.Codex/release-v2/surface-inventory.json`
   unconditionally, even on the ordinary run where nothing in the public surface changed.
