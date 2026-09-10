@@ -87,6 +87,49 @@ RSpec.describe Woods::PayloadStore do
       expect(target.join('manifest.json').read).to eq('v2')
     end
 
+    it 'reproduces a deeply nested tree, every file and every directory' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('flows/nested/deeper'))
+      FileUtils.mkdir_p(source.join('models'))
+      File.write(source.join('manifest.json'), '{}')
+      File.write(source.join('models/Post.json'), '{"identifier":"Post"}')
+      File.write(source.join('flows/flow_index.json'), '{}')
+      File.write(source.join('flows/nested/deeper/OrdersController_show.json'), '{"entry_point":"x"}')
+
+      target = store.create(2)
+      store.clone(source, target)
+
+      relative = lambda do |root|
+        Dir.glob(File.join(root.to_s, '**', '*'), File::FNM_DOTMATCH)
+           .reject { |path| %w[. ..].include?(File.basename(path)) }
+           .map { |path| Pathname.new(path).relative_path_from(root).to_s }.sort
+      end
+      expect(relative.call(target)).to eq(relative.call(source))
+      expect(target.join('flows/nested/deeper/OrdersController_show.json').read).to eq('{"entry_point":"x"}')
+    end
+
+    # `Pathname#find` visits a directory before its children, so by the time a
+    # file is replicated its directory has already been created. `mkdir_p` per
+    # file was one stat-heavy syscall chain per unit on a payload of 8000+, all
+    # of it re-proving what the previous entry established.
+    it 'creates each directory once rather than once per file' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models'))
+      5.times { |i| File.write(source.join("models/Unit#{i}.json"), '{}') }
+      File.write(source.join('manifest.json'), '{}')
+      target = store.create(2)
+
+      created = []
+      allow(FileUtils).to receive(:mkdir_p).and_wrap_original do |original, path, **options|
+        created << path.to_s
+        original.call(path, **options)
+      end
+
+      store.clone(source, target)
+
+      expect(created.sort).to eq([target.to_s, target.join('models').to_s].sort)
+    end
+
     it 'is a no-op when the source does not exist' do
       target = store.create(2)
 
