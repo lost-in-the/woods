@@ -173,7 +173,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Wait for Qdrant
         run: |
@@ -205,7 +205,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Verify release-v2 public-surface inventory
         run: bundle exec rake release_v2:verify_surface_inventory
@@ -227,7 +227,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Run artifact-reader specs under LC_ALL=C
         env:
@@ -251,7 +251,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Set up Node 22.19.0
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -279,7 +279,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Run tests with coverage
         run: COVERAGE=true bundle exec rake spec
@@ -302,7 +302,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Check for dependency vulnerabilities
         run: bundle exec bundle-audit check --update
@@ -314,7 +314,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3.10'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Build the release artifact once
         id: artifact
@@ -367,7 +367,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
         with:
-          ruby-version: '3.3'
+          ruby-version: '4.0.6'
           bundler-cache: true
       - name: Build the gem, install it, and boot it
         run: bundle exec rspec spec/integration/packaged_gem_spec.rb
