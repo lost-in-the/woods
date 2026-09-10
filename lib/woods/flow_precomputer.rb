@@ -89,11 +89,17 @@ module Woods
     #   controller units, rehydrated from the payload this run seeded
     # @param removed_identifiers [Array<String>] controller identifiers
     #   whose unit the run pruned
+    # @param carried_identifiers [Array<String>] controllers the run
+    #   re-extracted whose flows it established cannot have changed. Their
+    #   index entries stay as they are and their annotation is read back out
+    #   of those entries, because a re-extracted unit lost the annotation
+    #   whether or not its flows moved. Skipping the assembly is the whole
+    #   saving; skipping the annotation would diverge from a full run.
     # @return [Hash{String => Hash{String => String}}] per-controller
     #   annotation (action => relative flow path) to write into the units'
     #   metadata; an empty hash means "no flows", which clears any
     #   annotation a previous run had written
-    def recompute_delta(touched_units:, removed_identifiers: [])
+    def recompute_delta(touched_units:, removed_identifiers: [], carried_identifiers: [])
       FileUtils.mkdir_p(@flows_dir)
 
       assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
@@ -110,8 +116,13 @@ module Woods
         delta.merge!(entries)
       end
 
+      previous = previous_flow_index
+      Array(carried_identifiers).each do |identifier|
+        annotations[identifier] = carried_annotation(previous, identifier)
+      end
+
       replaced = touched_units.map(&:identifier) + Array(removed_identifiers)
-      carried = previous_flow_index.reject { |entry_point, _path| replaced.include?(controller_of(entry_point)) }
+      carried = previous.reject { |entry_point, _path| replaced.include?(controller_of(entry_point)) }
 
       write_flow_index(carried.merge(delta))
 
@@ -154,6 +165,18 @@ module Woods
       end
 
       [entries, unit_flow_paths]
+    end
+
+    # One controller's annotation, rebuilt from the index entries it keeps.
+    #
+    # @param previous [Hash{String => String}] the previous flow index
+    # @param identifier [String] controller identifier
+    # @return [Hash{String => String}] action to relative flow path
+    def carried_annotation(previous, identifier)
+      previous.each_with_object({}) do |(entry_point, path), annotation|
+        controller, action = entry_point.to_s.split('#', 2)
+        annotation[action] = path if action && controller == identifier
+      end
     end
 
     # The controller part of a flow index entry point.

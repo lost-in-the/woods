@@ -415,6 +415,72 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── A capped blast radius ────────────────────────────────────────────────
+  #
+  # `incremental_blast_radius_depth` stops the re-extraction walk N reverse
+  # hops from the changed file. The knob is only usable if the index it
+  # maintains is still equivalent to a full extraction: a unit outside the cap
+  # keeps content it was never asked to re-derive, and its `dependents` list
+  # has to be refreshed by the second pass rather than by a re-extraction.
+  #
+  # RadiusFar is two hops from the file that changes, so under a cap of 1 it
+  # is never re-extracted during the sequence.
+  describe 'a capped blast radius' do
+    around do |example|
+      Woods.configuration.incremental_blast_radius_depth = 1
+      example.run
+    ensure
+      Woods.configuration.incremental_blast_radius_depth = nil
+    end
+
+    # Found by identifier rather than by filename: the filename helper lives
+    # behind a require this file only performs in its before(:all).
+    def unit_json(dir, type, identifier)
+      documents = Dir[File.join(payload_dir(dir), type, '*.json')]
+                  .reject { |path| File.basename(path) == '_index.json' }
+                  .map { |path| JSON.parse(File.read(path)) }
+      documents.find { |document| document['identifier'] == identifier }
+    end
+
+    def write_radius_chain
+      write_leaf('baseline')
+      write_file('app/services/radius_near_service.rb',
+                 service_source('RadiusNearService', dependency: 'RadiusLeafService'))
+      write_file('app/services/radius_far_service.rb',
+                 service_source('RadiusFarService', dependency: 'RadiusNearService'))
+    end
+
+    def write_leaf(nonce)
+      write_file('app/services/radius_leaf_service.rb',
+                 "#{service_source('RadiusLeafService')}# #{nonce}\n")
+    end
+
+    it 'agrees with a full extraction about a unit two hops out' do
+      write_radius_chain
+
+      index_dir = run_sequence([-> { write_leaf('edited') }])
+
+      far = unit_json(index_dir, 'services', 'RadiusFarService')
+      expect(far['dependencies'].map { |dep| dep['target'] }).to include('RadiusNearService')
+      expect(unit_json(index_dir, 'services', 'RadiusNearService')['dependents'])
+        .to eq(unit_json(full_extraction, 'services', 'RadiusNearService')['dependents'])
+    end
+
+    it 'refreshes the dependents of a unit two hops out when the edge moves' do
+      write_radius_chain
+
+      run_sequence([
+                     lambda {
+                       # RadiusNear stops pointing at the leaf and points at
+                       # RadiusFar instead, so RadiusFar gains a dependent
+                       # without ever being re-extracted itself.
+                       write_file('app/services/radius_near_service.rb',
+                                  service_source('RadiusNearService', dependency: 'RadiusFarService'))
+                     }
+                   ])
+    end
+  end
+
   # ── SUMMARY.md totals (M4) ───────────────────────────────────────────────
   #
   # An incremental run used to ship the seeded previous generation's

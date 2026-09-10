@@ -149,7 +149,8 @@ module Woods
                   :dump_retention_count, :component_paths
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio,
-                :graph_cycle_limit, :graph_cycle_max_length
+                :graph_cycle_limit, :graph_cycle_max_length,
+                :incremental_blast_radius_depth
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -210,6 +211,9 @@ module Woods
       @volatile_dependency_ratio = 3.0
       @graph_cycle_limit = GraphAnalyzer::DEFAULT_CYCLE_LIMIT
       @graph_cycle_max_length = GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
+      # nil = the unbounded transitive closure. See the setter for why the
+      # default is not a small number.
+      @incremental_blast_radius_depth = nil
       # Directories the component extractors walk before reading `descendants`,
       # relative to Rails.root. See Extractors::ComponentDiscovery.
       @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
@@ -333,6 +337,28 @@ module Woods
     # @raise [ConfigurationError] otherwise
     def graph_cycle_max_length=(value)
       @graph_cycle_max_length = validate_optional_positive_integer!(:graph_cycle_max_length, value)
+    end
+
+    # How many reverse hops an incremental run walks from a changed file
+    # before it stops re-extracting dependents. `nil` (the default) keeps the
+    # unbounded transitive closure.
+    #
+    # A unit's extracted content is mostly a function of its own source and
+    # its own reflection, so on most graphs a small cap re-extracts the same
+    # bytes far faster. It is not safe everywhere, which is why the default
+    # is unbounded: an STI grandchild reads its grandparent's reflection
+    # (`reflect_on_all_associations`, `_validators` and the callback chain
+    # are all inherited), so `SportsCar < Car < Vehicle` has content that
+    # changes when `Vehicle` changes while sitting two hops away in the
+    # graph. A nested `has_many :through` resolves through the same kind of
+    # chain. Set this only on a tree you know has neither.
+    #
+    # @param value [Integer, nil] must be a positive Integer, or nil
+    # @raise [ConfigurationError] otherwise
+    def incremental_blast_radius_depth=(value)
+      @incremental_blast_radius_depth = validate_optional_positive_integer!(
+        :incremental_blast_radius_depth, value
+      )
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

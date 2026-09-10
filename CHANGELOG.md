@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manifest and summary, publish) was unattributed, so a slow run could only be split by
   guessing. One `[Woods] [profile] <phase> in N.NNs` line per phase, on the monotonic
   clock. Off by default and free when off.
+- **`incremental_blast_radius_depth` bounds how far an incremental run re-extracts.**
+  `extract_changed` walked the unbounded transitive dependent closure of every changed
+  file, so one edit to a widely referenced unit re-extracted most of the app. The new key
+  caps the walk at N reverse hops (`nil`, the default, keeps the unbounded closure). A
+  unit outside the cap keeps its content and still gets its `dependents` list refreshed by
+  the run's second pass, which the equivalence harness now covers under a cap of 1. The
+  default stays unbounded on purpose: an STI grandchild inherits its grandparent's
+  associations, validations and callback chain while sitting two hops away in the graph,
+  and nested `has_many :through` resolves the same way, so a host opts in for a tree it
+  knows has neither. On a 200-service chain in the dummy app, one leaf edit re-extracts
+  200 units unbounded and 2 under a depth of 1.
 
 ### Changed
 
@@ -56,6 +67,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the per-type `_index.json` files and run back to back at the end of every
   incremental run, so every index was globbed, read and parsed twice. An unreadable index
   still drops that type from both, now with one warning instead of two.
+- **The incremental flow refresh is scoped to the flow assembly radius.** Flows were
+  reassembled for every controller in the run's touched set, and the touched set is the
+  graph's whole reverse closure, so one leaf edit re-ran flow assembly for nearly every
+  controller in the app. A flow document reaches `FlowPrecomputer::DEFAULT_MAX_DEPTH`
+  units, so the run now walks the pre-change graph to that same depth and reassembles
+  only the controllers inside it. Controllers outside it carry their
+  `metadata[:flow_paths]` annotation forward out of the previous flow index rather than
+  losing it. A targeted `refresh`, a routes re-run, and a controller whose action set no
+  longer matches the index all still reassemble in full. On 50 controllers over a
+  50-service chain in the dummy app, one edit at the far end went from 50 controllers
+  reassembled to 3 plus 47 carried.
 - **`graph_sha` is digested from the bytes written.** `graph_analysis.json`'s digest of
   `dependency_graph.json` came from reading the file back off disk, one whole-file read
   per run of an artifact that on a large app is tens of megabytes, to digest bytes the
