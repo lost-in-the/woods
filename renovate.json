@@ -23,6 +23,16 @@
         "ruby"
       ],
       "enabled": false
+    },
+    {
+      "description": "simplecov 1.0 requires Ruby 3.2; hold it below 1.0 while the gem supports Ruby 3.0 and 3.1",
+      "matchDatasources": [
+        "rubygems"
+      ],
+      "matchPackageNames": [
+        "simplecov"
+      ],
+      "allowedVersions": "< 1.0"
     }
   ]
 }
