@@ -146,6 +146,7 @@ pushes the artifact CI built at that commit without rebuilding it.
 |---|---|
 | `script/validate-release-run`, `script/validate-release`, `script/verify-release-tag`, `ci.yml`, `release.yml` | merge to main, re-dispatch at the same tag; the tag does not move |
 | The live `release` environment (protection rule, admin bypass) | fix the setting directly; no re-dispatch needed |
+| `CI run <id> tested ref is main, expected v<version>` | the dispatch named main's CI run; re-dispatch with the run the tag push started (its branch column reads the tag), nothing to merge |
 | `spec/` or `lib/` that `package-test` runs against the candidate | merge the fix, then the maintainer moves the tag to the new main tip, waits for a fresh CI run, and re-dispatches |
 
 **Moving a tag is a maintainer step, and only before `publish` has pushed the
