@@ -141,7 +141,7 @@ module Woods
               gh api --method POST repos/#{REPOSITORY}/dispatches \\
                 -f event_type=release \\
                 -F 'client_payload[tag]=v#{target}' \\
-                -F 'client_payload[ci_run_id]=<green CI run id on the tagged SHA>'
+                -F 'client_payload[ci_run_id]=<id of the green CI run the tag push started>'
 
             The workflow publishes the bytes CI tested. Never run `gem push` from a laptop.
             #{final_reopen_hint(target)}
