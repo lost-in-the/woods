@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Scope per-file git metadata to HEAD history instead of every ref, excluding
+  unmerged branches and tool checkpoints from churn and authorship (#319). Run
+  a full `woods:extract` after upgrading to refresh previously published metadata.
+
 ## [2.0.0.beta2] - 2026-09-10
 
 ### Added
