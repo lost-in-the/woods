@@ -395,6 +395,7 @@ module Woods
     #
     # @return [Hash] Results keyed by extractor type
     def extract_all
+      profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       setup_output_directory
       ModelNameCache.reset!
       # @package_resolver alone is not enough: #package_resolver builds
@@ -423,29 +424,33 @@ module Woods
 
       # Phase 1.5: Deduplicate results
       Rails.logger.info '[Woods] Deduplicating results...'
-      deduplicate_results
+      profile_phase('deduplication') { deduplicate_results }
 
       # Phase 1.6: Package membership. Runs before the graph is rebuilt so
       # registration copies metadata[:package] onto the node (#280).
-      annotate_packages
+      profile_phase('package annotation') { annotate_packages }
 
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
       # `#remove`/`#unregister`, so surgical removal is now possible — but a
       # full extraction has just registered every unit including duplicates,
       # and rebuilding from the deduped set is both cheaper and less
       # error-prone than unwinding registrations one at a time.
-      @dependency_graph = DependencyGraph.new
-      @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
+      profile_phase('graph rebuild') do
+        @dependency_graph = DependencyGraph.new
+        @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
+      end
 
       # Phase 2: Resolve dependents (reverse dependencies)
       Rails.logger.info '[Woods] Resolving dependents...'
-      resolve_dependents
+      profile_phase('dependents') { resolve_dependents }
 
       # Phase 3: Enrich with git data. Runs BEFORE analysis now: the
       # volatile_dependencies report reads commit counts off graph nodes.
       Rails.logger.info '[Woods] Enriching with git data...'
-      enrich_with_git_data
-      annotate_graph_with_git_data
+      profile_phase('git enrichment') do
+        enrich_with_git_data
+        annotate_graph_with_git_data
+      end
 
       # Phase 4: Graph analysis (PageRank, structural metrics)
       Rails.logger.info '[Woods] Analyzing dependency graph...'
@@ -453,7 +458,7 @@ module Woods
 
       # Phase 4.5: Normalize file_path to relative paths
       Rails.logger.info '[Woods] Normalizing file paths...'
-      normalize_file_paths
+      profile_phase('path normalization') { normalize_file_paths }
 
       # Phase 5: Write output
       Rails.logger.info '[Woods] Writing output...'
@@ -463,7 +468,7 @@ module Woods
       # run after write_results — the just-written set is what defines
       # "legitimate" — and belongs to the full path only; the incremental path
       # deletes through the graph instead. See {#sweep_orphaned_unit_files}.
-      sweep_orphaned_unit_files
+      profile_phase('orphan sweep') { sweep_orphaned_unit_files }
 
       # Phase 5.5: Precompute request flows (opt-in). Must run AFTER
       # write_results — FlowAssembler loads unit JSON from disk, so running
@@ -486,18 +491,22 @@ module Woods
         profile_phase('flows') { precompute_flows }
       end
 
-      write_dependency_graph
-      write_graph_analysis
+      profile_phase('graph write') do
+        write_dependency_graph
+        write_graph_analysis
+      end
       profile_phase('manifest and summary') do
         write_manifest
         write_structural_summary
       end
-      capture_snapshot
-      profile_phase('publish') { publish_generation('full') }
+      profile_phase('snapshot') { capture_snapshot }
+      publish_generation('full')
 
       log_summary
 
       @results
+    ensure
+      log_profile_total('full', profile_started)
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -529,6 +538,7 @@ module Woods
     # @param changed_files [Array<String>] List of changed file paths
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     def extract_changed(changed_files)
+      profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       prepare_incremental_run
 
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
@@ -552,36 +562,38 @@ module Woods
         acc
       end
 
-      touched.merge(reconcile_class_based_types(affected_types))
-      touched.merge(rerun_whole_app_extractors(change_set, affected_types))
-      touched.merge(reannotate_packages(change_set, affected_types))
-      pruned = prune_vanished_units(change_set, affected_types)
-      touched.merge(pruned)
+      profile_phase('reconciliation') do
+        touched.merge(reconcile_class_based_types(affected_types))
+        touched.merge(rerun_whole_app_extractors(change_set, affected_types))
+        touched.merge(reannotate_packages(change_set, affected_types))
+        pruned = prune_vanished_units(change_set, affected_types)
+        touched.merge(pruned)
 
-      # Reconcile once more, because pruning can un-know a class the first pass
-      # skipped. A class-based file moved between autoload directories with its
-      # constant unchanged is still registered under the old path when
-      # reconciliation runs, so it looks known and is not re-extracted; the
-      # prune that follows then removes it for its vanished path. This pass
-      # re-adds it in the same run (M1) instead of leaving the unit missing
-      # until some later run happens to notice. Idempotent when nothing was
-      # pruned: the discovery set is compared against the graph, so an
-      # already-registered class is skipped.
-      #
-      # But not everything pruning removed may come back. `except:` keeps the
-      # *deletion* shape pruned: without a reload, a constant outlives the file
-      # that defined it — so deleting `app/models/user.rb` prunes `User`, and
-      # this pass finds `User` still in `ActiveRecord::Base.descendants`.
-      # Re-registering it would pin the unit to a path that no longer exists,
-      # and nothing could ever remove it: the sweep excludes class-based units
-      # and no future change set names that path again. A resident daemon
-      # processing a batch before its reload hits this every time. What
-      # separates the two shapes is the filesystem — only pruned identifiers
-      # that a still-existing file in the change set actually declares are
-      # re-addable. See {#readdable_pruned_classes}.
-      touched.merge(reconcile_class_based_types(
-                      affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
-                    ))
+        # Reconcile once more, because pruning can un-know a class the first pass
+        # skipped. A class-based file moved between autoload directories with its
+        # constant unchanged is still registered under the old path when
+        # reconciliation runs, so it looks known and is not re-extracted; the
+        # prune that follows then removes it for its vanished path. This pass
+        # re-adds it in the same run (M1) instead of leaving the unit missing
+        # until some later run happens to notice. Idempotent when nothing was
+        # pruned: the discovery set is compared against the graph, so an
+        # already-registered class is skipped.
+        #
+        # But not everything pruning removed may come back. `except:` keeps the
+        # *deletion* shape pruned: without a reload, a constant outlives the file
+        # that defined it — so deleting `app/models/user.rb` prunes `User`, and
+        # this pass finds `User` still in `ActiveRecord::Base.descendants`.
+        # Re-registering it would pin the unit to a path that no longer exists,
+        # and nothing could ever remove it: the sweep excludes class-based units
+        # and no future change set names that path again. A resident daemon
+        # processing a batch before its reload hits this every time. What
+        # separates the two shapes is the filesystem — only pruned identifiers
+        # that a still-existing file in the change set actually declares are
+        # re-addable. See {#readdable_pruned_classes}.
+        touched.merge(reconcile_class_based_types(
+                        affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
+                      ))
+      end
 
       finalize_incremental_unit_json(affected_types)
 
@@ -595,6 +607,8 @@ module Woods
       finalize_incremental_run(touched)
 
       touched.to_a
+    ensure
+      log_profile_total('incremental', profile_started)
     end
 
     # ══════════════════════════════════════════════════════════════════════
@@ -629,6 +643,7 @@ module Woods
     #   extractor
     # @raise [ArgumentError] when no recognized key is given
     def refresh(*keys)
+      profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       keys = Array(keys).flatten.map(&:to_sym).uniq
       known, unknown = keys.partition { |key| EXTRACTORS.key?(key) }
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
@@ -643,10 +658,12 @@ module Woods
       end
 
       finalize_incremental_unit_json(affected_types)
-      affected_types.each { |type_key| regenerate_type_index(type_key) }
+      profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
 
       { types: known, touched: touched.to_a, unknown: unknown }
+    ensure
+      log_profile_total('refresh', profile_started)
     end
 
     # Raise when the most recent extraction run wrote a payload but could not
@@ -667,6 +684,15 @@ module Woods
     end
 
     private
+
+    # Whole-run wall time, including unprofiled setup and failed runs. This
+    # separate log family must never be added to the individual phase times.
+    def log_profile_total(name, started)
+      return unless started
+
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      Rails.logger.info "[Woods] [profile total] #{name} in #{elapsed.round(2)}s"
+    end
 
     # Time one phase of a run and log how long it took, when WOODS_PROFILE=1.
     #
@@ -796,7 +822,7 @@ module Woods
     #   reading "incremental" after a `woods:refresh[routes]` is being misled
     # @return [void]
     def finalize_incremental_run(touched, reason: 'incremental')
-      write_dependency_graph
+      profile_phase('graph write') { write_dependency_graph }
 
       if touched.empty?
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
@@ -809,7 +835,7 @@ module Woods
         write_manifest(incremental: true)
         write_structural_summary
       end
-      profile_phase('publish') { publish_generation(reason) }
+      publish_generation(reason)
 
       return unless Woods.configuration.enable_snapshots
 
@@ -833,8 +859,8 @@ module Woods
       # below covers the directory under the name the pointer will carry.
       payload = publishable_payload_name(generation)
       profile_phase('payload sync') { sync_payload }
-      marker = generation.bump!(reason: reason, payload: payload)
-      prune_payloads(marker.number)
+      marker = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
+      profile_phase('payload prune') { prune_payloads(marker.number) }
       marker
     rescue StandardError => e
       # A failed bump must not fail the extraction that produced a perfectly
@@ -3445,12 +3471,14 @@ module Woods
     def finalize_incremental_unit_json(affected_types)
       dependents_dirty = @dependents_dirty || Set.new
       git_dirty = @incremental_written || {}
-      git_data = incremental_git_data(git_dirty.keys)
+      git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.keys) }
 
-      (dependents_dirty | git_dirty.keys).each do |identifier|
-        rewrite_unit_json(identifier, affected_types,
-                          refresh_dependents: dependents_dirty.include?(identifier),
-                          git_data: git_dirty.key?(identifier) ? git_data : nil)
+      profile_phase('unit finalization') do
+        (dependents_dirty | git_dirty.keys).each do |identifier|
+          rewrite_unit_json(identifier, affected_types,
+                            refresh_dependents: dependents_dirty.include?(identifier),
+                            git_data: git_dirty.key?(identifier) ? git_data : nil)
+        end
       end
     end
 

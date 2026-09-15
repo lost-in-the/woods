@@ -69,7 +69,7 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
     extractor.dependency_graph.register(
       Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
     )
-    %i[safe_eager_load! finalize_incremental_unit_json regenerate_type_index
+    %i[safe_eager_load! regenerate_type_index
        write_dependency_graph write_incremental_graph_analysis refresh_incremental_flows
        write_manifest write_structural_summary].each do |phase|
       allow(extractor).to receive(phase)
@@ -89,7 +89,14 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       extractor.extract_all
 
-      expect(profiled_phases).to be_empty
+      expect(logged.grep(/\[profile/)).to be_empty
+    end
+    it 'logs no phase or total timing lines during incremental extraction' do
+      stub_incremental_run
+
+      extractor.extract_changed(['app/models/user.rb'])
+
+      expect(logged.grep(/\[profile/)).to be_empty
     end
   end
 
@@ -107,9 +114,12 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       extractor.extract_all
 
+      expect(logged.grep(/\[profile total\] full in/).size).to eq(1)
       expect(profiled_phases).to eq(
-        ['payload seed', 'eager load', 'extraction', 'graph analysis', 'write results',
-         'flows', 'manifest and summary', 'payload sync', 'publish']
+        ['payload seed', 'eager load', 'extraction', 'deduplication', 'package annotation',
+         'graph rebuild', 'dependents', 'git enrichment', 'graph analysis', 'path normalization',
+         'write results', 'orphan sweep', 'flows', 'graph write', 'manifest and summary',
+         'snapshot', 'payload sync', 'publish', 'payload prune']
       )
     end
 
@@ -118,10 +128,12 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       extractor.extract_changed(['app/models/user.rb'])
 
+      expect(logged.grep(/\[profile total\] incremental in/).size).to eq(1)
       expect(profiled_phases).to eq(
         ['payload seed', 'previous graph load', 'eager load', 'blast radius', 'flow radius',
-         're-extraction', 'type index', 'graph analysis', 'flows', 'manifest and summary',
-         'payload sync', 'publish']
+         're-extraction', 'reconciliation', 'git enrichment', 'unit finalization', 'type index',
+         'graph write', 'graph analysis', 'flows', 'manifest and summary',
+         'payload sync', 'publish', 'payload prune']
       )
     end
 

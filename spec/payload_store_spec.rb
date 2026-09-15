@@ -60,6 +60,22 @@ RSpec.describe Woods::PayloadStore do
       expect(target.join('models/Post.json').read).to eq('{"identifier":"Post"}')
     end
 
+    it 'clones nested Unicode paths with a trailing source separator and preserves old bytes' do
+      source = store.create(1)
+      relative = 'models/nested space/élève.json'
+      FileUtils.mkdir_p(source.join(File.dirname(relative)))
+      File.binwrite(source.join(relative), 'original')
+      target = store.create(2)
+
+      store.clone("#{source}/", target)
+
+      expect(target.join(relative).binread).to eq('original')
+      expect(target.join(relative).stat.ino).to eq(source.join(relative).stat.ino)
+      Woods::AtomicFile.write(target.join(relative), 'changed')
+      expect(source.join(relative).binread).to eq('original')
+      expect(target.join(relative).binread).to eq('changed')
+    end
+
     it 'hardlinks rather than copying, so cloning costs no data' do
       source = store.create(1)
       File.write(source.join('manifest.json'), '{}')
@@ -209,7 +225,7 @@ RSpec.describe Woods::PayloadStore do
       source = Pathname.new(tmpdir).join('source.json')
       File.write(source, '{"a":1}')
       destination = Pathname.new(tmpdir).join('destination.json')
-      allow(FileUtils).to receive(:ln).and_raise(Errno::EXDEV, 'cross-device link')
+      allow(File).to receive(:link).and_raise(Errno::EXDEV, 'cross-device link')
 
       expect { store.link_or_copy(source, destination) }.not_to raise_error
       expect(destination.read).to eq('{"a":1}')

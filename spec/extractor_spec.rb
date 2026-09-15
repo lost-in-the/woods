@@ -3191,10 +3191,13 @@ RSpec.describe Woods::Extractor do
       payload_store = Woods::PayloadStore.new(output_dir)
       payload_dir = payload_store.create(1)
       target_extractor.instance_variable_set(:@payload_dir, payload_dir)
-      allow(FileUtils).to receive(:ln).and_raise(Errno::EXDEV, 'cross-device link')
+      allow(File).to receive(:link).and_raise(Errno::EXDEV, 'cross-device link')
 
       expect { target_extractor.send(:seed_payload_from_flat_root) }.not_to raise_error
       expect(File.read(payload_dir.join('manifest.json'))).to eq('{"total_units":1}')
+      expect(File).to have_received(:link)
+      expect(File.stat(payload_dir.join('manifest.json')).ino)
+        .not_to eq(File.stat(File.join(output_dir, 'manifest.json')).ino)
     end
   end
 

@@ -423,6 +423,29 @@ owns the definition of "the two indexes agree" and documents every exclusion.
 
 **Run it before and after any change to the incremental path.**
 
+## Profiling fixed costs
+
+Set `WOODS_PROFILE=1` to time extraction phases. Git enrichment and unit JSON
+finalization are separate from incremental re-extraction; runtime discovery,
+whole-app reruns and pruning appear under `reconciliation`. `payload sync`,
+`publish` (the generation pointer write), and `payload prune` (retention) are
+separate, additive phases. Older versions included sync and retention inside
+`publish`, so do not sum those older lines without subtracting nested sync.
+
+`[profile total]` reports time inside the extraction call, including setup and
+failed runs. It is not another phase to sum. Compare it with phase durations
+to find unaccounted work; each line rounds to hundredths of a second. Rails
+boot, Bundler and watch reload work outside the call require separate wall
+measurements. Do not infer that all unaccounted time is boot.
+
+Both full and incremental runs currently seed the prior payload. Cloning uses
+per-file hardlinks (or copies where links are unsupported); updated files are
+replaced atomically, preserving previous generations. Full-run carry-forward
+and generation retention remain unchanged. A faster Ruby traversal reduces
+seed overhead, but it does not remove filesystem work per file. Compare
+repeated runs on the actual index filesystem before attributing latency to
+extraction or changing the index layout.
+
 ## Boundaries and open work
 
 - **Reloaded deletion is supported.** The resident watcher reloads changed
