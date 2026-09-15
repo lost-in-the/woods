@@ -1,0 +1,1780 @@
+{
+  "schema_version": 1,
+  "name": "canopy-runtime-v1",
+  "provenance": {
+    "repository": "lost-in-the/woods-testbed",
+    "app": "apps/rails-8.0-large",
+    "app_sha": "f5f603f92a16f385d4fc825d72c7232a75014da4",
+    "woods_sha": "67625f4d",
+    "rails": "8.0",
+    "ruby": "3.3.1",
+    "extraction": "runtime woods:extract; isolated output; no embeddings or application records"
+  },
+  "units": [
+    {
+      "type": "controller",
+      "identifier": "ApplicationController",
+      "file_path": "app/controllers/application_controller.rb",
+      "namespace": null,
+      "source_code": "\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#\n\nclass ApplicationController < ActionController::Base\n  helper_method :current_author, :current_organization, :editor?\n  rescue_from Pundit::NotAuthorizedError, with: -> { render plain: 'You do not have access to this action.', status: :forbidden }\n  rescue_from ActiveRecord::RecordNotFound, with: -> { render plain: 'Record not found.', status: :not_found }\n  rescue_from ActiveRecord::RecordInvalid, EditorialWorkflow::InvalidTransition, ActiveRecord::StaleObjectError, ArgumentError, with: :invalid_request\n  def current_author\n    @current_author ||= Author.find_by(id: session[:author_id])\n  end\n  def current_organization\n    @current_organization ||= current_author&.organizations&.find_by(id: session[:organization_id]) || current_author&.organizations&.first\n  end\n  def editor? = current_author && current_organization && current_author.editor_of?(current_organization)\n  private\n  def require_session\n    redirect_to demo_session_path unless current_author && current_organization\n  end\n  def require_editor\n    raise Pundit::NotAuthorizedError unless editor?\n  end\n  def page_offset = ([params[:page].to_i, 1].max - 1) * 25\n  def invalid_request(error)\n    render plain: error.message, status: :unprocessable_entity\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "code_reference"
+        },
+        {
+          "type": "controller",
+          "target": "DemoSessionsController",
+          "via": "redirect_to"
+        }
+      ],
+      "source_hash": "c84612fe69ad4b50b0133c7114aad0baafa5de59dec16aef850fcee7ce357f7a"
+    },
+    {
+      "type": "controller",
+      "identifier": "ArticlesController",
+      "file_path": "app/controllers/articles_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   POST    /articles/:id/submit                          \u2192 #submit\n#   POST    /articles/:id/decide                          \u2192 #decide\n#   POST    /articles/:id/publish                         \u2192 #publish\n#   POST    /articles/:id/schedule                        \u2192 #schedule\n#   GET     /articles                                     \u2192 #index\n#   POST    /articles                                     \u2192 #create\n#   GET     /articles/new                                 \u2192 #new\n#   GET     /articles/:id/edit                            \u2192 #edit\n#   GET     /articles/:id                                 \u2192 #show\n#   PATCH   /articles/:id                                 \u2192 #update\n#   PUT     /articles/:id                                 \u2192 #update\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_author\n#   before   :require_session\n#   before   :load_article (only: [:show, :edit, :update, :submit, :decide, :publish, :schedule])\n#\n\nclass ArticlesController < ApplicationController\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: RequiresAuthor                                        \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # module RequiresAuthor\n  #   extend ActiveSupport::Concern\n  #   included do\n  #     before_action :require_author\n  #   end\n  #   private\n  #   def require_author\n  #     @current_author = Author.find_by(id: session[:author_id])\n  #     redirect_to demo_session_path if @current_author.nil?\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End RequiresAuthor \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n  include RequiresAuthor\n  before_action :require_session\n  before_action :load_article, only: %i[show edit update submit decide publish schedule]\n  def index\n    @articles = Article.joins(:publication).where(publications: { organization_id: current_organization.id })\n    @articles = @articles.where(author: current_author).or(@articles.where(state: 'published')) unless editor?\n    @articles = @articles.where(state: params[:state]) if params[:state].present?\n    @articles = @articles.where('articles.title LIKE ?', \"%#{Article.sanitize_sql_like(params[:q].to_s)}%\") if params[:q].present?\n    @articles = @articles.includes(:author, :publication).order(updated_at: :desc).limit(25).offset(page_offset)\n    # Keep a real cache extraction fixture, scoped and invalidated on publish.\n    @published_count = current_organization.publications.sum do |publication|\n      Rails.cache.fetch(\"articles/published/#{publication.id}\", expires_in: 5.minutes) { publication.articles.published.not_archived.count }\n    end\n  end\n  def show\n    @revisions = @article.revisions.order(number: :desc).includes(review_assignments: [:reviewer, :review_decision])\n  end\n  def new\n    @article = Article.new(author: current_author, publication: current_organization.publications.first)\n  end\n  def create\n    publication = current_organization.publications.find(params.require(:article).require(:publication_id))\n    @article = Article.new(author: current_author, publication: publication)\n    workflow.save_draft(@article, article_params)\n    redirect_to @article\n  end\n  def edit\n    workflow.authorize!(@article, :update?)\n  end\n  def update\n    workflow.save_draft(@article, article_params)\n    redirect_to @article\n  end\n  def submit\n    workflow.submit(@article, reviewer: current_organization.authors.find(params.require(:reviewer_id)))\n    redirect_to @article\n  end\n  def decide\n    assignment = @article.revisions.joins(:review_assignments).where(review_assignments: { id: params[:assignment_id] }).first!.review_assignments.find(params[:assignment_id])\n    workflow.decide(assignment, outcome: params.require(:outcome), notes: params[:notes])\n    redirect_to @article\n  end\n  def publish\n    PublishArticle.new(author: current_author).call(@article)\n    redirect_to @article\n  end\n  def schedule\n    workflow.schedule(@article, at: Time.zone.parse(params.require(:scheduled_at)))\n    redirect_to @article\n  end\n  private\n  def load_article\n    @article = Article.joins(:publication).where(publications: { organization_id: current_organization&.id }).find(params[:id])\n    workflow.authorize!(@article, :show?)\n  end\n  def workflow = EditorialWorkflow.new(author: current_author)\n  def article_params = params.require(:article).permit(:title, :body).to_h.symbolize_keys\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "concern",
+          "target": "RequiresAuthor",
+          "via": "include"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "624c04d39571e9dd89d90c78e849d37c314f50b53492dac483dc5d5278858b7d"
+    },
+    {
+      "type": "controller",
+      "identifier": "Billing::InvoicesController",
+      "file_path": "app/controllers/billing/invoices_controller.rb",
+      "namespace": "Billing",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   POST    /billing/invoices/:id/pay                     \u2192 #pay\n#   POST    /billing/invoices/:id/refund                  \u2192 #refund\n#   GET     /billing/invoices                             \u2192 #index\n#   GET     /billing/invoices/:id                         \u2192 #show\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_author\n#   before   :require_session\n#   before   :require_editor\n#\n\nmodule Billing\n  class InvoicesController < ApplicationController\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: RequiresAuthor                                        \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # module RequiresAuthor\n  #   extend ActiveSupport::Concern\n  #   included do\n  #     before_action :require_author\n  #   end\n  #   private\n  #   def require_author\n  #     @current_author = Author.find_by(id: session[:author_id])\n  #     redirect_to demo_session_path if @current_author.nil?\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End RequiresAuthor \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    include RequiresAuthor\n    before_action :require_session\n    before_action :require_editor\n    def index\n      @invoices = scope.includes(:subscriber).order(id: :desc).limit(25).offset(page_offset)\n    end\n    def show\n      @invoice = scope.find(params[:id])\n    end\n    def pay\n      invoice = scope.find(params[:id])\n      CollectPayment.new.call(invoice: invoice, key: params.require(:key), outcome: params.fetch(:outcome, 'success'), method: params[:method])\n      redirect_to billing_invoice_path(invoice)\n    end\n    def refund\n      invoice = scope.find(params[:id])\n      RefundPayment.new.call(payment: invoice.payments.find(params[:payment_id]), amount_cents: params.require(:amount_cents), key: params.require(:key), reason: params.require(:reason))\n      redirect_to billing_invoice_path(invoice)\n    end\n    private\n    def scope\n      Invoice.joins(:subscriber).where(subscribers: { organization_id: current_organization.id })\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "concern",
+          "target": "RequiresAuthor",
+          "via": "include"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "code_reference"
+        },
+        {
+          "type": "controller",
+          "target": "Billing::InvoicesController",
+          "via": "redirect_to"
+        }
+      ],
+      "source_hash": "695ef1806328bb265fb7ecf77d1e751a08dd86dae29542ffbfdbff9ad9a7dfb0"
+    },
+    {
+      "type": "controller",
+      "identifier": "CollectionsController",
+      "file_path": "app/controllers/collections_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   GET     /collections                                  \u2192 #index\n#   POST    /collections                                  \u2192 #create\n#   GET     /collections/:id                              \u2192 #show\n#   PATCH   /collections/:id                              \u2192 #update\n#   PUT     /collections/:id                              \u2192 #update\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#   before   :require_editor\n#\n\nclass CollectionsController < ApplicationController\n  before_action :require_session\n  before_action :require_editor\n  def index\n    @collections = scope.includes(:publication).order(:name).limit(25).offset(page_offset)\n  end\n  def show\n    @collection = scope.find(params[:id])\n    @placements = @collection.collection_articles.includes(:article).limit(25).offset(page_offset)\n    @articles = @collection.publication.articles.order(:title).limit(100)\n  end\n  def create\n    publication = current_organization.publications.find(params.require(:publication_id))\n    collection = publication.collections.create!(name: params.require(:name))\n    redirect_to collection\n  end\n  def update\n    collection = scope.find(params[:id])\n    article = collection.publication.articles.find(params.require(:article_id))\n    collection.with_lock do\n      placement = collection.collection_articles.find_or_initialize_by(article: article)\n      placement.update!(position: params.require(:position))\n      if params[:tag].present?\n        tag = Tag.find_or_create_by!(name: params[:tag].strip.downcase)\n        article.article_tags.find_or_create_by!(tag: tag)\n      end\n    end\n    redirect_to collection\n  end\n  private\n  def scope = Collection.joins(:publication).where(publications: { organization_id: current_organization.id })\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Tag",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Collection",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "2e7125bffea5096a2a53a3a30371c51b15121b49a8707587df1d4d4da9734b82"
+    },
+    {
+      "type": "controller",
+      "identifier": "CommentsController",
+      "file_path": "app/controllers/comments_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   GET     /articles/:article_id/comments                \u2192 #index\n#   POST    /articles/:article_id/comments                \u2192 #create\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#   before   :load_article\n#\n\nclass CommentsController < ApplicationController\n  before_action :require_session\n  before_action :load_article\n  def index\n    @comments = @article.comments.recent.includes(:author).limit(25).offset(page_offset)\n  end\n  def create\n    @article.comments.create!(body: params.require(:body), author: current_author, parent: params[:parent_id].present? ? @article.comments.find(params[:parent_id]) : nil)\n    redirect_to article_comments_path(@article)\n  end\n  private\n  def load_article\n    @article = Article.find(params[:article_id])\n    raise Pundit::NotAuthorizedError unless ArticlePolicy.new(current_author, @article).show?\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        },
+        {
+          "type": "controller",
+          "target": "CommentsController",
+          "via": "redirect_to"
+        }
+      ],
+      "source_hash": "d7d6b02f19038ea22f557da2c9e97f844b8cb34a051947534bf8aa229294b543"
+    },
+    {
+      "type": "controller",
+      "identifier": "DashboardController",
+      "file_path": "app/controllers/dashboard_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   POST    /run_due                                      \u2192 #run_due\n#   POST    /webhooks/:id/retry                           \u2192 #retry_webhook\n#   GET     /                                             \u2192 #index\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#\n\nclass DashboardController < ApplicationController\n  before_action :require_session\n  def index\n    @report = EditorialReport.new(current_organization)\n    @events = current_organization.activity_events.order(id: :desc).limit(15)\n    @webhooks = WebhookDelivery.joins(:webhook_endpoint).where(webhook_endpoints: { organization_id: current_organization.id }).order(id: :desc).limit(15)\n  end\n  def run_due\n    require_editor\n    current_organization.publications.each do |publication|\n      publication.articles.where(state: 'scheduled').where('scheduled_at <= ?', Time.current).find_each { |article| PublishArticle.new(author: current_author).call(article) }\n    end\n    Billing::Subscription.joins(:subscriber).where(subscribers: { organization_id: current_organization.id }).active.where('renews_at <= ?', Time.current).find_each do |subscription|\n      Billing::SubscriptionWorkflow.new(author: current_author).renew(subscription)\n    end\n    redirect_to root_path, notice: 'Due publishing and renewals completed.'\n  end\n  def retry_webhook\n    require_editor\n    delivery = WebhookDelivery.joins(:webhook_endpoint).where(webhook_endpoints: { organization_id: current_organization.id }).find(params[:id])\n    WebhookDeliveryJob.perform_now(delivery.id)\n    redirect_to root_path\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "WebhookDelivery",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "88bace3e119fda426b7abbda26451884407e4484940c5b4a0d2393dbfc2548f6"
+    },
+    {
+      "type": "controller",
+      "identifier": "DemoSessionsController",
+      "file_path": "app/controllers/demo_sessions_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   GET     /demo_session                                 \u2192 #show\n#   PATCH   /demo_session                                 \u2192 #update\n#   PUT     /demo_session                                 \u2192 #update\n#   DELETE  /demo_session                                 \u2192 #destroy\n#   POST    /demo_session                                 \u2192 #create\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :demo_only\n#\n\nclass DemoSessionsController < ApplicationController\n  before_action :demo_only\n  def show\n    @authors = Author.joins(:memberships).distinct.order(:name)\n  end\n  def create\n    author = Author.joins(:memberships).find(params.require(:author_id))\n    reset_session\n    session[:author_id] = author.id\n    redirect_to root_path\n  end\n  def update\n    organization = current_author&.organizations&.find(params.require(:organization_id))\n    raise Pundit::NotAuthorizedError unless organization\n    session[:organization_id] = organization.id\n    redirect_to root_path\n  end\n  def destroy\n    reset_session\n    redirect_to demo_session_path\n  end\n  private\n  def demo_only\n    head :not_found unless Rails.env.development? || Rails.env.test?\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "code_reference"
+        },
+        {
+          "type": "controller",
+          "target": "DemoSessionsController",
+          "via": "redirect_to"
+        }
+      ],
+      "source_hash": "42ea7087567154484b8da6ad42271e7532c6576c2eb814ec6368e99576ecf669"
+    },
+    {
+      "type": "controller",
+      "identifier": "GraphqlController",
+      "file_path": "app/controllers/graphql_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   POST    /graphql                                      \u2192 #create\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#\n\nclass GraphqlController < ApplicationController\n  before_action :require_session\n  def create\n    render json: TestbedSchema.execute(params.require(:query), variables: params[:variables]&.to_unsafe_h || {}, context: { author: current_author, organization: current_organization })\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [],
+      "source_hash": "8461505aceeec89d670ffb9b072a5a68b9828a0752360626d91b1307c0fe4206"
+    },
+    {
+      "type": "controller",
+      "identifier": "Newsletter::CampaignsController",
+      "file_path": "app/controllers/newsletter/campaigns_controller.rb",
+      "namespace": "Newsletter",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   POST    /newsletter/campaigns/:id/send_campaign       \u2192 #send_campaign\n#   POST    /newsletter/campaigns/:id/drain               \u2192 #drain\n#   POST    /newsletter/campaigns/:id/engage              \u2192 #engage\n#   GET     /newsletter/campaigns                         \u2192 #index\n#   POST    /newsletter/campaigns                         \u2192 #create\n#   GET     /newsletter/campaigns/:id                     \u2192 #show\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#   before   :require_editor\n#\n\nmodule Newsletter\n  class CampaignsController < ApplicationController\n    before_action :require_session\n    before_action :require_editor\n    def index\n      @campaigns = scope.order(id: :desc).limit(25).offset(page_offset)\n      @articles = Article.joins(:publication).where(publications: { organization_id: current_organization.id }).published.not_archived.order(id: :desc).limit(100)\n    end\n    def show\n      @campaign = scope.find(params[:id])\n      @deliveries = @campaign.deliveries.includes(:subscriber).limit(25).offset(page_offset)\n    end\n    def create\n      article = Article.joins(:publication).where(publications: { organization_id: current_organization.id }).find(params[:article_id])\n      campaign = Campaign.create!(article: article, publication: article.publication, subject: params.require(:subject))\n      redirect_to newsletter_campaign_path(campaign)\n    end\n    def send_campaign\n      campaign = scope.find(params[:id])\n      SendCampaign.new.call(campaign: campaign, author: current_author)\n      redirect_to newsletter_campaign_path(campaign)\n    end\n    def drain\n      campaign = scope.find(params[:id])\n      campaign.deliveries.where(state: 'queued').find_each { |delivery| DeliverJob.perform_now(delivery.id) }\n      redirect_to newsletter_campaign_path(campaign)\n    end\n    def engage\n      campaign = scope.find(params[:id])\n      delivery = campaign.deliveries.where(state: 'delivered').find(params.require(:delivery_id))\n      delivery.engagement_events.create!(subscriber: delivery.subscriber, article: campaign.article, kind: params.require(:kind), metadata: { source: 'demo', device: { kind: 'browser' } })\n      redirect_to newsletter_campaign_path(campaign)\n    end\n    private\n    def scope = Campaign.joins(:publication).where(publications: { organization_id: current_organization.id })\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Newsletter::Campaign",
+          "via": "code_reference"
+        },
+        {
+          "type": "controller",
+          "target": "Newsletter::CampaignsController",
+          "via": "redirect_to"
+        }
+      ],
+      "source_hash": "678b2ea0910f09ad619959222af79ffc61747214585d2ad4739a0a6b26c4e4d4"
+    },
+    {
+      "type": "controller",
+      "identifier": "PublicArticlesController",
+      "file_path": "app/controllers/public_articles_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   GET     /read/:slug                                   \u2192 #show\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#\n\nclass PublicArticlesController < ApplicationController\n  def show\n    @article = Article.published.not_archived.find_by!(slug: params[:slug])\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "22ab67ceec9a8571c28b54fc0d1c794005bf9f64232745bc6372df0e99a712ba"
+    },
+    {
+      "type": "controller",
+      "identifier": "SubscribersController",
+      "file_path": "app/controllers/subscribers_controller.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   POST    /subscribers/:id/subscribe                    \u2192 #subscribe\n#   POST    /subscribers/:id/cancel                       \u2192 #cancel\n#   GET     /subscribers                                  \u2192 #index\n#   POST    /subscribers                                  \u2192 #create\n#   GET     /subscribers/:id                              \u2192 #show\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#   before   :require_editor\n#\n\nclass SubscribersController < ApplicationController\n  before_action :require_session\n  before_action :require_editor\n  def index\n    @subscribers = current_organization.subscribers.order(:name).limit(25).offset(page_offset)\n  end\n  def show\n    @subscriber = current_organization.subscribers.find(params[:id])\n    @plans = Billing::Plan.joins(:publication).where(publications: { organization_id: current_organization.id })\n  end\n  def create\n    subscriber = current_organization.subscribers.create!(params.require(:subscriber).permit(:name, :email))\n    redirect_to subscriber\n  end\n  def subscribe\n    subscriber = current_organization.subscribers.find(params[:id])\n    Billing::SubscriptionWorkflow.new(author: current_author).activate(subscriber: subscriber, plan: Billing::Plan.find(params.require(:plan_id)))\n    redirect_to subscriber\n  end\n  def cancel\n    subscriber = current_organization.subscribers.find(params[:id])\n    Billing::SubscriptionWorkflow.new(author: current_author).cancel(subscriber.subscriptions.find(params[:subscription_id]))\n    redirect_to subscriber\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Plan",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "bf45072879e8de4f589c7ffd7c2e6493bba3967edf54ede7cdba871510445df9"
+    },
+    {
+      "type": "controller",
+      "identifier": "Support::TicketsController",
+      "file_path": "app/controllers/support/tickets_controller.rb",
+      "namespace": "Support",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Routes                                                                 \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   GET     /support/tickets                              \u2192 #index\n#   POST    /support/tickets                              \u2192 #create\n#   GET     /support/tickets/:id                          \u2192 #show\n#   PATCH   /support/tickets/:id                          \u2192 #update\n#   PUT     /support/tickets/:id                          \u2192 #update\n#\n\n# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Filter Chain                                                           \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n#\n#   before   :verify_authenticity_token\n#   after    :verify_same_origin_request\n#   before   :require_session\n#   before   :require_editor\n#\n\nmodule Support\n  class TicketsController < ApplicationController\n    before_action :require_session\n    before_action :require_editor\n    def index\n      @tickets = scope.includes(:subscriber).order(id: :desc).limit(25).offset(page_offset)\n    end\n    def show\n      @ticket = scope.find(params[:id])\n    end\n    def create\n      subscriber = current_organization.subscribers.find(params.require(:subscriber_id))\n      invoice = subscriber.invoices.find(params[:invoice_id]) if params[:invoice_id].present?\n      ticket = subscriber.tickets.create!(title: params.require(:title), subject: invoice)\n      redirect_to support_ticket_path(ticket)\n    end\n    def update\n      ticket = scope.find(params[:id])\n      ticket.update!(assignee: current_organization.authors.find(params[:assignee_id])) if params[:assignee_id].present?\n      ticket.messages.create!(body: params[:body], author: current_author) if params[:body].present?\n      ResolveTicket.new.call(ticket: ticket, author: current_author) if params[:resolve] == '1'\n      redirect_to support_ticket_path(ticket)\n    end\n    private\n    def scope = Ticket.joins(:subscriber).where(subscribers: { organization_id: current_organization.id })\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Support::Ticket",
+          "via": "code_reference"
+        },
+        {
+          "type": "controller",
+          "target": "Support::TicketsController",
+          "via": "redirect_to"
+        }
+      ],
+      "source_hash": "3d8fdfb00286524c198d655bf3b5dac24026efd1d9ee5d23e5bf754ab5252a28"
+    },
+    {
+      "type": "job",
+      "identifier": "ApplicationJob",
+      "file_path": "app/jobs/application_job.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: ApplicationJob                                                \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: default                                                     \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass ApplicationJob < ActiveJob::Base\nend\n\n",
+      "metadata": {},
+      "dependencies": [],
+      "source_hash": "95a54d55f9b97fcbea23aefdce6dd21c230dffd9e0c677fa4bf74d71a06d72f4"
+    },
+    {
+      "type": "job",
+      "identifier": "Billing::ChargePaymentJob",
+      "file_path": "app/jobs/billing/charge_payment_job.rb",
+      "namespace": "Billing",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: Billing::ChargePaymentJob                                     \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: billing                                                     \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Billing\n  class ChargePaymentJob < ApplicationJob\n    queue_as :billing\n    def perform(invoice_id, key = nil, outcome = 'success')\n      Billing::CollectPayment.new.call(invoice: Billing::Invoice.find(invoice_id), key: key || \"invoice-#{invoice_id}-initial\", outcome: outcome)\n    end\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "4c4100dbf5552a4d1d9cb870842ece10afe7ccbefe7561bf91b2bc810fe9cec1"
+    },
+    {
+      "type": "job",
+      "identifier": "Newsletter::DeliverJob",
+      "file_path": "app/jobs/newsletter/deliver_job.rb",
+      "namespace": "Newsletter",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: Newsletter::DeliverJob                                        \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: newsletter                                                  \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Newsletter\n  class DeliverJob < ApplicationJob\n    queue_as :newsletter\n    def perform(delivery_id)\n      delivery = Delivery.find(delivery_id)\n      delivery.with_lock do\n        return unless delivery.state == 'queued'\n        bounce = delivery.subscriber.preferences['simulate_bounce'] == true\n        delivery.update!(state: bounce ? 'bounced' : 'delivered', delivered_at: bounce ? nil : Time.current)\n      end\n    end\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Newsletter::Delivery",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "ffa3407ed21ff5b8bf7ad5c4444e9940d85966c287d8281941451fb4317ac0e1"
+    },
+    {
+      "type": "job",
+      "identifier": "PublishArticleJob",
+      "file_path": "app/jobs/publish_article_job.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: PublishArticleJob                                             \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: default                                                     \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass PublishArticleJob < ApplicationJob\n  queue_as :default\n\n  def perform(article_id)\n    article = Article.find(article_id)\n    AuthorMailer.article_published(article).deliver_later\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        },
+        {
+          "type": "mailer",
+          "target": "AuthorMailer",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "631db6fcd0de138f3ddebc2993afc49f1606d4d9ca5b2bc22d4390c67139edc3"
+    },
+    {
+      "type": "job",
+      "identifier": "PublishDueArticlesJob",
+      "file_path": "app/jobs/publish_due_articles_job.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: PublishDueArticlesJob                                         \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: editorial                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass PublishDueArticlesJob < ApplicationJob\n  queue_as :editorial\n  def perform\n    Article.where(state: 'scheduled').where('scheduled_at <= ?', Time.current).find_each do |article|\n      editor = article.publication.organization.memberships.find_by!(role: 'editor').author\n      PublishArticle.new(author: editor).call(article)\n    end\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "b8108be80a400bec5ef9046a07eda5772c2b8b0c63670d468ea6812e8709375d"
+    },
+    {
+      "type": "job",
+      "identifier": "RenewSubscriptionsJob",
+      "file_path": "app/jobs/renew_subscriptions_job.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: RenewSubscriptionsJob                                         \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: billing                                                     \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass RenewSubscriptionsJob < ApplicationJob\n  queue_as :billing\n  def perform\n    Billing::Subscription.active.where('renews_at <= ?', Time.current).find_each do |subscription|\n      editor = subscription.subscriber.organization.memberships.find_by!(role: 'editor').author\n      Billing::SubscriptionWorkflow.new(author: editor).renew(subscription)\n    end\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "f913079b044db0b4936721c9bf8151780195e5b999c611497e557d83a7fbd66b"
+    },
+    {
+      "type": "job",
+      "identifier": "WebhookDeliveryJob",
+      "file_path": "app/jobs/webhook_delivery_job.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Job: WebhookDeliveryJob                                            \u2551\n# \u2551 Type: active_job                                                   \u2551\n# \u2551 Queue: webhooks                                                    \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\n# No HTTP is performed. The first attempt fails, the next succeeds.\nclass WebhookDeliveryJob < ApplicationJob\n  queue_as :webhooks\n  def perform(delivery_id)\n    delivery = WebhookDelivery.find(delivery_id)\n    delivery.with_lock do\n      return if delivery.state == 'delivered'\n      attempts = delivery.attempts + 1\n      delivery.update!(attempts: attempts, state: attempts == 1 ? 'failed' : 'delivered')\n    end\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "WebhookDelivery",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "338fa31549cf7f33d2d2b1815405c50bb9ca238287867740c787362f98c4630e"
+    },
+    {
+      "type": "mailer",
+      "identifier": "AuthorMailer",
+      "file_path": "app/mailers/author_mailer.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Mailer: AuthorMailer                                                \u2551\n# \u2551 Actions: article_published                                          \u2551\n# \u2551 Default From: noreply@example.com                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass AuthorMailer < ApplicationMailer\n  def article_published(article)\n    @article = article\n    @author = article.author\n    mail(to: @author.email, subject: \"Your article is live\")\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [],
+      "source_hash": "0796c79df7aed94a0c8a839eb4a12bc0c17b7c46e6da1e1c3f73b0f948ed1906"
+    },
+    {
+      "type": "model",
+      "identifier": "ActivityEvent",
+      "file_path": "app/models/activity_event.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: activity_events\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   organization_id           integer         NOT NULL\n#   actor_id                  integer         \n#   subject_type              string          NOT NULL\n#   subject_id                integer         NOT NULL\n#   action                    string          NOT NULL\n#   metadata                  json            NOT NULL DEFAULT \"{}\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_activity_events_on_subject: [subject_type, subject_id]\n#   index_activity_events_on_actor_id: [actor_id]\n#   index_activity_events_on_organization_id: [organization_id]\n#\n# Foreign Keys:\n#   activity_events.actor_id \u2192 authors\n#   activity_events.organization_id \u2192 organizations\n\nclass ActivityEvent < ApplicationRecord\n  belongs_to :organization\n  belongs_to :actor, class_name: 'Author', optional: true\n  belongs_to :subject, polymorphic: true\n  has_many :webhook_deliveries, dependent: :destroy\n  validates :action, presence: true\n  validates :subject_type, inclusion: { in: ['Article', 'Billing::Subscription', 'Support::Ticket'] }\n  validate do\n    owner = case subject\n    when Article then subject.publication.organization_id\n    when Billing::Subscription, Support::Ticket then subject.subscriber.organization_id\n    end\n    errors.add(:subject, 'wrong organization') unless owner == organization_id\n    errors.add(:actor, 'wrong organization') if actor && !actor.memberships.exists?(organization_id: organization_id)\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Organization",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Subject",
+          "via": "polymorphic_interface"
+        },
+        {
+          "type": "model",
+          "target": "WebhookDelivery",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Support::Ticket",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "caead29c7f8423d18282e1d6d4c081ea1683203f13a11a7a7b7c765725825ca8"
+    },
+    {
+      "type": "model",
+      "identifier": "ArticleRevision",
+      "file_path": "app/models/article_revision.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: article_revisions\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   article_id                integer         NOT NULL\n#   author_id                 integer         NOT NULL\n#   number                    integer         NOT NULL\n#   title                     string          NOT NULL\n#   body                      text            \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_article_revisions_on_article_id_and_number: [article_id, number] (unique)\n#   index_article_revisions_on_author_id: [author_id]\n#   index_article_revisions_on_article_id: [article_id]\n#\n# Foreign Keys:\n#   article_revisions.author_id \u2192 authors\n#   article_revisions.article_id \u2192 articles\n\nclass ArticleRevision < ApplicationRecord\n  belongs_to :article\n  belongs_to :author\n  has_many :review_assignments, dependent: :destroy\n  validates :title, :number, presence: true\n  validates :number, uniqueness: { scope: :article_id }\n  validate { errors.add(:base, 'Revisions are immutable') if persisted? && changed? }\n  validate { errors.add(:author, 'must belong to the organization') unless author&.memberships&.exists?(organization_id: article&.publication&.organization_id) }\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "ReviewAssignment",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "b36691990caefa8734938c15733c32c51447b626cad40b66e730db432f04bb3b"
+    },
+    {
+      "type": "model",
+      "identifier": "ArticleTag",
+      "file_path": "app/models/article_tag.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: article_tags\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   article_id                integer         NOT NULL\n#   tag_id                    integer         NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_article_tags_on_article_id_and_tag_id: [article_id, tag_id] (unique)\n#   index_article_tags_on_tag_id: [tag_id]\n#   index_article_tags_on_article_id: [article_id]\n#\n# Foreign Keys:\n#   article_tags.tag_id \u2192 tags\n#   article_tags.article_id \u2192 articles\n\nclass ArticleTag < ApplicationRecord\n  belongs_to :article\n  belongs_to :tag\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Tag",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "0223f8385c1169a76cbf9db75a251af8905118b5d86c45baf8bf80d995034e9d"
+    },
+    {
+      "type": "model",
+      "identifier": "Article",
+      "file_path": "app/models/article.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: articles\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   author_id                 integer         NOT NULL\n#   title                     string          NOT NULL\n#   slug                      string          NOT NULL\n#   body                      text            \n#   published_at              datetime        \n#   archived_at               datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#   publication_id            integer         NOT NULL\n#   state                     string          NOT NULL DEFAULT \"draft\"\n#   scheduled_at              datetime        \n#   lock_version              integer         NOT NULL DEFAULT \"0\"\n#   comments_count            integer         NOT NULL DEFAULT \"0\"\n#\n# Indexes:\n#   index_articles_on_publication_id_and_state_and_scheduled_at: [publication_id, state, scheduled_at]\n#   index_articles_on_publication_id: [publication_id]\n#   index_articles_on_slug: [slug] (unique)\n#   index_articles_on_author_id: [author_id]\n#\n# Foreign Keys:\n#   articles.publication_id \u2192 publications\n#   articles.author_id \u2192 authors\n\nclass Article < ApplicationRecord\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: Archivable                                            \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # # Soft-archiving, included by three models.\n  # #\n  # # Three is deliberate (KERNEL_CONTRACT.md): concern inlining is what Woods does\n  # # that file-level tools don't, and one includer wouldn't exercise it. The\n  # # contract smoke asserts the count exactly.\n  # module Archivable\n  #   extend ActiveSupport::Concern\n  # \n  #   included do\n  #     scope :archived,     -> { where.not(archived_at: nil) }\n  #     scope :not_archived, -> { where(archived_at: nil) }\n  # \n  #     before_save :clear_archived_at_when_reactivated\n  #   end\n  # \n  #   def archive!\n  #     update!(archived_at: Time.current)\n  #   end\n  # \n  #   def archived?\n  #     archived_at.present?\n  #   end\n  # \n  #   private\n  # \n  #   def clear_archived_at_when_reactivated\n  #     self.archived_at = nil if respond_to?(:active) && active? && archived?\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End Archivable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n  include Archivable\n\n  belongs_to :publication\n  has_many :revisions, class_name: 'ArticleRevision', dependent: :destroy\n  has_many :collection_articles, dependent: :destroy\n  has_many :collections, through: :collection_articles\n  validates :state, inclusion: { in: %w[draft in_review changes_requested approved scheduled published] }\n  validate do\n    errors.add(:author, 'must belong to this organization') unless author&.memberships&.exists?(organization_id: publication&.organization_id)\n  end\n\n  belongs_to :author\n  has_many :comments, dependent: :destroy\n  has_many :article_tags, dependent: :destroy\n  has_many :tags, through: :article_tags\n\n  validates :title, presence: true\n  validates :slug, presence: true, uniqueness: true\n\n  scope :published, -> { where.not(published_at: nil) }\n\n  before_validation :derive_slug\n\n  def word_count\n    WordCount.new(body.to_s).total\n  end\n\n  def latest_revision\n    revisions.order(number: :desc).first\n  end\n\n  private\n\n  def derive_slug\n    self.slug ||= WoodsTestbed::Slug.call(title)\n  end\n\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Publication",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "ArticleRevision",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "CollectionArticle",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Collection",
+          "via": "has_many",
+          "through": "collection_articles",
+          "through_db": "primary"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Comment",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "ArticleTag",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Tag",
+          "via": "has_many",
+          "through": "article_tags",
+          "through_db": "primary"
+        },
+        {
+          "type": "concern",
+          "target": "Archivable",
+          "via": "include"
+        }
+      ],
+      "source_hash": "36648b07aeee7e71c2360826d0f07cc57ecae37bbf4cea212eb60674b3c503de"
+    },
+    {
+      "type": "model",
+      "identifier": "Author",
+      "file_path": "app/models/author.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: authors\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   name                      string          NOT NULL\n#   email                     string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_authors_on_email: [email] (unique)\n#\n\n# The graph hub. Several models point here, so PageRank has something to rank\n# and the dependents pass has real fan-in to resolve.\nclass Author < ApplicationRecord\n  has_many :articles, dependent: :destroy\n  has_many :comments, dependent: :nullify\n  has_many :invoices, class_name: \"Billing::Invoice\", dependent: :restrict_with_error\n\n  validates :name, presence: true\n  validates :email, presence: true, uniqueness: true\n\n  scope :prolific, -> { joins(:articles).group(:id).having(\"COUNT(articles.id) > 5\") }\n\n  def display_name\n    name.presence || email\n  end\n  has_many :memberships, dependent: :destroy\n  has_many :organizations, through: :memberships\n  def editor_of?(organization)\n    memberships.exists?(organization_id: organization.id, role: 'editor')\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Comment",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Membership",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Organization",
+          "via": "has_many",
+          "through": "memberships",
+          "through_db": "primary"
+        }
+      ],
+      "source_hash": "27874016325261f06fe7623989812908fc17c6dfc8d25bf87df8c3c11bd7cdba"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::BankPayment",
+      "file_path": "app/models/billing/bank_payment.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_payments\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   invoice_id                integer         NOT NULL\n#   type                      string          NOT NULL\n#   state                     string          NOT NULL DEFAULT \"pending\"\n#   amount_cents              integer         NOT NULL DEFAULT \"0\"\n#   last_four                 string          \n#   sort_code                 string          \n#   audited_at                datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#   idempotency_key           string          \n#\n# Indexes:\n#   index_billing_payments_on_idempotency_key: [idempotency_key] (unique)\n#   index_billing_payments_on_invoice_id: [invoice_id]\n#\n# Foreign Keys:\n#   billing_payments.invoice_id \u2192 billing_invoices\n\nmodule Billing\n  class BankPayment < Payment\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: Auditable                                             \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # # Audit trail, included only by the STI base so that inlining and STI\n  # # interact rather than being exercised in separate files.\n  # module Auditable\n  #   extend ActiveSupport::Concern\n  # \n  #   included do\n  #     before_save :stamp_audit_fields\n  #   end\n  # \n  #   def audit_summary\n  #     \"#{self.class.name}##{id} last touched #{audited_at || 'never'}\"\n  #   end\n  # \n  #   private\n  # \n  #   def stamp_audit_fields\n  #     self.audited_at = Time.current\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End Auditable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    validates :sort_code, presence: true\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Refund",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "belongs_to"
+        },
+        {
+          "type": "concern",
+          "target": "Auditable",
+          "via": "include"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Payment",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "fd4089e88161733c0d777bfcaa54da1cfc001bf50dbb32854c4fd486134f2d0e"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::CardPayment",
+      "file_path": "app/models/billing/card_payment.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_payments\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   invoice_id                integer         NOT NULL\n#   type                      string          NOT NULL\n#   state                     string          NOT NULL DEFAULT \"pending\"\n#   amount_cents              integer         NOT NULL DEFAULT \"0\"\n#   last_four                 string          \n#   sort_code                 string          \n#   audited_at                datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#   idempotency_key           string          \n#\n# Indexes:\n#   index_billing_payments_on_idempotency_key: [idempotency_key] (unique)\n#   index_billing_payments_on_invoice_id: [invoice_id]\n#\n# Foreign Keys:\n#   billing_payments.invoice_id \u2192 billing_invoices\n\nmodule Billing\n  class CardPayment < Payment\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: Auditable                                             \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # # Audit trail, included only by the STI base so that inlining and STI\n  # # interact rather than being exercised in separate files.\n  # module Auditable\n  #   extend ActiveSupport::Concern\n  # \n  #   included do\n  #     before_save :stamp_audit_fields\n  #   end\n  # \n  #   def audit_summary\n  #     \"#{self.class.name}##{id} last touched #{audited_at || 'never'}\"\n  #   end\n  # \n  #   private\n  # \n  #   def stamp_audit_fields\n  #     self.audited_at = Time.current\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End Auditable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    validates :last_four, presence: true\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Refund",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "belongs_to"
+        },
+        {
+          "type": "concern",
+          "target": "Auditable",
+          "via": "include"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Payment",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "5729b459e64d4cd43b93db2b8d4f9f2b920f87e55ffd4862ac9381a332490c7f"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::Invoice",
+      "file_path": "app/models/billing/invoice.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_invoices\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   author_id                 integer         NOT NULL\n#   reference                 string          NOT NULL\n#   settled_at                datetime        \n#   archived_at               datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#   subscriber_id             integer         \n#   subscription_id           integer         \n#   due_at                    datetime        \n#   currency                  string          NOT NULL DEFAULT \"USD\"\n#\n# Indexes:\n#   index_billing_invoices_on_subscription_id: [subscription_id]\n#   index_billing_invoices_on_subscriber_id: [subscriber_id]\n#   index_billing_invoices_on_reference: [reference] (unique)\n#   index_billing_invoices_on_author_id: [author_id]\n#\n# Foreign Keys:\n#   billing_invoices.subscription_id \u2192 billing_subscriptions\n#   billing_invoices.author_id \u2192 authors\n#   billing_invoices.subscriber_id \u2192 subscribers\n\nmodule Billing\n  class Invoice < ApplicationRecord\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: Archivable                                            \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # # Soft-archiving, included by three models.\n  # #\n  # # Three is deliberate (KERNEL_CONTRACT.md): concern inlining is what Woods does\n  # # that file-level tools don't, and one includer wouldn't exercise it. The\n  # # contract smoke asserts the count exactly.\n  # module Archivable\n  #   extend ActiveSupport::Concern\n  # \n  #   included do\n  #     scope :archived,     -> { where.not(archived_at: nil) }\n  #     scope :not_archived, -> { where(archived_at: nil) }\n  # \n  #     before_save :clear_archived_at_when_reactivated\n  #   end\n  # \n  #   def archive!\n  #     update!(archived_at: Time.current)\n  #   end\n  # \n  #   def archived?\n  #     archived_at.present?\n  #   end\n  # \n  #   private\n  # \n  #   def clear_archived_at_when_reactivated\n  #     self.archived_at = nil if respond_to?(:active) && active? && archived?\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End Archivable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    include Archivable\n\n    self.table_name = \"billing_invoices\"\n\n    belongs_to :subscriber, optional: true\n    belongs_to :subscription, class_name: 'Billing::Subscription', optional: true\n    scope :overdue, ->(at = Time.current) { outstanding.where('due_at < ?', at) }\n    validate do\n      errors.add(:subscription, 'wrong subscriber') if subscription && subscription.subscriber_id != subscriber_id\n      errors.add(:author, 'wrong organization') if subscriber && !author&.memberships&.exists?(organization_id: subscriber.organization_id)\n    end\n    belongs_to :author\n    has_many :line_items, class_name: \"Billing::LineItem\", dependent: :destroy\n    has_many :payments, class_name: \"Billing::Payment\", dependent: :restrict_with_error\n\n    validates :reference, presence: true, uniqueness: true\n\n    scope :outstanding, -> { where(settled_at: nil) }\n\n    def total_cents\n      line_items.sum(:amount_cents)\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Billing::LineItem",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Payment",
+          "via": "has_many"
+        },
+        {
+          "type": "concern",
+          "target": "Archivable",
+          "via": "include"
+        }
+      ],
+      "source_hash": "137f826e2ffee8cfcedb6b2f2d421425b04fbe2b6ad2bc9fdbb8785a3b8540bf"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::LineItem",
+      "file_path": "app/models/billing/line_item.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_line_items\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   invoice_id                integer         NOT NULL\n#   description               string          NOT NULL\n#   amount_cents              integer         NOT NULL DEFAULT \"0\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_billing_line_items_on_invoice_id: [invoice_id]\n#\n# Foreign Keys:\n#   billing_line_items.invoice_id \u2192 billing_invoices\n\nmodule Billing\n  class LineItem < ApplicationRecord\n    self.table_name = \"billing_line_items\"\n\n    belongs_to :invoice, class_name: \"Billing::Invoice\"\n\n    validates :description, presence: true\n    validates :amount_cents, numericality: { greater_than_or_equal_to: 0 }\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "8e96556b4d6e6aa331a207bea9f095cd1b2badc0c2d3be74fc899ec1ec9b48d2"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::Payment",
+      "file_path": "app/models/billing/payment.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_payments\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   invoice_id                integer         NOT NULL\n#   type                      string          NOT NULL\n#   state                     string          NOT NULL DEFAULT \"pending\"\n#   amount_cents              integer         NOT NULL DEFAULT \"0\"\n#   last_four                 string          \n#   sort_code                 string          \n#   audited_at                datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#   idempotency_key           string          \n#\n# Indexes:\n#   index_billing_payments_on_idempotency_key: [idempotency_key] (unique)\n#   index_billing_payments_on_invoice_id: [invoice_id]\n#\n# Foreign Keys:\n#   billing_payments.invoice_id \u2192 billing_invoices\n\nmodule Billing\n  # STI base, and the one model carrying a state machine \u2014 so inlining\n  # (Auditable), STI, and the aasm DSL all meet on a single class.\n  class Payment < ApplicationRecord\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: Auditable                                             \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # # Audit trail, included only by the STI base so that inlining and STI\n  # # interact rather than being exercised in separate files.\n  # module Auditable\n  #   extend ActiveSupport::Concern\n  # \n  #   included do\n  #     before_save :stamp_audit_fields\n  #   end\n  # \n  #   def audit_summary\n  #     \"#{self.class.name}##{id} last touched #{audited_at || 'never'}\"\n  #   end\n  # \n  #   private\n  # \n  #   def stamp_audit_fields\n  #     self.audited_at = Time.current\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End Auditable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n    include AASM\n    include Auditable\n\n    self.table_name = \"billing_payments\"\n\n    has_many :refunds, class_name: 'Billing::Refund', dependent: :restrict_with_error\n    belongs_to :invoice, class_name: \"Billing::Invoice\"\n\n    validates :amount_cents, numericality: { greater_than: 0 }\n\n    aasm column: :state do\n      state :pending, initial: true\n      state :authorized\n      state :captured\n      state :failed\n\n      event :authorize do\n        transitions from: :pending, to: :authorized\n      end\n\n      event :capture do\n        transitions from: :authorized, to: :captured\n      end\n\n      event :fail do\n        transitions from: %i[pending authorized], to: :failed\n      end\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Refund",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "belongs_to"
+        },
+        {
+          "type": "concern",
+          "target": "Auditable",
+          "via": "include"
+        }
+      ],
+      "source_hash": "961949e714829f9e8519f6280543a0ac8fddfbd5993c389a2640b892709742cd"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::Plan",
+      "file_path": "app/models/billing/plan.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_plans\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   publication_id            integer         NOT NULL\n#   name                      string          NOT NULL\n#   amount_cents              integer         NOT NULL\n#   currency                  string          NOT NULL DEFAULT \"USD\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_billing_plans_on_publication_id: [publication_id]\n#\n# Foreign Keys:\n#   billing_plans.publication_id \u2192 publications\n\nmodule Billing\n  class Plan < ApplicationRecord\n    self.table_name = \"billing_plans\"\n    belongs_to :publication\n    has_many :subscriptions, class_name: 'Billing::Subscription', dependent: :restrict_with_error\n    validates :name, presence: true\n    validates :amount_cents, numericality: { only_integer: true, greater_than: 0 }\n    validates :currency, inclusion: { in: ['USD'] }\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Publication",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "3abeec71ae7fa0db14dd858c4ad74c805ca8c50f3f12aebee0b96805461454dd"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::Refund",
+      "file_path": "app/models/billing/refund.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_refunds\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   payment_id                integer         NOT NULL\n#   amount_cents              integer         NOT NULL\n#   reason                    string          NOT NULL\n#   idempotency_key           string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_billing_refunds_on_idempotency_key: [idempotency_key] (unique)\n#   index_billing_refunds_on_payment_id: [payment_id]\n#\n# Foreign Keys:\n#   billing_refunds.payment_id \u2192 billing_payments\n\nmodule Billing\n  class Refund < ApplicationRecord\n    self.table_name = \"billing_refunds\"\n    belongs_to :payment, class_name: 'Billing::Payment'\n    validates :reason, :idempotency_key, presence: true\n    validates :idempotency_key, uniqueness: true\n    validates :amount_cents, numericality: { only_integer: true, greater_than: 0 }\n    validate do\n      if payment && (payment.state != 'captured' || amount_cents.to_i + payment.refunds.where.not(id: id).sum(:amount_cents) > payment.amount_cents)\n        errors.add(:amount_cents, 'exceeds refundable captured balance')\n      end\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Payment",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "84af60e119de21710acabadc6bd4e5c91bd7bd678a48a531580643047ca42948"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::SubscriptionChange",
+      "file_path": "app/models/billing/subscription_change.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_subscription_changes\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   subscription_id           integer         NOT NULL\n#   event                     string          NOT NULL\n#   details                   json            NOT NULL DEFAULT \"{}\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_billing_subscription_changes_on_subscription_id: [subscription_id]\n#\n# Foreign Keys:\n#   billing_subscription_changes.subscription_id \u2192 billing_subscriptions\n\nmodule Billing\n  class SubscriptionChange < ApplicationRecord\n    self.table_name = \"billing_subscription_changes\"\n    belongs_to :subscription, class_name: 'Billing::Subscription'\n    validates :event, presence: true\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "4d433c831173d699c4125d357e0c5f439d4930af9ecdb0dff6a6834bf6313198"
+    },
+    {
+      "type": "model",
+      "identifier": "Billing::Subscription",
+      "file_path": "app/models/billing/subscription.rb",
+      "namespace": "Billing",
+      "source_code": "# == Schema Information\n#\n# Table: billing_subscriptions\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   subscriber_id             integer         NOT NULL\n#   plan_id                   integer         NOT NULL\n#   state                     string          NOT NULL DEFAULT \"active\"\n#   renews_at                 datetime        NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_billing_subscriptions_on_subscriber_id_and_plan_id: [subscriber_id, plan_id] (unique)\n#   index_billing_subscriptions_on_plan_id: [plan_id]\n#   index_billing_subscriptions_on_subscriber_id: [subscriber_id]\n#\n# Foreign Keys:\n#   billing_subscriptions.plan_id \u2192 billing_plans\n#   billing_subscriptions.subscriber_id \u2192 subscribers\n\nmodule Billing\n  class Subscription < ApplicationRecord\n    self.table_name = \"billing_subscriptions\"\n    belongs_to :subscriber\n    belongs_to :plan, class_name: 'Billing::Plan'\n    has_many :invoices, class_name: 'Billing::Invoice', dependent: :restrict_with_error\n    has_many :history, class_name: 'Billing::SubscriptionChange', dependent: :destroy\n    validates :state, inclusion: { in: %w[active canceled] }\n    validates :renews_at, presence: true\n    validates :subscriber_id, uniqueness: { scope: :plan_id }\n    scope :active, -> { where(state: 'active') }\n    validate { errors.add(:plan, 'must belong to the subscriber organization') unless plan&.publication&.organization_id == subscriber&.organization_id }\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Plan",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::SubscriptionChange",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "df5a6c25322192282bc06d294fb8fe9bda466a9bbd47749022286d6601e16b77"
+    },
+    {
+      "type": "model",
+      "identifier": "CollectionArticle",
+      "file_path": "app/models/collection_article.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: collection_articles\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   collection_id             integer         NOT NULL\n#   article_id                integer         NOT NULL\n#   position                  integer         NOT NULL DEFAULT \"0\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_collection_articles_on_collection_id_and_article_id: [collection_id, article_id] (unique)\n#   index_collection_articles_on_article_id: [article_id]\n#   index_collection_articles_on_collection_id: [collection_id]\n#\n# Foreign Keys:\n#   collection_articles.article_id \u2192 articles\n#   collection_articles.collection_id \u2192 collections\n\nclass CollectionArticle < ApplicationRecord\n  belongs_to :collection\n  belongs_to :article\n  validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }\n  validates :article_id, uniqueness: { scope: :collection_id }\n  validate { errors.add(:article, 'must belong to this publication') unless article&.publication_id == collection&.publication_id }\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Collection",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "77fe7644fa408452ca5f794b6d8a7634b50ce3dd5f3122237725930698db1630"
+    },
+    {
+      "type": "model",
+      "identifier": "Collection",
+      "file_path": "app/models/collection.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: collections\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   publication_id            integer         NOT NULL\n#   name                      string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_collections_on_publication_id: [publication_id]\n#\n# Foreign Keys:\n#   collections.publication_id \u2192 publications\n\nclass Collection < ApplicationRecord\n  belongs_to :publication\n  has_many :collection_articles, -> { order(:position) }, dependent: :destroy\n  has_many :articles, through: :collection_articles\n  validates :name, presence: true\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Publication",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "CollectionArticle",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "has_many",
+          "through": "collection_articles",
+          "through_db": "primary"
+        }
+      ],
+      "source_hash": "fee721b7f25ad92d8dfb6a8a983b89ee3dbc601c8fe2acff155b3bbb645e9ce1"
+    },
+    {
+      "type": "model",
+      "identifier": "Comment",
+      "file_path": "app/models/comment.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: comments\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   article_id                integer         NOT NULL\n#   author_id                 integer         \n#   body                      text            NOT NULL\n#   archived_at               datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#   parent_id                 integer         \n#\n# Indexes:\n#   index_comments_on_parent_id: [parent_id]\n#   index_comments_on_author_id: [author_id]\n#   index_comments_on_article_id: [article_id]\n#\n# Foreign Keys:\n#   comments.parent_id \u2192 comments\n#   comments.article_id \u2192 articles\n#   comments.author_id \u2192 authors\n\nclass Comment < ApplicationRecord\n\n# \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n# \u2502 Included from: Archivable                                            \u2502\n# \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n  # # Soft-archiving, included by three models.\n  # #\n  # # Three is deliberate (KERNEL_CONTRACT.md): concern inlining is what Woods does\n  # # that file-level tools don't, and one includer wouldn't exercise it. The\n  # # contract smoke asserts the count exactly.\n  # module Archivable\n  #   extend ActiveSupport::Concern\n  # \n  #   included do\n  #     scope :archived,     -> { where.not(archived_at: nil) }\n  #     scope :not_archived, -> { where(archived_at: nil) }\n  # \n  #     before_save :clear_archived_at_when_reactivated\n  #   end\n  # \n  #   def archive!\n  #     update!(archived_at: Time.current)\n  #   end\n  # \n  #   def archived?\n  #     archived_at.present?\n  #   end\n  # \n  #   private\n  # \n  #   def clear_archived_at_when_reactivated\n  #     self.archived_at = nil if respond_to?(:active) && active? && archived?\n  #   end\n  # end\n# \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 End Archivable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n  include Archivable\n\n  belongs_to :article, counter_cache: true\n  belongs_to :author, optional: true\n\n  validates :body, presence: true\n\n  scope :recent, -> { order(created_at: :desc) }\n  belongs_to :parent, class_name: 'Comment', optional: true\n  has_many :replies, class_name: 'Comment', foreign_key: :parent_id, dependent: :nullify\n  validate do\n    errors.add(:parent, 'must belong to this article') if parent && parent.article_id != article_id\n    seen = [id].compact\n    node = parent\n    while node\n      if seen.include?(node.id)\n        errors.add(:parent, 'cannot create a cycle')\n        break\n      end\n      seen << node.id\n      node = node.parent\n    end\n    errors.add(:author, 'must belong to organization') if author && !author.memberships.exists?(organization_id: article&.publication&.organization_id)\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Comment",
+          "via": "belongs_to"
+        },
+        {
+          "type": "concern",
+          "target": "Archivable",
+          "via": "include"
+        }
+      ],
+      "source_hash": "64dc90c97c56fdbc6d6bcb7811c5a7ebf0331cd1702a09da82b70e5c51ee3d2e"
+    },
+    {
+      "type": "model",
+      "identifier": "EngagementEvent",
+      "file_path": "app/models/engagement_event.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: engagement_events\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   subscriber_id             integer         NOT NULL\n#   article_id                integer         NOT NULL\n#   delivery_id               integer         \n#   kind                      string          NOT NULL\n#   metadata                  json            NOT NULL DEFAULT \"{}\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_engagement_events_on_delivery_id: [delivery_id]\n#   index_engagement_events_on_article_id: [article_id]\n#   index_engagement_events_on_subscriber_id: [subscriber_id]\n#\n# Foreign Keys:\n#   engagement_events.delivery_id \u2192 newsletter_deliveries\n#   engagement_events.article_id \u2192 articles\n#   engagement_events.subscriber_id \u2192 subscribers\n\nclass EngagementEvent < ApplicationRecord\n  belongs_to :subscriber\n  belongs_to :article\n  belongs_to :delivery, class_name: 'Newsletter::Delivery', optional: true\n  validates :kind, inclusion: { in: %w[open click read] }\n  validate do\n    errors.add(:subscriber, 'wrong organization') unless subscriber&.organization_id == article&.publication&.organization_id\n    errors.add(:delivery, 'does not match subscriber/article') if delivery && (delivery.subscriber_id != subscriber_id || delivery.campaign.article_id != article_id)\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Newsletter::Delivery",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "deb4d79ab678d776db04a4a55b179af3fe023d23c073d9206e120400703078eb"
+    },
+    {
+      "type": "model",
+      "identifier": "Membership",
+      "file_path": "app/models/membership.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: memberships\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   organization_id           integer         NOT NULL\n#   author_id                 integer         NOT NULL\n#   role                      string          NOT NULL DEFAULT \"author\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_memberships_on_organization_id_and_author_id: [organization_id, author_id] (unique)\n#   index_memberships_on_author_id: [author_id]\n#   index_memberships_on_organization_id: [organization_id]\n#\n# Foreign Keys:\n#   memberships.author_id \u2192 authors\n#   memberships.organization_id \u2192 organizations\n\nclass Membership < ApplicationRecord\n  belongs_to :organization\n  belongs_to :author\n  validates :role, inclusion: { in: %w[author editor] }\n  validates :author_id, uniqueness: { scope: :organization_id }\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Organization",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "b41383a75491e36c09c9327818768f9585ccd48547b6b691a54e57572195a005"
+    },
+    {
+      "type": "model",
+      "identifier": "Newsletter::Campaign",
+      "file_path": "app/models/newsletter/campaign.rb",
+      "namespace": "Newsletter",
+      "source_code": "# == Schema Information\n#\n# Table: newsletter_campaigns\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   publication_id            integer         NOT NULL\n#   article_id                integer         NOT NULL\n#   subject                   string          NOT NULL\n#   state                     string          NOT NULL DEFAULT \"draft\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_newsletter_campaigns_on_article_id: [article_id]\n#   index_newsletter_campaigns_on_publication_id: [publication_id]\n#\n# Foreign Keys:\n#   newsletter_campaigns.article_id \u2192 articles\n#   newsletter_campaigns.publication_id \u2192 publications\n\nmodule Newsletter\n  class Campaign < ApplicationRecord\n    self.table_name = \"newsletter_campaigns\"\n    belongs_to :publication\n    belongs_to :article\n    has_many :deliveries, class_name: 'Newsletter::Delivery', dependent: :destroy\n    validates :subject, presence: true\n    validates :state, inclusion: { in: %w[draft sent] }\n    validate { errors.add(:article, 'must be published in this publication') unless article&.publication_id == publication_id && article&.state == 'published' }\n    def recipients\n      Subscriber.joins(subscriptions: :plan).where(billing_subscriptions: { state: 'active' }, billing_plans: { publication_id: publication_id }).distinct\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Publication",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Newsletter::Delivery",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "8cea7e6f3b9109b125a772982100e953a21b973c124a36d48db345f4e735fe38"
+    },
+    {
+      "type": "model",
+      "identifier": "Newsletter::Delivery",
+      "file_path": "app/models/newsletter/delivery.rb",
+      "namespace": "Newsletter",
+      "source_code": "# == Schema Information\n#\n# Table: newsletter_deliveries\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   campaign_id               integer         NOT NULL\n#   subscriber_id             integer         NOT NULL\n#   state                     string          NOT NULL DEFAULT \"queued\"\n#   delivered_at              datetime        \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_newsletter_deliveries_on_campaign_id_and_subscriber_id: [campaign_id, subscriber_id] (unique)\n#   index_newsletter_deliveries_on_subscriber_id: [subscriber_id]\n#   index_newsletter_deliveries_on_campaign_id: [campaign_id]\n#\n# Foreign Keys:\n#   newsletter_deliveries.subscriber_id \u2192 subscribers\n#   newsletter_deliveries.campaign_id \u2192 newsletter_campaigns\n\nmodule Newsletter\n  class Delivery < ApplicationRecord\n    self.table_name = \"newsletter_deliveries\"\n    belongs_to :campaign, class_name: 'Newsletter::Campaign'\n    belongs_to :subscriber\n    has_many :engagement_events, foreign_key: :delivery_id, dependent: :destroy\n    validates :subscriber_id, uniqueness: { scope: :campaign_id }\n    validates :state, inclusion: { in: %w[queued delivered bounced] }\n    validate { errors.add(:subscriber, 'must belong to the organization') unless subscriber&.organization_id == campaign&.publication&.organization_id }\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Newsletter::Campaign",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "EngagementEvent",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "5bb9ba77b88502ec0b0bad3379074fbd44dcaea440e853f6f17cda9c3231567c"
+    },
+    {
+      "type": "model",
+      "identifier": "Organization",
+      "file_path": "app/models/organization.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: organizations\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   name                      string          NOT NULL\n#   slug                      string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_organizations_on_slug: [slug] (unique)\n#\n\nclass Organization < ApplicationRecord\n  has_many :publications, dependent: :restrict_with_error\n  has_many :memberships, dependent: :destroy\n  has_many :authors, through: :memberships\n  has_many :subscribers, dependent: :restrict_with_error\n  has_many :activity_events, dependent: :destroy\n  has_many :webhook_endpoints, dependent: :destroy\n  validates :name, :slug, presence: true\n  validates :slug, uniqueness: true\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Publication",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Membership",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "has_many",
+          "through": "memberships",
+          "through_db": "primary"
+        },
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "ActivityEvent",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "WebhookEndpoint",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "40fc726b37d7a54e10a7a91deab45926b9688bdccd76d6b1153c4e06ff5b53e9"
+    },
+    {
+      "type": "model",
+      "identifier": "Publication",
+      "file_path": "app/models/publication.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: publications\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   organization_id           integer         NOT NULL\n#   name                      string          NOT NULL\n#   slug                      string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_publications_on_slug: [slug] (unique)\n#   index_publications_on_organization_id: [organization_id]\n#\n# Foreign Keys:\n#   publications.organization_id \u2192 organizations\n\nclass Publication < ApplicationRecord\n  belongs_to :organization\n  has_many :articles, dependent: :restrict_with_error\n  has_many :collections, dependent: :destroy\n  has_many :plans, class_name: 'Billing::Plan', dependent: :restrict_with_error\n  has_many :campaigns, class_name: 'Newsletter::Campaign', dependent: :destroy\n  validates :name, :slug, presence: true\n  validates :slug, uniqueness: true\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Organization",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Collection",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Plan",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Newsletter::Campaign",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "230e3c9e5deb76af45f31448488ffbf3c2535fa3ccc34d1425cdf82c4178d80e"
+    },
+    {
+      "type": "model",
+      "identifier": "ReviewAssignment",
+      "file_path": "app/models/review_assignment.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: review_assignments\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   article_revision_id       integer         NOT NULL\n#   reviewer_id               integer         NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   idx_on_article_revision_id_reviewer_id_fecb738717: [article_revision_id, reviewer_id] (unique)\n#   index_review_assignments_on_reviewer_id: [reviewer_id]\n#   index_review_assignments_on_article_revision_id: [article_revision_id]\n#\n# Foreign Keys:\n#   review_assignments.reviewer_id \u2192 authors\n#   review_assignments.article_revision_id \u2192 article_revisions\n\nclass ReviewAssignment < ApplicationRecord\n  belongs_to :article_revision\n  belongs_to :reviewer, class_name: 'Author'\n  has_one :review_decision, dependent: :destroy\n  validates :reviewer_id, uniqueness: { scope: :article_revision_id }\n  validate do\n    unless reviewer&.memberships&.exists?(organization_id: article_revision&.article&.publication&.organization_id, role: 'editor')\n      errors.add(:reviewer, 'must be an editor of this organization')\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "ArticleRevision",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "ReviewDecision",
+          "via": "has_one"
+        }
+      ],
+      "source_hash": "68d51f93f0ab716c8ddf84b67790e367e583e0ee2a639c80c5ae970cf5c34c6c"
+    },
+    {
+      "type": "model",
+      "identifier": "ReviewDecision",
+      "file_path": "app/models/review_decision.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: review_decisions\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   review_assignment_id      integer         NOT NULL\n#   outcome                   string          NOT NULL\n#   notes                     text            \n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_review_decisions_on_review_assignment_id: [review_assignment_id] (unique)\n#\n# Foreign Keys:\n#   review_decisions.review_assignment_id \u2192 review_assignments\n\nclass ReviewDecision < ApplicationRecord\n  belongs_to :review_assignment\n  validates :outcome, inclusion: { in: %w[approved changes_requested] }\n  validates :review_assignment_id, uniqueness: true\n  validate { errors.add(:base, 'Decisions are immutable') if persisted? && changed? }\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "ReviewAssignment",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "66d6f4a3f068b6a5d48723ecc7095b19a27b1be3873387e73f755a2589a507cf"
+    },
+    {
+      "type": "model",
+      "identifier": "Subscriber",
+      "file_path": "app/models/subscriber.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: subscribers\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   organization_id           integer         NOT NULL\n#   author_id                 integer         \n#   name                      string          NOT NULL\n#   email                     string          NOT NULL\n#   preferences               json            NOT NULL DEFAULT \"{}\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_subscribers_on_organization_id_and_email: [organization_id, email] (unique)\n#   index_subscribers_on_author_id: [author_id]\n#   index_subscribers_on_organization_id: [organization_id]\n#\n# Foreign Keys:\n#   subscribers.author_id \u2192 authors\n#   subscribers.organization_id \u2192 organizations\n\nclass Subscriber < ApplicationRecord\n  belongs_to :organization\n  belongs_to :author, optional: true\n  has_many :subscriptions, class_name: 'Billing::Subscription', dependent: :restrict_with_error\n  has_many :invoices, class_name: 'Billing::Invoice', dependent: :restrict_with_error\n  has_many :tickets, class_name: 'Support::Ticket', dependent: :destroy\n  validates :name, :email, presence: true\n  validates :email, uniqueness: { scope: :organization_id }\n  validate { errors.add(:author, 'must belong to the organization') if author && !author.memberships.exists?(organization_id: organization_id) }\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Organization",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Support::Ticket",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "2c306bb9fee0155e80d72be797c0335524aacfc035809ff3392bc335f469736d"
+    },
+    {
+      "type": "model",
+      "identifier": "Support::TicketMessage",
+      "file_path": "app/models/support/ticket_message.rb",
+      "namespace": "Support",
+      "source_code": "# == Schema Information\n#\n# Table: support_ticket_messages\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   ticket_id                 integer         NOT NULL\n#   author_id                 integer         \n#   body                      text            NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_support_ticket_messages_on_author_id: [author_id]\n#   index_support_ticket_messages_on_ticket_id: [ticket_id]\n#\n# Foreign Keys:\n#   support_ticket_messages.author_id \u2192 authors\n#   support_ticket_messages.ticket_id \u2192 support_tickets\n\nmodule Support\n  class TicketMessage < ApplicationRecord\n    self.table_name = \"support_ticket_messages\"\n    belongs_to :ticket, class_name: 'Support::Ticket'\n    belongs_to :author, optional: true\n    validates :body, presence: true\n    validate { errors.add(:author, 'must belong to organization') if author && !author.memberships.exists?(organization_id: ticket&.subscriber&.organization_id) }\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Support::Ticket",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "e1d0f88ea5a775898aa8e56fc4f11b93c6511137782719f08470433043a7b323"
+    },
+    {
+      "type": "model",
+      "identifier": "Support::Ticket",
+      "file_path": "app/models/support/ticket.rb",
+      "namespace": "Support",
+      "source_code": "# == Schema Information\n#\n# Table: support_tickets\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   subscriber_id             integer         NOT NULL\n#   assignee_id               integer         \n#   subject_type              string          \n#   subject_id                integer         \n#   title                     string          NOT NULL\n#   state                     string          NOT NULL DEFAULT \"open\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_support_tickets_on_subject: [subject_type, subject_id]\n#   index_support_tickets_on_assignee_id: [assignee_id]\n#   index_support_tickets_on_subscriber_id: [subscriber_id]\n#\n# Foreign Keys:\n#   support_tickets.assignee_id \u2192 authors\n#   support_tickets.subscriber_id \u2192 subscribers\n\nmodule Support\n  class Ticket < ApplicationRecord\n    self.table_name = \"support_tickets\"\n    belongs_to :subscriber\n    belongs_to :assignee, class_name: 'Author', optional: true\n    belongs_to :subject, polymorphic: true, optional: true\n    has_many :messages, class_name: 'Support::TicketMessage', dependent: :destroy\n    validates :title, presence: true\n    validates :state, inclusion: { in: %w[open resolved] }\n    validates :subject_type, inclusion: { in: ['Billing::Invoice', 'Billing::Subscription'], allow_nil: true }\n    validate do\n      errors.add(:subject, 'must belong to subscriber') if subject && (!subject.respond_to?(:subscriber_id) || subject.subscriber_id != subscriber_id)\n      errors.add(:assignee, 'must be an organization editor') if assignee && !assignee.memberships.exists?(organization_id: subscriber&.organization_id, role: 'editor')\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Subscriber",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Author",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "Subject",
+          "via": "polymorphic_interface"
+        },
+        {
+          "type": "model",
+          "target": "Support::TicketMessage",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "eb5992912617262b9d51d2412850d9d4207ea6417f865a6a97f74ef621b5267c"
+    },
+    {
+      "type": "model",
+      "identifier": "Tag",
+      "file_path": "app/models/tag.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: tags\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   name                      string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_tags_on_name: [name] (unique)\n#\n\nclass Tag < ApplicationRecord\n  has_many :article_tags, dependent: :destroy\n  has_many :articles, through: :article_tags\n\n  validates :name, presence: true, uniqueness: true\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "ArticleTag",
+          "via": "has_many"
+        },
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "has_many",
+          "through": "article_tags",
+          "through_db": "primary"
+        }
+      ],
+      "source_hash": "b46edf3a9e7b782c4c7f0dc202c7b9cbd545a86af6c74cde2859abe9b4720835"
+    },
+    {
+      "type": "model",
+      "identifier": "WebhookDelivery",
+      "file_path": "app/models/webhook_delivery.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: webhook_deliveries\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   webhook_endpoint_id       integer         NOT NULL\n#   activity_event_id         integer         NOT NULL\n#   state                     string          NOT NULL DEFAULT \"pending\"\n#   attempts                  integer         NOT NULL DEFAULT \"0\"\n#   payload                   json            NOT NULL DEFAULT \"{}\"\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   idx_on_webhook_endpoint_id_activity_event_id_d10c51c218: [webhook_endpoint_id, activity_event_id] (unique)\n#   index_webhook_deliveries_on_activity_event_id: [activity_event_id]\n#   index_webhook_deliveries_on_webhook_endpoint_id: [webhook_endpoint_id]\n#\n# Foreign Keys:\n#   webhook_deliveries.activity_event_id \u2192 activity_events\n#   webhook_deliveries.webhook_endpoint_id \u2192 webhook_endpoints\n\nclass WebhookDelivery < ApplicationRecord\n  belongs_to :webhook_endpoint\n  belongs_to :activity_event\n  validates :activity_event_id, uniqueness: { scope: :webhook_endpoint_id }\n  validates :state, inclusion: { in: %w[pending failed delivered] }\n  validate { errors.add(:activity_event, 'wrong organization') unless activity_event&.organization_id == webhook_endpoint&.organization_id }\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "WebhookEndpoint",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "ActivityEvent",
+          "via": "belongs_to"
+        }
+      ],
+      "source_hash": "38d3586430f9f2f1bbebabb654d36c22d2e2c7537285432a4838b046877280e0"
+    },
+    {
+      "type": "model",
+      "identifier": "WebhookEndpoint",
+      "file_path": "app/models/webhook_endpoint.rb",
+      "namespace": null,
+      "source_code": "# == Schema Information\n#\n# Table: webhook_endpoints\n#\n# Columns:\n#   id                        integer         NOT NULL PRIMARY KEY\n#   organization_id           integer         NOT NULL\n#   url                       string          NOT NULL\n#   secret                    string          NOT NULL\n#   created_at                datetime        NOT NULL\n#   updated_at                datetime        NOT NULL\n#\n# Indexes:\n#   index_webhook_endpoints_on_organization_id: [organization_id]\n#\n# Foreign Keys:\n#   webhook_endpoints.organization_id \u2192 organizations\n\nclass WebhookEndpoint < ApplicationRecord\n  belongs_to :organization\n  has_many :webhook_deliveries, dependent: :destroy\n  validates :url, :secret, presence: true\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Organization",
+          "via": "belongs_to"
+        },
+        {
+          "type": "model",
+          "target": "WebhookDelivery",
+          "via": "has_many"
+        }
+      ],
+      "source_hash": "1bf35b71ee444ba797d6720eac0b4199b2e19da8f81a0554116a673d1221e8b2"
+    },
+    {
+      "type": "pundit_policy",
+      "identifier": "ApplicationPolicy",
+      "file_path": "app/policies/application_policy.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Pundit Policy: ApplicationPolicy                                    \u2551\n# \u2551 Model: Application                                                  \u2551\n# \u2551 Actions: index?, show?, create?, update?, destroy?                  \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\n# Idiomatic Pundit base.\n#\n# PunditExtractor#pundit_policy? identifies a Pundit policy by convention:\n# `< ApplicationPolicy`, or `attr_reader :user` + `:record`, or\n# `def initialize(user, ...)` alongside a predicate method. Naming the\n# constructor args anything else (author/article, actor/subject) makes the\n# policy invisible to that extractor \u2014 so the kernel follows the convention.\nclass ApplicationPolicy\n  attr_reader :user, :record\n\n  def initialize(user, record)\n    @user = user\n    @record = record\n  end\n\n  def index?\n    false\n  end\n\n  def show?\n    false\n  end\n\n  def create?\n    false\n  end\n\n  def update?\n    false\n  end\n\n  def destroy?\n    false\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Application",
+          "via": "authorization"
+        }
+      ],
+      "source_hash": "527641d093f3e65b6c64f3a9e15744736156da623f148a57fbeddea9f224f6d0"
+    },
+    {
+      "type": "pundit_policy",
+      "identifier": "ArticlePolicy",
+      "file_path": "app/policies/article_policy.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Pundit Policy: ArticlePolicy                                        \u2551\n# \u2551 Model: Article                                                      \u2551\n# \u2551 Actions: index?, show?, create?, update?, destroy?, review?, publish?\u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass ArticlePolicy < ApplicationPolicy\n  def index? = user.present?\n  def show? = member? && (record.state == 'published' || update?)\n  def create? = member?\n  def update? = member? && (record.author_id == user.id || review?)\n  def destroy? = update?\n  def review? = user.present? && record.publication.present? && user.editor_of?(record.publication.organization)\n  def publish? = review?\n  private\n  def member?\n    user.present? && user.memberships.exists?(organization_id: record.publication&.organization_id)\n  end\nend\n\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "authorization"
+        }
+      ],
+      "source_hash": "7499b95b7dcf9258fdad816212b6c0ee68070e123d474c99f38a4656ed0cae7c"
+    },
+    {
+      "type": "service",
+      "identifier": "Billing::CollectPayment",
+      "file_path": "app/use_cases/billing/collect_payment.rb",
+      "namespace": "Billing",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: Billing::CollectPayment                                     \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Billing\n  # Deterministic local adapter: a failed attempt remains a failed attempt.\n  # Retrying delivery uses the same key; retrying a declined card uses a new key.\n  class CollectPayment\n    def call(invoice:, key:, outcome: 'success', method: 'card')\n      raise ArgumentError, 'Unknown payment outcome' unless %w[success failure].include?(outcome)\n      raise ArgumentError, 'An idempotency key is required' if key.blank?\n      invoice.with_lock do\n        existing = Payment.find_by(idempotency_key: key)\n        if existing\n          raise ArgumentError, 'Key belongs to another invoice' unless existing.invoice_id == invoice.id\n          return existing\n        end\n        return invoice.payments.find_by!(state: 'captured') if invoice.settled_at\n        attributes = { invoice: invoice, amount_cents: invoice.total_cents, idempotency_key: key }\n        payment = method == 'bank' ? BankPayment.create!(**attributes, sort_code: '000000') : CardPayment.create!(**attributes, last_four: '4242')\n        if outcome == 'failure'\n          payment.fail!\n        else\n          payment.authorize!\n          payment.capture!\n          invoice.update!(settled_at: Time.current)\n        end\n        payment\n      end\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Payment",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Billing::BankPayment",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Billing::CardPayment",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "7604e6249c2f217fb89bcad9a826829d76e10dfdecd0d3e0f2dd5abade50f44b"
+    },
+    {
+      "type": "service",
+      "identifier": "Billing::IssueInvoice",
+      "file_path": "app/use_cases/billing/issue_invoice.rb",
+      "namespace": "Billing",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: Billing::IssueInvoice                                       \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Billing\n  class IssueInvoice\n    def initialize(author:)\n      @author = author\n    end\n\n    def call(description:, amount_cents:)\n      invoice = Billing::Invoice.create!(author: @author, reference: next_reference)\n      invoice.line_items.create!(description: description, amount_cents: amount_cents)\n      Billing::ChargePaymentJob.perform_later(invoice.id)\n      invoice\n    end\n\n    private\n\n    def next_reference\n      \"INV-#{SecureRandom.hex(4).upcase}\"\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "code_reference"
+        },
+        {
+          "type": "job",
+          "target": "Billing::ChargePaymentJob",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "d13e123f645a06010b7f36d4b9f189b518e9d6cdb23b1c63109ba15f231c4e8f"
+    },
+    {
+      "type": "service",
+      "identifier": "Billing::RefundPayment",
+      "file_path": "app/use_cases/billing/refund_payment.rb",
+      "namespace": "Billing",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: Billing::RefundPayment                                      \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Billing\n  class RefundPayment\n    def call(payment:, amount_cents:, key:, reason:)\n      payment.with_lock do\n        existing = Refund.find_by(idempotency_key: key)\n        if existing\n          raise ArgumentError, 'Key belongs to a different refund' unless existing.payment_id == payment.id && existing.amount_cents == amount_cents.to_i\n          return existing\n        end\n        payment.refunds.create!(amount_cents: amount_cents, reason: reason, idempotency_key: key)\n      end\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Refund",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "50aecb13357a2e17b851e56f31af339b77a8f3dadd394e97e8f6d6bc0791e7c3"
+    },
+    {
+      "type": "service",
+      "identifier": "Billing::SubscriptionWorkflow",
+      "file_path": "app/use_cases/billing/subscription_workflow.rb",
+      "namespace": "Billing",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: Billing::SubscriptionWorkflow                               \u2551\n# \u2551 Entry Points: unknown                                                \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Billing\n  class SubscriptionWorkflow\n    def initialize(author:)\n      @author = author\n    end\n    def activate(subscriber:, plan:)\n      authorize!(subscriber)\n      Subscription.transaction do\n        subscription = Subscription.find_or_initialize_by(subscriber: subscriber, plan: plan)\n        if subscription.new_record?\n          subscription.renews_at = Time.current + 30.days\n          subscription.save!\n          subscription.history.create!(event: 'activated', details: { plan: plan.name })\n          issue(subscription, period: 'activation')\n        end\n        subscription\n      end\n    end\n    def renew(subscription, at: Time.current)\n      authorize!(subscription.subscriber)\n      subscription.with_lock do\n        return unless subscription.state == 'active' && subscription.renews_at <= at\n        period = subscription.renews_at.utc.iso8601\n        issue(subscription, period: period)\n        subscription.update!(renews_at: subscription.renews_at + 30.days)\n        subscription.history.create!(event: 'renewed', details: { period: period })\n      end\n    end\n    def cancel(subscription)\n      authorize!(subscription.subscriber)\n      subscription.with_lock do\n        return if subscription.state == 'canceled'\n        subscription.update!(state: 'canceled')\n        subscription.history.create!(event: 'canceled')\n        RecordActivity.new.call(organization: subscription.subscriber.organization, actor: @author, subject: subscription, action: 'subscription.canceled')\n      end\n    end\n    private\n    def issue(subscription, period:)\n      invoice = Invoice.create!(author: @author, subscriber: subscription.subscriber, subscription: subscription,\n        reference: \"SUB-#{subscription.id}-#{period}\", due_at: Time.current + 7.days, currency: subscription.plan.currency)\n      invoice.line_items.create!(description: \"#{subscription.plan.name} / #{period}\", amount_cents: subscription.plan.amount_cents)\n      invoice\n    end\n    def authorize!(subscriber)\n      raise Pundit::NotAuthorizedError unless @author&.editor_of?(subscriber.organization)\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Billing::Subscription",
+          "via": "code_reference"
+        },
+        {
+          "type": "model",
+          "target": "Billing::Invoice",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "d59e17086efac17b6c1c0f285b954663235a4da7589641cb41171c8aacb4050a"
+    },
+    {
+      "type": "service",
+      "identifier": "EditorialWorkflow",
+      "file_path": "app/use_cases/editorial_workflow.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: EditorialWorkflow                                           \u2551\n# \u2551 Entry Points: unknown                                                \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\n# All transports share these transition and authorization rules.\nclass EditorialWorkflow\n  class InvalidTransition < StandardError; end\n  def initialize(author:)\n    @author = author\n  end\n\n  def save_draft(article, attributes)\n    authorize!(article, :update?)\n    Article.transaction do\n      article.lock! if article.persisted?\n      raise InvalidTransition, 'Published articles must remain immutable in this demo' if article.state == 'published'\n      article.assign_attributes(attributes.slice(:title, :body))\n      article.state = 'draft'\n      article.scheduled_at = nil\n      article.save!\n      article.revisions.create!(author: @author, number: (article.revisions.maximum(:number) || 0) + 1, title: article.title, body: article.body)\n      article\n    end\n  end\n\n  def submit(article, reviewer:)\n    authorize!(article, :update?)\n    article.with_lock do\n      raise InvalidTransition, 'Save a draft before submitting' unless %w[draft changes_requested].include?(article.state) && article.latest_revision\n      article.latest_revision.review_assignments.create!(reviewer: reviewer)\n      article.update!(state: 'in_review')\n    end\n  end\n\n  def decide(assignment, outcome:, notes: nil)\n    article = assignment.article_revision.article\n    authorize!(article, :review?)\n    raise Pundit::NotAuthorizedError, 'Only the assigned reviewer can decide' unless assignment.reviewer_id == @author.id\n    article.with_lock do\n      unless article.state == 'in_review' && article.latest_revision.id == assignment.article_revision_id\n        raise InvalidTransition, 'This review is stale; review the latest submitted revision'\n      end\n      assignment.create_review_decision!(outcome: outcome, notes: notes)\n      article.update!(state: outcome)\n    end\n  end\n\n  def schedule(article, at:)\n    authorize!(article, :publish?)\n    article.with_lock do\n      raise InvalidTransition, 'Approve the latest revision first' unless article.state == 'approved'\n      raise InvalidTransition, 'Choose a future time' unless at && at > Time.current\n      article.update!(state: 'scheduled', scheduled_at: at)\n    end\n  end\n\n  def authorize!(article, action)\n    raise Pundit::NotAuthorizedError, 'Not permitted in this publication' unless ArticlePolicy.new(@author, article).public_send(action)\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "3314295409a0c5a51162eec2d4cf9b81ae6a3dd9796cd58725370fa68c6f8aeb"
+    },
+    {
+      "type": "service",
+      "identifier": "Newsletter::SendCampaign",
+      "file_path": "app/use_cases/newsletter/send_campaign.rb",
+      "namespace": "Newsletter",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: Newsletter::SendCampaign                                    \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Newsletter\n  class SendCampaign\n    def call(campaign:, author:)\n      raise Pundit::NotAuthorizedError unless author&.editor_of?(campaign.publication.organization)\n      campaign.with_lock do\n        return if campaign.state == 'sent'\n        campaign.recipients.find_each do |subscriber|\n          next if subscriber.preferences['newsletter'] == false\n          campaign.deliveries.find_or_create_by!(subscriber: subscriber)\n        end\n        campaign.update!(state: 'sent')\n      end\n      campaign.deliveries.where(state: 'queued').find_each { |delivery| Newsletter::DeliverJob.perform_later(delivery.id) }\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "job",
+          "target": "Newsletter::DeliverJob",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "61f757808d7f3419361daf556d7ed103d68f5c02839e9db7ba1007a6e480f00f"
+    },
+    {
+      "type": "service",
+      "identifier": "PublishArticle",
+      "file_path": "app/use_cases/publish_article.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: PublishArticle                                              \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass PublishArticle\n  def initialize(author:)\n    @author = author\n  end\n\n  def call(article)\n    EditorialWorkflow.new(author: @author).authorize!(article, :publish?)\n    changed = false\n    article.with_lock do\n      return article if article.state == 'published'\n      unless %w[approved scheduled].include?(article.state) && (article.scheduled_at.nil? || article.scheduled_at <= Time.current)\n        raise EditorialWorkflow::InvalidTransition, 'Article must be approved and due for publication'\n      end\n      revision = article.latest_revision\n      unless revision&.review_assignments&.joins(:review_decision)&.where(review_decisions: { outcome: 'approved' })&.exists?\n        raise EditorialWorkflow::InvalidTransition, 'The latest revision has no approval'\n      end\n      article.update!(title: revision.title, body: revision.body, state: 'published', published_at: Time.current)\n      RecordActivity.new.call(organization: article.publication.organization, actor: @author, subject: article, action: 'article.published')\n      changed = true\n    end\n    if changed\n      Rails.cache.delete(\"articles/published/#{article.publication_id}\")\n      ActiveSupport::Notifications.instrument('article.published', article_id: article.id)\n      PublishArticleJob.perform_later(article.id)\n    end\n    article\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [
+        {
+          "type": "model",
+          "target": "Article",
+          "via": "code_reference"
+        },
+        {
+          "type": "job",
+          "target": "PublishArticleJob",
+          "via": "code_reference"
+        }
+      ],
+      "source_hash": "f3cc57ae078234ef9176bf593481723a8d2e0256c74a94840aec79bab601c023"
+    },
+    {
+      "type": "service",
+      "identifier": "RecordActivity",
+      "file_path": "app/use_cases/record_activity.rb",
+      "namespace": null,
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: RecordActivity                                              \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nclass RecordActivity\n  def call(organization:, actor:, subject:, action:)\n    event = organization.activity_events.create!(actor: actor, subject: subject, action: action)\n    organization.webhook_endpoints.find_each do |endpoint|\n      endpoint.webhook_deliveries.create!(activity_event: event, payload: { event: action, subject: { type: subject.class.name, id: subject.id } })\n    end\n    event\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [],
+      "source_hash": "d4d86a6efce14fb0d8dd8c22ae2e018297eb95d2ef7022b90b9cc587cc82687b"
+    },
+    {
+      "type": "service",
+      "identifier": "Support::ResolveTicket",
+      "file_path": "app/use_cases/support/resolve_ticket.rb",
+      "namespace": "Support",
+      "source_code": "# \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n# \u2551 Service: Support::ResolveTicket                                      \u2551\n# \u2551 Entry Points: call                                                   \u2551\n# \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nmodule Support\n  class ResolveTicket\n    def call(ticket:, author:)\n      raise Pundit::NotAuthorizedError unless author&.editor_of?(ticket.subscriber.organization)\n      ticket.with_lock do\n        return if ticket.state == 'resolved'\n        ticket.update!(state: 'resolved', assignee: author)\n        RecordActivity.new.call(organization: ticket.subscriber.organization, actor: author, subject: ticket, action: 'ticket.resolved')\n      end\n    end\n  end\nend\n",
+      "metadata": {},
+      "dependencies": [],
+      "source_hash": "06a13e947c09a9d954e013e89820ff3ac49a598225013c62bc15b6ed8f3da9dc"
+    }
+  ],
+  "queries": [
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "query": "find idempotency_key",
+      "expected_units": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "query": "find newsletter recipients",
+      "expected_units": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "query": "find stale review",
+      "expected_units": [
+        "EditorialWorkflow"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "query": "find Support::Ticket ownership",
+      "expected_units": [
+        "Support::Ticket"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "query": "How are repeated attempts to charge a customer prevented?",
+      "expected_units": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "query": "How is an obsolete editorial decision rejected?",
+      "expected_units": [
+        "EditorialWorkflow"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "query": "How are readers who opted out excluded from a mailing?",
+      "expected_units": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "query": "How do we reimburse a previously captured charge?",
+      "expected_units": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "query": "trace Billing::Invoice",
+      "expected_units": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "query": "trace Newsletter::Delivery",
+      "expected_units": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "query": "trace ReviewAssignment",
+      "expected_units": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "query": "trace Support::Ticket",
+      "expected_units": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "query": "explain all payment refunds",
+      "expected_units": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "query": "explain all newsletter delivery eligibility",
+      "expected_units": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "query": "explain all editorial approval scheduling",
+      "expected_units": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "query": "explain all support ticket resolution",
+      "expected_units": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "query": "find exactly Billing::CollectPayment",
+      "expected_units": [
+        "Billing::ChargePaymentJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "query": "find exactly Newsletter::Campaign",
+      "expected_units": [
+        "Newsletter::DeliverJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "query": "find exactly EditorialWorkflow",
+      "expected_units": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "query": "find exactly Billing::SubscriptionWorkflow",
+      "expected_units": [
+        "RenewSubscriptionsJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "query": "trace article",
+      "expected_units": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "query": "trace subscriber",
+      "expected_units": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "query": "trace review_assignment",
+      "expected_units": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "query": "trace publication",
+      "expected_units": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "budget": 1200
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "query": "find exactly editorial_workflow",
+      "expected_units": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "query": "find exactly publish_article",
+      "expected_units": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "query": "find exactly subscriber",
+      "expected_units": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "query": "find exactly article",
+      "expected_units": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "budget": 1200,
+      "types": [
+        "job"
+      ]
+    }
+  ]
+}

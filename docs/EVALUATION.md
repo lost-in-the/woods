@@ -14,6 +14,120 @@ Three harnesses, three questions.
 
 `woods:evaluate:baseline[grep|random|file_level]` scores a naive strategy on the same query set for comparison.
 
+## Checked-in Canopy retrieval gate
+
+The required CI `coverage` job runs this offline command before its test suite:
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/runner.rb
+# Report: tmp/retrieval-evaluation.json (uploaded by CI)
+```
+
+`bench/evaluation/` contains a versioned, deliberately small baseline:
+
+- **Corpus:** 62 runtime-extracted Canopy units and 28 annotated queries covering
+  publishing, billing, newsletters, and support. Source and relationships come
+  from the committed fictional `woods-testbed` Rails application; no application
+  records are included. Exact application/Woods revisions are in `corpus.json`.
+  This snapshot selects models, services, jobs, controllers, Pundit policies, and
+  mailers; it does not represent every extractor or a large production index.
+- **Embeddings:** real `all-MiniLM-L6-v2` ONNX inference, captured with a pinned
+  model revision and file hashes. CI replays those vectors through the current
+  production classifier, stores, graph, ranker, type fallback, and assembler.
+  No hash-based fake embeddings or expected-answer vectors are used.
+- **Gate:** per-strategy precision at 5, recall, and MRR must remain at least 95%
+  of the first observed score (floors rounded down to six decimal places).
+  Corpus/vector/token-provenance mismatches, missing strategies, and unexpected
+  strategy selection also fail. The baseline format is developer-only and is
+  **not** the `EVAL_BASELINE_FILE` aggregate-threshold format.
+
+First Ruby 4.0.6 capture (five warmed pipeline repetitions per query; Ruby 3.3.1
+and 3.4.10 replay the same answers):
+
+| Strategy | Queries | Precision@5 | Recall | MRR | Mean actual context tokens |
+|---|---:|---:|---:|---:|---:|
+| Keyword | 4 | 0.292 | 0.500 | 0.750 | 1,020.8 |
+| Vector | 4 | 0.271 | 0.375 | 0.625 | 1,083.2 |
+| Graph | 8 | 0.417 | 0.238 | 0.500 | 551.8 |
+| Hybrid | 4 | 0.750 | 0.396 | 1.000 | 1,058.8 |
+| Direct with type filtering | 4 | 0.375 | 0.750 | 0.625 | 551.0 |
+| Within-type vector fallback | 4 | 0.400 | 1.000 | 1.000 | 1,180.8 |
+
+Precision@5 divides relevant hits by the actual returned slice size (up to five),
+not always by five. Recall divides retrieved relevant units by all annotated
+relevant units. MRR is the mean reciprocal rank of the first relevant hit; a
+query with no relevant hit contributes zero.
+
+`profiles.json` binds measured Ruby runtimes to independently scored captures.
+Ruby 3.0.7, 3.1.7, and 3.2.11 share the legacy capture; Ruby 3.3.1, 3.4.10, and
+4.0.6 share the capture above. Other Ruby engines or major/minor versions fail
+with a recapture instruction. The legacy vector precision/recall/MRR are
+0.313 / 0.375 / 0.583, with separate positive floors and exact token counts.
+Raw vectors and PageRank scores are identical between the groups; production
+ranking assigns distinct percentile importance to equal PageRank scores using
+Ruby's unstable tie ordering. **B-191** tracks that defect. The harness does not
+alter ranks to hide it. Cross-runtime scores should not be compared as quality
+improvements until the tie policy is fixed.
+
+These are separate annotated query groups, **not a controlled comparison of six
+strategies on identical questions**. Relevance annotations were written from
+fixture source and its functional contract before scoring. Initial graph and
+direct probes remain in the corpus; additional probes exercise the supported
+snake-case graph roots and actual within-type fallback. Four original graph
+queries return no sources, including `trace Billing::Invoice` and
+`trace ReviewAssignment`. They remain zero in the report; backlog **B-190**
+tracks the seed-resolution defect. Low semantic recall and editorial misses are
+also retained. The floors prevent further regression; they are not release
+quality targets or evidence that retrieval is already good enough.
+
+`capture_report.json` records per-query ranks, quality, latency ranges, and exact
+`cl100k_base` counts of the returned context. Those counts are bound to context
+SHA-256 values; the tokenizer vocabulary asset hash, pattern, special-token map,
+and package version are recorded alongside them. Changed context requires explicit recapture and review. Woods'
+`tokens_used` remains a separate character-ratio estimate. Neither number counts
+agent prompts, generated answers, or total agent usage. Vector capture records
+actual model-input token counts (including special tokens after truncation),
+separately from output-context tokens. The model truncates inputs to 512 tokens,
+so long source units are only partially represented.
+
+Pipeline latency excludes model loading, downloads, live embedding requests, and
+network time. `vectors.json` separately records the warm embedding batch time,
+input counts, model/package provenance, and SHA-256 of each model asset. Timing
+is observational and has no shared-runner CI threshold. This baseline does not
+validate OpenAI/Ollama quality, their latency, production-scale storage, or agent
+outcomes; #227 remains open for broader representative-provider evidence.
+
+### Reproduce or review a new capture
+
+Ordinary CI needs only the Ruby bundle and the checked-in files. Model refresh is
+an explicit maintenance operation with isolated Python dependencies:
+
+```bash
+uv venv /tmp/woods-eval-venv
+uv pip install --python /tmp/woods-eval-venv/bin/python -r bench/evaluation/requirements.txt
+/tmp/woods-eval-venv/bin/python bench/evaluation/capture.py /tmp/woods-eval-model
+```
+
+This overwrites `vectors.json` with real inference from the pinned Apache-2.0
+model. To capture changed context after an intentional pipeline change:
+
+```bash
+bundle exec ruby -Ilib -r./bench/evaluation/runner -e \
+  'r=RetrievalBaseline::Runner.new; File.write("/tmp/retrieval-capture.json", JSON.pretty_generate(r.run))'
+/tmp/woods-eval-venv/bin/python bench/evaluation/capture_tokens.py /tmp/retrieval-capture.json
+```
+
+For a legacy-runtime capture pass `capture_report_legacy.json` as the second
+argument to `capture_tokens.py`. Use the matching runtime in `profiles.json`,
+and retain its exact version in the report.
+
+Review every changed answer and score before updating the matching baseline digests or
+floors. Never lower a floor merely to make CI pass. Keep labels independent of
+rankings and preserve hard or failed queries. When changing the application
+snapshot, use a fresh runtime `woods:extract` into a disposable output directory,
+retain only deliberate source/relationship fields, and record both repository
+SHAs. Do not copy a host's live index or application records into the repository.
+
 ## Agent-level ablation
 
 Retrieval scores say whether the right units come back. They do not say whether an agent finishes the job. The ablation runs the same task set twice per task, once with the Woods MCP server available and once without, and compares resolution rate, tokens, cost, and turns.
