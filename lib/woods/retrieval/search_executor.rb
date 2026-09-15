@@ -155,7 +155,7 @@ module Woods
         when :keyword
           execute_keyword(classification: classification, limit: limit)
         when :graph
-          execute_graph(classification: classification, limit: limit)
+          execute_graph(query: query, limit: limit)
         when :hybrid
           execute_hybrid(query, classification: classification, limit: limit, type_filter: type_filter)
         when :direct
@@ -318,11 +318,11 @@ module Woods
       # Graph strategy: find related units via dependency traversal.
       #
       # @return [Array<Candidate>]
-      def execute_graph(classification:, limit:)
+      def execute_graph(query:, limit:)
         candidates = []
 
-        # First, use keywords to find seed identifiers in the metadata store
-        seeds = find_seed_identifiers(classification)
+        # Resolve original query subjects to canonical metadata identifiers
+        seeds = find_seed_identifiers(query)
         return [] if seeds.empty?
 
         seeds.each do |seed_id|
@@ -449,27 +449,77 @@ module Woods
         { type: type_filter.map(&:to_s) }
       end
 
-      # Find seed identifiers from classification keywords via metadata search.
-      #
-      # @param classification [QueryClassifier::Classification]
-      # @return [Array<String>]
-      def find_seed_identifiers(classification)
-        seeds = []
+      # Keep graph subjects separate from intent words and preserve namespace
+      # separators/case that the general-purpose classifier keywords discard.
+      GRAPH_INTENT_WORDS = %w[trace follow track call calls called depends used find locate search look].freeze
+      private_constant :GRAPH_INTENT_WORDS
 
-        # Try direct lookups for capitalized keywords (likely class names)
-        classification.keywords.each do |keyword|
-          capitalized = keyword.split('_').map(&:capitalize).join
-          result = @metadata_store.find(capitalized)
-          seeds << capitalized if result
+      def find_seed_identifiers(query)
+        records = graph_query_records(query)
+        exact = records.flat_map do |term, matches|
+          graph_identifier_matches(matches, term)
         end
+        return exact.map { |record| record['id'] }.uniq.sort unless exact.empty?
 
-        # Fall back to search if no direct hits
-        if seeds.empty? && classification.keywords.any?
-          results = @metadata_store.search(classification.keywords.join(' '))
-          seeds = results.first(3).map { |r| r['id'] }
+        # A qualified miss must not seed another namespace through source-text
+        # mentions. Unqualified prose can still fall back to subject metadata.
+        records.reject { |term, _| term.include?('::') }.values.flatten
+               .map { |record| record['id'] }.uniq.sort.first(3)
+      end
+
+      # Sentence-capitalized instructions are still prose. Keep an instruction
+      # token only when it is also an explicitly spelled, existing identifier.
+      def graph_query_records(query)
+        query.scan(/\w+(?:::\w+)*/).uniq.filter_map do |term|
+          instruction = QueryClassifier::STOP_WORDS.include?(term.downcase) ||
+                        GRAPH_INTENT_WORDS.include?(term.downcase)
+          next if instruction && !term.match?(/[A-Z]/)
+
+          records = graph_subject_records(term)
+          records = records.select { |record| graph_record_identifier(record) == term } if instruction
+          [term, records]
+        end.to_h
+      end
+
+      # Prefer the spelling supplied by the caller before inferring snake_case
+      # variants. Metadata search recovers canonical and typed storage identities.
+      def graph_subject_records(term)
+        direct = @metadata_store.find(term)
+        return [direct.merge('id' => term)] if direct
+
+        records = @metadata_store.search(term)
+        exact = records.select { |record| graph_record_identifier(record) == term }
+        return exact unless exact.empty?
+
+        camelized = term.split('::').map { |part| part.split('_').map(&:capitalize).join }.join('::')
+        return records if camelized == term
+
+        inferred = @metadata_store.find(camelized)
+        return [inferred.merge('id' => camelized)] if inferred
+
+        (records + @metadata_store.search(camelized)).uniq { |record| record['id'] }
+      end
+
+      # Exact qualified identity wins over a bounded, deterministic set of
+      # unqualified namespace suffix matches; source-text mentions are not roots.
+      def graph_identifier_matches(records, term)
+        literal = records.select { |record| graph_record_identifier(record) == term }
+        return literal unless literal.empty?
+
+        exact = records.select do |record|
+          graph_record_identifier(record).delete('_').casecmp?(term.delete('_'))
         end
+        return exact unless exact.empty?
+        return [] if term.include?('::')
 
-        seeds
+        suffix_matches = records.select do |record|
+          graph_record_identifier(record).split('::').last.delete('_').casecmp?(term.delete('_'))
+        end
+        suffix_matches.sort_by { |record| record['id'] }.first(3)
+      end
+
+      def graph_record_identifier(record)
+        record['identifier'] || StorageIdentity.identifier(record['id'])
       end
 
       # Deduplicate candidates, keeping the highest-scored entry per identifier.

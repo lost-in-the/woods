@@ -41,14 +41,14 @@ bundle exec ruby -Ilib bench/evaluation/runner.rb
   strategy selection also fail. The baseline format is developer-only and is
   **not** the `EVAL_BASELINE_FILE` aggregate-threshold format.
 
-First Ruby 4.0.6 capture (five warmed pipeline repetitions per query; Ruby 3.3.1
+B-190 recapture on Ruby 4.0.6 (five warmed pipeline repetitions per query; Ruby 3.3.1
 and 3.4.10 replay the same answers):
 
 | Strategy | Queries | Precision@5 | Recall | MRR | Mean actual context tokens |
 |---|---:|---:|---:|---:|---:|
 | Keyword | 4 | 0.292 | 0.500 | 0.750 | 1,020.8 |
 | Vector | 4 | 0.271 | 0.375 | 0.625 | 1,083.2 |
-| Graph | 8 | 0.417 | 0.238 | 0.500 | 551.8 |
+| Graph | 8 | 0.813 | 0.519 | 1.000 | 1,041.1 |
 | Hybrid | 4 | 0.750 | 0.396 | 1.000 | 1,058.8 |
 | Direct with type filtering | 4 | 0.375 | 0.750 | 0.625 | 551.0 |
 | Within-type vector fallback | 4 | 0.400 | 1.000 | 1.000 | 1,180.8 |
@@ -73,10 +73,12 @@ These are separate annotated query groups, **not a controlled comparison of six
 strategies on identical questions**. Relevance annotations were written from
 fixture source and its functional contract before scoring. Initial graph and
 direct probes remain in the corpus; additional probes exercise the supported
-snake-case graph roots and actual within-type fallback. Four original graph
-queries return no sources, including `trace Billing::Invoice` and
-`trace ReviewAssignment`. They remain zero in the report; backlog **B-190**
-tracks the seed-resolution defect. Low semantic recall and editorial misses are
+snake-case graph roots and actual within-type fallback. The B-190 fix now
+resolves all four originally empty graph queries, including `trace Billing::Invoice`
+and `trace ReviewAssignment`. Only those four answers changed in each runtime
+profile; the corpus, relevance labels, vectors, and original quality floors are
+unchanged. Graph precision/recall/MRR increased from 0.417 / 0.238 / 0.500 to
+0.813 / 0.519 / 1.000. Low semantic recall and editorial misses are
 also retained. The floors prevent further regression; they are not release
 quality targets or evidence that retrieval is already good enough.
 

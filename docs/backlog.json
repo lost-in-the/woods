@@ -2626,7 +2626,7 @@
       "lib/woods/retrieval/search_executor.rb"
     ],
     "description": "Discovered while capturing #227 Canopy baseline: trace Billing::Invoice and trace ReviewAssignment return no units although their runtime graph nodes and edges exist. find_seed_identifiers lowercases/capitalizes keywords, loses namespace/internal case, then searches the entire trace phrase. Acceptance: resolve exact namespaced and CamelCase roots without including intent words in the fallback metadata search; preserve trace strategy and retain the original zero-result probes in bench/evaluation/corpus.json until the fix raises their scores. Do not lower retrieval quality floors.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-191",

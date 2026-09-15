@@ -3,7 +3,7 @@
   "corpus_sha256": "f2eac704dd0b773059e7268ed40046d862f47a1049223d89fcb45c8e645b5d20",
   "vectors_sha256": "311204a33db66587269346a7d54bcef842a08176e56c0d1816cd9e1275c4c89d",
   "profiles_sha256": "a7bf34736dfea4e0bf413fb7f04e037406ae02f5c2f67db63cc52eae3923f691",
-  "capture_report_sha256": "d59e06eb9040d5776eb74bf55b8861aa8b96cfff377f4f148a55908e67520eca",
+  "capture_report_sha256": "e399265d0ee1aa8a36a677a50da5a275222d3caa6d9c1532aa3108a40ebc333f",
   "notes": "Frozen Canopy runtime corpus + real MiniLM vectors. Floors are 95% of first captured score for this runtime profile, rounded down to six places. B-191 PageRank ties require separate runtime captures; no production ranking changes. Exact context counts are cl100k_base, not agent usage.",
   "thresholds": {
     "keyword": {
