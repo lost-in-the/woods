@@ -1,5 +1,8 @@
 # Reading a published index from Ruby
 
+For shell, Python, shipping snapshots, or direct JSON access, use the
+[published filesystem layout contract](INDEX_LAYOUT.md).
+
 `Woods::PublishedIndex` is the stable, read-only API for tools that are not MCP clients: RuboCop cops, CI gate scripts, and the `woods:check:*` tasks. It needs no Rails, opens one published generation, and never moves off it for the life of the reader.
 
 ```ruby
