@@ -431,6 +431,9 @@ module Woods
             deps.each { |d| lines << "#{indent}  - #{d}" }
           end
 
+          if fetch_key(data, :partial)
+            lines << "Partial traversal (#{fetch_key(data, :partial_reason)}); narrow depth/types/via or increase max_nodes/max_edges."
+          end
           lines << '' << truncation_note(data, nodes.size) if fetch_key(data, :nodes_total)
 
           lines.join("\n").rstrip

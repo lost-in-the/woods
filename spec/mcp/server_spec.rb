@@ -340,6 +340,23 @@ RSpec.describe Woods::MCP::Server do
 
     after { FileUtils.remove_entry(wide_dir) if File.directory?(wide_dir) }
 
+    it 'separates a partial traversal prefix from pagination and keeps repeated pages stable' do
+      first = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', max_nodes: 4, limit: 2))
+      last = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', max_nodes: 4, limit: 2, offset: 2))
+      beyond = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub', max_nodes: 4, offset: 4))
+      expect(first).to include('partial' => true, 'partial_reason' => 'node_budget', 'nodes_total' => 4)
+      expect(first['nodes'].keys + last['nodes'].keys).to eq(%w[Hub Dep000 Dep001 Dep002])
+      expect(last).to include('partial' => true, 'nodes_total' => 4, 'nodes_offset' => 2)
+      expect(beyond['nodes']).to be_empty
+      expect(beyond).to include('partial' => true, 'nodes_total' => 4)
+    end
+
+    it 'keeps traversal depth independent of a one-node page' do
+      data = parse_response(call_tool(wide_server, 'dependencies', identifier: 'Dep000', limit: 1, max_edges: 1))
+      expect(data['nodes_total']).to eq(2)
+      expect(data).not_to have_key('partial')
+    end
+
     it 'bounds the default page and marks it truncated' do
       data = parse_response(call_tool(wide_server, 'dependents', identifier: 'Hub'))
 

@@ -11,6 +11,8 @@ module Woods
       TASK_RESULT_TOOLS = %w[pipeline_embed pipeline_extract].freeze
 
       INTEGER_BOUNDS = {
+        'max_nodes' => [1, 10_000],
+        'max_edges' => [1, 100_000],
         'budget' => [1, 200_000],
         'depth' => [0, 20],
         'limit' => [1, 1_000],

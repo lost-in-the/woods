@@ -288,6 +288,9 @@ module Woods
             deps.each { |d| lines << "#{indent}  -> #{d}" }
           end
 
+          if fetch_key(data, :partial)
+            lines << "Partial traversal (#{fetch_key(data, :partial_reason)}); narrow depth/types/via or increase max_nodes/max_edges."
+          end
           if fetch_key(data, :nodes_total)
             offset = fetch_key(data, :nodes_offset, 0)
             position = offset.positive? ? " from offset #{offset}" : ''

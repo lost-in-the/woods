@@ -535,9 +535,15 @@ module Woods
       # @param depth [Integer] Maximum traversal depth
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param via [Array<String>, nil] Filter to these relationship types (e.g. ["link_to", "redirect_to"])
-      # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
-      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil)
-        traverse(identifier, depth: depth, types: types, via: via, direction: :forward)
+      # @param max_nodes [Integer] Distinct admitted nodes including root (default 1000; clamped to 1..10_000)
+      # @param max_edges [Integer] Edge checks before filters, including reverse via checks
+      #   (default 10_000; clamped to 1..100_000). Graph loading/cache preparation is not budgeted.
+      # @return [Hash] { root:, found:, nodes: { id => { type:, depth:, deps: [] } } };
+      #   incomplete walks add partial: true, partial_reason (node_budget or edge_budget),
+      #   and traversal_budget (max_nodes, max_edges, visited_nodes, visited_edges).
+      #   Already discovered rows remain; empty deps in a partial result need not mean a leaf.
+      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :forward, max_nodes: max_nodes, max_edges: max_edges)
       end
 
       # BFS traversal of reverse dependencies (dependents).
@@ -546,9 +552,15 @@ module Woods
       # @param depth [Integer] Maximum traversal depth
       # @param types [Array<String>, nil] Filter to these singular type names
       # @param via [Array<String>, nil] Filter to these relationship types (e.g. ["link_to", "redirect_to"])
-      # @return [Hash] { root:, nodes: { id => { type:, depth:, deps: [] } } }
-      def traverse_dependents(identifier, depth: 2, types: nil, via: nil)
-        traverse(identifier, depth: depth, types: types, via: via, direction: :reverse)
+      # @param max_nodes [Integer] Distinct admitted nodes including root (default 1000; clamped to 1..10_000)
+      # @param max_edges [Integer] Edge checks before filters, including reverse via checks
+      #   (default 10_000; clamped to 1..100_000). Graph loading/cache preparation is not budgeted.
+      # @return [Hash] { root:, found:, nodes: { id => { type:, depth:, deps: [] } } };
+      #   incomplete walks add partial: true, partial_reason (node_budget or edge_budget),
+      #   and traversal_budget (max_nodes, max_edges, visited_nodes, visited_edges).
+      #   Already discovered rows remain; empty deps in a partial result need not mean a leaf.
+      def traverse_dependents(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :reverse, max_nodes: max_nodes, max_edges: max_edges)
       end
 
       # Search rails_source units by concept keyword.
@@ -1241,70 +1253,89 @@ module Woods
       # @param via [Array<String>, nil] Filter to these relationship types
       # @param direction [:forward, :reverse] Traversal direction
       # @return [Hash]
-      def traverse(identifier, depth:, types:, via:, direction:)
+      def traverse(identifier, depth:, types:, via:, direction:, max_nodes:, max_edges:)
         graph_data = raw_graph_data
         nodes_data = graph_data['nodes'] || {}
-
         return { root: identifier, found: false, nodes: {} } unless nodes_data.key?(identifier)
 
-        # Normalize edges once per graph load — memoized alongside raw_graph_data
-        normalized_edges = normalized_graph_edges
-
+        budget = {
+          max_nodes: max_nodes.to_i.clamp(1, 10_000),
+          max_edges: max_edges.to_i.clamp(1, 100_000),
+          visited_nodes: 1, visited_edges: 0
+        }
         type_set = types&.to_set
         via_set = via&.to_set
         visited = Set.new([identifier])
         queue = [[identifier, 0]]
         result_nodes = {}
+        cursor = 0
+        partial_reason = nil
 
-        while queue.any?
-          current, current_depth = queue.shift
-
-          neighbors = if direction == :forward
-                        resolve_forward_neighbors(normalized_edges, current, via_set)
-                      else
-                        resolve_reverse_neighbors(graph_data, normalized_edges, current, via_set)
-                      end
-
-          # Filter by node type if requested. An identifier naming units of
-          # several types matches when any of them does — excluding it because
-          # the type that happens to sort first is not the requested one would
-          # hide a unit the filter asked for.
-          filtered = if type_set
-                       neighbors.select { |n| graph_node_types[n]&.any? { |t| type_set.include?(t) } }
-                     else
-                       neighbors
-                     end
-
-          # At max depth, record the node with empty deps so the renderer
-          # doesn't emit an extra level of unexpanded neighbors. The parent
-          # node's deps list already shows this node as a child.
-          will_expand = current_depth < depth
+        while cursor < queue.size
+          current, current_depth = queue[cursor]
+          cursor += 1
           node_meta = nodes_data[current]
-          entry = {
-            type: node_meta&.dig('type'),
-            depth: current_depth,
-            deps: will_expand ? filtered : []
-          }
-          # Only when the identifier is genuinely ambiguous, so the shape is
-          # unchanged for every node in an index with no shared identifiers.
+          entry = { type: node_meta&.dig('type'), depth: current_depth, deps: [] }
           node_types = graph_node_types[current] || []
           entry[:types] = node_types if node_types.size > 1
-          # Likewise: a single-database app learns nothing from a column that
-          # answers the same thing on every row (B-183).
           entry[:database] = node_meta&.dig('database') if multi_database_graph?
           result_nodes[current] = entry
+          next if partial_reason || current_depth >= depth
 
-          next unless will_expand
+          # Keep every discovered row, even after expansion stops. No dangling
+          # deps are introduced by the budget, and paging stays independent.
+          partial_reason = catch(:traversal_budget) do
+            each_traversal_neighbor(graph_data, current, direction, via_set, budget) do |neighbor|
+              next if type_set && !graph_node_types[neighbor]&.any? { |type| type_set.include?(type) }
 
-          filtered.each do |neighbor|
-            unless visited.include?(neighbor)
-              visited.add(neighbor)
-              queue.push([neighbor, current_depth + 1])
+              unless visited.include?(neighbor)
+                throw :traversal_budget, 'node_budget' if visited.size >= budget[:max_nodes]
+
+                visited.add(neighbor)
+                budget[:visited_nodes] += 1
+                queue << [neighbor, current_depth + 1]
+              end
+              entry[:deps] << neighbor
             end
+            nil
           end
         end
 
-        { root: identifier, found: true, nodes: result_nodes }
+        result = { root: identifier, found: true, nodes: result_nodes }
+        result.merge!(partial: true, partial_reason: partial_reason, traversal_budget: budget) if partial_reason
+        result
+      end
+
+      # Walk stored adjacency order lazily. In reverse traversal a via filter
+      # must inspect forward edges too; those checks consume the same budget.
+      # Whole-generation JSON loading is deliberately outside the walk budget.
+      def each_traversal_neighbor(graph_data, identifier, direction, via_set, budget)
+        edges = normalized_graph_edges
+        if direction == :forward
+          (edges[identifier] || []).each do |edge|
+            consume_traversal_edge(budget)
+            edge = { 'target' => edge } unless edge.is_a?(Hash)
+            yield edge['target'] unless via_set && !via_set.include?(edge['via'])
+          end
+        else
+          ((graph_data['reverse'] || {})[identifier] || []).each do |dependent|
+            consume_traversal_edge(budget)
+            if via_set
+              matches = (edges[dependent] || []).any? do |edge|
+                consume_traversal_edge(budget)
+                edge.is_a?(Hash) && edge['target'] == identifier && via_set.include?(edge['via'])
+              end
+              next unless matches
+            end
+            yield dependent
+          end
+        end
+      end
+
+      def consume_traversal_edge(budget)
+        throw :traversal_budget, 'edge_budget' if budget[:visited_edges] >= budget[:max_edges]
+
+        budget[:visited_edges] += 1
       end
 
       # Normalize all edge arrays once, converting bare strings to hashes.
@@ -1319,28 +1350,6 @@ module Woods
       def normalize_all_edges(raw_edges)
         raw_edges.transform_values do |entries|
           entries.map { |e| e.is_a?(Hash) ? e : { 'target' => e } }
-        end
-      end
-
-      # Extract forward neighbor identifiers, optionally filtered by via type.
-      # Expects pre-normalized edges (all entries are hashes).
-      def resolve_forward_neighbors(normalized_edges, identifier, via_set)
-        edges = normalized_edges[identifier] || []
-        edges = edges.select { |e| via_set.include?(e['via']) } if via_set
-        edges.map { |e| e['target'] }
-      end
-
-      # Extract reverse neighbor identifiers, optionally filtered by via type.
-      # Reverse edges are stored as bare identifier arrays. When via filtering
-      # is requested, checks each dependent's pre-normalized forward edges to
-      # find those pointing at +identifier+ with a matching via type.
-      def resolve_reverse_neighbors(graph_data, normalized_edges, identifier, via_set)
-        dependents = (graph_data['reverse'] || {})[identifier] || []
-        return dependents unless via_set
-
-        dependents.select do |dep|
-          forward = normalized_edges[dep] || []
-          forward.any? { |e| e['target'] == identifier && via_set.include?(e['via']) }
         end
       end
     end

@@ -453,6 +453,16 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
     end
   end
 
+  describe 'a budget-limited traversal result' do
+    %i[markdown plain claude].each do |format|
+      it "warns about incomplete traversal in #{format}, independently of paging" do
+        data = traversal_fixture.merge('partial' => true, 'partial_reason' => 'edge_budget')
+        expect(described_class.for(format).render(:dependents, data))
+          .to include('Partial traversal (edge_budget)', 'max_nodes/max_edges')
+      end
+    end
+  end
+
   describe 'a truncated traversal result' do
     let(:truncated_result) do
       {
