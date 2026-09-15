@@ -413,6 +413,35 @@ config.session_store = Woods::SessionTracer::FileStore.new(
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```
 
+### Solid Cache session retention and compatibility
+
+`Woods::SessionTracer::SolidCacheStore` accepts a direct `SolidCache::Store`.
+Its coordination layer uses private Solid Cache APIs for uncached, per-key
+routing and atomic ownership. Missing APIs raise
+`Woods::SessionTracer::SolidCacheCoordination::BackendError`; a gem's version
+constraint alone does not establish compatibility. The live contract suite
+validates SQLite, PostgreSQL, and MySQL (including MySQL's insert path without
+`RETURNING`). See [the version-validation procedure](../CONTRIBUTING.md#solid-cache-session-compatibility)
+before upgrading Solid Cache.
+
+Session traces are best-effort diagnostic data. The slot directory and record
+rings are bounded by `max_sessions` and `max_requests_per_session`, but the
+following crash/eviction limits remain:
+
+- A crashed admission can strand an active-session mapping outside the directory.
+  These mappings can accumulate across distinct session IDs, with a bounded
+  amount per ID. Recording that session again reclaims its mapping; the normal
+  directory bound is not a hard bound on these stranded keys.
+- If the backend evicts a slot counter while deep crash-orphan records remain
+  in an unoccupied slot, new records can be silently dropped until the counter
+  advances past them. This loss is bounded and self-healing, but the affected
+  requests are not recovered.
+- Losing the epoch key fences every live session. Old traces become unreadable,
+  and each session is admitted again on its next record. This deliberately
+  favors privacy over retention so previously cleared data stays cleared.
+
+Do not use this store as an audit log or the only record of a request.
+
 ## Gem indexing
 
 `config.add_gem` is accepted for forward compatibility but **not implemented**: nothing in the

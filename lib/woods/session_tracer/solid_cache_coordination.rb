@@ -157,11 +157,13 @@ module Woods
       end
 
       def inserted?(entry_class, result, key, payload)
-        affected_rows = result.affected_rows if result.respond_to?(:affected_rows)
-        return affected_rows.positive? unless affected_rows.nil?
-        return result.rows.any? if entry_class.connection.supports_insert_returning?
+        # MySQL's FOUND_ROWS can count a duplicate no-op as an affected row.
+        # The per-attempt CAS version makes equal values distinct payloads, so
+        # only our exact stored bytes establish ownership without RETURNING.
+        return entry_class.read(key) == payload unless entry_class.connection.supports_insert_returning?
 
-        entry_class.read(key) == payload
+        affected_rows = result.affected_rows if result.respond_to?(:affected_rows)
+        affected_rows.nil? ? result.rows.any? : affected_rows.positive?
       end
 
       def routed_read(key, failsafe)
