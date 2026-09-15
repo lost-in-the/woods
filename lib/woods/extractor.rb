@@ -2075,7 +2075,7 @@ module Woods
       path_set = relative_paths.to_set
       relative_paths.each_slice(500) do |batch|
         log_output = run_git(
-          'log', '--all', '--name-only',
+          'log', 'HEAD', '--name-only',
           '--format=__COMMIT__%H|||%an|||%cI|||%s',
           '--since=365 days ago',
           '--', *batch
