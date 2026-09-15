@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Watch startup reconciles environment-boot-covered restart inputs with one full
+  extraction instead of repeatedly exiting 75. Live changes and changes during
+  environment initialization still require restart; failed reconciliation and
+  deleted restart inputs survive retries and supervisor restarts. Built-in
+  watchers establish detection before startup extraction begins (#318).
+
 ## [2.0.0.beta2] - 2026-09-10
 
 ### Added

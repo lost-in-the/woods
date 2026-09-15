@@ -15,6 +15,9 @@ module Woods
     # silent while files change under it. Hosts in that position should force
     # polling rather than trust this backend.
     class ListenWatcher
+      # Optional daemon handshake; called once detection is established.
+      attr_writer :ready_callback
+
       # @param root [String, Pathname] directory to watch
       # @param ignored [Array<String>] directory names/prefixes to skip
       # @param listen_class [Class] injectable for specs
@@ -50,6 +53,7 @@ module Woods
             on_change.call(batch) if batch.any?
           end
           @listener.start
+          @ready_callback&.call
         rescue StandardError => e
           # inotify watch exhaustion (ENOSPC) lands here, and it is the most
           # likely failure on a large tree. {Watcher.build}'s caller falls back

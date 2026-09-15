@@ -18,6 +18,9 @@ module Woods
     # is what keeps that bounded: skipping `.git`, `node_modules`, `tmp` and
     # friends takes a Rails app from "everything" to "the source tree".
     class PollingWatcher
+      # Optional daemon handshake; called once detection is established.
+      attr_writer :ready_callback
+
       # @param root [String, Pathname] directory to watch
       # @param ignored [Array<String>] directory names/prefixes to skip
       # @param interval [Float] seconds between scans
@@ -47,6 +50,7 @@ module Woods
 
         @running = true
         primed_now?
+        @ready_callback&.call
 
         while @running
           @sleeper.call(@interval)
