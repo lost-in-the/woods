@@ -112,8 +112,8 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 | `woods_status` | Index health, generation, counts, and retrieval readiness |
 | `search` | Discover identifiers by regex, prefix, suffix, source, or metadata |
 | `lookup` | Fetch one exact unit with source, metadata, and relationships |
-| `dependencies` | Traverse what a unit depends on (`depth`, `types`, `via` narrow; `limit`, `offset` page) |
-| `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `limit`, `offset` page) |
+| `dependencies` | Traverse what a unit depends on (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
+| `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
 | `structure` | Summarize structural relationships around a unit |
 | `trace_flow` | Follow a request, job, mail, or other execution flow |
 | `framework` | Inspect relevant Rails or installed gem source |
@@ -134,6 +134,39 @@ error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
 
+### Dependency traversal budgets
+
+`dependencies` and `dependents` walk breadth-first in stored graph order. The
+walk defaults to `max_nodes: 1000` (including the root) and `max_edges: 10000`;
+callers can select 1–10,000 nodes and 1–100,000 edge checks. The node budget
+counts distinct nodes admitted after filters. Every candidate edge is charged
+before filtering, including duplicates, cycles, and the forward-edge checks
+needed to match a reverse `via` filter. Thus restrictive filters cannot bypass
+the edge budget. Nodes at the requested `depth` are recorded without reading
+their adjacency lists.
+
+When further expansion would exceed a budget, JSON reports `partial: true`,
+`partial_reason: "node_budget"` or `"edge_budget"`, and `traversal_budget` with
+`max_nodes`, `max_edges`, `visited_nodes`, and `visited_edges`. Text renderers
+also identify the partial traversal. Already discovered nodes remain in the
+answer, but an empty `deps` array in a partial answer does not prove a leaf.
+Exact-budget walks that finish all requested work are complete and have no
+`partial` marker.
+
+`limit` (default 50) and `offset` only page that discovered result; they never
+change the walk budget or depth. On a partial traversal, `nodes_total`, when
+present for pagination, counts the discovered prefix, **not the full reachable
+graph**. Paging beyond that prefix stays partial. To explore more, narrow
+`depth`/`types`/`via`, choose another root, or increase the traversal budget within
+its maximum. Keep the root, filters, budgets, and published generation unchanged
+for stable pages. No wall-clock deadline is used, so cutoffs are deterministic.
+
+Budgets cover traversal work after per-generation graph loading and cache
+preparation (JSON parsing, typed-edge normalization, node types and database
+metadata). They do not cap that initial load, elapsed time, or total process
+memory. These arguments are unreleased in Woods 2.0.0.beta2; check the connected
+server's tool schema before sending them to an older installation.
+
 ### Conditional Index capabilities
 
 The Ruby server builder contains 15 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, and Notion sync. They register only when their required collaborators or configuration are wired.
@@ -143,6 +176,7 @@ The normal packaged executable does not wire pipeline-operator or feedback-store
 ### HTTP transport
 
 Use HTTP only for a deliberate shared or remote deployment. It expands the network boundary and requires authentication, origin restrictions, and TLS termination. Follow [MCP HTTP transport](MCP_HTTP_TRANSPORT.md); do not translate the stdio example into an unauthenticated public listener.
+
 
 ## Console Server
 

@@ -426,6 +426,85 @@ RSpec.describe Woods::MCP::IndexReader do
     end
   end
 
+  describe 'traversal work budgets' do
+    let(:graph) do
+      {
+        'nodes' => %w[Hub A B C D].to_h { |id| [id, { 'type' => id == 'Hub' ? 'model' : 'service' }] },
+        'edges' => { 'Hub' => %w[A B C D], 'A' => ['Hub'] },
+        'reverse' => { 'Hub' => %w[A B C D], 'A' => ['Hub'] }
+      }
+    end
+
+    before { allow(reader).to receive(:raw_graph_data).and_return(graph) }
+
+    %i[traverse_dependencies traverse_dependents].each do |method|
+      it "bounds #{method} during expansion and keeps discovered rows" do
+        result = reader.public_send(method, 'Hub', max_nodes: 3)
+        expect(result[:nodes].keys).to eq(%w[Hub A B])
+        expect(result[:nodes]['Hub'][:deps]).to eq(%w[A B])
+        expect(result).to include(partial: true, partial_reason: 'node_budget')
+        expect(result[:traversal_budget]).to include(visited_nodes: 3, visited_edges: 3)
+      end
+
+      it "does not read edges at the depth boundary for #{method}" do
+        expect(reader).not_to receive(:normalized_graph_edges)
+        result = reader.public_send(method, 'Hub', depth: 0, max_nodes: 1)
+        expect(result[:nodes].keys).to eq(['Hub'])
+        expect(result).not_to have_key(:partial)
+      end
+
+      it "reports exact-budget completion for #{method}" do
+        result = reader.public_send(method, 'Hub', depth: 1, max_nodes: 5, max_edges: 4)
+        expect(result[:nodes].size).to eq(5)
+        expect(result).not_to have_key(:partial)
+      end
+
+      it "bounds rejected type checks in #{method}" do
+        result = reader.public_send(method, 'Hub', types: ['model'], max_edges: 2)
+        expect(result[:nodes].keys).to eq(['Hub'])
+        expect(result).to include(partial_reason: 'edge_budget')
+        expect(result[:traversal_budget][:visited_edges]).to eq(2)
+      end
+    end
+
+    it 'bounds a hub with the default budget even when callers supply no new arguments' do
+      ids = Array.new(1001) { |i| "Service#{i}" }
+      graph['nodes'].merge!(ids.to_h { |id| [id, { 'type' => 'service' }] })
+      graph['edges']['Hub'] = ids
+      result = reader.traverse_dependencies('Hub')
+      expect(result[:nodes].size).to eq(1000)
+      expect(result).to include(partial: true, partial_reason: 'node_budget')
+      expect(result[:traversal_budget]).to include(max_nodes: 1000, max_edges: 10_000)
+    end
+
+    it 'charges every edge check, including reverse via matching work' do
+      graph['edges']['A'] = Array.new(20) { { 'target' => 'Other', 'via' => 'code_reference' } }
+      result = reader.traverse_dependents('Hub', via: ['code_reference'], max_edges: 3)
+      expect(result[:nodes].keys).to eq(['Hub'])
+      expect(result).to include(partial_reason: 'edge_budget')
+      expect(result[:traversal_budget][:visited_edges]).to eq(3)
+    end
+
+    it 'bounds duplicate and cyclic edges without consuming duplicate node slots' do
+      graph['edges']['Hub'] = %w[A A Hub A]
+      result = reader.traverse_dependencies('Hub', max_nodes: 2, max_edges: 5)
+      expect(result[:nodes].keys).to eq(%w[Hub A])
+      expect(result).not_to have_key(:partial)
+      expect(reader.traverse_dependencies('Hub', max_edges: 2)).to include(partial_reason: 'edge_budget')
+    end
+
+    it 'caps Ruby callers at the hard maximum and clamps nonpositive budgets' do
+      result = reader.traverse_dependencies('Hub', max_nodes: 0, max_edges: 1_000_000)
+      expect(result[:traversal_budget]).to include(max_nodes: 1, max_edges: 100_000)
+    end
+
+    it 'does not enumerate the remainder of a large adjacency list after the cutoff' do
+      graph['edges']['Hub'] = Array.new(10_000) { 'A' }
+      expect(reader).to receive(:consume_traversal_edge).exactly(3).times.and_call_original
+      expect(reader.traverse_dependencies('Hub', max_edges: 2)).to include(partial_reason: 'edge_budget')
+    end
+  end
+
   describe '#traverse_dependencies' do
     it 'returns forward dependencies for Comment' do
       result = reader.traverse_dependencies('Comment', depth: 1)

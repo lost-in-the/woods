@@ -156,7 +156,8 @@ module Woods
                                 description: 'Traverse forward dependencies of a unit (what it depends on). ' \
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
-                                             "depth, bounded to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default.",
+                                             "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
+                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff.',
                                 reader_method: :traverse_dependencies,
                                 render_key: :dependencies)
           define_traversal_tool(server, reader, respond, renderer,
@@ -164,7 +165,8 @@ module Woods
                                 description: 'Traverse reverse dependencies of a unit (what depends on it). ' \
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
-                                             "depth, bounded to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default.",
+                                             "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
+                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff.',
                                 reader_method: :traverse_dependents,
                                 render_key: :dependents)
           define_structure_tool(server, reader, respond, renderer)
@@ -580,17 +582,23 @@ module Woods
                 },
                 limit: { type: 'integer',
                          description: "Maximum nodes to return (default: #{DEFAULT_TRAVERSAL_LIMIT})" },
-                offset: { type: 'integer', description: 'Skip this many nodes (default: 0)' }
+                offset: { type: 'integer', description: 'Skip this many nodes (default: 0)' },
+                max_nodes: { type: 'integer', minimum: 1, maximum: 10_000,
+                             description: 'Visited-node budget including root (default: 1000; maximum: 10000)' },
+                max_edges: { type: 'integer', minimum: 1, maximum: 100_000,
+                             description: 'Edge-check budget before filters, including reverse via checks (default: 10000; maximum: 100000)' }
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil, max_nodes: nil, max_edges: nil|
             types = coerce.call(types)
             via = coerce.call(via)
             depth = coerce_int.call(depth)
             limit = coerce_int.call(limit)
             offset = coerce_int.call(offset)
-            result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via)
+            result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
+                                                            max_nodes: coerce_int.call(max_nodes) || 1000,
+                                                            max_edges: coerce_int.call(max_edges) || 10_000)
             if result[:found] == false
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."

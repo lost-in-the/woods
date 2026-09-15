@@ -42,6 +42,8 @@ RSpec.describe 'Index MCP tool contracts' do
                                  required: %w[identifier], properties: {
                                    'identifier' => string_contract(1, 10_000),
                                    'depth' => integer_contract(0, 20),
+                                   'max_nodes' => integer_contract(1, 10_000),
+                                   'max_edges' => integer_contract(1, 100_000),
                                    'types' => array_contract(1_000, 10_000),
                                    'via' => union_contract,
                                    'limit' => integer_contract(1, 1_000),
@@ -62,6 +64,8 @@ RSpec.describe 'Index MCP tool contracts' do
                                required: %w[identifier], properties: {
                                  'identifier' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20),
+                                 'max_nodes' => integer_contract(1, 10_000),
+                                 'max_edges' => integer_contract(1, 100_000),
                                  'types' => array_contract(1_000, 10_000),
                                  'via' => union_contract,
                                  'limit' => integer_contract(1, 1_000),
@@ -722,8 +726,33 @@ RSpec.describe 'Index MCP tool contracts' do
     send(assertion, data, value, name)
   end
 
+  def assert_traversal_node_budget(data, value, name)
+    if value == 1
+      expect(data['nodes'].size).to eq(1)
+      expect(data).to include('partial' => true, 'partial_reason' => 'node_budget')
+      expect(data['traversal_budget']['visited_nodes']).to eq(1)
+    else
+      expect(data).not_to have_key('partial')
+      expect(data['nodes'].size).to eq(name == 'dependencies' ? 2 : 3)
+    end
+  end
+
+  def assert_traversal_edge_budget(data, value, name)
+    if value == 1 && name == 'dependents'
+      expect(data).to include('partial' => true, 'partial_reason' => 'edge_budget')
+      expect(data['traversal_budget']['visited_edges']).to eq(1)
+    else
+      expect(data).not_to have_key('partial')
+      expect(data['nodes']).not_to be_empty
+    end
+  end
+
   def boundary_assertions
     {
+      %w[dependencies max_nodes] => :assert_traversal_node_budget,
+      %w[dependents max_nodes] => :assert_traversal_node_budget,
+      %w[dependencies max_edges] => :assert_traversal_edge_budget,
+      %w[dependents max_edges] => :assert_traversal_edge_budget,
       %w[dependencies depth] => :assert_dependencies_depth,
       %w[dependencies limit] => :assert_traversal_limit,
       %w[dependencies offset] => :assert_traversal_offset,

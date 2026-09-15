@@ -32,6 +32,17 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 The normal packaged Index Server registers 14 tools; conditional schemas register only when their wiring is configured — use the connected server's own tool list, never the source inventory. Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure. Never work around a block, validation error, or redaction.
 
+## Partial dependency answers
+
+Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods
+2.0.0.beta2. Check the installed gem version and connected tool schema before
+using them; installing this plugin does not upgrade the gem. On a supporting
+server, `partial`/`partial_reason` means the walk stopped early, independently
+of page truncation. Do not claim an exhaustive blast radius or treat empty
+deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
+paging alone only visits the discovered prefix. See the
+[budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
+
 ## Report evidence
 
 Name the tools and exact identifiers used, cite the source paths Woods returned, separate direct Woods evidence from inference, and state generation/staleness caveats. Say when a claim still needs source or test verification.

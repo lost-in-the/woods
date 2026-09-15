@@ -91,6 +91,17 @@ Then reconnect through the MCP client and call `woods_status`. Use client-native
 
 For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
 
+## Partial dependency answers
+
+Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods
+2.0.0.beta2. Check the installed gem version and connected tool schema before
+using them; installing this plugin does not upgrade the gem. On a supporting
+server, `partial`/`partial_reason` means the walk stopped early, independently
+of page truncation. Do not claim an exhaustive blast radius or treat empty
+deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
+paging alone only visits the discovered prefix. See the
+[budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
+
 ## 4. Check semantic retrieval
 
 Only diagnose this layer when structural tools work and `codebase_retrieve` fails. Check `woods_status`, configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.

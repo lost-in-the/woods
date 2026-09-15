@@ -255,13 +255,16 @@ The `metadata.inlined_concerns` array lists which concerns were resolved:
 }
 ```
 
-**What you'll get:** A BFS tree of everything that references `User`, controllers, services, jobs, mailers, up to 2 hops out. Set `depth: 1` for direct dependents only.
+**What you'll get:** A BFS traversal of units that reference `User`, such as controllers, services, jobs, and mailers, up to 2 hops out. Set `depth: 1` for direct dependents only.
 
-The answer is bounded to 50 nodes. When it is cut, the response ends with a
+The answer is paged to 50 nodes by default. When it is cut, the response ends with a
 `Showing N of M (truncated)` line, the same one `graph_analysis` prints. Reach
 for `depth`, `types` and `via` first: they make the answer smaller. `limit` and
 `offset` only page what those leave, so a hub read one page at a time still
-costs every page.
+repeats the walk. A separate traversal budget can return `partial: true`;
+that marker means the reachable graph is incomplete even after the final page.
+See [traversal budgets](MCP_SERVERS.md#dependency-traversal-budgets) before
+changing `max_nodes` or `max_edges`.
 
 To find only which jobs depend on `User`:
 
