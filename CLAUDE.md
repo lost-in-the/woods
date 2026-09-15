@@ -292,7 +292,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - Manifest `git_branch`/`git_sha` come from `Woods::GitProvenance` (`lib/woods/git_provenance.rb`), which is worktree-aware and cwd-independent (`git -C <root>`).
   - A present `.git` whose ref cannot be resolved (an unmounted worktree git dir in a container) yields `"unknown"`, never a stale env value.
   - `GIT_BRANCH`/`GIT_SHA` env vars count only when there is **no** `.git` at the root, or git is unavailable.
-  - `capture_snapshot` treats `"unknown"` as no-sha (#137). The per-file `batch_git_data`/`run_git` path is separate and cwd-based.
+  - `capture_snapshot` treats `"unknown"` as no-sha (#137). Per-file enrichment and manifest provenance both use `GitCommand`, rooted at the application directory with the same `WOODS_GIT_DIR` override. Per-file history is scoped to the selected `HEAD`.
 - Model name scanning uses a precomputed regex via `ModelNameCache`, invalidated per run. Three passes: whole-word fully-qualified names; string literals passed to `constantize`/`const_get`; unambiguous bare short names via `ModelNameCache.resolve_short_name`. Ambiguous short names are skipped.
 - `extract_dependencies` in every extractor must include `:via`. See `model_extractor` for reference values.
 - `CallbackAnalyzer` is regex-based, not AST. Proc and lambda callbacks are skipped.

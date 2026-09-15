@@ -711,7 +711,16 @@ When written to disk, units also include:
 
 ### Git enrichment fields (`metadata[:git]`)
 
-If the host app is a git repo, the following are added to `metadata[:git]` after extraction:
+If the host app is a git repo, the following are added to `metadata[:git]` after extraction.
+History is limited to commits reachable from `HEAD` in the past 365 days,
+including merged branch history. Unmerged branches, remote refs, and tool
+checkpoint refs do not contribute. Commands run against the application root;
+when `WOODS_GIT_DIR` is set, `HEAD` belongs to that explicitly selected git
+directory, which may differ from a linked worktree's HEAD.
+
+After upgrading from a version that included all refs, run a full
+`woods:extract` to replace previously published git metadata. Incremental
+extraction refreshes only the units it rewrites.
 
 | Field | Description |
 |-------|-------------|
