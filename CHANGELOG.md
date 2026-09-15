@@ -9,11 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Bound `dependencies` and `dependents` traversal work independently of response
-  pagination, with configurable node/edge budgets and explicit partial-result
-  reasons. Filtered edges and reverse relationship checks consume the edge
-  budget; complete small results retain their existing shape (#311).
-
 - Keep runtime trace evidence for same-name instance and singleton methods separate, including inherited singleton owners and caller kinds. Legacy untyped events enrich instance methods only; re-record old singleton traces.
 
 - Ruby trace enrichment now records the nearest observed calling Ruby method
@@ -40,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still refuses to boot without a token when HTTP Console is enabled (#304).
 
 ### Added
+
+- Bound `dependencies` and `dependents` traversal work independently of response
+  pagination, with configurable node/edge budgets and explicit partial-result
+  reasons. Filtered edges and reverse relationship checks consume the edge
+  budget; complete small results retain their existing shape (#311).
 
 - Document the published filesystem layout for non-Ruby consumers, with pinned
   Bash/jq and Python reads, retention-race handling, and structural snapshot
