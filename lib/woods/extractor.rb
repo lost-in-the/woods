@@ -1268,9 +1268,6 @@ module Woods
 
     def setup_output_directory
       FileUtils.mkdir_p(@output_dir)
-      EXTRACTORS.each_key do |type|
-        FileUtils.mkdir_p(payload_dir.join(type.to_s))
-      end
     end
 
     # ──────────────────────────────────────────────────────────────────────
