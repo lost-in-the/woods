@@ -54,6 +54,12 @@ bin/rails woods:stats
 
 If extraction fails, reproduce Rails boot and eager loading first. Do not inspect internal payload files when Woods tasks provide the check.
 
+Writer-version provenance (#323) is unreleased; check the installed gem version's
+release notes before expecting `woods_status.index.woods_version`. When present,
+it names the last manifest publisher; `server.version` names the MCP reader.
+Missing/null means unknown. A matching version after an incremental run never
+replaces a required full upgrade extraction. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 Configure the Index Server with the application bundle, absolute app `cwd`, and an index path visible to that process. For a host-installed bundle:
 
 ```json

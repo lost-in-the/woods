@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Published manifests record `woods_version`, the last publisher's gem version,
+  for Rails extraction and static self-maps. MCP exposes it independently of the
+  reader version, and `woods:validate` gives nonfatal warnings for malformed
+  writer versions or different major versions. Older manifests remain valid
+  without this optional provenance field (#323).
+
 ## [2.0.0.beta2] - 2026-09-10
 
 ### Added

@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative 'atomic_file'
+require_relative 'version'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
@@ -2324,6 +2325,7 @@ module Woods
 
       manifest = {
         extracted_at: Time.current.iso8601,
+        woods_version: Woods::VERSION,
         rails_version: Rails.version,
         ruby_version: RUBY_VERSION,
 

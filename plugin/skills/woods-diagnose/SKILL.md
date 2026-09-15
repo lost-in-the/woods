@@ -32,6 +32,12 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+Writer-version provenance (#323) is unreleased: verify the installed gem version's
+release notes before expecting it. If `index.woods_version` exists, compare it
+with `server.version`; missing/null is unknown, not a failure. A validator
+major-version warning calls for full extraction and upgrade review, while a match
+does not certify retained units were migrated. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 If a one-shot extraction raises `Could not publish generation`, the candidate
 payload was written but never made visible; readers still serve the previous
 complete generation. Fix the named filesystem, permission, space, or mount

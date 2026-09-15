@@ -30,6 +30,45 @@ RSpec.describe Woods::Resilience::IndexValidator do
   end
 
   describe '#validate' do
+    context 'with manifest writer-version provenance (#323)' do
+      before do
+        write_json('dependency_graph.json', { 'nodes' => {}, 'edges' => [] })
+      end
+
+      [nil, Woods::VERSION, "#{Gem::Version.new(Woods::VERSION).segments.first}.99.0.beta1"].each do |version|
+        it "accepts legacy or same-major writer version #{version.inspect}" do
+          write_json('manifest.json', { 'counts' => {}, 'woods_version' => version })
+          report = described_class.new(index_dir: tmp_dir).validate
+          expect(report.valid?).to be true
+          expect(report.warnings).to be_empty
+        end
+      end
+
+      it 'accepts an older manifest without a writer-version field' do
+        write_json('manifest.json', { 'counts' => {} })
+        report = described_class.new(index_dir: tmp_dir).validate
+        expect(report.valid?).to be true
+        expect(report.warnings).to be_empty
+      end
+
+      it 'warns without failing when the writer and reader major versions differ' do
+        writer = "#{Gem::Version.new(Woods::VERSION).segments.first + 1}.0.0"
+        write_json('manifest.json', { 'counts' => {}, 'woods_version' => writer })
+        report = described_class.new(index_dir: tmp_dir).validate
+        expect(report.valid?).to be true
+        expect(report.warnings).to include(a_string_matching(/#{Regexp.escape(writer)}.*#{Regexp.escape(Woods::VERSION)}.*woods:extract/))
+      end
+
+      ['', ' ', 'invalid', 2, false, [], {}].each do |version|
+        it "warns without failing for malformed writer version #{version.inspect}" do
+          write_json('manifest.json', { 'counts' => {}, 'woods_version' => version })
+          report = described_class.new(index_dir: tmp_dir).validate
+          expect(report.valid?).to be true
+          expect(report.warnings).to include(a_string_matching(/Invalid manifest woods_version/))
+        end
+      end
+    end
+
     context 'with a valid index' do
       before do
         write_unit_file('models', 'User.json', source_code: 'class User; end')
