@@ -26,6 +26,16 @@ query
 | Assembly | `Woods::Retrieval::ContextAssembler` | Fills a token budget with ranked units, sectioned into structural / primary / supporting / framework blocks |
 | Orchestration | `Woods::Retriever` | Coordinates all four stages; returns a `RetrievalResult` with `context`, `sources`, `strategy`, `tokens_used`, and `trace` |
 
+### PageRank importance
+
+When a graph store supplies PageRank, ranking converts its scores to ordinal
+percentiles: the highest-ranked unit receives 1.0 and the lowest receives 1/n,
+where n is the number of entries in the PageRank map.
+Equal PageRank scores are ordered lexically by identifier before assigning
+percentiles. This preserves distinct ordinal weights while making ties independent
+of graph insertion order and Ruby version. It does not assign equal importance
+weights to tied units. Missing graph entries retain the metadata-based fallback.
+
 ### Search strategies
 
 `SearchExecutor` selects one of five strategies based on query classification:

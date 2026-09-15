@@ -534,6 +534,25 @@ RSpec.describe Woods::Retrieval::Ranker do
       expect(result.map(&:identifier)).to eq(%w[Top Mid Bottom])
     end
 
+    it 'breaks equal PageRank scores by identifier regardless of graph insertion order' do
+      scores = { 'Zulu' => 0.2, 'Alpha' => 0.2, 'Top' => 0.9, 'Bottom' => 0.01 }
+      candidates = %w[Zulu Bottom Alpha Top].map { |id| candidate(identifier: id, score: 0.5) }
+
+      [scores, scores.to_a.reverse.to_h].each do |insertion_order|
+        allow(graph_store).to receive(:pagerank).and_return(insertion_order)
+        ranker.invalidate_pagerank_cache!
+
+        result = ranker.rank(candidates, classification: classification)
+
+        expect(result.map(&:identifier)).to eq(%w[Top Alpha Zulu Bottom])
+        # Preserve ordinal percentiles: the top receives 1 and the bottom 1/n.
+        expect(result.map(&:score)).to match([
+                                               be_within(1e-12).of(0.475), be_within(1e-12).of(0.45),
+                                               be_within(1e-12).of(0.425), be_within(1e-12).of(0.4)
+                                             ])
+      end
+    end
+
     it 'falls back to bucketed metadata importance for identifiers absent from pagerank' do
       # Known is the lowest-ranked unit in a 5-node graph (percentile ≈ 0.2)
       allow(graph_store).to receive(:pagerank).and_return(

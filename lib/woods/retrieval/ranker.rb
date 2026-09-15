@@ -378,7 +378,9 @@ module Woods
 
       # Lazily-computed rank-percentile map derived from the graph store's PageRank.
       #
-      # Top-ranked identifier gets 1.0, bottom-ranked gets 1/n. Identifiers absent
+      # Top-ranked identifier gets 1.0, bottom-ranked gets 1/n. Equal PageRank scores
+      # are ordered lexically by identifier so their ordinal percentiles do not
+      # depend on graph insertion order or Ruby's unstable sort. Identifiers absent
       # from PageRank (new units, ephemeral candidates) return nil and fall back
       # to the bucketed importance signal.
       #
@@ -402,7 +404,7 @@ module Woods
         scores = @graph_store.pagerank
         return {} if scores.nil? || scores.empty?
 
-        ranked = scores.sort_by { |_id, score| -score }
+        ranked = scores.sort_by { |identifier, score| [-score, identifier] }
         total = ranked.size.to_f
         ranked.each_with_index.to_h do |(identifier, _score), rank|
           [identifier, 1.0 - (rank / total)]

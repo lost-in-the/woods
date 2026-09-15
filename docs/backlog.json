@@ -2637,7 +2637,19 @@
     "files": [
       "lib/woods/retrieval/ranker.rb"
     ],
-    "description": "Found validating #227 real-model baseline across supported Ruby interpreters. Identical graph PageRank values and insertion order produce different percentile importance values because compute_pagerank_importance_map sorts only by score; Ruby 3.0-3.2 order equal scores differently from 3.3-4.0. Canopy vector MRR changes from 0.583333 to 0.625 and returned context changes without any vector differences. Acceptance: choose and test a deterministic equal-score policy, verify the real corpus across all supported Ruby versions, recapture and review affected evidence without weakening quality floors. Runtime-specific baseline profiles retain current measured behavior until this is fixed.",
+    "description": "Found validating #227 real-model baseline across supported Ruby interpreters. Identical graph PageRank values and insertion order produce different percentile importance values because compute_pagerank_importance_map sorts only by score; Ruby 3.0-3.2 order equal scores differently from 3.3-4.0. Canopy vector MRR changes from 0.583333 to 0.625 and returned context changes without any vector differences. Acceptance: choose and test a deterministic equal-score policy, verify the real corpus across all supported Ruby versions, recapture and review affected evidence without weakening quality floors. Resolved by score-descending, identifier-lexical ordering before assigning the existing ordinal percentiles. Opposite insertion orders are covered; all six supported Ruby lines replay identical PageRank importance and aggregate quality metrics. Separate runtime context profiles remain for B-192.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-192",
+    "title": "Make hybrid candidate score ties deterministic before truncation and RRF",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retrieval/search_executor.rb"
+    ],
+    "description": "Found during B-191 validation after PageRank importance maps became identical across Ruby versions. execute_hybrid sorts combined vector, keyword, and graph candidates by score alone before caller truncation; equal-score ordering changes across Ruby 3.0-3.2 and 3.3-4.0, altering candidate membership and per-source RRF ranks. In the unchanged Canopy corpus hybrid-2, Newsletter::DeliverJob and Newsletter::Delivery swap their leading returned positions; aggregate quality metrics remain equal, but context bytes differ. Acceptance: define deterministic candidate tie ordering before truncation and fusion, cover insertion-order and cross-source ties, replay all six Ruby lines against the original corpus and quality floors, and review context recaptures without changing labels or lowering thresholds. Keep separate runtime captures until this is resolved.",
     "status": "ready"
   }
 ]
