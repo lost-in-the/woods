@@ -662,7 +662,9 @@ RSpec.describe Woods::Watch::Daemon do
           original.call
         end
         daemon = build(watcher: backend, catch_up: true)
-        allow(daemon).to receive(:enqueue).and_wrap_original do |original, paths, **options|
+        # A positional options hash keeps this RSpec wrapper compatible with
+        # Ruby 3.0/3.1; the real method still receives keyword arguments.
+        allow(daemon).to receive(:enqueue).and_wrap_original do |original, paths, options = {}|
           original.call(paths, **options)
           live_event << true if paths.include?(path) && !options[:startup]
         end
