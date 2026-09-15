@@ -127,6 +127,36 @@ WOODS_RUN_LIVE_BACKENDS=1 BUNDLE_GEMFILE=gemfiles/live_backends.gemfile \
 
 The lane expects reachable PostgreSQL/pgvector, MySQL, and Qdrant services. Configure endpoints with `WOODS_PG_URL`, `WOODS_MYSQL_URL`, and `WOODS_QDRANT_URL`. The Console contracts exercise blocked-table enforcement and legitimate SQL on both database dialects. New adapter behavior that depends on a real server belongs in this lane.
 
+### Solid Cache session compatibility
+
+The live-backend job runs `spec/integration/solid_cache_compatibility_spec.rb`
+against SQLite, PostgreSQL, and MySQL. MySQL coverage asserts that the adapter
+has no insert `RETURNING`, checks actual insert ownership (including same-value
+conflicts), exercises concurrent ownership, expiry, conditional deletion, and
+session clear/epoch recovery. A separate case strips only insert-result metadata
+to exercise the older Rails read-back fallback against real MySQL rows.
+
+Solid Cache coordination depends on private APIs. Before declaring a newly
+resolved `solid_cache` version supported:
+
+1. Record the exact Ruby, Active Record, Solid Cache, and database versions.
+2. Run the complete compatibility file against disposable PostgreSQL and MySQL
+   databases, with `WOODS_RUN_LIVE_BACKENDS=1`,
+   `BUNDLE_GEMFILE=gemfiles/live_backends.gemfile`, `WOODS_PG_URL`, and
+   `WOODS_MYSQL_URL` set. The suite recreates `solid_cache_entries`; never point
+   it at an application cache database.
+3. Require every example to pass, including SQLite local-cache bypass, TTL,
+   sharding, missing-private-API errors, and the MySQL ownership cases. Attach
+   the versions and results to the PR; a passing double-based unit suite is
+   insufficient.
+
+The live gemfile resolves `solid_cache ~> 1.0`; this is a dependency selection
+range, not evidence that every version in it has been tested. The baseline
+validated for #228 is Ruby 4.0.6, Solid Cache 1.0.10, Active Record 8.1.3.1,
+SQLite 3.53.2, PostgreSQL 16.15, and MySQL 26.7.0.
+Accepted crash/eviction limits are documented in the
+[configuration reference](docs/CONFIGURATION_REFERENCE.md#solid-cache-session-retention-and-compatibility).
+
 ## Keep public surfaces synchronized
 
 A pull request is incomplete when behavior and user guidance disagree.

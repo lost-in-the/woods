@@ -78,9 +78,10 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
     SolidCache::Entry.singleton_class.prepend(SolidCacheEntryReadProbe)
   end
 
-  # Run locally against PostgreSQL without the other live-lane services:
+  # Run locally against disposable PostgreSQL and MySQL databases:
   # BUNDLE_GEMFILE=gemfiles/live_backends.gemfile WOODS_RUN_LIVE_BACKENDS=1 \
   #   WOODS_PG_URL=postgres://postgres:postgres@localhost:5432/woods_test \
+  #   WOODS_MYSQL_URL=mysql2://root:woods@localhost:3306/woods_test \
   #   bundle exec rspec spec/integration/solid_cache_compatibility_spec.rb
   RSpec.describe 'Solid Cache session compatibility', :live_backends do
     def create_solid_cache_schema(connection)
@@ -95,11 +96,16 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
       connection.add_index(:solid_cache_entries, %i[key_hash byte_size])
       connection.add_index(:solid_cache_entries, :key_hash, unique: true)
       SolidCache::Entry.reset_column_information
+      # Solid Cache caches adapter-quoted SQL outside Active Record schema caches.
+      return unless SolidCache::Entry.instance_variable_defined?(:@select_sql)
+
+      SolidCache::Entry.remove_instance_variable(:@select_sql)
     end
 
     around do |example|
-      if example.metadata[:postgresql]
-        ActiveRecord::Base.establish_connection(ENV.fetch('WOODS_PG_URL'))
+      if example.metadata[:postgresql] || example.metadata[:mysql]
+        url = example.metadata[:mysql] ? 'WOODS_MYSQL_URL' : 'WOODS_PG_URL'
+        ActiveRecord::Base.establish_connection(ENV.fetch(url))
         create_solid_cache_schema(ActiveRecord::Base.connection)
         example.run
       else
@@ -128,23 +134,27 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
 
     it 'shares atomic session sequences across actual Solid Cache stores', :postgresql do
       cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
-      first = Woods::SessionTracer::SolidCacheStore.new(cache: cache, max_requests_per_session: 32)
+      first = Woods::SessionTracer::SolidCacheStore.new(cache: cache, max_sessions: 32, max_requests_per_session: 32)
       second = Woods::SessionTracer::SolidCacheStore.new(
-        cache: SolidCache::Store.new(max_age: nil, max_entries: 10_000), max_requests_per_session: 32
+        cache: SolidCache::Store.new(max_age: nil, max_entries: 10_000), max_sessions: 32, max_requests_per_session: 32
       )
       writers = 12.times.map do |index|
         Thread.new do
-          target = index.even? ? first : second
-          target.record('shared', { 'timestamp' => '2026-08-20T12:00:00Z', 'action' => "action-#{index}" })
+          ActiveRecord::Base.connection_pool.with_connection(prevent_permanent_checkout: true) do
+            target = index.even? ? first : second
+            target.record('shared', { 'timestamp' => '2026-08-20T12:00:00Z', 'action' => "action-#{index}" })
+          end
         end
       end
-      writers.each(&:join)
+      writers.each(&:value)
 
       expect(first.read('shared').map { |entry| entry.fetch('action') })
         .to contain_exactly(*12.times.map { |index| "action-#{index}" })
       expect(second.sessions.map { |entry| entry.fetch('session_id') }).to eq(['shared'])
       second.clear('shared')
       expect(first.read('shared')).to eq([])
+    ensure
+      writers&.each { |writer| writer.kill.join if writer.alive? }
     end
     it 'pre-creates counters before PostgreSQL increment transactions can observe absence', :postgresql do
       cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
@@ -202,6 +212,99 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
       expect(coordination.write_if_absent('same-value', 0)).to be(true)
       expect(coordination.write_if_absent('same-value', 0)).to be(false)
       expect(coordination.read('same-value')).to eq(0)
+    end
+
+    context 'with MySQL without INSERT RETURNING', :mysql do
+      let(:cache) { SolidCache::Store.new(max_age: nil, max_entries: 10_000) }
+      let(:coordination) { Woods::SessionTracer::SolidCacheCoordination.new(cache) }
+
+      before do
+        expect(SolidCache::Entry.connection.supports_insert_returning?).to be(false)
+      end
+
+      def strip_insert_result_metadata
+        # Older Rails results lack affected_rows. Keep the real SQL operation
+        # and its empty rows, removing only the newer result metadata.
+        allow(SolidCache::Entry).to receive(:insert_all).and_wrap_original do |original, attributes, options = {}|
+          result = original.call(attributes, **options)
+          Struct.new(:rows).new(result.rows)
+        end
+      end
+
+      [false, true].each do |legacy_result|
+        it "identifies the insert owner and reclaims expired rows (legacy result: #{legacy_result})" do
+          strip_insert_result_metadata if legacy_result
+
+          expect(coordination.write_if_absent('mysql-owner', 0)).to be(true)
+          expect(coordination.write_if_absent('mysql-owner', 0)).to be(false)
+          expect(coordination.write_if_absent('mysql-owner', 1)).to be(false)
+          expect(coordination.read('mysql-owner')).to eq(0)
+          expect(coordination.delete_if_equal('mysql-owner', 1)).to be(false)
+          expect(coordination.delete_if_equal('mysql-owner', 0)).to be(true)
+          expect(coordination.read('mysql-owner')).to be_nil
+
+          expect(coordination.write_if_absent('mysql-owner', 'expired', expires_in: 0.01)).to be(true)
+          wait_for_entry_expiry(cache, 'mysql-owner')
+          expect(coordination.write_if_absent('mysql-owner', 'replacement')).to be(true)
+          expect(coordination.read('mysql-owner')).to eq('replacement')
+        end
+
+        it "elects one same-value owner under contention (legacy result: #{legacy_result})" do
+          strip_insert_result_metadata if legacy_result
+          ready = Queue.new
+          start = Queue.new
+          writers = 2.times.map do
+            Thread.new do
+              ActiveRecord::Base.connection_pool.with_connection(prevent_permanent_checkout: true) do
+                backend = Woods::SessionTracer::SolidCacheCoordination.new(
+                  SolidCache::Store.new(max_age: nil, max_entries: 10_000)
+                )
+                ready << true
+                start.pop
+                backend.write_if_absent('mysql-contended', 0)
+              end
+            end
+          end
+          results = Timeout.timeout(10) do
+            2.times { ready.pop }
+            2.times { start << true }
+            writers.map(&:value)
+          end
+
+          expect(results).to contain_exactly(true, false)
+          expect(coordination.read('mysql-contended')).to eq(0)
+        ensure
+          writers&.each { |writer| writer.kill.join if writer.alive? }
+        end
+      end
+
+      it 'shares ring records, clears them, and readmits after epoch loss' do
+        first = Woods::SessionTracer::SolidCacheStore.new(cache: cache, max_requests_per_session: 2)
+        second = Woods::SessionTracer::SolidCacheStore.new(
+          cache: SolidCache::Store.new(max_age: nil, max_entries: 10_000), max_requests_per_session: 2
+        )
+        3.times { |index| first.record('mysql-session', { 'action' => "action-#{index}" }) }
+        expect(second.read('mysql-session').map { |entry| entry.fetch('action') }).to eq(%w[action-1 action-2])
+        second.clear('mysql-session')
+        expect(first.read('mysql-session')).to eq([])
+        first.record('mysql-session', { 'action' => 'before-epoch-loss' })
+        cache.delete(first.send(:epoch_key))
+        expect(second.read('mysql-session')).to eq([])
+        expect(second.sessions).to eq([])
+        second.record('mysql-session', { 'action' => 'readmitted' })
+        expect(first.read('mysql-session')).to eq([{ 'action' => 'readmitted' }])
+        first.clear_all
+        expect(second.sessions).to eq([])
+      end
+    end
+
+    it 'reports an unsupported private API as a typed backend error' do
+      cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
+      cache.singleton_class.class_eval { undef_method :reading_key }
+      coordination = Woods::SessionTracer::SolidCacheCoordination.new(cache)
+
+      expect { coordination.read('private-api-probe') }
+        .to raise_error(Woods::SessionTracer::SolidCacheCoordination::BackendError, /private API unavailable.*read/)
     end
 
     def wait_for_entry_expiry(cache, name, timeout: 10)

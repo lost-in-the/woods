@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can explicitly disable HTTP and its boot-time token warnings. Production
   still refuses to boot without a token when HTTP Console is enabled (#304).
 
+- Solid Cache conditional writes on MySQL no longer claim ownership of a
+  pre-existing row when the adapter reports matched rows as affected rows.
+  Validate ownership using the per-attempt serialized payload, with live MySQL
+  contention/recovery coverage and documented crash/eviction limits (#228).
+
 ### Added
 
 - Document the published filesystem layout for non-Ruby consumers, with pinned
