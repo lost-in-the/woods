@@ -42,6 +42,13 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+For a custom shell/Python reader or upload gate, check its installed-version
+assumptions against the [filesystem layout contract](https://github.com/lost-in-the/woods/blob/main/docs/INDEX_LAYOUT.md).
+Resolve the pointer once and pin the manifest during a complete read/copy; never
+select the highest payload directory or treat a missing root graph as no index.
+Confirm the installed release and filesystem support retention locks before
+using the pinning examples; flat layouts need writers stopped for a consistent copy.
+
 A host reader can report a container daemon dead because foreign-host records
 are rejected by default. Foreign heartbeat trust (#321) is unreleased: first
 check the installed Woods version and that version's release notes. Only for a

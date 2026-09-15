@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Document the published filesystem layout for non-Ruby consumers, with pinned
+  Bash/jq and Python reads, retention-race handling, and structural snapshot
+  publication guidance (#306).
+
 - `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets watch status, incremental/clean guards,
   daemon startup checks, and MCP trust fresh foreign-container heartbeats without
   checking an unrelated local pid. This is opt-in; foreign records expire after

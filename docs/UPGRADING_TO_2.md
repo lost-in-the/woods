@@ -198,6 +198,11 @@ tmp/woods/
 
 Woods tasks, readers, exporters, and MCP servers resolve this automatically. Custom tooling must read `generation.json`, resolve its `payload` relative to the index root, reject paths that escape that root, and then read the payload files. A missing payload key represents the legacy flat layout.
 
+Use the [filesystem layout contract](INDEX_LAYOUT.md) for Bash/jq and Python
+examples. Multi-file reads and uploads must keep the selected payload pinned
+against retention for the complete read/copy; pointer resolution alone does not
+protect a directory from being pruned.
+
 The optional manifest `woods_version` records its last publisher. A matching
 major version after an incremental run does not establish that older units were
 migrated; keep the full re-extraction requirement. See [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).

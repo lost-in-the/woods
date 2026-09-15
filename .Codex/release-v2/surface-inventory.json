@@ -1034,6 +1034,7 @@
     "docs/FAQ.md": [],
     "docs/GETTING_STARTED.md": [],
     "docs/INCREMENTAL_EXTRACTION.md": [],
+    "docs/INDEX_LAYOUT.md": [],
     "docs/INTERNALS.md": [
       {
         "surface": "extractor_registrations",
