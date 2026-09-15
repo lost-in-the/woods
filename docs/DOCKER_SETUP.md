@@ -210,13 +210,16 @@ Before either path can start, deliberately enable live-data access in the Rails 
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
-  config.console_mcp_token = ENV["WOODS_CONSOLE_MCP_TOKEN"]
+  config.console_mcp_http_enabled = false # stdio-only
 end
 ```
 
 The process exits with status 1 while this master switch is false. Review [Console MCP setup and security](CONSOLE_MCP_SETUP.md) before enabling it.
 
-Stdio does not send the bearer token, but production Rails boot still requires `WOODS_CONSOLE_MCP_TOKEN` to contain at least 32 characters whenever Console is enabled. Provide it to the container through the application's normal secret mechanism. Outside production, omitting it warns and leaves the Console HTTP endpoint guarded with 401.
+This explicitly disables HTTP Console while retaining stdio access; no HTTP
+token is needed at boot. Existing configurations default to HTTP enabled.
+For HTTP deployment, enable the HTTP flag and configure its token, origins
+and TLS using the [Console setup guide](CONSOLE_MCP_SETUP.md#option-c-http-rack-middleware).
 
 ### Comparison
 

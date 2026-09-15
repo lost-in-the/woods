@@ -103,6 +103,13 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 
 ## 5. Check Console separately
 
+For repeated missing-token boot warnings on a stdio-only host, check whether
+its installed version supports `console_mcp_http_enabled = false` before
+suggesting it; this option is unreleased in Woods 2.0.0.beta2. The default
+preserves HTTP enablement, so selecting stdio as a client alone does not
+suppress HTTP token validation. Never disable authentication on an HTTP
+endpoint to silence this warning.
+
 Console failures are live Rails/config/security failures, not Index failures. Verify authorized environment, Rails boot, `WOODS_CONSOLE_CONFIG` or direct `cwd`, blocked-table policy, credentials, and stderr.
 
 For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.

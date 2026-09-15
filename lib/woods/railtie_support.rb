@@ -15,11 +15,9 @@ module Woods
   # exercise the request-time procs and boot-time verification without
   # loading Rails::Railtie.
   module RailtieSupport
-    # Boot-time message for a console enabled without a token. Raised in
-    # production; warned everywhere else. Only the HTTP transport enforces
-    # the token ({Woods::MCP::BearerAuth} fails closed with 401 at the console
-    # path); the stdio server never sees a bearer header, so for it a missing
-    # token is a production-boot failure, not a request failure.
+    # Boot-time message when HTTP Console is enabled without a token.
+    # Production refuses to boot; other environments warn. Explicitly
+    # disabling HTTP leaves stdio available without HTTP token validation.
     MISSING_TOKEN_MESSAGE =
       '[Woods Console] console_mcp_token is not set — Console MCP is a high-privilege ' \
       'endpoint that runs SQL and model introspection against the live database. ' \
@@ -37,7 +35,8 @@ module Woods
       'HTTP Console MCP requests will be refused (401) until one is set. The stdio ' \
       'transport (rake woods:console) does not transmit or use a bearer token, so a ' \
       'stdio-only setup still works — set the token before exposing the HTTP endpoint. ' \
-      'Production boot will raise while Console MCP is enabled without a token.'
+      'Set console_mcp_http_enabled = false for stdio-only use. ' \
+      'Production boot will raise while HTTP Console MCP is enabled without a token.'
 
     class << self
       # @return [String, nil] path the console stack was mounted at (captured
@@ -53,12 +52,13 @@ module Woods
 
       # Request-time predicate handed to the console guards and consulted by
       # {Woods::Console::RackMiddleware}. Reads the live configuration on
-      # every call, so a flag set after the middleware was inserted (e.g. in
+      # every call. Both the Console master switch and HTTP switch must be on,
+      # so a flag set after the middleware was inserted (e.g. in
       # config/initializers) still takes effect.
       #
       # @return [Proc] arity-0 proc returning the current enabled flag
       def console_enabled_proc
-        -> { config.console_mcp_enabled }
+        -> { config.console_mcp_enabled && config.console_mcp_http_enabled }
       end
 
       # Deferred bearer token for {Woods::MCP::BearerAuth}, resolved on each
@@ -95,12 +95,12 @@ module Woods
       end
 
       # Boot-time console validation, run from `after_initialize` once the
-      # final configuration is known. With the console enabled and no usable
+      # final configuration is known. With HTTP Console enabled and no usable
       # token, every HTTP request at the console path will be refused with
       # 401 — production refuses to boot instead (matching the pre-#183
       # fail-closed posture), other environments warn loudly. The stdio
-      # server carries no bearer check, so the warning says which transport
-      # it is about rather than claiming every request fails. A token shorter than
+      # server carries no bearer check; explicit stdio-only configuration
+      # skips token validation entirely. A token shorter than
       # {Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH} is a misconfiguration and
       # raises in every environment (as the eager BearerAuth constructor
       # used to). Also warns when `console_mcp_path` changed after the stack
@@ -112,7 +112,7 @@ module Woods
       #   or a too-short token anywhere
       def verify_console_configuration!(production:)
         warn_late_console_path(config)
-        return unless config.console_mcp_enabled
+        return unless config.console_mcp_enabled && config.console_mcp_http_enabled
 
         require 'woods/mcp/bearer_auth'
         token = config.console_mcp_token.to_s

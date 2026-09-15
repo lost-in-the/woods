@@ -60,6 +60,12 @@ RSpec.describe Woods::Configuration do
       expect(config.session_tracer_allow_production).to eq(false)
     end
 
+    it 'keeps HTTP available by default when the Console master switch is enabled' do
+      expect(config.console_mcp_http_enabled).to be(true)
+      config.console_mcp_http_enabled = false
+      expect(config.console_mcp_http_enabled).to be(false)
+    end
+
     it 'sets console_mcp_enabled to false' do
       expect(config.console_mcp_enabled).to eq(false)
     end
