@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep runtime trace evidence for same-name instance and singleton methods separate, including inherited singleton owners and caller kinds. Legacy untyped events enrich instance methods only; re-record old singleton traces.
+
 - Ruby trace enrichment now records the nearest observed calling Ruby method
   instead of the callee receiver. Recording keeps separate fiber stacks, handles
   recursive and unwound calls, and leaves outside-recording callers unknown

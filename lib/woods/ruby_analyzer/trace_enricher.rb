@@ -55,14 +55,11 @@ module Woods
       def self.merge(units:, trace_data:)
         return units if trace_data.nil? || trace_data.empty?
 
-        # Index traces by class_name + method_name
+        # Index by defining owner, method name, and instance/singleton kind.
         grouped = group_traces(trace_data)
 
         units.each do |unit|
-          class_name, method_name = parse_identifier(unit.identifier)
-          next unless class_name && method_name
-
-          key = "#{class_name}##{method_name}"
+          key = parse_identifier(unit.identifier)
           next unless grouped.key?(key)
 
           traces = grouped[key]
@@ -75,7 +72,10 @@ module Woods
             caller_method = fetch_key(t, :caller_method)
             next unless caller_class
 
-            { 'caller_class' => caller_class, 'caller_method' => caller_method }
+            caller = { 'caller_class' => caller_class, 'caller_method' => caller_method }
+            kind = fetch_key(t, :caller_method_kind)
+            caller['caller_method_kind'] = kind.to_s if kind
+            caller
           end
 
           return_types = returns.filter_map do |t|
@@ -104,27 +104,39 @@ module Woods
             method_name = fetch_key(trace, :method_name)
             next unless class_name && method_name
 
-            key = "#{class_name}##{method_name}"
-            grouped[key] << trace
+            # Legacy recorder output with a named owner describes instance
+            # methods. Never infer its kind from the units supplied to merge.
+            kind = (fetch_key(trace, :method_kind) || 'instance').to_s
+            next unless %w[instance singleton].include?(kind)
+            next if class_name.start_with?('#<')
+
+            grouped[[class_name, method_name, kind]] << trace
           end
           grouped
         end
 
         def parse_identifier(identifier)
-          # Handle both "Class#method" and "Class.method" formats
-          if identifier.include?('#')
-            identifier.split('#', 2)
-          elsif identifier.include?('.')
-            identifier.split('.', 2)
-          end
+          match = /\A(.+?)([#.])(.+)\z/.match(identifier)
+          return unless match
+
+          [match[1], match[3], match[2] == '#' ? 'instance' : 'singleton']
         end
 
-        # Preserve event owner naming here; method-kind identity is a separate
-        # concern. Stack entries reuse recorded calls rather than inspecting a
-        # callee binding or guessing an interpreter-specific backtrace offset.
         def event_identity(tp)
-          { class_name: tp.defined_class&.name || tp.defined_class.to_s,
-            method_name: tp.method_id.to_s }
+          owner = tp.defined_class
+          singleton = owner&.singleton_class?
+          name = singleton ? singleton_owner_name(owner, tp.self) : owner&.name
+          { class_name: name, method_name: tp.method_id.to_s,
+            method_kind: singleton ? 'singleton' : 'instance' }
+        end
+
+        # Ruby 3.0 has no Class#attached_object. Find the defining owner,
+        # not just the receiver: Child.run may be defined on Parent's singleton
+        # class. Singleton methods on individual objects have no named unit.
+        def singleton_owner_name(owner, receiver)
+          return unless receiver.is_a?(Module)
+
+          receiver.ancestors.find { |ancestor| ancestor.singleton_class.equal?(owner) }&.name
         end
 
         def record_event(tp, stack)
@@ -143,7 +155,9 @@ module Woods
         end
 
         def caller_fields(frame)
-          { caller_class: frame && frame[:class_name], caller_method: frame && frame[:method_name] }
+          frame = nil unless frame && frame[:class_name]
+          { caller_class: frame && frame[:class_name], caller_method: frame && frame[:method_name],
+            caller_method_kind: frame && frame[:method_kind] }
         end
 
         # Ruby emits :return during exceptional and nonlocal unwinds too. A
@@ -152,7 +166,8 @@ module Woods
         def returning_caller(identity, stack)
           frame = stack.pop
           if frame && identity.all? { |key, value| frame[key] == value }
-            { caller_class: frame[:caller_class], caller_method: frame[:caller_method] }
+            { caller_class: frame[:caller_class], caller_method: frame[:caller_method],
+              caller_method_kind: frame[:caller_method_kind] }
           else
             stack.clear
             caller_fields(nil)
