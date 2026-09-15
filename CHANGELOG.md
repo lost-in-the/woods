@@ -9,11 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Add `console_mcp_http_enabled` (default `true`) so stdio-only Console setups
-  can explicitly disable HTTP and its boot-time token warnings. Production
-  still refuses to boot without a token when HTTP Console is enabled (#304).
-
-### Fixed
+- Ruby trace enrichment now records the nearest observed calling Ruby method
+  instead of the callee receiver. Recording keeps separate fiber stacks, handles
+  recursive and unwound calls, and leaves outside-recording callers unknown
+  without binding or backtrace inspection (#309).
 
 - Scope per-file git metadata to HEAD history instead of every ref, excluding
   unmerged branches and tool checkpoints from churn and authorship (#319). Run
@@ -28,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment initialization still require restart; failed reconciliation and
   deleted restart inputs survive retries and supervisor restarts. Built-in
   watchers establish detection before startup extraction begins (#318).
+
+- Add `console_mcp_http_enabled` (default `true`) so stdio-only Console setups
+  can explicitly disable HTTP and its boot-time token warnings. Production
+  still refuses to boot without a token when HTTP Console is enabled (#304).
 
 ### Added
 

@@ -48,6 +48,7 @@ and stdio or Streamable HTTP endpoints directly.
 
 - [Why Woods](WHY_WOODS.md): the problems runtime introspection solves.
 - [Internals](INTERNALS.md): extraction, publication, graph, storage, retrieval, and MCP components.
+- [Ruby runtime trace enrichment](RUNTIME_TRACING.md): record observed Ruby callers and merge trace evidence into method units.
 - [Extractor reference](EXTRACTOR_REFERENCE.md): what each extractor produces and the edge cases it handles.
 - [Reading a published index from Ruby](PUBLISHED_INDEX.md): the `Woods::PublishedIndex` Ruby API for cops, gate scripts, and `woods:check:*` tasks (including the moved-message check).
 - [Evaluation](EVALUATION.md): retrieval scoring, baselines, and the agent-level index on/off ablation.
