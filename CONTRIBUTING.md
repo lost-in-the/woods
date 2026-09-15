@@ -98,6 +98,24 @@ Before requesting review, run the full unit suite and style check unless the PR 
 
 Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces the aggregate line floor and measures branches, but does not enforce a branch floor. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
 
+### Pending examples in CI
+
+CI fails when a running example becomes unexpectedly pending, including `skip`,
+`xit`, and pending metadata. `spec/support/pending_policy.rb` records the exact
+file, full description, reason, and unavailable capability for each reviewed
+exception. Current exceptions cover the two optional tiktoken benchmarks, one
+optional Tokenizers example, two Ruby-before-3.2 regexp-timeout examples, one
+procfs example, and three filesystem-permission examples when running as root.
+The Linux CI unit jobs run the real procfs identity example as an unprivileged
+user, so the procfs and root exceptions normally apply only to other environments.
+Opt-in suites excluded by their documented environment gates are not pending
+examples. Focused runs do not need to include every reviewed exception.
+
+Adding a new skip requires review of both its exact entry and capability check;
+matching an existing reason alone is insufficient. Local runs retain normal
+RSpec pending behavior. Exercise the policy and matrix consistency checks with
+`CI=true bin/rspec spec/ci`.
+
 ### Rails version matrix
 
 The gem supports Ruby 3.0 or later and Rails 6.0 through 8.x. CI separates fast unit coverage from real Rails boots:
@@ -112,6 +130,11 @@ BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle install
 WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
   bin/rspec spec/integration/booted_extraction_spec.rb
 ```
+
+The unit suite evaluates every hand-maintained Rails gemfile and checks its
+Appraisal requirements, old-Rails compatibility pins, and CI matrix membership.
+This detects configuration drift; it does not establish minimum-dependency
+resolution or replace the booted rows.
 
 When adding a Rails line, update `Appraisals`, the corresponding hand-maintained gemfile, and `.github/workflows/ci.yml`. For Rails below 7.1, copy an existing 6.x gemfile so its sqlite3 and concurrent-ruby compatibility pins are preserved.
 
