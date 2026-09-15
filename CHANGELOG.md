@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unmerged branches and tool checkpoints from churn and authorship (#319). Run
   a full `woods:extract` after upgrading to refresh previously published metadata.
 
+- Full extraction no longer creates empty type directories at the index root
+  before publishing its generation payload. Existing root directories and legacy
+  flat-index files are preserved (#320).
+
 ## [2.0.0.beta2] - 2026-09-10
 
 ### Added
