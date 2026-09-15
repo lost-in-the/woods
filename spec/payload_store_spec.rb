@@ -146,6 +146,51 @@ RSpec.describe Woods::PayloadStore do
       expect(created.sort).to eq([target.to_s, target.join('models').to_s].sort)
     end
 
+    it 'classifies each ordinary entry once while seeding the payload' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models'))
+      file = source.join('models/Post.json').to_s
+      File.write(file, '{}')
+      target = store.create(2)
+      allow(File).to receive(:lstat).and_call_original
+      allow(File).to receive(:directory?).and_call_original
+
+      store.clone(source, target)
+
+      expect(File).to have_received(:lstat).with(file).once
+      expect(File).not_to have_received(:directory?).with(file)
+      expect(target.join('models/Post.json').read).to eq('{}')
+    end
+
+    it 'retains independent directories and unchanged files after pruning their source generation' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models/empty'))
+      File.write(source.join('models/Post.json'), 'original')
+      target = store.create(2)
+      store.clone(source, target)
+
+      store.prune(keep: 1, protect: 2)
+
+      expect(source).not_to exist
+      expect(target.join('models/empty')).to be_directory
+      expect(target.join('models/Post.json').read).to eq('original')
+    end
+
+    it 'does not descend through directory symlinks or omit hidden entries' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models'))
+      File.write(source.join('models/.hidden.json'), '{}')
+      File.symlink(source, source.join('models/loop'))
+      target = store.create(2)
+
+      store.clone(source, target)
+
+      expect(target.join('models/.hidden.json').read).to eq('{}')
+      expect(target.join('models/loop')).to be_directory
+      expect(target.join('models/loop')).not_to be_symlink
+      expect(target.join('models/loop').children).to be_empty
+    end
+
     it 'is a no-op when the source does not exist' do
       target = store.create(2)
 

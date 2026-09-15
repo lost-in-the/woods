@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reduce payload-seed metadata lookups by classifying each entry once. Preserve
+  per-file hardlink/copy fallback, atomic publication and generation retention
+  while reducing full and incremental seed overhead (#305).
+
 - Keep runtime trace evidence for same-name instance and singleton methods separate, including inherited singleton owners and caller kinds. Legacy untyped events enrich instance methods only; re-record old singleton traces.
 
 - Ruby trace enrichment now records the nearest observed calling Ruby method

@@ -2,7 +2,6 @@
 
 require 'pathname'
 require 'fileutils'
-require 'find'
 
 module Woods
   # Writer-side owner of the per-generation payload directories.
@@ -100,13 +99,14 @@ module Woods
 
       to = target.to_s
       FileUtils.mkdir_p(to)
-      # Find yields paths below this exact prefix. Avoid constructing and
-      # relativizing a Pathname for every file in an otherwise unchanged tree.
-      prefix_length = from.end_with?(File::SEPARATOR) ? from.length : from.length + 1
-      Find.find(from) do |entry|
-        next if entry == from
-
-        replicate(entry, File.join(to, entry[prefix_length..]))
+      pending = [[from, to]]
+      until pending.empty?
+        source_dir, target_dir = pending.pop
+        Dir.each_child(source_dir) do |name|
+          entry = File.join(source_dir, name)
+          destination = File.join(target_dir, name)
+          replicate(entry, destination, pending)
+        end
       end
     end
 
@@ -214,19 +214,21 @@ module Woods
       end
     end
 
-    # `Find.find` is a pre-order walk: a directory is always visited
-    # before anything inside it. So the directory branch has already created
-    # every parent a file could need, and the `mkdir_p` the file branch used
-    # to run was one stat-heavy syscall chain per unit re-proving what the
-    # previous entry established. On a payload of 8000+ files that was the
-    # bulk of the incremental seed.
+    # Classify once: Find.find followed by File.directory? queried metadata
+    # twice per file, costly on FUSE/virtiofs mounts. Parents are created before
+    # their children, so regular files need no extra parent-directory checks.
+    # Preserve the old walk's symlink behavior: a directory symlink becomes an
+    # empty directory, never a traversal into another tree or generation.
     #
-    # @param entry [String] source entry, as `find` yielded it
+    # @param entry [String] source entry
     # @param destination [String] where it belongs in the target
+    # @param pending [Array] directories still to visit
     # @return [void]
-    def replicate(entry, destination)
-      if File.directory?(entry)
-        FileUtils.mkdir_p(destination.to_s)
+    def replicate(entry, destination, pending)
+      stat = File.lstat(entry)
+      if stat.directory? || (stat.symlink? && File.directory?(entry))
+        FileUtils.mkdir_p(destination)
+        pending << [entry, destination] if stat.directory?
       else
         link_or_copy(entry, destination)
       end
