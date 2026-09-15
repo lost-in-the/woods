@@ -460,7 +460,14 @@ namespace :woods do
   task tend: :incremental
 
   desc 'Watch the app and keep the index current (resident daemon)'
-  task watch: :environment do
+  task :watch do
+    # Observe inputs before Rails initializes. A snapshot taken in Daemon.new
+    # would silently bless edits made while initializers were running.
+    require 'woods/watch/boot_snapshot'
+    environment = Rake::Task[:environment]
+    fresh_environment = !environment.already_invoked && !Rails.application.initialized?
+    boot_snapshot = Woods::Watch::BootSnapshot.new(root: Rails.root) if fresh_environment
+    environment.invoke
     # Both, and the extractor is not optional. The daemon's default
     # extractor_factory names Woods::Extractor lazily, so omitting this require
     # loaded and started cleanly and then NameError'd on the first real cycle —
@@ -472,6 +479,12 @@ namespace :woods do
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
+    poll_interval = begin
+      Float(ENV.fetch('WOODS_WATCH_POLL_INTERVAL', Woods::Watch::Watcher::DEFAULT_POLL_INTERVAL))
+    rescue ArgumentError, TypeError
+      raise ArgumentError, 'WOODS_WATCH_POLL_INTERVAL must be a positive finite number of seconds'
+    end
+
     daemon = Woods::Watch::Daemon.new(
       output_dir: output_dir,
       root: Rails.root,
@@ -479,12 +492,14 @@ namespace :woods do
       full_extraction_threshold: Integer(
         ENV.fetch('WOODS_WATCH_FULL_THRESHOLD', Woods::Watch::Daemon::DEFAULT_FULL_EXTRACTION_THRESHOLD)
       ),
+      poll_interval: poll_interval,
       # The documented fix for a container watching a bind mount, where native
       # FS events do not propagate and the daemon would sit silent. Nothing
       # exposed it before, which made the advice unfollowable.
       force_polling: ENV['WOODS_WATCH_POLL'] == '1', # container autodetect also applies; see Watcher.containerized?
       idle_timeout: ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT', nil) && Float(ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT')),
       catch_up: ENV['WOODS_WATCH_CATCH_UP'] != '0',
+      boot_snapshot: boot_snapshot,
       logger: Rails.logger
     )
 

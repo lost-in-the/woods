@@ -205,6 +205,17 @@ RSpec.describe 'woods_status tool' do
     end
 
     describe 'watch' do
+      it 'uses the shared foreign-host trust policy for its liveness verdict (#321)' do
+        allow(ENV).to receive(:[]).and_call_original
+        Woods::Watch::Status.new(output_dir: index_dir)
+                            .write(state: :running, host: 'another-container')
+        allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return(nil)
+        expect(status_for[:watch]).to include(state: 'running', alive: false)
+
+        allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
+        expect(status_for[:watch]).to include(state: 'running', alive: true)
+      end
+
       it 'reports absent when no daemon has ever run' do
         expect(status_for[:watch]).to eq(state: 'absent')
       end
