@@ -81,6 +81,11 @@ jobs:
       - name: Run booted-app extraction
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb
 
+      # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
+      # Each example boots its own subprocess with the matrix appraisal.
+      - name: Run Console transport boot contracts
+        run: bin/rspec spec/console/transport_boot_spec.rb
+
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full
       # extraction at every step. Runs in its own process — like the spec

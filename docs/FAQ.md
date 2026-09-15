@@ -274,7 +274,13 @@ Verify the active v2 generation with `docker compose exec app bundle exec rake w
 
 ### How do I configure the Console Server with Docker?
 
-First set `config.console_mcp_enabled = true` in the Rails initializer after reviewing the live-data trust boundary. Stdio does not send a bearer token, but production Rails boot still requires a configured `console_mcp_token` of at least 32 characters whenever Console is enabled. Supply `WOODS_CONSOLE_MCP_TOKEN` through the container's secret mechanism; see [Console MCP setup](CONSOLE_MCP_SETUP.md#option-a-stdio-via-rake-recommended). Then, for the embedded mode (9 Tier 1 tools), point the MCP client at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
+First enable the master `console_mcp_enabled` switch after reviewing the
+live-data trust boundary. For stdio-only use, explicitly set
+`console_mcp_http_enabled = false`; HTTP remains enabled by default for
+compatibility and requires its bearer token while enabled. Follow
+[Console MCP setup](CONSOLE_MCP_SETUP.md#option-a-stdio-via-rake-recommended)
+for the configuration. Then point the embedded-mode client (9 Tier 1 tools)
+at `docker compose exec -T` so Compose does not allocate a pseudo-TTY:
 
 ```json
 {

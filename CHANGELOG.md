@@ -28,7 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deleted restart inputs survive retries and supervisor restarts. Built-in
   watchers establish detection before startup extraction begins (#318).
 
+- Add `console_mcp_http_enabled` (default `true`) so stdio-only Console setups
+  can explicitly disable HTTP and its boot-time token warnings. Production
+  still refuses to boot without a token when HTTP Console is enabled (#304).
+
 ### Added
+
+- Document the published filesystem layout for non-Ruby consumers, with pinned
+  Bash/jq and Python reads, retention-race handling, and structural snapshot
+  publication guidance (#306).
 
 - `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets watch status, incremental/clean guards,
   daemon startup checks, and MCP trust fresh foreign-container heartbeats without

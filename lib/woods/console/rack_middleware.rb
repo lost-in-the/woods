@@ -99,7 +99,8 @@ module Woods
       # The enabled flag is read from Woods.configuration on every request,
       # never captured at construction: the railtie inserts this middleware
       # before config/initializers have run (#183). While
-      # `console_mcp_enabled` is false (the default), requests — even at the
+      # `console_mcp_enabled` is false (the default), or HTTP is explicitly
+      # disabled with `console_mcp_http_enabled = false`, requests — even at the
       # mounted path — pass through to the wrapped app unchanged, so a host
       # that never opted in is completely unaffected. Requests at
       # non-matching paths always pass through.
@@ -122,7 +123,7 @@ module Woods
       # every request. Nil-safe: the railtie mounts this middleware in every
       # app (#183), including hosts that never called Woods.configure.
       def enabled?
-        Woods.configuration&.console_mcp_enabled
+        Woods.configuration&.console_mcp_enabled && Woods.configuration.console_mcp_http_enabled
       end
 
       # Thread-safe lazy initialization of the MCP server and transport.

@@ -26,13 +26,23 @@ The simplest setup. The `woods:console` rake task boots Rails, then starts the e
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
-  config.console_mcp_token = ENV["WOODS_CONSOLE_MCP_TOKEN"]
+  config.console_mcp_http_enabled = false # stdio-only; no HTTP endpoint
 end
 ```
 
-The stdio and Docker entry points exit with status 1 while this setting is false. Enabling it grants the MCP process live read access under the blocked-table, redaction, and credential-scanning controls described below.
+The stdio and Docker entry points exit with status 1 while `console_mcp_enabled` is false. Enabling it grants the MCP process live read access under the blocked-table, redaction, and credential-scanning controls described below.
 
-The token authenticates HTTP requests; a stdio client does not send it. Production Rails boot nevertheless requires a token of at least 32 characters whenever Console MCP is enabled, even for a stdio-only setup. Store `WOODS_CONSOLE_MCP_TOKEN` in the application's normal secret store. Outside production a missing token warns and leaves Console HTTP guarded with 401 — the boot warning names both transports, so a stdio-only setup can tell that the 401 is not its symptom and that its own session still works.
+`console_mcp_http_enabled` defaults to `true` to preserve existing HTTP
+setups. Set it to `false` for stdio-only use: HTTP guards and the Console
+middleware pass requests through to Rails, and boot skips HTTP token checks,
+including in production. Stdio does not send or consume a bearer token.
+
+If both Console flags are enabled, HTTP still requires a token of at least
+32 characters. Missing tokens warn outside production and every guarded
+request returns 401; production refuses to boot. A configured short token
+raises at boot in every environment while HTTP is enabled. Store the token
+in the application's normal secret store. Before enabling HTTP later, set
+its token, allowed origins and TLS as described in [Option C](#option-c-http-rack-middleware).
 
 ### How it works
 
@@ -172,6 +182,7 @@ In an initializer (`config/initializers/woods.rb`):
 ```ruby
 Woods.configure do |config|
   config.console_mcp_enabled = true
+  config.console_mcp_http_enabled = true
   config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
   config.console_mcp_allowed_origins = [
     'https://rails.internal.example', # public Rails/MCP Host
@@ -483,6 +494,14 @@ Until this flag is `true`, none of the transports route traffic:
 
 Keep the flag off in environments where the Console isn't needed (production web tier, CI). Flip it on per-environment, e.g. in `config/environments/development.rb` or a staging-only initializer, once the layers below are configured for that environment's threat model.
 
+### `console_mcp_http_enabled` (HTTP transport gate)
+
+Defaults to `true` for compatibility. Set to `false` alongside
+`console_mcp_enabled = true` to retain stdio access without enabling HTTP or
+requiring an HTTP token. Both flags are read at request time, so settings in
+`config/initializers/woods.rb` take effect. Disabling HTTP does not disable
+blocked-table, redaction, credential-scanning or rollback controls on stdio.
+
 ### `console_blocked_tables` (layer 1: table gate)
 
 Entries are lowercased table names. A tool call is rejected at dispatch time when:
@@ -658,7 +677,8 @@ touching ActiveRecord, and neither is registered in `tools/list`.
 ```ruby
 # config/initializers/woods.rb
 Woods.configure do |config|
-  config.console_mcp_enabled           = true     # mount the Rack middleware via Railtie
+  config.console_mcp_enabled           = true     # master switch
+  config.console_mcp_http_enabled      = true     # false for stdio-only use
   config.console_mcp_token             = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
   config.console_embedded_read_tools   = true     # unlock console_sql / console_query
   config.console_redacted_columns      = Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS

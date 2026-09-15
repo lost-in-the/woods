@@ -343,6 +343,11 @@ cat ./tmp/woods/generation.json                    # {"number": 42, "payload": "
 ls ./tmp/woods/payloads/gen-42/manifest.json
 ```
 
+Custom scripts that require a root `dependency_graph.json` have the same failure.
+Update their gate using the [filesystem layout contract](INDEX_LAYOUT.md), which
+includes Bash/jq and Python readers. An upload must pin and copy one complete
+payload before publishing its captured pointer; keep a failed copy unpublished.
+
 `woods-mcp-start` and `IndexReader` already resolve this automatically, this is only for manual inspection. If neither path has a manifest, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
 
 ---

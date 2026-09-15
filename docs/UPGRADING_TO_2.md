@@ -106,7 +106,7 @@ Pay particular attention to:
 - `output_dir` and environment overrides;
 - storage and embedding provider settings;
 - the configured embedding model/dimension;
-- `console_mcp_enabled`, the `console_mcp_token` secret source, allowed origins, path, and embedded read-tool flags;
+- `console_mcp_enabled`, `console_mcp_http_enabled`, the HTTP `console_mcp_token` secret source, allowed origins, path, and embedded read-tool flags;
 - snapshot, session, Notion, Obsidian, and Unblocked settings;
 - old `config.extractors` or `config.add_gem` calls, which are not implemented selectors.
 
@@ -198,6 +198,11 @@ tmp/woods/
 
 Woods tasks, readers, exporters, and MCP servers resolve this automatically. Custom tooling must read `generation.json`, resolve its `payload` relative to the index root, reject paths that escape that root, and then read the payload files. A missing payload key represents the legacy flat layout.
 
+Use the [filesystem layout contract](INDEX_LAYOUT.md) for Bash/jq and Python
+examples. Multi-file reads and uploads must keep the selected payload pinned
+against retention for the complete read/copy; pointer resolution alone does not
+protect a directory from being pruned.
+
 The optional manifest `woods_version` records its last publisher. A matching
 major version after an incremental run does not establish that older units were
 migrated; keep the full re-extraction requirement. See [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
@@ -258,28 +263,22 @@ Structural reads still work from a read-only index mount, but the `reload` tool 
 
 ### Console users: preserve or configure the HTTP token
 
-If Console MCP is disabled, no Console token action is required. If it is enabled, configure a token of at least 32 characters through a secret manager or environment variable rather than committing it to the initializer:
+If HTTP Console is enabled, preserve or configure a secret token of at least
+32 characters. Missing tokens warn outside production and HTTP requests fail
+closed with 401; production boot refuses them. Configured short tokens raise
+while HTTP Console is enabled. Keep token values in the application's normal
+secret store, never in committed configuration.
 
-```bash
-WOODS_CONSOLE_MCP_TOKEN="$(openssl rand -hex 32)"
-export WOODS_CONSOLE_MCP_TOKEN
-```
+Stdio does not use a bearer token. On versions supporting
+`console_mcp_http_enabled`, set it to `false` for stdio-only use without HTTP
+boot validation, while keeping the master `console_mcp_enabled` flag on.
+The HTTP flag defaults to `true` to preserve existing deployments; choosing a
+stdio client alone does not turn HTTP off. Older versions without this flag
+still require a token at production boot whenever Console is enabled.
 
-```ruby
-config.console_mcp_token = ENV.fetch("WOODS_CONSOLE_MCP_TOKEN")
-```
+Follow [Console MCP setup](CONSOLE_MCP_SETUP.md) for transport-specific setup
+and the [Configuration reference](CONFIGURATION_REFERENCE.md) for defaults.
 
-Persist the generated value in the application's normal secret store before opening a new shell or deploying. Never print, log, or commit the token during an agent-operated upgrade.
-
-Rails-mounted Console HTTP clients must send the token as `Authorization: Bearer <token>`. With Console enabled, a missing token has these outcomes:
-
-- outside production, Rails warns and the Console HTTP endpoint returns 401;
-- in production, Rails refuses to boot;
-- in every environment, a configured token shorter than 32 characters raises a configuration error.
-
-The stdio Console transport does not send or authenticate with the bearer token. Outside production it can run without one, although Rails still warns because enabling Console also activates the guarded Rack endpoint. In production, Rails boot validation still requires the token even when stdio is the intended transport. The safest default is to configure the token whenever Console is enabled, or leave Console disabled.
-
-See [Console MCP setup](CONSOLE_MCP_SETUP.md) for client examples and [Configuration reference](CONFIGURATION_REFERENCE.md) for the complete security settings.
 
 ## Verify before rollout
 

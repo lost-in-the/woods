@@ -31,6 +31,8 @@
     "console_mcp_allowed_origins=",
     "console_mcp_enabled",
     "console_mcp_enabled=",
+    "console_mcp_http_enabled",
+    "console_mcp_http_enabled=",
     "console_mcp_path",
     "console_mcp_path=",
     "console_mcp_token",
@@ -985,7 +987,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 109,
+    "configuration_attributes": 111,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
@@ -1032,6 +1034,7 @@
     "docs/FAQ.md": [],
     "docs/GETTING_STARTED.md": [],
     "docs/INCREMENTAL_EXTRACTION.md": [],
+    "docs/INDEX_LAYOUT.md": [],
     "docs/INTERNALS.md": [
       {
         "surface": "extractor_registrations",

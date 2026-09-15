@@ -42,6 +42,13 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+For a custom shell/Python reader or upload gate, check its installed-version
+assumptions against the [filesystem layout contract](https://github.com/lost-in-the/woods/blob/main/docs/INDEX_LAYOUT.md).
+Resolve the pointer once and pin the manifest during a complete read/copy; never
+select the highest payload directory or treat a missing root graph as no index.
+Confirm the installed release and filesystem support retention locks before
+using the pinning examples; flat layouts need writers stopped for a consistent copy.
+
 A host reader can report a container daemon dead because foreign-host records
 are rejected by default. Foreign heartbeat trust (#321) is unreleased: first
 check the installed Woods version and that version's release notes. Only for a
@@ -95,6 +102,13 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
 
 ## 5. Check Console separately
+
+For repeated missing-token boot warnings on a stdio-only host, check whether
+its installed version supports `console_mcp_http_enabled = false` before
+suggesting it; this option is unreleased in Woods 2.0.0.beta2. The default
+preserves HTTP enablement, so selecting stdio as a client alone does not
+suppress HTTP token validation. Never disable authentication on an HTTP
+endpoint to silence this warning.
 
 Console failures are live Rails/config/security failures, not Index failures. Verify authorized environment, Rails boot, `WOODS_CONSOLE_CONFIG` or direct `cwd`, blocked-table policy, credentials, and stderr.
 

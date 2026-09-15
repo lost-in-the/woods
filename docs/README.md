@@ -51,6 +51,7 @@ and stdio or Streamable HTTP endpoints directly.
 - [Ruby runtime trace enrichment](RUNTIME_TRACING.md): record observed Ruby callers and merge trace evidence into method units.
 - [Extractor reference](EXTRACTOR_REFERENCE.md): what each extractor produces and the edge cases it handles.
 - [Reading a published index from Ruby](PUBLISHED_INDEX.md): the `Woods::PublishedIndex` Ruby API for cops, gate scripts, and `woods:check:*` tasks (including the moved-message check).
+- [Published index layout](INDEX_LAYOUT.md): the filesystem contract for non-Ruby readers, with Bash/jq and Python examples, retention pins, and snapshot-copy rules.
 - [Evaluation](EVALUATION.md): retrieval scoring, baselines, and the agent-level index on/off ablation.
 - [Backend matrix](BACKEND_MATRIX.md): implemented provider/store combinations and their operational requirements.
 - [Token benchmark](TOKEN_BENCHMARK.md): evidence behind Woods token-estimation defaults.
@@ -90,6 +91,7 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | Contributor policy | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Coding-agent repository instructions | [AGENTS.md](https://github.com/lost-in-the/woods/blob/main/AGENTS.md) |
 | Non-MCP Ruby access to a published index | [PUBLISHED_INDEX.md](PUBLISHED_INDEX.md) |
+| Published filesystem layout for external readers | [INDEX_LAYOUT.md](INDEX_LAYOUT.md) |
 | Evaluation harnesses | [EVALUATION.md](EVALUATION.md) |
 
 The current public surface is generated from 35 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.

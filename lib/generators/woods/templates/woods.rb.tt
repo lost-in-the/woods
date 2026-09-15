@@ -124,6 +124,7 @@ Woods.configure do |config|
   #              HTTP calls, callbacks, threads, or other connections/shards.
 
   # config.console_mcp_enabled = false
+  # config.console_mcp_http_enabled = true  # set false for stdio-only Console use
   # config.console_mcp_path    = '/mcp/console'
 
   # Console HTTP requires a strong bearer token. Its Origin/Host guard is
