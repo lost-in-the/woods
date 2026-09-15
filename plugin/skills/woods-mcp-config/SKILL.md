@@ -73,7 +73,14 @@ Woods.configure do |config|
 end
 ```
 
-The token authenticates HTTP requests and is not sent by a stdio client. Production Rails boot still requires `WOODS_CONSOLE_MCP_TOKEN` to contain at least 32 characters whenever Console is enabled, including for a stdio-only setup. Keep it in the application's secret store. Outside production, omitting it warns and leaves the Console HTTP endpoint guarded with 401.
+The token authenticates HTTP requests and is not sent by a stdio client.
+Before suggesting `console_mcp_http_enabled = false`, verify that the installed
+version supports it: the option is unreleased in Woods 2.0.0.beta2. Supported
+stdio-only hosts can set it to `false` and omit the HTTP token; existing
+versions require the token at production boot whenever Console is enabled.
+For HTTP, retain a strong token, allowed origins and TLS. Use installed-version
+tagged documentation; the [canonical Console guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md)
+tracks current source.
 
 Then add a direct Console process:
 

@@ -47,6 +47,17 @@ RSpec.describe 'Woods::Railtie support logic' do
       expect(enabled.call).to be(true)
     end
 
+    it 'disables every HTTP layer when stdio-only is configured after mounting' do
+      enabled = Woods::RailtieSupport.console_enabled_proc
+      Woods.configure do |config|
+        config.console_mcp_enabled = true
+        config.console_mcp_http_enabled = false
+      end
+      expect(enabled.call).to be(false)
+      Woods.configuration.console_mcp_http_enabled = true
+      expect(enabled.call).to be(true)
+    end
+
     it 'console_token_proc reflects a token set after the proc was created' do
       token_proc = Woods::RailtieSupport.console_token_proc
       Woods.configure { |c| c.console_mcp_token = 'a' * 40 }
@@ -127,6 +138,31 @@ RSpec.describe 'Woods::Railtie support logic' do
       end
     end
 
+    it 'passes the console path through without building a server in stdio-only mode' do
+      stack = build_console_stack(host_app)
+      Woods.configure do |config|
+        config.console_mcp_enabled = true
+        config.console_mcp_http_enabled = false
+      end
+      expect_any_instance_of(Woods::Console::RackMiddleware).not_to receive(:ensure_transport)
+
+      status, _headers, body = request(stack, '/mcp/console', 'HTTP_ORIGIN' => 'http://evil.example.com')
+      expect(status).to eq(200)
+      expect(body).to eq(['host app'])
+    end
+
+    it 'fails closed if HTTP is enabled after a tokenless stdio-only boot' do
+      stack = build_console_stack(host_app)
+      Woods.configure do |config|
+        config.console_mcp_enabled = true
+        config.console_mcp_http_enabled = false
+      end
+      expect(request(stack, '/mcp/console').first).to eq(200)
+      Woods.configuration.console_mcp_http_enabled = true
+
+      expect(request(stack, '/mcp/console').first).to eq(401)
+    end
+
     context 'when the console is enabled after the stack was mounted (config/initializers timing)' do
       let(:token) { 'c' * 40 }
 
@@ -190,6 +226,28 @@ RSpec.describe 'Woods::Railtie support logic' do
         expect { Woods::RailtieSupport.verify_console_configuration!(production: true) }
           .not_to raise_error
         expect(Woods::RailtieSupport).not_to have_received(:warn)
+      end
+    end
+
+    context 'with only stdio enabled' do
+      before do
+        Woods.configure do |config|
+          config.console_mcp_enabled = true
+          config.console_mcp_http_enabled = false
+          config.console_mcp_token = nil
+        end
+      end
+
+      it 'neither warns nor raises even in production' do
+        expect { Woods::RailtieSupport.verify_console_configuration!(production: true) }.not_to raise_error
+        expect(Woods::RailtieSupport).not_to have_received(:warn)
+      end
+
+      it 'still validates a short token if HTTP is later enabled' do
+        Woods.configuration.console_mcp_token = 'short'
+        Woods.configuration.console_mcp_http_enabled = true
+        expect { Woods::RailtieSupport.verify_console_configuration!(production: false) }
+          .to raise_error(Woods::ConfigurationError, /shorter than 32/)
       end
     end
 

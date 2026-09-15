@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Add `console_mcp_http_enabled` (default `true`) so stdio-only Console setups
+  can explicitly disable HTTP and its boot-time token warnings. Production
+  still refuses to boot without a token when HTTP Console is enabled (#304).
+
+### Fixed
+
 - Scope per-file git metadata to HEAD history instead of every ref, excluding
   unmerged branches and tool checkpoints from churn and authorship (#319). Run
   a full `woods:extract` after upgrading to refresh previously published metadata.
