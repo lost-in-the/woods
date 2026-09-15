@@ -30,7 +30,8 @@ RSpec.describe Woods::RubyAnalyzer::TraceEnricher do
       expect(calls).to all(include(caller_class: caller.class.name, caller_method: 'invoke'))
       unit = make_unit(identifier: 'TraceCallerFixture::Callee#run')
       described_class.merge(units: [unit], trace_data: traces)
-      expected = { 'caller_class' => 'TraceCallerFixture::Caller', 'caller_method' => 'invoke' }
+      expected = { 'caller_class' => 'TraceCallerFixture::Caller', 'caller_method' => 'invoke',
+                   'caller_method_kind' => 'instance' }
       expect(unit.metadata[:trace][:callers]).to eq([expected])
     end
 
@@ -278,6 +279,7 @@ RSpec.describe Woods::RubyAnalyzer::TraceEnricher do
     it 'handles class method identifiers' do
       trace = [{
         'class_name' => 'Factory',
+        'method_kind' => 'singleton',
         'method_name' => 'build',
         'event' => 'call',
         'path' => '/app/factory.rb',
