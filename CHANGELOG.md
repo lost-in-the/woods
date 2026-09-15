@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve namespaced and CamelCase graph-retrieval subjects, keep snake_case
   lookup working, and exclude tracing instructions from fallback metadata searches (B-190).
 
+- Order equal PageRank scores by identifier before assigning retrieval importance
+  percentiles, making their ranking weights deterministic across Ruby versions
+  and graph insertion orders (B-191).
+
 - Reduce payload-seed metadata lookups by classifying each entry once. Preserve
   per-file hardlink/copy fallback, atomic publication and generation retention
   while reducing full and incremental seed overhead (#305).

@@ -41,17 +41,17 @@ bundle exec ruby -Ilib bench/evaluation/runner.rb
   strategy selection also fail. The baseline format is developer-only and is
   **not** the `EVAL_BASELINE_FILE` aggregate-threshold format.
 
-B-190 recapture on Ruby 4.0.6 (five warmed pipeline repetitions per query; Ruby 3.3.1
+B-190/B-191 recapture on Ruby 4.0.6 (five warmed pipeline repetitions per query; Ruby 3.3.1
 and 3.4.10 replay the same answers):
 
 | Strategy | Queries | Precision@5 | Recall | MRR | Mean actual context tokens |
 |---|---:|---:|---:|---:|---:|
 | Keyword | 4 | 0.292 | 0.500 | 0.750 | 1,020.8 |
-| Vector | 4 | 0.271 | 0.375 | 0.625 | 1,083.2 |
+| Vector | 4 | 0.313 | 0.375 | 0.625 | 1,041.2 |
 | Graph | 8 | 0.813 | 0.519 | 1.000 | 1,041.1 |
 | Hybrid | 4 | 0.750 | 0.396 | 1.000 | 1,058.8 |
 | Direct with type filtering | 4 | 0.375 | 0.750 | 0.625 | 551.0 |
-| Within-type vector fallback | 4 | 0.400 | 1.000 | 1.000 | 1,180.8 |
+| Within-type vector fallback | 4 | 0.400 | 1.000 | 1.000 | 1,250.8 |
 
 Precision@5 divides relevant hits by the actual returned slice size (up to five),
 not always by five. Recall divides retrieved relevant units by all annotated
@@ -61,13 +61,18 @@ query with no relevant hit contributes zero.
 `profiles.json` binds measured Ruby runtimes to independently scored captures.
 Ruby 3.0.7, 3.1.7, and 3.2.11 share the legacy capture; Ruby 3.3.1, 3.4.10, and
 4.0.6 share the capture above. Other Ruby engines or major/minor versions fail
-with a recapture instruction. The legacy vector precision/recall/MRR are
-0.313 / 0.375 / 0.583, with separate positive floors and exact token counts.
-Raw vectors and PageRank scores are identical between the groups; production
-ranking assigns distinct percentile importance to equal PageRank scores using
-Ruby's unstable tie ordering. **B-191** tracks that defect. The harness does not
-alter ranks to hide it. Cross-runtime scores should not be compared as quality
-improvements until the tie policy is fixed.
+with a recapture instruction. All six runtimes now produce the aggregate metrics
+above. B-191 orders equal PageRank scores lexically by identifier before assigning
+the existing ordinal percentiles; their importance maps no longer depend on Ruby's
+tie ordering. Vector precision/recall/MRR are 0.313 / 0.375 / 0.625 in both groups.
+The original positive quality floors remain unchanged.
+
+Separate context captures remain necessary for **B-192**: hybrid candidate sorting
+still orders equal scores differently before truncation and RRF. On `hybrid-2`,
+`Newsletter::DeliverJob` and `Newsletter::Delivery` exchange leading positions
+between the two runtime groups. Their quality metrics and exact token counts
+match, but context bytes differ. The harness preserves this measured difference;
+it does not reorder production answers to make the profiles agree.
 
 These are separate annotated query groups, **not a controlled comparison of six
 strategies on identical questions**. Relevance annotations were written from
@@ -75,9 +80,9 @@ fixture source and its functional contract before scoring. Initial graph and
 direct probes remain in the corpus; additional probes exercise the supported
 snake-case graph roots and actual within-type fallback. The B-190 fix now
 resolves all four originally empty graph queries, including `trace Billing::Invoice`
-and `trace ReviewAssignment`. Only those four answers changed in each runtime
-profile; the corpus, relevance labels, vectors, and original quality floors are
-unchanged. Graph precision/recall/MRR increased from 0.417 / 0.238 / 0.500 to
+and `trace ReviewAssignment`. The B-190 change affected those four graph answers. B-191 additionally
+changes vector and within-type fallback ranks or membership; all original queries,
+relevance labels, vectors, and quality floors remain unchanged. Graph precision/recall/MRR increased from 0.417 / 0.238 / 0.500 to
 0.813 / 0.519 / 1.000. Low semantic recall and editorial misses are
 also retained. The floors prevent further regression; they are not release
 quality targets or evidence that retrieval is already good enough.

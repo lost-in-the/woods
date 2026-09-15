@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "cause": "B-191: equal PageRank scores get different rank-percentile ordering through Ruby sort_by ties; raw vectors and PageRank are identical.",
+  "cause": "B-192: hybrid candidate score-only sorting changes tied candidate order and truncation across Ruby versions, which changes RRF weights and hybrid-2 context. PageRank importance is deterministic after B-191; all aggregate quality metrics now match.",
   "runtimes": {
     "ruby-3.0": {
       "baseline": "baseline_legacy.json",

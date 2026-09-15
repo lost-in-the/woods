@@ -28,9 +28,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 6.034573016222566,
-        "min": 5.0364810158498585,
-        "max": 6.702881015371531
+        "median": 5.5693479953333735,
+        "min": 5.516720993909985,
+        "max": 8.301689988002181
       },
       "actual_context_tokens_cl100k": 1012,
       "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2"
@@ -53,9 +53,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1027,
       "latency_ms": {
-        "median": 7.4303289875388145,
-        "min": 7.0190809783525765,
-        "max": 7.739926048088819
+        "median": 7.645897043403238,
+        "min": 7.580465986393392,
+        "max": 8.171216992195696
       },
       "actual_context_tokens_cl100k": 950,
       "context_sha256": "8d3d8285877c8f9612b1f4557491fac9675270c036e941ee9a975711661f73ab"
@@ -78,9 +78,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1181,
       "latency_ms": {
-        "median": 7.374994980636984,
-        "min": 7.2583669680170715,
-        "max": 8.625068003311753
+        "median": 7.832075003534555,
+        "min": 7.121971982996911,
+        "max": 8.845633012242615
       },
       "actual_context_tokens_cl100k": 1016,
       "context_sha256": "3e9bef8c0ac833847060e60316f23330f7fecf91a2fd704144b29cb920063f0c"
@@ -102,9 +102,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1164,
       "latency_ms": {
-        "median": 10.051089979242533,
-        "min": 9.320636978372931,
-        "max": 10.59650699608028
+        "median": 10.215446003712714,
+        "min": 9.347779036033899,
+        "max": 11.418778041843325
       },
       "actual_context_tokens_cl100k": 1105,
       "context_sha256": "51890dbd43c777e55ff7e3e9a613794cab78bf5d48c5f94ac072bdd3cef5638b"
@@ -126,9 +126,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 3.4293399658054113,
-        "min": 3.29806498484686,
-        "max": 3.710615972522646
+        "median": 3.810369991697371,
+        "min": 3.470157040283084,
+        "max": 4.286558018065989
       },
       "actual_context_tokens_cl100k": 1012,
       "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2"
@@ -149,9 +149,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 3.274692047853023,
-        "min": 3.224738989956677,
-        "max": 3.419974003918469
+        "median": 3.5776369622908533,
+        "min": 3.4333780058659613,
+        "max": 4.083900013938546
       },
       "actual_context_tokens_cl100k": 1090,
       "context_sha256": "8fafde628a9f0bf38b11891e4efa84eac19353e4329fd49fa280f2c7829cf67f"
@@ -162,8 +162,8 @@
       "actual_strategy": "vector",
       "retrieved": [
         "AuthorMailer",
-        "Subscriber",
         "Newsletter::SendCampaign",
+        "Subscriber",
         "Publication"
       ],
       "expected": [
@@ -172,15 +172,15 @@
       ],
       "precision_at5": 0.25,
       "recall": 0.5,
-      "mrr": 0.3333333333333333,
+      "mrr": 0.5,
       "estimated_context_tokens": 1107,
       "latency_ms": {
-        "median": 3.224337997380644,
-        "min": 3.1420650193467736,
-        "max": 3.4134610323235393
+        "median": 3.4488969831727445,
+        "min": 3.3332519815303385,
+        "max": 3.786134999245405
       },
-      "actual_context_tokens_cl100k": 1051,
-      "context_sha256": "37ec0adaa13e159ce2f9b0bf369ad27f8be8864011c101e65e4a9d3898fec3c5"
+      "context_sha256": "2394021c792c0fa86e49d79d3e7585d38434721ddeb03d1ed11b9f3e27129017",
+      "actual_context_tokens_cl100k": 1051
     },
     {
       "id": "vector-4",
@@ -199,9 +199,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 3.2235970138572156,
-        "min": 3.1361040310002863,
-        "max": 3.343480988405645
+        "median": 3.5216319956816733,
+        "min": 3.2179360277950764,
+        "max": 3.810060035903007
       },
       "actual_context_tokens_cl100k": 1012,
       "context_sha256": "c64f3d01aeaa753ccd79365037e1f6b01d7c747d7d672aa26fe310005e33dbb4"
@@ -225,12 +225,12 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1181,
       "latency_ms": {
-        "median": 2.2319360286928713,
-        "min": 2.1941359736956656,
-        "max": 2.267753006890416
+        "median": 2.367020002566278,
+        "min": 2.240063971839845,
+        "max": 2.6513710035942495
       },
-      "context_sha256": "5637546ee305e6e5d5129ffbc0f24ddd12d94b3e2b033442eadb6b202e513420",
-      "actual_context_tokens_cl100k": 1126
+      "actual_context_tokens_cl100k": 1126,
+      "context_sha256": "5637546ee305e6e5d5129ffbc0f24ddd12d94b3e2b033442eadb6b202e513420"
     },
     {
       "id": "graph-2",
@@ -252,12 +252,12 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1177,
       "latency_ms": {
-        "median": 0.4027920076623559,
-        "min": 0.32470596488565207,
-        "max": 0.5477729719132185
+        "median": 0.34086499363183975,
+        "min": 0.30063994927331805,
+        "max": 0.5532809882424772
       },
-      "context_sha256": "26eb22c75137636c9cd762a9205a190851a1b5e1b9f341faa86f2e6a78d3fb5d",
-      "actual_context_tokens_cl100k": 1028
+      "actual_context_tokens_cl100k": 1028,
+      "context_sha256": "26eb22c75137636c9cd762a9205a190851a1b5e1b9f341faa86f2e6a78d3fb5d"
     },
     {
       "id": "graph-3",
@@ -279,12 +279,12 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1023,
       "latency_ms": {
-        "median": 0.38668198976665735,
-        "min": 0.28813700191676617,
-        "max": 0.43286802247166634
+        "median": 0.29866601107642055,
+        "min": 0.29487902065739036,
+        "max": 0.4949619760736823
       },
-      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
-      "actual_context_tokens_cl100k": 942
+      "actual_context_tokens_cl100k": 942,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160"
     },
     {
       "id": "graph-4",
@@ -306,12 +306,12 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1166,
       "latency_ms": {
-        "median": 2.2326780017465353,
-        "min": 2.161545038688928,
-        "max": 2.403406018856913
+        "median": 2.2914300207048655,
+        "min": 2.1978160366415977,
+        "max": 2.5232619955204427
       },
-      "context_sha256": "b0afcf5955d9f97ebf00c4471aa3c1e4870b255bcbd862742e2e0e0947aa2338",
-      "actual_context_tokens_cl100k": 1031
+      "actual_context_tokens_cl100k": 1031,
+      "context_sha256": "b0afcf5955d9f97ebf00c4471aa3c1e4870b255bcbd862742e2e0e0947aa2338"
     },
     {
       "id": "hybrid-1",
@@ -332,9 +332,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 11.842623993288726,
-        "min": 11.696139990817755,
-        "max": 12.26500200573355
+        "median": 13.112313987221569,
+        "min": 12.738577963318676,
+        "max": 13.877820980269462
       },
       "actual_context_tokens_cl100k": 1120,
       "context_sha256": "26a0feb986c09a4fe3344a988da2d8012c0d10532d15ef93b8badb6a1b8be5a0"
@@ -360,9 +360,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1027,
       "latency_ms": {
-        "median": 14.107961964327842,
-        "min": 13.805538008455187,
-        "max": 15.502323978580534
+        "median": 15.305681037716568,
+        "min": 14.545435027685016,
+        "max": 16.215737035963684
       },
       "actual_context_tokens_cl100k": 950,
       "context_sha256": "2088d7d6834e4ff3b4a2585aecac4bfd67f9a4d87253db4f62ff2c849bbf7633"
@@ -387,9 +387,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 13.773256971035153,
-        "min": 13.539971027057618,
-        "max": 14.097442966885865
+        "median": 15.547091024927795,
+        "min": 14.190753980074078,
+        "max": 16.042173956520855
       },
       "actual_context_tokens_cl100k": 1134,
       "context_sha256": "18741978e79bf0b94fd6e1f40f132a40ee3f70a2c0003faee396508a2acd7230"
@@ -412,9 +412,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1071,
       "latency_ms": {
-        "median": 14.334344014059752,
-        "min": 14.005439996253699,
-        "max": 14.6638989681378
+        "median": 15.014147968031466,
+        "min": 14.328129997011274,
+        "max": 16.17737498600036
       },
       "actual_context_tokens_cl100k": 1031,
       "context_sha256": "7e4ff722b19f80dd2fa109bbf727eea7fb45a310d206fc109472b70329e41bb3"
@@ -435,9 +435,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 449,
       "latency_ms": {
-        "median": 9.624533995520324,
-        "min": 9.50946897501126,
-        "max": 9.793007979169488
+        "median": 9.946274978574365,
+        "min": 9.64488199679181,
+        "max": 10.297578992322087
       },
       "actual_context_tokens_cl100k": 540,
       "context_sha256": "939a346bdcde60a26f74e6a172bdd0f741d073ef5c2623f2b57decd09943d929"
@@ -458,9 +458,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 468,
       "latency_ms": {
-        "median": 9.422786999493837,
-        "min": 9.209688985720277,
-        "max": 9.451832040213048
+        "median": 9.270826005376875,
+        "min": 9.241231018677354,
+        "max": 10.154553048778325
       },
       "actual_context_tokens_cl100k": 562,
       "context_sha256": "871683471aa2ea91e9255c49582f7a9063c0b5b0e9a11f6f1903cb002c664605"
@@ -482,9 +482,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 468,
       "latency_ms": {
-        "median": 7.192864955868572,
-        "min": 6.859162007458508,
-        "max": 7.7353380038402975
+        "median": 7.298579963389784,
+        "min": 7.116521010175347,
+        "max": 7.807089015841484
       },
       "actual_context_tokens_cl100k": 562,
       "context_sha256": "b64af11192a21f4b66d8f2b1c99ef32ae5e90097da3e61762e674c8aeba4f579"
@@ -505,9 +505,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 449,
       "latency_ms": {
-        "median": 9.592614020220935,
-        "min": 9.388282021973282,
-        "max": 10.04868495510891
+        "median": 10.395401041023433,
+        "min": 10.23623498622328,
+        "max": 10.967857961077243
       },
       "actual_context_tokens_cl100k": 540,
       "context_sha256": "939a346bdcde60a26f74e6a172bdd0f741d073ef5c2623f2b57decd09943d929"
@@ -532,9 +532,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 4.5181429595686495,
-        "min": 4.190200008451939,
-        "max": 5.21408102940768
+        "median": 4.424625018145889,
+        "min": 4.1055899928323925,
+        "max": 4.94285102467984
       },
       "actual_context_tokens_cl100k": 1125,
       "context_sha256": "6b5e5b8cf25e6a80a08f85b31daad1256607e2b43a96c8adec2d4b10142ca2ef"
@@ -559,9 +559,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1158,
       "latency_ms": {
-        "median": 2.3406779509969056,
-        "min": 2.1003300207667053,
-        "max": 2.4494220269843936
+        "median": 2.4398969835601747,
+        "min": 2.345540968235582,
+        "max": 2.542679023463279
       },
       "actual_context_tokens_cl100k": 1021,
       "context_sha256": "6c7c2fbfe117cd05367e8e4caa5d0769e8106a14891acd2af34509dd6d50b8d0"
@@ -586,9 +586,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1023,
       "latency_ms": {
-        "median": 2.233178005553782,
-        "min": 2.0997090032324195,
-        "max": 2.3398370249196887
+        "median": 2.303773013409227,
+        "min": 2.049599017482251,
+        "max": 2.394121023826301
       },
       "actual_context_tokens_cl100k": 942,
       "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160"
@@ -612,9 +612,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1189,
       "latency_ms": {
-        "median": 2.298349980264902,
-        "min": 2.253426006063819,
-        "max": 2.425697981379926
+        "median": 2.567583986092359,
+        "min": 2.1229060366749763,
+        "max": 3.65272699855268
       },
       "actual_context_tokens_cl100k": 1114,
       "context_sha256": "7164bbd495650c278bea00239838c3566af9d96663c481770c2731a9c416603d"
@@ -626,8 +626,8 @@
       "retrieved": [
         "PublishDueArticlesJob",
         "PublishArticleJob",
-        "RenewSubscriptionsJob",
         "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
         "Billing::ChargePaymentJob",
         "ApplicationJob"
       ],
@@ -640,12 +640,12 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1148,
       "latency_ms": {
-        "median": 0.9192050201818347,
-        "min": 0.7449999684467912,
-        "max": 0.9380510309711099
+        "median": 1.1165310279466212,
+        "min": 1.0417210287414491,
+        "max": 1.132961013354361
       },
-      "actual_context_tokens_cl100k": 1314,
-      "context_sha256": "792dc5ecf7ffd07be06525e137100b4b4a07e7f6a3373ef26737dfdab0b2f2e3"
+      "context_sha256": "e81d80a45b4cf7902ec49f8939fdf9c3d6278c154f2b3772016266a51d3efcec",
+      "actual_context_tokens_cl100k": 1314
     },
     {
       "id": "fallback-2",
@@ -667,9 +667,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1057,
       "latency_ms": {
-        "median": 0.834298029076308,
-        "min": 0.7440689951181412,
-        "max": 1.0947930277325213
+        "median": 0.8149089990183711,
+        "min": 0.7880489574745297,
+        "max": 0.8351269643753767
       },
       "actual_context_tokens_cl100k": 1201,
       "context_sha256": "6d5cb7db709719731949904c0d90c7d6854e5814123ea77b85a87c95251ceabc"
@@ -679,8 +679,8 @@
       "strategy": "fallback",
       "actual_strategy": "fallback",
       "retrieved": [
-        "RenewSubscriptionsJob",
         "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
         "PublishArticleJob",
         "PublishDueArticlesJob",
         "Billing::ChargePaymentJob"
@@ -694,12 +694,12 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1029,
       "latency_ms": {
-        "median": 0.8100620470941067,
-        "min": 0.7534459582529962,
-        "max": 0.8810249855741858
+        "median": 1.0178469819948077,
+        "min": 0.7812450057826936,
+        "max": 1.0419620084576309
       },
-      "actual_context_tokens_cl100k": 1174,
-      "context_sha256": "aa1ad4633fb44d9f064e1584d325d211b42e730255fa6f690942491fcf960c77"
+      "context_sha256": "e881e3f5f9bd3c6c0e914b69f7856ebba192b49a9e49b386793ab93a62cb1bba",
+      "actual_context_tokens_cl100k": 1174
     },
     {
       "id": "fallback-4",
@@ -710,7 +710,8 @@
         "PublishDueArticlesJob",
         "Newsletter::DeliverJob",
         "Billing::ChargePaymentJob",
-        "RenewSubscriptionsJob"
+        "RenewSubscriptionsJob",
+        "ApplicationJob"
       ],
       "expected": [
         "PublishArticleJob",
@@ -719,14 +720,14 @@
       "precision_at5": 0.4,
       "recall": 1.0,
       "mrr": 1.0,
-      "estimated_context_tokens": 1029,
+      "estimated_context_tokens": 1148,
       "latency_ms": {
-        "median": 0.7700580172240734,
-        "min": 0.7446100353263319,
-        "max": 0.9583489736542106
+        "median": 0.8695499855093658,
+        "min": 0.7447880343534052,
+        "max": 0.9887720225378871
       },
-      "actual_context_tokens_cl100k": 1174,
-      "context_sha256": "f4a8084f281ae85927ca67766862a3fe748681683a31ac772fafff9c7209ab9f"
+      "context_sha256": "27c411f2c42d6b8e588ef0f52c19179f13f1ffaffef027519f90b879b739e908",
+      "actual_context_tokens_cl100k": 1314
     }
   ],
   "strategies": {
@@ -740,7 +741,7 @@
     "vector": {
       "precision_at5": 0.3125,
       "recall": 0.375,
-      "mrr": 0.5833333333333334,
+      "mrr": 0.625,
       "estimated_context_tokens": 1096.25,
       "queries": 4
     },
@@ -769,7 +770,7 @@
       "precision_at5": 0.4,
       "recall": 1.0,
       "mrr": 1.0,
-      "estimated_context_tokens": 1065.75,
+      "estimated_context_tokens": 1095.5,
       "queries": 4
     }
   },
