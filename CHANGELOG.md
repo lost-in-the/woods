@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Ruby trace enrichment now records the nearest observed calling Ruby method
+  instead of the callee receiver. Recording keeps separate fiber stacks, handles
+  recursive and unwound calls, and leaves outside-recording callers unknown
+  without binding or backtrace inspection (#309).
+
 - Scope per-file git metadata to HEAD history instead of every ref, excluding
   unmerged branches and tool checkpoints from churn and authorship (#319). Run
   a full `woods:extract` after upgrading to refresh previously published metadata.
