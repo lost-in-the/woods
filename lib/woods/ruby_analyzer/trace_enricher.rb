@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'fiber'
+
 require_relative '../extracted_unit'
 
 module Woods
@@ -19,6 +21,10 @@ module Woods
     class TraceEnricher
       # Record method calls during block execution using TracePoint.
       #
+      # Records the current thread only, with independent stacks for its fibers.
+      # Caller fields identify the nearest observed Ruby method, not native or
+      # block frames. Calls entered before recording have an unknown caller.
+      #
       # @yield Block to trace
       # @return [Array<Hash>] Collected trace events
       # @raise [ArgumentError] if no block is given
@@ -26,21 +32,15 @@ module Woods
         raise ArgumentError, 'block required' unless block
 
         traces = []
-
+        stacks = Hash.new { |frames, fiber| frames[fiber] = [] }
         trace = TracePoint.new(:call, :return) do |tp|
-          traces << {
-            class_name: tp.defined_class&.name || tp.defined_class.to_s,
-            method_name: tp.method_id.to_s,
-            event: tp.event.to_s,
-            path: tp.path,
-            line: tp.lineno,
-            caller_class: extract_caller_class(tp),
-            caller_method: extract_caller_method(tp),
-            return_class: tp.event == :return ? safe_return_class(tp) : nil
-          }
+          fiber = Fiber.current
+          stack = stacks[fiber]
+          traces << record_event(tp, stack)
+          stacks.delete(fiber) if stack.empty?
         end
 
-        trace.enable(&block)
+        trace.enable(target_thread: Thread.current, &block)
         traces
       end
 
@@ -119,20 +119,44 @@ module Woods
           end
         end
 
-        def extract_caller_class(tp)
-          binding_obj = tp.binding
-          receiver = binding_obj.receiver
-          receiver.is_a?(Class) || receiver.is_a?(Module) ? receiver.name : receiver.class.name
-        rescue StandardError
-          nil
+        # Preserve event owner naming here; method-kind identity is a separate
+        # concern. Stack entries reuse recorded calls rather than inspecting a
+        # callee binding or guessing an interpreter-specific backtrace offset.
+        def event_identity(tp)
+          { class_name: tp.defined_class&.name || tp.defined_class.to_s,
+            method_name: tp.method_id.to_s }
         end
 
-        def extract_caller_method(_tp)
-          # TracePoint doesn't directly expose caller method,
-          # but we can get it from the call stack
-          caller_locations(3, 1)&.first&.label
-        rescue StandardError
-          nil
+        def record_event(tp, stack)
+          identity = event_identity(tp)
+          caller = if tp.event == :call
+                     caller_fields(stack.last)
+                   else
+                     returning_caller(identity, stack)
+                   end
+          event = identity.merge(
+            event: tp.event.to_s, path: tp.path, line: tp.lineno,
+            **caller, return_class: tp.event == :return ? safe_return_class(tp) : nil
+          )
+          stack << event if tp.event == :call
+          event
+        end
+
+        def caller_fields(frame)
+          { caller_class: frame && frame[:class_name], caller_method: frame && frame[:method_name] }
+        end
+
+        # Ruby emits :return during exceptional and nonlocal unwinds too. A
+        # return whose call predates recording has no known caller; discard an
+        # inconsistent stack instead of inventing an edge from unrelated frames.
+        def returning_caller(identity, stack)
+          frame = stack.pop
+          if frame && identity.all? { |key, value| frame[key] == value }
+            { caller_class: frame[:caller_class], caller_method: frame[:caller_method] }
+          else
+            stack.clear
+            caller_fields(nil)
+          end
         end
 
         def safe_return_class(tp)
