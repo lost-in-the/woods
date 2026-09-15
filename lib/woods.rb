@@ -135,7 +135,7 @@ module Woods
                   :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
                   :session_tracer_enabled, :session_tracer_allow_production,
                   :session_store, :session_id_proc, :session_exclude_paths,
-                  :console_mcp_enabled, :console_mcp_path, :console_mcp_token,
+                  :console_mcp_enabled, :console_mcp_http_enabled, :console_mcp_path, :console_mcp_token,
                   :console_mcp_allowed_origins,
                   :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
@@ -173,10 +173,13 @@ module Woods
       @session_id_proc = nil
       @session_exclude_paths = []
       @console_mcp_enabled = false
+      # Preserve existing HTTP setups. Stdio-only hosts explicitly disable
+      # HTTP while leaving the Console master switch enabled.
+      @console_mcp_http_enabled = true
       @console_mcp_path = '/mcp/console'
       # Accept token from config or env var. Nil by default — the railtie
-      # refuses to wire the middleware in production without a real token
-      # and only warns loudly in non-prod when unset.
+      # rejects production boot when HTTP Console is enabled without a real
+      # token, and warns in non-production. Stdio does not use this token.
       @console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN', nil)
       # Origins allowed to reach the embedded console MCP. Loopback only
       # by default; override in host initializers for tunneled or internal

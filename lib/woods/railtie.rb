@@ -14,8 +14,8 @@ module Woods
   # flags and tokens set in `config/initializers/woods.rb` (the
   # generator-created location) do not exist yet when middleware arguments
   # are captured. Both guards are scoped to `console_mcp_path` — requests
-  # outside it pass through untouched — and while `console_mcp_enabled` is
-  # false the whole stack passes through, so an unconfigured host app is
+  # outside it pass through untouched — and while `console_mcp_enabled` or
+  # `console_mcp_http_enabled` is false the whole stack passes through, so an unconfigured host app is
   # completely unaffected. Boot-time validation of the settled configuration
   # happens in `after_initialize` via {Woods::RailtieSupport}.
   #
@@ -84,7 +84,7 @@ module Woods
       # BearerAuth next — requires `Authorization: Bearer <token>` at the
       # console path, failing closed (401) while no usable token is
       # configured. Both are scoped to the console path and inert while
-      # console_mcp_enabled is false.
+      # either console_mcp_enabled or console_mcp_http_enabled is false.
       app.middleware.use(
         Woods::MCP::OriginGuard,
         allowed_origins: Woods::RailtieSupport.console_allowed_origins_proc,

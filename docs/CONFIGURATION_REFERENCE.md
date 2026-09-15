@@ -525,8 +525,9 @@ deployment guide including defense layers.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, the Railtie does not mount the Console MCP middleware. |
-| `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every Console HTTP request. **Required in production**: the Railtie raises `Woods::ConfigurationError` when `console_mcp_enabled` is true but no token is set. In non-production a missing token warns at boot and every Console request fails closed with `401 Unauthorized`. A configured token shorter than 32 characters raises `Woods::ConfigurationError` at boot in every environment. Generate with `SecureRandom.hex(32)`. |
+| `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, stdio exits and the mounted Console middleware passes requests through to Rails. |
+| `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
+| `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
 | `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
