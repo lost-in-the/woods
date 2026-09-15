@@ -19,6 +19,8 @@ RSpec.describe 'woods:watch polling interval' do
         require 'woods/watch/daemon'
         require 'logger'
         module Rails
+          def self.application = self
+          def self.initialized? = false
           def self.root = Pathname.new(#{dir.inspect})
           def self.logger = Logger.new($stderr)
         end
