@@ -1,0 +1,6 @@
+fastembed==0.7.3
+onnxruntime==1.30.0
+tokenizers==0.23.2
+numpy==2.5.3
+huggingface-hub==0.36.2
+tiktoken==0.11.0

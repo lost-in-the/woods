@@ -2615,5 +2615,29 @@
     "depends_on": [
       "B-186"
     ]
+  },
+  {
+    "id": "B-190",
+    "title": "Preserve namespaced and CamelCase roots in graph retrieval seed resolution",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retrieval/search_executor.rb"
+    ],
+    "description": "Discovered while capturing #227 Canopy baseline: trace Billing::Invoice and trace ReviewAssignment return no units although their runtime graph nodes and edges exist. find_seed_identifiers lowercases/capitalizes keywords, loses namespace/internal case, then searches the entire trace phrase. Acceptance: resolve exact namespaced and CamelCase roots without including intent words in the fallback metadata search; preserve trace strategy and retain the original zero-result probes in bench/evaluation/corpus.json until the fix raises their scores. Do not lower retrieval quality floors.",
+    "status": "ready"
+  },
+  {
+    "id": "B-191",
+    "title": "Make equal PageRank importance ties deterministic across Ruby versions",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retrieval/ranker.rb"
+    ],
+    "description": "Found validating #227 real-model baseline across supported Ruby interpreters. Identical graph PageRank values and insertion order produce different percentile importance values because compute_pagerank_importance_map sorts only by score; Ruby 3.0-3.2 order equal scores differently from 3.3-4.0. Canopy vector MRR changes from 0.583333 to 0.625 and returned context changes without any vector differences. Acceptance: choose and test a deterministic equal-score policy, verify the real corpus across all supported Ruby versions, recapture and review affected evidence without weakening quality floors. Runtime-specific baseline profiles retain current measured behavior until this is fixed.",
+    "status": "ready"
   }
 ]

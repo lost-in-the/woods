@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
+  real MiniLM vectors, per-strategy quality floors, latency observations, and
+  exact output-token counts. Preserve known failed queries in the evidence (#227).
+
 ### Fixed
 
 - Reduce payload-seed metadata lookups by classifying each entry once. Preserve

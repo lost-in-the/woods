@@ -286,6 +286,8 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
+      - name: Gate captured real-model retrieval quality
+        run: bundle exec ruby -Ilib bench/evaluation/runner.rb
       - name: Run tests with coverage
         run: COVERAGE=true bundle exec rake spec
       # Uploaded even when the coverage step above fails its minimum_coverage
@@ -297,6 +299,15 @@ jobs:
         with:
           name: simplecov-report
           path: coverage/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish retrieval evaluation report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: retrieval-evaluation
+          path: tmp/retrieval-evaluation.json
           if-no-files-found: error
           retention-days: 7
 
