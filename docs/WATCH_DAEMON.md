@@ -29,6 +29,7 @@ Ctrl-C to stop.
 | `WOODS_WATCH_DEBOUNCE` | `0.4` | Seconds of quiet before a batch is considered settled |
 | `WOODS_WATCH_FULL_THRESHOLD` | `50` | Actionable changed-file count above which a full extraction replaces incremental |
 | `WOODS_WATCH_POLL` | unset | `1` forces the polling backend, set this inside a container watching a bind mount |
+| `WOODS_WATCH_POLL_INTERVAL` | `1.0` | Positive, finite seconds of sleep between polling scans; does not select the polling backend |
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset | Seconds of quiet after which a dormant daemon exits |
 | `WOODS_WATCH_CATCH_UP` | `1` | `0` skips the startup reconciliation |
 | `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset | `1` lets a reader trust a fresh foreign-host heartbeat without checking its pid locally; see [cross-host liveness](#cross-host-liveness) |
@@ -243,8 +244,18 @@ polling rather than trust a watcher that may sit silent while files change
 under it:
 
 ```bash
-WOODS_WATCH_POLL=1 bundle exec rake woods:watch
+WOODS_WATCH_POLL=1 WOODS_WATCH_POLL_INTERVAL=2.5 bundle exec rake woods:watch
 ```
+
+### Polling cost
+
+For a slow bind mount, increase `WOODS_WATCH_POLL_INTERVAL` to reduce scan
+frequency. The default is 1.0 second; the example above uses 2.5 seconds.
+Each cycle also includes the scan's duration. Longer intervals can delay
+change detection and polling shutdown. The value also applies when a native
+watcher fails and falls back to polling; it has no effect while native watching
+is active. Blank, malformed, nonfinite, zero and negative values are rejected
+before the daemon starts.
 
 Selection is also self-correcting at runtime. If `listen` cannot start at all, inotify watch exhaustion (`ENOSPC`) is the usual reason on a large tree, the
 daemon logs it and falls back to polling rather than exiting, because a daemon

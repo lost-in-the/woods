@@ -27,6 +27,9 @@ module Woods
     # Every backend implements the same two methods: `start(&on_change)`,
     # which yields an array of absolute paths, and `stop`.
     module Watcher
+      # Seconds of sleep between polling scans.
+      DEFAULT_POLL_INTERVAL = 1.0
+
       # Directory names never worth watching. Scanning them is what makes a
       # polling watcher expensive, and a change inside one is never extraction
       # input.
@@ -52,7 +55,7 @@ module Woods
       # @param force_polling [Boolean] skip the listen backend entirely
       # @param logger [#info, #warn] where backend selection is reported
       # @return [#start, #stop]
-      def build(root:, ignored: DEFAULT_IGNORED_DIRECTORIES, poll_interval: 1.0,
+      def build(root:, ignored: DEFAULT_IGNORED_DIRECTORIES, poll_interval: DEFAULT_POLL_INTERVAL,
                 force_polling: false, logger: nil)
         force_polling ||= containerized?
 

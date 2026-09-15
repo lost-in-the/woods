@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checking an unrelated local pid. This is opt-in; foreign records expire after
   15 minutes, and malformed or excessively future timestamps are rejected (#321).
 
+- `WOODS_WATCH_POLL_INTERVAL` configures positive, finite seconds between watch
+  polling scans, including fallback from native watching (default 1.0; #322).
+
 ## [2.0.0.beta2] - 2026-09-10
 
 ### Added

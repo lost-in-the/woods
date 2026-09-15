@@ -25,7 +25,7 @@ module Woods
       # @param ignored [Array<String>] directory names/prefixes to skip
       # @param interval [Float] seconds between scans
       # @param sleeper [#call] injected for specs, so they need not pass time
-      def initialize(root:, ignored: Watcher::DEFAULT_IGNORED_DIRECTORIES, interval: 1.0,
+      def initialize(root:, ignored: Watcher::DEFAULT_IGNORED_DIRECTORIES, interval: Watcher::DEFAULT_POLL_INTERVAL,
                      sleeper: ->(seconds) { sleep(seconds) })
         @root = root.to_s
         @ignored = ignored

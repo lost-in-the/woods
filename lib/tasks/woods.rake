@@ -479,6 +479,12 @@ namespace :woods do
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
+    poll_interval = begin
+      Float(ENV.fetch('WOODS_WATCH_POLL_INTERVAL', Woods::Watch::Watcher::DEFAULT_POLL_INTERVAL))
+    rescue ArgumentError, TypeError
+      raise ArgumentError, 'WOODS_WATCH_POLL_INTERVAL must be a positive finite number of seconds'
+    end
+
     daemon = Woods::Watch::Daemon.new(
       output_dir: output_dir,
       root: Rails.root,
@@ -486,6 +492,7 @@ namespace :woods do
       full_extraction_threshold: Integer(
         ENV.fetch('WOODS_WATCH_FULL_THRESHOLD', Woods::Watch::Daemon::DEFAULT_FULL_EXTRACTION_THRESHOLD)
       ),
+      poll_interval: poll_interval,
       # The documented fix for a container watching a bind mount, where native
       # FS events do not propagate and the daemon would sit silent. Nothing
       # exposed it before, which made the advice unfollowable.
