@@ -64,6 +64,20 @@ RSpec.describe Woods::Watch::Daemon do
     )
   end
 
+  describe 'poll interval' do
+    it 'forwards the configured interval to the initial watcher' do
+      allow(Woods::Watch::Watcher).to receive(:build)
+      build(poll_interval: 2.5).send(:build_watcher)
+      expect(Woods::Watch::Watcher).to have_received(:build).with(hash_including(poll_interval: 2.5))
+    end
+
+    [0, -1, Float::NAN, Float::INFINITY].each do |invalid|
+      it "rejects invalid interval #{invalid.inspect}" do
+        expect { build(poll_interval: invalid) }.to raise_error(ArgumentError, /poll_interval/)
+      end
+    end
+  end
+
   describe 'classification' do
     it 'does nothing for paths no extractor cares about' do
       result = build.process(['README.md'])
@@ -1125,13 +1139,13 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = described_class.new(
         output_dir: inside, root: root, extractor_factory: -> { extractor },
         reloader: reloader, debounce: 0, catch_up: false,
-        watcher: RaisingWatcher.new, idle_timeout: 0.1
+        watcher: RaisingWatcher.new, idle_timeout: 0.1, poll_interval: 2.5
       )
 
       Timeout.timeout(5) { daemon.run }
 
       expect(Woods::Watch::Watcher).to have_received(:build)
-        .with(hash_including(ignored: array_including('.woods'), force_polling: true))
+        .with(hash_including(ignored: array_including('.woods'), force_polling: true, poll_interval: 2.5))
     end
   end
 end

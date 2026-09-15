@@ -156,6 +156,7 @@ module Woods
       # @param lock [Woods::Coordination::PipelineLock, nil] writer lock for
       #   this index; built from {LOCK_NAME} when nil
       # @param catch_up [Boolean] reconcile changes that predate startup
+      # @param poll_interval [Float] finite, positive seconds between polling scans
       # @param force_polling [Boolean] never use the `listen` backend — the
       #   right choice across a container bind mount, where native FS events
       #   do not propagate
@@ -166,7 +167,9 @@ module Woods
       def initialize(output_dir:, root: nil, extractor_factory: nil, reloader: nil, watcher: nil,
                      policy: ReloadPolicy.new, debounce: DEFAULT_DEBOUNCE,
                      full_extraction_threshold: DEFAULT_FULL_EXTRACTION_THRESHOLD,
-                     idle_timeout: nil, lock: nil, catch_up: true, force_polling: false, logger: nil)
+                     idle_timeout: nil, lock: nil, catch_up: true, force_polling: false,
+                     poll_interval: Watcher::DEFAULT_POLL_INTERVAL, logger: nil)
+        @poll_interval = validated_poll_interval(poll_interval)
         @output_dir = output_dir.to_s
         @root = (root || (defined?(Rails) ? Rails.root : Dir.pwd)).to_s
         @extractor_factory = extractor_factory || -> { Woods::Extractor.new(output_dir: @output_dir) }
@@ -256,6 +259,15 @@ module Woods
       end
 
       private
+
+      def validated_poll_interval(value)
+        interval = Float(value)
+        unless interval.finite? && interval.positive?
+          raise ArgumentError, 'poll_interval (WOODS_WATCH_POLL_INTERVAL) must be finite and greater than zero'
+        end
+
+        interval
+      end
 
       # The watch loop proper, split from {#run} so the shutdown `ensure` —
       # publish `stopped`, persist carried paths — can only ever fire for a
@@ -769,7 +781,8 @@ module Woods
         # the output-directory feedback loop {#ignored_directories} exists to
         # break, on precisely the path a large tree reaches.
         @watcher = Watcher.build(
-          root: @root, ignored: ignored_directories, logger: @logger, force_polling: true
+          root: @root, ignored: ignored_directories, logger: @logger, force_polling: true,
+          poll_interval: @poll_interval
         )
         @watcher.start(&on_change)
       end
@@ -1225,7 +1238,8 @@ module Woods
 
       def build_watcher
         @watcher = Watcher.build(
-          root: @root, ignored: ignored_directories, logger: @logger, force_polling: @force_polling
+          root: @root, ignored: ignored_directories, logger: @logger, force_polling: @force_polling,
+          poll_interval: @poll_interval
         )
       end
 
