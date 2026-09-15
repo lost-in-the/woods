@@ -992,8 +992,10 @@ module Woods
         return false if ENV['WOODS_IGNORE_WATCH'] == '1'
         return false unless @status.alive?
 
-        other = @status.read['pid']
-        return false if other.nil? || other.to_i == Process.pid
+        record = @status.read
+        other = record['pid']
+        return false if other.nil?
+        return false if same_claim_host?(record['host']) && other.to_i == Process.pid
 
         @logger.warn(
           "[Woods] a watch daemon (pid #{other}) is already maintaining #{@output_dir} — standing down. " \

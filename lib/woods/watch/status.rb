@@ -31,9 +31,10 @@ module Woods
       STATES = %i[running degraded stopped].freeze
 
       # A status record older than this is not believed, however healthy it
-      # claims to be. Generous relative to a debounce window, because an idle
-      # daemon only rewrites its status when something happens.
+      # claims to be. The daemon heartbeats every five minutes, including
+      # while idle, so this allows two missed heartbeats.
       STALE_AFTER = 900 # 15 minutes
+      MAX_FUTURE_SKEW = 30 # seconds of clock difference tolerated across hosts
 
       # @param output_dir [String, Pathname] index directory
       # @param clock [#call] returns the ISO8601 stamp for a write
@@ -86,31 +87,34 @@ module Woods
 
       # Is a daemon currently maintaining this index?
       #
-      # Three things have to hold, and each rules out a different way the
-      # status file lies: the state has to be one a live daemon writes, the
-      # recorded pid has to still exist (a `kill -9` leaves the file behind),
-      # and the record has to be recent (a machine that lost power leaves a
-      # `running` record with a pid some unrelated process now owns).
+      # Require a live state, a positive pid, and a recent timestamp. A local
+      # pid must still exist; foreign-host trust explicitly substitutes bounded
+      # heartbeat freshness for that uncheckable process evidence. A crashed
+      # foreign daemon can therefore remain believable until the record ages out.
       #
       # Callers use this to decide whether to do the work themselves — a
       # session-start hook that would otherwise run `woods:incremental` can
       # skip it when a daemon is already on the job.
       #
       # @param max_age [Numeric] seconds after which a record is disbelieved
+      # @param trust_foreign_host [Boolean] trust a fresh foreign-host record
+      #   without a local pid check; defaults to WOODS_WATCH_TRUST_FOREIGN_HOST=1
       # @return [Boolean]
-      def alive?(max_age: STALE_AFTER)
+      def alive?(max_age: STALE_AFTER, trust_foreign_host: ENV['WOODS_WATCH_TRUST_FOREIGN_HOST'] == '1')
         record = read
         return false unless %w[running degraded].include?(record['state'])
-        return false unless same_host?(record['host'])
-        return false unless process_alive?(record['pid'])
+        return false unless record['pid'].is_a?(Integer) && record['pid'].positive?
+        return false unless recent?(record['updated_at'], max_age)
+        return trust_foreign_host unless same_host?(record['host'])
 
-        recent?(record['updated_at'], max_age)
+        process_alive?(record['pid'])
       end
 
       # The identity a pid is only meaningful within.
       #
       # In a container the hostname defaults to the container id, so this
-      # changes exactly when the pid namespace does.
+      # usually changes with the pid namespace. Custom or reused hostnames
+      # cannot establish namespace identity.
       #
       # @return [String]
       def self.host_identity
@@ -128,8 +132,8 @@ module Woods
       # deployment. A container pid like 47 almost always exists on the host, so
       # a host hook would read `running` plus a live-looking pid plus a fresh
       # timestamp and stand down while nothing was covering it. Comparing the
-      # recorded host means a cross-namespace reader disbelieves the record
-      # rather than misreading it.
+      # recorded host keeps a cross-namespace reader from checking an unrelated
+      # local pid. Foreign records are rejected unless freshness trust is enabled.
       #
       # Records written before this field existed have no host; treat them as
       # same-host so an in-place upgrade does not declare a live daemon dead.
@@ -160,7 +164,8 @@ module Woods
       def recent?(iso8601, max_age)
         return false if iso8601.nil?
 
-        Time.parse(@clock.call) - Time.parse(iso8601) <= max_age
+        age = Time.iso8601(@clock.call) - Time.iso8601(iso8601)
+        age.between?(-MAX_FUTURE_SKEW, max_age)
       rescue ArgumentError, TypeError
         false
       end
