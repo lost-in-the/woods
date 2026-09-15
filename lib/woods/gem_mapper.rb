@@ -7,6 +7,7 @@ require 'pathname'
 require 'time'
 
 require_relative 'atomic_file'
+require_relative 'version'
 require_relative 'coordination/pipeline_lock'
 require_relative 'dependency_graph'
 require_relative 'extracted_unit'
@@ -267,6 +268,7 @@ module Woods
       end
       manifest = {
         extracted_at: Time.now.utc.iso8601, rails_version: nil, ruby_version: RUBY_VERSION,
+        woods_version: Woods::VERSION,
         counts: counts, total_units: @units.size, total_chunks: 0, git_sha: nil, git_branch: nil,
         provenance: GemMapper::PROVENANCE.merge(source_checksum: @checksum),
         graph_nodes: @graph.to_h.dig(:stats, :node_count), graph_edges: @graph.to_h.dig(:stats, :edge_count)

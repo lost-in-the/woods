@@ -43,6 +43,13 @@ For a single-call health snapshot, call the Index Server's `woods_status` tool. 
 
 Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
 
+If `woods:validate` warns that the manifest writer and reader major versions
+differ, run full extraction using the intended gem and follow the upgrade guide.
+An invalid `woods_version` warns without failing structural validation; a missing
+or null value is normal for older indexes. Compare `index.woods_version` with
+`server.version` in MCP status; never infer an unknown writer from the reader's
+version. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
 
 ## Extraction Problems

@@ -47,6 +47,10 @@ Prefer the application's bundle and a project-scoped configuration:
 
 `woods-mcp-start` checks that the directory and published manifest exist, then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
 
+`woods_status.index.woods_version` identifies the last publisher of the served
+manifest; `server.version` identifies the running MCP reader. Missing writer
+provenance is `null`. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 You can launch the server directly when the client already handles preflight:
 
 ```bash

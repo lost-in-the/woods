@@ -2070,6 +2070,7 @@ module Woods
           base = {
             extracted_at: extracted_at,
             staleness_seconds: staleness,
+            woods_version: manifest && manifest['woods_version'],
             rails_version: manifest && manifest['rails_version'],
             ruby_version: manifest && manifest['ruby_version'],
             total_units: manifest && manifest['total_units'],

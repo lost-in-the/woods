@@ -296,6 +296,7 @@ RSpec.describe Woods::Extractor do
       expect(manifest['counts']).to eq('models' => 2, 'controllers' => 1)
       expect(manifest['total_units']).to eq(3)
       expect(manifest['total_chunks']).to eq(6)
+      expect(manifest['woods_version']).to eq(Woods::VERSION)
     end
 
     it 'still derives counts from @results in full mode' do
@@ -316,6 +317,7 @@ RSpec.describe Woods::Extractor do
       expect(manifest['counts']).to eq('models' => 1)
       expect(manifest['total_units']).to eq(1)
       expect(manifest['total_chunks']).to eq(1)
+      expect(manifest['woods_version']).to eq(Woods::VERSION)
     end
   end
 
@@ -1031,6 +1033,8 @@ RSpec.describe Woods::Extractor do
 
       expect(result[:types]).to include(:routes)
       expect(result[:touched]).to include('GET /posts')
+      payload = Woods::Generation.new(output_dir: extractor.output_dir).payload_dir
+      expect(JSON.parse(File.read(payload.join('manifest.json')))['woods_version']).to eq(Woods::VERSION)
     end
 
     it 'accepts strings as well as symbols' do
@@ -1774,15 +1778,19 @@ RSpec.describe Woods::Extractor do
     # must not inherit the sweep.
     it 'does not sweep on the incremental path' do
       seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
+      original_manifest = JSON.generate('woods_version' => '1.0.0', 'counts' => {})
+      File.write(File.join(output_dir, 'manifest.json'), original_manifest)
       # Baseline for the CORE-2 guard: an incremental run needs an index.
       extractor.dependency_graph.register(
         Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
       )
 
       expect(extractor).not_to receive(:sweep_orphaned_unit_files)
-      extractor.extract_changed([])
+      expect(extractor.extract_changed([])).to be_empty
 
       expect(File.exist?(File.join(published_models_dir, filename_for('Ghost')))).to be(true)
+      expect(File.binread(File.join(payload_root, 'manifest.json'))).to eq(original_manifest)
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(0)
     end
   end
 

@@ -198,6 +198,10 @@ tmp/woods/
 
 Woods tasks, readers, exporters, and MCP servers resolve this automatically. Custom tooling must read `generation.json`, resolve its `payload` relative to the index root, reject paths that escape that root, and then read the payload files. A missing payload key represents the legacy flat layout.
 
+The optional manifest `woods_version` records its last publisher. A matching
+major version after an incremental run does not establish that older units were
+migrated; keep the full re-extraction requirement. See [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 Graph consumers must also tolerate multiple typed variants for the same textual identifier. Do not collapse nodes by identifier alone when type is part of identity.
 
 The bundle requires patched MessagePack >=1.8.2 and JSON >=2.19.9, <3.

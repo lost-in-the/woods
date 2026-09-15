@@ -33,6 +33,11 @@ Default to Index-only. It reads generated code context and exposes 14 tools. Con
 
 Use this shape for any stdio-capable MCP client, adapted to the client's configuration location. `woods-mcp-start` validates and launches; it does not install or auto-restart.
 
+Writer-version provenance (#323) is unreleased; check the installed gem version's
+release notes before expecting `index.woods_version` in `woods_status`. It reports
+the last manifest publisher, independently of `server.version`. Treat missing/null
+as unknown and see [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 When Woods is installed only in Docker, prefer running the server through the application container:
 
 ```json
