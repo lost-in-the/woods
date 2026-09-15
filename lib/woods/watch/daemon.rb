@@ -9,9 +9,11 @@ require_relative '../reload_policy'
 require_relative 'status'
 require_relative 'tree_scan'
 require_relative 'watcher'
+require_relative 'boot_snapshot'
 require 'json'
 require 'set'
 require 'securerandom'
+require 'timeout'
 
 module Woods
   module Watch
@@ -138,6 +140,9 @@ module Woods
       # which most daemon cycles are (a single-file cycle is milliseconds).
       HEARTBEAT_SHUTDOWN_TIMEOUT = 2
 
+      # Native registration or a polling baseline must finish before catch-up.
+      WATCHER_STARTUP_TIMEOUT = 30
+
       # @return [Woods::Generation]
       attr_reader :generation
 
@@ -157,6 +162,8 @@ module Woods
       #   this index; built from {LOCK_NAME} when nil
       # @param catch_up [Boolean] reconcile changes that predate startup
       # @param poll_interval [Float] finite, positive seconds between polling scans
+      # @param boot_snapshot [BootSnapshot, nil] captured before environment
+      #   initialization; permits full reconciliation of unchanged startup inputs
       # @param force_polling [Boolean] never use the `listen` backend — the
       #   right choice across a container bind mount, where native FS events
       #   do not propagate
@@ -168,7 +175,7 @@ module Woods
                      policy: ReloadPolicy.new, debounce: DEFAULT_DEBOUNCE,
                      full_extraction_threshold: DEFAULT_FULL_EXTRACTION_THRESHOLD,
                      idle_timeout: nil, lock: nil, catch_up: true, force_polling: false,
-                     poll_interval: Watcher::DEFAULT_POLL_INTERVAL, logger: nil)
+                     boot_snapshot: nil, poll_interval: Watcher::DEFAULT_POLL_INTERVAL, logger: nil)
         @poll_interval = validated_poll_interval(poll_interval)
         @output_dir = output_dir.to_s
         @root = (root || (defined?(Rails) ? Rails.root : Dir.pwd)).to_s
@@ -180,6 +187,7 @@ module Woods
         @full_extraction_threshold = full_extraction_threshold
         @idle_timeout = idle_timeout
         @catch_up = catch_up
+        @boot_snapshot = boot_snapshot
         @force_polling = force_polling
         @logger = logger || default_logger
         @generation = Generation.new(output_dir: @output_dir)
@@ -234,11 +242,19 @@ module Woods
       # @return [Hash] `{ action:, state:, generation:, reason:, count:,
       #   duration_ms: }`
       def process(paths = [])
+        process_batch(paths)
+      end
+
+      private
+
+      # Only the resident loop can discharge work covered by its explicit
+      # environment-boot snapshot. Direct #process calls remain conservative.
+      def process_batch(paths = [], startup: false)
         change_set = ChangeSet.new(paths: drain_with(paths), root: @root)
         cycle_completed = false
 
         begin
-          result = case required_action(change_set)
+          result = case required_action(change_set, startup: startup)
                    when :ignore then nothing_to_do
                    when :restart then require_restart(change_set)
                    when :reload then attempt_reload ? extract(change_set) : degraded_reload(change_set)
@@ -252,13 +268,11 @@ module Woods
           # shutdown's heartbeat.kill lands on a thread doing real work) would
           # otherwise lose the batch #drain_with already popped from @pending.
           # Every branch above that finishes normally already carries its own
-          # paths forward on failure (or intentionally doesn't, e.g. :restart);
+          # paths forward on failure or restart;
           # this only fires for the abnormal case none of them can catch.
           carry_forward(change_set) unless cycle_completed
         end
       end
-
-      private
 
       def validated_poll_interval(value)
         interval = Float(value)
@@ -285,11 +299,19 @@ module Woods
         @last_event_at = monotonic_now
         heartbeat = start_heartbeat
 
-        watcher_thread = launch_watcher do |paths|
-          enqueue(paths)
-          drain
+        # Watch immediately, but establish startup obligations before any
+        # callback can drain them. Live callbacks enqueue under a separate mutex.
+        watcher_thread = nil
+        @drain_mutex.synchronize do
+          watcher_thread = launch_watcher do |paths|
+            enqueue(paths)
+            drain
+          end
+          await_watcher_ready
+          catch_up unless @stop_reason
+          drain_cycles
+          @last_event_at = monotonic_now
         end
-        catch_up
         watcher_thread.join
         raise @watcher_failure if @watcher_failure
 
@@ -320,7 +342,7 @@ module Woods
         # plausibly) before reaching that line, and it must still happen
         # before #persist_pending — otherwise a watcher thread still draining
         # a batch races the shutdown snapshot of @pending.
-        watcher_thread&.join
+        watcher_thread&.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || watcher_thread&.kill&.join
         stop_heartbeat(heartbeat)
         # Before #persist_pending, for the same reason the watcher join is: a
         # retry drain still running would race the shutdown snapshot of
@@ -358,7 +380,16 @@ module Woods
           start_watching(&on_change)
         rescue StandardError => e
           @watcher_failure = e
+        ensure
+          @watcher_ready << :finished
         end
+      end
+
+      def await_watcher_ready
+        Timeout.timeout(WATCHER_STARTUP_TIMEOUT) { @watcher_ready.pop }
+        raise @watcher_failure if @watcher_failure
+      rescue Timeout::Error
+        raise WatcherError, 'watcher did not establish its baseline before the startup timeout'
       end
 
       # @param heartbeat [Thread, nil]
@@ -375,8 +406,12 @@ module Woods
       # `:reload` by restarting, since extracting against constants that no
       # longer match their source is the thing the classification exists to
       # prevent.
-      def required_action(change_set)
-        action = @policy.classify_all(change_set.relative_paths)
+      def required_action(change_set, startup: false)
+        paths = change_set.absolute_paths
+        paths = paths.reject { |path| startup_covered?(path) } if startup
+        relative = ChangeSet.new(paths: paths, root: @root).relative_paths
+        action = @policy.classify_all(relative)
+        action = :reextract if action == :ignore && @startup_full
         return :restart if action == :reload && !@reloader.enabled?
 
         action
@@ -398,10 +433,14 @@ module Woods
 
       def reset_cycle_state
         @pending = Set.new
+        @startup_paths = Set.new
+        @live_paths = Set.new
+        @startup_full = false
         @pending_mutex = Mutex.new
         @stop_reason = nil
         @drain_mutex = Mutex.new
         @retry_thread = nil
+        @watcher_ready = Queue.new
       end
 
       # Wait out the debounce window so events that land during it join the
@@ -417,9 +456,12 @@ module Woods
       end
 
       # Merge a watcher batch into the pending set without processing it.
-      def enqueue(paths)
+      def enqueue(paths, startup: false)
         absolute = ChangeSet.new(paths: paths, root: @root).absolute_paths
-        @pending_mutex.synchronize { @pending.merge(absolute) }
+        @pending_mutex.synchronize do
+          @pending.merge(absolute)
+          @live_paths.merge(absolute) unless startup
+        end
         @last_event_at = monotonic_now
       end
 
@@ -469,7 +511,7 @@ module Woods
       def drain_cycles
         until pending_empty? || @stop_reason
           settle
-          result = process
+          result = process_batch(startup: true)
 
           if result[:action] == :restart
             # @watcher, not a captured local — start_watching's polling
@@ -542,6 +584,10 @@ module Woods
 
         carried = restore_pending
         paths = (uncovered_paths + carried).uniq
+        boot_changes = @boot_snapshot ? @boot_snapshot.changed_paths : []
+        enqueue(boot_changes) unless boot_changes.empty?
+        prepare_startup_reconciliation(paths)
+        paths |= boot_changes
         if paths.empty?
           return reconcile_deletions if stale_deletions?
 
@@ -549,8 +595,26 @@ module Woods
         end
 
         @logger.info("[Woods] watch: #{paths.size} path(s) changed before startup — catching up")
-        enqueue(paths)
+        enqueue(paths, startup: true)
         drain
+      end
+
+      def prepare_startup_reconciliation(paths)
+        return unless @boot_snapshot
+
+        restart_paths = paths.select do |path|
+          set = ChangeSet.new(paths: [path], root: @root)
+          required_action(set) == :restart && @boot_snapshot.covers?(path)
+        end
+        @pending_mutex.synchronize do
+          @startup_paths.merge(restart_paths)
+          @startup_full = restart_paths.any?
+        end
+      end
+
+      def startup_covered?(path)
+        eligible = @pending_mutex.synchronize { @startup_paths.include?(path) && !@live_paths.include?(path) }
+        eligible && @boot_snapshot.covers?(path)
       end
 
       # A file deleted while nothing was watching leaves no mtime for the scan
@@ -771,7 +835,7 @@ module Woods
       # start at all (inotify exhaustion being the usual reason). A daemon that
       # costs some CPU beats one that silently never fires.
       def start_watching(&on_change)
-        @watcher.start(&on_change)
+        start_backend(&on_change)
       rescue WatcherError => e
         raise if @polling_fallback
 
@@ -784,6 +848,17 @@ module Woods
           root: @root, ignored: ignored_directories, logger: @logger, force_polling: true,
           poll_interval: @poll_interval
         )
+        start_backend(&on_change)
+      end
+
+      def start_backend(&on_change)
+        if @watcher.respond_to?(:ready_callback=)
+          @watcher.ready_callback = -> { @watcher_ready << :ready }
+        else
+          # Existing injected watchers own their startup contract. Built-in
+          # backends signal only after the actual baseline/registration.
+          @watcher_ready << :ready
+        end
         @watcher.start(&on_change)
       end
 
@@ -813,6 +888,7 @@ module Woods
       end
 
       def require_restart(change_set)
+        carry_forward(change_set)
         triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
         reason = "restart required: #{triggers.first(5).join(', ')}"
         @logger.warn("[Woods] watch: #{reason}")
@@ -877,13 +953,7 @@ module Woods
       end
 
       def run_extraction(change_set, started)
-        # Count only paths that imply extraction work. Sixty edited markdown
-        # files plus one model is a one-model change, and reading it as a storm
-        # would trade a millisecond cycle for a full extraction.
-        actionable = actionable_count(change_set)
-        full = actionable > @full_extraction_threshold
-        log_storm(actionable) if full
-
+        full = full_extraction?(change_set)
         before = @generation.current.number
         extractor = @extractor_factory.call
         touched = if full
@@ -896,7 +966,7 @@ module Woods
         action = full ? :full : :incremental
         return unpublished(action, change_set, started) if wrote_without_publishing?(touched, before)
 
-        publish(action, change_set, touched, started)
+        finish_extraction(action, change_set, touched, started)
       rescue ScriptError, StandardError => e
         # Extraction failed, so nothing landed — the generation stays where it
         # was and the index keeps serving its last good state.
@@ -907,6 +977,28 @@ module Woods
         carry_forward(change_set)
         outcome(:extract, :degraded, reason: reason, count: change_set.size,
                                      duration_ms: elapsed_ms(started))
+      end
+
+      def full_extraction?(change_set)
+        if @startup_full
+          @logger.info('[Woods] watch: environment boot covers startup changes — full extraction')
+          return true
+        end
+
+        # Ignorable paths do not make a storm out of a single model edit.
+        actionable = actionable_count(change_set)
+        full = actionable > @full_extraction_threshold
+        log_storm(actionable) if full
+        full
+      end
+
+      def finish_extraction(action, change_set, touched, started)
+        result = publish(action, change_set, touched, started)
+        if action == :full
+          @startup_full = false
+          @pending_mutex.synchronize { @startup_paths.clear }
+        end
+        result
       end
 
       def actionable_count(change_set)
@@ -1005,8 +1097,10 @@ module Woods
         return false if ENV['WOODS_IGNORE_WATCH'] == '1'
         return false unless @status.alive?
 
-        other = @status.read['pid']
-        return false if other.nil? || other.to_i == Process.pid
+        record = @status.read
+        other = record['pid']
+        return false if other.nil?
+        return false if same_claim_host?(record['host']) && other.to_i == Process.pid
 
         @logger.warn(
           "[Woods] a watch daemon (pid #{other}) is already maintaining #{@output_dir} — standing down. " \

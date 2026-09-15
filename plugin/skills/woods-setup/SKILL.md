@@ -84,7 +84,14 @@ When Woods is installed only in Docker, launch it through the application servic
 
 Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings.
 
-Offer to add `bundle exec rake woods:watch` to the existing development process manager. When authorized, it catches up missed changes and automatically maintains the structural index; the Index Server refreshes on its next call, so ordinary edits need no manual extraction or MCP restart. State that boot-captured changes require supervisor restart, Docker may need `WOODS_WATCH_POLL=1`, and semantic vectors still need `woods:embed_incremental`.
+Offer to add `bundle exec rake woods:watch` to the existing development process manager. When authorized, it catches up missed changes and automatically maintains the structural index; the Index Server refreshes on its next call, so ordinary edits need no manual extraction or MCP restart. Use the standalone watch command; do not prepend the `environment` task. Check the installed version's watch guide before relying on automatic startup reconciliation. State that live boot-captured changes require supervisor restart, Docker may need `WOODS_WATCH_POLL=1`, and semantic vectors still need `woods:embed_incremental`.
+
+Foreign-host heartbeat trust (`WOODS_WATCH_TRUST_FOREIGN_HOST=1`, #321) is unreleased.
+Check the installed gem version against its release notes before offering it;
+do not assume installing this plugin upgrades the gem. For a supporting version,
+follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness)
+and set the opt-in in each task/MCP reader of a shared container index. Explain
+the 15-minute crash-detection delay and preserve one supervisor per daemon.
 
 For slow bind mounts, check whether the installed version documents
 `WOODS_WATCH_POLL_INTERVAL` before suggesting it; this setting is unreleased

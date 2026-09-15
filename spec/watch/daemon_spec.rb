@@ -34,6 +34,7 @@ RSpec.describe Woods::Watch::Daemon do
       reloader: reloader,
       debounce: 0,
       catch_up: false,
+      boot_snapshot: Woods::Watch::BootSnapshot.new(root: root),
       **overrides
     )
   end
@@ -421,6 +422,113 @@ RSpec.describe Woods::Watch::Daemon do
   describe 'startup catch-up' do
     let(:fake_watcher) { FakeWatcher.new }
 
+    it 'publishes one full generation for boot-covered restart triggers and stays up' do
+      touch('Gemfile.lock')
+      daemon = build(watcher: fake_watcher, catch_up: true)
+
+      expect(daemon.run).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(daemon.generation.current.number).to eq(1)
+    end
+
+    it 'does not repeat the full catch-up on the next boot' do
+      touch('Gemfile.lock')
+      build(watcher: fake_watcher, catch_up: true).run
+
+      build(watcher: FakeWatcher.new, catch_up: true).run
+
+      expect(extractor).to have_received(:extract_all).once
+    end
+
+    it 'requires restart without an explicit environment-boot snapshot' do
+      touch('Gemfile.lock')
+
+      result = build(watcher: fake_watcher, catch_up: true, boot_snapshot: nil).run
+
+      expect(result).to eq(:restart_required)
+      expect(extractor).not_to have_received(:extract_all)
+    end
+
+    it 'detects boot changes even when a newer generation hides their mtime' do
+      path = touch('config/initializers/boot.rb')
+      snapshot = Woods::Watch::BootSnapshot.new(root: root)
+      File.write(File.join(root, path), '# changed during environment initialization')
+      publish_generation('another writer')
+
+      result = build(watcher: fake_watcher, catch_up: true, boot_snapshot: snapshot).run
+
+      expect(result).to eq(:restart_required)
+      expect(extractor).not_to have_received(:extract_all)
+      expect(JSON.parse(File.read(File.join(output_dir, 'watch_pending.json'))))
+        .to include(File.join(root, path))
+    end
+
+    it 'keeps a full reconciliation obligation after extraction fails' do
+      touch('Gemfile.lock')
+      daemon = build(catch_up: true)
+      allow(extractor).to receive(:extract_all).and_raise(SyntaxError, 'half edited')
+      daemon.send(:catch_up)
+      expect(daemon.generation.current.number).to eq(0)
+
+      allow(extractor).to receive(:extract_all) { publish_generation('full') && {} }
+      daemon.send(:drain)
+
+      expect(extractor).to have_received(:extract_all).twice
+      expect(daemon.generation.current.number).to eq(1)
+      expect(status['state']).to eq('running')
+    end
+
+    it 'keeps a full reconciliation obligation after lock contention' do
+      touch('Gemfile.lock')
+      lock = double('lock', acquire: false, release: nil)
+      daemon = build(catch_up: true, lock: lock)
+      daemon.send(:catch_up)
+      expect(extractor).not_to have_received(:extract_all)
+
+      allow(lock).to receive(:acquire).and_return(true)
+      daemon.send(:drain)
+
+      expect(extractor).to have_received(:extract_all).once
+      expect(daemon.generation.current.number).to eq(1)
+    end
+
+    it 'keeps a full reconciliation obligation when publication fails' do
+      touch('Gemfile.lock')
+      daemon = build(catch_up: true)
+      allow(extractor).to receive(:extract_all).and_return({})
+      daemon.send(:catch_up)
+      expect(status['state']).to eq('degraded')
+
+      allow(extractor).to receive(:extract_all) { publish_generation('full') && {} }
+      daemon.send(:drain)
+
+      expect(extractor).to have_received(:extract_all).twice
+      expect(daemon.generation.current.number).to eq(1)
+    end
+
+    it 'fully reconciles boot-covered code when reloading is disabled' do
+      touch('app/models/user.rb')
+      allow(reloader).to receive(:enabled?).and_return(false)
+
+      expect(build(watcher: fake_watcher, catch_up: true).run).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(build.process(['app/models/user.rb'])[:action]).to eq(:restart)
+    end
+
+    it 'reconciles a carried restart-trigger deletion on the next fresh boot' do
+      path = touch('config/initializers/removed.rb')
+      daemon = build(watcher: fake_watcher)
+      File.unlink(File.join(root, path))
+      fake_watcher.queue([path])
+      expect(daemon.run).to eq(:restart_required)
+      publish_generation('another writer')
+
+      successor = build(watcher: FakeWatcher.new, catch_up: true)
+      expect(successor.run).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(successor.generation.current.number).to eq(2)
+    end
+
     it 'reconciles changes that predate startup' do
       touch('app/services/before_the_daemon.rb')
 
@@ -529,6 +637,81 @@ RSpec.describe Woods::Watch::Daemon do
   # the end, so a *later* restart's watermark check reads the file as already
   # covered. Starting the watcher first, before catch_up runs, closes the
   # window.
+  describe 'production watcher readiness' do
+    [false, true].each do |fallback|
+      it "waits for the polling baseline and captures live restart edits (fallback: #{fallback})" do
+        path = File.join(root, touch('config/initializers/boot.rb'))
+        polling = Woods::Watch::PollingWatcher.new(root: root, interval: 0.001)
+        backend = polling
+        if fallback
+          listen = double('listen')
+          allow(listen).to receive(:to).and_raise(Errno::ENOSPC)
+          backend = Woods::Watch::ListenWatcher.new(root: root, listen_class: listen)
+          allow(Woods::Watch::Watcher).to receive(:build).and_return(polling)
+        end
+        baseline_entered = Queue.new
+        release_baseline = Queue.new
+        extraction_entered = Queue.new
+        release_extraction = Queue.new
+        live_event = Queue.new
+        allow(polling).to receive(:primed_now?).and_wrap_original do |original|
+          if baseline_entered.empty?
+            baseline_entered << true
+            release_baseline.pop
+          end
+          original.call
+        end
+        daemon = build(watcher: backend, catch_up: true)
+        allow(daemon).to receive(:enqueue).and_wrap_original do |original, paths, **options|
+          original.call(paths, **options)
+          live_event << true if paths.include?(path) && !options[:startup]
+        end
+        allow(extractor).to receive(:extract_all) do
+          extraction_entered << true
+          release_extraction.pop
+          publish_generation('full')
+          {}
+        end
+        thread = Thread.new { daemon.run }
+        Timeout.timeout(5) { sleep(0.001) until baseline_entered.size == 1 }
+        expect(extractor).not_to have_received(:extract_all)
+        release_baseline << true
+        Timeout.timeout(5) { extraction_entered.pop }
+        File.write(path, '# changed after the baseline')
+        Timeout.timeout(5) { live_event.pop }
+        release_extraction << true
+
+        expect(Timeout.timeout(5) { thread.value }).to eq(:restart_required)
+        expect(JSON.parse(File.read(File.join(output_dir, 'watch_pending.json')))).to include(path)
+      ensure
+        release_baseline << true if release_baseline
+        release_extraction << true if release_extraction
+        daemon&.stop
+        thread&.join(5)
+      end
+    end
+
+    it 'propagates a baseline failure without waiting or extracting' do
+      touch('Gemfile.lock')
+      polling = Woods::Watch::PollingWatcher.new(root: root)
+      allow(polling).to receive(:primed_now?).and_raise(Errno::EACCES)
+      daemon = build(watcher: polling, catch_up: true)
+
+      expect { Timeout.timeout(5) { daemon.run } }.to raise_error(Errno::EACCES)
+      expect(extractor).not_to have_received(:extract_all)
+    end
+
+    it 'bounds a backend that never signals readiness' do
+      stub_const('Woods::Watch::Daemon::WATCHER_STARTUP_TIMEOUT', 0.02)
+      stub_const('Woods::Watch::Daemon::HEARTBEAT_SHUTDOWN_TIMEOUT', 0.02)
+      polling = Woods::Watch::PollingWatcher.new(root: root)
+      allow(polling).to receive(:primed_now?) { sleep(10) }
+
+      expect { Timeout.timeout(1) { build(watcher: polling).run } }
+        .to raise_error(Woods::Watch::WatcherError, /startup timeout/)
+    end
+  end
+
   describe 'catch-up ordering versus the watcher' do
     # Signals when #start is invoked and hands the captured on_change block
     # back to the example, then blocks — like a real watcher's event loop —
@@ -557,6 +740,64 @@ RSpec.describe Woods::Watch::Daemon do
       def wait_until_started(timeout: 5)
         Timeout.timeout(timeout) { @started.pop }
       end
+    end
+
+    it 'establishes startup obligations before a live callback can extract' do
+      touch('Gemfile.lock')
+      touch('config/locales/en.yml')
+      live_watcher = LiveWatcher.new
+      daemon = build(watcher: live_watcher, catch_up: true)
+      allow(daemon).to receive(:catch_up).and_wrap_original do |original|
+        live_watcher.wait_until_started
+        live_watcher.on_change.call([File.join(root, 'config/locales/en.yml')])
+        expect(extractor).not_to have_received(:extract_changed)
+        original.call
+      end
+      allow(extractor).to receive(:extract_all) do
+        daemon.stop
+        publish_generation('full')
+        {}
+      end
+
+      expect(daemon.run).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(extractor).not_to have_received(:extract_changed)
+    ensure
+      daemon&.stop
+    end
+
+    it 'restarts for a live edit of the same initializer during full catch-up' do
+      path = touch('config/initializers/boot.rb')
+      live_watcher = LiveWatcher.new
+      entered = Queue.new
+      release = Queue.new
+      allow(extractor).to receive(:extract_all) do
+        entered << true
+        release.pop
+        publish_generation('full')
+        {}
+      end
+      daemon = build(watcher: live_watcher, catch_up: true)
+      run_thread = Thread.new { daemon.run }
+      live_watcher.wait_until_started
+      Timeout.timeout(5) { entered.pop }
+      File.write(File.join(root, path), '# edited while catch-up runs')
+      live_watcher.on_change.call([File.join(root, path)])
+      release << true
+
+      expect(Timeout.timeout(5) { run_thread.value }).to eq(:restart_required)
+      pending = JSON.parse(File.read(File.join(output_dir, 'watch_pending.json')))
+      expect(pending).to include(File.join(root, path))
+      # The predecessor's publication is newer than the edit, but the pending
+      # obligation makes the next fresh boot reconcile it anyway.
+      allow(extractor).to receive(:extract_all) { publish_generation('full') && {} }
+      expect(build(watcher: FakeWatcher.new, catch_up: true).run).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).twice
+    ensure
+      allow(extractor).to receive(:extract_all) { publish_generation('full') && {} }
+      release << true if release
+      daemon&.stop
+      run_thread&.join(5)
     end
 
     it 'processes a path the watcher delivers while catch-up is still running' do
@@ -769,12 +1010,42 @@ RSpec.describe Woods::Watch::Daemon do
       expect(JSON.parse(File.read(pending_file)))
         .to include(a_string_ending_with('config/locales/en.yml'))
     end
+
+    it 'persists paths recovered by watcher cleanup after a forced stop' do
+      relative = touch('config/locales/en.yml')
+      daemon = build
+      worker = double('watcher thread')
+      # A timed join expires while extraction is blocked. Killing the thread
+      # schedules its ensure; only joining again guarantees recovery completed.
+      allow(worker).to receive(:join).with(described_class::HEARTBEAT_SHUTDOWN_TIMEOUT).and_return(nil)
+      allow(worker).to receive(:kill).and_return(worker)
+      allow(worker).to receive(:join).with(no_args) do
+        daemon.send(:carry_forward, Woods::ChangeSet.new(paths: [relative], root: root))
+        worker
+      end
+
+      daemon.send(:shut_down, nil, worker)
+
+      expect(JSON.parse(File.read(pending_file)))
+        .to include(File.join(root, relative))
+    end
   end
 
   # PipelineLock stops two daemons interleaving writes; nothing stopped them
   # both existing, doubling the extraction work and making one status file
   # answer for two processes.
   describe 'a second daemon on one index' do
+    it 'stands down for a trusted foreign daemon even when its pid equals this process (#321)' do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
+      status = Woods::Watch::Status.new(output_dir: output_dir)
+      status.write(state: :running, host: 'another-container', pid: Process.pid)
+      original_bytes = File.binread(status.path)
+
+      expect(build.run).to eq(:already_running)
+      expect(File.binread(status.path)).to eq(original_bytes)
+    end
+
     it 'stands down when another live daemon holds the index' do
       allow_any_instance_of(Woods::Watch::Status).to receive(:alive?).and_return(true)
       allow_any_instance_of(Woods::Watch::Status)

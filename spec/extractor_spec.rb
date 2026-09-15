@@ -1652,6 +1652,36 @@ RSpec.describe Woods::Extractor do
       extractor.send(:collision_safe_filename, identifier)
     end
 
+    [1, 2].each do |runs|
+      it "keeps type directories in the published payload after #{runs} full runs (#320)" do
+        runs.times { extractor.extract_all }
+
+        generation = Woods::Generation.new(output_dir: output_dir)
+        expect(generation.current.number).to eq(runs)
+        expect(generation.current.payload).to eq("payloads/gen-#{runs}")
+        expect(JSON.parse(File.read(File.join(published_models_dir, filename_for('User')))))
+          .to include('identifier' => 'User')
+        expect(JSON.parse(File.read(File.join(published_models_dir, '_index.json'))).size).to eq(1)
+        expect(JSON.parse(File.read(File.join(payload_root, 'manifest.json'))))
+          .to include('total_units' => 1)
+        expect(File).to exist(File.join(payload_root, 'dependency_graph.json'))
+        Woods::Extractor::EXTRACTORS.each_key do |type|
+          expect(File).not_to exist(File.join(output_dir, type.to_s))
+        end
+      end
+    end
+
+    it 'preserves existing flat-root files when publishing a payload (#320)' do
+      seed_unit_file(models_dir, 'Legacy.json', 'Legacy')
+      legacy_path = File.join(models_dir, 'Legacy.json')
+      original_bytes = File.binread(legacy_path)
+
+      extractor.extract_all
+
+      expect(File.binread(legacy_path)).to eq(original_bytes)
+      expect(File).to exist(File.join(published_models_dir, filename_for('User')))
+    end
+
     it 'removes stale unit files of both name shapes while keeping the current units and _index.json' do
       seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost') # current (digest) shape
       seed_unit_file(models_dir, 'Legacy.json', 'Legacy')        # legacy safe_filename shape

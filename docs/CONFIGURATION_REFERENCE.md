@@ -598,6 +598,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_WATCH_FULL_THRESHOLD` | `50` | Number of changed paths in one batch that triggers a full extraction instead of incremental. |
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset (no timeout) | Seconds of inactivity before the daemon exits. |
 | `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
+| `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset (disabled) | Set to `"1"` in each task/MCP reader to trust a foreign daemon's heartbeat for up to 15 minutes, without a local pid check. See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for clock bounds, degraded coverage, and startup limitations. |
 
 ### Extraction rake tasks
 
