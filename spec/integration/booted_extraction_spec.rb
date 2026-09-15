@@ -127,6 +127,14 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(manifest['total_units']).to be > 0
   end
 
+  it 'creates type directories only inside the published payload (#320)' do
+    expect(payload_dir).not_to eq(@output_dir)
+    Woods::Extractor::EXTRACTORS.each_key do |type|
+      expect(File).not_to exist(File.join(@output_dir, type.to_s))
+    end
+    expect(index_for(:models)).not_to be_empty
+  end
+
   it 'extracts the application models from real source' do
     identifiers = index_for(:models).map { |u| u['identifier'] }
     expect(identifiers).to include('Post', 'Comment')

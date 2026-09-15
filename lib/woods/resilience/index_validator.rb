@@ -2,6 +2,8 @@
 
 require 'json'
 require 'set'
+require 'rubygems/version'
+require_relative '../version'
 require_relative '../filename_utils'
 require_relative '../atomic_file'
 
@@ -23,10 +25,8 @@ module Woods
     # `Tasks.verify_store_dimensions!` before a durable embed run and by
     # {Woods::Storage::Snapshotter::Vector} at MCP boot.
     #
-    # Consumed by `spec/integration/multi_worktree_spec.rb` as a per-worktree
-    # integrity oracle. The `woods:validate` rake task performs an overlapping
-    # check inline rather than calling this — deliberate duplication left alone
-    # for now, since the task's output format is user-facing.
+    # Shared by the `woods:validate` rake task and worktree integration checks.
+    # Writer-version mismatches are advisory; structural errors still fail.
     #
     # @example
     #   validator = IndexValidator.new(index_dir: "tmp/woods")
@@ -108,6 +108,7 @@ module Woods
         return unless File.exist?(manifest_path)
 
         manifest = JSON.parse(Woods::AtomicFile.read(manifest_path))
+        validate_writer_version(manifest['woods_version'], warnings)
         unresolvable = Hash.new { |hash, key| hash[key] = [] }
 
         (manifest['counts'] || {}).each do |type, expected_count|
@@ -116,6 +117,26 @@ module Woods
 
         warn_unresolvable_paths(warnings, unresolvable)
         validate_dependency_graph(payload, errors)
+      end
+
+      # The version records the last publisher, not the producer of every
+      # retained unit. Missing provenance is normal for older indexes.
+      def validate_writer_version(value, warnings)
+        return if value.nil?
+
+        unless value.is_a?(String) && !value.strip.empty?
+          warnings << 'Invalid manifest woods_version; writer provenance is unknown. Run a full woods:extract.'
+          return
+        end
+
+        writer = Gem::Version.new(value)
+        reader = Gem::Version.new(Woods::VERSION)
+        return if writer.segments.first == reader.segments.first
+
+        warnings << "Index last published by Woods #{value}; reader is Woods #{Woods::VERSION}. " \
+                    'Major versions differ. Run a full woods:extract before relying on compatibility.'
+      rescue ArgumentError
+        warnings << 'Invalid manifest woods_version; writer provenance is unknown. Run a full woods:extract.'
       end
 
       # Split each type's unresolvable units into app-tree paths and gem-owned

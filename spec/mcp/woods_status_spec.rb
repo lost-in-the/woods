@@ -20,6 +20,18 @@ RSpec.describe 'woods_status tool' do
       expect(status[:server]).to include(name: 'woods', version: Woods::VERSION, index_dir: fixture_dir.to_s)
     end
 
+    it 'reports the manifest writer version independently of this reader (#323)' do
+      writer = "#{Gem::Version.new(Woods::VERSION).segments.first + 1}.0.0"
+      allow(reader).to receive(:manifest).and_return({ 'woods_version' => writer, 'counts' => {} })
+      expect(status[:index][:woods_version]).to eq(writer)
+      expect(status[:server][:version]).to eq(Woods::VERSION)
+    end
+
+    it 'reports unknown writer provenance for a legacy manifest (#323)' do
+      allow(reader).to receive(:manifest).and_return({ 'counts' => {} })
+      expect(status[:index]).to include(woods_version: nil)
+    end
+
     it 'embeds an update sub-hash reporting the installed version (no update by default)' do
       # spec_helper stubs the network fetch to nil, so a hermetic run reports no update
       # and latest_version falls back to the installed version (the newest one known).
@@ -193,6 +205,17 @@ RSpec.describe 'woods_status tool' do
     end
 
     describe 'watch' do
+      it 'uses the shared foreign-host trust policy for its liveness verdict (#321)' do
+        allow(ENV).to receive(:[]).and_call_original
+        Woods::Watch::Status.new(output_dir: index_dir)
+                            .write(state: :running, host: 'another-container')
+        allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return(nil)
+        expect(status_for[:watch]).to include(state: 'running', alive: false)
+
+        allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
+        expect(status_for[:watch]).to include(state: 'running', alive: true)
+      end
+
       it 'reports absent when no daemon has ever run' do
         expect(status_for[:watch]).to eq(state: 'absent')
       end

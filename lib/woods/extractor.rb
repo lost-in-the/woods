@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative 'atomic_file'
+require_relative 'version'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
@@ -1294,9 +1295,6 @@ module Woods
 
     def setup_output_directory
       FileUtils.mkdir_p(@output_dir)
-      EXTRACTORS.each_key do |type|
-        FileUtils.mkdir_p(payload_dir.join(type.to_s))
-      end
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2104,7 +2102,7 @@ module Woods
       path_set = relative_paths.to_set
       relative_paths.each_slice(500) do |batch|
         log_output = run_git(
-          'log', '--all', '--name-only',
+          'log', 'HEAD', '--name-only',
           '--format=__COMMIT__%H|||%an|||%cI|||%s',
           '--since=365 days ago',
           '--', *batch
@@ -2350,6 +2348,7 @@ module Woods
 
       manifest = {
         extracted_at: Time.current.iso8601,
+        woods_version: Woods::VERSION,
         rails_version: Rails.version,
         ruby_version: RUBY_VERSION,
 

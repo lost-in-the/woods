@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'fileutils'
 require 'json'
 require 'tmpdir'
+require 'open3'
 require 'woods/gem_mapper'
 require 'woods/mcp/index_reader'
 
@@ -29,6 +30,7 @@ RSpec.describe Woods::GemMapper do
 
     reader = Woods::MCP::IndexReader.new(output_dir)
     expect(reader.manifest.dig('provenance', 'mode')).to eq('woods_static_ruby_source')
+    expect(reader.manifest['woods_version']).to eq(Woods::VERSION)
     expect(reader.find_unit('Woods::Extractor')).to include('file_path' => 'lib/woods/extractor.rb')
     expect(reader.find_unit('Woods::RubyAnalyzer')).not_to be_nil
     expect(reader.find_unit('Woods::MCP::IndexReader')).not_to be_nil
@@ -50,8 +52,10 @@ RSpec.describe Woods::GemMapper do
   it 'skips an unchanged tree without advancing the generation' do
     mapper = described_class.new(root: root, output_dir: output_dir)
     mapper.map!
+    original_manifest = File.binread(payload_dir.join('manifest.json'))
 
     expect(mapper.map!).to include(status: :skipped, generation: 1)
+    expect(File.binread(payload_dir.join('manifest.json'))).to eq(original_manifest)
   end
 
   it 'writes only repository-relative source paths' do
@@ -60,5 +64,17 @@ RSpec.describe Woods::GemMapper do
     entries = Dir[payload_dir.join('ruby_*', '_index.json').to_s].flat_map { |path| JSON.parse(File.read(path)) }
     expect(entries.map { |entry| entry['file_path'] }).to all(satisfy { |path| !path.start_with?('/') })
     expect(entries.map { |entry| entry['file_path'] }).to include('lib/tasks/woods.rake', 'exe/woods-mcp')
+  end
+
+  it 'records its writer version when loaded as a standalone mapper (#323)' do
+    script = <<~RUBY
+      require 'woods/gem_mapper'
+      Woods::GemMapper.new(root: ARGV[0], output_dir: ARGV[1]).map!
+      payload = Woods::Generation.new(output_dir: ARGV[1]).payload_dir
+      puts JSON.parse(File.read(payload.join('manifest.json'))).fetch('woods_version')
+    RUBY
+    out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, root, output_dir)
+    expect(status).to be_success, err
+    expect(out.strip).to eq(Woods::VERSION)
   end
 end

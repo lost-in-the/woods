@@ -33,6 +33,11 @@ Default to Index-only. It reads generated code context and exposes 14 tools. Con
 
 Use this shape for any stdio-capable MCP client, adapted to the client's configuration location. `woods-mcp-start` validates and launches; it does not install or auto-restart.
 
+Writer-version provenance (#323) is unreleased; check the installed gem version's
+release notes before expecting `index.woods_version` in `woods_status`. It reports
+the last manifest publisher, independently of `server.version`. Treat missing/null
+as unknown and see [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 When Woods is installed only in Docker, prefer running the server through the application container:
 
 ```json
@@ -50,6 +55,12 @@ When Woods is installed only in Docker, prefer running the server through the ap
 Use a host-side bundle only after verifying Ruby, the application bundle, and the index are available on the host. Always pass the path visible to the process that runs `woods-mcp`.
 
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
+
+For host MCP reading a container daemon's shared index, foreign heartbeat trust
+(#321) is unreleased. Verify the installed gem version's release notes before
+offering `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in the MCP environment. It makes
+`woods_status.watch.alive` use the same bounded freshness policy as task readers;
+see [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness).
 
 ## Shape 2: Index plus authorized Console
 

@@ -13,6 +13,11 @@ Call `woods_status` before relying on the index. Check:
 
 If status is unhealthy, report the evidence and ask the owner to extract or refresh. Do not fill gaps by asserting that Woods found nothing.
 
+Compare `index.woods_version` (last manifest publisher, unknown for older indexes)
+with `server.version` (the MCP reader). A major-version difference warrants a
+full extraction and upgrade review; a match does not prove every retained unit
+was rewritten. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 ## The default query loop
 
 Use this four-step loop for most codebase questions:

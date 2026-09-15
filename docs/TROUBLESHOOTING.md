@@ -43,6 +43,13 @@ For a single-call health snapshot, call the Index Server's `woods_status` tool. 
 
 Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
 
+If `woods:validate` warns that the manifest writer and reader major versions
+differ, run full extraction using the intended gem and follow the upgrade guide.
+An invalid `woods_version` warns without failing structural validation; a missing
+or null value is normal for older indexes. Compare `index.woods_version` with
+`server.version` in MCP status; never infer an unknown writer from the reader's
+version. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
+
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
 
 ## Extraction Problems
@@ -839,3 +846,16 @@ view sharing the same name. Current writers distinguish typed storage identities
 public names remain unchanged. Snapshot migration 007 runs automatically and keeps
 existing rows, but cannot recover variants lost by older writers. See the
 [upgrade guide](UPGRADING_TO_2.md) for storage, flow rebuild, and rollback details.
+
+## Watch exits 75 repeatedly at startup
+
+Check the installed Woods version and its [watch daemon guide](WATCH_DAEMON.md).
+Older releases, including `2.0.0.beta2`, can repeatedly request restart when a
+boot-captured file is newer than the last index generation. Stop the supervisor,
+run one successful `bundle exec rake woods:extract` in the application environment,
+then start the standalone `bundle exec rake woods:watch` process again.
+
+With startup snapshot support, a fresh environment boot performs the full
+reconciliation automatically. Changes during environment initialization or live
+watching still require restart. Do not prepend `environment` to the watch command
+or start it inside an already initialized process when relying on this recovery.

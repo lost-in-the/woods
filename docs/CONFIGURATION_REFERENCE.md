@@ -593,10 +593,12 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. For `woods:incremental` this removes daemon coverage: a git range that fails to resolve then exits 1 instead of standing down (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains)). |
 | `WOODS_LOCK_WAIT` | `Watch::Daemon::LOCK_STALE_TIMEOUT` (600s) | How long a rake writer waits for `PipelineLock` before exiting non-zero. |
 | `WOODS_WATCH_POLL` | auto-detected | Set to `"1"`/`"0"` to force/disable polling mode (vs. `listen` gem, e.g. in a container without inotify). |
+| `WOODS_WATCH_POLL_INTERVAL` | `1.0` (seconds) | Positive, finite delay between polling scans; also used on native-watcher fallback. Does not force polling. Larger values reduce scan frequency and can delay detection and shutdown. |
 | `WOODS_WATCH_DEBOUNCE` | `0.4` (seconds) | Delay before processing a batch of file-change events. |
 | `WOODS_WATCH_FULL_THRESHOLD` | `50` | Number of changed paths in one batch that triggers a full extraction instead of incremental. |
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset (no timeout) | Seconds of inactivity before the daemon exits. |
 | `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
+| `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset (disabled) | Set to `"1"` in each task/MCP reader to trust a foreign daemon's heartbeat for up to 15 minutes, without a local pid check. See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for clock bounds, degraded coverage, and startup limitations. |
 
 ### Extraction rake tasks
 

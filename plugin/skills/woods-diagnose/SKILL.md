@@ -23,6 +23,16 @@ bundle exec rails runner 'Rails.application.eager_load!; puts "eager load ok"'
 
 Use the application's normal Docker command and environment variables when applicable. Fix boot/eager-load failures before Woods.
 
+### Watch repeatedly exits 75
+
+Check the installed version's watch guide. Older releases, including
+`2.0.0.beta2`, can rediscover the same restart-trigger paths on every boot. Stop
+the supervisor, run one successful full extraction, then restart the standalone
+watch task. Do not assume automatic startup reconciliation exists in that release.
+For versions documenting environment-boot snapshots, confirm that the command is
+`bundle exec rake woods:watch`, with no preceding `environment` task, and check
+whether boot inputs keep changing during initialization or catch-up.
+
 ## 2. Check the published index
 
 ```bash
@@ -31,6 +41,21 @@ bin/rails woods:stats
 ```
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
+
+A host reader can report a container daemon dead because foreign-host records
+are rejected by default. Foreign heartbeat trust (#321) is unreleased: first
+check the installed Woods version and that version's release notes. Only for a
+supporting version, offer `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in every relevant
+task/MCP reader and follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness).
+Fresh `degraded` still means incremental work is needed; a fresh `running`
+record can outlive a crashed foreign daemon by up to 15 minutes. Older versions
+need their status check run in the daemon's own container.
+
+Writer-version provenance (#323) is unreleased: verify the installed gem version's
+release notes before expecting it. If `index.woods_version` exists, compare it
+with `server.version`; missing/null is unknown, not a failure. A validator
+major-version warning calls for full extraction and upgrade review, while a match
+does not certify retained units were migrated. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
 If a one-shot extraction raises `Could not publish generation`, the candidate
 payload was written but never made visible; readers still serve the previous

@@ -87,6 +87,12 @@ docker compose exec app bundle exec rake woods:extract_framework
 
 Run the watcher as its own development service or process-manager entry, not as a one-off terminal command. Docker Desktop bind mounts may not deliver reliable native filesystem events; set `WOODS_WATCH_POLL=1` for polling when needed. The watcher updates structural generations automatically, while semantic vectors still require `woods:embed_incremental`.
 
+When host-side tasks or one-off containers read the daemon's shared index,
+`WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets those readers trust its recent heartbeat.
+Set it in each reader process; Docker does not forward host variables by default.
+See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for the 15-minute
+crash-detection bound and single-supervisor requirement.
+
 ### Index persistence
 
 Persist `tmp/woods/` if the index should survive container replacement. A bind mount also makes it available to optional host-side tools:

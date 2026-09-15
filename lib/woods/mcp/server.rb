@@ -2070,6 +2070,7 @@ module Woods
           base = {
             extracted_at: extracted_at,
             staleness_seconds: staleness,
+            woods_version: manifest && manifest['woods_version'],
             rails_version: manifest && manifest['rails_version'],
             ruby_version: manifest && manifest['ruby_version'],
             total_units: manifest && manifest['total_units'],
@@ -2210,7 +2211,7 @@ module Woods
           record = JSON.parse(Woods::AtomicFile.read(path))
           # `state` is whatever the daemon last wrote, and a `kill -9`'d daemon
           # leaves `running` behind forever. `alive?` adds the two checks that
-          # catch that — the pid still exists and the record is recent — so the
+          # catch that — a recent record and, for local hosts, a live pid — so the
           # payload can distinguish "maintaining this index" from "claimed to be,
           # once". Reported as a separate field rather than by overwriting
           # `state`, because the recorded state and the liveness verdict answer

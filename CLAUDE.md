@@ -292,7 +292,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - Manifest `git_branch`/`git_sha` come from `Woods::GitProvenance` (`lib/woods/git_provenance.rb`), which is worktree-aware and cwd-independent (`git -C <root>`).
   - A present `.git` whose ref cannot be resolved (an unmounted worktree git dir in a container) yields `"unknown"`, never a stale env value.
   - `GIT_BRANCH`/`GIT_SHA` env vars count only when there is **no** `.git` at the root, or git is unavailable.
-  - `capture_snapshot` treats `"unknown"` as no-sha (#137). The per-file `batch_git_data`/`run_git` path is separate and cwd-based.
+  - `capture_snapshot` treats `"unknown"` as no-sha (#137). Per-file enrichment and manifest provenance both use `GitCommand`, rooted at the application directory with the same `WOODS_GIT_DIR` override. Per-file history is scoped to the selected `HEAD`.
 - Model name scanning uses a precomputed regex via `ModelNameCache`, invalidated per run. Three passes: whole-word fully-qualified names; string literals passed to `constantize`/`const_get`; unambiguous bare short names via `ModelNameCache.resolve_short_name`. Ambiguous short names are skipped.
 - `extract_dependencies` in every extractor must include `:via`. See `model_extractor` for reference values.
 - `CallbackAnalyzer` is regex-based, not AST. Proc and lambda callbacks are skipped.
@@ -358,6 +358,6 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 
 - `woods:watch` (`lib/woods/watch/`) is dev-only and adds no network listener. Every collaborator is injected; `Daemon#process` is the supported embedding point. Config is via `WOODS_WATCH_*` env vars. See `docs/WATCH_DAEMON.md`.
 - Rescue `ScriptError` as well as `StandardError` wherever a reload can happen. A `SyntaxError` must degrade the daemon, not kill it.
-- The watcher starts **before** catch-up so a save during catch-up is captured. Catch-up reconciles against the `generation.json` mtime; a missing file means one full extraction. Deletions are found by checking registered paths, then one cycle runs with an **empty** change set so the extractor's bounded sweep reaches the ghosts.
+- The built-in watcher signals readiness **before** catch-up (polling baseline or native listener registration). Live callbacks enqueue while startup reconciliation holds the drain mutex. The task snapshots inputs before `environment`; boot-covered restart paths force one full extraction, while boot-time/live changes restart. No snapshot is trusted when Rails/environment already ran. This does not cover earlier Bundler/application-file loading. Failed full obligations and restart-trigger deletions survive recovery. Catch-up still uses the generation watermark and bounded deletion sweep; see `docs/WATCH_DAEMON.md`.
 - `Status#alive?` disbelieves records older than `STALE_AFTER` (15 min) and compares host identity before pid liveness (a dead container pid usually exists on the host). The daemon heartbeats at `HEARTBEAT_INTERVAL`, republishing the last state.
 - Debounce coalesces only because the watcher callback enqueues and returns; the drain loop does the work. Do not move the work back into the callback.

@@ -24,6 +24,26 @@ Woods::PublishedIndex.open(Rails.root.join('tmp/woods')) do |index|
 end
 ```
 
+## Manifest writer provenance
+
+The published `manifest.json` records `woods_version`, a string naming the Woods gem version
+that last published that manifest. Full extraction, changed incremental runs,
+targeted refreshes, and the static Woods self-map write it. A no-op leaves the
+published manifest and its version unchanged. Resolve the manifest through the
+generation pointer, as Woods readers do.
+
+Older manifests may omit the field or contain `null`; that means unknown.
+`woods_status.index.woods_version` reports this value from the served manifest,
+while `woods_status.server.version` identifies the running MCP reader. The reader
+never substitutes its own version for missing writer provenance.
+
+`woods:validate` warns when a present writer version is malformed or its major
+version differs from the installed validator. The warning is advisory and does
+not invalidate an otherwise structurally valid index. Re-run full extraction
+when investigating a major-version mismatch. Matching versions do not certify
+compatibility: an incremental publisher can retain units written by an older
+version. This field does not replace the [upgrade procedure](UPGRADING_TO_2.md).
+
 ## One generation, pinned for the reader's whole life
 
 Unlike `Woods::MCP::IndexReader`, a `PublishedIndex` never refreshes between calls. It resolves one generation at `.new`/`.open` time and every fact it returns, `units`, the table map, `generation_number`, `external_dependency_checksum`, comes from that one generation for as long as the reader is open. There is no `reload` and no auto-refresh: open a new reader to see a later publish.

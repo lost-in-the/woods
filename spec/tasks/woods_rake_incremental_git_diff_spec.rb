@@ -165,6 +165,18 @@ RSpec.describe 'woods:incremental changed-path parsing' do
         .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
     end
 
+    %w[running degraded].each do |state|
+      it "keeps failed-range coverage semantics for a trusted foreign #{state} daemon (#321)" do
+        require 'woods/watch/status'
+        Woods::Watch::Status.new(output_dir: repo_dir).write(state: state.to_sym, host: 'another-container')
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
+
+        expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+          .to raise_error(SystemExit) { |error| expect(error.status).to eq(state == 'running' ? 0 : 1) }
+      end
+    end
+
     # ── A missing git binary is the same decision, not a crash (INF-12) ──
     #
     # `Open3.capture3` raises Errno::ENOENT when git is absent (a slim
