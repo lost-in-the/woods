@@ -38,6 +38,15 @@ query
 | `:hybrid` | `comprehensive` or `exploratory` scope | Runs vector + keyword + graph expansion, deduplicates |
 | `:direct` | `locate`/`reference` + `pinpoint` scope | Looks up identifiers directly in metadata store; falls back to keyword |
 
+Graph queries preserve identifier spelling and namespaces: `trace Billing::Invoice`,
+`trace ReviewAssignment`, and `trace review_assignment` resolve the subject before
+traversing its dependencies and dependents. An exact identifier takes precedence;
+an unqualified name without an exact match can seed up to three namespace matches
+in storage-identifier order. Use the qualified name to disambiguate. A missing
+qualified identifier does not fall back to a different namespace. For unqualified
+prose, metadata fallback searches subject terms without instructions such as
+`trace`, `follow`, or `who calls`.
+
 Keyword results are scored by how many distinct fields matched (identifier, source, metadata), not by the store's result order. Each matched field adds 0.25, capped at 1.0, so a result matching on identifier and source scores higher than one matching source alone.
 
 ---

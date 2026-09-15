@@ -462,6 +462,125 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
   end
 
   describe 'graph strategy execution' do
+    context 'with namespaced and CamelCase identifiers' do
+      before do
+        %w[Billing::Invoice Shipping::Invoice ReviewAssignment HTTPClient].each do |identifier|
+          seed_unit(identifier: identifier, type: :model, file_path: "app/models/#{identifier}.rb",
+                    vector: [1.0, 0.0, 0.0], dependencies: [{ type: :model, target: 'User' }])
+        end
+      end
+
+      {
+        'trace Billing::Invoice' => 'Billing::Invoice',
+        'trace ReviewAssignment' => 'ReviewAssignment',
+        'trace review_assignment' => 'ReviewAssignment',
+        'trace billing::invoice' => 'Billing::Invoice',
+        'who calls HTTPClient?' => 'HTTPClient'
+      }.each do |query, expected|
+        it "resolves #{query} and traverses its edges" do
+          result = executor.execute(query: query, classification: classifier.classify(query))
+
+          expect(result.strategy).to eq(:graph)
+          expect(result.candidates.map(&:identifier)).to contain_exactly(expected, 'User')
+        end
+      end
+
+      it 'retains both namespace matches for an ambiguous unqualified name' do
+        query = 'trace Invoice'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates.map(&:identifier)).to contain_exactly('Billing::Invoice', 'Shipping::Invoice', 'User')
+      end
+
+      it 'prefers original case over an inferred spelling that also exists' do
+        seed_unit(identifier: 'Reviewassignment', type: :model, file_path: 'app/models/reviewassignment.rb',
+                  vector: [1.0, 0.0, 0.0])
+        query = 'trace ReviewAssignment'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates.map(&:identifier)).to contain_exactly('ReviewAssignment', 'User')
+      end
+
+      it 'prefers a typed exact spelling over an inferred untyped spelling' do
+        exact_id = Woods::StorageIdentity.key('ReviewAssignment', :model)
+        metadata_store.delete('ReviewAssignment')
+        metadata_store.store(exact_id, { type: 'model', identifier: 'ReviewAssignment' })
+        seed_unit(identifier: 'Reviewassignment', type: :model, file_path: 'app/models/reviewassignment.rb',
+                  vector: [1.0, 0.0, 0.0])
+        query = 'trace ReviewAssignment'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates.map(&:identifier)).to contain_exactly(exact_id, 'User')
+      end
+
+      %w[Trace Track Call The].each do |identifier|
+        it "preserves the explicit #{identifier} constant despite its lowercase prose meaning" do
+          seed_unit(identifier: identifier, type: :model, file_path: "app/models/#{identifier.downcase}.rb",
+                    vector: [1.0, 0.0, 0.0])
+          query = "trace #{identifier}"
+          result = executor.execute(query: query, classification: classifier.classify(query))
+
+          expect(result.candidates.map(&:identifier)).to eq([identifier])
+        end
+      end
+
+      it 'prefers the exact unqualified identifier over namespace suffix matches' do
+        seed_unit(identifier: 'Invoice', type: :model, file_path: 'app/models/invoice.rb', vector: [1.0, 0.0, 0.0])
+        query = 'trace Invoice'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates.map(&:identifier)).to eq(['Invoice'])
+      end
+
+      it 'preserves typed storage identities while traversing the public graph identifier' do
+        ids = %w[model service].map { |type| Woods::StorageIdentity.key('Billing::Invoice', type) }
+        metadata_store.delete('Billing::Invoice')
+        ids.each do |id|
+          metadata_store.store(id, { type: Woods::StorageIdentity.parts(id).last, identifier: 'Billing::Invoice' })
+        end
+        query = 'trace Billing::Invoice'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates.map(&:identifier)).to contain_exactly(*ids, 'User')
+      end
+
+      it 'does not broaden an unknown qualified identifier to a different namespace' do
+        query = 'trace Missing::Invoice'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates).to be_empty
+      end
+
+      it 'excludes intent words from metadata fallback' do
+        metadata_store.store('TraceOnly',
+                             { type: 'model', identifier: 'TraceOnly', description: 'trace follow calls depends' })
+        query = 'trace unknown_subject'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates).to be_empty
+      end
+
+      ['Trace unknown_subject', 'TRACE unknown_subject', 'Who calls unknown_subject?',
+       'What depends on unknown_subject?'].each do |query|
+        it "excludes capitalized instruction prose from #{query}" do
+          metadata_store.store('TraceOnly', { type: 'model', identifier: 'TraceOnly',
+                                              description: 'trace follow calls depends who what' })
+          result = executor.execute(query: query, classification: classifier.classify(query))
+
+          expect(result.candidates).to be_empty
+        end
+      end
+
+      it 'searches subject metadata without the trace instruction' do
+        metadata_store.store('PaymentProcessor',
+                             { type: 'service', identifier: 'PaymentProcessor', description: 'settlement' })
+        query = 'trace settlement'
+        result = executor.execute(query: query, classification: classifier.classify(query))
+
+        expect(result.candidates.map(&:identifier)).to eq(['PaymentProcessor'])
+      end
+    end
+
     it 'returns dependencies and dependents of seed units' do
       classification = classifier.classify('What depends on the User model?')
       result = executor.execute(query: 'What depends on the User model?', classification: classification)
