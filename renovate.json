@@ -33,6 +33,18 @@
         "simplecov"
       ],
       "allowedVersions": "< 1.0"
+    },
+    {
+      "description": "ruby/setup-ruby v1 is a moving branch, not a tag. Resolve its pinned SHA from that exact branch while keeping digest updates enabled.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchPackageNames": [
+        "ruby/setup-ruby"
+      ],
+      "overrideDatasource": "github-digest",
+      "versioning": "exact",
+      "matchCurrentValue": "v1"
     }
   ]
 }
