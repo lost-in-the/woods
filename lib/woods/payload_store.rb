@@ -95,19 +95,18 @@ module Woods
     # @param target [Pathname, String] a directory returned by {#create}
     # @return [void]
     def clone(source, target)
-      from = Pathname.new(source.to_s)
-      return unless from.directory?
+      from = File.expand_path(source.to_s)
+      return unless File.directory?(from)
 
-      to = Pathname.new(target.to_s)
-      # The one directory `find` never offers: it yields the root as `.`, and
-      # a caller seeding a subtree (Extractor#seed_payload_from_flat_root)
-      # passes a target that does not exist yet.
-      FileUtils.mkdir_p(to.to_s)
-      from.find do |entry|
-        relative = entry.relative_path_from(from)
-        next if relative.to_s == '.'
+      to = target.to_s
+      FileUtils.mkdir_p(to)
+      # Find yields paths below this exact prefix. Avoid constructing and
+      # relativizing a Pathname for every file in an otherwise unchanged tree.
+      prefix_length = from.end_with?(File::SEPARATOR) ? from.length : from.length + 1
+      Find.find(from) do |entry|
+        next if entry == from
 
-        replicate(entry, to.join(relative))
+        replicate(entry, File.join(to, entry[prefix_length..]))
       end
     end
 
@@ -172,7 +171,7 @@ module Woods
     # @param destination [Pathname, String] where it should land
     # @return [void]
     def link_or_copy(source, destination)
-      FileUtils.ln(source.to_s, destination.to_s)
+      File.link(source.to_s, destination.to_s)
     rescue Errno::EXDEV, Errno::EPERM, Errno::EMLINK, NotImplementedError
       FileUtils.cp(source.to_s, destination.to_s)
     end
@@ -215,18 +214,18 @@ module Woods
       end
     end
 
-    # `Pathname#find` is a pre-order walk: a directory is always visited
+    # `Find.find` is a pre-order walk: a directory is always visited
     # before anything inside it. So the directory branch has already created
     # every parent a file could need, and the `mkdir_p` the file branch used
     # to run was one stat-heavy syscall chain per unit re-proving what the
     # previous entry established. On a payload of 8000+ files that was the
     # bulk of the incremental seed.
     #
-    # @param entry [Pathname] source entry, as `find` yielded it
-    # @param destination [Pathname] where it belongs in the target
+    # @param entry [String] source entry, as `find` yielded it
+    # @param destination [String] where it belongs in the target
     # @return [void]
     def replicate(entry, destination)
-      if entry.directory?
+      if File.directory?(entry)
         FileUtils.mkdir_p(destination.to_s)
       else
         link_or_copy(entry, destination)

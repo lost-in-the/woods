@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Reduce payload-clone allocation and traversal overhead while preserving
+  hardlinks, copy fallback and immutable generation ownership (#305).
+- Make extraction profiling additive: report git enrichment, reconciliation,
+  finalization, pointer publication and retention separately, with a distinct
+  whole-run wall-time line (#305).
+
 ## [2.0.0.beta2] - 2026-09-10
 
 ### Added

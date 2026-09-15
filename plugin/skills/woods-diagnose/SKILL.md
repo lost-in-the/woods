@@ -38,6 +38,15 @@ complete generation. Fix the named filesystem, permission, space, or mount
 failure and rerun the same task. Never edit `generation.json` or point a reader
 at the unreachable payload by hand.
 
+For slow extraction, use `WOODS_PROFILE=1` when supported by the installed
+version. Keep process boot and resident-cycle measurements separate. Older
+profiles nest payload sync and retention inside `publish`; current source
+reports disjoint phases and a separate `[profile total]` line. Do not add
+whole-run totals to phase durations or promise the new lines on an older gem.
+Use the installed version's tagged guide; the
+[canonical profiling guide](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#profiling-fixed-costs)
+tracks current source.
+
 ## 3. Check the MCP process and path
 
 Compare the client config with the exact command, absolute `cwd`, bundle, and index path visible to that process. Run the configured executable manually to read stderr. For a host bundle:

@@ -185,6 +185,16 @@ Use this only when the application bundle, a supported Ruby, and the Woods execu
 | **Survives container replacement** | Only with a bind/named volume | Yes, on host disk |
 | **Needs Ruby/Woods bundle on host** | No | Yes |
 
+### Index filesystem performance
+
+Bind mounts backed by virtiofs or FUSE can make each hardlink, rename and
+metadata lookup costly. Profile `payload seed`, writes and `payload prune`
+before tuning extraction. A container volume can reduce these costs, but it
+changes host visibility: use a distinct index location per worktree, run MCP
+where that path is visible, and update export/archive paths together. A single
+shared volume for every worktree would mix their indexes. See
+[incremental profiling](INCREMENTAL_EXTRACTION.md#profiling-fixed-costs).
+
 ## Console Server Setup
 
 The Console Server queries live Rails state. There are two launch paths for the same embedded server.
