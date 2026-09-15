@@ -76,6 +76,13 @@ This is `rails/spring`'s contract, copied deliberately: Spring's staleness bugs
 came from under-scoping exactly this set, so the boundary here is drawn on the
 generous side.
 
+A restart-trigger change found at startup is reconciled with one full extraction
+when it is covered by the task's environment-boot snapshot. That advances the
+generation through real extraction, so a supervisor restart does not repeatedly
+exit `75` over the same files. Live restart triggers still stop the daemon,
+including edits during startup extraction. Their paths survive shutdown even
+when the preceding extraction has advanced the generation watermark.
+
 The same escalation happens when the app *can't* reload at all, a boot with
 `config.enable_reloading = false`. Extracting against constants that no longer
 match their source would be worse than saying so.
@@ -152,6 +159,21 @@ it starts: edits and pulled commits that landed while nothing was watching are
 invisible to it forever. That matters because callers stand down when a daemon
 is alive, so *alive has to mean covered*.
 
+The standalone `woods:watch` task snapshots reload/restart inputs before invoking
+Rails' `environment` task. Inputs unchanged across that boundary, including
+carried paths that remain deleted, may be reconciled by a full extraction.
+Changes during environment initialization still require restart. Lock contention,
+extraction failure, and publication failure retain the full-reconciliation
+obligation for retry; a successful publish clears it.
+
+This boundary covers **environment initialization**. Bundler and
+`config/application.rb` can run before the task begins; the snapshot does not
+prove that edits during those earlier stages were incorporated. Start the task
+against a settled boot configuration. If Rails is already initialized or the
+`environment` task was already invoked, the daemon keeps conservative restart
+handling. Use `bundle exec rake woods:watch` as a separate process, rather than
+`bundle exec rake environment woods:watch`.
+
 So `run` reconciles before it waits. The watermark is `generation.json`'s mtime, written last on every successful run, so it means "when this index was last
 known good", and everything modified since is uncovered, whoever changed it.
 With no generation file there is no index, every file is uncovered, and the
@@ -162,7 +184,12 @@ external cleanup targeting the large directories), and readers deliberately
 degrade a dangling pointer to the index root, so trusting the mtime there would
 report "current at startup" over a directory holding nothing.
 
-**The watcher thread starts before this reconciliation runs, not after.** A
+**The built-in watcher establishes detection before reconciliation runs.**
+Polling signals readiness after its baseline scan; native watching signals after
+listener startup, including a fallback to polling. Startup waits up to 30 seconds
+for readiness and reports an error if detection cannot start. Callbacks enqueue
+live events immediately, while extraction waits until startup obligations are
+established. A
 file saved while catch-up's own extraction is still in flight (which can take
 minutes on a storm-triggered full run) used to be lost twice: no watcher
 existed yet to see it, and the polling watcher takes its baseline snapshot
@@ -687,6 +714,14 @@ daemon = Woods::Watch::Daemon.new(output_dir: Rails.root.join("tmp/woods"))
 result = daemon.process(changed_paths)
 # => { action: :incremental, state: :running, generation: 42, count: 1, duration_ms: 61 }
 ```
+
+For an embedded `#run`, pass `boot_snapshot: Woods::Watch::BootSnapshot.new(root: …)`
+with the snapshot captured **before** environment initialization if the host can
+establish that boundary. Without it, startup restart inputs remain restart
+requests. Direct `#process` calls always preserve conservative restart handling.
+Injected watchers retain their existing `start`/`stop` interface; those with
+asynchronous startup can implement `ready_callback=` and call it after detection
+is established to participate in the readiness handshake.
 
 `#process` is one whole cycle and is the supported embedding point. `#run` only
 supplies batches to it.

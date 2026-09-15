@@ -409,9 +409,7 @@
     {
       "name": "woods:watch",
       "arguments": [],
-      "prerequisites": [
-        "environment"
-      ]
+      "prerequisites": []
     },
     {
       "name": "woods:watch_status",

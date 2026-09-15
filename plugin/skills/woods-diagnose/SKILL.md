@@ -23,6 +23,16 @@ bundle exec rails runner 'Rails.application.eager_load!; puts "eager load ok"'
 
 Use the application's normal Docker command and environment variables when applicable. Fix boot/eager-load failures before Woods.
 
+### Watch repeatedly exits 75
+
+Check the installed version's watch guide. Older releases, including
+`2.0.0.beta2`, can rediscover the same restart-trigger paths on every boot. Stop
+the supervisor, run one successful full extraction, then restart the standalone
+watch task. Do not assume automatic startup reconciliation exists in that release.
+For versions documenting environment-boot snapshots, confirm that the command is
+`bundle exec rake woods:watch`, with no preceding `environment` task, and check
+whether boot inputs keep changing during initialization or catch-up.
+
 ## 2. Check the published index
 
 ```bash
