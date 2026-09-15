@@ -109,6 +109,20 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
       end
     end
 
+    it 'refuses deletion under a trusted foreign daemon (#321)' do
+      Dir.mktmpdir('woods_clean') do |dir|
+        populate(dir)
+        require 'woods/watch/status'
+        Woods::Watch::Status.new(output_dir: dir).write(state: :running, host: 'another-container')
+        allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
+
+        expect { expect(Object.new.send(:woods_clean_index, dir, wait: 0)).to eq(:refused) }
+          .to output(/refusing to delete/).to_stderr
+        expect(File).to exist(File.join(dir, 'manifest.json'))
+      end
+    end
+
     it 'honours WOODS_IGNORE_WATCH=1 over a live daemon, same as woods:incremental' do
       Dir.mktmpdir('woods_clean') do |parent|
         dir = File.join(parent, 'woods')

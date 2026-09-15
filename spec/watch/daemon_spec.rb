@@ -1021,6 +1021,17 @@ RSpec.describe Woods::Watch::Daemon do
   # both existing, doubling the extraction work and making one status file
   # answer for two processes.
   describe 'a second daemon on one index' do
+    it 'stands down for a trusted foreign daemon even when its pid equals this process (#321)' do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
+      status = Woods::Watch::Status.new(output_dir: output_dir)
+      status.write(state: :running, host: 'another-container', pid: Process.pid)
+      original_bytes = File.binread(status.path)
+
+      expect(build.run).to eq(:already_running)
+      expect(File.binread(status.path)).to eq(original_bytes)
+    end
+
     it 'stands down when another live daemon holds the index' do
       allow_any_instance_of(Woods::Watch::Status).to receive(:alive?).and_return(true)
       allow_any_instance_of(Woods::Watch::Status)

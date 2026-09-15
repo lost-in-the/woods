@@ -42,6 +42,15 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+A host reader can report a container daemon dead because foreign-host records
+are rejected by default. Foreign heartbeat trust (#321) is unreleased: first
+check the installed Woods version and that version's release notes. Only for a
+supporting version, offer `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in every relevant
+task/MCP reader and follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness).
+Fresh `degraded` still means incremental work is needed; a fresh `running`
+record can outlive a crashed foreign daemon by up to 15 minutes. Older versions
+need their status check run in the daemon's own container.
+
 If a one-shot extraction raises `Could not publish generation`, the candidate
 payload was written but never made visible; readers still serve the previous
 complete generation. Fix the named filesystem, permission, space, or mount

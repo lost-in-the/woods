@@ -31,6 +31,7 @@ Ctrl-C to stop.
 | `WOODS_WATCH_POLL` | unset | `1` forces the polling backend, set this inside a container watching a bind mount |
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset | Seconds of quiet after which a dormant daemon exits |
 | `WOODS_WATCH_CATCH_UP` | `1` | `0` skips the startup reconciliation |
+| `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset | `1` lets a reader trust a fresh foreign-host heartbeat without checking its pid locally; see [cross-host liveness](#cross-host-liveness) |
 
 Run it under a supervisor. When boot-captured configuration changes the daemon
 exits `75` (`EX_TEMPFAIL`) on purpose, see [Restart triggers](#restart-triggers).
@@ -212,7 +213,7 @@ supplies the trigger.
 This is what makes the documented hook pattern safe:
 
 ```bash
-bundle exec rake woods:watch_status || start_the_daemon
+bundle exec rake woods:watch_status || start_the_daemon # same host; see cross-host liveness below
 bundle exec rake woods:incremental   # stands down, the daemon has these
 ```
 
@@ -561,7 +562,7 @@ and a hook-triggered `woods:incremental`. They share the existing file-based
 A hook can check cheaply:
 
 ```bash
-bundle exec rake woods:watch_status || start_the_daemon   # exit 0 = alive
+bundle exec rake woods:watch_status || start_the_daemon   # same host, exit 0 = alive
 ```
 
 The check does not boot Rails. Without `WOODS_OUTPUT`, it resolves
@@ -570,18 +571,42 @@ launcher's current directory, so `rake -f /app/Rakefile woods:watch_status`
 and worktree-manager invocations inspect the same per-app status. Set
 `WOODS_OUTPUT` when the daemon uses a non-default index directory.
 
-Liveness needs three things to agree, each ruling out a different way the
-status file lies: a state a live daemon writes, a pid that still exists (a
-`kill -9` leaves the file behind), and a recent timestamp (a machine that lost
-power leaves a `running` record whose pid some unrelated process now owns).
+### Cross-host liveness
 
-One known limit: the pid check sees only the caller's own pid namespace. In the
-Docker layout, daemon in the container, output volume-mounted to the host, a
-host-side `watch_status` tests a host pid that has nothing to do with the
-containerized daemon, so it can misread liveness in either direction for up to
-`STALE_AFTER` (the timestamp check still bounds it, and the heartbeat keeps a
-live daemon inside that bound). Run `watch_status` on the same side as the
-daemon; a cross-namespace liveness protocol isn't worth its complexity here.
+By default, a reader trusts only a same-host record: a `running` or `degraded`
+state, a positive pid that still exists, and a recent ISO8601 timestamp. Foreign
+hostnames are rejected because a container pid cannot be checked on the host.
+
+For a daemon and reader sharing the same index through a bind mount, opt in in
+each reader's environment:
+
+```bash
+export WOODS_WATCH_TRUST_FOREIGN_HOST=1
+bundle exec rake woods:watch_status || start_the_daemon
+```
+
+Set the variable inside one-off containers running `woods:incremental`, and in
+the host MCP process when it reports `woods_status`. Docker does not forward a
+host environment variable automatically: pass `-e WOODS_WATCH_TRUST_FOREIGN_HOST=1`
+to `docker compose run` or `docker compose exec`, or configure that service's
+environment. Use the same shared index (`WOODS_OUTPUT` when needed) in each process.
+
+Opted-in readers accept foreign `running` and `degraded` records on heartbeat
+freshness, without any local pid lookup. Heartbeats run every five minutes; a
+crashed foreign daemon can still be believed for up to 15 minutes after its last
+heartbeat. Missing or malformed timestamps and timestamps more than 30 seconds
+in the future are rejected. Keep the participating clocks synchronized.
+
+`degraded` means alive but unable to update: `watch_status` exits 0, incremental
+still attempts extraction, and clean refuses. `WOODS_IGNORE_WATCH=1` still
+overrides writer stand-down and clean protection. It does not alter the status
+report. Direct Ruby callers can override the environment with
+`Status#alive?(trust_foreign_host: true)` or `false`.
+
+This is liveness evidence for an established daemon, not a cross-container
+startup lease. Simultaneous starts in foreign namespaces still need one
+supervisor to coordinate ownership. Hostnames are also imperfect identity:
+custom or reused identical container hostnames retain the local-pid limitation.
 
 ### Hooks for agent sessions
 

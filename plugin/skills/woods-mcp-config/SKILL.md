@@ -51,6 +51,12 @@ Use a host-side bundle only after verifying Ruby, the application bundle, and th
 
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
 
+For host MCP reading a container daemon's shared index, foreign heartbeat trust
+(#321) is unreleased. Verify the installed gem version's release notes before
+offering `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in the MCP environment. It makes
+`woods_status.watch.alive` use the same bounded freshness policy as task readers;
+see [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness).
+
 ## Shape 2: Index plus authorized Console
 
 After explicit authorization, enable the live-data master switch in the Rails initializer. The process exits while it remains false:
