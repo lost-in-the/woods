@@ -441,10 +441,47 @@ measurements. Do not infer that all unaccounted time is boot.
 Both full and incremental runs currently seed the prior payload. Cloning uses
 per-file hardlinks (or copies where links are unsupported); updated files are
 replaced atomically, preserving previous generations. Full-run carry-forward
-and generation retention remain unchanged. A faster Ruby traversal reduces
-seed overhead, but it does not remove filesystem work per file. Compare
-repeated runs on the actual index filesystem before attributing latency to
-extraction or changing the index layout.
+and generation retention remain unchanged. The seed walker classifies each entry
+once, avoiding duplicate file metadata lookups; it still links each file
+separately. Generation directories remain independent, so pruning an old generation cannot remove a newer one's files.
+Compare repeated runs on the actual index filesystem before attributing latency
+to extraction or changing the index layout.
+
+For a repeatable component comparison from a source checkout:
+
+```bash
+# BENCH_ROOT is an existing scratch parent on the index filesystem.
+# The script creates and removes only its own temporary directory there.
+BENCH_ROOT=/path/on/index/filesystem WOODS_SOURCE=/path/to/baseline \
+  ruby bench/payload_seed.rb
+BENCH_ROOT=/path/on/index/filesystem WOODS_SOURCE=/path/to/candidate \
+  ruby bench/payload_seed.rb
+```
+
+The benchmark clones 8,335 synthetic 2 KiB files across 35 directories, checks
+file counts and bytes outside timing, and reports seven samples plus medians.
+This measures the seed component only; it does not boot Rails or establish an
+end-to-end host improvement. Filesystem metadata latency and the copy fallback
+can dominate differently from local hardlink results. A first full extraction
+has no previous payload, so include a repeated full run when measuring seed cost.
+Full seeding also preserves on-demand framework units when framework extraction
+is disabled, and non-JSON files in existing type directories; dropping the seed
+wholesale would change that behavior.
+
+### Choosing full versus incremental for CI
+
+Measure repeated full and representative-day incremental runs with
+`WOODS_PROFILE=1` on the same resulting application tree, configuration and index
+filesystem. Restore the same baseline index before each incremental trial;
+otherwise a second trial may be a no-op. Include Rails boot in both wall times
+when comparing separate task invocations, and compare resident watcher cycles
+separately. Validate each resulting index with `woods:validate`.
+
+Use full extraction for that workload when its median wall time is no greater
+than the representative incremental run. There is no universal changed-file
+threshold: shared dependencies and whole-app extractor triggers change the work
+per file. Re-measure after substantial application or Woods changes. A fast leaf
+edit does not establish that a day of commits is below the crossover.
 
 ## Boundaries and open work
 
