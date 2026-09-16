@@ -677,6 +677,42 @@ WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
 
 The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 
+## Git enrichment history
+
+Current source requires **Git 2.31 or newer** for optional per-unit git
+metadata. Extraction still succeeds when git is unavailable or history cannot
+be read completely. Git enrichment is omitted in either case; a failed or
+incomplete streamed history read logs a warning.
+This requirement and the history policy below are unreleased after 2.0.0.beta2.
+
+Full and incremental extraction use one streamed `HEAD` history walk, restricted
+to the last 365 days by git's `--since` traversal. Only requested app-owned paths
+are retained. Commit counts and contributors describe **HEAD-reachable touched-path
+events**, independent of which other paths are requested:
+
+- A root commit compares with an empty tree; a normal commit compares with its parent.
+- A merge compares with its first parent, while traversal still visits all parents.
+  A normal merge can therefore count both a side commit and the merge that introduces
+  its change. An `ours` merge touches no paths itself, but its side commits remain
+  reachable and count. A conflict-resolution merge counts when its result differs
+  from the first parent.
+- Renames are deletion/addition events at exact current names; Woods never follows
+  previous names. Unmerged branches, remote-only refs, and checkpoint refs are excluded.
+- `change_frequency` uses total events and events newer than 90 days. Contributors
+  and recent commits retain their existing top-five limit; recent commits and
+  `last_modified` follow git's traversal order, not a separate global timestamp sort.
+
+**Compatibility:** merge-related counts, authors, recent commits, and derived
+churn analysis can differ from the old 500-path batches, which used git's
+pathspec history simplification. This is an intentional semantics change.
+Run a full extraction after upgrading to replace retained incremental metadata
+consistently. No configuration key enables the new policy; rollback uses the
+previous gem plus a full extraction. Shallow checkouts still provide truncated
+history; fetch the complete history for complete 365-day evidence.
+
+The single walk removes repeated pathspec matching. Its end-to-end speedup on
+the original #305 host has not yet been measured.
+
 ## Database compatibility
 
 All storage options work with both MySQL and PostgreSQL, except:

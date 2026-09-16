@@ -209,6 +209,23 @@ Loading an already damaged graph does not restore discarded entries. See the
 
 ---
 
+### Git enrichment warns that history could not be read completely
+
+Current source uses an explicit merge-diff mode requiring **Git 2.31 or newer**.
+This is unreleased after 2.0.0.beta2: first confirm the installed Woods version.
+Check `git --version` inside the same container/process environment as extraction,
+and upgrade git if it is older. On a supported version, check that the application's
+`HEAD` and object store can be read using the same `WOODS_GIT_DIR` setting.
+
+A failed or incomplete history stream is discarded as a whole; extraction continues
+without that enrichment, rather than publishing partial or zero-count history.
+Previously retained incremental units can still carry older metadata. After fixing
+git, run a full extraction to refresh every unit. See the
+[history contract](CONFIGURATION_REFERENCE.md#git-enrichment-history) for merge
+counting and upgrade compatibility.
+
+---
+
 ### Every unit reports `commit_count: 0` and `change_frequency: "new"`
 
 **Symptom:** Not a few units, all of them, in an application whose files clearly

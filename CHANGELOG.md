@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Read per-unit git enrichment in one streamed HEAD history walk instead of
+  repeated 500-path batches (B-195, #305). Merge commits compare with their first
+  parent while all HEAD ancestry is visited; counts can change from legacy
+  pathspec simplification. Optional enrichment now requires Git 2.31 or newer;
+  incomplete/failed history is omitted with a warning. Run full extraction
+  after upgrading to refresh retained metadata. Host speedup remains unmeasured.
+
 - Apply the same app-owned path exclusions to full and incremental git enrichment;
   external, vendored, and node_modules units no longer gain empty git metadata (B-194).
 

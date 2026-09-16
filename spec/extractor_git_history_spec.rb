@@ -101,6 +101,26 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     expect(metadata[:recent_commits].map { |entry| entry[:message] }).to include('checkpoint commit')
   end
 
+  it 'counts reachable side history through an ours merge independently of requested paths' do
+    git('merge', '-s', 'ours', '--no-ff', '-qm', 'discard side tree', 'unmerged')
+
+    expect(metadata[:commit_count]).to eq(2)
+    expect(metadata[:recent_commits].map { |entry| entry[:message] })
+      .to contain_exactly('main commit', 'checkpoint commit')
+    expect(extractor.send(:batch_git_data, [path, root.join('other.rb').to_s]).fetch('sample.rb')).to eq(metadata)
+  end
+
+  it 'preserves literal filenames and subject delimiters in published metadata' do
+    strange = root.join("__COMMIT__tab\tline\n.rb").to_s
+    File.write(strange, 'literal')
+    git('add', '--', strange)
+    git('commit', '-qm', 'subject ||| untouched')
+
+    data = extractor.send(:batch_git_data, [strange]).fetch(File.basename(strange))
+    expect(data[:commit_count]).to eq(1)
+    expect(data[:recent_commits].first[:message]).to eq('subject ||| untouched')
+  end
+
   it 'uses detached HEAD without following other refs' do
     git('checkout', '--detach', '-q', 'main')
 

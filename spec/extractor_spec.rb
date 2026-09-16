@@ -649,56 +649,31 @@ RSpec.describe Woods::Extractor do
       expect(extractor.send(:batch_git_data, [])).to eq({})
     end
 
-    it 'batches paths in slices of 500 to avoid ARG_MAX' do
-      require 'active_support'
-      require 'active_support/core_ext/numeric/time'
-
-      file_paths = (1..1100).map { |i| File.join(tmpdir, "file_#{i}.rb") }
-
-      allow(extractor).to receive(:parse_git_log_output)
-      allow(extractor).to receive(:build_file_metadata).and_return({})
-
-      # Stub Time.current to return a time that supports ActiveSupport duration arithmetic
-      fake_now = Time.new(2024, 1, 1, 0, 0, 0, '+00:00')
-      allow(Time).to receive(:current).and_return(fake_now)
-
-      # run_git should be called once per slice: ceil(1100 / 500) = 3 (500, 500, 100)
-      expect(extractor).to receive(:run_git).exactly(3).times.and_return('')
-
-      extractor.send(:batch_git_data, file_paths)
-    end
-
-    # P9d. Many units share one file_path, so the collected file_paths sent
-    # to batch_git_data carried duplicates and each 500-path pathspec batch
-    # repeated paths other batches also sent. The result is keyed by
-    # relative path, so deduplicating is invisible to the output; the
-    # slice count below fails on the pre-fix shape (2200 entries).
-    it 'deduplicates repeated file paths before slicing' do
-      require 'active_support'
-      require 'active_support/core_ext/numeric/time'
-
-      file_paths = (1..1100).flat_map { |i| [File.join(tmpdir, "file_#{i}.rb")] * 2 }
-
-      allow(extractor).to receive(:parse_git_log_output)
-      allow(extractor).to receive(:build_file_metadata).and_return({})
-
-      fake_now = Time.new(2024, 1, 1, 0, 0, 0, '+00:00')
-      allow(Time).to receive(:current).and_return(fake_now)
-
-      expect(extractor).to receive(:run_git).exactly(3).times.and_return('')
+    it 'deduplicates paths and requests one history walk even above the old 500-path batch size' do
+      require 'active_support/all'
+      relative_paths = (1..1100).map { |i| "file_#{i}.rb" }
+      file_paths = relative_paths.flat_map { |path| [File.join(tmpdir, path)] * 2 }
+      reader = instance_double(Woods::GitHistory)
+      allow(Woods::GitHistory).to receive(:new).and_return(reader)
+      expect(reader).to receive(:read).once.with(relative_paths, recent_after: kind_of(Time))
+                                      .and_return(relative_paths.to_h { |path| [path, {}] })
 
       result = extractor.send(:batch_git_data, file_paths)
       expect(result.size).to eq(1100)
+    end
+
+    it 'omits all metadata when the history reader fails' do
+      reader = instance_double(Woods::GitHistory, read: nil)
+      allow(Woods::GitHistory).to receive(:new).and_return(reader)
+      expect(extractor.send(:batch_git_data, [File.join(tmpdir, 'file.rb')])).to eq({})
     end
   end
 
   describe '#enrich_with_git_data' do
     it 'sends only app-owned paths under Rails.root to git' do
       # A gem-owned unit (an engine model) carries its real absolute path,
-      # outside the repository. git rejects the whole `log` invocation when any
-      # pathspec is outside the repository, and batch_git_data sends 500 paths
-      # per invocation, so one gem path would erase the git metadata of 499
-      # app units.
+      # outside the repository. Its history is not app-owned and must not
+      # acquire an empty metadata hash during enrichment.
       require 'woods'
       app_path = File.join(tmpdir, 'app', 'models', 'post.rb')
       FileUtils.mkdir_p(File.dirname(app_path))
@@ -709,7 +684,7 @@ RSpec.describe Woods::Extractor do
 
       # A bundle vendored INSIDE Rails.root (BUNDLE_PATH=vendor/bundle) puts gem
       # paths under the root prefix; they are gitignored, so sending them is
-      # wasted pathspec work per batch. Same exclusion app_source? applies.
+      # unnecessary history lookups. Same exclusion app_source? applies.
       vendored_path = File.join(tmpdir, 'vendor', 'bundle', 'ruby', 'gems', 'engine-1.0', 'app', 'models', 'blob.rb')
       FileUtils.mkdir_p(File.dirname(vendored_path))
       FileUtils.touch(vendored_path)
