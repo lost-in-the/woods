@@ -48,6 +48,56 @@ RSpec.describe Woods::Extractors::PackageExtractor do
       expect(units.map(&:identifier).sort).to eq(['.', 'packs/accounts', 'packs/billing'])
     end
 
+    it 'does not traverse excluded top-level trees during default discovery' do
+      %w[bin node_modules script tmp vendor].each do |name|
+        write_package("#{name}/snapshots/deep", "dependencies: []\n")
+      end
+      scanned = []
+      allow(Dir).to receive(:glob).and_wrap_original do |original, pattern, **options|
+        scanned << [pattern, options[:base]]
+        original.call(pattern, **options)
+      end
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['.', 'packs/accounts', 'packs/billing'])
+      expect(scanned).not_to include([File.join(tmp_dir, '**', 'package.yml'), nil])
+      recursive_roots = scanned.filter_map { |pattern, base| base.to_s if pattern.include?('**') }
+      expect(recursive_roots).to eq([File.join(tmp_dir, 'packs')])
+    end
+
+    it 'preserves root, nested, hidden, symlink and literal directory-name discovery' do
+      write_package('packs/billing/nested', "dependencies: []\n")
+      write_package('packs/tmp/kept', "dependencies: []\n")
+      write_package('.hidden', "dependencies: []\n")
+      write_package('packs/.hidden', "dependencies: []\n")
+      write_package('literal[dir]', "dependencies: []\n")
+      File.symlink(File.join(tmp_dir, 'packs'), File.join(tmp_dir, 'linked'))
+      File.symlink(File.join(tmp_dir, 'packs/accounts'), File.join(tmp_dir, 'packs/linked'))
+      expected = Dir.glob(File.join(tmp_dir, '**', 'package.yml')).reject do |path|
+        path.start_with?(File.join(tmp_dir, 'node_modules/'))
+      end
+
+      expect(described_class.new.extract_all.map(&:file_path)).to eq(expected.sort)
+    end
+
+    it 'does not prune defaults when only the exclusions are overridden' do
+      create_file('packwerk.yml', { 'exclude' => [] }.to_yaml)
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(
+        ['node_modules/some-lib', '.', 'packs/accounts', 'packs/billing']
+      )
+    end
+
+    it 'retains custom exclusions and explicit hidden or symlink package paths' do
+      write_package('.hidden', "dependencies: []\n")
+      File.symlink(File.join(tmp_dir, 'packs/accounts'), File.join(tmp_dir, 'linked'))
+      create_file('packwerk.yml', { 'package_paths' => ['**/', '.hidden', 'linked', 'packs/*'],
+                                    'exclude' => [] }.to_yaml)
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(
+        ['.hidden', 'linked', 'node_modules/some-lib', '.', 'packs/accounts', 'packs/billing']
+      )
+    end
+
     it 'records the package fields and a package_dependency edge per declared dependency' do
       billing = described_class.new.extract_all.find { |u| u.identifier == 'packs/billing' }
 

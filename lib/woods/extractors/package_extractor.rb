@@ -103,11 +103,28 @@ module Woods
         @package_files ||= begin
           patterns = Array(@packwerk['package_paths'] || DEFAULT_PACKAGE_PATHS)
           excludes = Array(@packwerk['exclude'] || DEFAULT_EXCLUDE)
-          found = patterns.flat_map do |pattern|
-            Dir.glob(@rails_root.join(pattern.to_s, PACKAGE_FILE).to_s)
-          end
+          found = if patterns == DEFAULT_PACKAGE_PATHS && excludes == DEFAULT_EXCLUDE
+                    default_package_files
+                  else
+                    patterns.flat_map { |pattern| Dir.glob(@rails_root.join(pattern.to_s, PACKAGE_FILE).to_s) }
+                  end
           found.uniq.reject { |path| excluded?(relativize(path), excludes) }.sort
         end
+      end
+
+      # Prune only the known default top-level exclusions before recursion.
+      # Recursive glob does not descend through symlink directories; keep that
+      # behavior when turning top-level entries into separate glob roots.
+      def default_package_files
+        found = Dir.glob(PACKAGE_FILE, base: @rails_root).map { |name| @rails_root.join(name).to_s }
+        Dir.glob('*', base: @rails_root).each do |name|
+          directory = @rails_root.join(name)
+          next unless directory.directory? && !directory.symlink?
+          next if excluded?("#{name}/#{PACKAGE_FILE}", DEFAULT_EXCLUDE)
+
+          found.concat(Dir.glob("**/#{PACKAGE_FILE}", base: directory).map { |path| directory.join(path).to_s })
+        end
+        found
       end
 
       def excluded?(relative, excludes)

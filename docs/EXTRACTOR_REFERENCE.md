@@ -469,6 +469,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Identifier is the package directory relative to `Rails.root` (`.` for the root package), the same name Packwerk uses
 - Honors `packwerk.yml` `package_paths` and `exclude`; without one, `**/` with the Packwerk default excludes (`bin`, `node_modules`, `script`, `tmp`, `vendor`)
+- With those exact defaults, excluded top-level directories are pruned before discovery descends into them, so an index or snapshots under `tmp/` do not add package-scan work. Custom patterns or exclusions retain their configured glob behavior. Hidden directories and symlink directories are not recursively followed by default.
 - `metadata`: `name`, `dependencies` (sorted), `enforce_dependencies` (`true`, `false`, or `"strict"`), `enforce_privacy`, `layer` (pks), `public_path`, `owner`
 - Each declared dependency becomes a `{ type: :package, target: <name>, via: :package_dependency }` edge
 - Package membership on other units (`metadata[:package]`, below) does not depend on how a unit was discovered: any registered unit with a file path under a package root is annotated. The undeclared cross-package edge report remains a follow-up, not this extractor. Discovery is the separate open gap: a pack-resident file-based unit is not yet found by `PathDispatcher` when only its `package.yml` changes (follow-up B-175), so it carries no membership only because it has no unit at all yet, not because membership skips it
