@@ -42,6 +42,12 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+If external targets such as `http_api` lose dependents after incremental
+extraction, check whether the installed Woods version includes B-193.
+The fix is unreleased; installing this plugin does not upgrade the gem.
+Affected indexes need one full extraction after upgrading to a fixed version.
+Follow the [recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#external-dependency-targets-lose-dependents-after-incremental-extraction).
+
 For a custom shell/Python reader or upload gate, check its installed-version
 assumptions against the [filesystem layout contract](https://github.com/lost-in-the/woods/blob/main/docs/INDEX_LAYOUT.md).
 Resolve the pointer once and pin the manifest during a complete read/copy; never

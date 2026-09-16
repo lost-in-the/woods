@@ -178,6 +178,20 @@ bundle exec rake woods:extract
 
 ---
 
+### External dependency targets lose dependents after incremental extraction
+
+**Symptom:** An external target such as `http_api` loses previously indexed
+dependents after an incremental run.
+
+**Cause:** Versions affected by B-193 can split symbolic and string target
+identities when restoring and updating the graph.
+
+**Fix:** Check whether the installed version includes B-193; this fix is
+unreleased. After upgrading to a version containing the fix, run
+`bundle exec rake woods:extract` once to rebuild lost reverse dependencies.
+Loading an already damaged graph does not restore discarded entries. See the
+[incremental graph contract](INCREMENTAL_EXTRACTION.md#the-contract).
+
 ### Git metadata is missing or shows zeros
 
 **Symptom:** Units have `last_modified_at: null` or `change_frequency: 0` in the JSON output.

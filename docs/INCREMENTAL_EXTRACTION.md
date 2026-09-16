@@ -34,6 +34,14 @@ exactly. Tolerating the ordering there meant the harness, the only test that
 compares a full run against an incremental one, could not see the very
 dependence the analyzer's determinism work existed to remove.
 
+Graph targets use string identifiers even when an extractor emits a symbolic
+external target such as `:http_api`. Full and incremental runs retain every
+reverse dependency across JSON restoration and re-registration, including
+contributions from units sharing an identifier under different types. Unit
+dependency metadata retains its extractor-provided values. If an older version
+already lost reverse dependencies on these targets, run a full extraction once
+to restore them; loading the damaged graph cannot recover discarded entries.
+
 This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
 forward run over run instead of being erased by the next full rebuild.

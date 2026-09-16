@@ -518,6 +518,30 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'symbolic external dependency targets' do
+    it 'retains untouched HTTP dependents when another service is re-extracted' do
+      %w[FirstHttpService SecondHttpService].each do |name|
+        write_file("app/services/#{name.underscore}.rb", <<~RUBY)
+          class #{name}
+            def call
+              Net::HTTP.get(URI('https://example.test'))
+            end
+          end
+        RUBY
+      end
+
+      index_dir = run_sequence([
+                                 lambda {
+                                   relative = 'app/services/first_http_service.rb'
+                                   write_file(relative, "#{File.read(app_path(relative))}# changed\n")
+                                 }
+                               ])
+
+      reverse = read_json(index_dir, 'dependency_graph.json').fetch('reverse')
+      expect(reverse.fetch('http_api')).to include('FirstHttpService', 'SecondHttpService')
+    end
+  end
+
   describe 'class-based additions' do
     it 'indexes a service class the file dispatcher and the descendant scan both see' do
       # The reconciliation path keys on live descendants, so the class has to

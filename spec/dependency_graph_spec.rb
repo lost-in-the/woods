@@ -25,6 +25,62 @@ RSpec.describe Woods::DependencyGraph do
     unit
   end
 
+  describe 'external dependency identity across incremental restoration' do
+    let(:first) do
+      make_unit(type: :service, identifier: 'First', dependencies: [{ target: :http_api, via: :code_reference }])
+    end
+    let(:second) do
+      make_unit(type: :service, identifier: 'Second', dependencies: [{ target: :http_api, via: 'code_reference' }])
+    end
+
+    it 'keeps every dependent after JSON restoration and re-registration without changing unit metadata' do
+      [first, second].each { |unit| graph.register(unit) }
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+      restored.register(first)
+
+      expect(restored.to_h[:reverse]).to eq('http_api' => %w[First Second])
+      expect(restored.dependents_of('http_api', via: :code_reference)).to contain_exactly('First', 'Second')
+      expect(graph.dependencies_of('Second', via: :code_reference)).to eq(['http_api'])
+      expect(restored.to_h).to eq(graph.to_h)
+      expect(first.dependencies).to eq([{ target: :http_api, via: :code_reference }])
+      expect(second.dependencies).to eq([{ target: :http_api, via: 'code_reference' }])
+    end
+
+    it 'normalizes symbolic forward targets in a legacy in-memory graph on restoration' do
+      restored = described_class.from_h(
+        edges: { 'First' => [{ target: :http_api, via: 'code_reference' }] },
+        reverse: { http_api: ['First'] }
+      )
+
+      expect(restored.dependencies_of('First', via: :code_reference)).to eq(['http_api'])
+      expect(restored.dependents_of('http_api', via: :code_reference)).to eq(['First'])
+      restored.unregister('First')
+      expect(restored.dependents_of('http_api')).to be_empty
+      expect(restored.dependents_of('http_api', via: :code_reference)).to be_empty
+    end
+
+    it 'preserves a colliding type contribution until the final type is removed' do
+      graph.register(first)
+      graph.register(make_unit(type: :job, identifier: 'First',
+                               dependencies: [{ target: 'http_api', via: 'code_reference' }]))
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+      restored.register(first)
+      restored.remove('First', type: :service)
+
+      expect(restored.dependents_of('http_api', via: :code_reference)).to eq(['First'])
+      expect(restored.dependents_detail('http_api')).to eq([{ type: :job, identifier: 'First' }])
+      restored.remove('First', type: :job)
+      expect(restored.to_h[:reverse]).to be_empty
+      expect(restored.dependents_of('http_api', via: :code_reference)).to be_empty
+    end
+
+    it 'merges symbol and string reverse keys when restoring an in-memory hash' do
+      restored = described_class.from_h(reverse: { http_api: ['First'], 'http_api' => ['Second'] })
+
+      expect(restored.to_h[:reverse]).to eq('http_api' => %w[First Second])
+    end
+  end
+
   describe '#register' do
     it 'adds a node to the graph' do
       graph.register(make_unit(type: :model, identifier: 'User'))
