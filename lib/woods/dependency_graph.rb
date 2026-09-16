@@ -80,14 +80,14 @@ module Woods
       }.merge(node_attributes_from(unit))
 
       (@edges[unit.identifier] ||= {})[unit.type] =
-        unit.dependencies.map { |d| { target: d[:target], via: d[:via] }.merge(self.class.edge_attributes(d)) }
+        self.class.normalize_edges(unit.dependencies, strict: true)
       (@file_map[unit.file_path] ||= Set.new).add(unit.identifier) if unit.file_path
 
       # Type index for filtering (Set-based for O(1) insert)
       (@type_index[unit.type] ||= Set.new).add(unit.identifier)
 
       # Build reverse edges (Set-based for O(1) insert)
-      unit.dependencies.each do |dep|
+      @edges[unit.identifier][unit.type].each do |dep|
         (@reverse[dep[:target]] ||= Set.new).add(unit.identifier)
         (@reverse_via[[dep[:target], dep[:via]]] ||= Set.new).add(unit.identifier)
       end
@@ -1032,7 +1032,10 @@ module Woods
       graph.instance_variable_set(:@edges, edges)
 
       raw_reverse = data[:reverse] || data['reverse'] || {}
-      graph.instance_variable_set(:@reverse, raw_reverse.transform_values { |v| v.is_a?(Set) ? v : Set.new(v) })
+      reverse = raw_reverse.each_with_object({}) do |(target, sources), index|
+        (index[target.to_s] ||= Set.new).merge(sources)
+      end
+      graph.instance_variable_set(:@reverse, reverse)
 
       raw_file_map = data[:file_map] || data['file_map'] || {}
       graph.instance_variable_set(:@file_map, absolutize_file_map(normalize_file_map(raw_file_map), root))
@@ -1126,7 +1129,12 @@ module Woods
       }.merge(persisted_node_attributes(node))
     end
 
-    # Normalize edge data from either old format (bare strings) or new format (hashes).
+    # Normalize fresh dependencies and persisted edges to the same identity:
+    # string targets and symbol relationship labels. Extractors may emit
+    # symbolic external targets (such as :http_api); retaining those symbols
+    # after a JSON-loaded baseline splits reverse indexes on re-registration.
+    # Unit dependency metadata stays unchanged; only graph records normalize.
+    # Also accepts the old bare-string edge format.
     #
     # ROUND-TRIP INVARIANT (do not break when refactoring):
     #   DependencyGraph#to_h -> JSON.generate -> JSON.parse -> DependencyGraph.from_h
@@ -1147,15 +1155,20 @@ module Woods
     # explicit data conversion.
     #
     # @param edges [Array] Edge entries — either strings or hashes
+    # @param strict [Boolean] require hashes for fresh units; legacy loads stay tolerant
     # @return [Array<Hash>] Normalized edges with :target and :via keys
-    def self.normalize_edges(edges)
+    def self.normalize_edges(edges, strict: false)
+      raise ArgumentError, 'Fresh graph dependencies must be an array' if strict && !edges.is_a?(Array)
+
       return [] unless edges.is_a?(Array)
 
       edges.map do |edge|
+        raise ArgumentError, 'Fresh graph dependencies must be hashes' if strict && !edge.is_a?(Hash)
+
         if edge.is_a?(String)
           { target: edge, via: nil }
         elsif edge.is_a?(Hash)
-          { target: edge[:target] || edge['target'], via: (edge[:via] || edge['via'])&.to_sym }
+          { target: (edge[:target] || edge['target'])&.to_s, via: (edge[:via] || edge['via'])&.to_sym }
             .merge(edge_attributes(edge))
         else
           { target: edge.to_s, via: nil }

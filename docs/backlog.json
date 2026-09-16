@@ -2675,5 +2675,17 @@
     ],
     "description": "The #305 host audit found that incremental extraction adds empty git metadata to gem-owned units that full extraction excludes. Reuse git_enrichable_path? for incremental batching so external, vendor, node_modules, missing paths and framework/gem source units are omitted consistently. Preserve per-type file history when identifiers collide. Regression exercises full and incremental enrichment against a real repository.",
     "status": "resolved"
+  },
+  {
+    "id": "B-193",
+    "title": "Preserve symbolic external dependency reverse edges across incremental runs",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/dependency_graph.rb"
+    ],
+    "description": "The #305 host audit found reverse[http_api] losing untouched dependents after incremental extraction. Fresh symbolic targets and JSON-restored string targets split the reverse index and serialize as duplicate keys. Normalize graph target and relationship identity consistently on registration/restoration, without changing ExtractedUnit metadata; preserve typed collision contributions and removals. Validate JSON-roundtrip regression and booted full/incremental equivalence with real HTTP service dependencies.",
+    "status": "resolved"
   }
 ]
