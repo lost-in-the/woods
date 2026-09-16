@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Apply the same app-owned path exclusions to full and incremental git enrichment;
+  external, vendored, and node_modules units no longer gain empty git metadata (B-194).
+
 - Prune default excluded package directories before recursively discovering
   `package.yml`, avoiding scans of indexes and snapshots under `tmp/` (B-196, #305).
 

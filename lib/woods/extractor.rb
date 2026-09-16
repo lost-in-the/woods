@@ -3595,11 +3595,12 @@ module Woods
     def incremental_git_data(identifiers)
       return {} if identifiers.empty? || !git_available?
 
+      root = "#{Rails.root}/"
       paths = identifiers.flat_map do |identifier|
         @dependency_graph.nodes_for(identifier).filter_map do |node|
           next if %i[rails_source gem_source].include?(node[:type])
 
-          node[:file_path] if node[:file_path] && File.exist?(node[:file_path])
+          node[:file_path] if git_enrichable_path?(node[:file_path], root)
         end
       end
 
