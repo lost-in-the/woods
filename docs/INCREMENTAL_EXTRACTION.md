@@ -120,6 +120,11 @@ step before it.
    string literal, and an unrelated addition in the same batch do not.
    Idempotent when nothing was pruned.
 
+Git enrichment uses the same eligibility checks in full and incremental runs:
+existing app-owned files under `Rails.root`, excluding `vendor/`, `node_modules/`,
+and framework/gem source units. Each typed unit resolves its own file history,
+even when its identifier is shared by another type.
+
 Then the second pass: `dependents` and `metadata.git` are refreshed on every
 touched unit (the incremental equivalents of full extraction's phases 2 and 4),
 type indexes are regenerated, the graph, `graph_analysis.json` and the

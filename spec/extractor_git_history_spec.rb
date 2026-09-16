@@ -62,6 +62,38 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     expect(incremental.fetch('sample.rb')).to eq(unit.metadata[:git])
   end
 
+  it 'applies the full path exclusions to incremental git enrichment across typed collisions' do
+    external = root.parent.join("#{root.basename}-external.rb")
+    paths = [root.join('vendor/bundle/gem.rb'), root.join('node_modules/package.js'), external]
+    paths.each do |excluded|
+      FileUtils.mkdir_p(excluded.dirname)
+      File.write(excluded, 'excluded')
+    end
+    units = [Woods::ExtractedUnit.new(type: :service, identifier: 'Sample', file_path: path)]
+    paths.zip(%i[model component controller]).each do |excluded, type|
+      units << Woods::ExtractedUnit.new(type: type, identifier: 'Sample', file_path: excluded.to_s)
+    end
+    units << Woods::ExtractedUnit.new(type: :job, identifier: 'Missing', file_path: root.join('missing.rb').to_s)
+    units << Woods::ExtractedUnit.new(type: :mailer, identifier: 'NoPath', file_path: nil)
+    units << Woods::ExtractedUnit.new(type: :gem_source, identifier: 'Gem', file_path: path)
+    units << Woods::ExtractedUnit.new(type: :rails_source, identifier: 'Rails', file_path: path)
+    extractor.instance_variable_set(:@results, units.group_by { |unit| described_class::TYPE_TO_EXTRACTOR_KEY.fetch(unit.type) })
+    units.each { |unit| extractor.dependency_graph.register(unit) }
+
+    extractor.send(:enrich_with_git_data)
+    incremental = extractor.send(:incremental_git_data, units.map(&:identifier).uniq)
+
+    expect(incremental.keys).to eq(['sample.rb'])
+    expect(incremental.fetch('sample.rb')).to eq(units.first.metadata.fetch(:git))
+    expect(units.drop(1).map { |unit| unit.metadata[:git] }).to all(be_nil)
+    expect(extractor.send(:git_for_type, 'Sample', :service, incremental)).to eq(units.first.metadata[:git])
+    %i[model component controller].each do |type|
+      expect(extractor.send(:git_for_type, 'Sample', type, incremental)).to be_nil
+    end
+  ensure
+    FileUtils.rm_f(external) if external
+  end
+
   it 'includes side-branch changes after they are merged into HEAD' do
     git('merge', '--no-ff', '-qm', 'merge side', 'unmerged')
 
