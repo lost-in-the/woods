@@ -2687,5 +2687,18 @@
     ],
     "description": "The #305 host audit found reverse[http_api] losing untouched dependents after incremental extraction. Fresh symbolic targets and JSON-restored string targets split the reverse index and serialize as duplicate keys. Normalize graph target and relationship identity consistently on registration/restoration, without changing ExtractedUnit metadata; preserve typed collision contributions and removals. Validate JSON-roundtrip regression and booted full/incremental equivalence with real HTTP service dependencies.",
     "status": "resolved"
+  },
+  {
+    "id": "B-195",
+    "title": "Replace batched pathspec git enrichment with one streamed HEAD history walk",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/git_history.rb"
+    ],
+    "description": "The #305 host audit identified repeated 500-path git log walks as the largest extraction phase. Use one streamed HEAD-reachable touched-path history, explicitly comparing merges with their first parent while traversing all parents, roots with the empty tree, and exact current paths without rename following. NUL-framed records preserve arbitrary filename delimiters and commit subjects; retain per-file counts, contributors and five recent commits rather than the whole log. Git 2.31 or newer is required for optional enrichment; discard failed or incomplete history with an actionable warning. Changed merge counts versus legacy pathspec simplification are documented; original-host end-to-end speedup remains unmeasured.",
+    "status": "resolved"
   }
 ]

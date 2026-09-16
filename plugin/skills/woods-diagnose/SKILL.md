@@ -85,6 +85,14 @@ Use the installed version's tagged guide; the
 [canonical profiling guide](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#profiling-fixed-costs)
 tracks current source.
 
+For `Git enrichment omitted: history could not be read completely`, first check
+whether the installed Woods release documents the new streamed-history policy;
+it is unreleased after 2.0.0.beta2. Supporting versions require Git 2.31 or newer.
+Check `git --version` in the extraction container and repository/object-store
+access with its `WOODS_GIT_DIR` setting. A failed history stream is discarded;
+repair git access and run full extraction to refresh retained metadata. See the
+[history contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#git-enrichment-history).
+
 ## 3. Check the MCP process and path
 
 Compare the client config with the exact command, absolute `cwd`, bundle, and index path visible to that process. Run the configured executable manually to read stderr. For a host bundle:

@@ -15,6 +15,7 @@ require_relative 'extracted_unit'
 require_relative 'dependency_graph'
 require_relative 'payload_store'
 require_relative 'git_provenance'
+require_relative 'git_history'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
 require_relative 'extractors/phlex_extractor'
@@ -1893,11 +1894,9 @@ module Woods
     # Is this a path worth asking git about?
     #
     # A gem-owned unit (an engine model) carries its real path. Outside
-    # Rails.root, git refuses the whole `log` invocation when any pathspec is
-    # outside the repository — one gem path would erase the git metadata of
-    # the other 499 units in its 500-path batch. Inside Rails.root, a bundle
+    # Rails.root, it has no app repository history. Inside Rails.root, a bundle
     # vendored at `vendor/bundle` puts the same gem files under the root
-    # prefix, gitignored, so sending them is wasted pathspec work every run.
+    # prefix, gitignored, so requesting their history serves no app-owned unit.
     # Same exclusions as {Extractors::SharedUtilityMethods#app_source?}.
     #
     # @param path [String, nil] absolute file path
@@ -2082,63 +2081,19 @@ module Woods
       ''
     end
 
-    # Batch-fetch git data for all file paths in two git commands.
-    #
-    # Duplicate paths are collapsed before slicing (audit P9d): many units
-    # share one file_path, and duplicates only repeat a pathspec another
-    # batch also sent. The result is keyed by relative path, so the output
-    # is identical.
-    #
-    # @param file_paths [Array<String>] Absolute file paths
-    # @return [Hash{String => Hash}] Keyed by relative path
+    # One HEAD history walk, independent of requested-path grouping. See
+    # GitHistory for explicit merge semantics and binary record framing.
+    # @param file_paths [Array<String>] absolute file paths
+    # @return [Hash{String => Hash}] keyed by Rails.root-relative path
     def batch_git_data(file_paths)
       return {} if file_paths.empty?
 
-      root = "#{Rails.root}/"
-      relative_paths = file_paths.map { |f| f.sub(root, '') }.uniq
-      result = {}
-      relative_paths.each { |rp| result[rp] = {} }
+      relative_paths = file_paths.map { |path| normalize_file_path(path) }.uniq
+      recent_after = Time.current - 90.days
+      raw = GitHistory.new(root: Rails.root, logger: Rails.logger).read(relative_paths, recent_after: recent_after)
+      return {} unless raw
 
-      path_set = relative_paths.to_set
-      relative_paths.each_slice(500) do |batch|
-        log_output = run_git(
-          'log', 'HEAD', '--name-only',
-          '--format=__COMMIT__%H|||%an|||%cI|||%s',
-          '--since=365 days ago',
-          '--', *batch
-        )
-        parse_git_log_output(log_output, path_set, result)
-      end
-
-      ninety_days_ago = (Time.current - 90.days).iso8601
-      result.each do |relative_path, data|
-        result[relative_path] = build_file_metadata(data, ninety_days_ago)
-      end
-
-      result
-    end
-
-    # Parse git log output line-by-line, populating result with per-file commit data.
-    def parse_git_log_output(log_output, path_set, result)
-      current_commit = nil
-
-      log_output.each_line do |line|
-        line = line.strip
-        next if line.empty?
-
-        if line.start_with?('__COMMIT__')
-          parts = line.sub('__COMMIT__', '').split('|||', 4)
-          current_commit = { sha: parts[0], author: parts[1], date: parts[2], message: parts[3] }
-        elsif current_commit && path_set.include?(line)
-          entry = result[line] ||= {}
-          unless entry[:last_modified]
-            entry[:last_modified] = current_commit[:date]
-            entry[:last_author] = current_commit[:author]
-          end
-          (entry[:commits] ||= []) << current_commit
-          (entry[:contributors] ||= Hash.new(0))[current_commit[:author]] += 1
-        end
-      end
+      raw.transform_values { |data| build_file_metadata(data, recent_after.iso8601) }
     end
 
     # Classify how frequently a file changes based on commit counts.
@@ -2160,12 +2115,13 @@ module Woods
     def build_file_metadata(data, ninety_days_ago)
       all_commits = data[:commits] || []
       contributor_counts = data[:contributors] || {}
-      recent_count = all_commits.count { |c| c[:date] && c[:date] > ninety_days_ago }
+      recent_count = data.fetch(:recent_count) { all_commits.count { |c| c[:date] && c[:date] > ninety_days_ago } }
+      total_count = data.fetch(:commit_count, all_commits.size)
 
       {
         last_modified: data[:last_modified],
         last_author: data[:last_author],
-        commit_count: all_commits.size,
+        commit_count: total_count,
         contributors: contributor_counts
                       .sort_by { |_, count| -count }
                       .first(5)
@@ -2173,7 +2129,7 @@ module Woods
         recent_commits: all_commits.first(5).map do |c|
           { sha: c[:sha]&.first(8), message: c[:message], date: c[:date], author: c[:author] }
         end,
-        change_frequency: classify_change_frequency(all_commits.size, recent_count)
+        change_frequency: classify_change_frequency(total_count, recent_count)
       }
     end
 
@@ -3587,7 +3543,7 @@ module Woods
     end
 
     # Batch-fetch git metadata for the units written by this run, in a single
-    # git invocation, keyed by Rails.root-relative path the way
+    # history walk, keyed by Rails.root-relative path the way
     # {#batch_git_data} returns it.
     #
     # @param identifiers [Array<String>]
