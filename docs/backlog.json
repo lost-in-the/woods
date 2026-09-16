@@ -2651,5 +2651,17 @@
     ],
     "description": "Found during B-191 validation after PageRank importance maps became identical across Ruby versions. execute_hybrid sorts combined vector, keyword, and graph candidates by score alone before caller truncation; equal-score ordering changes across Ruby 3.0-3.2 and 3.3-4.0, altering candidate membership and per-source RRF ranks. In the unchanged Canopy corpus hybrid-2, Newsletter::DeliverJob and Newsletter::Delivery swap their leading returned positions; aggregate quality metrics remain equal, but context bytes differ. Acceptance: define deterministic candidate tie ordering before truncation and fusion, cover insertion-order and cross-source ties, replay all six Ruby lines against the original corpus and quality floors, and review context recaptures without changing labels or lowering thresholds. Keep separate runtime captures until this is resolved.",
     "status": "ready"
+  },
+  {
+    "id": "B-196",
+    "title": "Prune default excluded package directories before recursive discovery",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/package_extractor.rb"
+    ],
+    "description": "The #305 host audit found package discovery walks index payloads and snapshots under tmp before excluding them. Prune the known default top-level directories before recursive globbing, preserving root/nested package ordering, hidden and symlink behavior, and custom package_paths/exclude semantics. A regression asserts excluded trees never become recursive scan roots; synthetic scaling evidence and booted extraction validate the change without claiming a measured host speedup.",
+    "status": "resolved"
   }
 ]

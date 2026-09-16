@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Prune default excluded package directories before recursively discovering
+  `package.yml`, avoiding scans of indexes and snapshots under `tmp/` (B-196, #305).
+
 - Preserve namespaced and CamelCase graph-retrieval subjects, keep snake_case
   lookup working, and exclude tracing instructions from fallback metadata searches (B-190).
 
