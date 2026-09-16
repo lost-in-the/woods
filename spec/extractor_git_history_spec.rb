@@ -77,7 +77,8 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     units << Woods::ExtractedUnit.new(type: :mailer, identifier: 'NoPath', file_path: nil)
     units << Woods::ExtractedUnit.new(type: :gem_source, identifier: 'Gem', file_path: path)
     units << Woods::ExtractedUnit.new(type: :rails_source, identifier: 'Rails', file_path: path)
-    extractor.instance_variable_set(:@results, units.group_by { |unit| described_class::TYPE_TO_EXTRACTOR_KEY.fetch(unit.type) })
+    results = units.group_by { |unit| described_class::TYPE_TO_EXTRACTOR_KEY.fetch(unit.type) }
+    extractor.instance_variable_set(:@results, results)
     units.each { |unit| extractor.dependency_graph.register(unit) }
 
     extractor.send(:enrich_with_git_data)
