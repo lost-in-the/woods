@@ -24,7 +24,7 @@ This guide covers the most common problems encountered when installing, extracti
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
-| Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
+| Git metadata missing | Shallow clone in CI | Use `fetch-depth: 0` for complete history |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
 | HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
 | HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ALLOWED_ORIGINS="https://example.com"` (comma-separated; default is loopback-only) |
@@ -215,18 +215,26 @@ Loading an already damaged graph does not restore discarded entries. See the
 
 ### Git metadata is missing or shows zeros
 
-**Symptom:** Units have `last_modified_at: null` or `change_frequency: 0` in the JSON output.
+**Symptom:** Per-unit `metadata.git` is absent, or an older Woods version reports
+most files as `change_frequency: new` in a shallow CI checkout.
 
-**Cause:** The git repository is a shallow clone (common in CI with `fetch-depth: 1`). Woods uses `git log` to compute change frequency, a shallow clone has no history to analyze.
+**Cause:** A shallow clone truncates HEAD ancestry. The shallow-checkout guard is
+unreleased after 2.0.0.beta2: current source omits git enrichment and warns once,
+rather than treating the truncated history as complete. If repository depth
+cannot be verified, enrichment is also omitted; check git access and version.
 
-**Fix:** Fetch at least two commits:
+**Fix:** Fetch complete history (`git fetch --unshallow` for an existing shallow
+clone), then run full extraction to replace retained metadata:
 
 ```yaml
 # .github/workflows/index.yml
 - uses: actions/checkout@v4
   with:
-    fetch-depth: 2    # minimum for incremental; use 0 for full history
+    fetch-depth: 0
 ```
+
+Two commits can suffice for an incremental diff, but do not establish the full
+ancestry needed for churn metadata.
 
 ---
 

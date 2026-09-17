@@ -58,21 +58,20 @@ not always by five. Recall divides retrieved relevant units by all annotated
 relevant units. MRR is the mean reciprocal rank of the first relevant hit; a
 query with no relevant hit contributes zero.
 
-`profiles.json` binds measured Ruby runtimes to independently scored captures.
-Ruby 3.0.7, 3.1.7, and 3.2.11 share the legacy capture; Ruby 3.3.1, 3.4.10, and
-4.0.6 share the capture above. Other Ruby engines or major/minor versions fail
-with a recapture instruction. All six runtimes now produce the aggregate metrics
-above. B-191 orders equal PageRank scores lexically by identifier before assigning
-the existing ordinal percentiles; their importance maps no longer depend on Ruby's
-tie ordering. Vector precision/recall/MRR are 0.313 / 0.375 / 0.625 in both groups.
-The original positive quality floors remain unchanged.
+`profiles.json` binds six measured Ruby runtimes to a shared context capture:
+Ruby 3.0.7, 3.1.7, 3.2.11, 3.3.1, 3.4.10, and 4.0.6. Other Ruby engines or
+major/minor versions fail with a recapture instruction. All six produce identical
+retrieved identifiers, context bytes, token counts and quality metrics for every
+query. The original positive per-runtime quality floors remain unchanged in
+`baseline.json` and `baseline_legacy.json`.
 
-Separate context captures remain necessary for **B-192**: hybrid candidate sorting
-still orders equal scores differently before truncation and RRF. On `hybrid-2`,
-`Newsletter::DeliverJob` and `Newsletter::Delivery` exchange leading positions
-between the two runtime groups. Their quality metrics and exact token counts
-match, but context bytes differ. The harness preserves this measured difference;
-it does not reorder production answers to make the profiles agree.
+B-191 orders equal PageRank scores lexically by identifier. B-192 orders hybrid
+candidates by descending score, identifier, then source before truncation and
+RRF; the same ordering selects the three vector seeds for graph expansion.
+Only `hybrid-2` changes from the prior Ruby 3.3–4.0 capture: `Newsletter::DeliverJob`
+now precedes `Newsletter::Delivery`, matching the prior Ruby 3.0–3.2 answer.
+No quality metric or exact token count changes. This is production retrieval
+ordering, with no answer reordering in the evaluation harness.
 
 These are separate annotated query groups, **not a controlled comparison of six
 strategies on identical questions**. Relevance annotations were written from
@@ -124,9 +123,10 @@ bundle exec ruby -Ilib -r./bench/evaluation/runner -e \
 /tmp/woods-eval-venv/bin/python bench/evaluation/capture_tokens.py /tmp/retrieval-capture.json
 ```
 
-For a legacy-runtime capture pass `capture_report_legacy.json` as the second
-argument to `capture_tokens.py`. Use the matching runtime in `profiles.json`,
-and retain its exact version in the report.
+Replay all six measured Ruby lines before replacing the shared capture. Retain
+the exact capture runtime in the report and preserve each runtime’s original
+quality floors. A newly observed runtime difference needs separate reviewed
+captures rather than being hidden by answer reordering.
 
 Review every changed answer and score before updating the matching baseline digests or
 floors. Never lower a floor merely to make CI pass. Keep labels independent of
