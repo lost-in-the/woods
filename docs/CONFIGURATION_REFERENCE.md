@@ -431,6 +431,20 @@ config.session_store = Woods::SessionTracer::FileStore.new(
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```
 
+### Redis session index compatibility
+
+`RedisStore` lists and clears both legacy SET indexes and recency ZSET indexes.
+Listing removes expired members and orders summaries by their last request.
+Reads and clears preserve a legacy SET, so upgrading only readers does not
+break older writers. Type checks and index operations run atomically in Redis
+and tolerate a concurrent writer converting the index.
+
+The first `record` from a newer writer converts the SET to a ZSET atomically.
+Upgrade writers together: older SET writers cannot write after that conversion.
+Migrated members receive score zero, so they evict in lexical order at the
+retention limit until recorded again; new records use their request timestamp.
+Session list contents and TTLs are preserved by the index conversion.
+
 ### Solid Cache session retention and compatibility
 
 `Woods::SessionTracer::SolidCacheStore` accepts a direct `SolidCache::Store`.

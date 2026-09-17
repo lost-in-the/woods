@@ -56,6 +56,19 @@ module Woods
         return 1
       LUA
 
+      # Read and remove against either index format without converting a
+      # legacy SET. Each type check and operation is atomic with respect to
+      # a concurrent record's migration. Reader-only upgrades therefore do
+      # not prevent older SET writers from continuing to record.
+      INDEX_ACCESS_SCRIPT = <<~LUA
+        local legacy = redis.call('TYPE', KEYS[1]).ok == 'set'
+        if ARGV[1] == 'members' then
+          if legacy then return redis.call('SMEMBERS', KEYS[1]) end
+          return redis.call('ZRANGE', KEYS[1], 0, -1)
+        end
+        return redis.call(legacy and 'SREM' or 'ZREM', KEYS[1], ARGV[2])
+      LUA
+
       # @param redis [Redis] A Redis client instance
       # @param ttl [Integer, nil] Time-to-live in seconds for session keys (nil = no expiry)
       def initialize(redis:, ttl: nil, max_sessions: DEFAULT_MAX_SESSIONS,
@@ -103,14 +116,13 @@ module Woods
       # @param limit [Integer] Maximum number of sessions to return
       # @return [Array<Hash>] Session summaries
       def sessions(limit: 20)
-        all_ids = @redis.zrange(SESSIONS_KEY, 0, -1)
+        all_ids = index_access('members')
 
         # Filter to sessions that still have data (TTL may have expired)
         active = all_ids.select { |id| @redis.exists?(session_key(id)) }
 
         # Remove expired session IDs from the index
-        expired = all_ids - active
-        expired.each { |id| @redis.zrem(SESSIONS_KEY, id) } if expired.any?
+        (all_ids - active).each { |id| index_access('remove', id) }
 
         # Redis sorted sets order by score, but a summary's last_request is
         # the payload timestamp of the session's last record — the same
@@ -133,19 +145,23 @@ module Woods
       # @return [void]
       def clear(session_id)
         @redis.del(session_key(session_id))
-        @redis.zrem(SESSIONS_KEY, session_id)
+        index_access('remove', session_id)
       end
 
       # Remove all session data.
       #
       # @return [void]
       def clear_all
-        all_ids = @redis.zrange(SESSIONS_KEY, 0, -1)
+        all_ids = index_access('members')
         all_ids.each { |id| @redis.del(session_key(id)) }
         @redis.del(SESSIONS_KEY)
       end
 
       private
+
+      def index_access(action, session_id = nil)
+        @redis.eval(INDEX_ACCESS_SCRIPT, keys: [SESSIONS_KEY], argv: [action, *session_id])
+      end
 
       # @param session_id [String]
       # @return [String] Redis key for this session
@@ -196,7 +212,7 @@ module Woods
 
         victims.each do |id|
           @redis.del(session_key(id))
-          @redis.zrem(SESSIONS_KEY, id)
+          index_access('remove', id)
         end
       end
 

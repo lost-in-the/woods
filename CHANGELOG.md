@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   depth, with one warning and full-history recovery guidance, instead of
   reporting truncated commit counts as complete churn data (B-189).
 
+- Read and clear legacy Redis session indexes before any new record without
+  `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
+  and keeps reader-only upgrades compatible with older SET writers (B-162).
+
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
   deny operations and scoped resets preserve corrupt state (B-159).
@@ -578,7 +582,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a previous version migrates automatically on the first record through a
   single atomic server-side script, so concurrent writers racing the legacy
   index cannot erase each other's members or fail mid-migration; eviction
-  order (oldest last request) is unchanged. Adds a live-Redis contract spec
+  order follows oldest last request for newly scored members. Migrated members
+  receive score zero and evict lexicographically until recorded again (B-160).
+  Adds a live-Redis contract spec
   (`spec/session_tracer/redis_store_live_spec.rb`, `WOODS_RUN_LIVE_BACKENDS=1`).
 
 ### Documentation
