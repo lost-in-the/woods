@@ -14,6 +14,55 @@ Three harnesses, three questions.
 
 `woods:evaluate:baseline[grep|random|file_level]` scores a naive strategy on the same query set for comparison.
 
+## Paired lexical comparison (#404 / #227)
+
+`bench/evaluation/lexical_comparison.rb` runs **all 28 existing questions at their
+existing budgets** through semantic retrieval, lexical-only retrieval, a fixed
+query-seeded graph experiment, and the existing identifier-substring grep baseline.
+Unlike the strategy groups below, these conditions answer the same questions.
+The semantic condition replays the same captured real MiniLM vectors; labels,
+source snapshot and the original quality floors are unchanged.
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/lexical_comparison.rb /tmp/woods-paired.json
+# Use the pinned tokenizer environment described below:
+python bench/evaluation/capture_tokens.py /tmp/woods-paired.json lexical_comparison_capture.json
+```
+
+The second command writes `bench/evaluation/lexical_comparison_capture.json`.
+It retains every query's outcomes, context hash and exact token count, including
+misses. Raw returned contexts remain in `/tmp/woods-paired.json`. The capture binds
+its corpus/vector hashes and tokenizer provenance. It is reviewed experimental
+evidence, not a replacement for the required semantic gate.
+
+Initial Ruby 4.0.6 comparison (five warm pipeline repetitions per question):
+
+| Condition | Precision@5 | Recall | MRR | Mean actual context tokens | Median query latency (ms) |
+|---|---:|---:|---:|---:|---:|
+| Existing semantic pipeline | 0.536 | 0.580 | 0.857 | 1,000.7 | 3.019 |
+| Explicit lexical | 0.492 | 0.666 | 0.780 | 1,152.6 | 0.407 |
+| Lexical + query-seeded graph experiment | 0.396 | 0.476 | 0.750 | 1,159.8 | 3.292 |
+| Existing identifier grep baseline | 0.342 | 0.288 | 0.336 | 592.9 | 0.628 |
+
+Lexical retrieval improves recall on this small set while losing precision and
+first-hit rank against the semantic pipeline. This supports an explicit offline
+option, not semantic equivalence or a new default. The seeded graph condition
+loses on these measures and stays **evaluation-only**. It uses 20 iterations,
+restart probability 0.15, normalized positive lexical seeds, bidirectional
+recorded relationships within type eligibility, and no seeds for a no-match
+query. These choices were fixed before scoring; no weights were tuned to labels.
+The grep baseline matches identifiers, not source text; it retains its existing
+ordering, with eligibility applied before its limit and the same budgeted renderer.
+
+Latencies are warm in-process measurements over 62 units. They exclude lexical
+snapshot construction, live embedding/network latency and Rails extraction; they
+are not host-scale performance claims. Exact tokens count returned context only,
+using the existing `cl100k_base` capture machinery. Agent task outcomes were not
+measured. Ambiguous typed identities, concern/callback metadata and unrelated-hub
+controls also have targeted regressions; those synthetic controls do not replace
+representative host evaluation. Broader production/provider/agent evidence remains
+open under #227.
+
 ## Checked-in Canopy retrieval gate
 
 The required CI `coverage` job runs this offline command before its test suite:

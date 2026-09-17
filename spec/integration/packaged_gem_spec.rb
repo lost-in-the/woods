@@ -423,6 +423,71 @@ RSpec.describe 'packaged gem' do
       transport&.close
     end
 
+    def lexical_guard_file
+      path = File.join(@package_tmp, 'lexical-no-provider.rb')
+      File.write(path, <<~RUBY)
+        require 'woods'
+        require 'woods/builder'
+        require 'woods/mcp/config_resolver'
+        require 'net/http'
+        Woods::Builder.prepend(Module.new do
+          def build_embedding_provider(*) = raise('provider construction forbidden')
+          def build_resilient_embedding_provider(*) = raise('provider construction forbidden')
+          def build_vector_store(*) = raise('vector construction forbidden')
+        end)
+        Woods::MCP::ConfigResolver.singleton_class.prepend(Module.new do
+          def resolve(*) = raise('provider resolution forbidden')
+        end)
+        Net::HTTP.prepend(Module.new do
+          def request(*) = raise('outbound HTTP forbidden')
+        end)
+      RUBY
+      path
+    end
+
+    def assert_lexical_query(client)
+      client.connect(client_info: { name: 'installed-lexical', version: '1.0' },
+                     protocol_version: '2026-07-28', mode: :modern)
+      result = client.call_tool(name: 'codebase_retrieve',
+                                arguments: { query: 'Which model validates title presence?', types: ['model'] })
+      expect(result.dig('result', 'isError')).to be(false)
+      expect(result.dig('result', 'structuredContent', 'text')).to include('Mode: lexical', 'Post', 'validates')
+    end
+
+    def assert_installed_lexical_retrieval(index_dir)
+      expect(Dir.glob(File.join(index_dir, '**', 'vectors*'))).to be_empty
+      expect(File).not_to exist(File.join(index_dir, 'woods.json'))
+      isolated_cwd = Dir.mktmpdir('woods-lexical-cwd', @package_tmp)
+      evidence_path = File.join(isolated_cwd, 'boot-evidence.json')
+      env = installed_reopen_env(index_dir, isolated_cwd, evidence_path).merge(
+        'WOODS_RETRIEVAL_MODE' => 'lexical', 'WOODS_NO_UPDATE_CHECK' => '1',
+        'RUBYOPT' => "-r#{lexical_guard_file}"
+      )
+      transport = installed_reopen_transport(env)
+      assert_lexical_query(MCP::Client.new(transport: transport))
+      assert_installed_reopen_evidence(evidence_path, isolated_cwd, index_dir)
+    ensure
+      transport&.close
+    end
+
+    def assert_installed_lexical_http(index_dir)
+      port = free_port
+      base = URI("http://127.0.0.1:#{port}/")
+      env = installed_env.merge('PORT' => port.to_s, 'HOST' => '127.0.0.1', 'WOODS_MCP_HTTP_STATELESS' => '1',
+                                'WOODS_RETRIEVAL_MODE' => 'lexical', 'WOODS_NO_UPDATE_CHECK' => '1',
+                                'RUBYOPT' => "-r#{lexical_guard_file}")
+      stdin, output, wait_thread = Open3.popen2e(env, File.join(@gem_home, 'bin/woods-mcp-http'),
+                                                 index_dir, chdir: @package_tmp)
+      wait_for_http(base, wait_thread, output)
+      transport = MCP::Client::HTTP.new(url: base.to_s)
+      assert_lexical_query(MCP::Client.new(transport: transport))
+    ensure
+      transport&.close
+      reap_process(wait_thread)
+      stdin&.close unless stdin&.closed?
+      output&.close unless output&.closed?
+    end
+
     def expect_success(command, stdout, stderr, status)
       expect(status).to be_success, <<~MESSAGE
         #{command.join(' ')} failed with #{status.exitstatus}
@@ -726,6 +791,8 @@ RSpec.describe 'packaged gem' do
       # Extraction publishes each generation under payloads/gen-<N>/, so the
       # model payloads live below the generation directory, not the output root.
       expect(Dir[File.join(app, 'tmp/woods/payloads/gen-*/models/Post_*.json')]).not_to be_empty
+      assert_installed_lexical_retrieval(File.join(app, 'tmp/woods'))
+      assert_installed_lexical_http(File.join(app, 'tmp/woods'))
     end
   end
 end

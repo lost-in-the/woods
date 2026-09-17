@@ -126,3 +126,16 @@ Reconnect through the client so it performs its supported MCP negotiation. Clien
 Do not use an isolated raw JSON-RPC request as proof of MCP health. Do not claim conditional Index or inventory-only Console schemas are callable.
 
 Canonical guide: [MCP_SERVERS.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md).
+
+## Lexical retrieval capability check
+
+This is a development capability. Before proposing it, verify the installed gem
+exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
+`WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
+from the plugin version or an unreleased checkout.
+
+When supported, put `WOODS_RETRIEVAL_MODE=lexical` in the environment of the
+process launching Index MCP (stdio or HTTP). A Rails initializer alone is not
+loaded by that process. Confirm `woods_status.retriever.mode` reports `lexical`.
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for the supported contract, checked against the installed gem version.

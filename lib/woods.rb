@@ -147,13 +147,15 @@ module Woods
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
                   :dump_retention_count, :component_paths
-    attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
+    attr_reader :retrieval_mode, :embedding_model, :max_context_tokens, :similarity_threshold, :extractors,
+                :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
+      @retrieval_mode = :semantic
       @embedding_model = 'text-embedding-3-small'
       @embedding_model_explicit = false
       @max_context_tokens = 8000
@@ -319,6 +321,16 @@ module Woods
     def pretty_json=(value)
       validate_boolean!(:pretty_json, value)
       @pretty_json = value
+    end
+
+    # @param value [Symbol, String] semantic (default) or lexical
+    # @raise [ConfigurationError] if value is not a supported retrieval mode
+    def retrieval_mode=(value)
+      unless %w[semantic lexical].include?(value.to_s)
+        raise ConfigurationError, "retrieval_mode must be semantic or lexical, got #{value.inspect}"
+      end
+
+      @retrieval_mode = value.to_sym
     end
 
     # @param value [Symbol] Must be one of :claude, :markdown, :plain, :json

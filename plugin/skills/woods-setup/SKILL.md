@@ -88,7 +88,7 @@ When Woods is installed only in Docker, launch it through the application servic
 }
 ```
 
-Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings.
+Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
 
 Offer to add `bundle exec rake woods:watch` to the existing development process manager. When authorized, it catches up missed changes and automatically maintains the structural index; the Index Server refreshes on its next call, so ordinary edits need no manual extraction or MCP restart. Use the standalone watch command; do not prepend the `environment` task. Check the installed version's watch guide before relying on automatic startup reconciliation. State that live boot-captured changes require supervisor restart, Docker may need `WOODS_WATCH_POLL=1`, and semantic vectors still need `woods:embed_incremental`.
 
@@ -137,3 +137,16 @@ Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets,
 Report the Woods version, branch, files changed, commands/results, index path, MCP calls verified, semantic retrieval status, Console status, and unresolved risks. Never infer availability from source schemas alone.
 
 Canonical runbook: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md).
+
+## Lexical retrieval capability check
+
+This is a development capability. Before proposing it, verify the installed gem
+exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
+`WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
+from the plugin version or an unreleased checkout.
+
+When supported and authorized, offer explicit lexical mode for ranked discovery
+over extraction output without provider credentials or vectors. Semantic mode
+remains the default; setting up embeddings is a separate choice.
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for the supported contract, checked against the installed gem version.

@@ -319,7 +319,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 ### MCP servers
 
 - Tool dispatch uses a `Mutex`. Do not call tool handlers from multiple threads outside the server's dispatch.
-- The Index Server boots in **pattern-only mode** when no `woods.json` is present and no provider is configured (#138). `codebase_retrieve` activates only with a provider. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot. `WOODS_ALLOW_AUTODETECT` is a back-compat no-op. See `ConfigResolver.resolve_without_artifact`.
+- The Index Server defaults to **pattern-only mode** when no `woods.json` is present and no provider is configured (#138). Default semantic `codebase_retrieve` needs a provider; explicit `WOODS_RETRIEVAL_MODE=lexical` instead loads the published extraction units without provider resolution or vector artifacts (#404). Lexical mode requires a valid extraction index and never activates as a hidden fallback. `WOODS_REQUIRE_INDEX=1` restores fail-closed semantic boot. `WOODS_ALLOW_AUTODETECT` is a back-compat no-op. See `ConfigResolver.resolve_without_artifact` and `PublishedLexicalRetriever`.
 - Every payload reader resolves through `Generation#payload_dir`. A flat (pre-2.0) index resolves to the root; never read `manifest.json` from the root directly.
 - Both servers are `MCP::Server` instances from the `mcp` gem (`>= 1.2, < 2.0`). Woods writes no protocol code.
 - **Never pin `MCP_PROTOCOL_VERSION`.** The SDK server is dual-era; pinning collapses it to one. The env var is an escape hatch only.
