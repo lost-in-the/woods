@@ -268,6 +268,10 @@ module Woods
         zero_counts = { vectors: 0, metadata: 0, graph: 0 }
         return refresh_reader_only(reader, zero_counts) unless retriever
 
+        if retriever.is_a?(PublishedLexicalRetriever)
+          return reload_lexical_stores!(retriever, index_dir, reader || retriever.reader, state, hooks)
+        end
+
         target = swap_target(retriever)
         return refresh_reader_only(reader, zero_counts) unless target
 
@@ -332,6 +336,43 @@ module Woods
       # Refresh the reader's cached index state and answer the zero-count
       # no-op (MCP-2).
       #
+      def self.reload_lexical_stores!(retriever, index_dir, reader, state, hooks)
+        generation = Woods::Generation.new(output_dir: index_dir)
+        captured = generation.current
+        candidate = PublishedLexicalRetriever.new(index_dir: index_dir).warmup!
+        run_hook(hooks, :after_candidates)
+        lock = reload_extraction_lock(index_dir)
+        unless acquire_writer_lock_briefly(lock)
+          raise ReloadDegraded.new('lexical reload could not acquire the extraction writer lock',
+                                   generation: reader.loaded_generation || 0, stores: ['metadata'])
+        end
+
+        begin
+          reader.with_exclusive_generation do
+            identity = candidate.snapshot.first
+            expected = [captured.number, captured.token, generation.payload_dir(captured).to_s]
+            unless same_generation_marker?(captured, generation.current) &&
+                   [identity.first.to_i, *identity.drop(1)] == expected
+              raise ReloadGenerationMoved.new('generation moved during lexical reload; nothing was swapped',
+                                              generation: reader.loaded_generation || 0, stores: ['metadata'])
+            end
+            counts = { vectors: 0, metadata: candidate.metadata_store.count, graph: 0 }
+            reader.reload!
+            retriever.install_snapshot!(candidate.snapshot)
+            state&.clear_reload_failure!
+            counts
+          end
+        ensure
+          lock.release
+        end
+      rescue ReloadDegraded
+        raise
+      rescue StandardError => e
+        raise ReloadDegraded.new("lexical snapshot reload failed: #{e.class}: #{e.message}",
+                                 generation: reader.loaded_generation || 0, stores: ['metadata'])
+      end
+      private_class_method :reload_lexical_stores!
+
       # A store no-op is not an index no-op: the caller invoked `reload`
       # because something on disk moved, and on a flat (pre-2.0) index
       # {IndexReader} never self-refreshes, so skipping this reports

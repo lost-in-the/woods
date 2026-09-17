@@ -165,7 +165,7 @@ paging alone only visits the discovered prefix. See the
 
 ## 4. Check semantic retrieval
 
-Only diagnose this layer when structural tools work and `codebase_retrieve` fails. Check `woods_status`, configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
+Only diagnose this layer when structural tools work and `codebase_retrieve` fails. First check `woods_status.retriever.mode`. For lexical mode, validate the published extraction index and follow the capability check below. For semantic mode, check the configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
 
 - OpenAI: verify the key exists without printing it.
 - Ollama: verify the service and configured model locally.
@@ -201,3 +201,16 @@ Nine tools are normal. Eleven appear only with `console_embedded_read_tools`. Do
 Return the first failing layer, commands/evidence, root-cause hypothesis, whether any file changed, and the smallest next action. If a fix is requested, change one thing and rerun the failing check before proceeding.
 
 Canonical guide: [TROUBLESHOOTING.md](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
+
+## Lexical retrieval capability check
+
+This is a development capability. Before proposing it, verify the installed gem
+exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
+`WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
+from the plugin version or an unreleased checkout.
+
+For lexical errors, inspect the published generation and validate or re-extract
+the index; adding provider credentials cannot repair a corrupt lexical index.
+Semantic provider failure never switches to lexical automatically.
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for the supported contract, checked against the installed gem version.

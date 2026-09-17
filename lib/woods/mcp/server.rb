@@ -91,6 +91,7 @@ module Woods
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
                   bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil)
           reader = IndexReader.new(index_dir)
+          retriever.bind_reader(reader) if retriever.respond_to?(:bind_reader)
           reader.warmup! if warmup
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
@@ -884,13 +885,14 @@ module Woods
           coerce = method(:coerce_array)
           stale_check = method(:stale_index_result?)
           degraded_response = method(:degraded_retrieval_response)
+          retrieval_mode = retriever.respond_to?(:mode) ? retriever.mode : :semantic
           server.define_tool(
             name: 'codebase_retrieve',
-            description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
+            description: 'Ranked retrieval: relevant code units for a natural-language question. ' \
                          'Example: codebase_retrieve("how does billing work?") returns ranked source context. ' \
                          'Returns a token-budgeted context string ready to paste into a prompt. ' \
                          'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
-                         'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable. ' \
+                         'Uses configured embeddings, or explicit WOODS_RETRIEVAL_MODE=lexical over extraction units. ' \
                          'By default excludes test_mappings (~33% of a typical index) so spec filenames do not ' \
                          'dominate semantic rank; pass types: ["test_mapping"] to opt back in. ' \
                          'Parameter: use `budget` for the token budget (not `limit` — that means result count ' \
@@ -973,7 +975,7 @@ module Woods
                   respond_err,
                   reason: e.message,
                   stores: [e.store],
-                  phase: 'query'
+                  phase: 'query', mode: retrieval_mode
                 )
               end
               if stale_check.call(result)
@@ -1030,7 +1032,16 @@ module Woods
         # @param phase [String] 'boot' (hydration failure) or 'query'
         #   (store failure at query time)
         # @return [MCP::Tool::Response]
-        def degraded_retrieval_response(respond_err, reason:, stores:, phase:)
+        def degraded_retrieval_response(respond_err, reason:, stores:, phase:, mode: :semantic)
+          if mode == :lexical
+            return respond_err.call(
+              "Lexical retrieval is degraded: #{reason}. No partial lexical snapshot was served. " \
+              'Inspect woods_status and repair or re-extract the published index, then retry.',
+              code: :degraded_index, tool: 'codebase_retrieve', degraded: true,
+              phase: phase, stores: stores, reason: reason, mode: 'lexical'
+            )
+          end
+
           respond_err.call(
             "Semantic search is degraded: #{reason}. The affected store(s) return no data, so " \
             'queries would come back empty — this is NOT "no results". ' \
@@ -2050,10 +2061,11 @@ module Woods
             watch: watch_section(index_dir),
             retriever: {
               configured: !retriever.nil?,
-              class: retriever&.class&.name
+              class: retriever&.class&.name,
+              **(retriever.respond_to?(:mode) && retriever.mode == :lexical ? { mode: 'lexical' } : {})
             },
             bootstrap: bootstrap_state&.to_h,
-            features: features_from(config, resolved)
+            features: retrieval_features(config, resolved, retriever)
           }
         end
 
@@ -2274,6 +2286,13 @@ module Woods
         # historic status payloads always reported +false+ regardless of the
         # actual console MCP state. Advertising a misleading field is worse
         # than not advertising it at all.
+        def retrieval_features(config, resolved, retriever)
+          features = features_from(config, resolved)
+          return features unless retriever.respond_to?(:mode) && retriever.mode == :lexical
+
+          features.merge(retrieval_mode: 'lexical', embedding_model: nil, embedding_provider: nil, vector_store: nil)
+        end
+
         def features_from(config, resolved)
           provider_hash = resolved&.embedding_provider || {}
           resolved_provider = resolved_provider_symbol(provider_hash[:class])

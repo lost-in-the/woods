@@ -27,6 +27,15 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
+For embedding-free ranked retrieval, start Index MCP with
+`WOODS_RETRIEVAL_MODE=lexical`. This opt-in reads the published extraction units;
+it does not probe providers or load vectors. `woods_status.retriever.mode` reports
+`lexical`, and inactive embedding fields are `null`. The default semantic mode
+keeps its existing embedding setup and failure behavior. See
+[retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) for scoring,
+query limits and measured tradeoffs. Both packaged stdio and HTTP launches honor
+the setting; put it in the MCP process's environment, not just a Rails initializer.
+
 The stdio server can then run outside Rails. Point it at the index root (`tmp/woods/` by default), not at an internal generation or payload directory.
 
 ### Configure a stdio client
@@ -143,7 +152,7 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 | `domain_clusters` | Discover connected domains in the graph |
 | `pagerank` | Find structurally central units |
 | `reload` | Reload a newly published generation without restarting the client |
-| `codebase_retrieve` | Natural-language retrieval; returns a configuration error until embeddings exist |
+| `codebase_retrieve` | Natural-language retrieval with embeddings or explicit lexical mode over extraction output |
 
 The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
 

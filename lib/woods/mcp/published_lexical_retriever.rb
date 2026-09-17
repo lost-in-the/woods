@@ -11,9 +11,10 @@ module Woods
     # snapshot construction AND the query, so a publication cannot mix units.
     # No provider, vector adapter, host source read, or context cache is involved.
     class PublishedLexicalRetriever
-      attr_reader :reader
+      attr_reader :reader, :snapshot
 
       def initialize(index_dir:, reader: nil)
+        @index_dir = Pathname.new(index_dir)
         @reader = reader || IndexReader.new(index_dir)
         @snapshot_mutex = Mutex.new
         @snapshot = nil
@@ -33,11 +34,13 @@ module Woods
       end
 
       def warmup!
+        validate_publication!
         reader.with_pinned_generation { snapshot_for_reader }
         self
       end
 
       def retrieve(query, budget: 8000, **options)
+        validate_publication!
         reader.with_pinned_generation do
           retriever = snapshot_for_reader
           result = retriever.retrieve(query, budget: budget, **options)
@@ -58,11 +61,39 @@ module Woods
         @snapshot_mutex.synchronize { @snapshot = nil }
       end
 
+      def install_snapshot!(snapshot)
+        @snapshot_mutex.synchronize { @snapshot = snapshot }
+      end
+
       private
+
+      def validate_publication!
+        path = @index_dir.join(Generation::FILENAME)
+        unless path.exist?
+          raise IOError, 'published generation marker disappeared' if reader.loaded_generation
+
+          return
+        end
+        data = JSON.parse(AtomicFile.read(path))
+        unless data.is_a?(Hash) && data['number'].is_a?(Integer) && data['number'].positive?
+          raise IOError, 'invalid published generation marker'
+        end
+        return if data['payload'].nil?
+
+        payload = data['payload']
+        unless payload.is_a?(String) && !payload.empty? && !Pathname.new(payload).absolute?
+          raise IOError, 'invalid generation payload pointer'
+        end
+
+        directory = @index_dir.join(payload)
+        return if directory.directory? && directory.realpath.to_s.start_with?("#{@index_dir.realpath}/")
+
+        raise IOError, 'missing or escaping generation payload'
+      end
 
       def snapshot_for_reader
         @snapshot_mutex.synchronize do
-          key = [reader.loaded_generation, reader.payload_dir.to_s]
+          key = reader.generation_identity
           # Flat legacy indexes have no immutable generation identity. Rebuild
           # each time instead of serving changed files from a permanent cache.
           return @snapshot.last if key.first && @snapshot&.first == key
@@ -73,7 +104,7 @@ module Woods
           end
           candidate = Retriever.new(vector_store: nil, metadata_store: metadata, graph_store: nil,
                                     embedding_provider: nil, mode: :lexical)
-          @snapshot = [key, candidate]
+          @snapshot = [key.freeze, candidate].freeze
           candidate
         end
       end

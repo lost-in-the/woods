@@ -135,9 +135,9 @@ before using `max_nodes`/`max_edges`, and follow the
 
 Use returned relationship labels as evidence. Do not infer call order from a dependency edge alone.
 
-## Use semantic retrieval only when ready
+## Use ranked retrieval only when ready
 
-`codebase_retrieve` answers natural-language questions with token-budgeted context. Use it when `woods_status` reports a configured embedding provider and current vector data.
+`codebase_retrieve` answers natural-language questions with token-budgeted context. Use it when `woods_status` reports explicit lexical mode over a current published index, or a configured embedding provider and current vector data in semantic mode. Lexical mode explains matching terms/fields and does not infer synonyms absent from the text; a no-match response is not proof of missing behavior.
 
 Important parameters:
 

@@ -29,9 +29,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 3.6378639997565188,
-        "min": 3.3884969998325687,
-        "max": 8.618723997642519
+        "median": 3.939726000680821,
+        "min": 3.5137220002070535,
+        "max": 10.720158999902196
       },
       "condition": "semantic",
       "budget": 1200,
@@ -56,9 +56,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1027,
       "latency_ms": {
-        "median": 5.250084002909716,
-        "min": 5.203557000641013,
-        "max": 5.288405001920182
+        "median": 5.340823998267297,
+        "min": 5.28914800088387,
+        "max": 5.412516999058425
       },
       "condition": "semantic",
       "budget": 1200,
@@ -83,9 +83,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1181,
       "latency_ms": {
-        "median": 5.260293000901584,
-        "min": 5.215860001044348,
-        "max": 5.3520750007010065
+        "median": 5.3579159975924995,
+        "min": 5.339530998753617,
+        "max": 5.431122001027688
       },
       "condition": "semantic",
       "budget": 1200,
@@ -109,9 +109,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1164,
       "latency_ms": {
-        "median": 6.840533998911269,
-        "min": 6.2160580018826295,
-        "max": 7.257241999468533
+        "median": 7.1853580011520535,
+        "min": 6.398592999175889,
+        "max": 7.7718200009258
       },
       "condition": "semantic",
       "budget": 1200,
@@ -135,9 +135,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 2.9069279989926144,
-        "min": 2.872163000574801,
-        "max": 2.952193000965053
+        "median": 2.9691579984501004,
+        "min": 2.935075001005316,
+        "max": 3.01564500114182
       },
       "condition": "semantic",
       "budget": 1200,
@@ -160,9 +160,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 2.954907999082934,
-        "min": 2.8696990011667367,
-        "max": 2.972260001115501
+        "median": 3.318999002658529,
+        "min": 3.0370649983524345,
+        "max": 4.110704001504928
       },
       "condition": "semantic",
       "budget": 1200,
@@ -188,9 +188,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1107,
       "latency_ms": {
-        "median": 2.9024600007687695,
-        "min": 2.8771129982487764,
-        "max": 2.9058159998385236
+        "median": 2.9924110021966044,
+        "min": 2.970541001559468,
+        "max": 3.129235999949742
       },
       "condition": "semantic",
       "budget": 1200,
@@ -214,9 +214,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 2.9092829972796608,
-        "min": 2.8984729979129042,
-        "max": 4.439340002136305
+        "median": 3.044859000510769,
+        "min": 3.015533999132458,
+        "max": 4.866159997618524
       },
       "condition": "semantic",
       "budget": 1200,
@@ -242,9 +242,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1181,
       "latency_ms": {
-        "median": 1.7647549975663424,
-        "min": 1.5020749997347593,
-        "max": 1.869842002633959
+        "median": 1.7556489983689971,
+        "min": 1.5525400012847967,
+        "max": 1.9137830022373237
       },
       "condition": "semantic",
       "budget": 1200,
@@ -271,9 +271,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1177,
       "latency_ms": {
-        "median": 0.2499069996702019,
-        "min": 0.23565000083181076,
-        "max": 0.5196400015847757
+        "median": 0.2559770000516437,
+        "min": 0.2492340026947204,
+        "max": 0.5434820013761055
       },
       "condition": "semantic",
       "budget": 1200,
@@ -300,9 +300,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1023,
       "latency_ms": {
-        "median": 0.2290580014232546,
-        "min": 0.22182400061865337,
-        "max": 0.2388259999861475
+        "median": 0.24290299916174263,
+        "min": 0.22841499958303757,
+        "max": 0.2506870005163364
       },
       "condition": "semantic",
       "budget": 1200,
@@ -329,9 +329,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1166,
       "latency_ms": {
-        "median": 1.4351999998325482,
-        "min": 1.422547000402119,
-        "max": 1.4577119982277509
+        "median": 1.5271130032488145,
+        "min": 1.5024870008346625,
+        "max": 1.5768859993841033
       },
       "condition": "semantic",
       "budget": 1200,
@@ -357,9 +357,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 8.892255998944165,
-        "min": 8.791206000751117,
-        "max": 10.137530000065453
+        "median": 9.409088001120836,
+        "min": 9.129408001172123,
+        "max": 11.04169799873489
       },
       "condition": "semantic",
       "budget": 1200,
@@ -387,9 +387,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1027,
       "latency_ms": {
-        "median": 10.283023002557456,
-        "min": 10.247836999042192,
-        "max": 10.929189000307815
+        "median": 10.600967998470878,
+        "min": 10.469312001077924,
+        "max": 11.51331700020819
       },
       "condition": "semantic",
       "budget": 1200,
@@ -416,9 +416,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 10.114718999830075,
-        "min": 9.874639999907231,
-        "max": 11.46697299918742
+        "median": 10.594085000775522,
+        "min": 10.21099199715536,
+        "max": 12.316843000007793
       },
       "condition": "semantic",
       "budget": 1200,
@@ -443,9 +443,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1071,
       "latency_ms": {
-        "median": 10.495840000658063,
-        "min": 10.275317999912659,
-        "max": 11.023654999007704
+        "median": 10.897930998908123,
+        "min": 10.792224002216244,
+        "max": 12.06336099858163
       },
       "condition": "semantic",
       "budget": 1200,
@@ -468,9 +468,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 500,
       "latency_ms": {
-        "median": 6.770413001504494,
-        "min": 6.394781998096732,
-        "max": 7.677566998609109
+        "median": 7.328113999392372,
+        "min": 6.705093997879885,
+        "max": 8.197001996450126
       },
       "condition": "semantic",
       "budget": 1200,
@@ -493,9 +493,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 519,
       "latency_ms": {
-        "median": 6.2699390000489075,
-        "min": 6.03785500061349,
-        "max": 6.383068997820374
+        "median": 6.276486001297599,
+        "min": 6.227375000889879,
+        "max": 6.628091003221925
       },
       "condition": "semantic",
       "budget": 1200,
@@ -519,9 +519,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 519,
       "latency_ms": {
-        "median": 5.457600997033296,
-        "min": 4.697462001786334,
-        "max": 5.885020000278018
+        "median": 5.760354997619288,
+        "min": 4.786141998920357,
+        "max": 5.970867001451552
       },
       "condition": "semantic",
       "budget": 1200,
@@ -544,9 +544,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 500,
       "latency_ms": {
-        "median": 6.46485199831659,
-        "min": 6.442301000788575,
-        "max": 7.537334997323342
+        "median": 6.90646899965941,
+        "min": 6.630685002164682,
+        "max": 7.745481001620647
       },
       "condition": "semantic",
       "budget": 1200,
@@ -573,9 +573,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 2.74924399855081,
-        "min": 2.720559998124372,
-        "max": 2.8185339979245327
+        "median": 2.8581209990079515,
+        "min": 2.7776510032708757,
+        "max": 2.931958999397466
       },
       "condition": "semantic",
       "budget": 1200,
@@ -602,9 +602,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1158,
       "latency_ms": {
-        "median": 1.504911000665743,
-        "min": 1.4727499983564485,
-        "max": 2.4799810016702395
+        "median": 1.6242740020970814,
+        "min": 1.5038599995023105,
+        "max": 2.91121999907773
       },
       "condition": "semantic",
       "budget": 1200,
@@ -631,9 +631,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1023,
       "latency_ms": {
-        "median": 1.3967279992357362,
-        "min": 1.390175999404164,
-        "max": 1.5561460022581741
+        "median": 1.5374419999716338,
+        "min": 1.463615000830032,
+        "max": 2.177294001739938
       },
       "condition": "semantic",
       "budget": 1200,
@@ -659,9 +659,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1189,
       "latency_ms": {
-        "median": 1.5538119987468235,
-        "min": 1.43700399712543,
-        "max": 1.7701559991110116
+        "median": 1.4907660006429069,
+        "min": 1.4742550010851119,
+        "max": 1.786797001841478
       },
       "condition": "semantic",
       "budget": 1200,
@@ -689,9 +689,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1201,
       "latency_ms": {
-        "median": 0.6716240022797137,
-        "min": 0.6553629973495845,
-        "max": 1.3544190005632117
+        "median": 0.7146299976739101,
+        "min": 0.6874399987282231,
+        "max": 1.2910940022266004
       },
       "condition": "semantic",
       "budget": 1200,
@@ -718,9 +718,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1110,
       "latency_ms": {
-        "median": 0.6521180002891924,
-        "min": 0.6440629986173008,
-        "max": 0.6569970028067473
+        "median": 0.6855959982203785,
+        "min": 0.6691359994874801,
+        "max": 0.6946530011191498
       },
       "condition": "semantic",
       "budget": 1200,
@@ -747,9 +747,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1083,
       "latency_ms": {
-        "median": 0.6491919994005002,
-        "min": 0.644432999251876,
-        "max": 0.6618350016651675
+        "median": 0.6862979971629102,
+        "min": 0.6647779991908465,
+        "max": 0.6942220024939161
       },
       "condition": "semantic",
       "budget": 1200,
@@ -777,9 +777,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1201,
       "latency_ms": {
-        "median": 0.6695299998682458,
-        "min": 0.652327998977853,
-        "max": 0.6891869998071343
+        "median": 0.6762289995094761,
+        "min": 0.6564219984284136,
+        "max": 0.6965469983697403
       },
       "condition": "semantic",
       "budget": 1200,
@@ -805,14 +805,14 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.5182780005270615,
-        "min": 0.4507019984885119,
-        "max": 1.1059659991587978
+        "median": 0.5139470013091341,
+        "min": 0.46488600128213875,
+        "max": 1.730792999296682
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "4585968a547bba2f3d9ffd05133ee556b25590622e811ed6a430a4be1cbeee30",
-      "actual_context_tokens_cl100k": 1189
+      "context_sha256": "d33e024ab9984b6029c1994111a359fd2b5523bc11c0cb9af7718c24247e3a90",
+      "actual_context_tokens_cl100k": 1191
     },
     {
       "id": "keyword-2",
@@ -832,14 +832,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.38980799945420586,
-        "min": 0.37722399792983197,
-        "max": 0.9016839976538904
+        "median": 0.42633300108718686,
+        "min": 0.41288900320068933,
+        "max": 1.1306950000289362
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "4385f2ecf8453c91ce4fb9451b6b9ce5c3597eaec9b929e39449f8d40dba9e2d",
-      "actual_context_tokens_cl100k": 1197
+      "context_sha256": "c7355fb04c9f89b720965e920a60cc259fa77d7769fe80a90a9048d74dc89e90",
+      "actual_context_tokens_cl100k": 1202
     },
     {
       "id": "keyword-3",
@@ -848,25 +848,24 @@
       "retrieved": [
         "ReviewDecision",
         "ReviewAssignment",
-        "ArticleRevision",
-        "EditorialWorkflow"
+        "ArticleRevision"
       ],
       "expected": [
         "EditorialWorkflow"
       ],
-      "precision_at5": 0.25,
-      "recall": 1.0,
-      "mrr": 0.25,
-      "estimated_context_tokens": 1200,
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1168,
       "latency_ms": {
-        "median": 0.38614100049016997,
-        "min": 0.37567199979093857,
-        "max": 0.7722019981883932
+        "median": 0.4562699978123419,
+        "min": 0.43995899977744557,
+        "max": 0.6342910019156989
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "d567b31900e84a56ee6ba18bb3e7bbeb547cf8ca83f7982252c5aea26ec7072b",
-      "actual_context_tokens_cl100k": 1102
+      "context_sha256": "0e9cb5c936ca3d2f1c894417e9b503337b63a8fee5b9eab8404071523f3e5fc6",
+      "actual_context_tokens_cl100k": 1088
     },
     {
       "id": "keyword-4",
@@ -875,25 +874,24 @@
       "retrieved": [
         "Support::TicketMessage",
         "Support::Ticket",
-        "Support::ResolveTicket",
-        "Support::TicketsController"
+        "Support::ResolveTicket"
       ],
       "expected": [
         "Support::Ticket"
       ],
-      "precision_at5": 0.25,
+      "precision_at5": 0.3333333333333333,
       "recall": 1.0,
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4479769995668903,
-        "min": 0.4410540022945497,
-        "max": 0.45394700282486156
+        "median": 0.4906430003757123,
+        "min": 0.47619600081816316,
+        "max": 0.7906419996288605
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "23260379e17b03ff6365b3ed8ecd81f1549958f5dc83debb81fcb46f5476ae41",
-      "actual_context_tokens_cl100k": 1136
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
     },
     {
       "id": "vector-1",
@@ -912,16 +910,16 @@
       "precision_at5": 0.0,
       "recall": 0.0,
       "mrr": 0.0,
-      "estimated_context_tokens": 1044,
+      "estimated_context_tokens": 1110,
       "latency_ms": {
-        "median": 0.4203339995001443,
-        "min": 0.4185520010651089,
-        "max": 0.43763699795817956
+        "median": 0.45516699901781976,
+        "min": 0.43711399848689325,
+        "max": 0.4618499988282565
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "09bb103c99af1003097d9e5027d7be5da90349b19ac5f61d65b825fb910e23ca",
-      "actual_context_tokens_cl100k": 1083
+      "context_sha256": "83e03c19e4323c3725177574201ddb1bf7173b76c9556dcb1077a7b7a74afb53",
+      "actual_context_tokens_cl100k": 1154
     },
     {
       "id": "vector-2",
@@ -940,14 +938,14 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3866820006805938,
-        "min": 0.3849790009553544,
-        "max": 0.39763300082995556
+        "median": 0.4186390033282805,
+        "min": 0.40231900129583664,
+        "max": 0.4266039977665059
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "b641d4e387142bd871bde8f5f67f664a22964d420e895975551f0d11dd54d04a",
-      "actual_context_tokens_cl100k": 1090
+      "context_sha256": "92729210f5ad35c60bd20d7ee17b840d2f7e2f832a20fdbc9d246707eb74f67f",
+      "actual_context_tokens_cl100k": 1107
     },
     {
       "id": "vector-3",
@@ -963,9 +961,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.3868929998134263,
-        "min": 0.379548997443635,
-        "max": 0.7702389993937686
+        "median": 0.4091619994142093,
+        "min": 0.388313001167262,
+        "max": 0.9213250013999641
       },
       "condition": "lexical",
       "budget": 1200,
@@ -991,14 +989,14 @@
       "mrr": 0.3333333333333333,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4083120002178475,
-        "min": 0.40566800089436583,
-        "max": 0.6085759996494744
+        "median": 0.49437000052421354,
+        "min": 0.42723499791463837,
+        "max": 0.683553000271786
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "61d199fcc2a3db8a38106ce473b6b5433af109d0a188271fc487559efbdfac6d",
-      "actual_context_tokens_cl100k": 1189
+      "context_sha256": "83721ee94bfb69f58eb1c478c68f882b7d0d9666ea98da382ca24a0a75c397cd",
+      "actual_context_tokens_cl100k": 1199
     },
     {
       "id": "graph-1",
@@ -1006,8 +1004,7 @@
       "actual_strategy": "lexical",
       "retrieved": [
         "Billing::IssueInvoice",
-        "Billing::Invoice",
-        "Billing::LineItem"
+        "Billing::Invoice"
       ],
       "expected": [
         "Billing::Invoice",
@@ -1015,19 +1012,19 @@
         "Billing::LineItem",
         "Billing::Subscription"
       ],
-      "precision_at5": 0.6666666666666666,
-      "recall": 0.5,
+      "precision_at5": 0.5,
+      "recall": 0.25,
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4209459984849673,
-        "min": 0.40974500006996095,
-        "max": 0.48334200255339965
+        "median": 0.44223399891052395,
+        "min": 0.44117200013715774,
+        "max": 0.535758001205977
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "a744d453d462b449337e2e18ac8148c9327f885b86b1b32fb2c804a6e3c18d3a",
-      "actual_context_tokens_cl100k": 1182
+      "context_sha256": "251518ab24265a57685d3e47f2eec531229f169c13706b9f66d6ea7f8101c74c",
+      "actual_context_tokens_cl100k": 1207
     },
     {
       "id": "graph-2",
@@ -1036,8 +1033,7 @@
       "retrieved": [
         "Newsletter::Delivery",
         "Newsletter::DeliverJob",
-        "Newsletter::Campaign",
-        "Newsletter::CampaignsController"
+        "Newsletter::Campaign"
       ],
       "expected": [
         "Newsletter::Delivery",
@@ -1045,19 +1041,19 @@
         "Subscriber",
         "EngagementEvent"
       ],
-      "precision_at5": 0.5,
+      "precision_at5": 0.6666666666666666,
       "recall": 0.5,
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3746090005734004,
-        "min": 0.35607500103651546,
-        "max": 0.7185819995356724
+        "median": 0.421295000705868,
+        "min": 0.4018180006823968,
+        "max": 0.6326280017674435
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "67ecbf2cf5c4cedc84edb6ee3efcfff5df7f3ce946e9ea2329c98a1d398d5f0c",
-      "actual_context_tokens_cl100k": 1114
+      "context_sha256": "9b3c70f651ee009aecbb9c94b99ce0a76974f3a7fff5d6d26e0dbf75be4c6e11",
+      "actual_context_tokens_cl100k": 1135
     },
     {
       "id": "graph-3",
@@ -1066,8 +1062,7 @@
       "retrieved": [
         "ReviewAssignment",
         "ReviewDecision",
-        "ArticleRevision",
-        "EditorialWorkflow"
+        "ArticleRevision"
       ],
       "expected": [
         "ReviewAssignment",
@@ -1075,19 +1070,19 @@
         "ArticleRevision",
         "Author"
       ],
-      "precision_at5": 0.75,
+      "precision_at5": 1.0,
       "recall": 0.75,
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.7568229993921705,
-        "min": 0.6917419996170793,
-        "max": 1.1425939992477652
+        "median": 0.36482999712461606,
+        "min": 0.3630360006354749,
+        "max": 0.3734150013769977
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "12604b931d8711c9a8201eabd8612a4bf08408713926e1b184a35588e9058ef1",
-      "actual_context_tokens_cl100k": 1102
+      "context_sha256": "df0d0af906dad3ea27fd4c00528e6a6dfda3ec0e14968a1d90de650b1a52e69d",
+      "actual_context_tokens_cl100k": 1112
     },
     {
       "id": "graph-4",
@@ -1096,8 +1091,7 @@
       "retrieved": [
         "Support::TicketMessage",
         "Support::Ticket",
-        "Support::ResolveTicket",
-        "Support::TicketsController"
+        "Support::ResolveTicket"
       ],
       "expected": [
         "Support::Ticket",
@@ -1105,19 +1099,19 @@
         "Subscriber",
         "Author"
       ],
-      "precision_at5": 0.5,
+      "precision_at5": 0.6666666666666666,
       "recall": 0.5,
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.9066430029633921,
-        "min": 0.5339669987733942,
-        "max": 0.9280730009777471
+        "median": 0.40406200059805997,
+        "min": 0.39579700023750775,
+        "max": 0.9428660014236812
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "733324c180394f0792642d7aae798b453da37193c7f662930f492e44547383f0",
-      "actual_context_tokens_cl100k": 1140
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
     },
     {
       "id": "hybrid-1",
@@ -1125,8 +1119,7 @@
       "actual_strategy": "lexical",
       "retrieved": [
         "Billing::CollectPayment",
-        "Billing::Payment",
-        "Billing::RefundPayment"
+        "Billing::Payment"
       ],
       "expected": [
         "Billing::RefundPayment",
@@ -1134,19 +1127,19 @@
         "Billing::Payment",
         "Billing::Invoice"
       ],
-      "precision_at5": 0.6666666666666666,
-      "recall": 0.5,
+      "precision_at5": 0.5,
+      "recall": 0.25,
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.389196997275576,
-        "min": 0.38551000034203753,
-        "max": 1.402648998919176
+        "median": 0.40501399780623615,
+        "min": 0.39614799970877357,
+        "max": 0.6223180025699548
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "3a7eb901e20e73d52d3e6f5d680c6c57cdf8f06e9233267e3c9b8ac27dfe261f",
-      "actual_context_tokens_cl100k": 1191
+      "context_sha256": "5d89871439852d14a9a94f12fabc68bd6b6e75efede4fd05abaa41e8ee42d880",
+      "actual_context_tokens_cl100k": 1178
     },
     {
       "id": "hybrid-2",
@@ -1155,8 +1148,7 @@
       "retrieved": [
         "Newsletter::Delivery",
         "Newsletter::DeliverJob",
-        "Newsletter::Campaign",
-        "Newsletter::CampaignsController"
+        "Newsletter::Campaign"
       ],
       "expected": [
         "Newsletter::Campaign",
@@ -1165,19 +1157,19 @@
         "Newsletter::DeliverJob",
         "Subscriber"
       ],
-      "precision_at5": 0.75,
+      "precision_at5": 1.0,
       "recall": 0.6,
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4449109983397648,
-        "min": 0.4427559979376383,
-        "max": 0.5822569983138237
+        "median": 0.468652000563452,
+        "min": 0.4622000014933292,
+        "max": 0.6446510014939122
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "67ecbf2cf5c4cedc84edb6ee3efcfff5df7f3ce946e9ea2329c98a1d398d5f0c",
-      "actual_context_tokens_cl100k": 1114
+      "context_sha256": "9b3c70f651ee009aecbb9c94b99ce0a76974f3a7fff5d6d26e0dbf75be4c6e11",
+      "actual_context_tokens_cl100k": 1135
     },
     {
       "id": "hybrid-3",
@@ -1200,14 +1192,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4064189997734502,
-        "min": 0.39926600220496766,
-        "max": 0.4932310002914164
+        "median": 0.42942900108755566,
+        "min": 0.4121670026506763,
+        "max": 0.48655599675839767
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "f43fff49e9c49d2a8b22dc79634afe5e73a186124bea3e7c9852f057e81945af",
-      "actual_context_tokens_cl100k": 1157
+      "context_sha256": "9c2afafabe8269965b986a8fdaca78cb9f18b7c79bbbd74d29f8a2accbd9de4a",
+      "actual_context_tokens_cl100k": 1152
     },
     {
       "id": "hybrid-4",
@@ -1216,27 +1208,26 @@
       "retrieved": [
         "Support::TicketMessage",
         "Support::Ticket",
-        "Support::ResolveTicket",
-        "Support::TicketsController"
+        "Support::ResolveTicket"
       ],
       "expected": [
         "Support::Ticket",
         "Support::ResolveTicket",
         "Support::TicketMessage"
       ],
-      "precision_at5": 0.75,
+      "precision_at5": 1.0,
       "recall": 1.0,
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.45499000043491833,
-        "min": 0.43766700036940165,
-        "max": 0.6070540002838243
+        "median": 0.5002219986636192,
+        "min": 0.4665380001824815,
+        "max": 0.6542279988934752
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "733324c180394f0792642d7aae798b453da37193c7f662930f492e44547383f0",
-      "actual_context_tokens_cl100k": 1140
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
     },
     {
       "id": "direct-1",
@@ -1258,14 +1249,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.12330999743426219,
-        "min": 0.12174700168543495,
-        "max": 0.13275699893711135
+        "median": 0.143367000418948,
+        "min": 0.14300700058811344,
+        "max": 0.16522800069651566
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "f17191598e2a79dcedfa155fe441cfc07c0f9e743dc7dddd5b8c34d7b76bcba7",
-      "actual_context_tokens_cl100k": 1319
+      "context_sha256": "4352722a15a2a5e8ac43fbe0df727a668cfcaed32cc115e5eda1ea672fbba9b6",
+      "actual_context_tokens_cl100k": 1307
     },
     {
       "id": "direct-2",
@@ -1287,14 +1278,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.11466399882920086,
-        "min": 0.11113799700979143,
-        "max": 0.12796900045941584
+        "median": 0.13040299745625816,
+        "min": 0.1272369991056621,
+        "max": 0.1450809977541212
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "9ae561fd9097ead8a44b35f02b8ba97232ad21058300196ffdab95e27b10e2e3",
-      "actual_context_tokens_cl100k": 1319
+      "context_sha256": "75d96709936ae3578ac3939f1b2e8ec7a296454fcdf2e6d3c78e90eabe80c56b",
+      "actual_context_tokens_cl100k": 1298
     },
     {
       "id": "direct-3",
@@ -1317,14 +1308,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.11123799777124077,
-        "min": 0.10961400039377622,
-        "max": 0.11902199912583455
+        "median": 0.12232799781486392,
+        "min": 0.11894199997186661,
+        "max": 0.1370960017084144
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "87be38c6db2cb906dc4f40e854bf89836e1c520d1e042fd2f31d2b0d401adf1c",
-      "actual_context_tokens_cl100k": 1325
+      "context_sha256": "5ae64a8084a861d59c7eaebea7f9c6935189b26bcb9e4cb0715302bd96904555",
+      "actual_context_tokens_cl100k": 1321
     },
     {
       "id": "direct-4",
@@ -1346,14 +1337,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.12405199959175661,
-        "min": 0.12330999743426219,
-        "max": 0.12651699944399297
+        "median": 0.14888700025039725,
+        "min": 0.14551099957316183,
+        "max": 0.16067899923655204
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "21f267eb03a6fcf8ceaa31e6bf61712a887a840f1d0c30d0f38efd081111c676",
-      "actual_context_tokens_cl100k": 1319
+      "context_sha256": "536bb3a60bf465fa0ad75a79c70588760f66c1e3679db86a371355ce7cb52b26",
+      "actual_context_tokens_cl100k": 1307
     },
     {
       "id": "graph-5",
@@ -1361,7 +1352,7 @@
       "actual_strategy": "lexical",
       "retrieved": [
         "Article",
-        "PublishArticle"
+        "Tag"
       ],
       "expected": [
         "Article",
@@ -1375,14 +1366,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3541610021784436,
-        "min": 0.3530290014168713,
-        "max": 0.36949999775970355
+        "median": 0.4323450011725072,
+        "min": 0.4278659980627708,
+        "max": 0.44703199819196016
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "05dc649f1eb5e21d6601b162983d0a291e2a31126f00311149ec3a45c669bb93",
-      "actual_context_tokens_cl100k": 1166
+      "context_sha256": "f6e6563ab71603e2481cdd59a6eff8ca293ed472e724f3b95a2734cc5b85d2d7",
+      "actual_context_tokens_cl100k": 1190
     },
     {
       "id": "graph-6",
@@ -1402,16 +1393,16 @@
       "precision_at5": 1.0,
       "recall": 0.75,
       "mrr": 1.0,
-      "estimated_context_tokens": 1182,
+      "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3487210015009623,
-        "min": 0.34389200300211087,
-        "max": 0.707230999978492
+        "median": 0.34100499760825187,
+        "min": 0.33886100209201686,
+        "max": 0.5884460006200243
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "c31b7ece284ee1fcfe90dadf5a0727c88d13c4e5b8948d66e21f416eeefe1bcb",
-      "actual_context_tokens_cl100k": 1023
+      "context_sha256": "3d4251df364a8a8274eab87352acf00ae484afe24ad5376850b68f18c54e0b07",
+      "actual_context_tokens_cl100k": 1073
     },
     {
       "id": "graph-7",
@@ -1420,8 +1411,7 @@
       "retrieved": [
         "ReviewAssignment",
         "ReviewDecision",
-        "ArticleRevision",
-        "EditorialWorkflow"
+        "ArticleRevision"
       ],
       "expected": [
         "ReviewAssignment",
@@ -1429,19 +1419,19 @@
         "ArticleRevision",
         "Author"
       ],
-      "precision_at5": 0.75,
+      "precision_at5": 1.0,
       "recall": 0.75,
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3377110006113071,
-        "min": 0.3264900005888194,
-        "max": 0.48249100291286595
+        "median": 0.35116399885737337,
+        "min": 0.3480479972495232,
+        "max": 0.538472999323858
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "12604b931d8711c9a8201eabd8612a4bf08408713926e1b184a35588e9058ef1",
-      "actual_context_tokens_cl100k": 1102
+      "context_sha256": "df0d0af906dad3ea27fd4c00528e6a6dfda3ec0e14968a1d90de650b1a52e69d",
+      "actual_context_tokens_cl100k": 1112
     },
     {
       "id": "graph-8",
@@ -1462,16 +1452,16 @@
       "precision_at5": 0.5,
       "recall": 0.5,
       "mrr": 1.0,
-      "estimated_context_tokens": 1177,
+      "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3491419993224554,
-        "min": 0.3404560011404101,
-        "max": 0.42651700277929194
+        "median": 0.367454002116574,
+        "min": 0.3475679986877367,
+        "max": 0.41423100265092216
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "20dd8228d462321cfb5262c02cf6cab50f94222154d278678c03078769cea5d8",
-      "actual_context_tokens_cl100k": 1032
+      "context_sha256": "dbe9f75e988cf416e4261e00579e3a7d38a4da007a07de3c631894c85bb1c781",
+      "actual_context_tokens_cl100k": 1097
     },
     {
       "id": "fallback-1",
@@ -1494,14 +1484,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.10863300121854991,
-        "min": 0.10425399887026288,
-        "max": 0.1207249988510739
+        "median": 0.11895100033143535,
+        "min": 0.11569499838515185,
+        "max": 0.1390389988955576
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "87be38c6db2cb906dc4f40e854bf89836e1c520d1e042fd2f31d2b0d401adf1c",
-      "actual_context_tokens_cl100k": 1325
+      "context_sha256": "5ae64a8084a861d59c7eaebea7f9c6935189b26bcb9e4cb0715302bd96904555",
+      "actual_context_tokens_cl100k": 1321
     },
     {
       "id": "fallback-2",
@@ -1512,8 +1502,7 @@
         "PublishDueArticlesJob",
         "RenewSubscriptionsJob",
         "Billing::ChargePaymentJob",
-        "Newsletter::DeliverJob",
-        "WebhookDeliveryJob"
+        "Newsletter::DeliverJob"
       ],
       "expected": [
         "PublishArticleJob",
@@ -1522,16 +1511,16 @@
       "precision_at5": 0.4,
       "recall": 1.0,
       "mrr": 1.0,
-      "estimated_context_tokens": 1200,
+      "estimated_context_tokens": 1184,
       "latency_ms": {
-        "median": 0.11993400039500557,
-        "min": 0.11311100024613552,
-        "max": 0.1644869989831932
+        "median": 0.13488100012182258,
+        "min": 0.13210600081947632,
+        "max": 0.15118200099095702
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "e3fd97957bd40fe3dd84302882b35ac1d9fb39f58d844f8aac15825cd1a7013f",
-      "actual_context_tokens_cl100k": 1308
+      "context_sha256": "44222ac85b1b4cae4fd0d69ae50186406d79ee35458b47ad8d3b6988bb15b758",
+      "actual_context_tokens_cl100k": 1286
     },
     {
       "id": "fallback-3",
@@ -1554,14 +1543,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.1019709998217877,
-        "min": 0.10106899935635738,
-        "max": 0.10835200009751134
+        "median": 0.11278999954811297,
+        "min": 0.10915399980149232,
+        "max": 0.16743200103519484
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "18017efe2173fa17e177753f31b51f950738557d9c97fcddf372eaa6728dc28c",
-      "actual_context_tokens_cl100k": 1321
+      "context_sha256": "785349cc2f0412b04fde58ee631db4971ce3416e7f8d34477c97563c1fa78455",
+      "actual_context_tokens_cl100k": 1320
     },
     {
       "id": "fallback-4",
@@ -1584,14 +1573,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.10354400001233444,
-        "min": 0.10257199755869806,
-        "max": 0.11946299855480902
+        "median": 0.12224799866089597,
+        "min": 0.11956299931625836,
+        "max": 0.13651400149683468
       },
       "condition": "lexical",
       "budget": 1200,
-      "context_sha256": "f148fcafe7be2e39e5e9bfc2dd31bd6198edf93e16eecbb9b93c128663247a76",
-      "actual_context_tokens_cl100k": 1322
+      "context_sha256": "0639b679f3ecfa33e34e832edaf2e5b3842cc783cab4026bf397a68325b237d8",
+      "actual_context_tokens_cl100k": 1313
     },
     {
       "id": "keyword-1",
@@ -1610,14 +1599,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.1689480019849725,
-        "min": 3.158407998853363,
-        "max": 3.1778039992786944
+        "median": 3.6790900012420025,
+        "min": 3.358212998136878,
+        "max": 4.00741100020241
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "1d18ed3349905b5ec3f6abb56b7026100accdaddc84734b3a9aedc006a7b6ca8",
-      "actual_context_tokens_cl100k": 1096
+      "context_sha256": "51012e945de36e238f4f98d3fecf53266ea3b3543a91bfbb919a435c2af16073",
+      "actual_context_tokens_cl100k": 1097
     },
     {
       "id": "keyword-2",
@@ -1625,8 +1614,7 @@
       "actual_strategy": "lexical",
       "retrieved": [
         "Newsletter::DeliverJob",
-        "Article",
-        "Subscriber"
+        "Article"
       ],
       "expected": [
         "Newsletter::Campaign",
@@ -1635,16 +1623,16 @@
       "precision_at5": 0.0,
       "recall": 0.0,
       "mrr": 0.0,
-      "estimated_context_tokens": 1200,
+      "estimated_context_tokens": 1192,
       "latency_ms": {
-        "median": 3.2622619983158074,
-        "min": 3.1143560008786153,
-        "max": 3.2879600003070664
+        "median": 3.427331001148559,
+        "min": 3.2504419978067745,
+        "max": 3.585154998290818
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "8575e6b12ebf74cfb2b0af1afb2812821ecb4c72a8b28f75c861807544293ecd",
-      "actual_context_tokens_cl100k": 1178
+      "context_sha256": "f8c9af55db664ccb723a4c88043180973157d75d9540c49f7bbc8d843fc44b0d",
+      "actual_context_tokens_cl100k": 1170
     },
     {
       "id": "keyword-3",
@@ -1662,14 +1650,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.1442519975826144,
-        "min": 3.1229309970512986,
-        "max": 3.1967190006980672
+        "median": 3.30532399675576,
+        "min": 3.2135229994310066,
+        "max": 3.42745100351749
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "04d8afe4643496bcefbeff5c0b2caeaf1b14b2360b9df30d45c0371da0adaf23",
-      "actual_context_tokens_cl100k": 1138
+      "context_sha256": "29ceb4301faf95d5ebd4e8fa514f6463f9b74cd52df92db08635b0e71e710917",
+      "actual_context_tokens_cl100k": 1152
     },
     {
       "id": "keyword-4",
@@ -1688,14 +1676,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.186439997080015,
-        "min": 3.1784050006535836,
-        "max": 3.6843909983872436
+        "median": 3.3792819995142054,
+        "min": 3.315884001494851,
+        "max": 3.9784070031601004
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "e98e65aa401b9e78cc6c8440f08241b2d8133a7bea1ae6c2c2cf5674271e9dae",
-      "actual_context_tokens_cl100k": 1180
+      "context_sha256": "c7c7c42d239ecfd620e2ab1aba6e142a97c8ec3ed9aaacc0f432523ba267c4e9",
+      "actual_context_tokens_cl100k": 1185
     },
     {
       "id": "vector-1",
@@ -1715,14 +1703,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.14934099878883,
-        "min": 3.0933769994589966,
-        "max": 3.2594769982097205
+        "median": 3.361679002409801,
+        "min": 3.291598997748224,
+        "max": 3.6039400001754984
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "3c546a9faa50620e3c792e18ea8d8cd9b89f41d7d31a46cab14691bc7ef9d683",
-      "actual_context_tokens_cl100k": 1218
+      "context_sha256": "e7ed8b1e59a2966ae571f90ffe8435b3b664a7175cc5cd832624504401ab8516",
+      "actual_context_tokens_cl100k": 1217
     },
     {
       "id": "vector-2",
@@ -1740,14 +1728,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.0768659999012016,
-        "min": 3.0729079990123864,
-        "max": 3.2445590004499536
+        "median": 3.290036001999397,
+        "min": 3.2257259990728926,
+        "max": 3.4633179966476746
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "d8b4948b5b60e45bbaa4dfd2848ff87afab432c31c6f8af6e8e8ee6442ec0a02",
-      "actual_context_tokens_cl100k": 1135
+      "context_sha256": "8bc5b149bbccd10c7a5b97ce98272113612547b14269e09e539bfbde6dbf6fe7",
+      "actual_context_tokens_cl100k": 1151
     },
     {
       "id": "vector-3",
@@ -1763,9 +1751,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.41584599966881797,
-        "min": 0.41191899799741805,
-        "max": 0.4298329986340832
+        "median": 0.4374449999886565,
+        "min": 0.42620299791451544,
+        "max": 0.4413510032463819
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
@@ -1790,14 +1778,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.4085650004271884,
-        "min": 3.125808001641417,
-        "max": 3.7526569976762403
+        "median": 3.64510699728271,
+        "min": 3.256562999013113,
+        "max": 3.9937449982971884
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "3c546a9faa50620e3c792e18ea8d8cd9b89f41d7d31a46cab14691bc7ef9d683",
-      "actual_context_tokens_cl100k": 1218
+      "context_sha256": "e7ed8b1e59a2966ae571f90ffe8435b3b664a7175cc5cd832624504401ab8516",
+      "actual_context_tokens_cl100k": 1217
     },
     {
       "id": "graph-1",
@@ -1818,14 +1806,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.2026609987951815,
-        "min": 3.147086998069426,
-        "max": 3.2489170007465873
+        "median": 3.352291001647245,
+        "min": 3.3337969980493654,
+        "max": 3.3833589986898005
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "a19fdf81f449d3e85596d092e9769cf632b649ee997be053c301898ac755df93",
-      "actual_context_tokens_cl100k": 1120
+      "context_sha256": "ee2cff1c1a19a872e9bc64e8697ecf4190d4b2e53227d9f1bd4d878e6f65f1d3",
+      "actual_context_tokens_cl100k": 1188
     },
     {
       "id": "graph-2",
@@ -1847,14 +1835,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.0790799974056426,
-        "min": 3.060464998270618,
-        "max": 3.090279999014456
+        "median": 3.2549000025028363,
+        "min": 3.1886970027699135,
+        "max": 5.1899530008086
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "8900e9fa730e8dd2b02be0092728c3d6feeb57cc850984c47cab6bd4900c21fa",
-      "actual_context_tokens_cl100k": 1094
+      "context_sha256": "0f723ddb1a7d77270dde51eeb92c7030b1f64df740435512c909cacee8ca0960",
+      "actual_context_tokens_cl100k": 1100
     },
     {
       "id": "graph-3",
@@ -1875,14 +1863,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.2375060000049416,
-        "min": 3.068450001592282,
-        "max": 3.2876799996301997
+        "median": 3.2454730026074685,
+        "min": 3.1996470024751034,
+        "max": 3.983425998740131
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "6e30a80769d1476df3c6bbcd710da1392e0d73be3c361bbcf0ac5af16e077e9f",
-      "actual_context_tokens_cl100k": 1129
+      "context_sha256": "b3d32b2fbd637521751dade2c7fbf7a03def6f32adba7270fc6525f8632315a6",
+      "actual_context_tokens_cl100k": 1133
     },
     {
       "id": "graph-4",
@@ -1904,13 +1892,13 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.1830939988140017,
-        "min": 3.165851998346625,
-        "max": 3.2053349968919065
+        "median": 3.310733998659998,
+        "min": 3.2689569998183288,
+        "max": 3.3483139995951205
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "bdbf12decd6faa08295ca7e9d0d9d9019c62fb1a3fafd0e46d7478ee10e22baa",
+      "context_sha256": "13fd8c8160f2a02a0405ca22f0bee7263891888bb0ea15437221b0090d429111",
       "actual_context_tokens_cl100k": 1181
     },
     {
@@ -1932,14 +1920,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.1237240000336897,
-        "min": 3.114515999186551,
-        "max": 3.153189001750434
+        "median": 3.27973599996767,
+        "min": 3.2234009995590895,
+        "max": 3.9619270028197207
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "a15c2b314c56a504f08286f9a15577ad5ddfe92fb2b46edb0e903e80fee0f345",
-      "actual_context_tokens_cl100k": 1117
+      "context_sha256": "103b9a37e0ee135c4ed6cb6769c28c661cb873c9fc49dee1cfbf7fe618075d02",
+      "actual_context_tokens_cl100k": 1148
     },
     {
       "id": "hybrid-2",
@@ -1962,14 +1950,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.357900997798424,
-        "min": 3.159439998853486,
-        "max": 3.435695998632582
+        "median": 3.4068029999616556,
+        "min": 3.2936319985310547,
+        "max": 3.5570829968492035
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "8900e9fa730e8dd2b02be0092728c3d6feeb57cc850984c47cab6bd4900c21fa",
-      "actual_context_tokens_cl100k": 1094
+      "context_sha256": "0f723ddb1a7d77270dde51eeb92c7030b1f64df740435512c909cacee8ca0960",
+      "actual_context_tokens_cl100k": 1100
     },
     {
       "id": "hybrid-3",
@@ -1991,13 +1979,13 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.1639180015190504,
-        "min": 3.125195002212422,
-        "max": 3.177884002070641
+        "median": 3.3112360033555888,
+        "min": 3.2490289995621424,
+        "max": 3.3354699990013614
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "b35d33207f293aeda03f460d6565c0faa6bf45d9e23f4414dc9b1b669159827b",
+      "context_sha256": "f3b106b89fa2c51d8fefba8a87eb1cfc52b024361a6b9863be4857ebc1253179",
       "actual_context_tokens_cl100k": 1159
     },
     {
@@ -2019,13 +2007,13 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.173806999257067,
-        "min": 3.167594997648848,
-        "max": 3.6123560021223966
+        "median": 3.6413090019777883,
+        "min": 3.3360010020260233,
+        "max": 3.897547001542989
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "bdbf12decd6faa08295ca7e9d0d9d9019c62fb1a3fafd0e46d7478ee10e22baa",
+      "context_sha256": "13fd8c8160f2a02a0405ca22f0bee7263891888bb0ea15437221b0090d429111",
       "actual_context_tokens_cl100k": 1181
     },
     {
@@ -2037,8 +2025,7 @@
         "RenewSubscriptionsJob",
         "PublishDueArticlesJob",
         "PublishArticleJob",
-        "Newsletter::DeliverJob",
-        "WebhookDeliveryJob"
+        "Newsletter::DeliverJob"
       ],
       "expected": [
         "Billing::ChargePaymentJob"
@@ -2046,16 +2033,16 @@
       "precision_at5": 0.2,
       "recall": 1.0,
       "mrr": 1.0,
-      "estimated_context_tokens": 1200,
+      "estimated_context_tokens": 1180,
       "latency_ms": {
-        "median": 0.40771099884295836,
-        "min": 0.40121900019585155,
-        "max": 0.4115879964956548
+        "median": 0.44141100079286844,
+        "min": 0.4370639981061686,
+        "max": 0.6836229986220133
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "370b1523a63435a2ef40408eadeb1649649d80ca8c5cdc42ea6a41110b76d5ae",
-      "actual_context_tokens_cl100k": 1318
+      "context_sha256": "ef9fe45f5d47800269c176669996eed5399f5abf799a547c6f66e0b69619f519",
+      "actual_context_tokens_cl100k": 1284
     },
     {
       "id": "direct-2",
@@ -2077,14 +2064,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3977720007242169,
-        "min": 0.3930239981855266,
-        "max": 0.41429400152992457
+        "median": 0.4228270008752588,
+        "min": 0.4161549986747559,
+        "max": 0.43915800051763654
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "abc207d6adb883342087a489d1071f6d0008d8547686f95126f135efbcdc9a2a",
-      "actual_context_tokens_cl100k": 1320
+      "context_sha256": "011920b9826ca56d9c92c62802358a91426ab7ce9feb704b6e3588d6e2b9fc97",
+      "actual_context_tokens_cl100k": 1323
     },
     {
       "id": "direct-3",
@@ -2107,14 +2094,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3953380000893958,
-        "min": 0.39005900180200115,
-        "max": 0.4009990007034503
+        "median": 0.41908099956344813,
+        "min": 0.4055050012539141,
+        "max": 0.42249700345564634
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "ab00a8bc7ab2e46c0885c71c49235bf4db194bcdf865676eb841278947570d99",
-      "actual_context_tokens_cl100k": 1333
+      "context_sha256": "ad2131ac0ab985f9500502890b5006a8ce687419e1d428cfd566f0f0969e728f",
+      "actual_context_tokens_cl100k": 1331
     },
     {
       "id": "direct-4",
@@ -2125,8 +2112,7 @@
         "Billing::ChargePaymentJob",
         "PublishDueArticlesJob",
         "PublishArticleJob",
-        "Newsletter::DeliverJob",
-        "WebhookDeliveryJob"
+        "Newsletter::DeliverJob"
       ],
       "expected": [
         "RenewSubscriptionsJob"
@@ -2134,24 +2120,23 @@
       "precision_at5": 0.2,
       "recall": 1.0,
       "mrr": 1.0,
-      "estimated_context_tokens": 1200,
+      "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 0.4112169990548864,
-        "min": 0.4033430013805628,
-        "max": 0.593718999880366
+        "median": 0.44912700104760006,
+        "min": 0.43549100155360065,
+        "max": 0.49687499995343387
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "4b93d0b1d085e759be81be2b08fd3d386c75664d51cae0d839c1c60273666c3f",
-      "actual_context_tokens_cl100k": 1313
+      "context_sha256": "b2b764a5e35457ea559da80cbf39b8f62eb86322c2980ad7f23f07456870b38d",
+      "actual_context_tokens_cl100k": 1279
     },
     {
       "id": "graph-5",
       "strategy": "graph",
       "actual_strategy": "lexical",
       "retrieved": [
-        "Article",
-        "Author"
+        "Article"
       ],
       "expected": [
         "Article",
@@ -2161,18 +2146,18 @@
         "Comment"
       ],
       "precision_at5": 1.0,
-      "recall": 0.4,
+      "recall": 0.2,
       "mrr": 1.0,
-      "estimated_context_tokens": 1200,
+      "estimated_context_tokens": 1166,
       "latency_ms": {
-        "median": 3.103164999629371,
-        "min": 3.077876997849671,
-        "max": 3.1478679993597325
+        "median": 3.45283900242066,
+        "min": 3.3091610021074302,
+        "max": 3.519573001540266
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "c8a7831a60c1e4148f1e6a85b3a3f0aa697170743178cd10cec0618b5b9cf6e7",
-      "actual_context_tokens_cl100k": 1150
+      "context_sha256": "5a0ba6d3afe8ba90e438ac5022ab44c508e4a498a228d6d7e52c9201071a8697",
+      "actual_context_tokens_cl100k": 1158
     },
     {
       "id": "graph-6",
@@ -2194,14 +2179,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.0691009997099172,
-        "min": 3.030188996490324,
-        "max": 3.1078940010047518
+        "median": 3.2655700015311595,
+        "min": 3.230785998312058,
+        "max": 4.0180309988500085
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "22bbb7bdbd5635c2a9653e2e347d8c7419842b0879f799439f2336b8c851a754",
-      "actual_context_tokens_cl100k": 1038
+      "context_sha256": "570a874a634986f4aaba42c6394401a09866c6e9fe3cb798d2511ba6e1bf1f93",
+      "actual_context_tokens_cl100k": 1126
     },
     {
       "id": "graph-7",
@@ -2222,14 +2207,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.362980001838878,
-        "min": 3.031710999493953,
-        "max": 3.7105890005477704
+        "median": 3.2932220019574743,
+        "min": 3.168810002534883,
+        "max": 3.881396998622222
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "6e30a80769d1476df3c6bbcd710da1392e0d73be3c361bbcf0ac5af16e077e9f",
-      "actual_context_tokens_cl100k": 1129
+      "context_sha256": "b3d32b2fbd637521751dade2c7fbf7a03def6f32adba7270fc6525f8632315a6",
+      "actual_context_tokens_cl100k": 1133
     },
     {
       "id": "graph-8",
@@ -2237,7 +2222,7 @@
       "actual_strategy": "lexical",
       "retrieved": [
         "Article",
-        "Publication"
+        "Author"
       ],
       "expected": [
         "Publication",
@@ -2245,19 +2230,19 @@
         "Article",
         "Newsletter::Campaign"
       ],
-      "precision_at5": 1.0,
-      "recall": 0.5,
+      "precision_at5": 0.5,
+      "recall": 0.25,
       "mrr": 1.0,
-      "estimated_context_tokens": 1195,
+      "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 3.139502998237731,
-        "min": 3.061716997763142,
-        "max": 3.1687970003986266
+        "median": 3.366417997312965,
+        "min": 3.309070998511743,
+        "max": 3.4571069991216063
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "a99ee42bf5cc0065958927d86d81690770aab591153c759e3a47b45cca66cee3",
-      "actual_context_tokens_cl100k": 1120
+      "context_sha256": "cc391c4bc7a9cb4a97b1ea8f33791979bc16b69b6186bf0264537bd4daafb669",
+      "actual_context_tokens_cl100k": 1193
     },
     {
       "id": "fallback-1",
@@ -2280,14 +2265,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.41352200059918687,
-        "min": 0.3938649970223196,
-        "max": 0.4731840017484501
+        "median": 0.4171569999016356,
+        "min": 0.4155039969191421,
+        "max": 0.41841900019790046
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "ab00a8bc7ab2e46c0885c71c49235bf4db194bcdf865676eb841278947570d99",
-      "actual_context_tokens_cl100k": 1333
+      "context_sha256": "ad2131ac0ab985f9500502890b5006a8ce687419e1d428cfd566f0f0969e728f",
+      "actual_context_tokens_cl100k": 1331
     },
     {
       "id": "fallback-2",
@@ -2298,8 +2283,7 @@
         "PublishDueArticlesJob",
         "RenewSubscriptionsJob",
         "Billing::ChargePaymentJob",
-        "Newsletter::DeliverJob",
-        "WebhookDeliveryJob"
+        "Newsletter::DeliverJob"
       ],
       "expected": [
         "PublishArticleJob",
@@ -2310,14 +2294,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.40144000013242476,
-        "min": 0.3988249991380144,
-        "max": 0.43913999979849905
+        "median": 0.4297400009818375,
+        "min": 0.42666499939514324,
+        "max": 0.44321499808575027
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "a551499081b7a502f61f2026f953d52edd55477cf52a1d302ba0ae6dab2e8f06",
-      "actual_context_tokens_cl100k": 1316
+      "context_sha256": "8b4a46ba08527d2d41b5051afeefbff5241ad21dca852a1a3dd7a0dc8a2b8e41",
+      "actual_context_tokens_cl100k": 1299
     },
     {
       "id": "fallback-3",
@@ -2340,14 +2324,14 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.38708300053258426,
-        "min": 0.38475899782497436,
-        "max": 0.3931739993277006
+        "median": 0.4080100006831344,
+        "min": 0.40486400030204095,
+        "max": 0.4194009998172987
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "d1f4ed84c08f8e33f65760abd328125c9d722db2800cee59c1bbbcc05fc4ac22",
-      "actual_context_tokens_cl100k": 1331
+      "context_sha256": "d681b412ac27f152c04abc09e09db317924d1eeced752cbb0b51bf0952af8f69",
+      "actual_context_tokens_cl100k": 1328
     },
     {
       "id": "fallback-4",
@@ -2358,8 +2342,7 @@
         "PublishDueArticlesJob",
         "RenewSubscriptionsJob",
         "Billing::ChargePaymentJob",
-        "Newsletter::DeliverJob",
-        "WebhookDeliveryJob"
+        "Newsletter::DeliverJob"
       ],
       "expected": [
         "PublishArticleJob",
@@ -2368,16 +2351,16 @@
       "precision_at5": 0.4,
       "recall": 1.0,
       "mrr": 1.0,
-      "estimated_context_tokens": 1200,
+      "estimated_context_tokens": 1179,
       "latency_ms": {
-        "median": 0.3892269996867981,
-        "min": 0.3804599982686341,
-        "max": 0.4047759975946974
+        "median": 0.4259130000718869,
+        "min": 0.42240599941578694,
+        "max": 1.2264029974176083
       },
       "condition": "lexical_seeded_graph",
       "budget": 1200,
-      "context_sha256": "f4fd37ebc189bf2d5e8b71d68d9e14000ff5f238ea6e8998b44084e355e90274",
-      "actual_context_tokens_cl100k": 1316
+      "context_sha256": "d3834fcbc376ef395d575321f6dd9d0d848248012cad3b095da00d921f08d482",
+      "actual_context_tokens_cl100k": 1288
     },
     {
       "id": "keyword-1",
@@ -2393,9 +2376,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.5811560004076455,
-        "min": 0.5687519987986889,
-        "max": 1.1240890016779304
+        "median": 0.6002269983582664,
+        "min": 0.5812829986098222,
+        "max": 1.143248999142088
       },
       "condition": "grep",
       "budget": 1200,
@@ -2420,14 +2403,14 @@
       "mrr": 0.3333333333333333,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.5970949969196226,
-        "min": 0.5775390018243343,
-        "max": 0.8497870003338903
+        "median": 0.661090001813136,
+        "min": 0.6500300005427562,
+        "max": 0.7311709996429272
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "8ff9a84d9b8f7f173136c9db86d1623d36f56b0b27345a0614cf6e6f6a73871c",
-      "actual_context_tokens_cl100k": 1188
+      "context_sha256": "cae03b3afe79536f98ae6064075eebc22059a4b2eea7873152ee56b32c7dfea6",
+      "actual_context_tokens_cl100k": 1187
     },
     {
       "id": "keyword-3",
@@ -2445,9 +2428,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 585,
       "latency_ms": {
-        "median": 0.6150389999675099,
-        "min": 0.5756350001320243,
-        "max": 0.6516270004794933
+        "median": 0.609275000897469,
+        "min": 0.6067899994377512,
+        "max": 0.687790998199489
       },
       "condition": "grep",
       "budget": 1200,
@@ -2471,14 +2454,14 @@
       "mrr": 0.3333333333333333,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6164110018289648,
-        "min": 0.6016740007908083,
-        "max": 0.8389060021727346
+        "median": 0.6277780012169387,
+        "min": 0.614574000792345,
+        "max": 1.3176729989936575
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "93dc74db550bd215263759262d87d89c71cc915e39b570688276e7ce71e45a09",
-      "actual_context_tokens_cl100k": 1124
+      "context_sha256": "19d9185dd9a56d54b6aff1bf54b898c3034d73750c595cacf71adea98cdf6ccb",
+      "actual_context_tokens_cl100k": 1122
     },
     {
       "id": "vector-1",
@@ -2496,9 +2479,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 217,
       "latency_ms": {
-        "median": 0.6376210003509186,
-        "min": 0.6143779974081554,
-        "max": 1.4613989987992682
+        "median": 1.0140379999938887,
+        "min": 0.6378479993145447,
+        "max": 1.1007200009771623
       },
       "condition": "grep",
       "budget": 1200,
@@ -2521,9 +2504,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 936,
       "latency_ms": {
-        "median": 0.5980469977657776,
-        "min": 0.5936279994784854,
-        "max": 1.00109900085954
+        "median": 0.7057139991957229,
+        "min": 0.6458219977503177,
+        "max": 0.7489740019082092
       },
       "condition": "grep",
       "budget": 1200,
@@ -2544,9 +2527,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.6161199999041855,
-        "min": 0.6015430008119438,
-        "max": 0.6700009980704635
+        "median": 0.6549589998030569,
+        "min": 0.6380580016411841,
+        "max": 0.7607759980601259
       },
       "condition": "grep",
       "budget": 1200,
@@ -2572,9 +2555,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1016,
       "latency_ms": {
-        "median": 0.6784270008211024,
-        "min": 0.6385420019796584,
-        "max": 0.7102269992174115
+        "median": 0.6731130015396047,
+        "min": 0.6558319983014371,
+        "max": 1.4023510011611506
       },
       "condition": "grep",
       "budget": 1200,
@@ -2601,14 +2584,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6100790014897939,
-        "min": 0.6014729988237377,
-        "max": 1.1979470000369474
+        "median": 0.6282700014708098,
+        "min": 0.6069299997761846,
+        "max": 1.1740760019165464
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "316b4374cf30f5ef3093850d3a3e3a87aefcb684913c21de91525848ed98b6f6",
-      "actual_context_tokens_cl100k": 1200
+      "context_sha256": "3153d175e4dd6c76a6f09667a904dc83a3de8442a979ab7c1c40c5978c1c86a7",
+      "actual_context_tokens_cl100k": 1195
     },
     {
       "id": "graph-2",
@@ -2630,14 +2613,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.5869060005352367,
-        "min": 0.58170700140181,
-        "max": 0.9297660035372246
+        "median": 0.7260319980559871,
+        "min": 0.6331490003503859,
+        "max": 0.7377139991149306
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "00176bdad3c0b99bc8cf6c6abcedc045470907253d453d9f933fe0649b9188a5",
-      "actual_context_tokens_cl100k": 1240
+      "context_sha256": "fd2ea68029f6cf9c5c51c0e3939c5a6a17ef2c674de3da65d0e43035ff527f90",
+      "actual_context_tokens_cl100k": 1238
     },
     {
       "id": "graph-3",
@@ -2657,9 +2640,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 344,
       "latency_ms": {
-        "median": 0.5976459979137871,
-        "min": 0.5497170022863429,
-        "max": 0.607524998486042
+        "median": 0.6163580001157243,
+        "min": 0.6061189997126348,
+        "max": 0.7201810003607534
       },
       "condition": "grep",
       "budget": 1200,
@@ -2686,14 +2669,14 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6264500007091556,
-        "min": 0.5900310025026556,
-        "max": 0.6683280007564463
+        "median": 0.6356839985528495,
+        "min": 0.6254949985304847,
+        "max": 1.429681997251464
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "93dc74db550bd215263759262d87d89c71cc915e39b570688276e7ce71e45a09",
-      "actual_context_tokens_cl100k": 1124
+      "context_sha256": "19d9185dd9a56d54b6aff1bf54b898c3034d73750c595cacf71adea98cdf6ccb",
+      "actual_context_tokens_cl100k": 1122
     },
     {
       "id": "hybrid-1",
@@ -2716,13 +2699,13 @@
       "mrr": 0.25,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6280230008997023,
-        "min": 0.6032460005371831,
-        "max": 1.1940500007767696
+        "median": 0.6453819987655152,
+        "min": 0.6177799987199251,
+        "max": 1.158917999418918
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "b98aed1d38faccc5117a42325d1ce0891c6ce6f75bd26409605a41f3b84b70bb",
+      "context_sha256": "c48185212342adbbcff0fd6f18c43eefd311ee38785f87a459456d03ea5fd9e7",
       "actual_context_tokens_cl100k": 1161
     },
     {
@@ -2746,14 +2729,14 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6206489997566678,
-        "min": 0.5939699985901825,
-        "max": 0.9551240000291727
+        "median": 0.6772010019631125,
+        "min": 0.662844002363272,
+        "max": 0.7618880008521955
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "00176bdad3c0b99bc8cf6c6abcedc045470907253d453d9f933fe0649b9188a5",
-      "actual_context_tokens_cl100k": 1240
+      "context_sha256": "fd2ea68029f6cf9c5c51c0e3939c5a6a17ef2c674de3da65d0e43035ff527f90",
+      "actual_context_tokens_cl100k": 1238
     },
     {
       "id": "hybrid-3",
@@ -2774,9 +2757,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 695,
       "latency_ms": {
-        "median": 0.6125339969003107,
-        "min": 0.6016730003466364,
-        "max": 0.6515969980682712
+        "median": 0.6530350001412444,
+        "min": 0.6391099996108096,
+        "max": 0.9203940026054624
       },
       "condition": "grep",
       "budget": 1200,
@@ -2802,14 +2785,14 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6671260016446467,
-        "min": 0.6203390003065579,
-        "max": 0.7173599988163915
+        "median": 0.666201001877198,
+        "min": 0.6553500024892855,
+        "max": 1.4713990021846257
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "93dc74db550bd215263759262d87d89c71cc915e39b570688276e7ce71e45a09",
-      "actual_context_tokens_cl100k": 1124
+      "context_sha256": "19d9185dd9a56d54b6aff1bf54b898c3034d73750c595cacf71adea98cdf6ccb",
+      "actual_context_tokens_cl100k": 1122
     },
     {
       "id": "direct-1",
@@ -2826,9 +2809,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 217,
       "latency_ms": {
-        "median": 0.12419199993018992,
-        "min": 0.12209799751872197,
-        "max": 0.13153599866200238
+        "median": 0.12800799959222786,
+        "min": 0.12693600001512095,
+        "max": 0.12843899821746163
       },
       "condition": "grep",
       "budget": 1200,
@@ -2850,9 +2833,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 250,
       "latency_ms": {
-        "median": 0.12541400064947084,
-        "min": 0.11932299821637571,
-        "max": 0.14735500008100644
+        "median": 0.13067400141153485,
+        "min": 0.1284790014324244,
+        "max": 0.13172599938116036
       },
       "condition": "grep",
       "budget": 1200,
@@ -2873,9 +2856,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.11196899868082255,
-        "min": 0.1110480006900616,
-        "max": 0.13574399781646207
+        "median": 0.1165470021078363,
+        "min": 0.11266000001342036,
+        "max": 0.6590569973923266
       },
       "condition": "grep",
       "budget": 1200,
@@ -2897,9 +2880,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 217,
       "latency_ms": {
-        "median": 0.1284790014324244,
-        "min": 0.12450299982447177,
-        "max": 0.15108200022950768
+        "median": 0.126967002870515,
+        "min": 0.1260249991901219,
+        "max": 0.1310740008193534
       },
       "condition": "grep",
       "budget": 1200,
@@ -2925,14 +2908,14 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.6848890006949659,
-        "min": 0.6013929996697698,
-        "max": 1.3676640010089613
+        "median": 0.6164679980429355,
+        "min": 0.6045250011084136,
+        "max": 0.9973569976864383
       },
       "condition": "grep",
       "budget": 1200,
-      "context_sha256": "a2ec85f0392769f2ab01ac8d06b8371491665062d57c1c1083e5c60e065b9ab3",
-      "actual_context_tokens_cl100k": 1165
+      "context_sha256": "51d95af8f28f7d3e712b4dd94287fc36a96f038b60c3206d33b7b7c48c97984a",
+      "actual_context_tokens_cl100k": 1161
     },
     {
       "id": "graph-6",
@@ -2953,9 +2936,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 940,
       "latency_ms": {
-        "median": 0.5769980016339105,
-        "min": 0.5660569986503106,
-        "max": 1.0655900005076546
+        "median": 0.7103230018401518,
+        "min": 0.5983240007481072,
+        "max": 0.8808900020085275
       },
       "condition": "grep",
       "budget": 1200,
@@ -2978,9 +2961,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.6459070027631242,
-        "min": 0.6328210001811385,
-        "max": 0.6518379996123258
+        "median": 0.6024819995218422,
+        "min": 0.5893970010220073,
+        "max": 0.6102269981056452
       },
       "condition": "grep",
       "budget": 1200,
@@ -3005,9 +2988,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 291,
       "latency_ms": {
-        "median": 0.5717779968108516,
-        "min": 0.5684319985448383,
-        "max": 0.6041879969416186
+        "median": 0.6279389999690466,
+        "min": 0.5745989983552136,
+        "max": 1.4814880014455412
       },
       "condition": "grep",
       "budget": 1200,
@@ -3028,9 +3011,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.11339099728502333,
-        "min": 0.1115280028898269,
-        "max": 0.11681799878715537
+        "median": 0.11962300050072372,
+        "min": 0.1188809983432293,
+        "max": 0.12602399874594994
       },
       "condition": "grep",
       "budget": 1200,
@@ -3051,9 +3034,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.11373199959052727,
-        "min": 0.11193900354555808,
-        "max": 0.12013499872409739
+        "median": 0.11931200060644187,
+        "min": 0.11575499956961721,
+        "max": 0.12964100096723996
       },
       "condition": "grep",
       "budget": 1200,
@@ -3074,9 +3057,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.1162369990197476,
-        "min": 0.11218899817322381,
-        "max": 0.11858099969686009
+        "median": 0.11869100126205012,
+        "min": 0.11544500011950731,
+        "max": 0.12868900012108497
       },
       "condition": "grep",
       "budget": 1200,
@@ -3100,9 +3083,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 394,
       "latency_ms": {
-        "median": 0.12380100088194013,
-        "min": 0.12321999747655354,
-        "max": 0.12474300092435442
+        "median": 0.13326800035429187,
+        "min": 0.12704699838650413,
+        "max": 0.6061489984858781
       },
       "condition": "grep",
       "budget": 1200,

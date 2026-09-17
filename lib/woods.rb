@@ -323,8 +323,8 @@ module Woods
       @pretty_json = value
     end
 
-    # @param value [Symbol] Must be one of :claude, :markdown, :plain, :json
-    # @raise [ConfigurationError] if value is not a valid format
+    # @param value [Symbol, String] semantic (default) or lexical
+    # @raise [ConfigurationError] if value is not a supported retrieval mode
     def retrieval_mode=(value)
       unless %w[semantic lexical].include?(value.to_s)
         raise ConfigurationError, "retrieval_mode must be semantic or lexical, got #{value.inspect}"
@@ -333,6 +333,8 @@ module Woods
       @retrieval_mode = value.to_sym
     end
 
+    # @param value [Symbol] Must be one of :claude, :markdown, :plain, :json
+    # @raise [ConfigurationError] if value is not a valid format
     def context_format=(value)
       valid = %i[claude markdown plain json]
       unless valid.include?(value)

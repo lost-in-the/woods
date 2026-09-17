@@ -39,10 +39,10 @@ Initial Ruby 4.0.6 comparison (five warm pipeline repetitions per question):
 
 | Condition | Precision@5 | Recall | MRR | Mean actual context tokens | Median query latency (ms) |
 |---|---:|---:|---:|---:|---:|
-| Existing semantic pipeline | 0.536 | 0.580 | 0.857 | 1,000.7 | 2.908 |
-| Explicit lexical | 0.462 | 0.720 | 0.789 | 1,143.9 | 0.386 |
-| Lexical + query-seeded graph experiment | 0.414 | 0.492 | 0.750 | 1,152.8 | 3.132 |
-| Existing identifier grep baseline | 0.342 | 0.288 | 0.336 | 593.6 | 0.598 |
+| Existing semantic pipeline | 0.536 | 0.580 | 0.857 | 1,000.7 | 3.019 |
+| Explicit lexical | 0.492 | 0.666 | 0.780 | 1,152.6 | 0.407 |
+| Lexical + query-seeded graph experiment | 0.396 | 0.476 | 0.750 | 1,159.8 | 3.292 |
+| Existing identifier grep baseline | 0.342 | 0.288 | 0.336 | 592.9 | 0.628 |
 
 Lexical retrieval improves recall on this small set while losing precision and
 first-hit rank against the semantic pipeline. This supports an explicit offline

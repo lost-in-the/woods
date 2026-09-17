@@ -89,6 +89,13 @@ module Woods
       # @return [Integer, nil] nil until something has been read
       attr_reader :loaded_generation
 
+      # Cache identity includes the publish token: overlapping writers can
+      # legitimately publish the same number with a different immutable payload.
+      def generation_identity
+        ensure_fresh!
+        [@loaded_generation, @loaded_token, current_payload_dir.to_s].freeze
+      end
+
       # Drop caches if the index has been rewritten since they were populated.
       #
       # This is what makes the MCP `reload` tool an optimization rather than a
@@ -359,6 +366,32 @@ module Woods
                end
 
         dirs.flat_map { |dir| read_index(dir) }
+      end
+
+      # Enumerate complete typed published units, holding one generation pin.
+      # Bulk consumers must fail closed on a corrupt/missing entry instead of
+      # silently constructing a partial retrieval index. Bare-name lookup cannot
+      # do this because multiple types can legitimately share an identifier.
+      def each_unit
+        return enum_for(__method__) unless block_given?
+
+        with_pinned_generation do
+          TYPE_DIRS.each do |dir|
+            directory = current_payload_dir.join(dir)
+            raise IOError, "symlink unit directory: #{dir}" if directory.symlink?
+
+            entries = published_unit_entries(dir)
+            seen = Set.new
+            entries.each do |entry|
+              id = entry.is_a?(Hash) && entry['identifier']
+              unless id.is_a?(String) && !id.empty? && seen.add?(id)
+                raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
+              end
+
+              yield read_published_unit(dir, id)
+            end
+          end
+        end
       end
 
       # Default maximum number of unit files to load during phase-2 search.
@@ -1121,6 +1154,42 @@ module Woods
           end
         end
         map
+      end
+
+      def published_unit_entries(dir)
+        index_path = current_payload_dir.join(dir, '_index.json')
+        raise IOError, "symlink unit index: #{dir}" if index_path.symlink?
+
+        expected = manifest.dig('counts', dir)
+        raise IOError, "missing unit index: #{dir}/_index.json" if !index_path.file? && expected.to_i.positive?
+
+        entries = read_index(dir)
+        raise IOError, "invalid unit index: #{dir}" unless entries.is_a?(Array)
+        if expected.is_a?(Integer) && entries.size != expected
+          raise IOError, "unit count mismatch in #{dir}: expected #{expected}, found #{entries.size}"
+        end
+
+        entries
+      end
+
+      def read_published_unit(dir, identifier)
+        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+        filename = "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
+        path = current_payload_dir.join(dir, filename)
+        raise IOError, "symlink unit file: #{dir}/#{filename}" if path.symlink?
+
+        raise IOError, "non-regular unit file: #{dir}/#{filename}" unless path.lstat.file?
+
+        data = File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
+          raise IOError, "non-regular unit file: #{dir}/#{filename}" unless file.stat.file?
+
+          JSON.parse(file.read)
+        end
+        unless data.is_a?(Hash) && data['identifier'] == identifier && data['type'] == DIR_TO_TYPE.fetch(dir)
+          raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"
+        end
+
+        data
       end
 
       # Read and cache an _index.json file for a type directory.

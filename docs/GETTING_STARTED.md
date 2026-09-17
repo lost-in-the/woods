@@ -108,13 +108,13 @@ For example:
 
 > Use Woods to find `Order`, inspect its resolved callbacks and associations, and list the first two levels of code that depend on it. Cite the Woods identifiers you used.
 
-The Index schema inventory totals 29 schemas. Fourteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but returns a configuration error until embeddings are enabled. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
+The Index schema inventory totals 29 schemas. Fourteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but needs embeddings in the default semantic mode, or explicit [lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over extraction output. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
 
 ## Optional next steps
 
 ### Add semantic search
 
-Structural search, exact lookup, dependency traversal, graph analysis, and flow tracing do not need embeddings. Add embeddings only when agents need natural-language retrieval.
+Structural search, exact lookup, dependency traversal, graph analysis, and flow tracing do not need embeddings. For ranked natural-language retrieval, choose explicit [lexical mode](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) without providers, or configure embeddings for semantic matching.
 
 The local preset uses SQLite metadata, persisted in-memory vectors, and a local Ollama service. Add `gem "sqlite3"` to the application bundle if it is not already present. MySQL/PostgreSQL applications that do not want that dependency can use the `:shared_filesystem` preset instead; it still uses Ollama but persists all stores beneath the Woods output directory.
 
@@ -171,7 +171,7 @@ If live-data queries are necessary, review its allowlists, blocked tables, crede
 | Rails fails during extraction | Boot and eager-load Rails with the same environment variables | [Troubleshooting](TROUBLESHOOTING.md) |
 | Validation reports missing or stale units | Run a full extraction, then validate again | [Incremental extraction](INCREMENTAL_EXTRACTION.md) |
 | MCP reports no index or zero units | Confirm `cwd`, the host-visible `tmp/woods` path, and `woods:stats` output | [MCP servers](MCP_SERVERS.md) |
-| `codebase_retrieve` says it is disabled | Configure an embedding provider and run `woods:embed`, or use `search` | [Retrieval guide](RETRIEVAL_GUIDE.md) |
+| `codebase_retrieve` says it is disabled | Choose lexical mode or configure embeddings and run `woods:embed`; `search` also works | [Retrieval guide](RETRIEVAL_GUIDE.md) |
 | Docker extraction succeeds but MCP cannot see it | Translate the container output path to its host-mounted path | [Docker setup](DOCKER_SETUP.md) |
 
 ## Where to go next
