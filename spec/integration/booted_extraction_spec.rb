@@ -141,6 +141,64 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(identifiers).to include('Post', 'Comment')
   end
 
+  it 'publishes the live model callback chain rather than nonexistent per-kind readers' do
+    expect(Post).not_to respond_to(:_before_save_callbacks)
+    expect(Post._save_callbacks.map(&:filter)).to include(:normalize_title)
+
+    metadata = find_unit(:models, 'Post').fetch('metadata')
+    expect(metadata.fetch('callbacks')).to include(
+      a_hash_including('type' => 'before_save', 'filter' => 'normalize_title', 'kind' => 'before')
+    )
+    expect(metadata.fetch('callback_count')).to eq(metadata.fetch('callbacks').length)
+  end
+
+  it 'reflects real Rails callback kinds and the separate before_commit event' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+      before_validation :normalize_input, if: :normalization_enabled?
+      before_save :prepare_save, unless: :skip_save?
+      around_save :wrap_save
+      after_save :finish_save
+      before_create :prepare_create
+      around_create :wrap_create
+      after_create :finish_create
+      before_update :prepare_update
+      around_update :wrap_update
+      after_update :finish_update
+      before_destroy :prepare_destroy
+      around_destroy :wrap_destroy
+      after_destroy :finish_destroy
+      after_validation :finish_validation
+      before_commit :prepare_commit
+      after_commit :finish_commit, on: :create
+      after_rollback :undo_changes
+      after_initialize :initialize_state
+      after_find :load_state
+      after_touch :refresh_state
+    end
+    stub_const('CallbackProbe', model)
+    callbacks = Woods::Extractors::ModelExtractor.new.send(:extract_callbacks, model)
+    expected = {
+      before_validation: :normalize_input, after_validation: :finish_validation, before_save: :prepare_save,
+      around_save: :wrap_save, after_save: :finish_save, before_create: :prepare_create,
+      around_create: :wrap_create, after_create: :finish_create,
+      before_update: :prepare_update, around_update: :wrap_update, after_update: :finish_update,
+      before_destroy: :prepare_destroy, around_destroy: :wrap_destroy, after_destroy: :finish_destroy,
+      before_commit: :prepare_commit, after_commit: :finish_commit,
+      after_rollback: :undo_changes, after_initialize: :initialize_state,
+      after_find: :load_state, after_touch: :refresh_state
+    }
+    expected.each do |type, filter|
+      matches = callbacks.select { |entry| entry[:type] == type && entry[:filter] == filter.to_s }
+      expect(matches.length).to eq(1), "missing or duplicated #{type}: #{filter}"
+      expect(matches.first[:kind].to_s).to eq(type.to_s.split('_').first)
+    end
+    validation = callbacks.find { |entry| entry[:filter] == 'normalize_input' }
+    expect(validation[:conditions]).to include(if: [':normalization_enabled?'])
+    save = callbacks.find { |entry| entry[:filter] == 'prepare_save' }
+    expect(save[:conditions]).to include(unless: [':skip_save?'])
+  end
+
   it 'reflects model methods consistently before and after schema loading (#363)' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
@@ -505,6 +563,34 @@ RSpec.describe 'Optional ActionMailer extraction', :booted_app do
       expect(result).to include('valid' => true, 'errors' => [], 'discoverable' => expected,
                                 'extracted' => expected, 'published' => expected)
       expect(result.fetch('framework_loaded')).to eq(mode != 'absent')
+    end
+  end
+end
+
+RSpec.describe 'Model callbacks across Rails processes', :booted_app do
+  it 'preserves framework callbacks, metadata and chunk hashes across independent boots' do
+    results = Array.new(2) do
+      script = File.expand_path('../fixtures/model_callbacks/boot.rb', __dir__)
+      output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+      expect(status.success?).to be(true), error
+      JSON.parse(output.lines.last)
+    end
+
+    expect(results.last).to eq(results.first)
+    unit = results.first.fetch('unit')
+    filter = results.first.fetch('framework_filter')
+    expect(unit.fetch('metadata').fetch('callbacks')).to include(
+      a_hash_including('type' => 'before_destroy', 'kind' => 'before', 'filter' => filter)
+    )
+    chunk = unit.fetch('chunks').find { |entry| entry.fetch('chunk_type') == 'callbacks' }
+    expect(chunk.fetch('content')).to include(filter)
+    expect(chunk.fetch('content_hash')).to eq(Digest::SHA256.hexdigest(chunk.fetch('content')))
+    results.first.fetch('object_filters').tally.each do |label, count|
+      matches = unit.fetch('metadata').fetch('callbacks').count do |entry|
+        entry['type'] == 'before_save' && entry['filter'] == label
+      end
+      expect(matches).to eq(count), "missing or merged callback objects: #{label}"
+      expect(chunk.fetch('content')).to include(label)
     end
   end
 end
