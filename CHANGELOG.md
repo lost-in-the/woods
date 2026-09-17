@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
 
+- Prevent single-component cache keys from colliding with multi-component or
+  empty keys by uniformly length-prefixing components (B-155). Custom callers
+  using persistent single-component keys should clear that cache domain on upgrade.
+
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
 
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including

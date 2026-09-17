@@ -2146,7 +2146,7 @@
       "lib/woods/cache/cache_store.rb"
     ],
     "description": "Audit finding STO-7 (Low, executed). cache_store.rb:27-35 joins key parts without length-prefixing, so `cache_key(:d, '4:abc22:xy')` and `cache_key(:d, 'abc2', 'xy')` produce the same key and two different queries can share one cached response. Latent: no current caller constructs a part containing the separator. Acceptance: length-prefix each part (or escape the separator), with a spec asserting the two colliding call shapes produce different keys.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-156",

@@ -281,6 +281,13 @@ overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
 
+`Woods::Cache.cache_key` length-prefixes every component, including a single
+component, so different argument counts cannot share a response. Existing
+multi-component keys used by Woods' wrappers remain unchanged. Custom callers
+using single-component keys must clear their affected persistent cache domain
+when upgrading, since older unprefixed entries can alias the new encoding;
+subsequent calls refill it normally. Namespace clearing still covers both formats.
+
 ## Deployment shapes
 
 Woods supports three deployment shapes, pick the preset that matches yours.
