@@ -184,6 +184,12 @@ result.sources      # => [{ identifier: "User", type: "model", score: 0.91, ... 
 result.trace        # => RetrievalTrace with elapsed_ms, candidate_count, etc.
 ```
 
+`result.tokens_used` and `result.trace.tokens_used` count the final returned
+`context`, including the optional formatter output and type-rank table. Counting
+uses the same injected token counter or chars-per-token estimate as assembly;
+it does not guarantee an exact count for the downstream model. `budget` limits
+context assembly, so postprocessing can make the final count exceed it.
+
 Override the token budget per call:
 
 ```ruby

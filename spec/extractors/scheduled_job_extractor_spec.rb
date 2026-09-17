@@ -98,6 +98,101 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
   # ── Solid Queue (config/recurring.yml) ─────────────────────────────
 
   describe 'Solid Queue format' do
+    it 'evaluates recurring ERB with the schedule filename and preserves raw source' do
+      create_file('config/schedule_values.rb', 'WOODS_SCHEDULE_FREQUENCY = "every 7 hours"')
+      path = create_file('config/recurring.yml', <<~YAML)
+        <% require_relative "schedule_values" %>
+        <% if Rails.env.to_s == "test" %>
+        cleanup:
+          class: CleanupJob
+          schedule: <%= WOODS_SCHEDULE_FREQUENCY %>
+        <% end %>
+      YAML
+      allow(Rails).to receive(:env).and_return('test')
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to eq(['scheduled:cleanup'])
+      expect(units.first.metadata[:cron_expression]).to eq('every 7 hours')
+      expect(units.first.source_code).to eq(File.read(path))
+    ensure
+      Object.send(:remove_const, :WOODS_SCHEDULE_FREQUENCY) if Object.const_defined?(:WOODS_SCHEDULE_FREQUENCY)
+    end
+
+    it 'renders recurring configuration on Rails versions without ConfigurationFile' do
+      hide_const('ActiveSupport::ConfigurationFile')
+      create_file('config/legacy_schedule_settings.rb', 'WOODS_LEGACY_FREQUENCY = "every 7 hours"')
+      create_file('config/recurring.yml', <<~YAML)
+        <% require_relative "legacy_schedule_settings" %>
+        production: &production
+          cleanup:
+            class: CleanupJob
+            schedule: <%= WOODS_LEGACY_FREQUENCY %>
+        test: *production
+      YAML
+      expect(described_class.new.extract_all.first.metadata[:cron_expression]).to eq('every 7 hours')
+    ensure
+      Object.send(:remove_const, :WOODS_LEGACY_FREQUENCY) if Object.const_defined?(:WOODS_LEGACY_FREQUENCY)
+    end
+
+    it 'logs ERB runtime failures and omits the broken recurring file' do
+      path = create_file('config/recurring.yml', '<% raise "broken schedule" %>')
+      expect(Rails.logger).to receive(:error).with(/#{Regexp.escape(path)}: broken schedule/)
+      expect(described_class.new.extract_all).to eq([])
+    end
+
+    ['<% if %>', '<% require_relative "missing_schedule_helper" %>'].each do |source|
+      it "logs invalid ERB or missing required configuration: #{source}" do
+        path = create_file('config/recurring.yml', source)
+        expect(Rails.logger).to receive(:error).with(/#{Regexp.escape(path)}/)
+        expect(described_class.new.extract_all).to eq([])
+      end
+    end
+
+    it 'selects custom environment sections and respects an empty active section' do
+      path = create_file('config/recurring.yml', <<~YAML)
+        production: &production
+          cleanup:
+            class: CleanupJob
+            schedule: every hour
+        beta: {}
+        development: *production
+      YAML
+      allow(Rails).to receive(:env).and_return('development')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['scheduled:cleanup'])
+      allow(Rails).to receive(:env).and_return('beta')
+      expect(described_class.new.extract_all).to eq([])
+      allow(Rails).to receive(:env).and_return('test')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['scheduled:cleanup'])
+      expect(File).to exist(path)
+    end
+
+    it 'treats null environment sections as empty without hiding other environments' do
+      create_file('config/recurring.yml', <<~YAML)
+        production:
+          cleanup:
+            class: CleanupJob
+            schedule: every hour
+        test:
+      YAML
+      allow(Rails).to receive(:env).and_return('production')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['scheduled:cleanup'])
+      allow(Rails).to receive(:env).and_return('test')
+      expect(described_class.new.extract_all).to eq([])
+    end
+
+    it 'does not unwrap flat tasks named after environments or with nested arguments' do
+      create_file('config/recurring.yml', <<~YAML)
+        production:
+          class: CleanupJob
+          schedule: every hour
+          args:
+            options:
+              enabled: true
+      YAML
+      allow(Rails).to receive(:env).and_return('production')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['scheduled:production'])
+    end
+
     it 'extracts a basic entry' do
       path = create_file('config/recurring.yml', <<~YAML)
         periodic_cleanup:
