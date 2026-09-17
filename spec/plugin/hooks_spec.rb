@@ -56,7 +56,11 @@ RSpec.describe 'plugin hooks (#280)' do
       while [ -f "#{block}" ]; do
         sleep 0.05
       done
-      echo "$CHANGED_FILES $*" >> "#{log}"
+      #{RbConfig.ruby} -rjson -rbase64 -e '
+        batch = JSON.parse(Base64.strict_decode64(ARGV.fetch(0).split("[", 2).last.delete_suffix("]")))
+        task = batch.fetch("events").any? { |event| event.fetch("path") == "db/schema.rb" } ? "woods:extract" : "woods:incremental"
+        puts "\#{batch.fetch("events").map { |event| event.fetch("path") }.join(",")} \#{task}"
+      ' "$1" >> "#{log}"
     SH
     FileUtils.chmod(0o755, script)
     [script, log, started, block]
@@ -68,7 +72,7 @@ RSpec.describe 'plugin hooks (#280)' do
   def restricted_bin(dir, without:)
     bin = File.join(dir, 'restricted-bin')
     FileUtils.mkdir_p(bin)
-    %w[cat mkdir rmdir sed tr git ruby date sleep jq touch stat].each do |tool|
+    %w[cat mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
       next if without.include?(tool)
 
       real = `which #{tool}`.strip
@@ -155,13 +159,13 @@ RSpec.describe 'plugin hooks (#280)' do
       end
     end
 
-    it 'does nothing for a view path, when disabled, or without an index' do
+    it 'does nothing for unrelated documentation, when disabled, or without an index' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)
         rake, log, = recorder(dir)
         env = base_env.merge('WOODS_HOOK_RAKE' => rake)
 
-        run_hook(post_edit, edit_payload(dir, 'app/views/x.html.erb'), env)
+        run_hook(post_edit, edit_payload(dir, 'docs/example.md'), env)
         run_hook(post_edit, edit_payload(dir, 'app/models/user.rb'),
                  env.merge('WOODS_HOOKS_DISABLED' => '1'))
         FileUtils.rm_f(File.join(dir, 'tmp/woods/generation.json'))
@@ -185,6 +189,138 @@ RSpec.describe 'plugin hooks (#280)' do
 
         expect(status).to be_success, err
         expect(File.read(log)).to include('app/models/user.rb woods:incremental')
+      end
+    end
+
+    it 'refreshes the supported non-model inputs and keeps unrelated paths quiet' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        make_app(dir)
+        rake, log, = recorder(dir)
+        paths = %w[app/services/pay.rb app/controllers/pay_controller.rb app/jobs/pay_job.rb
+                   app/views/pay/index.html.erb app/models/concerns/payable.rb config/locales/en.yml
+                   spec/models/pay_spec.rb test/models/pay_test.rb lib/pay.rb]
+        paths.each { |path| run_hook(post_edit, edit_payload(dir, path), base_env.merge('WOODS_HOOK_RAKE' => rake)) }
+        expect(File.read(log).lines.size).to eq(paths.size)
+      end
+    end
+
+    it 'uses JSON transport without a host Ruby or bundle and preserves unusual paths' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        make_app(dir)
+        rake, log, = recorder(dir)
+        bin = restricted_bin(dir, without: %w[ruby flock])
+        path = "app/views/a,b c\n.html.erb"
+        _out, err, status = run_hook(post_edit, edit_payload(dir, path),
+                                     base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin))
+        expect(status).to be_success, err
+        expect(File.read(log)).to include(path)
+        expect(Dir[File.join(dir, 'tmp/woods/hook-pending/*.json')]).to be_empty
+      end
+    end
+
+    it 'falls back to host Ruby for JSON when jq is absent' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        make_app(dir)
+        rake, log, = recorder(dir)
+        bin = restricted_bin(dir, without: %w[jq flock])
+        _out, err, status = run_hook(post_edit, edit_payload(dir, 'app/services/pay.rb'),
+                                     base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin))
+        expect(status).to be_success, err
+        expect(File.read(log)).to include('app/services/pay.rb')
+      end
+    end
+
+    it 'passes an encoded task argument through a Docker prefix with no forwarded environment' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        make_app(dir)
+        rake, log, = recorder(dir)
+        docker = File.join(dir, 'docker')
+        File.write(docker, <<~SH)
+          #!/bin/sh
+          [ "$1 $2 $3 $4 $5 $6 $7" = 'compose exec -T app bundle exec rake' ] || exit 9
+          shift 7
+          exec env -i PATH="$PATH" #{rake} "$@"
+        SH
+        FileUtils.chmod(0o755, docker)
+        env = base_env.merge('WOODS_HOOK_RAKE' => "#{docker} compose exec -T app bundle exec rake")
+        _out, err, status = run_hook(post_edit, edit_payload(dir, 'app/services/pay.rb'), env)
+        expect(status).to be_success, err
+        expect(File.read(log)).to include('app/services/pay.rb')
+      end
+    end
+
+    [1, 75].each do |exit_status|
+      it "retains a failed/deferred batch (#{exit_status}) and retries it on the next edit" do
+        Dir.mktmpdir('woods-hook') do |dir|
+          tmp_dir = make_app(dir)
+          rake, log, = recorder(dir)
+          original = File.read(rake)
+          File.write(rake, "#!/bin/sh\nexit #{exit_status}\n")
+          env = base_env.merge('WOODS_HOOK_RAKE' => rake)
+          run_hook(post_edit, edit_payload(dir, 'app/services/first.rb'), env)
+          expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')].size).to eq(1)
+          expect(File.read(File.join(tmp_dir, 'hook.log'))).to include("status #{exit_status}", 'retained')
+          File.write(rake, original)
+          run_hook(post_edit, edit_payload(dir, 'app/services/second.rb'), env)
+          expect(File.read(log)).to include('app/services/first.rb', 'app/services/second.rb')
+          expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')]).to be_empty
+        end
+      end
+    end
+
+    it 'bounds a stalled command itself and retains its batch for recovery' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        tmp_dir = make_app(dir)
+        rake, _log, _started, block = recorder(dir)
+        File.write(block, '1')
+        Timeout.timeout(5) do
+          run_hook(post_edit, edit_payload(dir, 'app/services/pay.rb'),
+                   base_env.merge('WOODS_HOOK_RAKE' => rake, 'WOODS_HOOK_TIMEOUT_SECONDS' => '1'))
+        end
+        expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')].size).to eq(1)
+        expect(File.read(File.join(tmp_dir, 'hook.log'))).to include('retained')
+      end
+    end
+
+    it 'imports the old pending text queue without losing its deferred edit' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        tmp_dir = make_app(dir)
+        File.write(File.join(tmp_dir, 'hook-pending.txt'), "app/models/old.rb\n")
+        rake, log, = recorder(dir)
+        run_hook(post_edit, edit_payload(dir, 'app/services/new.rb'), base_env.merge('WOODS_HOOK_RAKE' => rake))
+        expect(File.read(log)).to include('app/models/old.rb', 'app/services/new.rb')
+        expect(File.exist?(File.join(tmp_dir, 'hook-pending.txt'))).to be(false)
+      end
+    end
+
+    it 'lets concurrent mkdir reclaimers recover every event after a dead owner' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        tmp_dir = make_app(dir)
+        lock = File.join(tmp_dir, 'hook.lock.d')
+        FileUtils.mkdir_p(lock)
+        File.write(File.join(lock, 'owner-999999999'), '')
+        rake, log, = recorder(dir)
+        bin = restricted_bin(dir, without: ['flock'])
+        env = base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin)
+        threads = 8.times.map do |i|
+          Thread.new { run_hook(post_edit, edit_payload(dir, "app/services/pay_#{i}.rb"), env) }
+        end
+        threads.each(&:join)
+        8.times { |i| expect(File.read(log)).to include("app/services/pay_#{i}.rb") }
+        expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')]).to be_empty
+      end
+    end
+
+    it 'rejects foreign and traversal paths and malformed input without invoking rake' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        make_app(dir)
+        rake, log, = recorder(dir)
+        env = base_env.merge('WOODS_HOOK_RAKE' => rake)
+        ['/another/app/services/pay.rb', 'app/services/../../../outside.rb'].each do |path|
+          run_hook(post_edit, { cwd: dir, tool_input: { file_path: path } }, env)
+        end
+        run_hook(post_edit, { cwd: dir, tool_input: { file_path: 123 } }, env)
+        expect(File.exist?(log)).to be(false)
       end
     end
 
@@ -317,7 +453,9 @@ RSpec.describe 'plugin hooks (#280)' do
 
             expect(status).to be_success, err
             expect(File.exist?(log)).to be(false)
-            expect(File.read(File.join(tmp_dir, 'hook-pending.txt'))).to include('app/models/user.rb')
+            expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')].map do |path|
+              File.read(path)
+            end.join).to include('app/models/user.rb')
           end
         end
       end

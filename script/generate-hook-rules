@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'bundler/setup'
+require_relative '../lib/woods/extractor'
+require_relative '../lib/woods/hooks/rule_projection'
+
+File.write(File.expand_path('../plugin/hooks/woods-input-rules.sh', __dir__), Woods::Hooks::RuleProjection.new.render)

@@ -283,6 +283,13 @@
       ]
     },
     {
+      "name": "woods:hook_refresh",
+      "arguments": [
+        "batch"
+      ],
+      "prerequisites": []
+    },
+    {
       "name": "woods:incremental",
       "arguments": [],
       "prerequisites": [
@@ -1000,7 +1007,7 @@
     "index_mcp_tools": 29,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 34,
+    "rake_tasks": 35,
     "tasks_methods": 4
   },
   "documentation_claims": {

@@ -140,6 +140,18 @@ Recovery through `reset_cooldowns` (B-159) is unreleased after `2.0.0.beta2`.
 Check the installed version before attempting it and follow the
 [corrupt cooldown recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#corrupt-pipeline-cooldown-state).
 
+## Deferred refresh hooks
+
+Expanded hook coverage and `woods:hook_refresh` (#408) are unreleased after
+Woods 2.0.0.beta2. Verify the installed task through the configured host/container
+command before diagnosing this plugin's queue. Read `<output>/hook.log` and
+`hook-pending/`; status 75 means an active daemon deferred work, not that it was
+consumed. Fix task availability, boot/publication failures or a stalled command,
+then retry with the same output and command prefix. Preserve pending events.
+A Docker timeout does not prove the application process stopped. Prefer a
+resident watcher for sustained edits and follow the
+[canonical retry guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
+
 ## Partial dependency answers
 
 Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods

@@ -106,7 +106,27 @@ polling frequency at the cost of detection latency. Use the installed preflight 
 [canonical watch guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md)
 tracks current source and may describe unreleased behavior.
 
-The plugin also ships two hooks (Woods 2.3 or later), shipped disabled. A `PostToolUse` hook runs `woods:incremental` in the background when an edit touches models, routes, migrations, schema, or a `package.yml`, reading `cwd` from the hook payload so linked worktrees refresh their own index; it batches paths from overlapping edits instead of dropping them under lock contention. A `SessionStart` hook warns when the published generation predates the last commit, a check scoped to commit timestamps, so it does not cover uncommitted edits or an older checkout. Both do nothing until `tmp/woods/generation.json` exists and until the user sets `WOODS_HOOKS_ENABLED=1`; set `WOODS_HOOK_RAKE="docker compose exec -T app bundle exec rake"` when the bundle lives in a container, `WOODS_OUTPUT` when the index directory is non-default, and `WOODS_HOOKS_DISABLED=1` to turn both back off.
+The plugin ships opt-in refresh and session-start hooks. The expanded refresh
+contract (#408) is unreleased after Woods 2.0.0.beta2: first verify the installed
+gem exposes `woods:hook_refresh` through the actual application command. Do not
+infer support from the plugin version. With support, edits to standard services,
+controllers, jobs, views, concerns, locales, supported tests/lib files, routes,
+and packages queue incremental work; boot/config/schema edits request a fresh
+full extraction. A live daemon defers without acknowledging the queue. Failed or
+deferred events remain under `<output>/hook-pending/` and retry on the next
+relevant edit. Inspect `hook.log` before retrying; never delete pending events to
+hide a failure. Prefer `woods:watch` for sustained edits because hook coverage
+increases Rails boot frequency.
+
+Both hooks require an existing index and `WOODS_HOOKS_ENABLED=1`; disable with
+`WOODS_HOOKS_DISABLED=1`. Use `WOODS_HOOK_RAKE="docker compose exec -T app bundle
+exec rake"` for a container-only bundle and `WOODS_OUTPUT` for a non-default
+index. The host needs Bash and either jq or Ruby, not the application bundle.
+The refresh worker has its own bounded deadline, but cancelling Docker exec does
+not prove its container process stopped. The session warning still compares
+commit timestamps only; silence does not prove dirty-source freshness or queue
+consumption. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
+for transport, retry and custom-root limits.
 
 ## Ask before expanding scope
 

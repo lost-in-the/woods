@@ -94,6 +94,11 @@ module Woods
     end
 
     class << self
+      # Runtime-discovered classes have no per-file extractor method.
+      def runtime_rules
+        @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
+      end
+
       # Rules for extractors with a per-file entry point.
       #
       # @return [Array<Rule>]
@@ -259,7 +264,7 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Boolean]
     def relevant?(relative_path)
-      return true if relative_path.start_with?('app/') && relative_path.end_with?('.rb')
+      return true if self.class.runtime_rules.any? { |rule| rule.matches?(relative_path) }
 
       file_rules_for(relative_path).any? || whole_app_keys_for(relative_path).any?
     end
