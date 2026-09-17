@@ -278,6 +278,34 @@ oracle compares against emits it too, both sides agree, wrongly. The coverage
 is in `spec/extractor_spec.rb`, driving the reconciler with a shrinking
 discovery set.
 
+### Runtime removals and bundle updates
+
+Jobs discovered through `ApplicationJob.descendants` supplement the job-file
+scan, but jobs are not part of `CLASS_BASED_DISCOVERY` removal reconciliation.
+If a dynamically defined or gem-owned job disappears without a tracked source
+path changing, its unit can survive subsequent incremental runs. A full
+extraction in a fresh Rails process removes it; an in-process full extraction
+can still see an old constant retained by that process (B-165).
+
+After adding, removing, or updating bundled gems, boot the updated bundle in a
+fresh process and run:
+
+```bash
+bundle exec rake woods:extract woods:validate
+```
+
+A `Gemfile.lock` change refreshes engines, middleware, and optional framework
+sources. It does not refresh every gem-owned model, job, or other runtime unit.
+Their recorded paths or metadata can remain stale, including absolute paths to
+a removed gem version and paths under `vendor/`. A full extraction rebuilds
+those units against the installed bundle (B-166).
+
+An absent external source path can also mean the validator runs on a different
+host or mount from extraction. Confirm the bundle and filesystem context before
+rebuilding; a full run in one container does not make its gem paths visible on
+another host. Validation warnings identify missing paths, but do not prove a
+retained unit matches the currently installed gem when its path still exists.
+
 ### Deletion
 
 - Paths named in the change set that no longer exist are **authoritative** for

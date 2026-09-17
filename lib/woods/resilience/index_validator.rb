@@ -139,8 +139,8 @@ module Woods
         warnings << 'Invalid manifest woods_version; writer provenance is unknown. Run a full woods:extract.'
       end
 
-      # Split each type's unresolvable units into app-tree paths and gem-owned
-      # paths, since only the first has a remedy the operator can act on.
+      # Split unresolvable app-tree paths from gem-owned paths so each warning
+      # can distinguish a different filesystem environment from a changed bundle.
       #
       # @param warnings [Array<String>]
       # @param unresolvable [Hash{String => Array<Array(String, Boolean)>}]
@@ -164,15 +164,16 @@ module Woods
 
       # Absolute paths outside the app root belong to a gem — an engine model,
       # a framework source — and resolve only where that gem is installed at
-      # the extracting path. Re-running extraction here cannot change that,
-      # so the remedy is not offered.
+      # the extracting path. A changed bundle requires fresh extraction; a
+      # reader on another filesystem instead needs the original gem paths.
       def warn_unresolvable_gem_paths(warnings, type, identifiers)
         return if identifiers.empty?
 
         warnings << "#{type}: #{identifiers.size} unit(s) whose file_path lies outside the app root " \
                     "and is absent here (e.g. #{identifiers.first(3).join(', ')}). Gem-owned units " \
                     '(engine models, framework sources) resolve only where that gem is installed at ' \
-                    'the extracting path.'
+                    'the extracting path. After a bundle update, run woods:extract in a fresh process ' \
+                    'with the updated bundle, then woods:validate.'
       end
 
       # rubocop:disable-next Metrics/ParameterLists

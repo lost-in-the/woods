@@ -135,6 +135,7 @@ RSpec.describe Woods::Resilience::IndexValidator do
         expect(outside).not_to be_empty
         expect(outside.first).to include('Attachment')
         expect(outside.first).not_to include('Re-run extraction')
+        expect(outside.first).to include('After a bundle update', 'fresh process', 'woods:extract', 'woods:validate')
         # User.json (relative path, missing) still gets the app-tree warning.
         expect(report.warnings.grep(/models: 1 unit\(s\) whose file_path resolves nowhere/)).not_to be_empty
       end
