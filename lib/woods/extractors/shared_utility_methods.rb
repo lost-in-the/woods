@@ -222,6 +222,29 @@ module Woods
         actions.to_a
       end
 
+      # Rails 6 exposes a numeric Proc identity through #filter, and the
+      # callable through #raw_filter. Newer Rails exposes the callable directly.
+      def callback_filter(callback)
+        stable_filter(callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter)
+      end
+
+      # Proc#to_s embeds a process-local address. Model and controller filters
+      # share source-site labels, so metadata and derived chunks agree across
+      # boots. Preserve symbols and other application-defined callback values.
+      def stable_filter(filter)
+        return filter unless filter.is_a?(Proc)
+
+        location = filter.source_location
+        site = if location
+                 path, line = location
+                 "#{path.delete_prefix("#{Rails.root}/")}:#{line}"
+               else
+                 'native'
+               end
+        "#<#{filter.lambda? ? 'lambda' : 'Proc'} #{site}>"
+      end
+      private :callback_filter, :stable_filter
+
       # Human-readable label for a non-ActionFilter condition.
       #
       # @param condition [Object] A proc, symbol, or other condition

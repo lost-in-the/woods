@@ -157,6 +157,31 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(result.map { |entry| [entry[:type], entry[:filter], entry[:kind]] }).to eq(expected)
     end
 
+    it 'labels Proc and lambda filters without running them, including Rails 6 raw_filter' do
+      stub_const('Rails', double('Rails', root: '/app'))
+      model = double('Model')
+      stub_callback_chains(model)
+      callable = proc { raise 'must not execute a callback' }
+      lambda_filter = -> { raise 'must not execute a callback' }
+      native = proc { raise 'must not execute a callback' }
+      external = proc { raise 'must not execute a callback' }
+      allow(callable).to receive(:source_location).and_return(['/app/app/models/post.rb', 12])
+      allow(lambda_filter).to receive(:source_location).and_return(['/app/app/models/post.rb', 13])
+      allow(native).to receive(:source_location).and_return(nil)
+      allow(external).to receive(:source_location).and_return(['/application/framework.rb', 20])
+      callbacks = [callable, lambda_filter, native, external, :named_hook, 'string_hook'].map do |filter|
+        double('Callback', filter: filter, kind: :before)
+      end
+      callbacks << double('Rails6Callback', filter: callable.object_id, raw_filter: callable, kind: :before)
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      expected = [
+        '#<Proc app/models/post.rb:12>', '#<lambda app/models/post.rb:13>', '#<Proc native>',
+        '#<Proc /application/framework.rb:20>', 'named_hook', 'string_hook', '#<Proc app/models/post.rb:12>'
+      ]
+      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(expected)
+    end
+
     it 'retains other events when reading one chain raises' do
       model = double('Model')
       stub_callback_chains(model)

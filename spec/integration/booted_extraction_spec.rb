@@ -567,6 +567,27 @@ RSpec.describe 'Optional ActionMailer extraction', :booted_app do
   end
 end
 
+RSpec.describe 'Model callbacks across Rails processes', :booted_app do
+  it 'preserves framework callbacks, metadata and chunk hashes across independent boots' do
+    results = Array.new(2) do
+      script = File.expand_path('../fixtures/model_callbacks/boot.rb', __dir__)
+      output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+      expect(status.success?).to be(true), error
+      JSON.parse(output.lines.last)
+    end
+
+    expect(results.last).to eq(results.first)
+    unit = results.first.fetch('unit')
+    filter = results.first.fetch('framework_filter')
+    expect(unit.fetch('metadata').fetch('callbacks')).to include(
+      a_hash_including('type' => 'before_destroy', 'kind' => 'before', 'filter' => filter)
+    )
+    chunk = unit.fetch('chunks').find { |entry| entry.fetch('chunk_type') == 'callbacks' }
+    expect(chunk.fetch('content')).to include(filter)
+    expect(chunk.fetch('content_hash')).to eq(Digest::SHA256.hexdigest(chunk.fetch('content')))
+  end
+end
+
 RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
   def extract_callbacks(kind)
     script = File.expand_path('../fixtures/controller_callbacks/boot.rb', __dir__)

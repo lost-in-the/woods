@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reflect model callbacks from Rails' per-event chains instead of nonexistent
   per-kind readers; include `before_commit` and keep `callback_count` equal to
-  the emitted callback list. Verify named callbacks in booted Rails extraction.
+  the emitted callback list. Preserve framework callbacks with stable Proc/lambda
+  source-site labels in metadata and chunks, including Rails 6's `raw_filter`,
+  so separate-process extractions of unchanged models remain equivalent.
 
 - Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
   and upgrade guidance before suggesting changes to valid namespace wrappers

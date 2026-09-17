@@ -633,7 +633,7 @@ module Woods
           callbacks.map do |cb|
             {
               type: event == :before_commit ? :before_commit : :"#{cb.kind}_#{event}",
-              filter: cb.filter.to_s,
+              filter: callback_filter(cb).to_s,
               kind: cb.kind, # :before, :after, :around
               conditions: format_callback_conditions(cb)
             }
