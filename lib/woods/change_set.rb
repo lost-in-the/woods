@@ -15,7 +15,8 @@ module Woods
   #
   # Paths are held absolute (matching how {DependencyGraph} registers file
   # paths) and exposed relative on demand (matching how {PathDispatcher}
-  # rules are written).
+  # rules are written). Normalization is lexical, so vanished files remain
+  # representable without resolving symlink targets or consulting the filesystem.
   #
   # @example
   #   cs = Woods::ChangeSet.new(paths: %w[app/models/user.rb app/models/gone.rb], root: Rails.root)
@@ -29,7 +30,7 @@ module Woods
     # @param paths [Array<String>] changed paths, absolute or root-relative
     # @param root [String, Pathname] application root (usually Rails.root)
     def initialize(paths:, root:)
-      @root = Pathname.new(root.to_s)
+      @root = Pathname.new(root.to_s).expand_path
       @absolute_paths = Array(paths).filter_map { |p| absolutize(p) }.uniq.freeze
     end
 
@@ -72,7 +73,7 @@ module Woods
     # @param path [String] absolute path
     # @return [String] root-relative path, or the input if outside {#root}
     def relativize(path)
-      prefix = "#{@root}/"
+      prefix = File.join(@root.to_s, '')
       path.start_with?(prefix) ? path.delete_prefix(prefix) : path
     end
 
@@ -82,7 +83,7 @@ module Woods
       str = path.to_s.strip
       return nil if str.empty?
 
-      Pathname.new(str).absolute? ? str : @root.join(str).to_s
+      @root.join(str).cleanpath.to_s
     end
   end
 end

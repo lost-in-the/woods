@@ -2060,7 +2060,7 @@
       "lib/woods/change_set.rb"
     ],
     "description": "Audit finding CORE-5 (Low, executed). change_set.rb:74-86 does not normalize its inputs: `root: \"dir/\"` makes every relative path miss the dispatch rules, and `app//models/x.rb` matches no rule at all, so the changed file is silently dropped from an incremental run. Every current caller passes a clean root, so this is latent. Acceptance: chomp the root and cleanpath in absolutize, with specs for both shapes asserting the path still reaches PathDispatcher.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-149",
