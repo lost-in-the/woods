@@ -183,6 +183,10 @@ therefore establishes another match; an exactly full page can instead be
 complete if the requested domain is exhausted. Deep lookahead shares
 `WOODS_SEARCH_MAX_SCAN` with the initial scan and retains round-robin scanning
 across types. Search does not count the entire omitted tail or offer pagination.
+The existing `types` filter and result labels name directory families:
+`rails_source` includes both Rails and gem source units. Deep reads accept those
+two stored types only in that shared directory; `lookup` and lexical retrieval
+retain the unit's actual `rails_source` or `gem_source` type.
 
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the

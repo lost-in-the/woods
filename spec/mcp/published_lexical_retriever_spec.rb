@@ -26,6 +26,27 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     expect(retriever.vector_store).to be_nil
   end
 
+  it 'retrieves gem sources from the shared framework directory with their real type' do
+    unit = Woods::ExtractedUnit.new(type: :gem_source, identifier: 'gems/widget/lib/widget.rb',
+                                    file_path: '/gems/widget/lib/widget.rb')
+    unit.source_code = 'module Widget; def frobnicate; end; end'
+    directory = File.join(index_dir, 'rails_source')
+    FileUtils.mkdir_p(directory)
+    filename = Object.new.extend(Woods::FilenameUtils).collision_safe_filename(unit.identifier)
+    File.write(File.join(directory, filename), JSON.generate(unit.to_h))
+    index_path = File.join(directory, '_index.json')
+    entries = JSON.parse(File.read(index_path)) << { 'identifier' => unit.identifier }
+    File.write(index_path, JSON.generate(entries))
+    manifest_path = File.join(index_dir, 'manifest.json')
+    manifest = JSON.parse(File.read(manifest_path))
+    manifest['counts']['rails_source'] = entries.size
+    File.write(manifest_path, JSON.generate(manifest))
+
+    result = retriever.retrieve('frobnicate', types: ['gem_source'])
+
+    expect(result.sources).to include(include(identifier: unit.identifier, type: 'gem_source'))
+  end
+
   it 'skips provider resolution, probes and vector artifact loading at bootstrap' do
     Woods.configuration.retrieval_mode = :lexical
     expect(Woods::MCP::ConfigResolver).not_to receive(:resolve)

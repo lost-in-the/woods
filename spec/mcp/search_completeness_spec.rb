@@ -5,6 +5,7 @@ require 'fileutils'
 require 'tmpdir'
 require 'woods/mcp/index_reader'
 require 'woods/filename_utils'
+require 'woods/extracted_unit'
 
 RSpec.describe 'Index search completeness' do
   include Woods::FilenameUtils
@@ -161,12 +162,30 @@ RSpec.describe 'Index search completeness' do
     expect { reader.search('needle', fields: ['source_code'], limit: 1) }.to raise_error(Errno::ENOENT)
   end
 
-  it 'rejects a payload whose type differs from its queued index identity' do
-    publish_units('model', [%w[Shared needle]])
-    path = File.join(index_dir, 'models', collision_safe_filename('Shared'))
-    File.write(path, JSON.generate(identifier: 'Shared', type: 'service', source_code: 'needle'))
+  it 'searches real gem-source units sharing the framework directory without changing search type labels' do
+    unit = Woods::ExtractedUnit.new(type: :gem_source, identifier: 'gems/widget/lib/widget.rb',
+                                    file_path: '/gems/widget/lib/widget.rb')
+    unit.source_code = 'module Widget; needle; end'
+    publish_units('rails_source', [[unit.identifier, unit.source_code]])
+    File.write(File.join(index_dir, 'rails_source', collision_safe_filename(unit.identifier)), JSON.generate(unit.to_h))
 
-    expect { reader.search('needle', fields: ['source_code']) }.to raise_error(IOError, /typed unit identity mismatch/)
+    result = reader.search('needle', types: ['rails_source'], fields: ['source_code'])
+
+    expect(result[:results]).to eq([{ identifier: unit.identifier, type: 'rails_source', match_field: 'source_code' }])
+    expect(result[:completeness]).to include(status: 'complete', total_matches: 1)
+    expect(reader.each_unit.to_a.first).to include('identifier' => unit.identifier, 'type' => 'gem_source')
+  end
+
+  %w[service gem_source].each do |wrong_type|
+    it "rejects a #{wrong_type} payload in the model directory" do
+      publish_units('model', [%w[Shared needle]])
+      path = File.join(index_dir, 'models', collision_safe_filename('Shared'))
+      File.write(path, JSON.generate(identifier: 'Shared', type: wrong_type, source_code: 'needle'))
+
+      expect do
+        reader.search('needle', fields: ['source_code'])
+      end.to raise_error(IOError, /typed unit identity mismatch/)
+    end
   end
 
   it 'rejects duplicate index identifiers instead of manufacturing an exact total' do

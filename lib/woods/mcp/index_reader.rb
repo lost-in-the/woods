@@ -41,6 +41,12 @@ module Woods
 
       TYPE_TO_DIR = DIR_TO_TYPE.invert.freeze
 
+      # Most output directories contain one unit type. RailsSourceExtractor
+      # also publishes gem_source units in rails_source/; directory-filtered
+      # search retains its historical labels while deep readers accept both.
+      UNIT_TYPES_BY_DIR = DIR_TO_TYPE.transform_values { |type| [type].freeze }
+                                     .merge('rails_source' => %w[rails_source gem_source].freeze).freeze
+
       # Maximum number of loaded unit files to cache in memory.
       MAX_UNIT_CACHE = 50
 
@@ -1131,7 +1137,7 @@ module Woods
       # Keep the existing per-file signature checks and LRU cache for deep reads.
       def load_search_unit(type, identifier)
         data = load_unit(TYPE_TO_DIR.fetch(type), unit_filename(identifier))
-        unless data.is_a?(Hash) && data['identifier'] == identifier && data['type'] == type
+        unless valid_published_unit?(data, TYPE_TO_DIR.fetch(type), identifier)
           raise IOError, "typed unit identity mismatch: #{type}:#{identifier}"
         end
 
@@ -1184,11 +1190,15 @@ module Woods
 
           JSON.parse(file.read)
         end
-        unless data.is_a?(Hash) && data['identifier'] == identifier && data['type'] == DIR_TO_TYPE.fetch(dir)
+        unless valid_published_unit?(data, dir, identifier)
           raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"
         end
 
         data
+      end
+
+      def valid_published_unit?(data, dir, identifier)
+        data.is_a?(Hash) && data['identifier'] == identifier && UNIT_TYPES_BY_DIR.fetch(dir).include?(data['type'])
       end
 
       # Read and cache an _index.json file for a type directory.
