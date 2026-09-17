@@ -907,7 +907,8 @@ module Woods
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
                                'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
-                               'When the unfiltered top-K has no candidate of a requested type, the retriever ' \
+                               'Lexical mode filters before its top-20 limit and omits the semantic rank table. ' \
+                               'In semantic mode, when the unfiltered top-K has no requested type, the retriever ' \
                                'falls back to rank-within-type so the response is populated whenever units of ' \
                                'the requested type exist in the index. The response appends a "Type rank ' \
                                'context" table with per-type: source, rank in unfiltered top-K, global_k, ' \
