@@ -161,7 +161,7 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
       it 'renders search heading and result count' do
         result = renderer.render(:search, search_fixture)
         expect(result).to include('## Search: "Post"')
-        expect(result).to include('2 results found.')
+        expect(result).to include('2 results returned.')
       end
 
       it 'renders each result as a bullet' do
@@ -366,7 +366,7 @@ RSpec.describe Woods::MCP::ToolResponseRenderer do
 
     it 'renders search with text dividers' do
       result = renderer.render(:search, search_fixture)
-      expect(result).to include('Search: "Post" (2 results)')
+      expect(result).to include('Search: "Post" (2 results returned)')
       expect(result).to include('Post (model)')
     end
 

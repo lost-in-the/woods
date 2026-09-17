@@ -490,8 +490,9 @@ module Woods
           server.define_tool(
             name: 'search',
             description: 'Find code units whose identifiers (or source/metadata) match a regex. ' \
-                         'Example: search("Worker|Job") returns all workers and jobs; search("^Post") ' \
-                         'returns units starting with "Post". Returns [{identifier, type, match_field}]. ' \
+                         'Example: search("Worker|Job") finds workers and jobs; search("^Post") ' \
+                         'returns units starting with "Post". Returns [{identifier, type, match_field}] plus completeness. ' \
+                         'Check completeness before treating discovery as exhaustive; a limit is only a page size. ' \
                          'Use `lookup` for exact identifiers, `dependencies`/`dependents` for graph traversal. ' \
                          'Gotchas: query is a Ruby regex — literal pipe needs escaping as \\|; ' \
                          'types restricts which index directories are scanned (e.g. ["mailer"] scans only ' \
@@ -549,11 +550,19 @@ module Woods
             payload = {
               query: query,
               result_count: results.size,
-              results: results
+              results: results,
+              completeness: search_result[:completeness]
             }
             payload[:note] = search_result[:note] if search_result[:note]
             payload[:partial] = true if search_result[:partial]
+            payload[:hint] = search_result[:hint] if search_result[:hint]
             respond.call(renderer.render(:search, payload))
+          rescue IOError, SystemCallError, JSON::ParserError, EncodingError
+            respond_err.call(
+              'Search completeness: unknown (unreadable_or_corrupt_source). ' \
+              'An Index artifact is unavailable or malformed; inspect woods_status and run woods:validate.',
+              code: :corrupt_artifact, tool: 'search', completeness: SearchResults.unavailable
+            )
           end
         end
 

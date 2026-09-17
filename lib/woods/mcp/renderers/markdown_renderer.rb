@@ -60,7 +60,7 @@ module Woods
           lines = []
           lines << "## Search: \"#{query}\""
           lines << ''
-          lines << "#{count} result#{'s' unless count == 1} found."
+          lines << "#{count} result#{'s' unless count == 1} returned."
           lines << ''
 
           results.each do |r|
@@ -79,6 +79,8 @@ module Woods
             lines << '**partial:** true' if partial
             lines << "**note:** #{note}" if note
           end
+
+          lines.concat(search_completeness_lines(data))
 
           lines.join("\n").rstrip
         end

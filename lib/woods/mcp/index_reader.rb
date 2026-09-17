@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative '../generation'
+require_relative 'search_results'
 
 module Woods
   module MCP
@@ -433,14 +434,11 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @param exact_prefix [String, nil] Literal identifier prefix filter (case-insensitive)
       # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
-      # @return [Hash] { results: Array<Hash>, note: String|nil, partial: Boolean }
+      # @return [Hash] results, optional note/partial, and explicit completeness evidence
       # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
       def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
-        # Pinned, not merely checked-once. This walks the identifier map and
-        # then loads units for the hits; each nested `find_unit` re-checks
-        # freshness, so a publish landing mid-walk rebuilt the caches while the
-        # result list still held identifiers from the previous generation — one
-        # response describing two indexes.
+        # Keep summaries, typed deep reads and lookahead on one generation,
+        # including when publication advances after the result page fills.
         with_pinned_generation do
           search_within_pin(query, types: types, fields: fields, limit: limit,
                                    exact_prefix: exact_prefix, exact_suffix: exact_suffix)
@@ -463,103 +461,79 @@ module Woods
         max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
         max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
 
-        results = []
+        results = SearchResults.new(limit: limit)
         notes = []
         phase2_scanned = 0
-        partial = false
 
         begin
-          dirs = if types
-                   types.filter_map { |t| TYPE_TO_DIR[t] }
-                 else
-                   TYPE_DIRS
-                 end
-
-          # Phase 2 candidates are collected per-dir and then scanned in
-          # round-robin across dirs. Exhausting the per-run scan cap linearly
-          # down TYPE_DIRS order would starve later types (`concerns` at pos
-          # 13, `test_mappings` at pos 31) on any codebase where the earlier
-          # dirs together exceed max_scan entries. Interleaving guarantees
-          # every type contributes to the scanned set.
+          dirs = types ? types.filter_map { |type| TYPE_TO_DIR[type] }.uniq : TYPE_DIRS
+          # Identifier matches retain priority. Deep candidates are interleaved
+          # across types so an early large directory cannot consume their budget.
           phase2_queues = {}
-
-          dirs.each do |dir|
-            type_name = DIR_TO_TYPE[dir]
-            entries = read_index(dir)
-
-            # Broad-match detection: warn when pattern matches >50% of dir entries
-            if entries.size > 1
-              matching_count = entries.count do |e|
-                identifier_passes_filters?(e['identifier'], pattern, prefix, suffix)
-              end
-              if matching_count > entries.size / 2.0
-                notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
-              end
-            end
-
-            entries.each do |entry|
-              id = entry['identifier']
-              next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
-
-              # Phase 1: identifier matching (still in-order per dir)
-              if fields.include?('identifier') && pattern.match?(id)
-                next if results.size >= limit
-
-                results << { identifier: id, type: type_name, match_field: 'identifier' }
-                next
-              end
-
-              # Phase 2 is only reached when the caller opted into deeper fields.
-              next unless fields.include?('metadata') || fields.include?('source_code')
-
-              (phase2_queues[dir] ||= []) << [type_name, id]
-            end
-          end
-
-          if results.size < limit && phase2_queues.any?
-            queues = phase2_queues.values.map(&:dup)
-            catch(:phase2_done) do
-              loop do
-                progressed = false
-                queues.each do |queue|
-                  next if queue.empty?
-
-                  throw :phase2_done if results.size >= limit
-
-                  if phase2_scanned >= max_scan
-                    partial = true
-                    throw :phase2_done
-                  end
-
-                  type_name, id = queue.shift
-                  progressed = true
-
-                  unit = find_unit(id)
-                  next unless unit
-
-                  phase2_scanned += 1
-
-                  if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
-                    results << { identifier: id, type: type_name, match_field: 'source_code' }
-                  elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
-                    results << { identifier: id, type: type_name, match_field: 'metadata' }
-                  end
+          catch(:search_done) do
+            dirs.each do |dir|
+              type_name = DIR_TO_TYPE[dir]
+              entries = search_index_entries(dir)
+              if entries.size > 1
+                matching_count = entries.count do |entry|
+                  identifier_passes_filters?(entry['identifier'], pattern, prefix, suffix)
                 end
-                break unless progressed
+                if matching_count > entries.size / 2.0
+                  notes << "broad pattern matched #{matching_count}/#{entries.size} entries in #{dir}"
+                end
               end
+
+              entries.each do |entry|
+                id = entry['identifier']
+                next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
+
+                if fields.include?('identifier') && pattern.match?(id)
+                  results.add(identifier: id, type: type_name, match_field: 'identifier')
+                  throw :search_done if results.result_limit_reached?
+
+                  next
+                end
+                next unless fields.include?('metadata') || fields.include?('source_code')
+
+                (phase2_queues[dir] ||= []) << [type_name, id]
+              end
+            end
+
+            queues = phase2_queues.values
+            loop do
+              progressed = false
+              queues.each do |queue|
+                next if queue.empty?
+
+                if phase2_scanned >= max_scan
+                  results.stop('scan_budget')
+                  throw :search_done
+                end
+                type_name, id = queue.shift
+                progressed = true
+                phase2_scanned += 1
+                unit = load_search_unit(type_name, id)
+                field = if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
+                          'source_code'
+                        elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
+                          'metadata'
+                        end
+                next unless field
+
+                results.add(identifier: id, type: type_name, match_field: field)
+                throw :search_done if results.result_limit_reached?
+              end
+              break unless progressed
             end
           end
         rescue StandardError => e
           raise unless regexp_timeout_error?(e)
 
           notes << "search aborted: the pattern exceeded the #{SEARCH_PATTERN_TIMEOUT}s per-match limit"
-          partial = true
+          results.stop('regex_timeout')
         end
 
-        response = { results: results.first(limit) }
-        response[:note] = notes.join('; ') unless notes.empty?
-        response[:partial] = true if partial
-        response
+        results.finish.response(note: notes.join('; '))
       end
 
       # BFS traversal of forward dependencies.
@@ -1147,13 +1121,38 @@ module Woods
           entries = read_index(dir)
           entries.each do |entry|
             id = entry['identifier']
-            base = id.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-            digest = Digest::SHA256.hexdigest(id)[0, 8]
-            filename = "#{base}_#{digest}.json"
-            map[id] = { type_dir: dir, filename: filename }
+            map[id] = { type_dir: dir, filename: unit_filename(id) }
           end
         end
         map
+      end
+
+      # Search uses the queued type, never the identifier-only lookup map.
+      # Keep the existing per-file signature checks and LRU cache for deep reads.
+      def load_search_unit(type, identifier)
+        data = load_unit(TYPE_TO_DIR.fetch(type), unit_filename(identifier))
+        unless data.is_a?(Hash) && data['identifier'] == identifier && data['type'] == type
+          raise IOError, "typed unit identity mismatch: #{type}:#{identifier}"
+        end
+
+        data
+      end
+
+      def unit_filename(identifier)
+        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+        "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
+      end
+
+      def search_index_entries(dir)
+        entries = published_unit_entries(dir)
+        seen = Set.new
+        entries.each do |entry|
+          id = entry.is_a?(Hash) && entry['identifier']
+          unless id.is_a?(String) && !id.empty? && seen.add?(id)
+            raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
+          end
+        end
+        entries
       end
 
       def published_unit_entries(dir)

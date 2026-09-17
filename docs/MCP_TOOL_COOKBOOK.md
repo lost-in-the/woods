@@ -326,26 +326,30 @@ column.
 }
 ```
 
-**Example response:**
+**Example JSON data** (inside the MCP response envelope):
 
 ```json
-[
-  {
-    "identifier": "PaymentsController",
-    "type": "controller",
-    "file_path": "app/controllers/payments_controller.rb",
-    "metadata": {
-      "actions": ["create", "show", "webhook"],
-      "routes": [
-        { "verb": "POST", "path": "/payments", "action": "create" },
-        { "verb": "POST", "path": "/payments/webhook", "action": "webhook" }
-      ]
-    }
+{
+  "query": "payment",
+  "result_count": 1,
+  "results": [
+    { "identifier": "PaymentsController", "type": "controller", "match_field": "identifier" }
+  ],
+  "completeness": {
+    "status": "complete",
+    "reason": "exhausted",
+    "has_more": false,
+    "total_matches": 1,
+    "matched_lower_bound": 1
   }
-]
+}
 ```
 
-Search `source_code` when you want semantic matches, not just naming matches.
+Use `lookup` on the returned identifier for source, actions, and routes. Search
+`source_code` for textual matches beyond names. Supporting versions distinguish
+exact totals from a bounded result prefix; `partial` means this is discovery,
+not an exhaustive list. Completeness metadata is unreleased after `2.0.0.beta2`;
+see the [search contract](MCP_SERVERS.md#search-completeness).
 
 ---
 

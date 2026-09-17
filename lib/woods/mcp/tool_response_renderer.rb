@@ -67,6 +67,22 @@ module Woods
 
       private
 
+      def search_completeness_lines(data)
+        evidence = fetch_key(data, :completeness)
+        return [] unless evidence.is_a?(Hash)
+
+        more = { true => 'yes', false => 'no', nil => 'unknown' }.fetch(fetch_key(evidence, :has_more))
+        total = fetch_key(evidence, :total_matches)
+        lines = [
+          "Search completeness: #{fetch_key(evidence, :status)} (#{fetch_key(evidence, :reason)}).",
+          "More matches: #{more}; total matches: #{total.nil? ? 'unknown' : total}; " \
+          "matched lower bound: #{fetch_key(evidence, :matched_lower_bound)}."
+        ]
+        hint = fetch_key(data, :hint)
+        lines << hint if hint
+        lines
+      end
+
       # Fetch a value from a hash by symbol or string key, falling back to a default.
       #
       # Handles data hashes that may use either symbol or string keys (e.g., data

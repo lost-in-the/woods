@@ -63,7 +63,7 @@ module Woods
           results = fetch_key(data, :results, [])
 
           lines = []
-          lines << "Search: \"#{query}\" (#{count} results)"
+          lines << "Search: \"#{query}\" (#{count} result#{'s' unless count == 1} returned)"
           lines << DIVIDER
 
           results.each do |r|
@@ -79,6 +79,7 @@ module Woods
           partial = fetch_key(data, :partial, false)
           lines << 'partial: true' if partial
           lines << "note: #{note}" if note
+          lines.concat(search_completeness_lines(data))
 
           lines.join("\n").rstrip
         end

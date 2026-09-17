@@ -2009,7 +2009,7 @@ RSpec.describe Woods::MCP::Server do
       response = call_tool(md_server, 'search', query: 'Post')
       text = response_text(response)
       expect(text).to include('## Search: "Post"')
-      expect(text).to include('results found')
+      expect(text).to include('results returned')
       expect(text).not_to start_with('{')
     end
 
