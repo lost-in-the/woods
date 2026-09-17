@@ -2435,11 +2435,12 @@
     "category": "test-gap",
     "layer": "extraction",
     "files": [
-      "spec/dummy/config/database.yml",
-      "spec/integration/booted_extraction_spec.rb"
+      "spec/fixtures/multi_database/",
+      "spec/integration/multi_database_extraction_spec.rb",
+      ".github/workflows/ci.yml"
     ],
     "description": "The database-partition layer (#280, B-169, B-170) is covered by unit specs with stubbed connection_db_config; the dummy app has one database, so no booted lane proves a real connects_to, a reused table name across databases, an inherited connection, or a has_many :through with the through model on a third database. Acceptance: a second SQLite database in the dummy app with at least one model per case above, booted_extraction asserting the resulting cross_database_edges entries, and incremental_equivalence staying green.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
