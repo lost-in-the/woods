@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
 
+- Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
+
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
 
 ### Added
