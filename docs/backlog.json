@@ -2700,5 +2700,17 @@
     ],
     "description": "The #305 host audit identified repeated 500-path git log walks as the largest extraction phase. Use one streamed HEAD-reachable touched-path history, explicitly comparing merges with their first parent while traversing all parents, roots with the empty tree, and exact current paths without rename following. NUL-framed records preserve arbitrary filename delimiters and commit subjects; retain per-file counts, contributors and five recent commits rather than the whole log. Git 2.31 or newer is required for optional enrichment; discard failed or incomplete history with an actionable warning. Changed merge counts versus legacy pathspec simplification are documented; original-host end-to-end speedup remains unmeasured.",
     "status": "resolved"
+  },
+  {
+    "id": "B-200",
+    "title": "Load lazy Rails routes before caching view navigation helpers",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/route_helper_resolver.rb"
+    ],
+    "description": "The #305 public Fizzy audit found incremental extraction losing view navigation dependencies when a fresh process cached named helpers before Rails lazy routes loaded (#360). Read the runtime route collection before caching named helpers, retaining partial-double compatibility. A failing real Rails regression now passes for fresh-process full A, changed-view incremental B and independent full B, asserting complete dependency graph equality including reverse edges and graph analysis. Verified on Rails 8.0.5.1 and 8.1.3.1; added to every booted Rails CI row.",
+    "status": "resolved"
   }
 ]

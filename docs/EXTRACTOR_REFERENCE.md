@@ -331,6 +331,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - File-based scanning, no Rails boot needed for the actual file reading
 - Records which partials a template renders and which instance variables it expects
+- Loads the runtime route collection before caching named helpers, including Rails lazy route sets. Fresh-process incremental view extraction resolves the same navigation targets as full extraction.
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
