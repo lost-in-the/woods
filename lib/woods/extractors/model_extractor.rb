@@ -421,10 +421,6 @@ module Woods
           enums: extract_enums(model),
           inlined_concerns: inlined_concerns || build_model_source_with_concerns(model, source).last,
 
-          # API surface
-          class_methods: model.methods(false).sort,
-          instance_methods: filter_instance_methods(model.instance_methods(false)).sort,
-
           # Inheritance
           sti_column: model.inheritance_column,
           is_sti_base: sti_base?(model),
@@ -448,6 +444,12 @@ module Woods
                    else
                      []
                    end,
+
+          # Schema loading can define methods (including Rails' optimized
+          # constructor). Reflect only after the schema reads above so a cold
+          # full extraction and a warmed incremental run see the same API.
+          class_methods: model.methods(false).sort,
+          instance_methods: filter_instance_methods(model.instance_methods(false)).sort,
 
           # Foreign keys as the connection reports them. The target table's
           # database is a graph-level concern, resolved by the

@@ -2700,5 +2700,17 @@
     ],
     "description": "The #305 host audit identified repeated 500-path git log walks as the largest extraction phase. Use one streamed HEAD-reachable touched-path history, explicitly comparing merges with their first parent while traversing all parents, roots with the empty tree, and exact current paths without rename following. NUL-framed records preserve arbitrary filename delimiters and commit subjects; retain per-file counts, contributors and five recent commits rather than the whole log. Git 2.31 or newer is required for optional enrichment; discard failed or incomplete history with an actionable warning. Changed merge counts versus legacy pathspec simplification are documented; original-host end-to-end speedup remains unmeasured.",
     "status": "resolved"
+  },
+  {
+    "id": "B-202",
+    "title": "Stabilize reflected model class methods across schema-loading order",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/model_extractor.rb"
+    ],
+    "description": "Rails schema loading can install an optimized singleton new constructor. Reflect model API methods after existing schema reads so cold full and warmed incremental extraction agree without filtering genuine application constructors. Booted regressions reproduce the original mismatch on the audited Rails 8.2 revision and cover application overrides.",
+    "status": "resolved"
   }
 ]
