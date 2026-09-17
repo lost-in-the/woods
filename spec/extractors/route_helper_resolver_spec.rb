@@ -91,7 +91,9 @@ RSpec.describe Woods::Extractors::RouteHelperResolver do
                            })
     end
 
-    %w[file image video log download root file_preview image_gallery video_stream log_archive download_archive].each do |name|
+    %w[
+      file image video log download root file_preview image_gallery video_stream log_archive download_archive
+    ].each do |name|
       it "resolves the real #{name} named route despite its non-navigation prefix" do
         named_routes[name.to_sym] = posts_index_route
 

@@ -2146,7 +2146,7 @@
       "lib/woods/cache/cache_store.rb"
     ],
     "description": "Audit finding STO-7 (Low, executed). cache_store.rb:27-35 joins key parts without length-prefixing, so `cache_key(:d, '4:abc22:xy')` and `cache_key(:d, 'abc2', 'xy')` produce the same key and two different queries can share one cached response. Latent: no current caller constructs a part containing the separator. Acceptance: length-prefix each part (or escape the separator), with a spec asserting the two colliding call shapes produce different keys.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-156",
@@ -2296,7 +2296,7 @@
     "lib/woods/extractors/controller_extractor.rb"
     ],
     "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-168",
@@ -2611,7 +2611,7 @@
       "lib/woods/git_command.rb"
     ],
     "description": "B-186 made enrichment require git rev-parse HEAD to succeed before writing any churn figure. A shallow clone (fetch-depth 1, the CI default) passes that guard: HEAD resolves, git log succeeds, and it returns exactly one commit per file. Every unit then reports commit_count 1 and change_frequency new, which is the same misleading answer B-186 removed, arrived at by a different route, and volatile_dependencies is empty because nothing clears VOLATILE_MIN_COMMITS. Acceptance: detect the shallow case with git rev-parse --is-shallow-repository, and either omit the churn keys or mark them as measured over a truncated history; log one warning naming the depth remedy; a spec covers a shallow clone of the temporary fixture repository, asserting the keys are not silently wrong. TROUBLESHOOTING already tells a reader to fetch more history for missing git metadata; this makes the index say so itself.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": [
       "B-186"
     ]
@@ -2650,7 +2650,7 @@
       "lib/woods/retrieval/search_executor.rb"
     ],
     "description": "Found during B-191 validation after PageRank importance maps became identical across Ruby versions. execute_hybrid sorts combined vector, keyword, and graph candidates by score alone before caller truncation; equal-score ordering changes across Ruby 3.0-3.2 and 3.3-4.0, altering candidate membership and per-source RRF ranks. In the unchanged Canopy corpus hybrid-2, Newsletter::DeliverJob and Newsletter::Delivery swap their leading returned positions; aggregate quality metrics remain equal, but context bytes differ. Acceptance: define deterministic candidate tie ordering before truncation and fusion, cover insertion-order and cross-source ties, replay all six Ruby lines against the original corpus and quality floors, and review context recaptures without changing labels or lowering thresholds. Keep separate runtime captures until this is resolved.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-196",

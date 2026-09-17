@@ -290,6 +290,13 @@ overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
 
+`Woods::Cache.cache_key` length-prefixes every component, including a single
+component, so different argument counts cannot share a response. Existing
+multi-component keys used by Woods' wrappers remain unchanged. Custom callers
+using single-component keys must clear their affected persistent cache domain
+when upgrading, since older unprefixed entries can alias the new encoding;
+subsequent calls refill it normally. Namespace clearing still covers both formats.
+
 ## Deployment shapes
 
 Woods supports three deployment shapes, pick the preset that matches yours.
@@ -716,6 +723,13 @@ metadata. Extraction still succeeds when git is unavailable or history cannot
 be read completely. Git enrichment is omitted in either case; a failed or
 incomplete streamed history read logs a warning.
 This requirement and the history policy below are unreleased after 2.0.0.beta2.
+
+Per-unit enrichment also requires a non-shallow repository. A shallow checkout
+or a failed repository-depth probe omits enrichment with one warning per
+extractor instance. Fetch complete history (`git fetch --unshallow`, or
+`actions/checkout` with `fetch-depth: 0`) and run full extraction to refresh
+retained metadata. If depth cannot be verified, check git access and version.
+A source archive without a repository remains quiet.
 
 Full and incremental extraction use one streamed `HEAD` history walk, restricted
 to the last 365 days by git's `--since` traversal. Only requested app-owned paths
