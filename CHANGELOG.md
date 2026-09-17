@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stabilize controller inline callback and condition labels across processes and
+  checkout paths, including action chunks; retain `unless` conditions in the
+  generated filter-chain header (B-167).
+
 - Publish metadata-only changes in local embedding snapshots without re-embedding
   unchanged source; retain no-op dumps and source-hash checkpoints (B-119).
 
@@ -23,9 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Treat non-object JSON snapshots and files removed or made unreadable during
   a read as absent across lookup, listing, diffs, and unit history (B-158).
 
+- Count corrupt and unreadable SHA-named JSON snapshots toward retention and
+  evict them before valid history, preserving the just-captured snapshot and
+  unrelated files (B-163).
+
 - Count the final retrieval context after formatting and type-rank metadata,
   keeping `tokens_used` and its trace consistent with the configured counter
   or estimate (B-197, #354).
+
+- Order tied hybrid retrieval candidates deterministically before graph seed
+  selection, truncation and reciprocal-rank fusion across supported Ruby versions
+  (B-192).
 
 - Bound OpenAI embedding requests to 36 valid inputs, preserving chunk order and
   rejecting partial or dimension-inconsistent batches (B-157). Chunk-heavy runs
@@ -33,7 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
 
+- Prevent single-component cache keys from colliding with multi-component or
+  empty keys by uniformly length-prefixing components (B-155). Custom callers
+  using persistent single-component keys should clear that cache domain on upgrade.
+
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
+
+- Omit per-unit git enrichment for shallow checkouts or unverifiable repository
+  depth, with one warning and full-history recovery guidance, instead of
+  reporting truncated commit counts as complete churn data (B-189).
 
 - Read and clear legacy Redis session indexes before any new record without
   `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
@@ -55,6 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
 
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
+
+- Preserve changes to nested `extracted_at` metadata when deciding whether to
+  rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
 
 ### Added
 
