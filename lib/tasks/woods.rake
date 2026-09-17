@@ -106,6 +106,12 @@ namespace :woods do
     puts "Re-extracted #{affected.size} affected units."
   end
 
+  desc 'Consume an encoded hook refresh batch (internal plugin transport)'
+  task :hook_refresh, [:batch] do |_task, args|
+    require 'woods/hooks/refresh'
+    Woods::Hooks::Refresh.new(args[:batch]).call
+  end
+
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
 

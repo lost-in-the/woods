@@ -693,7 +693,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. For `woods:incremental` this removes daemon coverage: a git range that fails to resolve then exits 1 instead of standing down (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains)). |
+| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean`/`woods:hook_refresh` proceed even when a daemon is (or claims to be) running. For `woods:incremental` this removes daemon coverage: a git range that fails to resolve then exits 1 instead of standing down (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains)). |
 | `WOODS_LOCK_WAIT` | `Watch::Daemon::LOCK_STALE_TIMEOUT` (600s) | How long a rake writer waits for `PipelineLock` before exiting non-zero. |
 | `WOODS_WATCH_POLL` | auto-detected | Set to `"1"`/`"0"` to force/disable polling mode (vs. `listen` gem, e.g. in a container without inotify). |
 | `WOODS_WATCH_POLL_INTERVAL` | `1.0` (seconds) | Positive, finite delay between polling scans; also used on native-watcher fallback. Does not force polling. Larger values reduce scan frequency and can delay detection and shutdown. |
@@ -702,6 +702,27 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_WATCH_IDLE_TIMEOUT` | unset (no timeout) | Seconds of inactivity before the daemon exits. |
 | `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
 | `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset (disabled) | Set to `"1"` in each task/MCP reader to trust a foreign daemon's heartbeat for up to 15 minutes, without a local pid check. See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for clock bounds, degraded coverage, and startup limitations. |
+
+### Opt-in plugin refresh hooks
+
+These settings control the plugin shell worker. Check installed
+`woods:hook_refresh` support first; the task is unreleased after 2.0.0.beta2.
+See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_HOOKS_ENABLED` | unset (disabled) | Exact `1` enables the refresh/session hooks when an index exists. |
+| `WOODS_HOOKS_DISABLED` | unset | Exact `1` overrides enablement. |
+| `WOODS_HOOK_RAKE` | `bundle exec rake` | Application command prefix; supports `docker compose exec -T app bundle exec rake`. Use a wrapper for shell quoting or explicit container environment. |
+| `WOODS_HOOK_TIMEOUT_SECONDS` | `600` | Internal worker deadline, integer 1–3600 seconds; failed/deferred batches remain queued. Docker-side cancellation requires separate verification. |
+| `WOODS_HOOK_LOCK_STALE_SECONDS` | `1800` | Age used only to reclaim legacy empty mkdir locks; live PID owners are never reclaimed merely by age. |
+
+`woods:hook_refresh[<base64 JSON>]` is the internal plugin transport. Version 1
+contains `output` and an `events` array of `{path, operation}` records; paths are
+application-relative and operations are `add`, `update`, `delete`, or `move`.
+The task validates inputs, defers active daemons with exit 75 before Rails boot,
+and checks publication failure before acknowledging work. Use ordinary extraction
+tasks for manual refreshes; hook transport is not a general shell execution API.
 
 ### Extraction rake tasks
 
