@@ -145,6 +145,15 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
   end
 
+  it 'extracts runtime recurring configuration with relative ERB, aliases and conditions (#364)' do
+    units = units_in(:scheduled_jobs)
+    expect(units.map { |unit| unit['identifier'] }).to eq(['scheduled:publish_posts'])
+    unit = units.first
+    expect(unit['metadata']).to include('job_class' => 'PublishPostJob', 'cron_expression' => 'every 7 hours')
+    expect(unit['source_code']).to include('<% require_relative "schedule_settings" %>')
+    expect(unit['dependencies']).to include('type' => 'job', 'target' => 'PublishPostJob', 'via' => 'scheduled')
+  end
+
   # Finding G-1: files wrapped in class namespaces used to index as the
   # wrapper (Domain::Container), and both siblings collided on it.
   it 'resolves class-wrapper-nested services to their file-named constants' do

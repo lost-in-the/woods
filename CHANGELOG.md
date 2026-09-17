@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
+  loading, including relative requires, conditional entries, aliases and custom
+  environment sections (B-203, #364).
+
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
 
 ### Added

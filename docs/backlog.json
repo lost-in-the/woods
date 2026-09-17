@@ -2700,5 +2700,17 @@
     ],
     "description": "The #305 host audit identified repeated 500-path git log walks as the largest extraction phase. Use one streamed HEAD-reachable touched-path history, explicitly comparing merges with their first parent while traversing all parents, roots with the empty tree, and exact current paths without rename following. NUL-framed records preserve arbitrary filename delimiters and commit subjects; retain per-file counts, contributors and five recent commits rather than the whole log. Git 2.31 or newer is required for optional enrichment; discard failed or incomplete history with an actionable warning. Changed merge counts versus legacy pathspec simplification are documented; original-host end-to-end speedup remains unmeasured.",
     "status": "resolved"
+  },
+  {
+    "id": "B-203",
+    "title": "Resolve ERB-backed recurring schedule configuration before extraction",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/scheduled_job_extractor.rb"
+    ],
+    "description": "Public Fizzy replay exposed raw YAML parsing of recurring.yml containing ERB require_relative and conditional entries. Use Rails ConfigurationFile where available and a filename-aware safe-YAML fallback on Rails 6.0. Preserve aliases, raw source, flat task maps, current/custom environment selection and error logging; verify through unit regressions and booted Rails extraction (#364).",
+    "status": "resolved"
   }
 ]
