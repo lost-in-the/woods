@@ -102,6 +102,17 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     end
   end
 
+  it 'uses the callable rather than the numeric callback key exposed by Rails 6' do
+    callable = proc { true }
+    callback = build_callback(kind: :before, filter: callable.object_id)
+    callback.define_singleton_method(:raw_filter) { callable }
+    controller = double('Controller', _process_action_callbacks: [callback])
+    expected = "#<Proc #{callable.source_location.join(':')}>"
+
+    expect(extractor.send(:extract_filter_chain, controller)).to eq([{ kind: :before, filter: expected }])
+    expect(extractor.send(:applicable_filters, controller, 'index')).to eq([{ kind: :before, filter: expected }])
+  end
+
   # ── callback_applies_to_action? ──────────────────────────────────────
 
   describe '#callback_applies_to_action?' do

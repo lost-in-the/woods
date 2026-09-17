@@ -273,13 +273,19 @@ module Woods
         controller._process_action_callbacks.map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
-          result = { kind: callback.kind, filter: stable_filter(callback.filter) }
+          result = { kind: callback.kind, filter: callback_filter(callback) }
           result[:only] = only if only.any?
           result[:except] = except if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           result
         end
+      end
+
+      # Rails 6 exposes a numeric Proc identity through #filter, and the
+      # callable through #raw_filter. Newer Rails exposes the callable directly.
+      def callback_filter(callback)
+        stable_filter(callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter)
       end
 
       # Proc#to_s embeds a process-local address. Use the same source-site
@@ -757,7 +763,7 @@ module Woods
         applicable = controller._process_action_callbacks.select do |cb|
           callback_applies_to_action?(cb, action_name)
         end
-        applicable.map { |cb| { kind: cb.kind, filter: stable_filter(cb.filter) } }
+        applicable.map { |cb| { kind: cb.kind, filter: callback_filter(cb) } }
       end
 
       # Determine if a callback applies to a given action name.
