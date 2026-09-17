@@ -196,7 +196,29 @@ RSpec.describe Woods::Cache do
   describe '.cache_key' do
     it 'builds a namespaced key' do
       key = described_class.cache_key(:embeddings, 'abc123')
-      expect(key).to eq('woods:cache:embeddings:abc123')
+      expect(key).to eq('woods:cache:embeddings:6:abc123')
+    end
+
+    it 'does not reuse one part as the length-prefixed representation of several parts' do
+      store = Woods::Cache::InMemory.new
+      single = described_class.cache_key(:context, '4:abc22:xy')
+      multiple = described_class.cache_key(:context, 'abc2', 'xy')
+      store.write(single, 'single-part response')
+      store.write(multiple, 'multi-part response')
+
+      expect(store.read(single)).to eq('single-part response')
+      expect(store.read(multiple)).to eq('multi-part response')
+    end
+
+    it 'keeps the arity distinction when both serialized keys are hashed' do
+      part = 'x' * 70
+      expect(described_class.cache_key(:context, "70:#{part}2:xy"))
+        .not_to eq(described_class.cache_key(:context, part, 'xy'))
+    end
+
+    it 'distinguishes zero parts from one or several empty parts' do
+      keys = [[], [''], ['', '']].map { |parts| described_class.cache_key(:context, *parts) }
+      expect(keys.uniq.size).to eq(3)
     end
 
     it 'hashes long keys with SHA256' do
