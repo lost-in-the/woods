@@ -32,6 +32,28 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(extractor.extract_model_mixin_file(unrelated)).to be_nil
     end
 
+    it 'preserves the canonical identity of conventional concerns with included nested helpers' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          extend ActiveSupport::Concern
+          module Helper
+            def track; end
+          end
+          include Helper
+        end
+      RUBY
+      stub_const('Trackable', Module.new)
+      stub_const('Trackable::Helper', Module.new)
+      Trackable.include(Trackable::Helper)
+      model.include(Trackable)
+      allow(Object).to receive(:const_source_location).and_call_original
+      %w[Trackable Trackable::Helper].each do |name|
+        allow(Object).to receive(:const_source_location).with(name).and_return([path, 1])
+      end
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['Trackable'])
+    end
+
     it 'excludes gem-owned modules even when the application adds their methods' do
       path = create_file('vendor/bundle/gem_mixin.rb', "module GemMixin\n def pin; end\nend\n")
       stub_const('GemMixin', Module.new)

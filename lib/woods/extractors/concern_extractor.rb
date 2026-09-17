@@ -61,7 +61,10 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
       def extract_concern_file(file_path)
         source = File.read(file_path)
-        module_name = model_mixin_paths[file_path.to_s]&.name || extract_module_name(file_path, source)
+        # Directory-discovered concerns keep their canonical file identity even
+        # when nested helpers share that file and are also included at runtime.
+        runtime_name = model_mixin_paths[file_path.to_s]&.name unless conventional_concern_path?(file_path)
+        module_name = runtime_name || extract_module_name(file_path, source)
 
         return nil unless module_name
         return nil unless concern_module?(source)

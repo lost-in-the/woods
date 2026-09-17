@@ -60,7 +60,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)
-- Named, source-defined app model mixins (for example `Card::Pinnable` in `app/models/card/pinnable.rb`) resolve through runtime source locations, with conventional concern paths as fallbacks. Included mixins also receive `:concern` units, so their actual files map to the includer through dependency edges. Gem-owned modules stay outside this discovery.
+- Named, source-defined app model mixins (for example `Card::Pinnable` in `app/models/card/pinnable.rb`) resolve through runtime source locations, with conventional concern paths as fallbacks. Included mixins also receive `:concern` units, so their actual files map to the includer through dependency edges. Gem-owned modules stay outside this discovery. Conventional concern files retain their existing identity even when nested helpers share the same file.
 - Inlines concerns: all `include FooConcern` references are resolved and the concern source is appended to `source_code`. Inlined concern names are recorded in `metadata[:inlined_concerns]`
 - Extracts all 19 callback types: `before_validation`, `after_validation`, `before_save`, `after_save`, `around_save`, `before_create`, `after_create`, `around_create`, `before_update`, `after_update`, `around_update`, `before_destroy`, `after_destroy`, `around_destroy`, `after_commit`, `after_rollback`, `after_initialize`, `after_find`, `after_touch`
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
