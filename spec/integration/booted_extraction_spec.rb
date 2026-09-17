@@ -215,6 +215,27 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(graph).not_to be_empty
   end
 
+  it 'keeps navigation edges to real routes whose names resemble filesystem or asset helpers' do
+    routes = ActionDispatch::Routing::RouteSet.new
+    routes.draw do
+      get '/files/:id', to: 'files#show', as: :file
+      get '/images/:id', to: 'images#show', as: :image
+      get '/videos/:id', to: 'videos#show', as: :video
+      get '/logs', to: 'logs#index', as: :log
+      get '/downloads/:id', to: 'downloads#show', as: :download
+      root 'posts#index'
+    end
+    allow(Rails.application).to receive(:routes).and_return(routes)
+    extractor = Woods::Extractors::ControllerExtractor.new
+    source = 'file_path(1); image_url(1); video_path(1); log_path; download_url(1); root_path; tmp_path; asset_path'
+
+    dependencies = extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+
+    expect(dependencies).to match_array(%w[Files Images Videos Logs Downloads Posts].map do |name|
+      { type: :controller, target: "#{name}Controller", via: :redirect_to }
+    end)
+  end
+
   it 'reports declared job and service parameters without names from default expressions' do
     job_params = find_unit(:jobs, 'SignatureJob').fetch('metadata').fetch('perform_params')
     service_params = find_unit(:services, 'SignatureService').fetch('metadata').fetch('initialize_params')

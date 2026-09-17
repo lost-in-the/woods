@@ -87,6 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loading, including relative requires, conditional entries, aliases and custom
   environment sections (B-203, #364).
 
+- Preserve navigation edges for real named routes such as `file_path`,
+  `image_url`, `download_path`, and `root_path`; unresolved asset/filesystem
+  helper names still produce no edge (B-152).
+
 - Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
 
 - Explain the full-extraction recovery for runtime job removals and bundle

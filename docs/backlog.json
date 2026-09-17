@@ -2110,7 +2110,7 @@
       "lib/woods/extractors/route_helper_resolver.rb"
     ],
     "description": "Audit finding EXTA-13 (Low, traced). route_helper_resolver.rb:35-51,106-111 filters known false-positive helper prefixes before consulting the route map, so an app with a genuine `file_path`/`download_path` resource loses every navigation edge to it even though the helper resolves in the live map. Deferred because it changes edge emission and needs a host-app false-positive re-check. Acceptance: consult the route map first and ignore only unresolvable bases, validated against a real host app for new false positives.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-153",
