@@ -36,6 +36,12 @@ module Woods
         (?:after|before)_(?:add|remove)_for_         # collection callbacks
       )/x
 
+      # Rails exposes one chain per event; each entry supplies its own kind.
+      # before_commit is itself an event, unlike before_save and after_commit.
+      CALLBACK_EVENTS = %i[
+        validation save create update destroy commit rollback before_commit initialize find touch
+      ].freeze
+
       # Warnings collected during extraction (skipped associations, failed models)
       attr_reader :warnings
 
@@ -410,6 +416,7 @@ module Woods
       #   composite source does not carry.
       # @return [Hash]
       def extract_metadata(model, source = nil, inlined_concerns: nil)
+        callbacks = extract_callbacks(model)
         {
           # Core identifiers
           table_name: model.table_name,
@@ -419,7 +426,7 @@ module Woods
           # Relationships and behaviors
           associations: extract_associations(model),
           validations: extract_validations(model),
-          callbacks: extract_callbacks(model),
+          callbacks: callbacks,
           scopes: extract_scopes(model, source),
           enums: extract_enums(model),
           inlined_concerns: inlined_concerns || build_model_source_with_concerns(model, source).last,
@@ -432,7 +439,7 @@ module Woods
 
           # Metrics for retrieval ranking
           loc: count_loc(model, source),
-          callback_count: callback_count(model),
+          callback_count: callbacks.length,
           association_count: model.reflect_on_all_associations.size,
           validation_count: model._validators.values.flatten.size,
 
@@ -621,22 +628,11 @@ module Woods
 
       # Extract all callbacks with their full chain
       def extract_callbacks(model)
-        callback_types = %i[
-          before_validation after_validation
-          before_save after_save around_save
-          before_create after_create around_create
-          before_update after_update around_update
-          before_destroy after_destroy around_destroy
-          after_commit after_rollback
-          after_initialize after_find
-          after_touch
-        ]
-
-        callback_types.flat_map do |type|
-          callbacks = model.send("_#{type}_callbacks")
+        CALLBACK_EVENTS.flat_map do |event|
+          callbacks = model.send("_#{event}_callbacks")
           callbacks.map do |cb|
             {
-              type: type,
+              type: event == :before_commit ? :before_commit : :"#{cb.kind}_#{event}",
               filter: cb.filter.to_s,
               kind: cb.kind, # :before, :after, :around
               conditions: format_callback_conditions(cb)
@@ -1225,17 +1221,6 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
       # Helper methods
       # ──────────────────────────────────────────────────────────────────────
-
-      def callback_count(model)
-        %i[validation save create update destroy commit rollback].sum do |type|
-          # CallbackChain includes Enumerable but defines no #size on any
-          # supported Rails version — #size raises and the rescue would
-          # zero the count. #count is the only correct API here.
-          model.send("_#{type}_callbacks").count
-        rescue StandardError
-          0
-        end
-      end
 
       def count_loc(model, source = nil)
         if source

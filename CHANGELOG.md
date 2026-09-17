@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reflect model callbacks from Rails' per-event chains instead of nonexistent
+  per-kind readers; include `before_commit` and keep `callback_count` equal to
+  the emitted callback list. Verify named callbacks in booted Rails extraction.
+
 - Stabilize controller inline callback and condition labels across processes and
   checkout paths, including action chunks; retain `unless` conditions in the
   generated filter-chain header (B-167).
