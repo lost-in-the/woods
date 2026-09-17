@@ -585,6 +585,13 @@ RSpec.describe 'Model callbacks across Rails processes', :booted_app do
     chunk = unit.fetch('chunks').find { |entry| entry.fetch('chunk_type') == 'callbacks' }
     expect(chunk.fetch('content')).to include(filter)
     expect(chunk.fetch('content_hash')).to eq(Digest::SHA256.hexdigest(chunk.fetch('content')))
+    results.first.fetch('object_filters').tally.each do |label, count|
+      matches = unit.fetch('metadata').fetch('callbacks').count do |entry|
+        entry['type'] == 'before_save' && entry['filter'] == label
+      end
+      expect(matches).to eq(count), "missing or merged callback objects: #{label}"
+      expect(chunk.fetch('content')).to include(label)
+    end
   end
 end
 

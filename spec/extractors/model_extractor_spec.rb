@@ -182,6 +182,42 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(expected)
     end
 
+    it 'removes default object identities while preserving custom and named filter labels' do
+      stub_const('NamedCallback', Class.new)
+      object = NamedCallback.new
+      anonymous = Class.new
+      custom = NamedCallback.new
+      allow(custom).to receive(:to_s).once.and_return('#<NamedCallback:0x1234>')
+      filters = [object, NamedCallback, anonymous, anonymous.new, custom, :named_hook, 'string_hook']
+      callbacks = filters.map { |filter| double('Callback', filter: filter, kind: :before) }
+      callbacks << double('Rails6Callback', filter: object.object_id, raw_filter: object, kind: :before)
+      model = double('Model')
+      stub_callback_chains(model)
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(
+        ['#<NamedCallback>', 'NamedCallback', '#<Class>', '#<#<Class>>', '#<NamedCallback:0x1234>',
+         'named_hook', 'string_hook', '#<NamedCallback>']
+      )
+    end
+
+    it 'normalizes default labels for callbacks in anonymous namespaces' do
+      namespace = Module.new
+      nested = namespace.const_set(:Nested, Class.new)
+      custom = Class.new
+      allow(custom).to receive(:to_s).once.and_return('#<Class:0x1234>')
+      callbacks = [namespace, nested, nested.new, custom].map do |filter|
+        double('Callback', filter: filter, kind: :before)
+      end
+      model = double('Model')
+      stub_callback_chains(model)
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(
+        ['#<Module>', '#<Module>::Nested', '#<#<Module>::Nested>', '#<Class:0x1234>']
+      )
+    end
+
     it 'retains other events when reading one chain raises' do
       model = double('Model')
       stub_callback_chains(model)

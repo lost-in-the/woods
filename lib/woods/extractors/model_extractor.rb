@@ -633,7 +633,7 @@ module Woods
           callbacks.map do |cb|
             {
               type: event == :before_commit ? :before_commit : :"#{cb.kind}_#{event}",
-              filter: callback_filter(cb).to_s,
+              filter: callback_filter_label(cb),
               kind: cb.kind, # :before, :after, :around
               conditions: format_callback_conditions(cb)
             }
@@ -646,6 +646,20 @@ module Woods
           # the rest to crash extraction.
           []
         end.compact
+      end
+
+      # Preserve application labels; strip addresses only from Ruby's actual
+      # default representation. Nested identities occur for anonymous classes.
+      # These are descriptive labels, not serialization of callback object state.
+      def callback_filter_label(callback)
+        filter = callback_filter(callback)
+        label = filter.to_s
+        return label unless label.start_with?('#<')
+
+        owner = filter.is_a?(Module) ? Module : Kernel
+        return label unless label == owner.instance_method(:to_s).bind(filter).call
+
+        label.gsub(/:0x[0-9a-f]+(?=>)/i, '')
       end
 
       # Extract scopes with their source if available.

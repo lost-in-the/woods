@@ -8,6 +8,7 @@ require 'json'
 require 'woods'
 require 'woods/extracted_unit'
 require 'woods/extractors/model_extractor'
+require_relative 'objects'
 
 # Fresh Ruby process, Rails boot, app root and SQLite database on every run.
 # Post's dependent: :destroy association registers a real framework Proc.
@@ -35,6 +36,7 @@ Dir.mktmpdir('woods_model_callback_app') do |root|
     create_table(:comments) { |t| t.references :post }
   end
   app.eager_load!
+  object_filters = ModelCallbackObjects.register(Post)
 
   callback = Post._destroy_callbacks.find do |entry|
     filter = entry.respond_to?(:raw_filter) ? entry.raw_filter : entry.filter
@@ -46,5 +48,6 @@ Dir.mktmpdir('woods_model_callback_app') do |root|
   unit = Woods::Extractors::ModelExtractor.new.extract_model(Post)
   # No metadata, source, dependency, chunk or hash fields are scrubbed.
   puts JSON.generate(unit: unit.to_h.except(:file_path, :extracted_at),
+                     object_filters: object_filters,
                      framework_filter: "#<#{filter.lambda? ? 'lambda' : 'Proc'} #{filter.source_location.join(':')}>")
 end
