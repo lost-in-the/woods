@@ -394,6 +394,24 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#volatile_dependency_limit_per_target' do
+    it 'defaults to unlimited and accepts a positive Integer or nil' do
+      config = described_class.new
+      expect(config.volatile_dependency_limit_per_target).to be_nil
+      config.volatile_dependency_limit_per_target = 3
+      expect(config.volatile_dependency_limit_per_target).to eq(3)
+      config.volatile_dependency_limit_per_target = nil
+      expect(config.volatile_dependency_limit_per_target).to be_nil
+    end
+
+    [0, -1, 2.5, '3', false].each do |invalid|
+      it "rejects #{invalid.inspect}" do
+        expect { described_class.new.volatile_dependency_limit_per_target = invalid }
+          .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      end
+    end
+  end
+
   describe '#graph_cycle_limit and #graph_cycle_max_length' do
     it 'defaults to the analyzer constants' do
       config = described_class.new

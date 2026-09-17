@@ -3611,6 +3611,14 @@ RSpec.describe Woods::Extractor do
       extractor.send(:build_graph_analyzer)
     end
 
+    it 'passes the optional per-target volatile dependency limit to the analyzer' do
+      Woods.configuration.volatile_dependency_limit_per_target = 3
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, hash_including(volatile_limit_per_target: 3)).and_call_original
+      extractor.send(:build_graph_analyzer)
+    end
+
     it 'passes the configured cycle caps to the analyzer' do
       Woods.configuration.graph_cycle_limit = 7
       Woods.configuration.graph_cycle_max_length = 9

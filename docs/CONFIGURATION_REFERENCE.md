@@ -388,11 +388,34 @@ end
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
 | `volatile_dependency_ratio` | Float | `3.0` | A dependency whose commit count (last 365 days) exceeds the dependent's by this ratio appears in the `volatile_dependencies` report (top 20, ranked by PageRank). Must be greater than 1. Report only, never a gate. |
+| `volatile_dependency_limit_per_target` | Integer or `nil` | `nil` | Optional maximum report edges per dependency (type and identifier), applied after ranking and before the global top 20. Positive integers only; `nil` leaves the default report unchanged. Distinct relationships consume separate slots. |
 | `graph_cycle_limit` | Integer or `nil` | `500` | How many distinct cycles `GraphAnalyzer` enumerates before it stops. Cycle detection finds one cycle per DFS back-edge, so a dense graph has tens of thousands of them and enumerating every one is the largest single cost of the analysis that runs on every extraction. Set to `nil` for exhaustive enumeration. |
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
 
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
+
+**Tuning volatile dependency reports.** Start with
+`graph_analysis.json`'s `stats.volatile_dependency_count`: it counts every
+qualifying edge before either cap, while the array normally keeps only 20.
+Raise `volatile_dependency_ratio` until the remaining candidates are useful
+for your application. A measured 7k-unit app had 544 qualifying edges at 3.0;
+8–10 was a useful ratio there, not a universal recommendation. Commit counts
+cover the last 365 days and need complete git history; missing git data is not
+proof of stability.
+
+If one hot dependency still fills the list, set
+`volatile_dependency_limit_per_target` to a small positive integer such as 3.
+Each dependency keeps its highest-ranked edges before the global limit applies,
+allowing other dependencies into the report. Different relationship labels
+remain separate edges and consume separate slots. With this option enabled,
+`stats.volatile_dependencies_limit_per_target` records the setting and
+`stats.volatile_dependency_reported_count` counts the final persisted array;
+`stats.volatile_dependency_count` still counts all qualifying edges. The extra
+stats are absent at the default `nil`. This limits the report, not the work of
+finding qualifying edges. Run extraction again after changing either setting;
+MCP reads the published report. These findings remain informational, never a
+release or architecture gate.
 
 When the JSON snapshot fallback is in use, malformed JSON, top-level values
 other than objects, and files that cannot be read (including concurrent retention

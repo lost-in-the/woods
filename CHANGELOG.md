@@ -104,6 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
+  from filling the volatility report (B-188). Apply the per-target edge cap before
+  the global top 20, preserve the default output, and expose the configured cap
+  and reported count alongside the full qualifying count when enabled.
+
 - Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
   real MiniLM vectors, per-strategy quality floors, latency observations, and
   exact output-token counts. Preserve known failed queries in the evidence (#227).

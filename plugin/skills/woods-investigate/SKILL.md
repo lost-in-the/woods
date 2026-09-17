@@ -43,6 +43,19 @@ deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
 paging alone only visits the discovered prefix. See the
 [budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
 
+## Volatile dependency reports
+
+Read `stats.volatile_dependency_count` before judging the top-20 array: it
+counts all qualifying edges. A frequently changed dependency can occupy most
+rows. Use the installed version's ratio tuning guidance; the optional
+`volatile_dependency_limit_per_target` setting (B-188) is unreleased after
+2.0.0.beta2, so verify gem support before recommending it. Supporting versions
+can cap each typed target before selecting the global top 20 and expose the
+cap plus `volatile_dependency_reported_count` in stats. Re-extract after
+configuration changes. Treat the report as candidates for source review, never
+an automatic gate. See the
+[configuration reference](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pipeline-options).
+
 ## Report evidence
 
 Name the tools and exact identifiers used, cite the source paths Woods returned, separate direct Woods evidence from inference, and state generation/staleness caveats. Say when a claim still needs source or test verification.
