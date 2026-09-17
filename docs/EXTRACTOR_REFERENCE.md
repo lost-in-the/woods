@@ -160,6 +160,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each action becomes a `:action` chunk with its applicable filters and route
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- Inline callbacks use stable source-site labels in filter metadata, controller annotations and action chunks: `#<Proc app/controllers/posts_controller.rb:12>` (or `lambda`). The controller filter metadata and annotations use the same labels for `if`/`unless` procs. App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Labels describe the callable location and kind, not captured closure state, and never execute callbacks.
 - Extracts `redirect_to` navigation edges: named route helpers (`posts_path`, `users_url`) are resolved to controller targets via `RouteHelperResolver`, producing `:redirect_to` dependency edges (gated by `extract_navigation_edges` config)
 
 **Edge cases:**

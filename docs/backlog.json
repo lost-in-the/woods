@@ -2245,7 +2245,7 @@
       "lib/woods/temporal/json_snapshot_store.rb"
     ],
     "description": "Audit finding R2-6 (Low, traced). Retention picks its eviction victims from parseable snapshot summaries, so an unreadable or corrupt file is never a candidate and accumulates forever \u2014 the exact files B-135 taught the reader to skip are the ones retention cannot reclaim. Intersection of P8 and B-135. Acceptance: rank unreadable files as the oldest victims, with a spec asserting a corrupt file is pruned once the retention bound is exceeded.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-164",
@@ -2257,8 +2257,8 @@
     "lib/woods/ruby_analyzer/",
     "lib/tasks/woods.rake"
     ],
-    "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map.",
-    "status": "open"
+    "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map. Resolved by the lexical qualification pass in commit 3fee33f05 (#279); revalidated on 2026-09-17 at main 6a1af8a8 with a fresh woods:self_map and IndexReader#traverse_dependents returning all 8 direct includers. No additional implementation change required.",
+    "status": "resolved"
   },
   {
     "id": "B-165",
@@ -2296,7 +2296,7 @@
     "lib/woods/extractors/controller_extractor.rb"
     ],
     "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-168",
