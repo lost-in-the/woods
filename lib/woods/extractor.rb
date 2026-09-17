@@ -1951,13 +1951,13 @@ module Woods
     # exactly this value shape — no fractional seconds, `Z` or a `±hh:mm`
     # offset — and `spec/extracted_unit_spec.rb` pins that, so a change to the
     # stamp's shape fails a spec instead of quietly un-matching this mask.
-    # The value constraint is what keeps the mask honest against user code: a
-    # bare `"extracted_at":` cannot occur inside any JSON *string* value
-    # (interior quotes serialize as `\"`), so only a real JSON key can match,
-    # and only when it holds a timestamp — which no extractor emits below the
-    # top level.
+    # Match only the final top-level stamp, followed by the source_hash field
+    # and the document's closing brace. Nested metadata may use the same key
+    # and timestamp shape; changing it must still rewrite the unit. Escaped
+    # quotes inside string values cannot match these JSON field boundaries.
     EXTRACTED_AT_SCALAR =
-      /("extracted_at":\s*")\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})(?=")/
+      /("extracted_at":\s*")\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})
+       (?=",\s*"source_hash":\s*"[0-9a-f]{64}"\s*}\s*\z)/x
     # An implementation detail of the byte comparison, not part of the
     # extractor's surface (`private` does not scope constants).
     private_constant :EXTRACTED_AT_SCALAR
@@ -1991,7 +1991,7 @@ module Woods
     #   original encoding
     # @return [String] the bytes with the stamp's value removed
     def mask_extracted_at(bytes)
-      bytes.gsub(EXTRACTED_AT_SCALAR, '\1')
+      bytes.sub(EXTRACTED_AT_SCALAR, '\1')
     end
 
     def normalize_file_paths

@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
 
+- Preserve changes to nested `extracted_at` metadata when deciding whether to
+  rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
+
 ### Added
 
 - Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
