@@ -12,7 +12,10 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:retriever) { described_class.new(index_dir: index_dir) }
 
-  before { FileUtils.cp_r("#{fixture_dir}/.", index_dir) }
+  before do
+    Woods.configuration = Woods::Configuration.new
+    FileUtils.cp_r("#{fixture_dir}/.", index_dir)
+  end
   after { FileUtils.rm_rf(index_dir) }
 
   it 'loads extract-only published units and attributes typed sources' do
