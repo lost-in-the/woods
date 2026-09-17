@@ -2257,8 +2257,8 @@
     "lib/woods/ruby_analyzer/",
     "lib/tasks/woods.rake"
     ],
-    "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map.",
-    "status": "open"
+    "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map. Resolved by the lexical qualification pass in commit 3fee33f05 (#279); revalidated on 2026-09-17 at main 6a1af8a8 with a fresh woods:self_map and IndexReader#traverse_dependents returning all 8 direct includers. No additional implementation change required.",
+    "status": "resolved"
   },
   {
     "id": "B-165",
