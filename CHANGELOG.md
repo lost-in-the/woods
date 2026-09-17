@@ -71,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reflect model methods after schema loading so full and incremental runs agree
   on Rails-generated constructors while preserving application overrides (B-202, #363).
 
+- Parse job `perform_params` and shared `initialize_params` from Ruby parameter
+  syntax, avoiding phantom names from keyword/default expressions while preserving
+  the existing metadata fields and named rest/block arguments (B-151).
+
 - Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
   loading, including relative requires, conditional entries, aliases and custom
   environment sections (B-203, #364).

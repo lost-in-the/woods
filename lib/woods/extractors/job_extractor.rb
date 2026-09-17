@@ -318,24 +318,9 @@ module Woods
       end
 
       def extract_perform_params(source)
-        return [] unless source =~ /def\s+perform\s*\(([^)]*)\)/
-
-        params_str = ::Regexp.last_match(1)
-        params = []
-
-        params_str.scan(/(\*?\*?\w+)(?:\s*=\s*([^,]+))?/) do |name, default|
-          params << {
-            name: name.gsub(/^\*+/, ''),
-            splat: if name.start_with?('**')
-                     :double
-                   else
-                     (name.start_with?('*') ? :single : nil)
-                   end,
-            has_default: !default.nil?
-          }
+        MethodParameters.extract(source, :perform).map do |parameter|
+          parameter.slice(:name, :splat, :has_default)
         end
-
-        params
       end
 
       def extract_discard_on(source)

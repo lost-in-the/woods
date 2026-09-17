@@ -215,6 +215,22 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(graph).not_to be_empty
   end
 
+  it 'reports declared job and service parameters without names from default expressions' do
+    job_params = find_unit(:jobs, 'SignatureJob').fetch('metadata').fetch('perform_params')
+    service_params = find_unit(:services, 'SignatureService').fetch('metadata').fetch('initialize_params')
+    names = %w[user_id values rest required notify options block]
+    expect(job_params.map { |param| param.fetch('name') }).to eq(names)
+    expect(service_params.map { |param| param.fetch('name') }).to eq(names)
+    expect(job_params.map { |param| param.fetch('has_default') }).to eq([false, true, false, false, true, false, false])
+    expect(service_params.map do |param|
+      param.fetch('has_default')
+    end).to eq([false, true, false, false, true, false, false])
+    expect(job_params.map { |param| param.fetch('splat') }).to eq([nil, nil, 'single', nil, nil, 'double', nil])
+    expect(service_params.map { |param| param.fetch('keyword') }).to eq([false, false, false, true, true, true, false])
+    expect(SignatureJob.instance_method(:perform).parameters.map(&:last).map(&:to_s)).to eq(names)
+    expect(SignatureService.instance_method(:initialize).parameters.map(&:last).map(&:to_s)).to eq(names)
+  end
+
   it 'records git provenance (resolved or "unknown"), never crashing on a non-repo dummy' do
     expect(manifest).to have_key('git_branch')
     expect(manifest).to have_key('git_sha')

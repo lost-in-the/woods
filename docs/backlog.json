@@ -2098,7 +2098,7 @@
       "lib/woods/extractors/shared_utility_methods.rb"
     ],
     "description": "Audit finding EXTA-11 (Low, executed). job_extractor.rb:291-310 and shared_utility_methods.rb:294-310 split parameter lists on commas without consuming keyword defaults, so `perform(user_id, notify: true)` records params `user_id, notify, true` \u2014 a fabricated third parameter in agent-facing output. Deferred because the right fix is Prism-based parameter parsing, a small design of its own. Acceptance: parse the parameter list with Prism (or consume kwarg defaults), with specs for kwargs, comma-bearing defaults, and block/splat parameters.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-152",
