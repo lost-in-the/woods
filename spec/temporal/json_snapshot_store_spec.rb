@@ -124,6 +124,66 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
     end
   end
 
+  describe 'unavailable snapshot reads' do
+    let(:unavailable_path) { File.join(tmpdir, 'snapshots', 'aaa1111.json') }
+
+    shared_examples 'an absent snapshot' do
+      it 'warns and returns nil from find' do
+        expect { expect(store.find('aaa1111')).to be_nil }
+          .to output(/Skipping .* snapshot aaa1111\.json/).to_stderr
+      end
+
+      it 'warns and omits the snapshot from list while retaining readable snapshots' do
+        expect { expect(store.list.map { |entry| entry[:git_sha] }).to eq(['bbb2222']) }
+          .to output(/Skipping .* snapshot aaa1111\.json/).to_stderr
+      end
+
+      it 'warns and returns an empty diff' do
+        expect { expect(store.diff('aaa1111', 'bbb2222')).to eq(added: [], modified: [], deleted: []) }
+          .to output(/Skipping .* snapshot aaa1111\.json/).to_stderr
+      end
+
+      it 'warns and omits the snapshot from unit_history while retaining readable snapshots' do
+        expect { expect(store.unit_history('User').map { |entry| entry[:git_sha] }).to eq(['bbb2222']) }
+          .to output(/Skipping .* snapshot aaa1111\.json/).to_stderr
+      end
+    end
+
+    before do
+      store.capture(manifest_v1, units_v1)
+      store.capture(manifest_v2, units_v2)
+    end
+
+    ['[]', '"text"', '42', 'true', 'false', 'null'].each do |json|
+      context "when a snapshot contains #{json}" do
+        before { File.write(unavailable_path, json) }
+
+        include_examples 'an absent snapshot'
+      end
+    end
+
+    context 'when retention removes the file after discovery but before the read' do
+      before do
+        allow(Woods::AtomicFile).to receive(:read).and_call_original
+        allow(Woods::AtomicFile).to receive(:read).with(unavailable_path).and_wrap_original do |method, path|
+          File.unlink(path)
+          method.call(path)
+        end
+      end
+
+      include_examples 'an absent snapshot'
+    end
+
+    context 'when reading a snapshot is denied' do
+      before do
+        allow(Woods::AtomicFile).to receive(:read).and_call_original
+        allow(Woods::AtomicFile).to receive(:read).with(unavailable_path).and_raise(Errno::EACCES)
+      end
+
+      include_examples 'an absent snapshot'
+    end
+  end
+
   # ── capture ────────────────────────────────────────────────────────
 
   describe '#capture' do
