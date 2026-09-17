@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Stabilize controller inline callback and condition labels across processes and
+  checkout paths, including action chunks; retain `unless` conditions in the
+  generated filter-chain header (B-167).
+
 - Publish metadata-only changes in local embedding snapshots without re-embedding
   unchanged source; retain no-op dumps and source-hash checkpoints (B-119).
 
