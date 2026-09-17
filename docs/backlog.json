@@ -1687,7 +1687,7 @@
       "lib/woods/embedding/indexer.rb"
     ],
     "description": "snapshot_worth_writing? gates on processed/vanished counts, and the skip decision is source_hash (source only). A rename or dependency change with unchanged source leaves processed=0, so metadata.msgpack and per-vector file_path metadata keep the old path until an unrelated unit changes. B-069's shape for mutation instead of deletion; durable presets are unaffected (SQLite metadata store writes every run). Fix direction: compare non-source metadata against the hydrated dump, or fold file_path/deps into the checkpoint hash.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-120",

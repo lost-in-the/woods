@@ -236,10 +236,13 @@ unless cross-process metadata persistence matters.
 config.metadata_store = :in_memory
 ```
 
-Pure-Ruby hash-backed store. No external dependencies, no persistence, vectors and metadata both live in the building process and die with
-it. The `_index.json` manifest under `output_dir` is the durable
-metadata for the index MCP server, so this is a reasonable default
-for hosts that don't bundle `sqlite3`.
+Pure-Ruby hash-backed store with no external dependencies. For local vector
+presets, embedding runs persist it as `metadata.msgpack` alongside `vectors.bin`
+in the promoted dump; the index MCP server loads that snapshot at startup or
+reload. Incremental embedding publishes changes to paths, dependencies, and
+other unit metadata even when unchanged source needs no new embedding. A run
+with no content or metadata changes keeps the existing dump and retention
+window. This is a reasonable default for hosts that don't bundle `sqlite3`.
 
 ## Retrieval cache options
 
