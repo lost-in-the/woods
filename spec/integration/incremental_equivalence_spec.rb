@@ -354,6 +354,17 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       run_sequence([-> { write_file('app/services/checkout_service.rb', service_source('CheckoutService')) }])
     end
 
+    it 'indexes a new file passed through a change set with noncanonical paths' do
+      baseline = full_extraction
+      write_file('app/services/normalized_service.rb', service_source('NormalizedService'))
+      changes = Woods::ChangeSet.new(paths: ["#{@app_root}/app//services/./normalized_service.rb"],
+                                     root: "#{@app_root}/")
+
+      Woods::Extractor.new(output_dir: baseline).extract_changed(changes.absolute_paths)
+
+      expect(differences(baseline, full_extraction)).to be_empty
+    end
+
     it 'indexes a lib file, an i18n file, and a rake file created after the baseline' do
       run_sequence([
                      lambda {

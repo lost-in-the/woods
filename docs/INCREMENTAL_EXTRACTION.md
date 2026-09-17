@@ -64,6 +64,10 @@ failure a CI chain cannot afford:
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
 | There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
 
+Changed paths are normalized lexically before dispatch: trailing root slashes,
+duplicate separators and `.`/`..` segments do not create separate changes or
+bypass matching. Missing files remain representable; symlinks are not resolved.
+
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
 `origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default). An
 unresolvable range — a GitLab zero-SHA on a new branch, an unfetched base ref,

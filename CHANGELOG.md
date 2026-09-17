@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
   deny operations and scoped resets preserve corrupt state (B-159).
 
+- Normalize incremental change paths before deduplication and dispatch, including
+  trailing root slashes, repeated separators and dot segments (B-148).
+
 - Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
 
 - Reflect model methods after schema loading so full and incremental runs agree
