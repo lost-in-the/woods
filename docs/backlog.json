@@ -2134,7 +2134,7 @@
       "lib/woods/console/embedded_executor.rb"
     ],
     "description": "Audit finding CON-4 (Low, executed). embedded_executor.rb:1406 calls `SqlNoiseStripper.strip_noise(template)` with the default :postgres dialect, unlike sql_identifier_referenced? (:1514) and validate_protected_sql_usage! (:1448), which both pass `dialect: sql_dialect || :postgres`. On a MySQL host a `\\'` escape folds a forbidden subquery into what the postgres strip reads as a literal, so SCOPE_TEMPLATE_FORBIDDEN never sees the SELECT. Not reachable through the registered schema (QUERY_SCOPE_TEMPLATE_REGEXP and the tool schemas constrain scope first); the exposure is direct/legacy bridge callers. Acceptance: pass the active dialect (or scan both strips, mirroring dml_body_views), with a MySQL-adapter scope-array example asserting the subquery is still refused.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-155",

@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
 
+- Validate direct/legacy Console scope arrays with the active SQL dialect and
+  MySQL session quote modes, refusing subqueries hidden by mismatched quote
+  stripping while retaining the supported tools' narrower scope grammar (B-154).
+
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
   deny operations and scoped resets preserve corrupt state (B-159).
