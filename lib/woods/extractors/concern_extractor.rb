@@ -50,7 +50,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of concern units
       def extract_all
-        find_files_in_directories(@directories).filter_map do |file|
+        (find_files_in_directories(@directories) + model_mixin_paths.keys).uniq.filter_map do |file|
           extract_concern_file(file)
         end
       end
@@ -61,7 +61,7 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
       def extract_concern_file(file_path)
         source = File.read(file_path)
-        module_name = extract_module_name(file_path, source)
+        module_name = model_mixin_paths[file_path.to_s]&.name || extract_module_name(file_path, source)
 
         return nil unless module_name
         return nil unless concern_module?(source)
@@ -83,7 +83,53 @@ module Woods
         nil
       end
 
+      # Extract a module outside concerns directories only when a live model
+      # includes it. Filenames alone cannot establish that a module is a mixin.
+      #
+      # @param file_path [String] Changed application source path
+      # @return [ExtractedUnit, nil]
+      def extract_model_mixin_file(file_path)
+        extract_concern_file(file_path) if model_mixin_paths.key?(file_path.to_s)
+      end
+
+      # Runtime mixins that have no conventional concern-directory discovery.
+      # @return [Hash<String, Module>] Source paths and their included modules
+      def runtime_model_mixins
+        model_mixin_paths.reject { |path, _mod| conventional_concern_path?(path) }
+      end
+
+      # @param path [String] Absolute source path
+      # @return [Boolean] Whether directory-based discovery owns this source
+      def conventional_concern_path?(path)
+        @directories.any? { |directory| path.to_s.start_with?("#{directory}/") }
+      end
+
       private
+
+      # Runtime ownership is authoritative; never import gem mixins even when
+      # the application adds methods to them.
+      # @return [Hash<String, Module>] App-owned included modules by source path
+      def model_mixin_paths
+        return {} unless defined?(ActiveRecord::Base)
+
+        @model_mixin_paths ||= discover_model_mixin_paths
+      end
+
+      # @return [Hash<String, Module>] Reflected module source locations
+      def discover_model_mixin_paths
+        models = ActiveRecord::Base.descendants.reject { |model| model.respond_to?(:abstract_class?) && model.abstract_class? }
+        models.flat_map(&:included_modules).uniq.each_with_object({}) do |mod, paths|
+          next unless mod.name
+
+          definition = Object.const_source_location(mod.name)&.first
+          next if definition && !app_source?(definition, "#{Rails.root}/")
+
+          path = resolve_source_location(mod, app_root: "#{Rails.root}/", fallback: nil)
+          next unless app_source?(path, "#{Rails.root}/") && File.file?(path)
+
+          paths[path] = mod
+        end
+      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Module Discovery

@@ -147,6 +147,7 @@ module Woods
           # ConcernExtractor globs app/**/concerns, not just the two canonical
           # directories — match any .rb under app/ inside a concerns/ segment.
           file_rule(:concerns, :extract_concern_file, %w[app], require_segment: '/concerns/'),
+          file_rule(:concerns, :extract_model_mixin_file, %w[app lib], exclude: %w[/concerns/]),
           # GraphQL types sit outside FILE_BASED (they share one extractor
           # method across four unit types via GRAPHQL_TYPES), which is exactly
           # why the FILE_BASED-driven coverage guard never noticed they had no

@@ -384,6 +384,9 @@ module Woods
 
       # Find the file path for a concern
       def concern_path_for(mod)
+        reflected = resolve_source_location(mod, app_root: Rails.root.to_s, fallback: nil)
+        return reflected if app_source?(reflected, "#{Rails.root}/") && File.file?(reflected)
+
         possible_paths = [
           Rails.root.join("app/models/concerns/#{mod.name.underscore}.rb"),
           Rails.root.join("app/controllers/concerns/#{mod.name.underscore}.rb"),

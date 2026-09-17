@@ -2085,7 +2085,7 @@
       "lib/woods/extractors/model_extractor.rb"
     ],
     "description": "Audit finding EXTA-9 (Low, traced). model_extractor.rb:385-392 resolves concern sources by convention against three directories, so a namespaced concern (app/models/library/sluggable.rb) silently fails to inline and the model unit loses the behavior that concern inlining exists to capture. controller_extractor.rb:344-350 already solved this with const_source_location. Deferred as a behavior improvement, not a regression. Acceptance: use const_source_location with the conventions as fallback, and a spec inlining a namespaced concern.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-151",

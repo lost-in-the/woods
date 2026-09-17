@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
+
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
 
 ### Added

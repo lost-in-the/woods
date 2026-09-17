@@ -10,6 +10,39 @@ require 'woods/extractors/concern_extractor'
 RSpec.describe Woods::Extractors::ConcernExtractor do
   include_context 'extractor setup'
 
+  describe 'runtime model mixins' do
+    let(:model) { Class.new }
+
+    before do
+      stub_const('ActiveRecord::Base', double('ActiveRecord::Base', descendants: [model]))
+    end
+
+    it 'discovers included app modules outside concerns directories but rejects unrelated modules' do
+      path = create_file('app/models/card/pinnable.rb', "module Card::Pinnable\n def pin; end\nend\n")
+      mod = Module.new
+      stub_const('Card', Class.new)
+      stub_const('Card::Pinnable', mod)
+      model.include(mod)
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('Card::Pinnable').and_return([path, 1])
+      unrelated = create_file('app/models/unrelated.rb', "module Unrelated\n def unrelated; end\nend\n")
+      extractor = described_class.new
+      expect(extractor.extract_all.map(&:identifier)).to eq(['Card::Pinnable'])
+      expect(extractor.extract_model_mixin_file(path).type).to eq(:concern)
+      expect(extractor.extract_model_mixin_file(unrelated)).to be_nil
+    end
+
+    it 'excludes gem-owned modules even when the application adds their methods' do
+      path = create_file('vendor/bundle/gem_mixin.rb', "module GemMixin\n def pin; end\nend\n")
+      stub_const('GemMixin', Module.new)
+      model.include(GemMixin)
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('GemMixin').and_return([path, 1])
+      expect(described_class.new.extract_all).to be_empty
+      expect(described_class.new.extract_model_mixin_file(path)).to be_nil
+    end
+  end
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
