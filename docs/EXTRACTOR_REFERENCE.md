@@ -160,6 +160,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each action becomes a `:action` chunk with its applicable filters and route
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- Route helper resolution accepts every live named controller/action route, including `file_path`, `image_url`, `download_path`, and `root_path`. Unknown filesystem/asset helpers produce no edge; matching names are conservative source references, not proof a call executes.
 - Extracts `redirect_to` navigation edges: named route helpers (`posts_path`, `users_url`) are resolved to controller targets via `RouteHelperResolver`, producing `:redirect_to` dependency edges (gated by `extract_navigation_edges` config)
 
 **Edge cases:**
