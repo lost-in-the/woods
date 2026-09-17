@@ -2196,7 +2196,7 @@
       "lib/woods/mcp/server.rb"
     ],
     "description": "Audit finding INF-6 (Low, executed). pipeline_guard.rb:43-53,145-153 fails closed on corrupt state (correct) but reset! treats it as nothing to reset, so mcp/server.rb:1588-1594 answers \"nothing was repaired\" while diagnose reports the state corrupt \u2014 the operator has no in-band way out. The spec pins reset-as-no-op. Acceptance: let an explicit reset!(:all) rewrite corrupt state, or make the repair message name the file to delete; flip the pinning spec either way.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-160",

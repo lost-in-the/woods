@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
 
+- Repair corrupt pipeline cooldown state on an explicit all-reset, including
+  `pipeline_repair` in custom operator-configured servers; ordinary reads still
+  deny operations and scoped resets preserve corrupt state (B-159).
+
 - Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
 
 - Reflect model methods after schema loading so full and incremental runs agree
