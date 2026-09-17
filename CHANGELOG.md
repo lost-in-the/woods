@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Treat non-object JSON snapshots and files removed or made unreadable during
   a read as absent across lookup, listing, diffs, and unit history (B-158).
 
+- Count corrupt and unreadable SHA-named JSON snapshots toward retention and
+  evict them before valid history, preserving the just-captured snapshot and
+  unrelated files (B-163).
+
 - Count the final retrieval context after formatting and type-rank metadata,
   keeping `tokens_used` and its trace consistent with the configured counter
   or estimate (B-197, #354).
