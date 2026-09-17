@@ -182,16 +182,59 @@ RSpec.describe Woods::Operator::PipelineGuard do
       File.chmod(0o600, state_path) if File.exist?(state_path)
     end
 
-    it 'leaves malformed state untouched when it parses to no requested entries' do
+    ['{not-json', '[1,2,3]', 'null', ''].each do |content|
+      it "repairs corrupt state #{content.inspect} only on an explicit all reset" do
+        File.write(state_path, content)
+
+        expect(guard.allow?(:extraction)).to be(false)
+        expect(guard.reset!(:extraction)).to be(false)
+        expect(guard.reset!(:embedding)).to be(false)
+        expect(File.binread(state_path)).to eq(content)
+        expect(guard.state_status).to eq(:corrupt)
+
+        expect(guard.reset!(:all)).to be(true)
+        expect(JSON.parse(File.read(state_path))).to eq({})
+        expect(guard.state_status).to eq(:ok)
+        expect(guard.allow?(:extraction)).to be(true)
+        expect(guard.allow?(:embedding)).to be(true)
+        expect(guard.reset!(:all)).to be(false)
+      end
+    end
+
+    it 'preserves a concurrent repair that leaves only unrelated state' do
       File.write(state_path, '{not-json')
-      File.chmod(0o400, state_path)
-      File.chmod(0o500, state_dir)
+      repaired = JSON.generate('custom_operation' => Time.now.iso8601)
+      allow(File).to receive(:open).and_call_original
+      allow(File).to receive(:open).with(state_path, File::RDWR).and_wrap_original do |open, *args, &block|
+        File.write(state_path, repaired)
+        open.call(*args, &block)
+      end
 
       expect(guard.reset!(:all)).to be(false)
+      expect(File.binread(state_path)).to eq(repaired)
+    end
+
+    it 'leaves concurrent corruption untouched during a scoped reset' do
+      guard.record!(:extraction)
+      allow(File).to receive(:open).and_call_original
+      allow(File).to receive(:open).with(state_path, File::RDWR).and_wrap_original do |open, *args, &block|
+        File.write(state_path, '{not-json')
+        open.call(*args, &block)
+      end
+
+      expect(guard.reset!(:extraction)).to be(false)
       expect(File.binread(state_path)).to eq('{not-json')
-    ensure
-      File.chmod(0o700, state_dir)
-      File.chmod(0o600, state_path) if File.exist?(state_path)
+      expect(guard.allow?(:extraction)).to be(false)
+    end
+
+    it 'propagates a failed write-open without claiming corrupt state was repaired' do
+      File.write(state_path, '{not-json')
+      allow(File).to receive(:open).and_call_original
+      allow(File).to receive(:open).with(state_path, File::RDWR).and_raise(Errno::EACCES)
+
+      expect { guard.reset!(:all) }.to raise_error(Errno::EACCES)
+      expect(File.binread(state_path)).to eq('{not-json')
+      expect(guard.allow?(:extraction)).to be(false)
     end
 
     it 'rejects unsupported operations without changing state' do

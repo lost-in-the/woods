@@ -52,6 +52,27 @@ version. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-pro
 
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
 
+### Corrupt pipeline cooldown state
+
+In a custom Index MCP server configured with an `operator` and
+`pipeline_guard`, a corrupt `pipeline_guard.json` denies full pipeline runs
+until repaired. The packaged `woods-mcp` executable does not expose pipeline
+operations; confirm the connected server's tools before using this recovery.
+
+For versions containing B-159, call `pipeline_repair` with
+`{"action":"reset_cooldowns"}` to replace malformed JSON, non-object JSON, or an
+empty guard file with an empty state object under the guard's file lock. This
+explicit action clears the extraction and embedding cooldowns; subsequent runs
+can start immediately. The direct Ruby equivalent is `guard.reset!(:all)`.
+Scoped resets leave corrupt state untouched. Valid state keeps any unrelated
+operation entries, and missing state remains a no-op without creating a file.
+A permission failure must be corrected before repair can succeed.
+
+This recovery is unreleased after `2.0.0.beta2`; check the installed version.
+Older versions report corrupt state as nothing to repair. Stop pipeline writers,
+back up the configured guard state's `pipeline_guard.json`, and remove only that
+file before restarting, or upgrade to a version containing the fix.
+
 ## Extraction Problems
 
 ### Extraction produces empty or incomplete output

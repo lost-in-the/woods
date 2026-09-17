@@ -105,6 +105,12 @@ Then reconnect through the MCP client and call `woods_status`. Use client-native
 
 For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
 
+For corrupt pipeline cooldown state, first confirm this is a custom server
+with `pipeline_repair` registered; packaged `woods-mcp` does not wire it.
+Recovery through `reset_cooldowns` (B-159) is unreleased after `2.0.0.beta2`.
+Check the installed version before attempting it and follow the
+[corrupt cooldown recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#corrupt-pipeline-cooldown-state).
+
 ## Partial dependency answers
 
 Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods

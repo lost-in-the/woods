@@ -161,20 +161,36 @@ RSpec.describe 'Index MCP pipeline repair contract' do
     File.chmod(0o600, guard_state_path) if File.exist?(guard_state_path)
   end
 
-  it 'reports malformed cooldown state as missing without truncating it' do
+  ['{not-json', '[1,2,3]', 'null', ''].each do |content|
+    it "repairs corrupt cooldown state #{content.inspect} through the configured operator" do
+      File.write(guard_state_path, content)
+      expect(guard.allow?(:extraction)).to be(false)
+
+      result = repair('reset_cooldowns')
+
+      expect(result['isError']).to be(false)
+      expect(result.dig('structuredContent', 'data')).to eq(
+        'repaired' => true, 'action' => 'reset_cooldowns', 'outcome' => 'reset'
+      )
+      expect(JSON.parse(File.read(guard_state_path))).to eq({})
+      expect(guard.state_status).to eq(:ok)
+      expect(guard.allow?(:extraction)).to be(true)
+      expect(guard.allow?(:embedding)).to be(true)
+    end
+  end
+
+  it 'reports a write-open failure without claiming corrupt state was repaired' do
     File.write(guard_state_path, '{not-json')
     server
-    File.chmod(0o400, guard_state_path)
-    File.chmod(0o500, state_dir)
+    allow(File).to receive(:open).and_call_original
+    allow(File).to receive(:open).with(guard_state_path, File::RDWR).and_raise(Errno::EACCES)
 
     result = repair('reset_cooldowns')
 
     expect(result['isError']).to be(true)
-    expect(result.dig('_meta', 'error_code')).to eq('cooldown_state_missing')
+    expect(result.dig('structuredContent', 'data')).to be_nil
     expect(File.binread(guard_state_path)).to eq('{not-json')
-  ensure
-    File.chmod(0o700, state_dir)
-    File.chmod(0o600, guard_state_path) if File.exist?(guard_state_path)
+    expect(guard.allow?(:extraction)).to be(false)
   end
 
   def repair(action)
