@@ -514,6 +514,70 @@ RSpec.describe Woods::Temporal::JsonSnapshotStore do
       expect(File.exist?(File.join(tmpdir, 'snapshots', 'ccc333.json'))).to be true
     end
 
+    ['{broken', '[]', 'null'].each do |contents|
+      it "counts #{contents.inspect} corrupt files toward retention and evicts them before readable snapshots" do
+        store = described_class.new(dir: tmpdir, retention: 2)
+        store.capture(manifest_for('aaa111', '2026-02-01T10:00:00Z'), units)
+        File.write(File.join(tmpdir, 'snapshots', 'bad123.json'), contents)
+
+        expect { store.capture(manifest_for('bbb222', '2026-01-01T10:00:00Z'), units) }
+          .to output(/Skipping corrupt snapshot/).to_stderr
+
+        expect(Dir.children(File.join(tmpdir, 'snapshots')).sort).to eq(%w[aaa111.json bbb222.json])
+      end
+    end
+
+    it 'keeps corrupt eligible files until the retention bound is exceeded' do
+      store = described_class.new(dir: tmpdir, retention: 3)
+      corrupt = File.join(tmpdir, 'snapshots', 'bad123.json')
+      File.write(corrupt, '{broken')
+
+      expect { store.capture(manifest_for('bbb222', '2026-02-01'), units) }
+        .to output(/Skipping corrupt snapshot/).to_stderr
+
+      expect(File).to exist(corrupt)
+      expect(store.find('bbb222')).to include(git_sha: 'bbb222')
+    end
+
+    it 'evicts unreadable snapshots while preserving the readable history' do
+      store = described_class.new(dir: tmpdir, retention: 2)
+      store.capture(manifest_for('aaa111', '2026-02-01T10:00:00Z'), units)
+      unreadable = File.join(tmpdir, 'snapshots', 'bad123.json')
+      File.write(unreadable, '{}')
+      allow(Woods::AtomicFile).to receive(:read).and_call_original
+      allow(Woods::AtomicFile).to receive(:read).with(unreadable).and_raise(Errno::EACCES)
+
+      expect { store.capture(manifest_for('bbb222', '2026-01-01T10:00:00Z'), units) }
+        .to output(/Skipping unreadable snapshot/).to_stderr
+
+      expect(Dir.children(File.join(tmpdir, 'snapshots')).sort).to eq(%w[aaa111.json bbb222.json])
+    end
+
+    it 'protects and removes files by their SHA filename, not their git_sha contents' do
+      store = described_class.new(dir: tmpdir, retention: 1)
+      snapshot_dir = File.join(tmpdir, 'snapshots')
+      File.write(File.join(snapshot_dir, 'aaa111.json'), JSON.generate(manifest_for('bbb222', '2026-01-01')))
+
+      store.capture(manifest_for('bbb222', '2026-02-01'), units)
+
+      expect(Dir.children(snapshot_dir)).to eq(['bbb222.json'])
+      expect(store.find('bbb222')).to include(git_sha: 'bbb222')
+    end
+
+    it 'leaves unrelated filenames and snapshot-shaped directories outside retention' do
+      store = described_class.new(dir: tmpdir, retention: 1)
+      snapshot_dir = File.join(tmpdir, 'snapshots')
+      File.write(File.join(snapshot_dir, 'notes.json'), '{broken')
+      File.write(File.join(snapshot_dir, '.aaa111.json'), '{broken')
+      FileUtils.mkdir_p(File.join(snapshot_dir, 'ddd444.json'))
+      File.write(File.join(snapshot_dir, 'bad123.json'), '{broken')
+
+      expect { store.capture(manifest_for('bbb222', '2026-02-01'), units) }
+        .to output(/Skipping/).to_stderr
+
+      expect(Dir.children(snapshot_dir).sort).to eq(%w[.aaa111.json bbb222.json ddd444.json notes.json])
+    end
+
     it 'answers history questions across pruned snapshots without error' do
       capture_series(4)
 

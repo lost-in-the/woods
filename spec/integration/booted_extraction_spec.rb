@@ -471,3 +471,28 @@ RSpec.describe 'Optional ActionMailer extraction', :booted_app do
     end
   end
 end
+
+RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
+  def extract_callbacks(kind)
+    script = File.expand_path('../fixtures/controller_callbacks/boot.rb', __dir__)
+    output, error, status = Open3.capture3({ 'CALLBACK_KIND' => kind }, RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    JSON.parse(output.lines.last)
+  end
+
+  it 'keeps filter metadata, source hashes and action chunks stable across independent roots and boots' do
+    first = extract_callbacks('proc')
+    expect(extract_callbacks('proc')).to eq(first)
+    expect(first.fetch('source_code')).to include('#<Proc app/controllers/callbacks_controller.rb:4>',
+                                                  'if: #<lambda app/controllers/callbacks_controller.rb:5>',
+                                                  'unless: #<Proc app/controllers/callbacks_controller.rb:5>',
+                                                  'if: :enabled?; unless: :disabled?')
+    expect(first.fetch('chunks')).not_to be_empty
+    expect(JSON.generate(first)).not_to match(/#<Proc:0x/)
+
+    changed = extract_callbacks('lambda')
+    expect(changed.fetch('metadata')).not_to eq(first.fetch('metadata'))
+    expect(changed.fetch('source_hash')).not_to eq(first.fetch('source_hash'))
+    expect(changed.fetch('chunks')).not_to eq(first.fetch('chunks'))
+  end
+end

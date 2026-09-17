@@ -2245,7 +2245,7 @@
       "lib/woods/temporal/json_snapshot_store.rb"
     ],
     "description": "Audit finding R2-6 (Low, traced). Retention picks its eviction victims from parseable snapshot summaries, so an unreadable or corrupt file is never a candidate and accumulates forever \u2014 the exact files B-135 taught the reader to skip are the ones retention cannot reclaim. Intersection of P8 and B-135. Acceptance: rank unreadable files as the oldest victims, with a spec asserting a corrupt file is pruned once the retention bound is exceeded.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-164",
@@ -2296,7 +2296,7 @@
     "lib/woods/extractors/controller_extractor.rb"
     ],
     "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-168",

@@ -253,6 +253,7 @@ module Woods
           opts << "only: [#{f[:only].map { |a| ":#{a}" }.join(', ')}]" if f[:only]&.any?
           opts << "except: [#{f[:except].map { |a| ":#{a}" }.join(', ')}]" if f[:except]&.any?
           opts << "if: #{f[:if]}" if f[:if]
+          opts << "unless: #{f[:unless]}" if f[:unless]
 
           opts_str = opts.any? ? " (#{opts.join('; ')})" : ''
           "  #{f[:kind].to_s.ljust(8)} :#{f[:filter]}#{opts_str}"
@@ -272,13 +273,41 @@ module Woods
         controller._process_action_callbacks.map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
-          result = { kind: callback.kind, filter: callback.filter }
+          result = { kind: callback.kind, filter: callback_filter(callback) }
           result[:only] = only if only.any?
           result[:except] = except if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           result
         end
+      end
+
+      # Rails 6 exposes a numeric Proc identity through #filter, and the
+      # callable through #raw_filter. Newer Rails exposes the callable directly.
+      def callback_filter(callback)
+        stable_filter(callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter)
+      end
+
+      # Proc#to_s embeds a process-local address. Use the same source-site
+      # description in source annotations, metadata, conditions and action chunks.
+      # Keep symbols and other application-defined callback values unchanged.
+      def stable_filter(filter)
+        return filter unless filter.is_a?(Proc)
+
+        location = filter.source_location
+        site = if location
+                 path, line = location
+                 "#{path.delete_prefix("#{Rails.root}/")}:#{line}"
+               else
+                 'native'
+               end
+        "#<#{filter.lambda? ? 'lambda' : 'Proc'} #{site}>"
+      end
+
+      # Override only controller Proc conditions; the shared model/mailer
+      # condition format is a separate extraction contract.
+      def condition_label(condition)
+        condition.is_a?(Proc) ? stable_filter(condition) : super
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -734,7 +763,7 @@ module Woods
         applicable = controller._process_action_callbacks.select do |cb|
           callback_applies_to_action?(cb, action_name)
         end
-        applicable.map { |cb| { kind: cb.kind, filter: cb.filter } }
+        applicable.map { |cb| { kind: cb.kind, filter: callback_filter(cb) } }
       end
 
       # Determine if a callback applies to a given action name.
