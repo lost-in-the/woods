@@ -33,4 +33,16 @@ RSpec.describe 'MCP conformance dependencies' do
       'integrity' => 'sha512-e/kC3Xx+iqsYg17nxZtp9H6ZfpK8gVlGklsT/4LcpbSgMVaAQZCa5jihRvcrmnksNl+h5dcwm7WgH/ao2gI1ew=='
     )
   end
+
+  it 'carries guidance through the supported SDK public instructions accessor' do
+    server = MCP::Server.new(name: 'guidance-contract', version: '1')
+    server.instructions = 'Check status first.'
+    request = { jsonrpc: '2.0', id: 1, method: 'initialize',
+                params: { protocolVersion: '2025-06-18', capabilities: {},
+                          clientInfo: { name: 'sdk-contract', version: '1' } } }
+
+    result = JSON.parse(server.handle_json(JSON.generate(request))).fetch('result')
+
+    expect(result['instructions']).to eq('Check status first.')
+  end
 end

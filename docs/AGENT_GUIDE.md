@@ -2,6 +2,14 @@
 
 This guide is for coding agents using an already connected Woods MCP server. Woods is evidence from the running Rails application and its extracted graph; it complements file search, tests, git history, and direct source inspection.
 
+Supporting servers also send a concise version of this workflow in MCP
+initialization/discovery instructions, without requiring an installed plugin.
+Check the connected server's version and registered tools; this feature is
+unreleased after `2.0.0.beta2`, and protocol `2024-11-05` omits the field.
+The [initialization contract](MCP_SERVERS.md#initialization-guidance) describes
+availability. This guide remains the detailed reference when instructions are
+absent or the client does not display them.
+
 ## Start every session with status
 
 Call `woods_status` before relying on the index. Check:

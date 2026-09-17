@@ -9,6 +9,13 @@ Woods is runtime evidence: resolved routes, schema, associations, callbacks, inl
 
 ## Preflight
 
+Supporting servers include concise MCP initialization/discovery guidance without
+this plugin. That feature (#402) is unreleased after `2.0.0.beta2`; check the
+installed server version, and do not require it from protocol `2024-11-05`.
+Follow the [agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
+when instructions are absent. A registered tool does not establish retrieval
+readiness or authorize maintenance or live Console access.
+
 Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; use `codebase_retrieve` only when status reports retrieval enabled. If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist.
 
 ## The default loop

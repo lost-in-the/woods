@@ -27,6 +27,55 @@ RSpec.describe 'MCP CLI integration' do
   let(:ruby_bin) { File.join(gem_root, 'exe/woods-mcp') }
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
 
+  describe 'initialization guidance over stdio' do
+    def initialize_over_stdio(request, index_dir)
+      env = { 'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'), 'MCP_PROTOCOL_VERSION' => nil,
+              'WOODS_REQUIRE_INDEX' => nil, 'OPENAI_API_KEY' => nil,
+              'OLLAMA_BASE_URL' => 'http://127.0.0.1:0' }
+      Open3.popen3(env, 'bundle', 'exec', 'ruby', ruby_bin, index_dir) do |stdin, stdout, stderr, wait|
+        stdin.puts(JSON.generate(request))
+        stdin.close
+        raise 'MCP initialization did not finish within 30 seconds' unless wait.join(30)
+
+        [stdout.read, stderr.read, wait.value]
+      ensure
+        stop_guidance_process(wait)
+      end
+    end
+
+    def stop_guidance_process(wait)
+      Process.kill('TERM', wait.pid) if wait.alive?
+      return if wait.join(5)
+
+      Process.kill('KILL', wait.pid)
+      wait.join
+    rescue Errno::ESRCH
+      wait.join
+    end
+
+    %w[2025-06-18 2024-11-05].each do |version|
+      it "negotiates #{version} through the packaged executable" do
+        request = { jsonrpc: '2.0', id: 1, method: 'initialize',
+                    params: { protocolVersion: version, capabilities: {},
+                              clientInfo: { name: 'guidance-cli', version: '1' } } }
+        output, errors, status = Dir.mktmpdir('woods-guidance-cli') do |index_dir|
+          FileUtils.cp_r(File.join(fixture_dir, '.'), index_dir)
+          expect(File.exist?(File.join(index_dir, 'woods.json'))).to be(false)
+          initialize_over_stdio(request, index_dir)
+        end
+        expect(status.success?).to be(true), utf8(errors)
+        result = JSON.parse(output).fetch('result')
+        expect(result['protocolVersion']).to eq(version)
+        if version == '2024-11-05'
+          expect(result).not_to have_key('instructions')
+        else
+          expect(result.fetch('instructions')).to start_with('Start with woods_status')
+          expect(result.fetch('instructions')).to include('only when woods_status reports retrieval enabled')
+        end
+      end
+    end
+  end
+
   # ── exe/woods-mcp-start wrapper ──────────────────────────────────
 
   describe 'woods-mcp-start wrapper' do
