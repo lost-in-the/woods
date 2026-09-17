@@ -2712,5 +2712,31 @@
     ],
     "description": "Resolved #355: replace SQLite LIKE with lower/instr substring matching so queries containing NUL cannot broaden and strings after NUL remain searchable. Shared adapter regressions cover NUL queries, suffixes, spanning matches, ordinary controls, and the serialized JSON all-fields contract. ASCII case folding and literal wildcard behavior remain unchanged.",
     "status": "resolved"
+  },
+  {
+    "id": "B-197",
+    "title": "Count retrieval tokens after final context postprocessing",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retriever.rb",
+      "lib/woods/retrieval/context_assembler.rb"
+    ],
+    "description": "Issue #354: tokens_used and trace.tokens_used must describe the delivered context after the formatter and type-rank table, using the assembly counter or chars-per-token ratio. Keep budget as an assembly budget and preserve ranking/source attribution. Validate real-store unfiltered, typed, formatter, configured ratio, and injected-counter paths.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-199",
+    "title": "Align Boolean field search across metadata adapters",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/metadata_store.rb",
+      "spec/storage/metadata_store_spec.rb"
+    ],
+    "description": "Issue #356: SQLite JSON1 converts Boolean scalars to integers during field-scoped search. Search true/false text consistently with InMemory while keeping real numeric 1/0 distinct, null and missing fields unmatched, and structured JSON and whole-record semantics unchanged. Shared adapter regressions cover these controls.",
+    "status": "resolved"
   }
 ]

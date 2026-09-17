@@ -271,6 +271,12 @@ contract tests; it does not represent semantic quality. Other values raise
 
 `build_metadata_store` accepts `:in_memory` and `:sqlite`. Nothing else is implemented.
 
+Both adapters search Boolean fields as the JSON words `true` and `false`,
+with case-insensitive substring matching. Numeric values `1` and `0` remain
+separate from Booleans. Strings are searched without JSON quotes; objects and
+arrays use JSON text. Null or absent fields never match a field-scoped query.
+Whole-record search (`fields: nil`) searches serialized JSON, including keys.
+
 ### SQLite
 
 **Best for:** Local development, zero-dependency setups, testing, and every shipped preset except pure in-memory.
