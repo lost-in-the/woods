@@ -1757,7 +1757,7 @@
       "lib/tasks/woods.rake"
     ],
     "description": "Top-level method definitions in a rake file land on Object in the host app. woods_evaluation.rake documents this exact hazard as the reason it module-wraps; woods.rake does not. The woods_ prefix makes collisions unlikely; module-wrap for consistency when convenient.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-125",
