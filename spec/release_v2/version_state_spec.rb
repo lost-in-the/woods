@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'json'
 require 'open3'
 require 'woods/release/notes'
+require 'woods/release/fragments'
 require 'woods/release/version_state'
 
 # The enforcement for the prerelease flow on `main`. Every commit on this
@@ -42,6 +43,19 @@ RSpec.describe 'release version state' do
 
   it 'always keeps an Unreleased section for the next release to collect into' do
     expect(changelog).to include('## [Unreleased]')
+  end
+
+  it 'validates pending entry files and leaves none at a release tag' do
+    entries = Woods::Release::Fragments.read(root)
+    tag = "v#{version}"
+    tags, error, status = Open3.capture3('git', 'tag', '--points-at', 'HEAD', '--list', tag, chdir: root)
+    expect(status).to be_success, error
+
+    # Empty inline Unreleased is also valid during fragment-only development,
+    # including beta cycles. The generated-state matrix checks prepare output;
+    # the tag validator independently checks the exact candidate SHA.
+    tagged_release = ENV['GITHUB_REF'] == "refs/tags/#{tag}" || tags.lines.map(&:strip).include?(tag)
+    expect(entries).to be_empty if tagged_release
   end
 
   it 'keeps every release-state fence in the state VERSION declares' do

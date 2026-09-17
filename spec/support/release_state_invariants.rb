@@ -39,6 +39,7 @@ RSpec.shared_examples 'a coherent release state' do
         .not_to raise_error
     elsif freshly_released
       expect(release_unreleased.to_s.strip).to eq('')
+      expect(Woods::Release::Fragments.read(release_root)).to be_empty
     else
       stray = release_unreleased.to_s.lines.map(&:rstrip).reject(&:empty?)
                                 .reject { |line| line.start_with?('### ', '- ', '  ') }

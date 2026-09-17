@@ -81,6 +81,9 @@ jobs:
       - name: Run booted-app extraction
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb
 
+      - name: Run multi-database extraction and equivalence
+        run: bundle exec rspec spec/integration/multi_database_extraction_spec.rb
+
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
       # Each example boots its own subprocess with the matrix appraisal.
       - name: Run Console transport boot contracts

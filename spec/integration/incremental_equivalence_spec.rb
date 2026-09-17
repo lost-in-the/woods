@@ -532,6 +532,95 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'package mutations (B-178)' do
+    def package_unit(index_dir, type, identifier)
+      unit_snapshot(index_dir).values.find do |unit|
+        unit['type'] == type && unit['identifier'] == identifier
+      end
+    end
+
+    def expect_package_membership(index_dir, type, identifier, package)
+      unit = package_unit(index_dir, type, identifier)
+      expect(unit).not_to be_nil
+      node = read_json(index_dir, 'dependency_graph.json').fetch('nodes').fetch(identifier)
+      if package
+        expect(unit.fetch('metadata')).to include('package' => package)
+        expect(node).to include('package' => package)
+      else
+        expect(unit.fetch('metadata')).not_to have_key('package')
+        expect(node).not_to have_key('package')
+      end
+    end
+
+    def expect_packages(index_dir, names)
+      packages = unit_snapshot(index_dir).values.select { |unit| unit['type'] == 'package' }
+      expect(packages.map { |unit| unit.fetch('identifier') }).to match_array(names)
+      nodes = read_json(index_dir, 'dependency_graph.json').fetch('nodes')
+      expect(nodes.select { |_id, node| node['type'] == 'package' }.keys).to match_array(names)
+    end
+
+    it 'adds a nested package and reassigns untouched runtime and file-based units' do
+      write_file('package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package_service.rb', service_source('PackageService', dependency: 'Post'))
+      index_dir = full_extraction
+      expect_packages(index_dir, ['.'])
+      expect_package_membership(index_dir, 'model', 'Post', '.')
+      expect_package_membership(index_dir, 'service', 'PackageService', '.')
+
+      changed = write_file('app/models/package.yml', "dependencies:\n  - .\nenforce_dependencies: true\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([changed])
+
+      expect_packages(index_dir, ['.', 'app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+      expect_package_membership(index_dir, 'service', 'PackageService', '.')
+      package = package_unit(index_dir, 'package', 'app/models')
+      expect(package.fetch('dependencies')).to include(
+        include('type' => 'package', 'target' => '.', 'via' => 'package_dependency')
+      )
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'removes the last package and clears membership on surviving units and nodes' do
+      path = write_file('app/models/package.yml', "enforce_dependencies: true\n")
+      index_dir = full_extraction
+      expect_packages(index_dir, ['app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+
+      delete_file(path)
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect_packages(index_dir, [])
+      expect_package_membership(index_dir, 'model', 'Post', nil)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'replaces package membership when only packwerk package_paths changes' do
+      write_file('app/models/package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package_service.rb', service_source('PackageService', dependency: 'Post'))
+      config_path = write_file('packwerk.yml', "package_paths:\n  - app/models\n")
+      index_dir = full_extraction
+      expect_packages(index_dir, ['app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+      expect_package_membership(index_dir, 'service', 'PackageService', nil)
+
+      # Both package files and both source files remain unchanged. Only the
+      # configured discovery roots change, so the whole-app trigger must
+      # replace packages and re-annotate units absent from the change set.
+      extractor = Woods::Extractor.new(output_dir: index_dir)
+      %w[app/services app/models].each do |package_path|
+        write_file(config_path, "package_paths:\n  - #{package_path}\n")
+        extractor.extract_changed([config_path])
+
+        expect_packages(index_dir, [package_path])
+        expect_package_membership(index_dir, 'model', 'Post', package_path == 'app/models' ? package_path : nil)
+        expect_package_membership(index_dir, 'service', 'PackageService',
+                                  package_path == 'app/services' ? package_path : nil)
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
+    end
+  end
+
   describe 'gap 5 — derived artifacts' do
     it 'recomputes PageRank and graph analysis on an incremental run' do
       index_dir = Dir.mktmpdir('woods_diff_derived')

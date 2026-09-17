@@ -2064,7 +2064,7 @@
   },
   {
     "id": "B-149",
-    "title": "Governed naming silently degrades on zeitwerk < 2.6.4 and classic-mode hosts",
+    "title": "Governed naming silently degrades on zeitwerk < 2.6.9 and classic-mode hosts",
     "severity": "low",
     "category": "design-gap",
     "layer": "extraction",
@@ -2072,8 +2072,8 @@
       "lib/woods/extractors/source_nesting.rb",
       "docs/UPGRADING_TO_2.md"
     ],
-    "description": "Audit finding EXTA-7 (Low, traced). source_nesting.rb:248-255,414-433 relies on Zeitwerk's `cpath_expected_at`, added in zeitwerk 2.6.4 (Jan 2023). On an older zeitwerk or a classic-mode host, governance yields nothing and the G-1 wrapper shape then aborts extraction with a misleading remedy \u2014 and Rails 6-era lockfiles are realistic on the supported railties >= 6.0 floor. Deferred because it needs a decision (fallback vs documented floor). Acceptance: name the zeitwerk floor in UPGRADING_TO_2 and in the collision message now; decide on a fallback in a 2.0.x.",
-    "status": "open"
+    "description": "Audit finding EXTA-7 (Low, traced). source_nesting.rb:248-255,414-433 relies on Zeitwerk's `cpath_expected_at`, added in zeitwerk 2.6.9 (July 2023). On an older zeitwerk or a classic-mode host, governance yields nothing and the G-1 wrapper shape then aborts extraction with a misleading remedy \u2014 and Rails 6-era lockfiles are realistic on the supported railties >= 6.0 floor. Deferred because it needs a decision (fallback vs documented floor). Acceptance: name the zeitwerk floor in UPGRADING_TO_2 and in the collision message now; decide on a fallback in a 2.0.x.",
+    "status": "resolved"
   },
   {
     "id": "B-150",
@@ -2435,11 +2435,12 @@
     "category": "test-gap",
     "layer": "extraction",
     "files": [
-      "spec/dummy/config/database.yml",
-      "spec/integration/booted_extraction_spec.rb"
+      "spec/fixtures/multi_database/",
+      "spec/integration/multi_database_extraction_spec.rb",
+      ".github/workflows/ci.yml"
     ],
     "description": "The database-partition layer (#280, B-169, B-170) is covered by unit specs with stubbed connection_db_config; the dummy app has one database, so no booted lane proves a real connects_to, a reused table name across databases, an inherited connection, or a has_many :through with the through model on a third database. Acceptance: a second SQLite database in the dummy app with at least one model per case above, booted_extraction asserting the resulting cross_database_edges entries, and incremental_equivalence staying green.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {
@@ -2452,7 +2453,7 @@
       "spec/integration/incremental_equivalence_spec.rb"
     ],
     "description": "Package membership (#280, B-171, B-172) has a unit-level regression on one Extractor instance; no booted lane mutates packwerk.yml or package.yml between incremental runs. Acceptance: the equivalence oracle covers a package added, the last package removed, and a package path changed, comparing full and incremental output after each mutation.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": [
       "B-171"
     ]
@@ -2469,7 +2470,7 @@
       "lib/tasks/release.rake"
     ],
     "description": "Every branch appends to the same `## [Unreleased]` block, so two open pull requests that both add a changelog entry conflict on the same lines. RuboCop's `changelog/` directory is the established alternative: one file per entry, named `<type>_<slug>.md`, collected into the release section and deleted by the release task. `Woods::Release::Changelog.fold` already merges duplicate `###` headings, so entry files would slot in as an additional source of blocks before that merge rather than as a second mechanism. Discovered while building the release flow; deliberately out of scope there. Acceptance: `release:prepare` folds `changelog/*.md` alongside `## [Unreleased]`, deletes the files it consumed, refuses an entry file whose type is not one of the headings the changelog uses, and `spec/release_v2/version_state_spec.rb` fails when an entry file survives a release commit.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

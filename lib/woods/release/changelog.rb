@@ -8,7 +8,7 @@ module Woods
   module Release
     # Reads and rewrites CHANGELOG.md for the release flow.
     #
-    # Feature work only ever touches `## [Unreleased]`. A release folds that
+    # Feature work adds `## [Unreleased]` notes or optional entry files. A release folds that
     # section into `## [<VERSION>] - <date>` with one block per `###` heading and
     # leaves an empty `## [Unreleased]` behind for the next cycle.
     #
@@ -62,8 +62,9 @@ module Woods
       # prereleases in first, oldest first, so entries keep the order they were
       # written in. An empty `## [Unreleased]` is left behind for the next cycle.
       #
+      # @param entries [Array<Array(String, String)>] validated heading/body pairs
       # @return [String] the rewritten changelog
-      def fold(source, version:, date: Time.now.utc.to_date)
+      def fold(source, version:, date: Time.now.utc.to_date, entries: [])
         if source.match?(/^## \[#{Regexp.escape(version)}\] - /)
           raise DuplicateRelease, "CHANGELOG.md already has a dated heading for #{version}"
         end
@@ -71,7 +72,7 @@ module Woods
         state = VersionState.parse(version)
         head, body, tail = split_unreleased(source)
         superseded = state.final? ? superseded_prereleases(tail, state) : []
-        blocks = merge_blocks(superseded.flat_map { |section| section.fetch(:blocks) } + parse_blocks(body))
+        blocks = merge_blocks(superseded.flat_map { |section| section.fetch(:blocks) } + parse_blocks(body) + entries)
         raise EmptyUnreleasedSection, empty_message(state) if blocks.empty?
 
         "#{head}#{UNRELEASED_HEADING}\n\n## [#{version}] - #{date.strftime('%Y-%m-%d')}\n\n" \

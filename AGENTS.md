@@ -129,7 +129,7 @@ Summarize and link from secondary pages; do not copy full setup blocks into FAQ 
 `main` carries `X.Y.Z.alpha` between releases and never claims a released version. `.claude/skills/release-flow/SKILL.md` is the agent-facing contract; the release flow section of `CONTRIBUTING.md` is the runbook.
 
 - Never edit `lib/woods/version.rb` or a `release-state` documentation fence by hand.
-- Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings.
+- Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings, or in `changelog/<type>_<slug>.md` (format in CONTRIBUTING.md).
 - One command per transition: `bin/rake "release:prepare[<version>]"`, `bin/rake "release:reopen[<next>.alpha]"`.
 - Never create or push a tag, run `gem push`, or trigger the release workflow. Those are maintainer steps.
 

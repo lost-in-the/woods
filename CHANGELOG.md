@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
+
 ### Fixed
+
+- Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
+  and upgrade guidance before suggesting changes to valid namespace wrappers
+  on older-loader or classic-mode hosts (B-149).
 
 - Stabilize controller inline callback and condition labels across processes and
   checkout paths, including action chunks; retain `unless` conditions in the
