@@ -6,6 +6,7 @@ require_relative 'errors'
 require_relative 'bootstrap_state'
 require_relative 'config_resolver'
 require_relative 'provider_probe'
+require_relative 'published_lexical_retriever'
 require_relative '../index_artifact'
 require_relative '../builder'
 require_relative '../resolved_config'
@@ -128,6 +129,12 @@ module Woods
       #   credentials, dimension mismatch, unsupported artifact, or a missing
       #   artifact under WOODS_REQUIRE_INDEX=1).
       def self.build_retriever(index_dir: nil)
+        mode = ENV.fetch('WOODS_RETRIEVAL_MODE', Woods.configuration.retrieval_mode.to_s)
+        unless %w[semantic lexical].include?(mode)
+          raise BootstrapError, "WOODS_RETRIEVAL_MODE must be semantic or lexical, got #{mode.inspect}"
+        end
+        return build_lexical_retriever(index_dir) if mode == 'lexical'
+
         state = BootstrapState.new
         state.mark(:hydrating)
 
@@ -160,6 +167,19 @@ module Woods
 
         [retriever, state]
       end
+
+      def self.build_lexical_retriever(index_dir)
+        state = BootstrapState.new
+        state.mark(:hydrating)
+        retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir)
+        retriever.warmup!
+        state.mark(:hydrated)
+        warn '[woods-mcp] lexical retrieval: hydrated (published extraction units; no embeddings)'
+        [retriever, state]
+      rescue StandardError => e
+        raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}"
+      end
+      private_class_method :build_lexical_retriever
 
       def self.static_source_map_without_embeddings?(artifact)
         return false unless artifact

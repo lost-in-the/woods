@@ -8,6 +8,8 @@ require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
 require_relative 'retrieval/context_assembler'
+require_relative 'retrieval/lexical_index'
+require_relative 'retrieval/lexical_assembler'
 require_relative 'embedding/token_counter'
 require_relative 'token_utils'
 
@@ -192,7 +194,7 @@ module Woods
     # The reload transaction swaps the whole struct via {#swap_stores!}.
     #
     # @return [Pipeline]
-    attr_reader :pipeline
+    attr_reader :pipeline, :mode
 
     # Optional callback invoked with the pipeline struct the moment
     # {#retrieve} resolves it, before any pipeline work runs. Nil in
@@ -208,7 +210,10 @@ module Woods
     # @param graph_store [Storage::GraphStore::Interface] Graph store adapter
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
-    def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil)
+    def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil, mode: :semantic)
+      raise ArgumentError, 'unknown retrieval mode' unless %i[semantic lexical].include?(mode)
+
+      @mode = mode
       @embedding_provider = embedding_provider
       @formatter = formatter
       @classifier = Retrieval::QueryClassifier.new
@@ -247,7 +252,9 @@ module Woods
     # they make raises the typed {StoreError} instead of a raw adapter error
     # (MCP-6); the struct keeps the raw adapters for identity and capability
     # checks.
-    def build_pipeline(vector_store:, metadata_store:, graph_store:)
+    def build_pipeline(vector_store:, metadata_store:, graph_store:) # rubocop:disable Metrics/MethodLength
+      return build_lexical_pipeline(metadata_store, graph_store) if @mode == :lexical
+
       translated_vector = translate_store(vector_store, :vector)
       translated_metadata = translate_store(metadata_store, :metadata)
       translated_graph = translate_store(graph_store, :graph)
@@ -270,6 +277,14 @@ module Woods
         graph_store: graph_store
       )
     end
+
+    def build_lexical_pipeline(metadata_store, graph_store)
+      executor = Retrieval::LexicalIndex.new(metadata_store: translate_store(metadata_store, :metadata))
+      Pipeline.new(executor: executor, assembler: Retrieval::LexicalAssembler.new, metadata_store: metadata_store,
+                   vector_store: nil, graph_store: graph_store)
+    end
+    private :build_lexical_pipeline
+
     private :build_pipeline
 
     # Wrap one store adapter for the pipeline components. Nil stays nil — a
@@ -359,7 +374,7 @@ module Woods
     # @param exclude_types [Array<String, Symbol>, nil] Additional types to
     #   exclude. Applied on top of DEFAULT_EXCLUDE_TYPES unless +types:+ is set.
     # @return [RetrievalResult] Complete retrieval result
-    def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
+    def retrieve(query, budget: 8000, types: nil, exclude_types: nil) # rubocop:disable Metrics/MethodLength
       validate_query!(query)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # One atomic read of the bundle reference: everything this query does
@@ -368,6 +383,10 @@ module Woods
       pipeline = @pipeline
       @pipeline_observer&.call(pipeline)
       classification = @classifier.classify(query)
+      if @mode == :lexical
+        return retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+      end
+
       execution_result = pipeline.executor.execute(query: query, classification: classification)
       ranked = pipeline.ranker.rank(execution_result.candidates, classification: classification)
 
@@ -388,6 +407,16 @@ module Woods
     end
 
     private
+
+    def retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+      excluded = DEFAULT_EXCLUDE_TYPES + Array(exclude_types).map(&:to_s)
+      execution = pipeline.executor.execute(query: query, type_filter: types, exclude_types: excluded)
+      assembled = pipeline.assembler.assemble(candidates: execution.candidates, budget: budget)
+      result = build_result(assembled: assembled, assembler: pipeline.assembler, classification: classification,
+                            strategy: :lexical, budget: budget)
+      result.trace = build_trace(result, execution, execution.candidates, assembled, start_time)
+      result
+    end
 
     # Validate +query+ before any classify/execute/rank work happens.
     #

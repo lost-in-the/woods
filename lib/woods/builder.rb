@@ -110,6 +110,11 @@ module Woods
     #   on disk and passes the populated store here.
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
     def build_retriever(vector_store: nil, metadata_store: nil, graph_store: nil)
+      if @config.retrieval_mode == :lexical
+        return build_lexical_retriever(metadata_store: metadata_store,
+                                       graph_store: graph_store)
+      end
+
       provider = build_resilient_embedding_provider
       cache = build_cache_store
 
@@ -124,6 +129,14 @@ module Woods
 
       cache ? wrap_with_retriever_cache(retriever, cache) : retriever
     end
+
+    def build_lexical_retriever(metadata_store:, graph_store:)
+      retriever = Retriever.new(vector_store: nil, metadata_store: metadata_store || build_metadata_store,
+                                graph_store: graph_store, embedding_provider: nil, mode: :lexical)
+      cache = build_cache_store
+      cache ? wrap_with_retriever_cache(retriever, cache) : retriever
+    end
+    private :build_lexical_retriever
 
     # Instantiate the vector store adapter specified by the configuration.
     #

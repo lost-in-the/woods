@@ -1,0 +1,3129 @@
+{
+  "schema_version": 1,
+  "corpus_sha256": "f2eac704dd0b773059e7268ed40046d862f47a1049223d89fcb45c8e645b5d20",
+  "vectors_sha256": "311204a33db66587269346a7d54bcef842a08176e56c0d1816cd9e1275c4c89d",
+  "ruby": "4.0.6",
+  "scope": "same28 captured Canopy queries and per-query budgets; warm in-process pipeline; semantic uses captured real MiniLM vectors, excludes provider/network time; task outcomes not measured",
+  "graph_experiment": {
+    "restart": 0.15,
+    "iterations": 20,
+    "edges": "bidirectional recorded relationships within type eligibility",
+    "seeds": "positive lexical scores normalized",
+    "tuning": "none; fixed before scoring labels"
+  },
+  "results": [
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 3.6378639997565188,
+        "min": 3.3884969998325687,
+        "max": 8.618723997642519
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Newsletter::Campaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1027,
+      "latency_ms": {
+        "median": 5.250084002909716,
+        "min": 5.203557000641013,
+        "max": 5.288405001920182
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "8d3d8285877c8f9612b1f4557491fac9675270c036e941ee9a975711661f73ab",
+      "actual_context_tokens_cl100k": 950
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Article"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1181,
+      "latency_ms": {
+        "median": 5.260293000901584,
+        "min": 5.215860001044348,
+        "max": 5.3520750007010065
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "3e9bef8c0ac833847060e60316f23330f7fecf91a2fd704144b29cb920063f0c",
+      "actual_context_tokens_cl100k": 1016
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1164,
+      "latency_ms": {
+        "median": 6.840533998911269,
+        "min": 6.2160580018826295,
+        "max": 7.257241999468533
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "51890dbd43c777e55ff7e3e9a613794cab78bf5d48c5f94ac072bdd3cef5638b",
+      "actual_context_tokens_cl100k": 1105
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 2.9069279989926144,
+        "min": 2.872163000574801,
+        "max": 2.952193000965053
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Article",
+        "Comment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 2.954907999082934,
+        "min": 2.8696990011667367,
+        "max": 2.972260001115501
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "8fafde628a9f0bf38b11891e4efa84eac19353e4329fd49fa280f2c7829cf67f",
+      "actual_context_tokens_cl100k": 1090
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "AuthorMailer",
+        "Newsletter::SendCampaign",
+        "Subscriber",
+        "Publication"
+      ],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1107,
+      "latency_ms": {
+        "median": 2.9024600007687695,
+        "min": 2.8771129982487764,
+        "max": 2.9058159998385236
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "2394021c792c0fa86e49d79d3e7585d38434721ddeb03d1ed11b9f3e27129017",
+      "actual_context_tokens_cl100k": 1051
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Billing::Refund",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 2.9092829972796608,
+        "min": 2.8984729979129042,
+        "max": 4.439340002136305
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "c64f3d01aeaa753ccd79365037e1f6b01d7c747d7d672aa26fe310005e33dbb4",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Billing::Invoice",
+        "Author"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1181,
+      "latency_ms": {
+        "median": 1.7647549975663424,
+        "min": 1.5020749997347593,
+        "max": 1.869842002633959
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "5637546ee305e6e5d5129ffbc0f24ddd12d94b3e2b033442eadb6b202e513420",
+      "actual_context_tokens_cl100k": 1126
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Subscriber",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1177,
+      "latency_ms": {
+        "median": 0.2499069996702019,
+        "min": 0.23565000083181076,
+        "max": 0.5196400015847757
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "26eb22c75137636c9cd762a9205a190851a1b5e1b9f341faa86f2e6a78d3fb5d",
+      "actual_context_tokens_cl100k": 1028
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "ReviewAssignment",
+        "Author",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1023,
+      "latency_ms": {
+        "median": 0.2290580014232546,
+        "min": 0.22182400061865337,
+        "max": 0.2388259999861475
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
+      "actual_context_tokens_cl100k": 942
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Support::Ticket",
+        "Author",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1166,
+      "latency_ms": {
+        "median": 1.4351999998325482,
+        "min": 1.422547000402119,
+        "max": 1.4577119982277509
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "b0afcf5955d9f97ebf00c4471aa3c1e4870b255bcbd862742e2e0e0947aa2338",
+      "actual_context_tokens_cl100k": 1031
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 8.892255998944165,
+        "min": 8.791206000751117,
+        "max": 10.137530000065453
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "26a0feb986c09a4fe3344a988da2d8012c0d10532d15ef93b8badb6a1b8be5a0",
+      "actual_context_tokens_cl100k": 1120
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Newsletter::Delivery",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1027,
+      "latency_ms": {
+        "median": 10.283023002557456,
+        "min": 10.247836999042192,
+        "max": 10.929189000307815
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "2088d7d6834e4ff3b4a2585aecac4bfd67f9a4d87253db4f62ff2c849bbf7633",
+      "actual_context_tokens_cl100k": 950
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Article",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 10.114718999830075,
+        "min": 9.874639999907231,
+        "max": 11.46697299918742
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "18741978e79bf0b94fd6e1f40f132a40ee3f70a2c0003faee396508a2acd7230",
+      "actual_context_tokens_cl100k": 1134
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.3333333333333333,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1071,
+      "latency_ms": {
+        "median": 10.495840000658063,
+        "min": 10.275317999912659,
+        "max": 11.023654999007704
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "7e4ff722b19f80dd2fa109bbf727eea7fb45a310d206fc109472b70329e41bb3",
+      "actual_context_tokens_cl100k": 1031
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 500,
+      "latency_ms": {
+        "median": 6.770413001504494,
+        "min": 6.394781998096732,
+        "max": 7.677566998609109
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "939a346bdcde60a26f74e6a172bdd0f741d073ef5c2623f2b57decd09943d929",
+      "actual_context_tokens_cl100k": 540
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 519,
+      "latency_ms": {
+        "median": 6.2699390000489075,
+        "min": 6.03785500061349,
+        "max": 6.383068997820374
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "871683471aa2ea91e9255c49582f7a9063c0b5b0e9a11f6f1903cb002c664605",
+      "actual_context_tokens_cl100k": 562
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 519,
+      "latency_ms": {
+        "median": 5.457600997033296,
+        "min": 4.697462001786334,
+        "max": 5.885020000278018
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "b64af11192a21f4b66d8f2b1c99ef32ae5e90097da3e61762e674c8aeba4f579",
+      "actual_context_tokens_cl100k": 562
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 500,
+      "latency_ms": {
+        "median": 6.46485199831659,
+        "min": 6.442301000788575,
+        "max": 7.537334997323342
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "939a346bdcde60a26f74e6a172bdd0f741d073ef5c2623f2b57decd09943d929",
+      "actual_context_tokens_cl100k": 540
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Article",
+        "Author"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 2.74924399855081,
+        "min": 2.720559998124372,
+        "max": 2.8185339979245327
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "6b5e5b8cf25e6a80a08f85b31daad1256607e2b43a96c8adec2d4b10142ca2ef",
+      "actual_context_tokens_cl100k": 1125
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Subscriber",
+        "Author",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1158,
+      "latency_ms": {
+        "median": 1.504911000665743,
+        "min": 1.4727499983564485,
+        "max": 2.4799810016702395
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "6c7c2fbfe117cd05367e8e4caa5d0769e8106a14891acd2af34509dd6d50b8d0",
+      "actual_context_tokens_cl100k": 1021
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "ReviewAssignment",
+        "Author",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1023,
+      "latency_ms": {
+        "median": 1.3967279992357362,
+        "min": 1.390175999404164,
+        "max": 1.5561460022581741
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
+      "actual_context_tokens_cl100k": 942
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Publication",
+        "Article"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1189,
+      "latency_ms": {
+        "median": 1.5538119987468235,
+        "min": 1.43700399712543,
+        "max": 1.7701559991110116
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "7164bbd495650c278bea00239838c3566af9d96663c481770c2731a9c416603d",
+      "actual_context_tokens_cl100k": 1114
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "ApplicationJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1201,
+      "latency_ms": {
+        "median": 0.6716240022797137,
+        "min": 0.6553629973495845,
+        "max": 1.3544190005632117
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "e81d80a45b4cf7902ec49f8939fdf9c3d6278c154f2b3772016266a51d3efcec",
+      "actual_context_tokens_cl100k": 1314
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1110,
+      "latency_ms": {
+        "median": 0.6521180002891924,
+        "min": 0.6440629986173008,
+        "max": 0.6569970028067473
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "6d5cb7db709719731949904c0d90c7d6854e5814123ea77b85a87c95251ceabc",
+      "actual_context_tokens_cl100k": 1201
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1083,
+      "latency_ms": {
+        "median": 0.6491919994005002,
+        "min": 0.644432999251876,
+        "max": 0.6618350016651675
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "e881e3f5f9bd3c6c0e914b69f7856ebba192b49a9e49b386793ab93a62cb1bba",
+      "actual_context_tokens_cl100k": 1174
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob",
+        "ApplicationJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1201,
+      "latency_ms": {
+        "median": 0.6695299998682458,
+        "min": 0.652327998977853,
+        "max": 0.6891869998071343
+      },
+      "condition": "semantic",
+      "budget": 1200,
+      "context_sha256": "27c411f2c42d6b8e588ef0f52c19179f13f1ffaffef027519f90b879b739e908",
+      "actual_context_tokens_cl100k": 1314
+    },
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::RefundPayment",
+        "Billing::CollectPayment",
+        "Billing::Refund",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.5182780005270615,
+        "min": 0.4507019984885119,
+        "max": 1.1059659991587978
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "4585968a547bba2f3d9ffd05133ee556b25590622e811ed6a430a4be1cbeee30",
+      "actual_context_tokens_cl100k": 1189
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign",
+        "Newsletter::CampaignsController"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.38980799945420586,
+        "min": 0.37722399792983197,
+        "max": 0.9016839976538904
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "4385f2ecf8453c91ce4fb9451b6b9ce5c3597eaec9b929e39449f8d40dba9e2d",
+      "actual_context_tokens_cl100k": 1197
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "ReviewAssignment",
+        "ArticleRevision",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.25,
+      "recall": 1.0,
+      "mrr": 0.25,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.38614100049016997,
+        "min": 0.37567199979093857,
+        "max": 0.7722019981883932
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "d567b31900e84a56ee6ba18bb3e7bbeb547cf8ca83f7982252c5aea26ec7072b",
+      "actual_context_tokens_cl100k": 1102
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.25,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4479769995668903,
+        "min": 0.4410540022945497,
+        "max": 0.45394700282486156
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "23260379e17b03ff6365b3ed8ecd81f1549958f5dc83debb81fcb46f5476ae41",
+      "actual_context_tokens_cl100k": 1136
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice",
+        "WebhookDeliveryJob",
+        "WebhookDelivery"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1044,
+      "latency_ms": {
+        "median": 0.4203339995001443,
+        "min": 0.4185520010651089,
+        "max": 0.43763699795817956
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "09bb103c99af1003097d9e5027d7be5da90349b19ac5f61d65b825fb910e23ca",
+      "actual_context_tokens_cl100k": 1083
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "EditorialWorkflow",
+        "ReviewAssignment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3866820006805938,
+        "min": 0.3849790009553544,
+        "max": 0.39763300082995556
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "b641d4e387142bd871bde8f5f67f664a22964d420e895975551f0d11dd54d04a",
+      "actual_context_tokens_cl100k": 1090
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.3868929998134263,
+        "min": 0.379548997443635,
+        "max": 0.7702389993937686
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice",
+        "Billing::Refund",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.3333333333333333,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4083120002178475,
+        "min": 0.40566800089436583,
+        "max": 0.6085759996494744
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "61d199fcc2a3db8a38106ce473b6b5433af109d0a188271fc487559efbdfac6d",
+      "actual_context_tokens_cl100k": 1189
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::IssueInvoice",
+        "Billing::Invoice",
+        "Billing::LineItem"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4209459984849673,
+        "min": 0.40974500006996095,
+        "max": 0.48334200255339965
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "a744d453d462b449337e2e18ac8148c9327f885b86b1b32fb2c804a6e3c18d3a",
+      "actual_context_tokens_cl100k": 1182
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign",
+        "Newsletter::CampaignsController"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3746090005734004,
+        "min": 0.35607500103651546,
+        "max": 0.7185819995356724
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "67ecbf2cf5c4cedc84edb6ee3efcfff5df7f3ce946e9ea2329c98a1d398d5f0c",
+      "actual_context_tokens_cl100k": 1114
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 0.75,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.7568229993921705,
+        "min": 0.6917419996170793,
+        "max": 1.1425939992477652
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "12604b931d8711c9a8201eabd8612a4bf08408713926e1b184a35588e9058ef1",
+      "actual_context_tokens_cl100k": 1102
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.9066430029633921,
+        "min": 0.5339669987733942,
+        "max": 0.9280730009777471
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "733324c180394f0792642d7aae798b453da37193c7f662930f492e44547383f0",
+      "actual_context_tokens_cl100k": 1140
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::CollectPayment",
+        "Billing::Payment",
+        "Billing::RefundPayment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.389196997275576,
+        "min": 0.38551000034203753,
+        "max": 1.402648998919176
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "3a7eb901e20e73d52d3e6f5d680c6c57cdf8f06e9233267e3c9b8ac27dfe261f",
+      "actual_context_tokens_cl100k": 1191
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign",
+        "Newsletter::CampaignsController"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 0.75,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4449109983397648,
+        "min": 0.4427559979376383,
+        "max": 0.5822569983138237
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "67ecbf2cf5c4cedc84edb6ee3efcfff5df7f3ce946e9ea2329c98a1d398d5f0c",
+      "actual_context_tokens_cl100k": 1114
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4064189997734502,
+        "min": 0.39926600220496766,
+        "max": 0.4932310002914164
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "f43fff49e9c49d2a8b22dc79634afe5e73a186124bea3e7c9852f057e81945af",
+      "actual_context_tokens_cl100k": 1157
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 0.75,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.45499000043491833,
+        "min": 0.43766700036940165,
+        "max": 0.6070540002838243
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "733324c180394f0792642d7aae798b453da37193c7f662930f492e44547383f0",
+      "actual_context_tokens_cl100k": 1140
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.12330999743426219,
+        "min": 0.12174700168543495,
+        "max": 0.13275699893711135
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "f17191598e2a79dcedfa155fe441cfc07c0f9e743dc7dddd5b8c34d7b76bcba7",
+      "actual_context_tokens_cl100k": 1319
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.11466399882920086,
+        "min": 0.11113799700979143,
+        "max": 0.12796900045941584
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "9ae561fd9097ead8a44b35f02b8ba97232ad21058300196ffdab95e27b10e2e3",
+      "actual_context_tokens_cl100k": 1319
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.11123799777124077,
+        "min": 0.10961400039377622,
+        "max": 0.11902199912583455
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "87be38c6db2cb906dc4f40e854bf89836e1c520d1e042fd2f31d2b0d401adf1c",
+      "actual_context_tokens_cl100k": 1325
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.12405199959175661,
+        "min": 0.12330999743426219,
+        "max": 0.12651699944399297
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "21f267eb03a6fcf8ceaa31e6bf61712a887a840f1d0c30d0f38efd081111c676",
+      "actual_context_tokens_cl100k": 1319
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "PublishArticle"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.2,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3541610021784436,
+        "min": 0.3530290014168713,
+        "max": 0.36949999775970355
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "05dc649f1eb5e21d6601b162983d0a291e2a31126f00311149ec3a45c669bb93",
+      "actual_context_tokens_cl100k": 1166
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Subscriber",
+        "EngagementEvent",
+        "Newsletter::Delivery"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1182,
+      "latency_ms": {
+        "median": 0.3487210015009623,
+        "min": 0.34389200300211087,
+        "max": 0.707230999978492
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "c31b7ece284ee1fcfe90dadf5a0727c88d13c4e5b8948d66e21f416eeefe1bcb",
+      "actual_context_tokens_cl100k": 1023
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 0.75,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3377110006113071,
+        "min": 0.3264900005888194,
+        "max": 0.48249100291286595
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "12604b931d8711c9a8201eabd8612a4bf08408713926e1b184a35588e9058ef1",
+      "actual_context_tokens_cl100k": 1102
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Publication",
+        "Billing::Plan",
+        "Collection",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1177,
+      "latency_ms": {
+        "median": 0.3491419993224554,
+        "min": 0.3404560011404101,
+        "max": 0.42651700277929194
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "20dd8228d462321cfb5262c02cf6cab50f94222154d278678c03078769cea5d8",
+      "actual_context_tokens_cl100k": 1032
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.10863300121854991,
+        "min": 0.10425399887026288,
+        "max": 0.1207249988510739
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "87be38c6db2cb906dc4f40e854bf89836e1c520d1e042fd2f31d2b0d401adf1c",
+      "actual_context_tokens_cl100k": 1325
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.11993400039500557,
+        "min": 0.11311100024613552,
+        "max": 0.1644869989831932
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "e3fd97957bd40fe3dd84302882b35ac1d9fb39f58d844f8aac15825cd1a7013f",
+      "actual_context_tokens_cl100k": 1308
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.1019709998217877,
+        "min": 0.10106899935635738,
+        "max": 0.10835200009751134
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "18017efe2173fa17e177753f31b51f950738557d9c97fcddf372eaa6728dc28c",
+      "actual_context_tokens_cl100k": 1321
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.10354400001233444,
+        "min": 0.10257199755869806,
+        "max": 0.11946299855480902
+      },
+      "condition": "lexical",
+      "budget": 1200,
+      "context_sha256": "f148fcafe7be2e39e5e9bfc2dd31bd6198edf93e16eecbb9b93c128663247a76",
+      "actual_context_tokens_cl100k": 1322
+    },
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::Invoice",
+        "Article"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.1689480019849725,
+        "min": 3.158407998853363,
+        "max": 3.1778039992786944
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "1d18ed3349905b5ec3f6abb56b7026100accdaddc84734b3a9aedc006a7b6ca8",
+      "actual_context_tokens_cl100k": 1096
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Article",
+        "Subscriber"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.2622619983158074,
+        "min": 3.1143560008786153,
+        "max": 3.2879600003070664
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "8575e6b12ebf74cfb2b0af1afb2812821ecb4c72a8b28f75c861807544293ecd",
+      "actual_context_tokens_cl100k": 1178
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "ReviewAssignment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.1442519975826144,
+        "min": 3.1229309970512986,
+        "max": 3.1967190006980672
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "04d8afe4643496bcefbeff5c0b2caeaf1b14b2360b9df30d45c0371da0adaf23",
+      "actual_context_tokens_cl100k": 1138
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::Ticket",
+        "Author",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.186439997080015,
+        "min": 3.1784050006535836,
+        "max": 3.6843909983872436
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "e98e65aa401b9e78cc6c8440f08241b2d8133a7bea1ae6c2c2cf5674271e9dae",
+      "actual_context_tokens_cl100k": 1180
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::Invoice",
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.14934099878883,
+        "min": 3.0933769994589966,
+        "max": 3.2594769982097205
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "3c546a9faa50620e3c792e18ea8d8cd9b89f41d7d31a46cab14691bc7ef9d683",
+      "actual_context_tokens_cl100k": 1218
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "ReviewAssignment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.0768659999012016,
+        "min": 3.0729079990123864,
+        "max": 3.2445590004499536
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "d8b4948b5b60e45bbaa4dfd2848ff87afab432c31c6f8af6e8e8ee6442ec0a02",
+      "actual_context_tokens_cl100k": 1135
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.41584599966881797,
+        "min": 0.41191899799741805,
+        "max": 0.4298329986340832
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::Invoice",
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.4085650004271884,
+        "min": 3.125808001641417,
+        "max": 3.7526569976762403
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "3c546a9faa50620e3c792e18ea8d8cd9b89f41d7d31a46cab14691bc7ef9d683",
+      "actual_context_tokens_cl100k": 1218
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::Invoice",
+        "Billing::Subscription"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.2026609987951815,
+        "min": 3.147086998069426,
+        "max": 3.2489170007465873
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "a19fdf81f449d3e85596d092e9769cf632b649ee997be053c301898ac755df93",
+      "actual_context_tokens_cl100k": 1120
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Article"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.0790799974056426,
+        "min": 3.060464998270618,
+        "max": 3.090279999014456
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "8900e9fa730e8dd2b02be0092728c3d6feeb57cc850984c47cab6bd4900c21fa",
+      "actual_context_tokens_cl100k": 1094
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "Article"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.2375060000049416,
+        "min": 3.068450001592282,
+        "max": 3.2876799996301997
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "6e30a80769d1476df3c6bbcd710da1392e0d73be3c361bbcf0ac5af16e077e9f",
+      "actual_context_tokens_cl100k": 1129
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::Ticket",
+        "Author",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.1830939988140017,
+        "min": 3.165851998346625,
+        "max": 3.2053349968919065
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "bdbf12decd6faa08295ca7e9d0d9d9019c62fb1a3fafd0e46d7478ee10e22baa",
+      "actual_context_tokens_cl100k": 1181
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::Invoice",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.1237240000336897,
+        "min": 3.114515999186551,
+        "max": 3.153189001750434
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "a15c2b314c56a504f08286f9a15577ad5ddfe92fb2b46edb0e903e80fee0f345",
+      "actual_context_tokens_cl100k": 1117
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Article"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.357900997798424,
+        "min": 3.159439998853486,
+        "max": 3.435695998632582
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "8900e9fa730e8dd2b02be0092728c3d6feeb57cc850984c47cab6bd4900c21fa",
+      "actual_context_tokens_cl100k": 1094
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.1639180015190504,
+        "min": 3.125195002212422,
+        "max": 3.177884002070641
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "b35d33207f293aeda03f460d6565c0faa6bf45d9e23f4414dc9b1b669159827b",
+      "actual_context_tokens_cl100k": 1159
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::Ticket",
+        "Author",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.3333333333333333,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.173806999257067,
+        "min": 3.167594997648848,
+        "max": 3.6123560021223966
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "bdbf12decd6faa08295ca7e9d0d9d9019c62fb1a3fafd0e46d7478ee10e22baa",
+      "actual_context_tokens_cl100k": 1181
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.40771099884295836,
+        "min": 0.40121900019585155,
+        "max": 0.4115879964956548
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "370b1523a63435a2ef40408eadeb1649649d80ca8c5cdc42ea6a41110b76d5ae",
+      "actual_context_tokens_cl100k": 1318
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3977720007242169,
+        "min": 0.3930239981855266,
+        "max": 0.41429400152992457
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "abc207d6adb883342087a489d1071f6d0008d8547686f95126f135efbcdc9a2a",
+      "actual_context_tokens_cl100k": 1320
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3953380000893958,
+        "min": 0.39005900180200115,
+        "max": 0.4009990007034503
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "ab00a8bc7ab2e46c0885c71c49235bf4db194bcdf865676eb841278947570d99",
+      "actual_context_tokens_cl100k": 1333
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4112169990548864,
+        "min": 0.4033430013805628,
+        "max": 0.593718999880366
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "4b93d0b1d085e759be81be2b08fd3d386c75664d51cae0d839c1c60273666c3f",
+      "actual_context_tokens_cl100k": 1313
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "Author"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.103164999629371,
+        "min": 3.077876997849671,
+        "max": 3.1478679993597325
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "c8a7831a60c1e4148f1e6a85b3a3f0aa697170743178cd10cec0618b5b9cf6e7",
+      "actual_context_tokens_cl100k": 1150
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.0691009997099172,
+        "min": 3.030188996490324,
+        "max": 3.1078940010047518
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "22bbb7bdbd5635c2a9653e2e347d8c7419842b0879f799439f2336b8c851a754",
+      "actual_context_tokens_cl100k": 1038
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "Article"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 3.362980001838878,
+        "min": 3.031710999493953,
+        "max": 3.7105890005477704
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "6e30a80769d1476df3c6bbcd710da1392e0d73be3c361bbcf0ac5af16e077e9f",
+      "actual_context_tokens_cl100k": 1129
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "Publication"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1195,
+      "latency_ms": {
+        "median": 3.139502998237731,
+        "min": 3.061716997763142,
+        "max": 3.1687970003986266
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "a99ee42bf5cc0065958927d86d81690770aab591153c759e3a47b45cca66cee3",
+      "actual_context_tokens_cl100k": 1120
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.41352200059918687,
+        "min": 0.3938649970223196,
+        "max": 0.4731840017484501
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "ab00a8bc7ab2e46c0885c71c49235bf4db194bcdf865676eb841278947570d99",
+      "actual_context_tokens_cl100k": 1333
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.40144000013242476,
+        "min": 0.3988249991380144,
+        "max": 0.43913999979849905
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "a551499081b7a502f61f2026f953d52edd55477cf52a1d302ba0ae6dab2e8f06",
+      "actual_context_tokens_cl100k": 1316
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.38708300053258426,
+        "min": 0.38475899782497436,
+        "max": 0.3931739993277006
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "d1f4ed84c08f8e33f65760abd328125c9d722db2800cee59c1bbbcc05fc4ac22",
+      "actual_context_tokens_cl100k": 1331
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3892269996867981,
+        "min": 0.3804599982686341,
+        "max": 0.4047759975946974
+      },
+      "condition": "lexical_seeded_graph",
+      "budget": 1200,
+      "context_sha256": "f4fd37ebc189bf2d5e8b71d68d9e14000ff5f238ea6e8998b44084e355e90274",
+      "actual_context_tokens_cl100k": 1316
+    },
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.5811560004076455,
+        "min": 0.5687519987986889,
+        "max": 1.1240890016779304
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::CampaignsController",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.5,
+      "mrr": 0.3333333333333333,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.5970949969196226,
+        "min": 0.5775390018243343,
+        "max": 0.8497870003338903
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "8ff9a84d9b8f7f173136c9db86d1623d36f56b0b27345a0614cf6e6f6a73871c",
+      "actual_context_tokens_cl100k": 1188
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 585,
+      "latency_ms": {
+        "median": 0.6150389999675099,
+        "min": 0.5756350001320243,
+        "max": 0.6516270004794933
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "22288a3f1f6983803979101fa9154205c4997ffebb502d6c75c963e374e3f22a",
+      "actual_context_tokens_cl100k": 522
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketsController",
+        "Support::TicketMessage",
+        "Support::Ticket"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 0.3333333333333333,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6164110018289648,
+        "min": 0.6016740007908083,
+        "max": 0.8389060021727346
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "93dc74db550bd215263759262d87d89c71cc915e39b570688276e7ce71e45a09",
+      "actual_context_tokens_cl100k": 1124
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 217,
+      "latency_ms": {
+        "median": 0.6376210003509186,
+        "min": 0.6143779974081554,
+        "max": 1.4613989987992682
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "93e54cdcbd6ed8ee4281553404d66814d023b2e07e38df4d2570e1fa50044100",
+      "actual_context_tokens_cl100k": 242
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 936,
+      "latency_ms": {
+        "median": 0.5980469977657776,
+        "min": 0.5936279994784854,
+        "max": 1.00109900085954
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "dceab4d7d683bc56077bae24f9cc44ce83960c6c6d41addd71ef463483978710",
+      "actual_context_tokens_cl100k": 853
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.6161199999041855,
+        "min": 0.6015430008119438,
+        "max": 0.6700009980704635
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob",
+        "WebhookDelivery",
+        "WebhookEndpoint"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1016,
+      "latency_ms": {
+        "median": 0.6784270008211024,
+        "min": 0.6385420019796584,
+        "max": 0.7102269992174115
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "00b99d58611ee911448c3f5e15d2efbcc9d2ef0563444c3aaa200d18b8cc6fd7",
+      "actual_context_tokens_cl100k": 995
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::InvoicesController",
+        "Billing::ChargePaymentJob",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6100790014897939,
+        "min": 0.6014729988237377,
+        "max": 1.1979470000369474
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "316b4374cf30f5ef3093850d3a3e3a87aefcb684913c21de91525848ed98b6f6",
+      "actual_context_tokens_cl100k": 1200
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::CampaignsController",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.5869060005352367,
+        "min": 0.58170700140181,
+        "max": 0.9297660035372246
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "00176bdad3c0b99bc8cf6c6abcedc045470907253d453d9f933fe0649b9188a5",
+      "actual_context_tokens_cl100k": 1240
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 344,
+      "latency_ms": {
+        "median": 0.5976459979137871,
+        "min": 0.5497170022863429,
+        "max": 0.607524998486042
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "6a49c6dd679cb6f8a629ff4d14097a3cd6c1178374ac75e8ac632e48fd53148c",
+      "actual_context_tokens_cl100k": 318
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketsController",
+        "Support::TicketMessage",
+        "Support::Ticket"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6264500007091556,
+        "min": 0.5900310025026556,
+        "max": 0.6683280007564463
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "93dc74db550bd215263759262d87d89c71cc915e39b570688276e7ce71e45a09",
+      "actual_context_tokens_cl100k": 1124
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::BankPayment",
+        "Billing::CardPayment",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.25,
+      "mrr": 0.25,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6280230008997023,
+        "min": 0.6032460005371831,
+        "max": 1.1940500007767696
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "b98aed1d38faccc5117a42325d1ce0891c6ce6f75bd26409605a41f3b84b70bb",
+      "actual_context_tokens_cl100k": 1161
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::CampaignsController",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.2,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6206489997566678,
+        "min": 0.5939699985901825,
+        "max": 0.9551240000291727
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "00176bdad3c0b99bc8cf6c6abcedc045470907253d453d9f933fe0649b9188a5",
+      "actual_context_tokens_cl100k": 1240
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.2,
+      "mrr": 1.0,
+      "estimated_context_tokens": 695,
+      "latency_ms": {
+        "median": 0.6125339969003107,
+        "min": 0.6016730003466364,
+        "max": 0.6515969980682712
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "5bf873517bd30a1229357fc570ed12e1a7594580d3f917a6dc6e7c10c3e8ea5e",
+      "actual_context_tokens_cl100k": 649
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketsController",
+        "Support::TicketMessage",
+        "Support::Ticket"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6671260016446467,
+        "min": 0.6203390003065579,
+        "max": 0.7173599988163915
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "93dc74db550bd215263759262d87d89c71cc915e39b570688276e7ce71e45a09",
+      "actual_context_tokens_cl100k": 1124
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 217,
+      "latency_ms": {
+        "median": 0.12419199993018992,
+        "min": 0.12209799751872197,
+        "max": 0.13153599866200238
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "93e54cdcbd6ed8ee4281553404d66814d023b2e07e38df4d2570e1fa50044100",
+      "actual_context_tokens_cl100k": 242
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 250,
+      "latency_ms": {
+        "median": 0.12541400064947084,
+        "min": 0.11932299821637571,
+        "max": 0.14735500008100644
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "8d2b63eabf98ab0794f208ede9145e3d2ba996b33f89ee5785aa375b4b6e6650",
+      "actual_context_tokens_cl100k": 266
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.11196899868082255,
+        "min": 0.1110480006900616,
+        "max": 0.13574399781646207
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 217,
+      "latency_ms": {
+        "median": 0.1284790014324244,
+        "min": 0.12450299982447177,
+        "max": 0.15108200022950768
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "93e54cdcbd6ed8ee4281553404d66814d023b2e07e38df4d2570e1fa50044100",
+      "actual_context_tokens_cl100k": 242
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ArticlesController"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.6848890006949659,
+        "min": 0.6013929996697698,
+        "max": 1.3676640010089613
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a2ec85f0392769f2ab01ac8d06b8371491665062d57c1c1083e5c60e065b9ab3",
+      "actual_context_tokens_cl100k": 1165
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "SubscribersController",
+        "Subscriber"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 0.5,
+      "estimated_context_tokens": 940,
+      "latency_ms": {
+        "median": 0.5769980016339105,
+        "min": 0.5660569986503106,
+        "max": 1.0655900005076546
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "c5013d907ec965fd76cd7796881379ac71c03f886ecadc4169f50f2d878b8d36",
+      "actual_context_tokens_cl100k": 886
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.6459070027631242,
+        "min": 0.6328210001811385,
+        "max": 0.6518379996123258
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Publication"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 291,
+      "latency_ms": {
+        "median": 0.5717779968108516,
+        "min": 0.5684319985448383,
+        "max": 0.6041879969416186
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "555ccbcd4fe4b7d83fdcc9a66f24389271d87e71bcb4a0205c18885cf049f0b7",
+      "actual_context_tokens_cl100k": 257
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.11339099728502333,
+        "min": 0.1115280028898269,
+        "max": 0.11681799878715537
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.11373199959052727,
+        "min": 0.11193900354555808,
+        "max": 0.12013499872409739
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.1162369990197476,
+        "min": 0.11218899817322381,
+        "max": 0.11858099969686009
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 394,
+      "latency_ms": {
+        "median": 0.12380100088194013,
+        "min": 0.12321999747655354,
+        "max": 0.12474300092435442
+      },
+      "condition": "grep",
+      "budget": 1200,
+      "context_sha256": "90b82c48e67f68c64df27d99e7e420c1fa569f6a967a8be062f16a911bb5dc0f",
+      "actual_context_tokens_cl100k": 428
+    }
+  ],
+  "tokenizer": {
+    "name": "cl100k_base",
+    "package": "tiktoken",
+    "version": "0.11.0",
+    "vocabulary_url": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+    "vocabulary_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+    "pattern": "'(?i:[sdmt]|ll|ve|re)|[^\\r\\n\\p{L}\\p{N}]?+\\p{L}++|\\p{N}{1,3}+| ?[^\\s\\p{L}\\p{N}]++[\\r\\n]*+|\\s++$|\\s*[\\r\\n]|\\s+(?!\\S)|\\s",
+    "special_tokens": {
+      "<|endoftext|>": 100257,
+      "<|fim_prefix|>": 100258,
+      "<|fim_middle|>": 100259,
+      "<|fim_suffix|>": 100260,
+      "<|endofprompt|>": 100276
+    },
+    "scope": "returned context only; no prompt, generation, or agent tokens"
+  }
+}

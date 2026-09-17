@@ -418,6 +418,7 @@ module Woods
       def vector_store   = @retriever.vector_store
       def metadata_store = @retriever.metadata_store
       def graph_store    = @retriever.graph_store
+      def mode = @retriever.respond_to?(:mode) ? @retriever.mode : :semantic
 
       # Invalidate every cached context result. Called from the MCP +reload+
       # tool after the retriever's stores have been re-hydrated from a fresh
@@ -479,7 +480,9 @@ module Woods
       # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
       def context_key(query, budget, types: nil, exclude_types: nil)
-        Cache.cache_key(:context, query, budget.to_s, fingerprint(types), fingerprint(exclude_types))
+        parts = [query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
+        parts << 'lexical' if mode == :lexical
+        Cache.cache_key(:context, *parts)
       end
 
       def fingerprint(types)

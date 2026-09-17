@@ -145,11 +145,54 @@ bundle exec rake woods:embed
 
 ---
 
+## Embedding-free lexical retrieval
+
+Opt into ranked retrieval over an extract-only published index:
+
+```bash
+WOODS_RETRIEVAL_MODE=lexical bundle exec woods-mcp-start ./tmp/woods
+```
+
+For a Ruby-built retriever, set `config.retrieval_mode = :lexical` and supply a
+populated metadata store to `Builder#build_retriever`. The packaged MCP server
+loads published unit JSON itself; it does not boot Rails or read current source
+files. Neither path constructs an embedding provider or vector adapter. The
+existing `:semantic` mode remains the default; provider failures never switch
+modes automatically. A Rails initializer is not loaded by the standalone MCP
+process, so set the environment variable in that process's client configuration.
+
+Lexical results use field-aware BM25 scoring over identifiers, source paths,
+published source and selected runtime metadata (including callbacks, associations
+and validations). Exact full identifiers rank first, with ambiguous typed owners
+retained. Other ties are deterministic. Responses name the lexical mode and
+matching fields/terms; runtime-field hits include the selected published runtime
+values. Lexical Ruby results leave the semantic-only `type_rank_context` table
+`nil`; they do not report a global vector rank or vector fallback. The top 20 eligible positive matches are considered for the
+output budget; this is ranked discovery, not an exhaustive match listing. Explicit
+`types` filters override default exclusions, as in semantic retrieval, and apply
+before that limit. A query with no lexical evidence returns no matches; unrelated
+graph hubs are never added. Query-seeded graph ranking is evaluation-only.
+
+The budget covers headers, matching explanations and truncation notices using a
+labelled character-based estimate, not an exact provider tokenizer. Full source
+remains available through `lookup`. Very small budgets can omit all sources. The
+reader pins one published generation for building and querying its immutable
+lexical snapshot, rebuilding after publication. Corrupt units fail explicitly;
+they cannot quietly become a successful partial index. Older flat indexes rebuild
+on each query because they lack an immutable generation identity.
+
+See [evaluation](EVALUATION.md) for measured query coverage and limits. Lexical
+matching cannot infer synonyms absent from the published text; a miss is not proof
+that application behavior is absent. Static Woods self-maps can opt into the same
+mode but remain static source maps, not resolved Rails runtime evidence.
+
+---
+
 ## Running Retrieval
 
 ### MCP tool: `codebase_retrieve`
 
-The primary interface for agents. Available in the Index Server when an embedding provider is configured and `rake woods:embed` has been run.
+The primary interface for agents. Available with explicit lexical mode over extraction output, or with an embedding provider and completed `rake woods:embed` in the default semantic mode.
 
 ```
 codebase_retrieve(query: "how does billing work?")

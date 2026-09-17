@@ -108,6 +108,7 @@ Columns:
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
 | `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
+| `retrieval_mode` | Symbol | `:semantic` | user-settable | `:semantic` uses configured embeddings; explicit `:lexical` ranks published text without a provider/vector store. See [retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval). |
 | `max_context_tokens` | Integer | `8000` | user-settable | Maximum tokens for retrieval context windows |
 | `similarity_threshold` | Float | `0.7` | user-settable | Minimum similarity score (0.0-1.0) for retrieval results |
 | `context_format` | Symbol | `:markdown` | user-settable | Output format for retrieval: `:claude`, `:markdown`, `:plain`, `:json` |
@@ -650,6 +651,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `WOODS_RETRIEVAL_MODE` | `semantic` | Explicit packaged MCP retrieval mode: `semantic` or `lexical`. Lexical reads extraction unit JSON without provider autodetection, credentials or vector artifacts. |
 | `WOODS_DIR` | `Dir.pwd` | Path to the extraction output directory. |
 | `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
