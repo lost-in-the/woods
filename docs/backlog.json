@@ -2122,7 +2122,7 @@
       "lib/woods/extractors/mailer_extractor.rb"
     ],
     "description": "Audit finding EXTA-15 (Low, traced). mailer_extractor.rb:30,47-81 neither guards on `defined?(ActionMailer)` nor gates on an app-defined ApplicationMailer, unlike the peers fixed in #200. Without ActionMailer, construction raises and the whole run aborts; without an ApplicationMailer, gem-defined mailers index as empty units at fabricated convention paths and, being CLASS_BASED-protected, persist across incremental runs. Deferred because validating it needs a booted host with ActionMailer removed. Acceptance: mirror the #200 shape, with a testbed variant that boots without ActionMailer.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-154",

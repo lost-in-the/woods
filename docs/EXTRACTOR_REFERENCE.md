@@ -246,7 +246,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **What it captures:** ActionMailer classes with their mailer actions, defaults, template paths, callbacks, and helper usage.
 
 **Key details:**
-- Discovers via class introspection (`ActionMailer::Base.descendants`)
+- Discovers `ApplicationMailer.descendants` when that class exists, otherwise `ActionMailer::Base.descendants`; an app without ActionMailer contributes no mailer units.
+- Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata
 - Extracts `default from:`, `layout`, and per-action subject patterns
 

@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
   and keeps reader-only upgrades compatible with older SET writers (B-162).
 
+- Allow full extraction when ActionMailer is absent and skip non-app mailers
+  instead of publishing empty units at fabricated paths; share that ownership
+  gate with incremental class discovery (B-153).
+
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
   deny operations and scoped resets preserve corrupt state (B-159).

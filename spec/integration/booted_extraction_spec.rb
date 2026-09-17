@@ -457,6 +457,21 @@ RSpec.describe 'Middleware extraction across Rails processes', :booted_app do
   end
 end
 
+RSpec.describe 'Optional ActionMailer extraction', :booted_app do
+  { 'absent' => [], 'gem_only' => [], 'app' => ['LocalMailer'] }.each do |mode, expected|
+    it "publishes a valid API-only index with mailer mode #{mode}" do
+      script = File.expand_path('../fixtures/optional_mailer/boot.rb', __dir__)
+      output, error, status = Open3.capture3({ 'MAILER_MODE' => mode }, RbConfig.ruby, '-Ilib', script)
+      expect(status.success?).to be(true), error
+      result = JSON.parse(output.lines.last)
+
+      expect(result).to include('valid' => true, 'errors' => [], 'discoverable' => expected,
+                                'extracted' => expected, 'published' => expected)
+      expect(result.fetch('framework_loaded')).to eq(mode != 'absent')
+    end
+  end
+end
+
 RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
   def extract_callbacks(kind)
     script = File.expand_path('../fixtures/controller_callbacks/boot.rb', __dir__)
