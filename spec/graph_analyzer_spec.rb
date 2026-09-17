@@ -3,6 +3,8 @@
 require 'spec_helper'
 
 RSpec.describe Woods::GraphAnalyzer do
+  include_context 'isolated Woods runtime'
+
   let(:graph) { Woods::DependencyGraph.new }
   let(:analyzer) { described_class.new(graph) }
 

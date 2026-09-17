@@ -236,6 +236,22 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     end)
   end
 
+  it 'reports declared job and service parameters without names from default expressions' do
+    job_params = find_unit(:jobs, 'SignatureJob').fetch('metadata').fetch('perform_params')
+    service_params = find_unit(:services, 'SignatureService').fetch('metadata').fetch('initialize_params')
+    names = %w[user_id values rest required notify options block]
+    expect(job_params.map { |param| param.fetch('name') }).to eq(names)
+    expect(service_params.map { |param| param.fetch('name') }).to eq(names)
+    expect(job_params.map { |param| param.fetch('has_default') }).to eq([false, true, false, false, true, false, false])
+    expect(service_params.map do |param|
+      param.fetch('has_default')
+    end).to eq([false, true, false, false, true, false, false])
+    expect(job_params.map { |param| param.fetch('splat') }).to eq([nil, nil, 'single', nil, nil, 'double', nil])
+    expect(service_params.map { |param| param.fetch('keyword') }).to eq([false, false, false, true, true, true, false])
+    expect(SignatureJob.instance_method(:perform).parameters.map(&:last).map(&:to_s)).to eq(names)
+    expect(SignatureService.instance_method(:initialize).parameters.map(&:last).map(&:to_s)).to eq(names)
+  end
+
   it 'records git provenance (resolved or "unknown"), never crashing on a non-repo dummy' do
     expect(manifest).to have_key('git_branch')
     expect(manifest).to have_key('git_sha')
@@ -475,6 +491,21 @@ RSpec.describe 'Middleware extraction across Rails processes', :booted_app do
     expect(changed.fetch('metadata')).not_to eq(first.fetch('metadata'))
     expect(changed.fetch('source')).not_to eq(first.fetch('source'))
     expect(changed.fetch('hash')).not_to eq(first.fetch('hash'))
+  end
+end
+
+RSpec.describe 'Optional ActionMailer extraction', :booted_app do
+  { 'absent' => [], 'gem_only' => [], 'app' => ['LocalMailer'] }.each do |mode, expected|
+    it "publishes a valid API-only index with mailer mode #{mode}" do
+      script = File.expand_path('../fixtures/optional_mailer/boot.rb', __dir__)
+      output, error, status = Open3.capture3({ 'MAILER_MODE' => mode }, RbConfig.ruby, '-Ilib', script)
+      expect(status.success?).to be(true), error
+      result = JSON.parse(output.lines.last)
+
+      expect(result).to include('valid' => true, 'errors' => [], 'discoverable' => expected,
+                                'extracted' => expected, 'published' => expected)
+      expect(result.fetch('framework_loaded')).to eq(mode != 'absent')
+    end
   end
 end
 

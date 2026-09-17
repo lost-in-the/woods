@@ -8,6 +8,8 @@ require 'open3'
 require 'woods/extractor'
 
 RSpec.describe Woods::Extractor do
+  include_context 'isolated Woods runtime'
+
   # Use a real tmpdir so Pathname#exist? works without stubs.
   let(:tmpdir) { Dir.mktmpdir('woods_test') }
   let(:rails_root) { Pathname.new(tmpdir) }
@@ -2806,6 +2808,22 @@ RSpec.describe Woods::Extractor do
       # VOLATILE_UNIT_KEYS: an untouched unit keeping an older stamp is
       # inside the contract.
       expect(JSON.parse(Woods::AtomicFile.read(target))['extracted_at']).to eq(base_time.iso8601)
+    end
+
+    [false, true].each do |pretty|
+      it "rewrites nested extracted_at metadata changes with pretty_json=#{pretty}" do
+        Woods.configuration.pretty_json = pretty
+        unit.metadata = { imported: { extracted_at: base_time.iso8601 } }
+        extractor.send(:write_unit_file, target, unit)
+        allow(Time).to receive(:now).and_return(base_time + 3600)
+        unit.metadata[:imported][:extracted_at] = (base_time + 1800).iso8601
+
+        extractor.send(:write_unit_file, target, unit)
+
+        written = JSON.parse(Woods::AtomicFile.read(target))
+        expect(written.dig('metadata', 'imported', 'extracted_at')).to eq((base_time + 1800).iso8601)
+        expect(written['extracted_at']).to eq((base_time + 3600).iso8601)
+      end
     end
 
     it 'still rewrites when a real field changed along with the stamp' do

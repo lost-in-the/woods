@@ -2048,7 +2048,7 @@
       "lib/woods/extractor.rb"
     ],
     "description": "Audit finding CORE-3 (Low, executed). extractor.rb:1503-1539 masks `extracted_at` with a global gsub before the byte comparison that decides whether to rewrite a unit file. A future extractor storing a nested `extracted_at` key would have that value masked too, so a change to only it skips the write and the artifact silently goes stale. Latent: no extractor emits a nested one today, and the spec covers only the top-level skip. Acceptance: anchor the mask to the document-final position, with a spec whose fixture carries a nested extracted_at and asserts the write still happens.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-148",
@@ -2060,7 +2060,7 @@
       "lib/woods/change_set.rb"
     ],
     "description": "Audit finding CORE-5 (Low, executed). change_set.rb:74-86 does not normalize its inputs: `root: \"dir/\"` makes every relative path miss the dispatch rules, and `app//models/x.rb` matches no rule at all, so the changed file is silently dropped from an incremental run. Every current caller passes a clean root, so this is latent. Acceptance: chomp the root and cleanpath in absolutize, with specs for both shapes asserting the path still reaches PathDispatcher.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-149",
@@ -2098,7 +2098,7 @@
       "lib/woods/extractors/shared_utility_methods.rb"
     ],
     "description": "Audit finding EXTA-11 (Low, executed). job_extractor.rb:291-310 and shared_utility_methods.rb:294-310 split parameter lists on commas without consuming keyword defaults, so `perform(user_id, notify: true)` records params `user_id, notify, true` \u2014 a fabricated third parameter in agent-facing output. Deferred because the right fix is Prism-based parameter parsing, a small design of its own. Acceptance: parse the parameter list with Prism (or consume kwarg defaults), with specs for kwargs, comma-bearing defaults, and block/splat parameters.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-152",
@@ -2122,7 +2122,7 @@
       "lib/woods/extractors/mailer_extractor.rb"
     ],
     "description": "Audit finding EXTA-15 (Low, traced). mailer_extractor.rb:30,47-81 neither guards on `defined?(ActionMailer)` nor gates on an app-defined ApplicationMailer, unlike the peers fixed in #200. Without ActionMailer, construction raises and the whole run aborts; without an ApplicationMailer, gem-defined mailers index as empty units at fabricated convention paths and, being CLASS_BASED-protected, persist across incremental runs. Deferred because validating it needs a booted host with ActionMailer removed. Acceptance: mirror the #200 shape, with a testbed variant that boots without ActionMailer.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-154",
@@ -2425,7 +2425,7 @@
       "spec/extractor_spec.rb"
     ],
     "description": "Running spec/graph_analyzer_spec.rb and spec/extractor_spec.rb together with --seed 8230 fails one example (Extractor#remove_replaced_units typed identity) with NoMethodError: undefined method 'configuration' for module Woods inside Extractor#json_serialize. Each file passes alone and the full suite passes. Found during #280 Task 4; pre-existing. Acceptance: the pair passes under any seed, with the shared state reset in spec support rather than in either file.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

@@ -55,14 +55,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
   and keeps reader-only upgrades compatible with older SET writers (B-162).
 
+- Allow full extraction when ActionMailer is absent and skip non-app mailers
+  instead of publishing empty units at fabricated paths; share that ownership
+  gate with incremental class discovery (B-153).
+
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
   deny operations and scoped resets preserve corrupt state (B-159).
+
+- Normalize incremental change paths before deduplication and dispatch, including
+  trailing root slashes, repeated separators and dot segments (B-148).
 
 - Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
 
 - Reflect model methods after schema loading so full and incremental runs agree
   on Rails-generated constructors while preserving application overrides (B-202, #363).
+
+- Parse job `perform_params` and shared `initialize_params` from Ruby parameter
+  syntax, avoiding phantom names from keyword/default expressions while preserving
+  the existing metadata fields and named rest/block arguments (B-151).
 
 - Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
   loading, including relative requires, conditional entries, aliases and custom
@@ -75,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
 
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
+
+- Preserve changes to nested `extracted_at` metadata when deciding whether to
+  rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
 
 ### Added
 

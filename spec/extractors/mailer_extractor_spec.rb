@@ -70,12 +70,44 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
       allow(application_mailer).to receive(:descendants).and_return([mailer1, mailer2])
 
-      # Stub source file resolution — no instance methods, fall back to path
+      create_file('app/mailers/user_mailer.rb', 'class UserMailer < ApplicationMailer; end')
+      create_file('app/mailers/order_mailer.rb', 'class OrderMailer < ApplicationMailer; end')
       units = described_class.new.extract_all
 
       expect(units.size).to eq(2)
       identifiers = units.map(&:identifier)
       expect(identifiers).to contain_exactly('UserMailer', 'OrderMailer')
+    end
+
+    it 'constructs and discovers nothing when ActionMailer is absent' do
+      hide_const('ApplicationMailer')
+      hide_const('ActionMailer')
+      instance = described_class.new
+
+      expect(instance.discoverable_classes).to eq([])
+      expect(instance.extract_all).to eq([])
+    end
+
+    it 'rejects gem mailers with only a fabricated app convention path' do
+      hide_const('ApplicationMailer')
+      mailer = build_mailer(name: 'GemMailer')
+      allow(action_mailer_base).to receive(:descendants).and_return([mailer])
+      instance = described_class.new
+
+      expect(instance.discoverable_classes).to eq([])
+      expect(instance.extract_mailer(mailer)).to be_nil
+      expect(instance.extract_all).to eq([])
+    end
+
+    it 'retains app-owned direct ActionMailer descendants without ApplicationMailer' do
+      hide_const('ApplicationMailer')
+      mailer = build_mailer(name: 'DirectMailer')
+      create_file('app/mailers/direct_mailer.rb', 'class DirectMailer < ActionMailer::Base; end')
+      allow(action_mailer_base).to receive(:descendants).and_return([mailer])
+      instance = described_class.new
+
+      expect(instance.discoverable_classes).to eq([mailer])
+      expect(instance.extract_all.map(&:identifier)).to eq(['DirectMailer'])
     end
 
     it 'skips mailers with nil name' do
@@ -496,6 +528,7 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       hide_const('ApplicationMailer')
 
       mailer = build_mailer(name: 'DirectMailer', actions: %w[send_email])
+      create_file('app/mailers/direct_mailer.rb', 'class DirectMailer < ActionMailer::Base; end')
       allow(action_mailer_base).to receive(:descendants).and_return([mailer])
 
       units = described_class.new.extract_all

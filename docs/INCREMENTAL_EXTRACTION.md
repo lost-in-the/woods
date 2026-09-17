@@ -28,6 +28,10 @@ Three differences are tolerated, and nothing else:
 | Ordering inside a unit's `dependents` | Full extraction appends in extractor order, incremental in graph order. Same multiset. |
 | PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
 
+The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
+A nested metadata field with the same name is application data: changing it
+rewrites the unit in both compact and pretty JSON output.
+
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
 exactly. Tolerating the ordering there meant the harness, the only test that
@@ -59,6 +63,10 @@ failure a CI chain cannot afford:
 | The range fails **and** a `:running` watch daemon maintains the index | Stand down with a printed reason, exit 0 — the daemon's start-up catch-up covers whatever changed. |
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
 | There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
+
+Changed paths are normalized lexically before dispatch: trailing root slashes,
+duplicate separators and `.`/`..` segments do not create separate changes or
+bypass matching. Missing files remain representable; symlinks are not resolved.
 
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
 `origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default). An

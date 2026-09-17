@@ -27,7 +27,9 @@ module Woods
       include RouteHelperResolver
 
       def initialize
-        @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
+        if defined?(ActionMailer::Base)
+          @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
+        end
         build_route_helper_map
       end
 
@@ -45,7 +47,9 @@ module Woods
       #
       # @return [Array<Class>]
       def discoverable_classes
-        @mailer_base.descendants
+        return [] unless @mailer_base
+
+        @mailer_base.descendants.select { |mailer| app_defined_mailer?(mailer) }
       end
 
       # Extract a single mailer
@@ -53,8 +57,7 @@ module Woods
       # @param mailer [Class] The mailer class
       # @return [ExtractedUnit] The extracted unit
       def extract_mailer(mailer)
-        return nil if mailer.name.nil?
-        return nil if mailer == ActionMailer::Base
+        return nil unless app_defined_mailer?(mailer)
 
         file_path = source_file_for(mailer)
 
@@ -81,6 +84,16 @@ module Woods
       end
 
       private
+
+      # Discovery and direct incremental extraction must agree on ownership;
+      # otherwise a gem class with a fabricated path becomes a phantom unit.
+      def app_defined_mailer?(mailer)
+        return false unless @mailer_base && mailer.name
+        return false if mailer == ActionMailer::Base
+
+        path = source_file_for(mailer)
+        path && File.file?(path) && app_source?(path, Rails.root.to_s)
+      end
 
       # Locate the source file for a mailer class.
       #

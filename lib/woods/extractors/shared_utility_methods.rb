@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'source_nesting'
+require_relative 'method_parameters'
 
 module Woods
   module Extractors
@@ -292,7 +293,7 @@ module Woods
         source.scan(/def\s+self\.(\w+[?!=]?)/).flatten
       end
 
-      # Extract initialize parameters from source code via regex.
+      # Extract initialize parameters from source syntax without evaluating defaults.
       #
       # Parses the parameter list of the initialize method to determine
       # parameter names, defaults, and whether they are keyword arguments.
@@ -304,21 +305,9 @@ module Woods
       # @param source [String] Ruby source code
       # @return [Array<Hash>] Parameter info hashes with :name, :has_default, :keyword
       def extract_initialize_params(source)
-        init_match = source.match(/def\s+initialize\s*\((.*?)\)/m)
-        return [] unless init_match
-
-        params_str = init_match[1]
-        params = []
-
-        params_str.scan(/(\w+)(?::\s*([^,\n]+))?/) do |name, default|
-          params << {
-            name: name,
-            has_default: !default.nil?,
-            keyword: params_str.include?("#{name}:")
-          }
+        MethodParameters.extract(source, :initialize).map do |parameter|
+          parameter.slice(:name, :has_default, :keyword)
         end
-
-        params
       end
     end
   end
