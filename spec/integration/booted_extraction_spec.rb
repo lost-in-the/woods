@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'json'
 require 'fileutils'
+require 'open3'
 
 # Booted-app extraction test (#136). Boots the minimal Rails app under
 # spec/dummy in-process against the Rails version the active gemfile resolves
@@ -382,5 +383,25 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       expect(node['table']).to eq('posts')
       expect(node['database']).to eq(expected_database)
     end
+  end
+end
+
+RSpec.describe 'Middleware extraction across Rails processes', :booted_app do
+  def extract_stack(setting)
+    script = File.expand_path('../fixtures/middleware/boot.rb', __dir__)
+    output, error, status = Open3.capture3({ 'MIDDLEWARE_SETTING' => setting },
+                                           RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    JSON.parse(output.lines.last)
+  end
+
+  it 'preserves the complete metadata, source and hash across independent boots' do
+    first = extract_stack('first')
+    expect(extract_stack('first')).to eq(first)
+    expect(first.fetch('source')).to include('#<Thing:0x123abc>')
+    changed = extract_stack('second')
+    expect(changed.fetch('metadata')).not_to eq(first.fetch('metadata'))
+    expect(changed.fetch('source')).not_to eq(first.fetch('source'))
+    expect(changed.fetch('hash')).not_to eq(first.fetch('hash'))
   end
 end
