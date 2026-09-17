@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search Boolean metadata fields as `true`/`false` consistently in SQLite and
   InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
 
+- Keep the default SQLite metadata database inside the effective `WOODS_OUTPUT`
+  directory for embedding tasks, isolating indexes while preserving explicit
+  database overrides (B-156). Existing databases are not moved; run `woods:embed`
+  for the selected index after upgrading.
+
 - Treat non-object JSON snapshots and files removed or made unreadable during
   a read as absent across lookup, listing, diffs, and unit history (B-158).
 
@@ -25,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
+
+- Read and clear legacy Redis session indexes before any new record without
+  `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
+  and keeps reader-only upgrades compatible with older SET writers (B-162).
 
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
@@ -572,7 +581,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a previous version migrates automatically on the first record through a
   single atomic server-side script, so concurrent writers racing the legacy
   index cannot erase each other's members or fail mid-migration; eviction
-  order (oldest last request) is unchanged. Adds a live-Redis contract spec
+  order follows oldest last request for newly scored members. Migrated members
+  receive score zero and evict lexicographically until recorded again (B-160).
+  Adds a live-Redis contract spec
   (`spec/session_tracer/redis_store_live_spec.rb`, `WOODS_RUN_LIVE_BACKENDS=1`).
 
 ### Documentation

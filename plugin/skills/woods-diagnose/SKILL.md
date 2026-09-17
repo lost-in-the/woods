@@ -132,6 +132,14 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 - Dimension mismatch: rebuild into a store matching the configured model; do not suppress the preflight.
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
 
+For metadata appearing in another index or worktree, compare `WOODS_OUTPUT`,
+`config.output_dir`, and any explicit `metadata_store_options[:database]`.
+The default SQLite path following `WOODS_OUTPUT` during embedding (B-156) is
+unreleased after `2.0.0.beta2`; check the installed version before relying on it.
+An explicit database path still wins. See the
+[SQLite path contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#sqlite-metadata)
+for isolation and upgrade steps.
+
 ## 5. Check Console separately
 
 For repeated missing-token boot warnings on a stdio-only host, check whether
