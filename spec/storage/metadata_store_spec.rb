@@ -59,6 +59,39 @@ RSpec.describe Woods::Storage::MetadataStore do
       end
     end
 
+    describe 'literal NUL search (#355)' do
+      before do
+        store.store('WithNul', { type: 'model', description: "prefix\0SUFFIX" })
+        store.store('Plain', { type: 'model', description: 'unrelated' })
+      end
+
+      it 'matches a NUL query only when the field contains NUL' do
+        expect(store.search("\0", fields: ['description']).map { |r| r['id'] }).to eq(['WithNul'])
+      end
+
+      it 'matches case-insensitively after a stored NUL' do
+        expect(store.search('suffix', fields: ['description']).map { |r| r['id'] }).to eq(['WithNul'])
+      end
+
+      it 'matches a substring spanning a NUL' do
+        expect(store.search("fix\0su", fields: ['description']).map { |r| r['id'] }).to eq(['WithNul'])
+      end
+
+      it 'does not ignore a query suffix after NUL' do
+        expect(store.search("prefix\0missing", fields: ['description'])).to be_empty
+      end
+
+      it 'preserves ordinary matches and nonmatches' do
+        expect(store.search('related', fields: ['description']).map { |r| r['id'] }).to eq(['Plain'])
+        expect(store.search('missing', fields: ['description'])).to be_empty
+      end
+
+      it 'searches the escaped JSON representation on the all-fields path' do
+        expect(store.search("\0")).to be_empty
+        expect(store.search('\\u0000').map { |r| r['id'] }).to eq(['WithNul'])
+      end
+    end
+
     describe 'search semantics (#218 / B-105)' do
       before do
         store.store('Invoice', { type: 'model', description: 'Handles Billing And Payments' })
