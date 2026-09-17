@@ -35,6 +35,13 @@ whether boot inputs keep changing during initialization or catch-up.
 
 ## 2. Check the published index
 
+For a `same-type identifier collision`, inspect both named source files and the
+Rails loader before suggesting source edits. Wrapper-nested class naming needs
+Zeitwerk mode and Zeitwerk >= 2.6.9; an older loader or classic mode can produce
+the collision even when the namespace wrappers are valid. The expanded error
+guidance (B-149) is unreleased after `2.0.0.beta2`; check the installed version
+first. Follow the [loader compatibility guidance](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#check-the-loader-for-wrapper-nested-classes).
+
 ```bash
 bin/rails woods:validate
 bin/rails woods:stats

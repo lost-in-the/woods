@@ -2064,7 +2064,7 @@
   },
   {
     "id": "B-149",
-    "title": "Governed naming silently degrades on zeitwerk < 2.6.4 and classic-mode hosts",
+    "title": "Governed naming silently degrades on zeitwerk < 2.6.9 and classic-mode hosts",
     "severity": "low",
     "category": "design-gap",
     "layer": "extraction",
@@ -2072,8 +2072,8 @@
       "lib/woods/extractors/source_nesting.rb",
       "docs/UPGRADING_TO_2.md"
     ],
-    "description": "Audit finding EXTA-7 (Low, traced). source_nesting.rb:248-255,414-433 relies on Zeitwerk's `cpath_expected_at`, added in zeitwerk 2.6.4 (Jan 2023). On an older zeitwerk or a classic-mode host, governance yields nothing and the G-1 wrapper shape then aborts extraction with a misleading remedy \u2014 and Rails 6-era lockfiles are realistic on the supported railties >= 6.0 floor. Deferred because it needs a decision (fallback vs documented floor). Acceptance: name the zeitwerk floor in UPGRADING_TO_2 and in the collision message now; decide on a fallback in a 2.0.x.",
-    "status": "open"
+    "description": "Audit finding EXTA-7 (Low, traced). source_nesting.rb:248-255,414-433 relies on Zeitwerk's `cpath_expected_at`, added in zeitwerk 2.6.9 (July 2023). On an older zeitwerk or a classic-mode host, governance yields nothing and the G-1 wrapper shape then aborts extraction with a misleading remedy \u2014 and Rails 6-era lockfiles are realistic on the supported railties >= 6.0 floor. Deferred because it needs a decision (fallback vs documented floor). Acceptance: name the zeitwerk floor in UPGRADING_TO_2 and in the collision message now; decide on a fallback in a 2.0.x.",
+    "status": "resolved"
   },
   {
     "id": "B-150",
