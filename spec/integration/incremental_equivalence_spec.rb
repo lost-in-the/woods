@@ -454,6 +454,55 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'volatile dependency per-target limit (B-188)' do
+    def git_in_app(*args)
+      output, status = Open3.capture2e('git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+
+    it 'persists the cap and full qualifying count across full and incremental extraction with real history' do
+      %w[BusyHubService OtherHubService].each do |name|
+        write_file("app/services/#{name.underscore}.rb", service_source(name))
+      end
+      %w[FirstConsumer SecondConsumer ThirdConsumer].each do |name|
+        write_file("app/services/#{name.underscore}.rb", service_source(name, dependency: 'BusyHubService'))
+      end
+      write_file('app/services/other_consumer.rb', service_source('OtherConsumer', dependency: 'OtherHubService'))
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+      5.times do |i|
+        %w[busy_hub_service other_hub_service].each do |name|
+          File.open(app_path("app/services/#{name}.rb"), 'a') { |file| file.puts("# change #{i}") }
+        end
+        git_in_app('commit', '-am', "change hubs #{i}")
+      end
+
+      Woods.configuration.volatile_dependency_limit_per_target = 1
+      index_dir = full_extraction
+      before_report = read_json(index_dir, 'graph_analysis.json')
+      expect(before_report.fetch('volatile_dependencies').map { |row| row.fetch('to') })
+        .to contain_exactly('BusyHubService', 'OtherHubService')
+      expect(before_report.fetch('stats')).to include('volatile_dependency_count' => 4,
+                                                      'volatile_dependencies_limit_per_target' => 1,
+                                                      'volatile_dependency_reported_count' => 2)
+
+      changed = write_file('app/services/new_consumer.rb', service_source('NewConsumer', dependency: 'BusyHubService'))
+      git_in_app('add', changed)
+      git_in_app('commit', '-m', 'add consumer')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([changed])
+
+      expect(read_json(index_dir, 'graph_analysis.json').fetch('stats'))
+        .to include('volatile_dependency_count' => 5, 'volatile_dependency_reported_count' => 2)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.volatile_dependency_limit_per_target = nil
+      FileUtils.rm_rf(app_path('.git'))
+    end
+  end
+
   describe 'gap 4 — whole-app unit types' do
     it 'refreshes routes when config/routes.rb changes' do
       run_sequence([

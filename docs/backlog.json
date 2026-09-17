@@ -2598,7 +2598,7 @@
       "lib/woods/graph_analyzer.rb"
     ],
     "description": "On a 7k-unit host app the default volatile_dependency_ratio of 3.0 produced 544 qualifying pairs, and the top five all pointed at one 153-commit hub from dependents with 10 to 13 commits: a hub that hot makes almost every dependent qualify by ratio alone. The configuration reference defines the ratio but gives no tuning guidance. Acceptance: the reference explains how to read the count (start from stats.volatile_dependency_count, raise the ratio until the list is reviewable, 8 to 10 was right for that app) and the analyzer gains an optional minimum dependent commit count or a per-dependency cap so a single hub cannot fill the report; the report stays informational.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

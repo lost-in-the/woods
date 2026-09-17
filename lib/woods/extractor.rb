@@ -1781,6 +1781,7 @@ module Woods
       GraphAnalyzer.new(
         @dependency_graph,
         volatile_ratio: ratio,
+        volatile_limit_per_target: config&.volatile_dependency_limit_per_target,
         cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
         cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
       )
