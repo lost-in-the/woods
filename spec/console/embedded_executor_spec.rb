@@ -1425,6 +1425,36 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
         expect(response['error']).to match(/redacted/i)
       end
 
+      it 'refuses a MySQL subquery hidden from PostgreSQL quote stripping in a direct scope array' do
+        allow(connection).to receive(:adapter_name).and_return('Mysql2')
+        allow(connection).to receive(:select_value).with('SELECT @@SESSION.sql_mode').and_return('')
+        template = %q{name = 'a\'b' OR id IN (SELECT id FROM users) OR name = 'z'}
+        relation = double('Relation')
+        expect(relation).not_to receive(:where)
+
+        expect { executor.send(:apply_scope, relation, [template]) }
+          .to raise_error(Woods::Console::ValidationError, /forbidden SQL keywords/)
+      end
+
+      it 'uses MySQL NO_BACKSLASH_ESCAPES when validating direct scope arrays' do
+        allow(connection).to receive(:adapter_name).and_return('Mysql2')
+        allow(connection).to receive(:select_value).with('SELECT @@SESSION.sql_mode').and_return('NO_BACKSLASH_ESCAPES')
+        template = %q{name = 'a\' OR id IN (SELECT id FROM users) OR name = 'z'}
+
+        expect { executor.send(:validate_scope_array!, [template]) }
+          .to raise_error(Woods::Console::ValidationError, /forbidden SQL keywords/)
+      end
+
+      it 'allows a valid MySQL scope literal containing a forbidden word' do
+        allow(connection).to receive(:adapter_name).and_return('Mysql2')
+        allow(connection).to receive(:select_value).with('SELECT @@SESSION.sql_mode').and_return('')
+        template = %q(name = 'a\' SELECT b')
+        relation = double('Relation')
+        expect(relation).to receive(:where).with(template).and_return(:filtered)
+
+        expect(executor.send(:apply_scope, relation, [template])).to eq(:filtered)
+      end
+
       it 'refuses a redacted column in a multi-bind scope template' do
         expect do
           executor.send(:validate_scope_array!, ['email = ? OR id = ?', 'a@b.com', 1])

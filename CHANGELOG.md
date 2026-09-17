@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   depth, with one warning and full-history recovery guidance, instead of
   reporting truncated commit counts as complete churn data (B-189).
 
+- Validate direct/legacy Console scope arrays with the active SQL dialect and
+  MySQL session quote modes, refusing subqueries hidden by mismatched quote
+  stripping while retaining the supported tools' narrower scope grammar (B-154).
+
 - Read and clear legacy Redis session indexes before any new record without
   `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
   and keeps reader-only upgrades compatible with older SET writers (B-162).

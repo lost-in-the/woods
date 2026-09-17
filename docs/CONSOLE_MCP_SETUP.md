@@ -773,6 +773,12 @@ For `console_query`, a schema-qualified column reference such as `orders.total` 
 
 Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`), see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.
 
+The internal scope-array defense also uses the connected adapter's dialect and
+MySQL session quote modes when rejecting subqueries and forbidden keywords.
+This protects direct/legacy executor callers; supported tool schemas continue
+to enforce their narrower parameterized scope grammar.
+
+
 ---
 
 ## Troubleshooting
