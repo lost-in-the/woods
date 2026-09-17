@@ -85,6 +85,13 @@ Use the installed version's tagged guide; the
 [canonical profiling guide](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#profiling-fixed-costs)
 tracks current source.
 
+For a shallow-checkout git-enrichment warning, the shallow guard (B-189) is
+unreleased after `2.0.0.beta2`; check the installed version first. Fetch complete
+history with `git fetch --unshallow` or `actions/checkout` `fetch-depth: 0`, then
+run full extraction. Depth two only enables a two-commit diff; it does not
+restore complete churn history. See the
+[git metadata recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-metadata-is-missing-or-shows-zeros).
+
 For `Git enrichment omitted: history could not be read completely`, first check
 whether the installed Woods release documents the new streamed-history policy;
 it is unreleased after 2.0.0.beta2. Supporting versions require Git 2.31 or newer.

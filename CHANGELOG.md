@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
 
+- Omit per-unit git enrichment for shallow checkouts or unverifiable repository
+  depth, with one warning and full-history recovery guidance, instead of
+  reporting truncated commit counts as complete churn data (B-189).
+
 - Read and clear legacy Redis session indexes before any new record without
   `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
   and keeps reader-only upgrades compatible with older SET writers (B-162).
