@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search Boolean metadata fields as `true`/`false` consistently in SQLite and
   InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
 
+- Keep the default SQLite metadata database inside the effective `WOODS_OUTPUT`
+  directory for embedding tasks, isolating indexes while preserving explicit
+  database overrides (B-156). Existing databases are not moved; run `woods:embed`
+  for the selected index after upgrading.
+
 - Treat non-object JSON snapshots and files removed or made unreadable during
   a read as absent across lookup, listing, diffs, and unit history (B-158).
 

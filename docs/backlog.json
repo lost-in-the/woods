@@ -2159,7 +2159,7 @@
       "lib/woods/builder.rb"
     ],
     "description": "Audit finding STO-10 (Low, traced). tasks.rb:63 resolves the output directory from WOODS_OUTPUT, but builder.rb:476-481 builds the metadata store path from `config.output_dir`. Units and dumps land under WOODS_OUTPUT while metadata.sqlite3 lands elsewhere: outside the swept index, and potentially shared between worktrees that believe they have disjoint indexes. Acceptance: thread the resolved output dir into build_metadata_store, with a spec asserting the database path follows WOODS_OUTPUT.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-157",

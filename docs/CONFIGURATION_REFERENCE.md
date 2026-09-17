@@ -224,6 +224,15 @@ config.metadata_store_options = {
 }
 ```
 
+Without an explicit `database` option, SQLite uses
+`<output_dir>/metadata.sqlite3`. For `woods:embed` and
+`woods:embed_incremental`, `WOODS_OUTPUT` overrides that directory together
+with the index and embedding dumps. An explicit `database` path (including
+`:memory:`) still takes precedence, so configure a separate path for each
+worktree when overriding it. Existing databases at the old configured output
+path are not moved or deleted; run `woods:embed` for the selected index after
+upgrading to populate its default metadata database.
+
 Requires the `sqlite3` gem in your host bundle. Rails apps backed by
 MySQL or PostgreSQL won't have it by default, selecting `:sqlite`
 without it raises `Woods::ConfigurationError` with install
@@ -643,7 +652,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for `woods:extract`/`woods:incremental`/`woods:watch` without editing the initializer. |
+| `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for extraction/watch and embedding tasks without editing the initializer; embedding also places its default SQLite metadata database there. Explicit database options take precedence. |
 | `CHANGED_FILES` | unset | Comma-separated explicit changed-path list for `woods:incremental`; when set, git range resolution is skipped entirely. |
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |

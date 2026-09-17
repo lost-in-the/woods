@@ -27,6 +27,7 @@ module Woods
     # @return [Embedding::Indexer]
     def build_embed_indexer
       config = Woods.configuration
+      output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
       builder = Builder.new(config)
       provider = builder.build_embedding_provider
 
@@ -56,11 +57,11 @@ module Woods
         provider: resilient_provider,
         text_preparer: builder.build_text_preparer(provider),
         vector_store: vector_store,
-        metadata_store: config.metadata_store ? builder.build_metadata_store : nil,
+        metadata_store: config.metadata_store ? builder.build_metadata_store(output_dir: output_dir) : nil,
         resolved_config: build_resolved_config(config, provider: provider),
         chunker: builder.build_chunker(provider),
         dump_retention_count: config.dump_retention_count,
-        output_dir: ENV.fetch('WOODS_OUTPUT', config.output_dir)
+        output_dir: output_dir
       )
     end
 
