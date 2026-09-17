@@ -17,6 +17,15 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 Default to Index-only. It reads generated code context and exposes 14 tools. Console MCP boots Rails and reads live data; ask before enabling it.
 
+Initialization guidance (#402) is unreleased after `2.0.0.beta2`; check the
+installed gem before expecting MCP `instructions`. Supporting servers provide
+a short workflow through initialization or modern discovery; protocol
+`2024-11-05` omits it. Missing instructions alone are not a connection failure.
+Keep normal protocol negotiation and use the
+[agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
+when unavailable. See the
+[initialization contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#initialization-guidance).
+
 ## Shape 1: Index-only
 
 ```json

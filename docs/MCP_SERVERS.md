@@ -103,6 +103,27 @@ Reconnect the client, then call:
 
 Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Modern MCP 2026-07-28 requests carry per-request protocol metadata and can use `server/discover` without an initialization handshake; older clients still use `initialize`. A valid raw smoke test must implement one complete flow rather than sending an isolated `tools/list` or `tools/call` request.
 
+### Initialization guidance
+
+The Index Server supplies a short, client-neutral `instructions` field through
+the SDK's `initialize` response and modern `server/discover`. It describes the
+status → discovery → inspection → bounded traversal → source-verification
+workflow, and lists only the tools actually registered by this server.
+Instructions are stable for unchanged tool registration and bounded to 2,048
+UTF-8 bytes across supported configurations. Building the text does not probe
+providers, extract code, or write configuration.
+
+Registration alone does not establish retrieval readiness: check `woods_status`
+before using `codebase_retrieve`, including after reload. The guidance grants
+no extraction, configuration-change, or Console authorization. Detailed usage
+belongs in the [agent guide](AGENT_GUIDE.md).
+
+This addition is unreleased after `2.0.0.beta2`. The SDK omits `instructions`
+when negotiating protocol `2024-11-05`; that behavior is preserved. Older gems,
+legacy clients, and clients that do not show server instructions can use the
+agent guide or investigation skill. Leave protocol negotiation enabled rather
+than pinning a newer version solely to obtain guidance.
+
 ### Tools (29 — 14 registered in the packaged default)
 
 The Index Server defines 29 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.

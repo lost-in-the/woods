@@ -18,6 +18,7 @@ require_relative 'bootstrap_state'
 require_relative 'errors'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
+require_relative 'initialization_guidance'
 require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
@@ -193,6 +194,7 @@ module Woods
           register_resource_handler(server, reader)
           ToolContract.apply!(server)
           IndexReaderPinning.install(server, reader: reader)
+          server.instructions = InitializationGuidance.for(server.tools.keys)
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one

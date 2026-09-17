@@ -184,6 +184,7 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
                         params: { protocolVersion: '2024-11-05', capabilities: {},
                                   clientInfo: { name: 'legacy', version: '1' } } })
       expect(JSON.parse(response.body).dig('result', 'serverInfo', 'name')).to eq('woods')
+      expect(JSON.parse(response.body).fetch('result')).not_to have_key('instructions')
     end
 
     it 'returns stable errors for malformed JSON and a removed legacy method' do
@@ -231,8 +232,26 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
     let(:server_env) do
       {
         'WOODS_MCP_HTTP_TOKEN' => token,
-        'WOODS_MCP_HTTP_ALLOWED_ORIGINS' => 'https://allowed.example'
+        'WOODS_MCP_HTTP_ALLOWED_ORIGINS' => 'https://allowed.example',
+        'WOODS_REQUIRE_INDEX' => nil,
+        'OPENAI_API_KEY' => nil,
+        'OLLAMA_BASE_URL' => 'http://127.0.0.1:0'
       }
+    end
+
+    it 'delivers initialization guidance only after authentication' do
+      request = { jsonrpc: '2.0', id: 1, method: 'initialize',
+                  params: { protocolVersion: '2025-06-18', capabilities: {},
+                            clientInfo: { name: 'guidance-http', version: '1' } } }
+      expect(post(request).code).to eq('401')
+
+      response = post(request, headers: { 'Authorization' => "Bearer #{token}" })
+      expect(response.code).to eq('200'), response.body
+      result = JSON.parse(response.body).fetch('result')
+      expect(result['protocolVersion']).to eq('2025-06-18')
+      expect(result.fetch('instructions')).to start_with('Start with woods_status')
+      expect(result.fetch('instructions')).to include('only when woods_status reports retrieval enabled')
+      expect(result.fetch('instructions').bytesize).to be <= 2048
     end
 
     it 'enforces bearer auth, Origin, Host, and modern CORS headers' do
@@ -274,6 +293,7 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
                         params: { protocolVersion: '2025-06-18', capabilities: {},
                                   clientInfo: { name: 'legacy', version: '1' } } })
       expect(response['mcp-session-id']).not_to be_nil
+      expect(JSON.parse(response.body).dig('result', 'instructions')).to start_with('Start with woods_status')
     end
   end
 end
