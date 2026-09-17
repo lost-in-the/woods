@@ -2183,7 +2183,7 @@
       "lib/woods/temporal/json_snapshot_store.rb"
     ],
     "description": "Audit finding INF-5 (Low, executed). json_snapshot_store.rb:259-307 assumes every parsed snapshot file is a Hash, so one file containing `[]` raises TypeError out of find, list, diff and unit_history at once; separately the glob-then-read window races the unlocked retention prune and raises ENOENT. Both break the B-135 \"corrupt = absent\" posture, which pinned only the truncation shape. Acceptance: require a Hash and rescue SystemCallError per file, treating either as absent, with specs for both shapes across all four tools.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-159",

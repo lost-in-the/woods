@@ -364,6 +364,12 @@ end
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
 
+When the JSON snapshot fallback is in use, malformed JSON, top-level values
+other than objects, and files that cannot be read (including concurrent retention
+removals) are warned about and treated as absent. Snapshot lists and unit history
+omit them; direct lookup returns no snapshot, and a diff with an unavailable
+snapshot returns empty added, modified, and deleted lists.
+
 `incremental_blast_radius_depth` is unbounded by default because a unit two hops
 out really can have content that depends on the changed file. An STI grandchild
 (`SportsCar < Car < Vehicle`) inherits its grandparent's associations,

@@ -22,7 +22,8 @@ module Woods
     #
     # Implements the same public interface as SnapshotStore so the MCP server
     # tools work identically.
-    # Malformed retained snapshots are warned about and treated as absent:
+    # Malformed, non-object, or unreadable retained snapshots (including files
+    # removed during retention) are warned about and treated as absent:
     # +find+ returns nil, +diff+ returns an empty result, and history/list scans
     # omit the corrupt file.
     #
@@ -264,9 +265,15 @@ module Woods
       end
 
       def read_snapshot(path)
-        JSON.parse(AtomicFile.read(path))
+        data = JSON.parse(AtomicFile.read(path))
+        raise JSON::ParserError, 'expected a JSON object' unless data.is_a?(Hash)
+
+        data
       rescue JSON::ParserError => e
         warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+        nil
+      rescue SystemCallError => e
+        warn "[Woods] Skipping unreadable snapshot #{File.basename(path)}: #{e.message}"
         nil
       end
 
