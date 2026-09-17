@@ -58,6 +58,71 @@ RSpec.describe Woods::SessionTracer::RedisStore, :live_backends do
     nil
   end
 
+  describe 'legacy SET reads before the first new record' do
+    let(:legacy_id) { "run-#{run_id}-legacy" }
+    let(:other_id) { "run-#{run_id}-other" }
+
+    before do
+      redis.sadd(described_class::SESSIONS_KEY, [legacy_id, other_id, 'expired'])
+      redis.rpush(store.send(:session_key, legacy_id), JSON.generate(request_data))
+      newer_request = request_data.merge('timestamp' => '2026-02-13T11:00:00Z')
+      redis.rpush(store.send(:session_key, other_id), JSON.generate(newer_request))
+    end
+
+    it 'lists by payload recency, prunes expired members, and preserves old-writer compatibility' do
+      expect(store.sessions(limit: 1).map { |entry| entry['session_id'] }).to eq([other_id])
+      expect(redis.type(described_class::SESSIONS_KEY)).to eq('set')
+      expect(redis.smembers(described_class::SESSIONS_KEY)).to contain_exactly(legacy_id, other_id)
+      expect { redis.sadd(described_class::SESSIONS_KEY, 'old-writer') }.not_to raise_error
+    end
+
+    it 'clears one legacy session without deleting another' do
+      store.clear(legacy_id)
+      expect(store.read(legacy_id)).to eq([])
+      expect(store.read(other_id).size).to eq(1)
+      expect(redis.smembers(described_class::SESSIONS_KEY)).to contain_exactly(other_id, 'expired')
+    end
+
+    it 'clears all legacy lists and the index without a prior record' do
+      store.clear_all
+      expect(store.read(legacy_id)).to eq([])
+      expect(store.read(other_id)).to eq([])
+      expect(redis.exists?(described_class::SESSIONS_KEY)).to be(false)
+      expect(store.sessions).to eq([])
+    end
+
+    it 'prunes expired members after a writer converts the index between list and cleanup' do
+      writer_redis = Redis.new(url: redis_url)
+      writer = described_class.new(redis: writer_redis)
+      converted = false
+      allow(redis).to receive(:exists?).and_wrap_original do |method, key|
+        unless converted
+          converted = true
+          writer.record('fresh', request_data)
+        end
+        method.call(key)
+      end
+
+      expect(store.sessions.map { |entry| entry['session_id'] }).to contain_exactly(legacy_id, other_id)
+      expect(redis.zrange(described_class::SESSIONS_KEY, 0, -1)).to contain_exactly(legacy_id, other_id, 'fresh')
+      expect(store.read('fresh').size).to eq(1)
+    ensure
+      writer_redis&.close
+    end
+
+    it 'evicts migrated score-zero members lexically until they are recorded again' do
+      bounded = described_class.new(redis: redis, max_sessions: 2)
+      redis.srem(described_class::SESSIONS_KEY, 'expired')
+      newest_request = request_data.merge('timestamp' => '2026-02-13T12:00:00Z')
+      redis.rpush(store.send(:session_key, legacy_id), JSON.generate(newest_request))
+      bounded.record('fresh', request_data)
+
+      expect(bounded.read(legacy_id)).to eq([])
+      expect(bounded.read(other_id).size).to eq(1)
+      expect(redis.zscore(described_class::SESSIONS_KEY, other_id)).to eq(0.0)
+    end
+  end
+
   describe 'recency zset index' do
     it 'keeps the index as a zset and round-trips records' do
       store.record("run-#{run_id}-a", request_data)
