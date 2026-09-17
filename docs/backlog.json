@@ -2209,7 +2209,7 @@
       "lib/woods/session_tracer/redis_store.rb"
     ],
     "description": "Audit finding INF-13 (Low, traced). redis_store.rb:40-51 inserts every migrated legacy member into the recency ZSET at score 0, so the migrated cohort evicts lexicographically and ahead of any post-migration session. The [Unreleased] Performance / P4 entry's claim that \"eviction order (oldest last request) is unchanged\" is therefore not true for that cohort. Acceptance: one-line CHANGELOG correction naming the migrated-cohort exception.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-161",
@@ -2233,7 +2233,7 @@
       "lib/woods/session_tracer/redis_store.rb"
     ],
     "description": "Audit finding R2-5 (Low, traced). The legacy SET-to-ZSET migration runs only inside `record` (the write path), while redis_store.rb:100,137 issue zrange against the index. A reader-only process, or a mixed-version fleet where the reader upgrades first, hits WRONGTYPE on an unmigrated index instead of degrading. Acceptance: migrate (or rescue and fall back) on the read path too, with a spec seeding a legacy SET and reading without any prior write.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-163",

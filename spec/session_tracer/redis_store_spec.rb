@@ -103,6 +103,8 @@ class MockRedis
   # sends — as a single step: type check, legacy-member transfer, insertion.
   # The live-Redis spec exercises the real Lua against a real server.
   def eval(script, keys: [], argv: [])
+    return eval_index_access(keys.fetch(0), argv) if script == Woods::SessionTracer::RedisStore::INDEX_ACCESS_SCRIPT
+
     unless script == Woods::SessionTracer::RedisStore::INDEX_UPDATE_SCRIPT
       raise ArgumentError, 'MockRedis only implements the Woods recency-index script'
     end
@@ -121,6 +123,13 @@ class MockRedis
     end
     @data[key][member] = score
     1
+  end
+
+  def eval_index_access(key, args)
+    legacy = @data[key].is_a?(Array)
+    return legacy ? smembers(key).dup : zrange(key, 0, -1) if args.first == 'members'
+
+    legacy ? srem(key, args.fetch(1)) : zrem(key, args.fetch(1))
   end
 
   # A set is an Array here and a zset a Hash, mirroring how the real server
@@ -182,6 +191,31 @@ RSpec.describe Woods::SessionTracer::RedisStore do
 
       expect(store.read('account/a').first['action']).to eq('slash')
       expect(store.read('account?a').first['action']).to eq('question')
+    end
+  end
+
+  describe 'legacy SET access' do
+    before do
+      redis.sadd(described_class::SESSIONS_KEY, 'legacy')
+      redis.sadd(described_class::SESSIONS_KEY, 'expired')
+      redis.rpush(store.send(:session_key, 'legacy'), JSON.generate(request_data))
+    end
+
+    it 'reads summaries and prunes expired members without migrating the index' do
+      expect(store.sessions.map { |entry| entry['session_id'] }).to eq(['legacy'])
+      expect(redis.smembers(described_class::SESSIONS_KEY)).to eq(['legacy'])
+    end
+
+    it 'clears a legacy member and its requests' do
+      store.clear('legacy')
+      expect(store.read('legacy')).to eq([])
+      expect(redis.smembers(described_class::SESSIONS_KEY)).to eq(['expired'])
+    end
+
+    it 'clears all legacy members and requests' do
+      store.clear_all
+      expect(store.read('legacy')).to eq([])
+      expect(store.sessions).to eq([])
     end
   end
 
