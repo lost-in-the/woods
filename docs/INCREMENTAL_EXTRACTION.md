@@ -28,6 +28,10 @@ Three differences are tolerated, and nothing else:
 | Ordering inside a unit's `dependents` | Full extraction appends in extractor order, incremental in graph order. Same multiset. |
 | PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
 
+The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
+A nested metadata field with the same name is application data: changing it
+rewrites the unit in both compact and pretty JSON output.
+
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
 exactly. Tolerating the ordering there meant the harness, the only test that

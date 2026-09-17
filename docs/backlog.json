@@ -2048,7 +2048,7 @@
       "lib/woods/extractor.rb"
     ],
     "description": "Audit finding CORE-3 (Low, executed). extractor.rb:1503-1539 masks `extracted_at` with a global gsub before the byte comparison that decides whether to rewrite a unit file. A future extractor storing a nested `extracted_at` key would have that value masked too, so a change to only it skips the write and the artifact silently goes stale. Latent: no extractor emits a nested one today, and the spec covers only the top-level skip. Acceptance: anchor the mask to the document-final position, with a spec whose fixture carries a nested extracted_at and asserts the write still happens.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-148",
