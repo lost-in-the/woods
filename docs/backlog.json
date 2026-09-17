@@ -1715,8 +1715,8 @@
       "spec/extractors/rails_source_extractor_spec.rb",
       "spec/extractors/view_component_extractor_spec.rb"
     ],
-    "description": "These pass in the full suite but fail standalone (missing requires / shared state): i18n 15/15, mailer 24/32, rails_source 33/33, view_component 16/23 at last measurement. A spec that only passes with company hides real breakage until someone bisects a single file. Same class as the controller_extractor_fixture_spec require fixed in #219.",
-    "status": "open"
+    "description": "These pass in the full suite but fail standalone (missing requires / shared state): i18n 15/15, mailer 24/32, rails_source 33/33, view_component 16/23 at last measurement. A spec that only passes with company hides real breakage until someone bisects a single file. Same class as the controller_extractor_fixture_spec require fixed in #219. RESOLVED: duplicate of B-109, fixed in 8fea1922886ac34991820ddf6a97dae94fe06fa3 (#223) by requiring woods in mailer/view_component and woods/model_name_cache in the shared extractor context. Reverified against a0559c0b on 2026-09-17: each file passes independently in a fresh process with seeds 1, 1729 and 65535 (i18n 15, mailer 32, rails_source 33, view_component 25 examples per seed; 315 examples total, zero failures).",
+    "status": "resolved"
   },
   {
     "id": "B-122",
