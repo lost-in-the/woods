@@ -534,7 +534,17 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 **Key details:**
 - Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever)
 - Extracts job class name, cron expression, queue, and any arguments
-- File-based (static read, no Rails introspection needed)
+- Resolves trusted application `recurring.yml` through Rails' configuration loader,
+  including ERB, filename-relative `require_relative`, and YAML aliases. On Rails
+  6.0 (before that loader existed), evaluates ERB with its filename and retains
+  safe YAML loading of scalars, hashes, arrays and symbols. ERB runs application
+  code in the extraction process; index only applications you trust.
+- Environment-wrapped task maps select the current Rails environment, including
+  custom names; an absent environment falls back to the first section, while an
+  explicitly empty section stays empty. Flat task maps remain supported.
+- Sidekiq-Cron remains safe-loaded YAML; Whenever remains a static DSL scan.
+  Invalid YAML/ERB, missing required files and runtime configuration errors are
+  logged and omit that schedule file. Source remains the original file text.
 - No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes
 
 ---

@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
 require 'yaml'
+begin
+  require 'active_support/configuration_file'
+rescue LoadError
+  # Rails 6.0 predates ConfigurationFile.
+  require 'erb'
+end
 
 module Woods
   module Extractors
@@ -37,9 +43,6 @@ module Woods
         '0 0 1 * *' => 'monthly on the 1st',
         '0 0 1 1 *' => 'yearly on January 1st'
       }.freeze
-
-      # Environment keys to unwrap when nested in YAML
-      ENVIRONMENT_KEYS = %w[production development test staging].freeze
 
       # A quoted Whenever command argument in either style. The body runs to
       # the *matching* delimiter, so the inner quotes of `command "echo 'hi'"`
@@ -79,7 +82,7 @@ module Woods
         else
           []
         end
-      rescue StandardError => e
+      rescue StandardError, SyntaxError, LoadError => e
         Rails.logger.error("Failed to extract scheduled jobs from #{file_path}: #{e.message}")
         []
       end
@@ -97,12 +100,15 @@ module Woods
       # @return [Array<ExtractedUnit>]
       def extract_yaml_schedule(file_path, format)
         source = File.read(file_path)
-        # aliases: true — schedule files commonly share defaults via anchors
-        # (`<<: *defaults`); without it Psych 4+ raises AliasesNotEnabled and
-        # the whole file is silently dropped (#203). Alias expansion only
-        # re-references the scalar/hash types already permitted, so it adds
-        # no deserialization risk.
-        data = YAML.safe_load(source, permitted_classes: [Symbol], aliases: true)
+        data = if format == :solid_queue
+                 # Match Solid Queue's trusted Rails configuration loader: ERB
+                 # executes with its real filename (including require_relative).
+                 load_recurring_configuration(file_path, source)
+               else
+                 # Sidekiq remains safe-loaded; aliases allow shared defaults
+                 # without permitting additional deserialized classes (#203).
+                 YAML.safe_load(source, permitted_classes: [Symbol], aliases: true)
+               end
 
         return [] unless data.is_a?(Hash) && data.any?
 
@@ -116,10 +122,23 @@ module Woods
         end
       end
 
+      def load_recurring_configuration(file_path, source)
+        if defined?(ActiveSupport::ConfigurationFile)
+          ActiveSupport::ConfigurationFile.parse(file_path)
+        else
+          # Rails 6.0: preserve the same filename-aware ERB evaluation while
+          # retaining the existing scalar/hash YAML policy.
+          require 'erb'
+          erb = ERB.new(source)
+          erb.filename = file_path
+          YAML.safe_load(erb.result, permitted_classes: [Symbol], aliases: true)
+        end
+      end
+
       # Detect and unwrap environment-nested YAML.
       #
-      # If the top-level keys are environment names (production, development,
-      # etc.), unwrap to the section for the environment being extracted,
+      # If the top level contains maps of tasks, unwrap to the section for
+      # the environment being extracted (including custom environment names),
       # falling back to the first section when the current environment has no
       # entry. Taking `values.first` unconditionally meant a file listing
       # `development:` before `production:` indexed the development schedule
@@ -128,9 +147,14 @@ module Woods
       # @param data [Hash] Parsed YAML data
       # @return [Hash] Unwrapped entries
       def unwrap_environment_nesting(data)
-        return data unless data.keys.all? { |k| ENVIRONMENT_KEYS.include?(k.to_s) }
+        # Environment sections contain task maps; task entries contain scalar
+        # configuration values. Shape matters even for a task called production.
+        nested = data.values.all? do |section|
+          section.nil? || (section.is_a?(Hash) && section.values.all?(Hash))
+        end
+        return data unless nested
 
-        data[current_environment] || data.values.first || {}
+        data.key?(current_environment) ? (data[current_environment] || {}) : (data.values.first || {})
       end
 
       # The environment name the extraction is running under, as a String.
