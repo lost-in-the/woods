@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeping `tokens_used` and its trace consistent with the configured counter
   or estimate (B-197, #354).
 
+- Order tied hybrid retrieval candidates deterministically before graph seed
+  selection, truncation and reciprocal-rank fusion across supported Ruby versions
+  (B-192).
+
 - Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).

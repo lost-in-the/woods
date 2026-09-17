@@ -2650,7 +2650,7 @@
       "lib/woods/retrieval/search_executor.rb"
     ],
     "description": "Found during B-191 validation after PageRank importance maps became identical across Ruby versions. execute_hybrid sorts combined vector, keyword, and graph candidates by score alone before caller truncation; equal-score ordering changes across Ruby 3.0-3.2 and 3.3-4.0, altering candidate membership and per-source RRF ranks. In the unchanged Canopy corpus hybrid-2, Newsletter::DeliverJob and Newsletter::Delivery swap their leading returned positions; aggregate quality metrics remain equal, but context bytes differ. Acceptance: define deterministic candidate tie ordering before truncation and fusion, cover insertion-order and cross-source ties, replay all six Ruby lines against the original corpus and quality floors, and review context recaptures without changing labels or lowering thresholds. Keep separate runtime captures until this is resolved.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-196",
