@@ -136,9 +136,10 @@ Both hooks require an existing index and `WOODS_HOOKS_ENABLED=1`; disable with
 exec rake"` for a container-only bundle and `WOODS_OUTPUT` for a non-default
 index. The host needs Bash and either jq or Ruby, not the application bundle.
 The refresh worker has its own bounded deadline, but cancelling Docker exec does
-not prove its container process stopped. The session warning still compares
-commit timestamps only; silence does not prove dirty-source freshness or queue
-consumption. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
+not prove its container process stopped. Source freshness (#405) is unreleased after beta2: verify the installed command
+exposes `woods:source_status` and `woods-extract` before using it. Supporting
+SessionStart hooks check source content and report missing/failed evidence as
+unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
 for transport, retry and custom-root limits.
 
 ## Ask before expanding scope

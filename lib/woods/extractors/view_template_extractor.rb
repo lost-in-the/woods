@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require 'set'
 require_relative 'route_helper_resolver'
 require_relative 'view_engines/base'
@@ -95,7 +97,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract view template #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract view template #{file_path}: #{e.message}")
         nil
       end
 

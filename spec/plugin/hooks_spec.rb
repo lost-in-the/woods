@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'json'
+require 'base64'
 require 'open3'
 require 'tmpdir'
 require 'fileutils'
@@ -465,75 +466,76 @@ RSpec.describe 'plugin hooks (#280)' do
   describe 'woods-session-start.sh' do
     let(:base_env) { { 'WOODS_HOOKS_ENABLED' => '1' } }
 
-    def commit_something(dir)
-      Open3.capture3(bash_path, '-c', "git init --quiet #{dir}")
-      File.write(File.join(dir, 'README'), 'x')
-      env = { 'GIT_AUTHOR_NAME' => 'w', 'GIT_AUTHOR_EMAIL' => 'w@x', 'GIT_COMMITTER_NAME' => 'w',
-              'GIT_COMMITTER_EMAIL' => 'w@x' }
-      Open3.capture3(env, 'git', '-C', dir, 'add', '.')
-      Open3.capture3(env, 'git', '-C', dir, 'commit', '--quiet', '-m', 'init')
+    def status_command(dir, state: 'current', exit_code: 0)
+      script = File.join(dir, 'source-status.sh')
+      File.write(script, <<~SH)
+        #!/bin/sh
+        printf '%s' "$1" > "#{dir}/status-argument"
+        printf '%s\\n' '#{JSON.generate(state: state)}'
+        exit #{exit_code}
+      SH
+      FileUtils.chmod(0o755, script)
+      base_env.merge('WOODS_HOOK_RAKE' => script)
     end
 
-    it 'does nothing when the hook has not been opted in, even when the index is stale' do
+    it 'does nothing until enabled and honors the disable override' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)
-        commit_something(dir)
-
-        out, = run_hook(session_start, { 'cwd' => dir, 'hook_event_name' => 'SessionStart' })
-        expect(out).to eq('')
+        env = status_command(dir, state: 'drifted')
+        [env.merge('WOODS_HOOKS_ENABLED' => '0'), env.merge('WOODS_HOOKS_DISABLED' => '1')].each do |disabled|
+          out, = run_hook(session_start, { 'cwd' => dir }, disabled)
+          expect(out).to eq('')
+          expect(File.exist?(File.join(dir, 'status-argument'))).to be(false)
+        end
       end
     end
 
-    it 'warns when the generation predates the last commit' do
+    it 'warns on content drift without relying on commit timestamps or a git checkout' do
       Dir.mktmpdir('woods-hook') do |dir|
-        make_app(dir)
-        commit_something(dir)
-
-        out, err, status = run_hook(session_start, { 'cwd' => dir, 'hook_event_name' => 'SessionStart' }, base_env)
-
+        make_app(dir, updated_at: (Time.now.utc + 60).iso8601)
+        out, err, status = run_hook(session_start, { 'cwd' => dir }, status_command(dir, state: 'drifted'))
         expect(status).to be_success, err
-        expect(out).to include('Woods index is stale')
-        expect(out).to include('woods:incremental')
+        expect(out).to include('source freshness is drifted', 'woods-extract full')
       end
     end
 
-    it 'honors WOODS_HOOKS_DISABLED even once enabled' do
+    it 'reports missing or failed verification as unknown rather than claiming current' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)
-        commit_something(dir)
-
-        out, = run_hook(session_start, { 'cwd' => dir, 'hook_event_name' => 'SessionStart' },
-                        base_env.merge('WOODS_HOOKS_DISABLED' => '1'))
-        expect(out).to eq('')
+        [status_command(dir, state: 'unknown'), status_command(dir, exit_code: 1)].each do |env|
+          out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(status).to be_success, err
+          expect(out).to include('source freshness is unknown')
+        end
       end
     end
 
-    it 'stays quiet when the generation is newer than the last commit, or when there is no index' do
+    it 'stays quiet for verified current source or no existing index' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)
-        commit_something(dir)
-        File.write(File.join(dir, 'tmp/woods/generation.json'),
-                   JSON.generate('number' => 4, 'token' => 'def', 'updated_at' => (Time.now.utc + 60).iso8601))
-
-        out, = run_hook(session_start, { 'cwd' => dir, 'hook_event_name' => 'SessionStart' }, base_env)
+        env = status_command(dir)
+        out, = run_hook(session_start, { 'cwd' => dir }, env)
         expect(out).to eq('')
-
+        FileUtils.rm_f(File.join(dir, 'status-argument'))
         FileUtils.rm_f(File.join(dir, 'tmp/woods/generation.json'))
-        out, = run_hook(session_start, { 'cwd' => dir, 'hook_event_name' => 'SessionStart' }, base_env)
+        out, = run_hook(session_start, { 'cwd' => dir }, env)
         expect(out).to eq('')
+        expect(File.exist?(File.join(dir, 'status-argument'))).to be(false)
       end
     end
 
-    it 'resolves the index directory from WOODS_OUTPUT instead of a hardcoded tmp/woods' do
+    it 'transports custom output and quick mode through the Docker-compatible task argument' do
       Dir.mktmpdir('woods-hook') do |dir|
-        make_app(dir, tmp_subdir: 'custom_output')
-        commit_something(dir)
-
-        out, err, status = run_hook(session_start, { 'cwd' => dir, 'hook_event_name' => 'SessionStart' },
-                                    base_env.merge('WOODS_OUTPUT' => File.join(dir, 'custom_output')))
-
+        output = "custom,a b\nc"
+        make_app(dir, tmp_subdir: output)
+        env = status_command(dir, state: 'drifted').merge('WOODS_OUTPUT' => output)
+        out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
         expect(status).to be_success, err
-        expect(out).to include('Woods index is stale')
+        expect(out).to include('source freshness is drifted')
+        task = File.read(File.join(dir, 'status-argument'))
+        expect(task).to start_with('woods:source_status[')
+        options = JSON.parse(Base64.strict_decode64(task.split('[', 2).last.delete_suffix(']')))
+        expect(options).to eq('output' => output, 'mode' => 'quick')
       end
     end
   end

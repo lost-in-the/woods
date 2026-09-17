@@ -57,6 +57,7 @@ require_relative 'flow_precomputer'
 require_relative 'change_set'
 require_relative 'generation'
 require_relative 'path_dispatcher'
+require_relative 'source_inputs/session'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -357,7 +358,7 @@ module Woods
     # flat index — the output root also holds `generation.json`, `dumps/`,
     # `tasks/`, `woods.sqlite3` and `payloads/` itself, none of which belong
     # to a generation's payload.
-    PAYLOAD_FILES = %w[manifest.json dependency_graph.json graph_analysis.json SUMMARY.md].freeze
+    PAYLOAD_FILES = %w[manifest.json source_inputs.json dependency_graph.json graph_analysis.json SUMMARY.md].freeze
 
     # Payload directories that are not per-type unit directories.
     PAYLOAD_DIRS = %w[flows].freeze
@@ -398,6 +399,7 @@ module Woods
     def extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       setup_output_directory
+      profile_phase('source capture') { begin_source_inputs('full') }
       ModelNameCache.reset!
       # @package_resolver alone is not enough: #package_resolver builds
       # through #extractor_for, which memoizes into @incremental_extractors.
@@ -501,6 +503,7 @@ module Woods
         write_structural_summary
       end
       profile_phase('snapshot') { capture_snapshot }
+      @source_inputs.full_units(@results, consumers: @extractors)
       publish_generation('full')
 
       log_summary
@@ -540,7 +543,7 @@ module Woods
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     def extract_changed(changed_files)
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
-      prepare_incremental_run
+      prepare_incremental_run(operation: 'incremental')
 
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       affected_types = Set.new
@@ -653,7 +656,7 @@ module Woods
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
       known.uniq!
 
-      prepare_incremental_run
+      prepare_incremental_run(operation: 'refresh')
       affected_types = Set.new
       touched = known.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
@@ -774,7 +777,8 @@ module Woods
     #
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
-    def prepare_incremental_run
+    def prepare_incremental_run(operation: 'incremental')
+      profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
       ensure_incremental_baseline!(graph_path)
@@ -860,6 +864,7 @@ module Woods
       # Resolve (and if necessary rename) the payload first, so the flush
       # below covers the directory under the name the pointer will carry.
       payload = publishable_payload_name(generation)
+      profile_phase('source verification') { write_source_inputs } if payload
       profile_phase('payload sync') { sync_payload }
       marker = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
       profile_phase('payload prune') { prune_payloads(marker.number) }
@@ -879,6 +884,38 @@ module Woods
       )
       Rails.logger.error "[Woods] #{@publication_error.message}"
       nil
+    end
+
+    # Capture before eager loading or extraction; only an explicit fresh-launch
+    # handoff can additionally establish the pre-Bundler/Rails boot boundary.
+    def begin_source_inputs(operation)
+      @source_inputs = SourceInputs::Session.new(root: Rails.root, output_dir: @output_dir,
+                                                 baseline_path: source_input_baseline_path,
+                                                 operation: operation)
+    end
+
+    def source_input_baseline_path
+      generation = Generation.new(output_dir: @output_dir)
+      marker = generation.current
+      directory = generation.payload_dir(marker)
+      return nil unless marker.payload && directory != generation.root
+
+      directory.join(SourceInputs::Manifest::FILE_NAME)
+    rescue TypeError, NoMethodError
+      nil
+    end
+
+    def source_consumer_failed?(key, consumer = extractor_for(key))
+      failed = consumer.nil? || SourceInputs::ConsumerErrors.failed?(consumer)
+      @source_inputs&.unverified("extractor:#{key}") if failed
+      failed
+    end
+
+    def write_source_inputs
+      return unless @source_inputs
+
+      manifest = @source_inputs.finish(generation: @payload_generation, eager_load_complete: @eager_load_complete)
+      AtomicFile.write(payload_dir.join(SourceInputs::Manifest::FILE_NAME), JSON.pretty_generate(manifest.data))
     end
 
     # Open the payload directory this run publishes into, seeded from the
@@ -2700,6 +2737,7 @@ module Woods
 
       @incremental_extractors[key] = EXTRACTORS[key]&.new
     rescue StandardError => e
+      @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.warn "[Woods] Could not build #{key} extractor: #{e.message}"
       @incremental_extractors[key] = nil
     end
@@ -2761,6 +2799,10 @@ module Woods
           # one method over — CORE-1).
           produced.merge(units.map { |unit| [unit.identifier, unit.type] })
           touched.merge(register_and_write(rule.extractor_key, units, affected_types))
+          unless source_consumer_failed?(rule.extractor_key)
+            @source_inputs&.consume_file(rule.extractor_key,
+                                         absolute_path)
+          end
         end
 
         next if raised
@@ -2789,7 +2831,10 @@ module Woods
       # on every changed path of that type, with the generation bumped over
       # the loss. Construction failure tells us nothing about the path; only
       # a genuinely constructed extractor that lacks the method earns the [].
-      return nil if extractor.nil?
+      if extractor.nil?
+        source_consumer_failed?(rule.extractor_key, extractor)
+        return nil
+      end
       return [] unless extractor.respond_to?(rule.method_name)
 
       result =
@@ -2804,6 +2849,7 @@ module Woods
 
       Array(result).compact
     rescue StandardError => e
+      @source_inputs&.unverified("extractor:#{rule.extractor_key}")
       Rails.logger.warn "[Woods] #{rule.extractor_key} re-extraction of #{absolute_path} failed: #{e.message}"
       # `nil`, not `[]`. The caller treats an empty result as "this path defines
       # nothing any more" and prunes the units previously registered to it — so
@@ -2979,10 +3025,12 @@ module Woods
       units = new_classes.filter_map do |klass|
         extractor_for(key).public_send(spec[:method], klass)
       rescue StandardError => e
+        @source_inputs&.unverified("extractor:#{key}")
         Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
         nil
       end
 
+      source_consumer_failed?(key)
       register_and_write(key, units, affected_types)
     end
 
@@ -3117,6 +3165,10 @@ module Woods
     #   mutating durable state
     def replace_type_wholesale(key, affected_types)
       extractor = extractor_for(key)
+      if extractor.nil?
+        source_consumer_failed?(key, extractor)
+        return Set.new
+      end
       return Set.new unless extractor.respond_to?(:extract_all)
 
       @wholesale_mutations = 0
@@ -3125,6 +3177,8 @@ module Woods
 
       touched = register_and_write(key, units, affected_types)
       touched.merge(remove_replaced_units(key, units, affected_types))
+      @source_inputs&.consume_extractor(key, units) unless source_consumer_failed?(key, extractor)
+      touched
     rescue StandardError => e
       if @wholesale_mutations.to_i.positive?
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -3137,6 +3191,7 @@ module Woods
         MSG
       end
 
+      @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
       Set.new
     end
@@ -3298,6 +3353,7 @@ module Woods
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
+        @source_inputs&.consume_deleted(path)
       end
     end
 
@@ -3401,6 +3457,7 @@ module Woods
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
+        @source_inputs&.consume_unit(extractor_key, unit.file_path) unless source_consumer_failed?(extractor_key)
         written.add(unit.identifier)
       end
     end
@@ -3661,11 +3718,15 @@ module Woods
       return nil unless extractor_key
 
       extractor = extractor_for(extractor_key)
-      return nil unless extractor
+      if extractor.nil?
+        source_consumer_failed?(extractor_key, extractor)
+        return nil
+      end
 
       # File-based extractors can return several units from one file (a .rake
       # file defining multiple tasks, etc.); class-based extractors return one.
       units = Array(re_extracted_units(extractor, type, unit_id, file_path, extractor_key)).compact
+      source_consumer_failed?(extractor_key, extractor)
       return nil if units.empty?
 
       register_and_write(extractor_key, units, affected_types)

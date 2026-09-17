@@ -11,6 +11,7 @@ require_relative '../generation'
 require_relative '../published_index'
 require_relative 'graph_invariant_validator'
 require_relative 'index_validator/graph_checks'
+require_relative '../source_inputs/manifest'
 
 module Woods
   module Resilience
@@ -131,6 +132,22 @@ module Woods
 
         warn_unresolvable_paths(warnings, unresolvable)
         validate_dependency_graph(payload, errors)
+        validate_source_inputs(payload, errors)
+      end
+
+      # Optional for old generations; malformed new provenance is an artifact
+      # integrity error. Source drift itself is advisory and belongs to status.
+      def validate_source_inputs(payload, errors)
+        path = File.join(payload, SourceInputs::Manifest::FILE_NAME)
+        return unless File.exist?(path)
+
+        File.open(path, File::RDONLY | File::NONBLOCK) do |file|
+          raise SourceInputs::Manifest::Invalid unless file.stat.file?
+
+          SourceInputs::Manifest.parse(file.read(SourceInputs::Manifest::MAX_BYTES + 1))
+        end
+      rescue SourceInputs::Manifest::Invalid, SystemCallError, IOError
+        errors << 'Invalid source_inputs.json provenance artifact'
       end
 
       def read_validation_manifest(path, errors)

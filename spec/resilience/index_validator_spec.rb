@@ -30,6 +30,15 @@ RSpec.describe Woods::Resilience::IndexValidator do
   end
 
   describe '#validate' do
+    it 'rejects malformed optional source provenance while accepting its absence' do
+      write_json('manifest.json', { 'counts' => {} })
+      write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })
+      expect(described_class.new(index_dir: tmp_dir).validate).to be_valid
+      write_json('source_inputs.json', { 'version' => 1 })
+      errors = described_class.new(index_dir: tmp_dir).validate.errors
+      expect(errors).to include('Invalid source_inputs.json provenance artifact')
+    end
+
     context 'with manifest writer-version provenance (#323)' do
       before do
         write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })

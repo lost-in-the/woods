@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
@@ -69,7 +71,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract policy #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract policy #{file_path}: #{e.message}")
         nil
       end
 

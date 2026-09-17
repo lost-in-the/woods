@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'woods/source_inputs/launcher'
+exit Woods::SourceInputs::Launcher.run(ARGV)

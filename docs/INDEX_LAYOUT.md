@@ -21,6 +21,7 @@ A typical structural index looks like this; optional entries need not exist:
 ├── payloads/
 │   └── gen-42/
 │       ├── manifest.json
+│       ├── source_inputs.json          # optional on older indexes
 │       ├── dependency_graph.json
 │       ├── graph_analysis.json
 │       ├── SUMMARY.md
@@ -65,6 +66,7 @@ gates below deliberately fail more strictly.
 | Artifact | Presence and meaning |
 |---|---|
 | `manifest.json` | Required for a complete structural publication. Counts by extractor directory, totals, extraction timestamp and provenance. Optional fields vary by writer/version; see [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance). |
+| `source_inputs.json` | Versioned source-input identities and per-consumer provenance for this exact generation; old indexes may omit it. See [source freshness](SOURCE_FRESHNESS.md). |
 | `dependency_graph.json` | Required for a complete structural publication. Typed graph data; an empty graph is valid. |
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
 | `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. |
@@ -178,6 +180,10 @@ have separate lifecycles. Their presence is configuration-dependent. Do not glob
 them into a structural payload or assume `generation.json` commits them together.
 A semantic/MCP deployment also needs its configured stores and artifacts; copying
 a structural payload alone does not clone that deployment.
+
+`<output>/.source-inputs.key` is private operational state used to verify source
+identities. Never include it in a published/exported structural snapshot; without
+it, a recipient can still read the index but source freshness is unknown.
 
 Temporary filenames, abandoned payloads, lock sidecars, retained-directory counts,
 and summary formatting are implementation details. Never remove or modify locks

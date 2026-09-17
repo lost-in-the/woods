@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative '../extracted_unit'
 
 module Woods
@@ -268,7 +270,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract Rails source #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract Rails source #{file_path}: #{e.message}")
         nil
       end
 
@@ -302,7 +304,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract gem source #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract gem source #{file_path}: #{e.message}")
         nil
       end
 

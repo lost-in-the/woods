@@ -15,7 +15,9 @@ require 'uri'
 
 module PackagedGemSpec
   ROOT = File.expand_path('../..', __dir__)
-  EXECUTABLES = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console woods-mcp-http woods-agent-config].freeze
+  EXECUTABLES = %w[
+    woods-mcp woods-mcp-start woods-console-mcp woods-console woods-mcp-http woods-agent-config woods-extract
+  ].freeze
   COMMUNITY_FILES = %w[
     LICENSE.txt
     README.md
@@ -246,6 +248,13 @@ RSpec.describe 'packaged gem' do
       expect(status).to be_success, stderr
       expect(stdout).to include('setup|update|remove', '--client claude', '--scope project|user')
       expect(stderr).to be_empty
+    end
+
+    it 'loads the fresh extraction CLI from the installed artifact without Rails initialization' do
+      executable = File.join(@smoke_gem_home, 'bin', 'woods-extract')
+      stdout, stderr, status = Open3.capture3(smoke_env, executable, '--help', chdir: @package_tmp)
+      expect(status).to be_success, stderr
+      expect(stdout).to include('full | incremental PATH... | refresh TYPE...', '--source-root PATH')
     end
 
     it 'boots the installed woods-mcp and answers an initialize request with protocol-pure stdout' do

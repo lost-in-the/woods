@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require 'yaml'
 require 'pathname'
 
@@ -69,7 +71,7 @@ module Woods
         unit.dependencies = dependencies.map { |dep| { type: :package, target: dep, via: :package_dependency } }
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract package from #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract package from #{file_path}: #{e.message}")
         nil
       end
 
@@ -139,6 +141,7 @@ module Woods
         data = YAML.safe_load_file(path, permitted_classes: [Symbol], aliases: true)
         data.is_a?(Hash) ? data : {}
       rescue StandardError => e
+        SourceInputs::ConsumerErrors.record(self)
         Rails.logger.warn("[Woods] Could not read #{PACKWERK_CONFIG}: #{e.message}")
         {}
       end

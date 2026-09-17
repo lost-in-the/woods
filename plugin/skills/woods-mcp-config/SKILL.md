@@ -164,3 +164,15 @@ errors; unsupported custom vector adapters degrade instead of running a global
 query. Scoping can hide relevant cross-boundary relationships, so broaden the
 request deliberately when the task needs them. See the
 [scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).
+
+## Source-content freshness (unreleased #405)
+
+Check installed-version support before using `woods-extract` or the optional
+`woods_status.source_check` argument. With support, inspect
+`index.source_freshness`: `current`, `drifted` or `unknown`. Repeated edits to an
+already-dirty file can leave the porcelain fingerprint unchanged. A quick scan
+limit may justify one `source_check: "deep"`; unavailable source/private keys or
+unproved boot/consumer coverage remain unknown. A fresh `bundle exec woods-extract full`
+inside the application environment establishes preboot evidence. Never publish
+`.source-inputs.key`, silently change its permissions, or delete queued edits to
+hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).

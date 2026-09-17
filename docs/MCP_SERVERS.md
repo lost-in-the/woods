@@ -352,3 +352,12 @@ arguments, not configuration settings. Inspect applied scope and completeness;
 a narrow graph query can omit relevant cross-boundary dependencies. See the
 [scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
 root/nested ownership, path normalization, errors, storage support, and cost.
+
+### Source freshness in status
+
+`woods_status` accepts optional `source_check: "quick"` (default, 250ms scan) or
+`"deep"` (five seconds). `index.source_freshness` describes the served generation
+as `current`, `drifted` or `unknown`; missing source/key and incomplete capture
+never count as current. No Rails initialization or provider call is needed.
+See [source freshness](SOURCE_FRESHNESS.md) for scope, private-key handling and
+fresh-process extraction. Existing HEAD/dirty fields remain separate diagnostics.

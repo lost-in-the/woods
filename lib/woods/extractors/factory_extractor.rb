@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -53,7 +55,7 @@ module Woods
 
         factories.map { |factory_data| build_unit(factory_data, file_path, source) }
       rescue StandardError => e
-        Rails.logger.error("Failed to extract factories from #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract factories from #{file_path}: #{e.message}")
         []
       end
 

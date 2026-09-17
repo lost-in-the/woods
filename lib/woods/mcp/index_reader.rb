@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative '../generation'
+require_relative '../source_inputs/status'
 require_relative 'search_results'
 require_relative '../retrieval/scope'
 
@@ -311,6 +312,15 @@ module Woods
       def payload_dir
         ensure_fresh!
         current_payload_dir
+      end
+
+      # Verify the immutable payload this reader is actually serving. Do not
+      # cache source results: an edit can occur without an index generation move.
+      def source_freshness(mode: 'quick')
+        with_pinned_generation do
+          SourceInputs::Status.new(output_dir: @index_dir, payload_dir: current_payload_dir,
+                                   generation: @payload_dir ? @loaded_generation : 0, mode: mode).call
+        end
       end
 
       # @return [Hash] Parsed manifest.json

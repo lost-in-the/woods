@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
@@ -120,8 +122,8 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
-        Rails.logger.error("[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
+        SourceInputs::ConsumerErrors.log(self, "[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
         nil
       end
 
