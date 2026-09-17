@@ -84,6 +84,12 @@ The diff itself is rooted at the extracted application (`git -C Rails.root`),
 so it cannot read whatever checkout the process happened to start in — the
 same rooting rule the manifest's git provenance follows.
 
+Named, source-defined app modules included by runtime models are tracked as concern units even
+outside `concerns/` directories. Changing their source refreshes their includers,
+including inlined code and callback analysis. Multiple runtime mixins sharing a source
+file retain separate identities and refresh all their includers. Run a full extraction after upgrading
+to populate these previously missing source mappings.
+
 ## What a run does, in order
 
 `Extractor#extract_changed` is order-sensitive; each step exists because of the
@@ -187,7 +193,8 @@ automatically.
 | `app/decorators`, `app/presenters`, `app/form_objects` | decorators |
 | `app/managers` / `app/policies` / `app/validators` | managers / policies + pundit_policies / validators |
 | `app/**/concerns/**/*.rb` | concerns |
-| `app/models/**/*.rb` (outside `concerns/`) | poros, caching |
+| `app/models/**/*.rb` (outside `concerns/`) | poros, caching; concerns when runtime model inclusion confirms a mixin |
+| `app/**/*.rb`, `lib/**/*.rb` (outside `concerns/`) | runtime model mixins also dispatch to concerns |
 | `app/controllers/**/*.rb` | caching |
 | `app/views/**/*.erb` | view_templates, caching |
 | `config/locales/**/*.yml` | i18n |

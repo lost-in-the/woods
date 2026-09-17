@@ -24,6 +24,21 @@ RSpec.describe Woods::Extractor do
 
   let(:extractor) { described_class.new(output_dir: File.join(tmpdir, 'output')) }
 
+  describe '#reconcile_model_mixins' do
+    it 'retains runtime mixins missing from incomplete eager-load discovery' do
+      concerns = double('ConcernExtractor', runtime_model_mixins: {})
+      extractor.instance_variable_set(:@incremental_extractors, { concerns: concerns })
+      extractor.instance_variable_set(:@eager_load_complete, false)
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :concern, identifier: 'Card::Pinnable',
+                                 file_path: rails_root.join('app/models/card/pinnable.rb').to_s)
+      )
+
+      expect(extractor.send(:reconcile_model_mixins, Set.new)).to be_empty
+      expect(extractor.dependency_graph.node_types('Card::Pinnable')).to include(:concern)
+    end
+  end
+
   describe '#raise_on_publication_failure!' do
     let(:output_dir) { File.join(tmpdir, 'output') }
     let(:generation) { Woods::Generation.new(output_dir: output_dir) }

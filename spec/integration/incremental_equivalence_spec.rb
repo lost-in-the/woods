@@ -156,6 +156,122 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Rails.application.reload_routes!
   end
 
+  it 'tracks nested model mixins through body and callback edits' do
+    model_path = write_file('app/models/pinned_record.rb', <<~RUBY)
+      class PinnedRecord < ApplicationRecord
+        self.table_name = 'posts'
+      end
+    RUBY
+    load app_path(model_path)
+    mixin_path = 'app/models/pinned_record/pinnable.rb'
+    source = <<~RUBY
+      module PinnedRecord::Pinnable
+        extend ActiveSupport::Concern
+        included do
+          before_save :set_pin
+        end
+        def set_pin
+          self.title = 'original pin'
+        end
+      end
+    RUBY
+    write_file(mixin_path, source)
+    load app_path(mixin_path)
+    PinnedRecord.include(PinnedRecord::Pinnable)
+    # Keep the reflected inclusion in the model source as it would be on disk.
+    File.open(app_path(model_path), 'a') { |file| file.puts('PinnedRecord.include(PinnedRecord::Pinnable)') }
+    baseline = full_extraction
+    unit = Woods::Extractors::ModelExtractor.new.extract_model(PinnedRecord)
+    expect(unit.source_code).to include('original pin')
+    payload = Woods::Generation.new(output_dir: baseline).payload_dir
+    graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+    expect(graph.identifiers_for_path(app_path(mixin_path))).to include('PinnedRecord::Pinnable')
+
+    %w[body callback].each do |change|
+      source = source.sub('original pin', 'changed pin') if change == 'body'
+      source = source.sub('before_save', 'before_validation') if change == 'callback'
+      write_file(mixin_path, source)
+      PinnedRecord.reset_callbacks(:save) if change == 'callback'
+      # Reopen the same runtime module, as Rails reload would refresh its methods.
+      PinnedRecord::Pinnable.remove_instance_variable(:@_included_block)
+      load app_path(mixin_path)
+      PinnedRecord.class_eval(&PinnedRecord::Pinnable.instance_variable_get(:@_included_block))
+      Woods::Extractor.new(output_dir: baseline).extract_changed([mixin_path])
+      expect(differences(baseline, full_extraction)).to be_empty
+    end
+
+    # Removing the last include changes only the model file. The orphan
+    # runtime-only concern must leave discovery even though its file remains.
+    PinnedRecord.abstract_class = true
+    Object.send(:remove_const, :PinnedRecord)
+    model_source = File.read(app_path(model_path)).sub("PinnedRecord.include(PinnedRecord::Pinnable)\n", '')
+    write_file(model_path, model_source)
+    load app_path(model_path)
+    Woods::Extractor.new(output_dir: baseline).extract_changed([model_path])
+    expect(differences(baseline, full_extraction)).to be_empty
+
+    # Adding an include likewise discovers the untouched mixin source.
+    load app_path(mixin_path)
+    PinnedRecord.include(PinnedRecord::Pinnable)
+    write_file(model_path, "#{model_source}PinnedRecord.include(PinnedRecord::Pinnable)\n")
+    Woods::Extractor.new(output_dir: baseline).extract_changed([model_path])
+    expect(differences(baseline, full_extraction)).to be_empty
+  ensure
+    if Object.const_defined?(:PinnedRecord)
+      PinnedRecord.abstract_class = true
+      Object.send(:remove_const, :PinnedRecord)
+    end
+  end
+
+  it 'refreshes every includer when runtime mixins share a source file' do
+    mixin_path = 'app/models/shared_runtime_mixins.rb'
+    source = <<~RUBY
+      module SharedRuntimeMixins
+        module First
+          def audit_value
+            'original first'
+          end
+        end
+        module Second
+          def audit_value
+            'original second'
+          end
+        end
+      end
+    RUBY
+    write_file(mixin_path, source)
+    load app_path(mixin_path)
+    %w[First Second].each do |name|
+      path = write_file("app/models/#{name.downcase}_audit_record.rb", <<~RUBY)
+        class #{name}AuditRecord < ApplicationRecord
+          self.table_name = 'posts'
+          include SharedRuntimeMixins::#{name}
+        end
+      RUBY
+      load app_path(path)
+    end
+    baseline = full_extraction
+    payload = Woods::Generation.new(output_dir: baseline).payload_dir
+    graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+    expect(graph.identifiers_for_path(app_path(mixin_path))).to include(
+      'SharedRuntimeMixins::First', 'SharedRuntimeMixins::Second'
+    )
+
+    write_file(mixin_path, source.gsub('original', 'changed'))
+    load app_path(mixin_path)
+    touched = Woods::Extractor.new(output_dir: baseline).extract_changed([mixin_path])
+    expect(touched).to include('FirstAuditRecord', 'SecondAuditRecord')
+    expect(differences(baseline, full_extraction)).to be_empty
+  ensure
+    %i[FirstAuditRecord SecondAuditRecord].each do |name|
+      next unless Object.const_defined?(name)
+
+      Object.const_get(name).abstract_class = true
+      Object.send(:remove_const, name)
+    end
+    Object.send(:remove_const, :SharedRuntimeMixins) if Object.const_defined?(:SharedRuntimeMixins)
+  end
+
   # ── Tree mutation ────────────────────────────────────────────────────────
 
   def app_path(relative)

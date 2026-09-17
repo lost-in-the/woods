@@ -12,7 +12,7 @@ RSpec.describe Woods::PathDispatcher do
 
   describe '#file_rules_for' do
     it 'routes a service file to the service extractor' do
-      expect(keys_for('app/services/checkout.rb')).to eq([:services])
+      expect(keys_for('app/services/checkout.rb')).to eq(%i[services concerns])
     end
 
     it 'routes every directory a multi-directory extractor claims' do
@@ -23,18 +23,18 @@ RSpec.describe Woods::PathDispatcher do
 
     it 'routes a path claimed by two extractors to both' do
       # app/policies is scanned by PolicyExtractor and PunditExtractor alike.
-      expect(keys_for('app/policies/post_policy.rb')).to contain_exactly(:policies, :pundit_policies)
+      expect(keys_for('app/policies/post_policy.rb')).to contain_exactly(:policies, :pundit_policies, :concerns)
     end
 
     it 'routes a nested concern outside the canonical directories' do
       expect(keys_for('app/models/gateway/stripe/concerns/retryable.rb')).to include(:concerns)
     end
 
-    it 'routes an app/models file to the PORO and caching extractors, not to concerns' do
+    it 'routes an app/models file through the runtime mixin guard as well as PORO and caching' do
       keys = keys_for('app/models/value_object.rb')
 
       expect(keys).to include(:poros, :caching)
-      expect(keys).not_to include(:concerns)
+      expect(keys).to include(:concerns)
     end
 
     it 'keeps concerns out of the PORO extractor' do

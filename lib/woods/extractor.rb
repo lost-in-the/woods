@@ -565,6 +565,7 @@ module Woods
 
       profile_phase('reconciliation') do
         touched.merge(reconcile_class_based_types(affected_types))
+        touched.merge(reconcile_model_mixins(affected_types))
         touched.merge(rerun_whole_app_extractors(change_set, affected_types))
         touched.merge(reannotate_packages(change_set, affected_types))
         pruned = prune_vanished_units(change_set, affected_types)
@@ -2849,6 +2850,34 @@ module Woods
         touched.merge(remove_stale_classes(spec, discovered, known, affected_types))
       end
 
+      touched
+    end
+
+    # Runtime-only model mixins can enter or leave discovery when their
+    # includer changes, even if the mixin file itself is untouched.
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] Added or removed concern identifiers
+    def reconcile_model_mixins(affected_types)
+      extractor = extractor_for(:concerns)
+      return Set.new unless extractor.respond_to?(:runtime_model_mixins)
+
+      live = extractor.runtime_model_mixins
+      known = @dependency_graph.units_of_type(:concern).to_set
+      added = live.flat_map do |path, modules|
+        next [] if modules.all? { |mod| known.include?(mod.name) }
+
+        Array(extractor.extract_model_mixin_file(path)).reject { |unit| known.include?(unit.identifier) }
+      end
+      touched = register_and_write(:concerns, added, affected_types)
+      return touched unless @eager_load_complete
+
+      live_names = live.values.flatten.to_set(&:name)
+      known.each do |identifier|
+        path = @dependency_graph.node(identifier, type: :concern)[:file_path]
+        next if extractor.conventional_concern_path?(path) || live_names.include?(identifier)
+
+        touched.add(identifier) if remove_unit(identifier, affected_types, type: :concern)
+      end
       touched
     end
 
