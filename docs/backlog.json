@@ -2702,6 +2702,18 @@
     "status": "resolved"
   },
   {
+    "id": "B-198",
+    "title": "Preserve embedded NUL in literal metadata search",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/metadata_store.rb"
+    ],
+    "description": "Resolved #355: replace SQLite LIKE with lower/instr substring matching so queries containing NUL cannot broaden and strings after NUL remain searchable. Shared adapter regressions cover NUL queries, suffixes, spanning matches, ordinary controls, and the serialized JSON all-fields contract. ASCII case folding and literal wildcard behavior remain unchanged.",
+    "status": "resolved"
+  },
+  {
     "id": "B-197",
     "title": "Count retrieval tokens after final context postprocessing",
     "severity": "medium",

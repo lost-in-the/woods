@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeping `tokens_used` and its trace consistent with the configured counter
   or estimate (B-197, #354).
 
+- Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
+
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
 
 ### Added

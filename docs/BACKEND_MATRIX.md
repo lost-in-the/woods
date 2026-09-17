@@ -290,6 +290,11 @@ Whole-record search (`fields: nil`) searches serialized JSON, including keys.
 - Single writer at a time
 - No network access
 
+Metadata search uses literal, ASCII-case-insensitive substring matching. Selected
+string fields include embedded NUL characters in the searchable text. With no
+field selection, search operates on serialized JSON, where NUL is represented
+as `\u0000`; a literal NUL query therefore does not match that escaped text.
+
 ### In-memory
 
 **Best for:** Testing, evaluation, small codebases.
