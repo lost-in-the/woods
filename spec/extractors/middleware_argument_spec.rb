@@ -18,6 +18,28 @@ RSpec.describe Woods::Extractors::MiddlewareArgument do
     expect(described_class.render(first)).not_to eq(described_class.render(second))
   end
 
+  it 'renders temporary class names structurally while preserving literal name strings' do
+    first = Class.new(String)
+    second = Class.new(String)
+    [first, second].each_with_index do |klass, index|
+      temporary_name = "Executor(#<Application:0x#{index + 1}abc>)"
+      if klass.respond_to?(:set_temporary_name)
+        klass.set_temporary_name(temporary_name)
+      else
+        allow(klass).to receive(:name).and_return(temporary_name)
+      end
+      expect(described_class.render(temporary_name)).to eq(temporary_name)
+    end
+    expect(described_class.render(first)).to eq('#<anonymous Class < String>')
+    expect(described_class.render(second)).to eq(described_class.render(first))
+  end
+
+  it 'preserves Ruby constant names containing Unicode characters' do
+    klass = Class.new
+    stub_const('MiddlewareÉclair', klass)
+    expect(described_class.render(klass)).to eq('MiddlewareÉclair')
+  end
+
   it 'describes opaque default objects by class without enumerating their instance variables' do
     object = Object.new
     object.instance_variable_set(:@secret, 'not-public')

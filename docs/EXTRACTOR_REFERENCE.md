@@ -295,7 +295,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Extracts the entire stack as one unit (not one per middleware)
 - Records middleware class names, insertion order, and initialization arguments as readable strings
-- Argument rendering preserves literal strings and nested array/hash configuration. Procs use source locations; anonymous classes use parent names and method source locations. Opaque objects using Ruby's default `to_s` are represented by class, without walking private runtime state. Custom `to_s` output is preserved, so application-defined nondeterministic renderers can still vary. Closure captures and opaque object internals are not serialized.
+- Argument rendering preserves literal strings and nested array/hash configuration. Procs use source locations; anonymous classes (including Ruby temporary names used by Rails executors/reloaders) use parent names and method source locations. Opaque objects using Ruby's default `to_s` are represented by class, without walking private runtime state. Custom `to_s` output is preserved, so application-defined nondeterministic renderers can still vary. Closure captures and opaque object internals are not serialized.
 - No per-file mapping, so incremental re-extraction re-runs `MiddlewareExtractor` wholesale when `config/application.rb`, `Gemfile.lock`, or a file under `config/initializers`/`config/environments` changes
 
 ---

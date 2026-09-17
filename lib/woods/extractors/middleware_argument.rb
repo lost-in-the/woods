@@ -35,7 +35,7 @@ module Woods
       end
 
       def module_name(value)
-        return value.name if value.name && !value.name.empty?
+        return value.name if constant_path?(value.name)
 
         parent = value.is_a?(Class) ? " < #{module_name(value.superclass)}" : ''
         methods = (value.instance_methods(false) + value.private_instance_methods(false)).uniq.sort.map do |name|
@@ -43,7 +43,23 @@ module Woods
         end
         "#<anonymous #{value.class}#{parent}#{" (#{methods.join(', ')})" unless methods.empty?}>"
       end
-      private_class_method :module_name
+
+      # Ruby temporary names are explicitly not constant paths and can contain
+      # runtime identities (Rails 8.2 uses these for executor/reloader classes).
+      # Validate each segment with Ruby itself, including Unicode constants,
+      # against an empty namespace: never resolve or autoload application names.
+      def constant_path?(name)
+        return false if name.nil? || name.empty?
+
+        namespace = Module.new
+        name.split('::', -1).all? do |segment|
+          namespace.const_defined?(segment, false)
+          true
+        end
+      rescue NameError
+        false
+      end
+      private_class_method :module_name, :constant_path?
     end
   end
 end
