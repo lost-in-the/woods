@@ -196,6 +196,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Scans: `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`
 - Extracts public entry points (`call`, `perform`, `execute`, `run`), custom error classes, and dependency references
 - File-based discovery (not class introspection), so it catches services with non-standard superclasses
+- `initialize_params` describes declared names, default presence and keyword status from Ruby syntax. Nested/comma-bearing defaults are not evaluated or treated as parameters; named rest, keyword-rest and block parameters retain their names. Anonymous forwarding has no name to report; malformed source produces an empty parameter list.
 
 **Example output (abbreviated):**
 
@@ -220,6 +221,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Scans: `app/jobs`, `app/workers`, `app/sidekiq`
 - Extracts queue name, retry configuration, concurrency options, perform method arguments, and callbacks
+- `perform_params` uses the same syntax-aware signature parsing as service initializers and preserves its `name`, `splat` (`single`/`double`/null), and `has_default` fields. Keyword defaults do not invent additional argument names.
 - Records what triggers this job (reverse lookup via dependency graph after extraction)
 - Supports both ActiveJob and Sidekiq native workers
 

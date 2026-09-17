@@ -472,6 +472,51 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
       expect(utility.extract_initialize_params(source)).to eq([])
     end
 
+    it 'returns only declared parameters with comma-bearing defaults, keywords and block/splats' do
+      source = <<~RUBY
+        def initialize(user_id, values = [1, 2], *rest, required:, notify: true, client: Client.new(1, 2), **options, &block)
+        end
+      RUBY
+      expect(utility.extract_initialize_params(source)).to eq([
+                                                                { name: 'user_id', has_default: false, keyword: false },
+                                                                { name: 'values', has_default: true, keyword: false },
+                                                                { name: 'rest', has_default: false, keyword: false },
+                                                                { name: 'required', has_default: false, keyword: true },
+                                                                { name: 'notify', has_default: true, keyword: true },
+                                                                { name: 'client', has_default: true, keyword: true },
+                                                                { name: 'options', has_default: false, keyword: true },
+                                                                { name: 'block', has_default: false, keyword: false }
+                                                              ])
+    end
+
+    it 'accepts an unparenthesized signature and ignores defaults containing apparent declarations' do
+      source = <<~RUBY
+        # def initialize(phantom)
+        def initialize name, message: "def initialize(fake, extra)", options: { a: 1, b: 2 }
+        end
+      RUBY
+      expect(utility.extract_initialize_params(source).map { |param| param[:name] }).to eq(%w[name message options])
+    end
+
+    it 'skips singleton-class definitions and handles destructured declarations without evaluating defaults' do
+      source = <<~RUBY
+        class << self
+          def initialize(fake); end
+        end
+        def initialize((first, second), callback: ->(ignored) { raise 'never run' }, **nil)
+        end
+      RUBY
+      # **nil cannot accompany keywords; malformed signatures produce no claims.
+      expect(utility.extract_initialize_params(source)).to eq([])
+      valid = source.sub(', **nil', '')
+      expect(utility.extract_initialize_params(valid).map { |param| param[:name] }).to eq(%w[first second callback])
+    end
+
+    it 'does not borrow a singleton initializer signature' do
+      source = 'class Example; def self.initialize(fake); end; def initialize(actual); end; end'
+      expect(utility.extract_initialize_params(source)).to eq([{ name: 'actual', has_default: false, keyword: false }])
+    end
+
     it 'extracts positional parameters' do
       source = <<~RUBY
         class Foo
