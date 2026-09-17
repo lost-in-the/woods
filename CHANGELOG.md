@@ -145,6 +145,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Clarify the existing search-regex timeout exclusion: Ruby 3.0/3.1 remain
+  supported without a per-match time bound. Run the Index MCP process on Ruby
+  3.2+ for the one-second per-match limit; no runtime mitigation was added
+  for older interpreters (B-161).
+
 - Reduce payload-clone allocation and traversal overhead while preserving
   hardlinks, copy fallback and immutable generation ownership (#305).
 - Make extraction profiling additive: report git enrichment, reconciliation,
