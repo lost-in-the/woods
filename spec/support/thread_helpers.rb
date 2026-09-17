@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'timeout'
+
 module ThreadHelpers
   # Capture threads spawned during the block and join them with a timeout.
   # Uses and_wrap_original to intercept Thread.new without breaking thread creation.
@@ -36,6 +38,26 @@ module ThreadHelpers
             "#{timeout}s. Assertions after this point would describe work that has not finished."
     end
   end
+
+  # Preserve a barrier's timeout while recording why its producer never
+  # reached it. Never join a live producer: it may be waiting on the very
+  # lock whose exclusion the example is testing.
+  def wait_for_thread_signal(queue, timeout: 1, **threads)
+    Timeout.timeout(timeout) { queue.pop }
+  rescue Timeout::Error => e
+    details = threads.map { |name, thread| "#{name}: #{thread_signal_diagnostic(thread)}" }
+    raise Timeout::Error, "Signal timed out after #{timeout}s\n#{details.join("\n")}", e.backtrace
+  end
+
+  def thread_signal_diagnostic(thread)
+    status = thread.status
+    return "status=#{status.inspect}\n#{Array(thread.backtrace).join("\n")}" if status
+
+    "status=#{status.inspect} completed_response=#{thread.value.inspect}"
+  rescue StandardError => e
+    "status=#{status.inspect} exception=#{e.class}: #{e.message}\n#{Array(e.backtrace).join("\n")}"
+  end
+  private :thread_signal_diagnostic
 
   # Poll a condition block until it returns truthy, with configurable timeout.
   # Replaces sleeps in thread-based specs with deterministic polling.
