@@ -84,6 +84,40 @@ Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
 
+### Reverse relationship records
+
+New writers add `reverse_via` to `dependency_graph.json`. Each target identifier
+maps to its incoming relationship records, including the owning source type:
+
+```json
+{
+  "reverse": { "Gadget": ["Widget"] },
+  "reverse_via": {
+    "Gadget": [{ "source": "Widget", "source_type": "service", "via": "render" }]
+  }
+}
+```
+
+The existing `reverse` arrays retain their bare identifiers. `reverse_via` includes
+edges from primary nodes and typed variants; several records can share a source
+and target while differing in type, relationship, or association attributes.
+Optional `through`, `through_db`, and `disable_joins` values match the forward
+edge. A `null` relationship means unknown legacy evidence. Target type remains
+unresolved when the target identifier belongs to multiple types; the source type
+does not resolve that ambiguity.
+
+These are recorded dependencies, not proof that changing a target breaks every
+source. For example, `factory_for` and migration `reference` edges describe
+different relationships from a runtime `render` edge. Consumers can inspect one
+target bucket without scanning the whole forward graph. Buckets and records are
+deterministically ordered, but consumers should treat the ordering as incidental.
+
+Older graphs omit `reverse_via`; absence means relationship detail must be derived
+from forward edges and variants, not that there are no dependents. Woods rebuilds
+this derived index from forward evidence when loading and republishing a graph.
+Existing readers can ignore the additive field; a subsequent changed extraction
+or full run publishes it. A no-op leaves the previous generation unchanged.
+
 ### What is outside this structural snapshot
 
 `woods.json`, `dumps/`, embedding checkpoints, temporal snapshots, watch status,

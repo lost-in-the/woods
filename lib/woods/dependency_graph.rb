@@ -729,14 +729,15 @@ module Woods
     # `nodes` and `edges` stay keyed on the bare identifier, holding the
     # **primary** node — the type that sorts first. Identifiers registered
     # under more than one type put their remaining nodes in `variants`, a flat
-    # array that is **omitted entirely when empty**. So the serialized form of
-    # a graph with no collisions is byte-for-byte what it has always been, and
-    # a `dependency_graph.json` written before this change loads through
+    # array that is **omitted entirely when empty**. A
+    # `dependency_graph.json` written before this change loads through
     # {.from_h} unmodified: it simply carries no `variants`.
     #
     # `reverse`, `file_map` and `type_index` need no new shape. They are
     # already identifier-valued sets, so a Scenic view `reports` and a factory
     # `reports` each contribute to their own type bucket and their own path.
+    # The additive `reverse_via` index preserves typed source identities and
+    # complete relationship records without changing the legacy `reverse` map.
     #
     # @return [Hash] Complete graph data
     def to_h
@@ -747,6 +748,7 @@ module Woods
           nodes: key_sorted(self.class.relativize_nodes(primary_nodes, root)),
           edges: key_sorted(primary_edges),
           reverse: key_sorted(@reverse.transform_values { |ids| ids.to_a.sort }),
+          reverse_via: published_reverse_via,
           file_map: key_sorted(self.class.relativize_file_map(@file_map, root)),
           type_index: key_sorted(@type_index.transform_values { |ids| ids.to_a.sort }),
           stats: {
@@ -770,6 +772,23 @@ module Woods
     end
     private :key_sorted
 
+    # Reverse buckets are derived from every typed forward registration, rather
+    # than the bare-name in-memory filter index, which cannot preserve variants
+    # or distinguish association attributes. Legacy nil relationships stay nil.
+    def published_reverse_via
+      buckets = {}
+      @edges.each do |source, by_type|
+        by_type.each do |type, edges|
+          edges.each do |edge|
+            record = { source: source, source_type: type }.merge(edge.except(:target))
+            (buckets[edge[:target]] ||= []) << record
+          end
+        end
+      end
+      key_sorted(buckets.transform_values { |records| records.sort_by { |record| JSON.generate(record) } })
+    end
+    private :published_reverse_via
+
     # A copy whose edge containers are the caller's alone.
     #
     # `dup` copies only the top level, so `to_h[:edges][id]` used to be the
@@ -783,6 +802,9 @@ module Woods
     def detached_snapshot(memo)
       snapshot = memo.dup
       snapshot[:edges] = memo[:edges].transform_values { |list| list.map(&:dup) }
+      snapshot[:reverse_via] = memo[:reverse_via].transform_values do |records|
+        records.map { |record| record.transform_values { |value| value.is_a?(String) ? value.dup : value } }
+      end
       if memo.key?(:variants)
         snapshot[:variants] = memo[:variants].map do |record|
           record.merge(edges: record[:edges].map(&:dup))

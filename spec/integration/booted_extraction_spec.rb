@@ -271,6 +271,9 @@ RSpec.describe 'Booted-app extraction', :booted_app do
 
     graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
     expect(graph).not_to be_empty
+    expect(graph.fetch('reverse_via').fetch('Comment')).to include(
+      include('source' => 'Post', 'source_type' => 'model', 'via' => 'has_many')
+    )
   end
 
   it 'keeps navigation edges to real routes whose names resemble filesystem or asset helpers' do

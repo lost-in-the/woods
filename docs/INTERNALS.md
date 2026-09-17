@@ -145,6 +145,11 @@ The `DependencyGraph` is a directed graph where nodes are `ExtractedUnit` identi
 - **Forward edges** (`@edges`): what each unit depends on, populated when units are registered
 - **Reverse edges** (`@reverse`): what depends on each unit, built during registration and in the resolve phase
 
+The published graph also carries additive `reverse_via` target buckets with
+typed source identities, relationship labels and association attributes. The
+bare-name `reverse` map remains compatible. See the
+[reverse relationship format](INDEX_LAYOUT.md#reverse-relationship-records).
+
 ```ruby
 graph = DependencyGraph.new
 graph.register(user_unit)     # adds User to nodes, adds User→Order edge (from belongs_to)
