@@ -4,6 +4,7 @@ require 'date'
 require 'open3'
 
 require_relative 'changelog'
+require_relative 'fragments'
 require_relative 'notes'
 require_relative 'version_state'
 
@@ -16,7 +17,7 @@ module Woods
     # moves a released tree back to the next `.alpha`. Neither commits, tags,
     # pushes, or publishes anything: the reviewed pull request and the dispatch
     # workflow stay the only path to RubyGems.
-    class Preparer
+    class Preparer # rubocop:disable Metrics/ClassLength
       # Raised when the working tree has changes the transition would bury.
       class DirtyWorkingTree < Error; end
 
@@ -59,10 +60,15 @@ module Woods
           VersionState.validate_prepare!(previous, target)
           assert_clean!(root)
 
-          changelog = Changelog.fold(read(root, CHANGELOG_PATH), version: target.to_s, date: date)
+          fragments = Fragments.read(root)
+          changelog = Changelog.fold(
+            read(root, CHANGELOG_PATH), version: target.to_s, date: date, entries: fragments.values
+          )
           rewrites = { VERSION_PATH => version_source(root, target), CHANGELOG_PATH => changelog }
           rewrites.merge!(Notes.rewrites(root: root, version: target.to_s, changelog: changelog))
-          result(previous, target, write(root, rewrites)) { |changed| prepare_report(previous, target, changed) }
+          changed = write(root, rewrites)
+          fragments.each_key { |path| File.unlink(File.join(root, path)) }
+          result(previous, target, (changed + fragments.keys).sort) { |paths| prepare_report(previous, target, paths) }
         end
 
         # Reopens development at the next `.alpha` after a final release. The

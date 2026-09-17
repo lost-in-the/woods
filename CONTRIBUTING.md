@@ -246,8 +246,29 @@ RubyGems treats any letter in a version as a prerelease, so a `~> 1.6` or `~> 2.
 ### During feature work
 
 - Do not edit `lib/woods/version.rb` by hand.
-- Put changelog entries under `## [Unreleased]` only, beneath one of its `###` headings. Duplicate headings are merged at release time, in the order they first appear.
 - Leave the `release-state` fences alone. `release:prepare` rewrites them.
+- Put changelog entries under `## [Unreleased]`, beneath one of its `###` headings, or in an optional `changelog/<type>_<slug>.md` file. Entry files avoid conflicts between parallel branches; inline entries remain supported. Duplicate headings merge at release time, in the order they first appear.
+
+Entry files contain nonempty UTF-8 Markdown without ATX (`#`) or setext
+(underlined) headings, usually a bullet
+and indented continuation lines. For example, `changelog/fixed_watch-restart.md`
+can contain `- Preserve pending work across watch restarts.` Supported types are
+`added`, `build`, `changed`, `dependencies`, `documentation`, `fixed`,
+`performance`, `security`, `testing`, and `upgrade-notes`. Slugs start with a
+lowercase letter or digit and use lowercase letters, digits, hyphens, or
+underscores. Use one unique file per change; do not copy its entry into
+Unreleased as well. Keep entry files directly inside a real `changelog/`
+directory; symlinks and directories masquerading as entries are refused.
+Other file extensions are left untouched.
+
+`release:prepare` appends entry files in filename order after inline Unreleased
+entries, folds them through the same heading merger, and deletes exactly the
+consumed files. It validates every entry and documentation rewrite before
+changing any files; an invalid entry or a later refusal preserves all entries.
+A prepared release has an empty Unreleased section and no entry files. During
+an ordinary beta cycle, entry files may accumulate even with an empty Unreleased section while
+VERSION stays at the previous beta; the tag validator always rejects entry
+files at the candidate release SHA, regardless of inline notes or the version.
 
 ### Preparing a release
 
@@ -260,9 +281,9 @@ One command per transition. It never commits, tags, pushes, or publishes.
 | Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
 | After the release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
 
-`release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands. Every rewrite is computed before any of it is written, so a refusal leaves the working tree untouched.
+`release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` and optional entry files into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands. Every rewrite is computed before any of it is written, so a refusal leaves the working tree untouched.
 
-A final release also absorbs every prerelease section of its own base version. Cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into `## [2.0.0] - <date>` and removes their headings, prerelease entries first and anything written after them second, so the notes a user reads for 2.0.0 are the whole story rather than three fragments. An empty `## [Unreleased]` is therefore legitimate for a final release cut straight from a release candidate. A beta or a release candidate has nothing to absorb, so an empty Unreleased section refuses: there is nothing new to publish.
+A final release also absorbs every prerelease section of its own base version. Cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into `## [2.0.0] - <date>` and removes their headings, prerelease entries first and anything written after them second, so the notes a user reads for 2.0.0 are the whole story rather than three fragments. An empty `## [Unreleased]` is therefore legitimate for a final release cut straight from a release candidate. A beta or a release candidate has nothing to absorb, so an empty Unreleased section without entry files refuses: there is nothing new to publish.
 
 Review the diff and run the release contracts:
 
