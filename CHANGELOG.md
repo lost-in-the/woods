@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
+  and upgrade guidance before suggesting changes to valid namespace wrappers
+  on older-loader or classic-mode hosts (B-149).
+
 - Stabilize controller inline callback and condition labels across processes and
   checkout paths, including action chunks; retain `unless` conditions in the
   generated filter-chain header (B-167).

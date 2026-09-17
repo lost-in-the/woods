@@ -2181,7 +2181,10 @@ RSpec.describe Woods::Extractor do
         .to raise_error(
           Woods::ExtractionError,
           %r{service 'Domain::Container'.*services/Domain::Container\.rb.*container/renderer\.rb}m
-        )
+        ) do |error|
+          expect(error.message).to include('Zeitwerk mode with Zeitwerk >= 2.6.9', 'classic-mode',
+                                           'before changing valid namespace wrappers', 'genuine duplicate')
+        end
     end
   end
 
