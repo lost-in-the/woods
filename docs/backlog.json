@@ -2452,7 +2452,7 @@
       "spec/integration/incremental_equivalence_spec.rb"
     ],
     "description": "Package membership (#280, B-171, B-172) has a unit-level regression on one Extractor instance; no booted lane mutates packwerk.yml or package.yml between incremental runs. Acceptance: the equivalence oracle covers a package added, the last package removed, and a package path changed, comparing full and incremental output after each mutation.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": [
       "B-171"
     ]
