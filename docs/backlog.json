@@ -2271,7 +2271,7 @@
     "lib/woods/extractors/job_extractor.rb"
     ],
     "description": "Post-#274: JobExtractor#discoverable_classes exists and gates re_extract_by_class, but jobs are not registered in CLASS_BASED_DISCOVERY, so a class-discovered job whose class disappears without its host file changing (gem removed, dynamic definition gone) survives incrementally until a full extraction. Same accepted posture as GraphQL runtime types. Acceptance: either add a jobs discovery entry (decide reconcile_removals semantics against the nested-job fixture and the audit EXTA-3 nil-path contract) or document the staleness bound in INCREMENTAL_EXTRACTION.md.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-166",
@@ -2284,7 +2284,7 @@
     "lib/woods/extractor.rb"
     ],
     "description": "Post-#275: gem-owned classes carry their real absolute (or vendored-relative) definition site. Gem paths never enter the incremental blast radius (no change set names them), and after a bundle update the recorded paths dangle until a full extraction rebuilds them; woods:validate reports them as gem-owned without a remedy. Acceptance: either extend the Gemfile.lock whole-app trigger to refresh class-discovered gem-owned units, or document the full-extract-after-bundle-update requirement in INCREMENTAL_EXTRACTION.md and the validate warning.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-167",

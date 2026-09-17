@@ -100,6 +100,14 @@ access with its `WOODS_GIT_DIR` setting. A failed history stream is discarded;
 repair git access and run full extraction to refresh retained metadata. See the
 [history contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#git-enrichment-history).
 
+After a bundle change or removal of a dynamically defined job, incremental
+extraction can retain stale runtime units. Use a fresh process with the updated
+bundle for full extraction, then validate. For missing external gem paths,
+first distinguish an upgraded bundle from a reader on a different host/mount.
+The more explicit `woods:validate` bundle-update remedy (B-166) is unreleased
+after `2.0.0.beta2`; the full-extraction recovery works on older versions too.
+See [runtime removals and bundle updates](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#runtime-removals-and-bundle-updates).
+
 ## 3. Check the MCP process and path
 
 Compare the client config with the exact command, absolute `cwd`, bundle, and index path visible to that process. Run the configured executable manually to read stderr. For a host bundle:
