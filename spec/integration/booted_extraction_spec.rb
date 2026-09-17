@@ -141,6 +141,48 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(identifiers).to include('Post', 'Comment')
   end
 
+  it 'reflects model methods consistently before and after schema loading (#363)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+    end
+    stub_const('SchemaOrderModel', model)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    before_loading = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+    model.columns
+    after_loading = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+
+    expect(before_loading[:class_methods]).to eq(after_loading[:class_methods])
+    expect(before_loading).to eq(after_loading)
+    expect(before_loading[:class_methods]).to eq(model.methods(false).sort)
+
+    first_unit = extractor.extract_model(model)
+    second_unit = extractor.extract_model(model)
+    expect(first_unit).not_to be_nil
+    expect(second_unit.metadata).to eq(first_unit.metadata)
+    expect(second_unit.source_code).to eq(first_unit.source_code)
+    expect(second_unit.to_h[:source_hash]).to eq(first_unit.to_h[:source_hash])
+  end
+
+  it 'retains an application-defined model constructor after schema loading (#363)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+
+      def self.new(...)
+        super.tap { |record| record.title ||= 'Custom constructor' }
+      end
+    end
+    stub_const('CustomConstructorModel', model)
+    original_constructor = model.method(:new)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    metadata = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+
+    expect(metadata[:class_methods]).to include(:new)
+    expect(model.method(:new)).to eq(original_constructor)
+    expect(model.new.title).to eq('Custom constructor')
+  end
+
   it 'extracts the controller and job units' do
     expect(index_for(:controllers).map { |u| u['identifier'] }).to include('PostsController')
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')

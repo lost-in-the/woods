@@ -2702,6 +2702,18 @@
     "status": "resolved"
   },
   {
+    "id": "B-202",
+    "title": "Stabilize reflected model class methods across schema-loading order",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/model_extractor.rb"
+    ],
+    "description": "Rails schema loading can install an optimized singleton new constructor. Reflect model API methods after existing schema reads so cold full and warmed incremental extraction agree without filtering genuine application constructors. Booted regressions reproduce the original mismatch on the audited Rails 8.2 revision and cover application overrides.",
+    "status": "resolved"
+  },
+  {
     "id": "B-200",
     "title": "Load lazy Rails routes before caching view navigation helpers",
     "severity": "high",
