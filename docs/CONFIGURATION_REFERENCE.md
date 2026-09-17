@@ -135,6 +135,17 @@ config.embedding_options = {
 }
 ```
 
+OpenAI embedding batches are sent in slices of at most 36 texts, preserving
+input order. For inputs within the API's 8,192-token per-text limit, this stays
+below both the 2,048-input limit and the 300,000-token total request limit.
+See the [OpenAI embedding request contract](https://developers.openai.com/api/reference/resources/embeddings/methods/create).
+Woods retains its conservative 8,191-token chunking ceiling; slicing does not
+make an individually oversized text valid. This bound avoids relying on token
+estimates and adds HTTP requests for batches containing many short chunks.
+All slices must validate, including consistent vector dimensions, before the
+provider returns any vectors for the batch. Ollama and custom providers keep
+their existing batching behavior.
+
 ### Ollama embeddings
 
 ```ruby

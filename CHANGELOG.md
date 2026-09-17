@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selection, truncation and reciprocal-rank fusion across supported Ruby versions
   (B-192).
 
+- Bound OpenAI embedding requests to 36 valid inputs, preserving chunk order and
+  rejecting partial or dimension-inconsistent batches (B-157). Chunk-heavy runs
+  use more HTTP requests to stay within the API's input and total-token limits.
+
 - Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
 
 - Prevent single-component cache keys from colliding with multi-component or

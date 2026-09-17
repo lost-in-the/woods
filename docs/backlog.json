@@ -2171,7 +2171,7 @@
       "lib/woods/embedding/indexer.rb"
     ],
     "description": "Audit finding STO-14 (Low, traced with inferred impact). indexer.rb:465-472,567-576,661-665 accumulates every chunk of a unit batch into one provider request, so the input count is batch_size x chunks_per_unit and not bounded by anything. Thirty-two heavily chunked units can exceed OpenAI's 2048-inputs limit, and that is a hard 400 the resilience stack cannot retry past \u2014 it aborts the run. Acceptance: flush `to_embed` in slices bounded by a per-provider input cap, with a spec asserting the request count for a chunk-heavy batch.",
-    "status": "open"
+    "status": "resolved"
   },
   {
     "id": "B-158",
