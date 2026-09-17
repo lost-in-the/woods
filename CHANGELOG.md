@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
 
+- Omit per-unit git enrichment for shallow checkouts or unverifiable repository
+  depth, with one warning and full-history recovery guidance, instead of
+  reporting truncated commit counts as complete churn data (B-189).
+
 - Repair corrupt pipeline cooldown state on an explicit all-reset, including
   `pipeline_repair` in custom operator-configured servers; ordinary reads still
   deny operations and scoped resets preserve corrupt state (B-159).

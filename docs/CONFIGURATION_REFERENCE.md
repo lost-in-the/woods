@@ -703,6 +703,13 @@ be read completely. Git enrichment is omitted in either case; a failed or
 incomplete streamed history read logs a warning.
 This requirement and the history policy below are unreleased after 2.0.0.beta2.
 
+Per-unit enrichment also requires a non-shallow repository. A shallow checkout
+or a failed repository-depth probe omits enrichment with one warning per
+extractor instance. Fetch complete history (`git fetch --unshallow`, or
+`actions/checkout` with `fetch-depth: 0`) and run full extraction to refresh
+retained metadata. If depth cannot be verified, check git access and version.
+A source archive without a repository remains quiet.
+
 Full and incremental extraction use one streamed `HEAD` history walk, restricted
 to the last 365 days by git's `--since` traversal. Only requested app-owned paths
 are retained. Commit counts and contributors describe **HEAD-reachable touched-path

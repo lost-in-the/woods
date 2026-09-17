@@ -2611,7 +2611,7 @@
       "lib/woods/git_command.rb"
     ],
     "description": "B-186 made enrichment require git rev-parse HEAD to succeed before writing any churn figure. A shallow clone (fetch-depth 1, the CI default) passes that guard: HEAD resolves, git log succeeds, and it returns exactly one commit per file. Every unit then reports commit_count 1 and change_frequency new, which is the same misleading answer B-186 removed, arrived at by a different route, and volatile_dependencies is empty because nothing clears VOLATILE_MIN_COMMITS. Acceptance: detect the shallow case with git rev-parse --is-shallow-repository, and either omit the churn keys or mark them as measured over a truncated history; log one warning naming the depth remedy; a spec covers a shallow clone of the temporary fixture repository, asserting the keys are not silently wrong. TROUBLESHOOTING already tells a reader to fetch more history for missing git metadata; this makes the index say so itself.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": [
       "B-186"
     ]
