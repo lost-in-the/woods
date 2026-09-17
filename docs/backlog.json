@@ -2220,8 +2220,8 @@
     "files": [
       "lib/woods/mcp/index_reader.rb"
     ],
-    "description": "Audit finding R2-4 (Low, traced). index_reader.rb:883-889 gates the user-search regex timeout on Ruby >= 3.2, and those older interpreters also lack 3.2's regex memoization, so the supported floor has neither protection. The CHANGELOG discloses the gate; the remediation ledger row does not. Deferred pending a decision. Acceptance: either add a coarse wall-clock deadline for < 3.2 or state the exclusion in the release notes and the ledger.",
-    "status": "open"
+    "description": "Audit finding R2-4 (Low, traced). index_reader.rb:883-889 gates the user-search regex timeout on Ruby >= 3.2, and those older interpreters also lack 3.2's regex memoization, so the supported floor has neither protection. At audit time the CHANGELOG disclosed the gate but the remediation ledger row did not. Acceptance: either add a coarse wall-clock deadline for < 3.2 or state the exclusion in the release notes and the ledger. Resolved by the documented-exclusion option, not a runtime mitigation: Ruby 3.0/3.1 remain supported without the per-match search-regex time bound. Run the Index MCP process on Ruby 3.2+ for the one-second per-match limit. The existing P5 changelog entry and docs/self-analysis/v2-audit-2/01-ledger-reconciliation.md already state the version gate; the Unreleased release note and this ledger now explicitly retain the exclusion. No coarse thread timeout was added.",
+    "status": "resolved"
   },
   {
     "id": "B-162",
@@ -2553,8 +2553,8 @@
       "lib/woods/graph_analyzer.rb",
       "lib/woods/extractor.rb"
     ],
-    "description": "34 s on 1.5.0 versus 44 s at f085276 for 4 percent more units, incremental 11 s for one model. Suspects: PageRank now runs inside analyze, the three new reports, git enrichment per unit. Acceptance: a profile of one full extraction on the dummy app plus the timing table from WATCH_DAEMON.md refreshed; any single phase over 15 percent of the total gets its own entry.",
-    "status": "ready",
+    "description": "34 s on 1.5.0 versus 44 s at f085276 for 4 percent more units, incremental 11 s for one model. Suspects: PageRank now runs inside analyze, the three new reports, git enrichment per unit. Acceptance: a profile of one full extraction on the dummy app plus the timing table from WATCH_DAEMON.md refreshed; any single phase over 15 percent of the total gets its own entry. Resolved by existing evidence in commit 14cb93f6 (#285): docs/WATCH_DAEMON.md, \"Where a full extraction of the fixture app spends its time\", records seven repetitions over 147 units (119 framework sources), 190 ms p50, and the complete phase table. RailsSourceExtractor is 100 ms / 52.6%, the only individual extractor/other phase above 15%; B-187 remains the separate host-shaped follow-up. This closes the profiling acceptance criteria, not a claim that the reported host slowdown was fixed.",
+    "status": "resolved",
     "depends_on": []
   },
   {
