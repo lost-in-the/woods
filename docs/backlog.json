@@ -2700,5 +2700,18 @@
     ],
     "description": "The #305 host audit identified repeated 500-path git log walks as the largest extraction phase. Use one streamed HEAD-reachable touched-path history, explicitly comparing merges with their first parent while traversing all parents, roots with the empty tree, and exact current paths without rename following. NUL-framed records preserve arbitrary filename delimiters and commit subjects; retain per-file counts, contributors and five recent commits rather than the whole log. Git 2.31 or newer is required for optional enrichment; discard failed or incomplete history with an actionable warning. Changed merge counts versus legacy pathspec simplification are documented; original-host end-to-end speedup remains unmeasured.",
     "status": "resolved"
+  },
+  {
+    "id": "B-197",
+    "title": "Count retrieval tokens after final context postprocessing",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retriever.rb",
+      "lib/woods/retrieval/context_assembler.rb"
+    ],
+    "description": "Issue #354: tokens_used and trace.tokens_used must describe the delivered context after the formatter and type-rank table, using the assembly counter or chars-per-token ratio. Keep budget as an assembly budget and preserve ranking/source attribution. Validate real-store unfiltered, typed, formatter, configured ratio, and injected-counter paths.",
+    "status": "resolved"
   }
 ]
