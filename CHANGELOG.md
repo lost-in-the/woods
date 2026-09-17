@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Search Boolean metadata fields as `true`/`false` consistently in SQLite and
+  InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
+
 - Count the final retrieval context after formatting and type-rank metadata,
   keeping `tokens_used` and its trace consistent with the configured counter
   or estimate (B-197, #354).

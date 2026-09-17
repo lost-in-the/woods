@@ -149,6 +149,53 @@ RSpec.describe Woods::Storage::MetadataStore do
       end
     end
 
+    describe 'Boolean field search (#356)' do
+      before do
+        store.store('Enabled', { type: 'model', flag: true })
+        store.store('Disabled', { type: 'model', flag: false })
+        store.store('One', { type: 'model', flag: 1 })
+        store.store('Zero', { type: 'model', flag: 0 })
+        store.store('Null', { type: 'model', flag: nil })
+        store.store('Missing', { type: 'model' })
+      end
+
+      { 'true' => 'Enabled', 'FALSE' => 'Disabled', 'ru' => 'Enabled',
+        'als' => 'Disabled', '1' => 'One', '0' => 'Zero' }.each do |query, expected|
+        it "matches #{query.inspect} without conflating Booleans and numbers" do
+          expect(store.search(query, fields: [:flag]).map { |row| row['id'] }).to eq([expected])
+        end
+      end
+
+      it 'never matches null or absent fields, even with an empty query' do
+        expect(store.search('', fields: ['flag']).map { |row| row['id'] })
+          .to contain_exactly('Enabled', 'Disabled', 'One', 'Zero')
+        expect(store.search('null', fields: ['flag'])).to be_empty
+      end
+
+      it 'matches string values literally alongside Boolean values' do
+        store.store('Text', { type: 'model', flag: 'true' })
+
+        expect(store.search('true', fields: ['flag']).map { |row| row['id'] })
+          .to contain_exactly('Enabled', 'Text')
+        expect(store.search('"true"', fields: ['flag'])).to be_empty
+      end
+
+      it 'preserves JSON Boolean spellings inside structured fields' do
+        store.store('Object', { type: 'model', flag: { enabled: true, disabled: false } })
+        store.store('Array', { type: 'model', flag: [true, false] })
+
+        expect(store.search('"enabled":true', fields: ['flag']).map { |row| row['id'] }).to eq(['Object'])
+        expect(store.search('[true,false]', fields: ['flag']).map { |row| row['id'] }).to eq(['Array'])
+      end
+
+      it 'keeps whole-record JSON matching unchanged' do
+        { '"flag":true' => 'Enabled', '"flag":false' => 'Disabled',
+          '"flag":1' => 'One', '"flag":0' => 'Zero', '"flag":null' => 'Null' }.each do |query, expected|
+          expect(store.search(query).map { |row| row['id'] }).to eq([expected])
+        end
+      end
+    end
+
     describe 'value round-trips (STO-8)' do
       it 'returns symbol values as strings' do
         store.store('User', { type: :model, namespace: :Admin })
