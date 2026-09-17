@@ -86,7 +86,8 @@ same rooting rule the manifest's git provenance follows.
 
 Named, source-defined app modules included by runtime models are tracked as concern units even
 outside `concerns/` directories. Changing their source refreshes their includers,
-including inlined code and callback analysis. Run a full extraction after upgrading
+including inlined code and callback analysis. Multiple runtime mixins sharing a source
+file retain separate identities and refresh all their includers. Run a full extraction after upgrading
 to populate these previously missing source mappings.
 
 ## What a run does, in order

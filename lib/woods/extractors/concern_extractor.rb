@@ -50,21 +50,20 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of concern units
       def extract_all
-        (find_files_in_directories(@directories) + model_mixin_paths.keys).uniq.filter_map do |file|
-          extract_concern_file(file)
-        end
+        conventional = find_files_in_directories(@directories).filter_map { |file| extract_concern_file(file) }
+        conventional + runtime_model_mixins.keys.flat_map { |file| extract_model_mixin_file(file) }
       end
 
       # Extract a single concern file
       #
       # @param file_path [String] Path to the concern file
+      # @param module_name [String, nil] Runtime identity for a discovered model mixin
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
-      def extract_concern_file(file_path)
+      def extract_concern_file(file_path, module_name: nil)
         source = File.read(file_path)
-        # Directory-discovered concerns keep their canonical file identity even
-        # when nested helpers share that file and are also included at runtime.
-        runtime_name = model_mixin_paths[file_path.to_s]&.name unless conventional_concern_path?(file_path)
-        module_name = runtime_name || extract_module_name(file_path, source)
+        # Runtime discovery supplies each included module's identity. Ordinary
+        # concern files retain their canonical identity, including nested helpers.
+        module_name ||= extract_module_name(file_path, source)
 
         return nil unless module_name
         return nil unless concern_module?(source)
@@ -90,13 +89,16 @@ module Woods
       # includes it. Filenames alone cannot establish that a module is a mixin.
       #
       # @param file_path [String] Changed application source path
-      # @return [ExtractedUnit, nil]
+      # @return [Array<ExtractedUnit>, nil]
       def extract_model_mixin_file(file_path)
-        extract_concern_file(file_path) if model_mixin_paths.key?(file_path.to_s)
+        modules = model_mixin_paths[file_path.to_s]
+        return unless modules
+
+        modules.filter_map { |mod| extract_concern_file(file_path, module_name: mod.name) }
       end
 
       # Runtime mixins that have no conventional concern-directory discovery.
-      # @return [Hash<String, Module>] Source paths and their included modules
+      # @return [Hash<String, Array<Module>>] Source paths and their included modules
       def runtime_model_mixins
         model_mixin_paths.reject { |path, _mod| conventional_concern_path?(path) }
       end
@@ -111,14 +113,14 @@ module Woods
 
       # Runtime ownership is authoritative; never import gem mixins even when
       # the application adds methods to them.
-      # @return [Hash<String, Module>] App-owned included modules by source path
+      # @return [Hash<String, Array<Module>>] App-owned included modules by source path
       def model_mixin_paths
         return {} unless defined?(ActiveRecord::Base)
 
         @model_mixin_paths ||= discover_model_mixin_paths
       end
 
-      # @return [Hash<String, Module>] Reflected module source locations
+      # @return [Hash<String, Array<Module>>] Reflected module source locations
       def discover_model_mixin_paths
         models = ActiveRecord::Base.descendants.reject { |model| model.respond_to?(:abstract_class?) && model.abstract_class? }
         models.flat_map(&:included_modules).uniq.each_with_object({}) do |mod, paths|
@@ -135,7 +137,7 @@ module Woods
           path = resolve_source_location(mod, app_root: "#{Rails.root}/", fallback: nil)
           next unless app_source?(path, "#{Rails.root}/") && File.file?(path)
 
-          paths[path] = mod
+          (paths[path] ||= []) << mod
         end
       end
 

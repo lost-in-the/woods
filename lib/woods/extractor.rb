@@ -2863,13 +2863,15 @@ module Woods
 
       live = extractor.runtime_model_mixins
       known = @dependency_graph.units_of_type(:concern).to_set
-      added = live.filter_map do |path, mod|
-        extractor.extract_model_mixin_file(path) unless known.include?(mod.name)
+      added = live.flat_map do |path, modules|
+        next [] if modules.all? { |mod| known.include?(mod.name) }
+
+        Array(extractor.extract_model_mixin_file(path)).reject { |unit| known.include?(unit.identifier) }
       end
       touched = register_and_write(:concerns, added, affected_types)
       return touched unless @eager_load_complete
 
-      live_names = live.values.to_set(&:name)
+      live_names = live.values.flatten.to_set(&:name)
       known.each do |identifier|
         path = @dependency_graph.node(identifier, type: :concern)[:file_path]
         next if extractor.conventional_concern_path?(path) || live_names.include?(identifier)

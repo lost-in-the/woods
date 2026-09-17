@@ -223,6 +223,55 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  it 'refreshes every includer when runtime mixins share a source file' do
+    mixin_path = 'app/models/shared_runtime_mixins.rb'
+    source = <<~RUBY
+      module SharedRuntimeMixins
+        module First
+          def audit_value
+            'original first'
+          end
+        end
+        module Second
+          def audit_value
+            'original second'
+          end
+        end
+      end
+    RUBY
+    write_file(mixin_path, source)
+    load app_path(mixin_path)
+    %w[First Second].each do |name|
+      path = write_file("app/models/#{name.downcase}_audit_record.rb", <<~RUBY)
+        class #{name}AuditRecord < ApplicationRecord
+          self.table_name = 'posts'
+          include SharedRuntimeMixins::#{name}
+        end
+      RUBY
+      load app_path(path)
+    end
+    baseline = full_extraction
+    payload = Woods::Generation.new(output_dir: baseline).payload_dir
+    graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+    expect(graph.identifiers_for_path(app_path(mixin_path))).to include(
+      'SharedRuntimeMixins::First', 'SharedRuntimeMixins::Second'
+    )
+
+    write_file(mixin_path, source.gsub('original', 'changed'))
+    load app_path(mixin_path)
+    touched = Woods::Extractor.new(output_dir: baseline).extract_changed([mixin_path])
+    expect(touched).to include('FirstAuditRecord', 'SecondAuditRecord')
+    expect(differences(baseline, full_extraction)).to be_empty
+  ensure
+    %i[FirstAuditRecord SecondAuditRecord].each do |name|
+      next unless Object.const_defined?(name)
+
+      Object.const_get(name).abstract_class = true
+      Object.send(:remove_const, name)
+    end
+    Object.send(:remove_const, :SharedRuntimeMixins) if Object.const_defined?(:SharedRuntimeMixins)
+  end
+
   # ── Tree mutation ────────────────────────────────────────────────────────
 
   def app_path(relative)

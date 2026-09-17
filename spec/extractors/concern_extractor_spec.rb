@@ -28,7 +28,7 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       unrelated = create_file('app/models/unrelated.rb', "module Unrelated\n def unrelated; end\nend\n")
       extractor = described_class.new
       expect(extractor.extract_all.map(&:identifier)).to eq(['Card::Pinnable'])
-      expect(extractor.extract_model_mixin_file(path).type).to eq(:concern)
+      expect(extractor.extract_model_mixin_file(path).map(&:type)).to eq([:concern])
       expect(extractor.extract_model_mixin_file(unrelated)).to be_nil
     end
 
