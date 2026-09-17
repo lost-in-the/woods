@@ -62,12 +62,12 @@ RSpec.describe 'lib/tasks/woods.rake requires' do
   # alongside.
   describe 'shared helpers' do
     def helper_body(name)
-      lines = source.lines
-      start = lines.index { |line| line.match?(/^  def #{Regexp.escape(name)}\b/) }
-      raise "could not locate the #{name} helper in lib/tasks/woods.rake" if start.nil?
+      lines = File.readlines(File.expand_path('../../lib/woods/rake_helpers.rb', __dir__), encoding: 'UTF-8')
+      start = lines.index { |line| line.match?(/^    def #{Regexp.escape(name)}\b/) }
+      raise "could not locate the #{name} helper in lib/woods/rake_helpers.rb" if start.nil?
 
       rest = lines[(start + 1)..]
-      stop = rest.index { |line| line.match?(/^  (def|desc|task)\b/) } || rest.length
+      stop = rest.index { |line| line.match?(/^    (def|desc|task)\b/) } || rest.length
       rest[0...stop].join
     end
 
@@ -115,7 +115,7 @@ RSpec.describe 'lib/tasks/woods.rake requires' do
       it 'acquires, yields and releases without a booted Rails' do
         Dir.mktmpdir('woods_helper') do |dir|
           ran = false
-          Object.new.send(:woods_with_extraction_lock, dir) { ran = true }
+          Woods::RakeHelpers.woods_with_extraction_lock(dir) { ran = true }
 
           expect(ran).to be(true)
           expect(Dir.children(dir).grep(/\.lock\z/)).to be_empty
@@ -124,7 +124,7 @@ RSpec.describe 'lib/tasks/woods.rake requires' do
 
       it 'honours an explicit wait without consulting the daemon default' do
         Dir.mktmpdir('woods_helper') do |dir|
-          expect { Object.new.send(:woods_with_extraction_lock, dir, wait: 0) { nil } }.not_to raise_error
+          expect { Woods::RakeHelpers.woods_with_extraction_lock(dir, wait: 0) { nil } }.not_to raise_error
         end
       end
     end

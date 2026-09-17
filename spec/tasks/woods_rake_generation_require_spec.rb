@@ -15,7 +15,7 @@ RSpec.describe 'lib/tasks/woods.rake constant availability' do
       require 'rake'
       require 'woods'
       load File.join(#{root.inspect}, 'lib/tasks/woods.rake')
-      print woods_payload_dir(Dir.tmpdir).to_s
+      print Woods::RakeHelpers.woods_payload_dir(Dir.tmpdir).to_s
     RUBY
     out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script)
 
