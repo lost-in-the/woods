@@ -2425,7 +2425,7 @@
       "spec/extractor_spec.rb"
     ],
     "description": "Running spec/graph_analyzer_spec.rb and spec/extractor_spec.rb together with --seed 8230 fails one example (Extractor#remove_replaced_units typed identity) with NoMethodError: undefined method 'configuration' for module Woods inside Extractor#json_serialize. Each file passes alone and the full suite passes. Found during #280 Task 4; pre-existing. Acceptance: the pair passes under any seed, with the shared state reset in spec support rather than in either file.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": []
   },
   {

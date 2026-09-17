@@ -8,6 +8,8 @@ require 'open3'
 require 'woods/extractor'
 
 RSpec.describe Woods::Extractor do
+  include_context 'isolated Woods runtime'
+
   # Use a real tmpdir so Pathname#exist? works without stubs.
   let(:tmpdir) { Dir.mktmpdir('woods_test') }
   let(:rails_root) { Pathname.new(tmpdir) }
