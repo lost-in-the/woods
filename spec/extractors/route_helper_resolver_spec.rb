@@ -151,6 +151,19 @@ RSpec.describe Woods::Extractors::RouteHelperResolver do
       expect(map.keys).to contain_exactly('posts', 'new_post', 'post', 'admin_users')
     end
 
+    it 'loads lazy routes before caching named helpers' do
+      lazy_routes = double('LazyRouteSet', named_routes: {})
+      allow(lazy_routes).to receive(:routes) do
+        allow(lazy_routes).to receive(:named_routes).and_return(named_routes)
+        []
+      end
+      allow(Rails.application).to receive(:routes).and_return(lazy_routes)
+
+      resolver = test_class.new(named_routes)
+
+      expect(resolver.resolve_route_helper('posts_path')).to include(controller: 'PostsController')
+    end
+
     it 'handles missing Rails gracefully' do
       hide_const('Rails')
       resolver = Class.new { include Woods::Extractors::RouteHelperResolver }.new

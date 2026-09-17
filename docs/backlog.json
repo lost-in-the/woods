@@ -2712,5 +2712,68 @@
     ],
     "description": "Rails schema loading can install an optimized singleton new constructor. Reflect model API methods after existing schema reads so cold full and warmed incremental extraction agree without filtering genuine application constructors. Booted regressions reproduce the original mismatch on the audited Rails 8.2 revision and cover application overrides.",
     "status": "resolved"
+  },
+  {
+    "id": "B-200",
+    "title": "Load lazy Rails routes before caching view navigation helpers",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/route_helper_resolver.rb"
+    ],
+    "description": "The #305 public Fizzy audit found incremental extraction losing view navigation dependencies when a fresh process cached named helpers before Rails lazy routes loaded (#360). Read the runtime route collection before caching named helpers, retaining partial-double compatibility. A failing real Rails regression now passes for fresh-process full A, changed-view incremental B and independent full B, asserting complete dependency graph equality including reverse edges and graph analysis. Verified on Rails 8.0.5.1 and 8.1.3.1; added to every booted Rails CI row.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-201",
+    "title": "Make middleware metadata and source hashes deterministic across processes",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/middleware_extractor.rb",
+      "lib/woods/extractors/middleware_argument.rb"
+    ],
+    "description": "Public Rails replay exposed process-specific middleware argument identities (#362). Render nested configuration and literal strings faithfully, procs by source location/kind, anonymous classes by parent and own method origins, and default opaque objects by class without traversing private state. Independent booted Rails processes assert identical metadata/source/hash and retain meaningful configuration differences. Custom to_s output, closure captures and opaque object internals remain outside the determinism guarantee.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-198",
+    "title": "Preserve embedded NUL in literal metadata search",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/metadata_store.rb"
+    ],
+    "description": "Resolved #355: replace SQLite LIKE with lower/instr substring matching so queries containing NUL cannot broaden and strings after NUL remain searchable. Shared adapter regressions cover NUL queries, suffixes, spanning matches, ordinary controls, and the serialized JSON all-fields contract. ASCII case folding and literal wildcard behavior remain unchanged.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-197",
+    "title": "Count retrieval tokens after final context postprocessing",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retriever.rb",
+      "lib/woods/retrieval/context_assembler.rb"
+    ],
+    "description": "Issue #354: tokens_used and trace.tokens_used must describe the delivered context after the formatter and type-rank table, using the assembly counter or chars-per-token ratio. Keep budget as an assembly budget and preserve ranking/source attribution. Validate real-store unfiltered, typed, formatter, configured ratio, and injected-counter paths.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-199",
+    "title": "Align Boolean field search across metadata adapters",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/metadata_store.rb",
+      "spec/storage/metadata_store_spec.rb"
+    ],
+    "description": "Issue #356: SQLite JSON1 converts Boolean scalars to integers during field-scoped search. Search true/false text consistently with InMemory while keeping real numeric 1/0 distinct, null and missing fields unmatched, and structured JSON and whole-record semantics unchanged. Shared adapter regressions cover these controls.",
+    "status": "resolved"
   }
 ]
