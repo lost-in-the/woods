@@ -94,6 +94,9 @@ module Woods
         #   it either way.)
         # - **`fields: nil` searches the whole record**, including keys, as
         #   serialized JSON. A query can therefore match a field *name*.
+        # - **Field-scoped values use JSON spellings.** Strings are unquoted,
+        #   objects/arrays use JSON text, Booleans use `true`/`false`, and
+        #   numbers remain numeric text. Null and absent fields never match.
         # - **LIKE metacharacters are literal.** `%` and `_` in a query match
         #   themselves rather than acting as wildcards.
         # - Field names are validated against {SEARCH_FIELD_NAME} by every
@@ -312,9 +315,9 @@ module Woods
           JSON.parse(JSON.generate(metadata))
         end
 
-        # The text SQLite's +json_extract(data, '$.field')+ would compare
-        # against for one field value: strings come back raw, structured
-        # values as their JSON text, scalars as their decimal form. A Ruby
+        # The searchable text for one field value: strings come back raw,
+        # structured values as JSON text, Booleans as true/false, and numbers
+        # as their decimal form. A Ruby
         # +Hash#to_s+ haystack used to leak `=>` and `:sym` syntax that no
         # JSON document contains (STO-8).
         #
@@ -437,7 +440,7 @@ module Woods
 
           pattern = "%#{escape_like(query)}%"
           if fields
-            conditions = fields.map { "json_extract(data, '$.#{_1}') LIKE ? ESCAPE '\\'" }.join(' OR ')
+            conditions = fields.map { "#{field_haystack_sql(_1)} LIKE ? ESCAPE '\\'" }.join(' OR ')
             params = Array.new(fields.size, pattern)
             rows = @db.execute("SELECT id, data FROM units WHERE #{conditions}", params)
           else
@@ -487,6 +490,16 @@ module Woods
 
         def sqlite_busy?(error)
           defined?(SQLite3::BusyException) && error.is_a?(SQLite3::BusyException)
+        end
+
+        # JSON1 extracts Boolean scalars as integers; use their JSON type to
+        # preserve true/false without conflating them with numeric 1/0.
+        # Field names have already passed validate_search_fields!.
+        def field_haystack_sql(field)
+          path = "$.#{field}"
+          "CASE json_type(data, '#{path}') " \
+            "WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " \
+            "ELSE json_extract(data, '#{path}') END"
         end
 
         # Escape SQL LIKE metacharacters in a user query so they match

@@ -2700,5 +2700,18 @@
     ],
     "description": "The #305 host audit identified repeated 500-path git log walks as the largest extraction phase. Use one streamed HEAD-reachable touched-path history, explicitly comparing merges with their first parent while traversing all parents, roots with the empty tree, and exact current paths without rename following. NUL-framed records preserve arbitrary filename delimiters and commit subjects; retain per-file counts, contributors and five recent commits rather than the whole log. Git 2.31 or newer is required for optional enrichment; discard failed or incomplete history with an actionable warning. Changed merge counts versus legacy pathspec simplification are documented; original-host end-to-end speedup remains unmeasured.",
     "status": "resolved"
+  },
+  {
+    "id": "B-199",
+    "title": "Align Boolean field search across metadata adapters",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/metadata_store.rb",
+      "spec/storage/metadata_store_spec.rb"
+    ],
+    "description": "Issue #356: SQLite JSON1 converts Boolean scalars to integers during field-scoped search. Search true/false text consistently with InMemory while keeping real numeric 1/0 distinct, null and missing fields unmatched, and structured JSON and whole-record semantics unchanged. Shared adapter regressions cover these controls.",
+    "status": "resolved"
   }
 ]
