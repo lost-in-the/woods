@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeping `tokens_used` and its trace consistent with the configured counter
   or estimate (B-197, #354).
 
+- Bound OpenAI embedding requests to 36 valid inputs, preserving chunk order and
+  rejecting partial or dimension-inconsistent batches (B-157). Chunk-heavy runs
+  use more HTTP requests to stay within the API's input and total-token limits.
+
 - Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
 
 - Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
