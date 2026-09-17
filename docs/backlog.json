@@ -2702,6 +2702,19 @@
     "status": "resolved"
   },
   {
+    "id": "B-201",
+    "title": "Make middleware metadata and source hashes deterministic across processes",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/middleware_extractor.rb",
+      "lib/woods/extractors/middleware_argument.rb"
+    ],
+    "description": "Public Rails replay exposed process-specific middleware argument identities (#362). Render nested configuration and literal strings faithfully, procs by source location/kind, anonymous classes by parent and own method origins, and default opaque objects by class without traversing private state. Independent booted Rails processes assert identical metadata/source/hash and retain meaningful configuration differences. Custom to_s output, closure captures and opaque object internals remain outside the determinism guarantee.",
+    "status": "resolved"
+  },
+  {
     "id": "B-198",
     "title": "Preserve embedded NUL in literal metadata search",
     "severity": "medium",
