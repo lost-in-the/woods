@@ -454,6 +454,55 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'volatile dependency per-target limit (B-188)' do
+    def git_in_app(*args)
+      output, status = Open3.capture2e('git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+
+    it 'persists the cap and full qualifying count across full and incremental extraction with real history' do
+      %w[BusyHubService OtherHubService].each do |name|
+        write_file("app/services/#{name.underscore}.rb", service_source(name))
+      end
+      %w[FirstConsumer SecondConsumer ThirdConsumer].each do |name|
+        write_file("app/services/#{name.underscore}.rb", service_source(name, dependency: 'BusyHubService'))
+      end
+      write_file('app/services/other_consumer.rb', service_source('OtherConsumer', dependency: 'OtherHubService'))
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+      5.times do |i|
+        %w[busy_hub_service other_hub_service].each do |name|
+          File.open(app_path("app/services/#{name}.rb"), 'a') { |file| file.puts("# change #{i}") }
+        end
+        git_in_app('commit', '-am', "change hubs #{i}")
+      end
+
+      Woods.configuration.volatile_dependency_limit_per_target = 1
+      index_dir = full_extraction
+      before_report = read_json(index_dir, 'graph_analysis.json')
+      expect(before_report.fetch('volatile_dependencies').map { |row| row.fetch('to') })
+        .to contain_exactly('BusyHubService', 'OtherHubService')
+      expect(before_report.fetch('stats')).to include('volatile_dependency_count' => 4,
+                                                      'volatile_dependencies_limit_per_target' => 1,
+                                                      'volatile_dependency_reported_count' => 2)
+
+      changed = write_file('app/services/new_consumer.rb', service_source('NewConsumer', dependency: 'BusyHubService'))
+      git_in_app('add', changed)
+      git_in_app('commit', '-m', 'add consumer')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([changed])
+
+      expect(read_json(index_dir, 'graph_analysis.json').fetch('stats'))
+        .to include('volatile_dependency_count' => 5, 'volatile_dependency_reported_count' => 2)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.volatile_dependency_limit_per_target = nil
+      FileUtils.rm_rf(app_path('.git'))
+    end
+  end
+
   describe 'gap 4 — whole-app unit types' do
     it 'refreshes routes when config/routes.rb changes' do
       run_sequence([
@@ -480,6 +529,95 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Woods::Extractor.new(output_dir: index_dir).extract_changed(['README.md'])
 
       expect(read_json(index_dir, 'manifest.json')['extracted_at']).to eq(before)
+    end
+  end
+
+  describe 'package mutations (B-178)' do
+    def package_unit(index_dir, type, identifier)
+      unit_snapshot(index_dir).values.find do |unit|
+        unit['type'] == type && unit['identifier'] == identifier
+      end
+    end
+
+    def expect_package_membership(index_dir, type, identifier, package)
+      unit = package_unit(index_dir, type, identifier)
+      expect(unit).not_to be_nil
+      node = read_json(index_dir, 'dependency_graph.json').fetch('nodes').fetch(identifier)
+      if package
+        expect(unit.fetch('metadata')).to include('package' => package)
+        expect(node).to include('package' => package)
+      else
+        expect(unit.fetch('metadata')).not_to have_key('package')
+        expect(node).not_to have_key('package')
+      end
+    end
+
+    def expect_packages(index_dir, names)
+      packages = unit_snapshot(index_dir).values.select { |unit| unit['type'] == 'package' }
+      expect(packages.map { |unit| unit.fetch('identifier') }).to match_array(names)
+      nodes = read_json(index_dir, 'dependency_graph.json').fetch('nodes')
+      expect(nodes.select { |_id, node| node['type'] == 'package' }.keys).to match_array(names)
+    end
+
+    it 'adds a nested package and reassigns untouched runtime and file-based units' do
+      write_file('package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package_service.rb', service_source('PackageService', dependency: 'Post'))
+      index_dir = full_extraction
+      expect_packages(index_dir, ['.'])
+      expect_package_membership(index_dir, 'model', 'Post', '.')
+      expect_package_membership(index_dir, 'service', 'PackageService', '.')
+
+      changed = write_file('app/models/package.yml', "dependencies:\n  - .\nenforce_dependencies: true\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([changed])
+
+      expect_packages(index_dir, ['.', 'app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+      expect_package_membership(index_dir, 'service', 'PackageService', '.')
+      package = package_unit(index_dir, 'package', 'app/models')
+      expect(package.fetch('dependencies')).to include(
+        include('type' => 'package', 'target' => '.', 'via' => 'package_dependency')
+      )
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'removes the last package and clears membership on surviving units and nodes' do
+      path = write_file('app/models/package.yml', "enforce_dependencies: true\n")
+      index_dir = full_extraction
+      expect_packages(index_dir, ['app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+
+      delete_file(path)
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect_packages(index_dir, [])
+      expect_package_membership(index_dir, 'model', 'Post', nil)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'replaces package membership when only packwerk package_paths changes' do
+      write_file('app/models/package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package_service.rb', service_source('PackageService', dependency: 'Post'))
+      config_path = write_file('packwerk.yml', "package_paths:\n  - app/models\n")
+      index_dir = full_extraction
+      expect_packages(index_dir, ['app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+      expect_package_membership(index_dir, 'service', 'PackageService', nil)
+
+      # Both package files and both source files remain unchanged. Only the
+      # configured discovery roots change, so the whole-app trigger must
+      # replace packages and re-annotate units absent from the change set.
+      extractor = Woods::Extractor.new(output_dir: index_dir)
+      %w[app/services app/models].each do |package_path|
+        write_file(config_path, "package_paths:\n  - #{package_path}\n")
+        extractor.extract_changed([config_path])
+
+        expect_packages(index_dir, [package_path])
+        expect_package_membership(index_dir, 'model', 'Post', package_path == 'app/models' ? package_path : nil)
+        expect_package_membership(index_dir, 'service', 'PackageService',
+                                  package_path == 'app/services' ? package_path : nil)
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
     end
   end
 

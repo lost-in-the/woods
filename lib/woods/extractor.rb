@@ -1396,8 +1396,10 @@ module Woods
     def same_type_collision_message(type, unit, prior_path)
       "same-type identifier collision: #{type.to_s.singularize} '#{unit.identifier}' derived from " \
         "two different sources ('#{prior_path || 'no file'}' and '#{unit.file_path || 'no file'}'); " \
-        'only one unit could ever be indexed, so extraction aborted — either merge the ' \
-        'declarations into one file or split them into distinct constants'
+        'only one unit could ever be indexed, so extraction aborted. ' \
+        'Wrapper-nested class naming requires Zeitwerk mode with Zeitwerk >= 2.6.9; on older loaders or ' \
+        'classic-mode hosts, check that support before changing valid namespace wrappers. ' \
+        'For a genuine duplicate, merge the declarations into one file or split them into distinct constants'
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1779,6 +1781,7 @@ module Woods
       GraphAnalyzer.new(
         @dependency_graph,
         volatile_ratio: ratio,
+        volatile_limit_per_target: config&.volatile_dependency_limit_per_target,
         cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
         cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
       )

@@ -7,11 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
+
 ### Fixed
 
 - Reflect model callbacks from Rails' per-event chains instead of nonexistent
   per-kind readers; include `before_commit` and keep `callback_count` equal to
   the emitted callback list. Verify named callbacks in booted Rails extraction.
+
+- Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
+  and upgrade guidance before suggesting changes to valid namespace wrappers
+  on older-loader or classic-mode hosts (B-149).
 
 - Stabilize controller inline callback and condition labels across processes and
   checkout paths, including action chunks; retain `unless` conditions in the
@@ -107,6 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
 
 ### Added
+
+- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
+  from filling the volatility report (B-188). Apply the per-target edge cap before
+  the global top 20, preserve the default output, and expose the configured cap
+  and reported count alongside the full qualifying count when enabled.
 
 - Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
   real MiniLM vectors, per-strategy quality floors, latency observations, and

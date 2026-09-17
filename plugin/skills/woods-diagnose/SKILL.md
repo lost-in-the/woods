@@ -35,6 +35,13 @@ whether boot inputs keep changing during initialization or catch-up.
 
 ## 2. Check the published index
 
+For a `same-type identifier collision`, inspect both named source files and the
+Rails loader before suggesting source edits. Wrapper-nested class naming needs
+Zeitwerk mode and Zeitwerk >= 2.6.9; an older loader or classic mode can produce
+the collision even when the namespace wrappers are valid. The expanded error
+guidance (B-149) is unreleased after `2.0.0.beta2`; check the installed version
+first. Follow the [loader compatibility guidance](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#check-the-loader-for-wrapper-nested-classes).
+
 ```bash
 bin/rails woods:validate
 bin/rails woods:stats
@@ -84,6 +91,13 @@ whole-run totals to phase durations or promise the new lines on an older gem.
 Use the installed version's tagged guide; the
 [canonical profiling guide](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#profiling-fixed-costs)
 tracks current source.
+
+For volatile-dependency reports dominated by one target, compare the full
+`stats.volatile_dependency_count` with the persisted array and use the
+[ratio tuning guidance](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pipeline-options).
+The optional per-target cap (B-188) is unreleased after 2.0.0.beta2; check the
+installed gem before suggesting `volatile_dependency_limit_per_target`.
+Re-extract to publish configuration changes; the report remains informational.
 
 For a shallow-checkout git-enrichment warning, the shallow guard (B-189) is
 unreleased after `2.0.0.beta2`; check the installed version first. Fetch complete

@@ -148,7 +148,7 @@ module Woods
                   :cache_store, :cache_options,
                   :dump_retention_count, :component_paths
     attr_reader :embedding_model, :max_context_tokens, :similarity_threshold, :extractors, :pretty_json,
-                :context_format, :cache_enabled, :volatile_dependency_ratio,
+                :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes
 
@@ -212,6 +212,7 @@ module Woods
       @cache_options = {}     # { redis: client, cache: store, ttl: { embeddings: 86400, ... } }
       @dump_retention_count = 3
       @volatile_dependency_ratio = 3.0
+      @volatile_dependency_limit_per_target = nil
       @graph_cycle_limit = GraphAnalyzer::DEFAULT_CYCLE_LIMIT
       @graph_cycle_max_length = GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
       # nil = the unbounded transitive closure. See the setter for why the
@@ -349,6 +350,16 @@ module Woods
       end
 
       @volatile_dependency_ratio = value.to_f
+    end
+
+    # Maximum volatile report edges per typed dependency, before the global
+    # report limit. `nil` preserves the unlimited default.
+    #
+    # @param value [Integer, nil] must be a positive Integer, or nil
+    # @raise [ConfigurationError] otherwise
+    def volatile_dependency_limit_per_target=(value)
+      @volatile_dependency_limit_per_target = validate_optional_positive_integer!(:volatile_dependency_limit_per_target,
+                                                                                  value)
     end
 
     # How many distinct cycles {Woods::GraphAnalyzer#cycles} enumerates before

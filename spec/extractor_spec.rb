@@ -2181,7 +2181,10 @@ RSpec.describe Woods::Extractor do
         .to raise_error(
           Woods::ExtractionError,
           %r{service 'Domain::Container'.*services/Domain::Container\.rb.*container/renderer\.rb}m
-        )
+        ) do |error|
+          expect(error.message).to include('Zeitwerk mode with Zeitwerk >= 2.6.9', 'classic-mode',
+                                           'before changing valid namespace wrappers', 'genuine duplicate')
+        end
     end
   end
 
@@ -3608,6 +3611,14 @@ RSpec.describe Woods::Extractor do
 
       expect(Woods::GraphAnalyzer).to receive(:new)
         .with(extractor.dependency_graph, hash_including(volatile_ratio: 4.5)).and_call_original
+      extractor.send(:build_graph_analyzer)
+    end
+
+    it 'passes the optional per-target volatile dependency limit to the analyzer' do
+      Woods.configuration.volatile_dependency_limit_per_target = 3
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, hash_including(volatile_limit_per_target: 3)).and_call_original
       extractor.send(:build_graph_analyzer)
     end
 

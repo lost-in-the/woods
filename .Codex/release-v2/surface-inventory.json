@@ -115,6 +115,8 @@
     "vector_store=",
     "vector_store_options",
     "vector_store_options=",
+    "volatile_dependency_limit_per_target",
+    "volatile_dependency_limit_per_target=",
     "volatile_dependency_ratio",
     "volatile_dependency_ratio="
   ],
@@ -987,7 +989,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 111,
+    "configuration_attributes": 113,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

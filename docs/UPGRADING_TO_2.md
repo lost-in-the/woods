@@ -47,6 +47,25 @@ After this runbook you will have:
 
 ## Before changing the bundle
 
+### Check the loader for wrapper-nested classes
+
+File-path-governed naming of classes inside class namespaces requires **Zeitwerk
+mode with Zeitwerk 2.6.9 or later** (`cpath_expected_at`, introduced in
+[Zeitwerk 2.6.9](https://github.com/fxn/zeitwerk/blob/main/CHANGELOG.md#269-25-july-2023)). This is a requirement
+of that naming capability, not a higher Rails minimum. Older Zeitwerk and
+classic-mode applications can still extract ordinary declarations, but Woods
+cannot use the loader to distinguish a file's class from its enclosing class
+wrappers. Two sibling files may then derive the same wrapper identifier and
+extraction will abort rather than silently discard one.
+
+For a `same-type identifier collision`, inspect both named files and the
+application's loader mode/version before rewriting valid namespace wrappers.
+On an older-loader host, move to a compatible Zeitwerk version and Zeitwerk mode,
+verify that the application boots and eager-loads, then run a fresh full
+extraction. Rebuild embeddings and exports if identifiers change. A genuine
+duplicate under a supported loader still needs distinct constants or one source
+file. Woods does not provide a classic-mode naming fallback for this case.
+
 ### 1. Record the current installation
 
 Run in the same environment that boots Rails:
