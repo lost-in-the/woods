@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Search Boolean metadata fields as `true`/`false` consistently in SQLite and
+  InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
+
+- Count the final retrieval context after formatting and type-rank metadata,
+  keeping `tokens_used` and its trace consistent with the configured counter
+  or estimate (B-197, #354).
+
+- Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
+
+- Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
+
+- Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
+
+- Reflect model methods after schema loading so full and incremental runs agree
+  on Rails-generated constructors while preserving application overrides (B-202, #363).
+
 - Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
   loading, including relative requires, conditional entries, aliases and custom
   environment sections (B-203, #364).

@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'json'
 require 'fileutils'
+require 'open3'
 
 # Booted-app extraction test (#136). Boots the minimal Rails app under
 # spec/dummy in-process against the Rails version the active gemfile resolves
@@ -138,6 +139,48 @@ RSpec.describe 'Booted-app extraction', :booted_app do
   it 'extracts the application models from real source' do
     identifiers = index_for(:models).map { |u| u['identifier'] }
     expect(identifiers).to include('Post', 'Comment')
+  end
+
+  it 'reflects model methods consistently before and after schema loading (#363)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+    end
+    stub_const('SchemaOrderModel', model)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    before_loading = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+    model.columns
+    after_loading = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+
+    expect(before_loading[:class_methods]).to eq(after_loading[:class_methods])
+    expect(before_loading).to eq(after_loading)
+    expect(before_loading[:class_methods]).to eq(model.methods(false).sort)
+
+    first_unit = extractor.extract_model(model)
+    second_unit = extractor.extract_model(model)
+    expect(first_unit).not_to be_nil
+    expect(second_unit.metadata).to eq(first_unit.metadata)
+    expect(second_unit.source_code).to eq(first_unit.source_code)
+    expect(second_unit.to_h[:source_hash]).to eq(first_unit.to_h[:source_hash])
+  end
+
+  it 'retains an application-defined model constructor after schema loading (#363)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+
+      def self.new(...)
+        super.tap { |record| record.title ||= 'Custom constructor' }
+      end
+    end
+    stub_const('CustomConstructorModel', model)
+    original_constructor = model.method(:new)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    metadata = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+
+    expect(metadata[:class_methods]).to include(:new)
+    expect(model.method(:new)).to eq(original_constructor)
+    expect(model.new.title).to eq('Custom constructor')
   end
 
   it 'extracts the controller and job units' do
@@ -391,5 +434,25 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       expect(node['table']).to eq('posts')
       expect(node['database']).to eq(expected_database)
     end
+  end
+end
+
+RSpec.describe 'Middleware extraction across Rails processes', :booted_app do
+  def extract_stack(setting)
+    script = File.expand_path('../fixtures/middleware/boot.rb', __dir__)
+    output, error, status = Open3.capture3({ 'MIDDLEWARE_SETTING' => setting },
+                                           RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    JSON.parse(output.lines.last)
+  end
+
+  it 'preserves the complete metadata, source and hash across independent boots' do
+    first = extract_stack('first')
+    expect(extract_stack('first')).to eq(first)
+    expect(first.fetch('source')).to include('#<Thing:0x123abc>')
+    changed = extract_stack('second')
+    expect(changed.fetch('metadata')).not_to eq(first.fetch('metadata'))
+    expect(changed.fetch('source')).not_to eq(first.fetch('source'))
+    expect(changed.fetch('hash')).not_to eq(first.fetch('hash'))
   end
 end

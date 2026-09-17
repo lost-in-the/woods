@@ -59,6 +59,7 @@ module Woods
     ).freeze
 
     # Diagnostic trace for retrieval quality analysis.
+    # +tokens_used+ counts the final delivered context, including postprocessing.
     #
     # +skipped_missing_metadata+ carries {Retrieval::ContextAssembler}'s count
     # of candidates dropped because the metadata store had no record for
@@ -378,12 +379,12 @@ module Woods
                                                       fallback_ran: fallback_ran)
 
       assembled = assemble_context(pipeline, filtered, classification, budget)
-      trace = build_trace(classification, execution_result, filtered, assembled, start_time)
-
       build_result(
-        assembled: assembled, classification: classification, strategy: execution_result.strategy,
-        budget: budget, trace: trace, type_rank_context: type_rank_context
-      )
+        assembled: assembled, assembler: pipeline.assembler, classification: classification,
+        strategy: execution_result.strategy, budget: budget, type_rank_context: type_rank_context
+      ).tap do |result|
+        result.trace = build_trace(result, execution_result, filtered, assembled, start_time)
+      end
     end
 
     private
@@ -476,11 +477,12 @@ module Woods
     # Build a RetrievalResult from assembled context and pipeline metadata.
     #
     # @param assembled [AssembledContext] Assembled context
+    # @param assembler [Retrieval::ContextAssembler] Counter configuration used for assembly
     # @param classification [QueryClassifier::Classification] Query classification
     # @param strategy [Symbol] Search strategy used
     # @param budget [Integer] Token budget
     # @return [RetrievalResult]
-    def build_result(assembled:, classification:, strategy:, budget:, trace: nil, type_rank_context: nil)
+    def build_result(assembled:, assembler:, classification:, strategy:, budget:, type_rank_context: nil)
       context = @formatter ? @formatter.call(assembled.context) : assembled.context
       context = append_type_rank_context(context, type_rank_context) if type_rank_context
 
@@ -489,9 +491,8 @@ module Woods
         sources: assembled.sources,
         classification: classification,
         strategy: strategy,
-        tokens_used: assembled.tokens_used,
+        tokens_used: assembler.estimate_tokens(context),
         budget: budget,
-        trace: trace,
         type_rank_context: type_rank_context
       )
     end
@@ -534,14 +535,14 @@ module Woods
       filter_by_type(pipeline, ranked, types: type_array, exclude_types: exclude_types)
     end
 
-    def build_trace(classification, execution_result, filtered, assembled, start_time)
+    def build_trace(result, execution_result, filtered, assembled, start_time)
       elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
       RetrievalTrace.new(
-        classification: classification,
+        classification: result.classification,
         strategy: execution_result.strategy,
         candidate_count: execution_result.candidates.size,
         ranked_count: filtered.size,
-        tokens_used: assembled.tokens_used,
+        tokens_used: result.tokens_used,
         elapsed_ms: elapsed_ms,
         skipped_missing_metadata: assembled.skipped_missing_metadata.to_i
       )

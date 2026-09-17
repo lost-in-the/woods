@@ -63,6 +63,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Inlines concerns: all `include FooConcern` references are resolved and the concern source is appended to `source_code`. Inlined concern names are recorded in `metadata[:inlined_concerns]`
 - Extracts all 19 callback types: `before_validation`, `after_validation`, `before_save`, `after_save`, `around_save`, `before_create`, `after_create`, `around_create`, `before_update`, `after_update`, `around_update`, `before_destroy`, `after_destroy`, `around_destroy`, `after_commit`, `after_rollback`, `after_initialize`, `after_find`, `after_touch`
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
+- Reflects model class and instance methods after reading the schema, so Rails schema-loading optimizations produce the same method metadata in cold and warmed runs. Application-defined constructors remain visible; Rails versions that install an optimized singleton `new` during schema loading consistently include it in `class_methods`.
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
@@ -294,7 +295,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Key details:**
 - Extracts the entire stack as one unit (not one per middleware)
-- Records middleware class names, insertion order, and any initialization arguments
+- Records middleware class names, insertion order, and initialization arguments as readable strings
+- Argument rendering preserves literal strings and nested array/hash configuration. Procs use source locations; anonymous classes (including Ruby temporary names used by Rails executors/reloaders) use parent names and method source locations. Opaque objects using Ruby's default `to_s` are represented by class, without walking private runtime state. Custom `to_s` output is preserved, so application-defined nondeterministic renderers can still vary. Closure captures and opaque object internals are not serialized.
 - No per-file mapping, so incremental re-extraction re-runs `MiddlewareExtractor` wholesale when `config/application.rb`, `Gemfile.lock`, or a file under `config/initializers`/`config/environments` changes
 
 ---
@@ -331,6 +333,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - File-based scanning, no Rails boot needed for the actual file reading
 - Records which partials a template renders and which instance variables it expects
+- Loads the runtime route collection before caching named helpers, including Rails lazy route sets. Fresh-process incremental view extraction resolves the same navigation targets as full extraction.
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)

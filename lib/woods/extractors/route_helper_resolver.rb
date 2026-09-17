@@ -65,6 +65,11 @@ module Woods
         routes = safe_rails_application_routes
         return unless routes
 
+        # Rails lazy route sets do not load when named_routes is read. Use the
+        # runtime route collection reader before caching helpers, just as the
+        # route extractor does. Older route sets and partial doubles still work.
+        routes.routes if routes.respond_to?(:routes)
+
         routes.named_routes.each do |name, route|
           controller = route.defaults[:controller]
           action = route.defaults[:action]
