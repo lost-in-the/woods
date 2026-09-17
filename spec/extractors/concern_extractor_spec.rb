@@ -54,6 +54,15 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(described_class.new.extract_all.map(&:identifier)).to eq(['Trackable'])
     end
 
+    it 'ignores modules belonging to model constants removed from the runtime' do
+      stub_const('RemovedModel', Class.new)
+      stub_const('RemovedModel::Helper', Module.new)
+      model.include(RemovedModel::Helper)
+      hide_const('RemovedModel')
+
+      expect(described_class.new.extract_all).to be_empty
+    end
+
     it 'excludes gem-owned modules even when the application adds their methods' do
       path = create_file('vendor/bundle/gem_mixin.rb', "module GemMixin\n def pin; end\nend\n")
       stub_const('GemMixin', Module.new)

@@ -124,7 +124,12 @@ module Woods
         models.flat_map(&:included_modules).uniq.each_with_object({}) do |mod, paths|
           next unless mod.name
 
-          definition = Object.const_source_location(mod.name)&.first
+          definition = begin
+            Object.const_source_location(mod.name)&.first
+          rescue NameError
+            # Removed/reloaded models can remain in descendants until GC.
+            next
+          end
           next if definition && !app_source?(definition, "#{Rails.root}/")
 
           path = resolve_source_location(mod, app_root: "#{Rails.root}/", fallback: nil)
