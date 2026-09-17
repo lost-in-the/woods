@@ -2702,6 +2702,19 @@
     "status": "resolved"
   },
   {
+    "id": "B-197",
+    "title": "Count retrieval tokens after final context postprocessing",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/retriever.rb",
+      "lib/woods/retrieval/context_assembler.rb"
+    ],
+    "description": "Issue #354: tokens_used and trace.tokens_used must describe the delivered context after the formatter and type-rank table, using the assembly counter or chars-per-token ratio. Keep budget as an assembly budget and preserve ranking/source attribution. Validate real-store unfiltered, typed, formatter, configured ratio, and injected-counter paths.",
+    "status": "resolved"
+  },
+  {
     "id": "B-199",
     "title": "Align Boolean field search across metadata adapters",
     "severity": "medium",
