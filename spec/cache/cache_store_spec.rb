@@ -790,6 +790,21 @@ RSpec.describe Woods::Cache::CachedRetriever do
       expect(retriever).to have_received(:retrieve).once
     end
 
+    it 'forwards independent scopes and preserves applied scope through JSON cache round trips' do
+      retrieval_result.applied_scope = { packages: ['packs/billing'], source_paths: [], eligible_units: 1,
+                                         outcome: :matched, candidate_count: 1, returned_units: 1 }
+      allow(retriever).to receive(:retrieve).and_return(retrieval_result)
+      fresh = cached_retriever.retrieve('billing', packages: ['packs/billing'])
+      cached = cached_retriever.retrieve('billing', packages: ['packs/billing'])
+      cached_retriever.retrieve('billing', packages: ['packs/other'])
+      cached_retriever.retrieve('billing', source_paths: ['packs/billing'])
+      cached_retriever.retrieve('billing')
+      expect(cached.applied_scope).to eq(fresh.applied_scope)
+      expect(retriever).to have_received(:retrieve).exactly(4).times
+      expect(retriever).to have_received(:retrieve).with('billing', budget: 8000, types: nil, exclude_types: nil,
+                                                                    packages: ['packs/billing'], source_paths: nil).once
+    end
+
     it 'round-trips type_rank_context through the cache with symbol keys preserved (#108)' do
       typed_result = Woods::Retriever::RetrievalResult.new(
         context: '## Ctx', sources: [], classification: nil,

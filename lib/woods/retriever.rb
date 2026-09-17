@@ -10,6 +10,9 @@ require_relative 'retrieval/ranker'
 require_relative 'retrieval/context_assembler'
 require_relative 'retrieval/lexical_index'
 require_relative 'retrieval/lexical_assembler'
+require_relative 'retrieval/scope'
+require_relative 'retrieval/scoped_vector_store'
+require_relative 'retrieval/scoped_graph_store'
 require_relative 'embedding/token_counter'
 require_relative 'token_utils'
 
@@ -101,7 +104,7 @@ module Woods
     #
     # Nil for unfiltered queries.
     RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace,
-                                 :type_rank_context, keyword_init: true)
+                                 :type_rank_context, :applied_scope, keyword_init: true)
 
     # Raised when a metadata-store access fails during retrieval (M8). One
     # shared typed error for every store call site: the retriever used to
@@ -374,7 +377,7 @@ module Woods
     # @param exclude_types [Array<String, Symbol>, nil] Additional types to
     #   exclude. Applied on top of DEFAULT_EXCLUDE_TYPES unless +types:+ is set.
     # @return [RetrievalResult] Complete retrieval result
-    def retrieve(query, budget: 8000, types: nil, exclude_types: nil) # rubocop:disable Metrics/MethodLength
+    def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       validate_query!(query)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # One atomic read of the bundle reference: everything this query does
@@ -382,9 +385,12 @@ module Woods
       # SAME store set even if a reload swaps the pipeline mid-flight (M7).
       pipeline = @pipeline
       @pipeline_observer&.call(pipeline)
+      scope = resolve_scope(pipeline, packages, source_paths, types, exclude_types)
+      pipeline = scoped_pipeline(pipeline, scope) if scope
       classification = @classifier.classify(query)
       if @mode == :lexical
-        return retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+        result = retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+        return attach_scope(result, scope)
       end
 
       execution_result = pipeline.executor.execute(query: query, classification: classification)
@@ -394,8 +400,10 @@ module Woods
       filtered, fallback_ran = apply_type_filter(pipeline, ranked, query, classification,
                                                  types: types, type_list: type_list,
                                                  exclude_types: exclude_types)
-      type_rank_context = build_type_rank_context_for(ranked, pipeline, type_list, filtered,
-                                                      fallback_ran: fallback_ran)
+      type_rank_context = unless scope
+                            build_type_rank_context_for(ranked, pipeline, type_list, filtered,
+                                                        fallback_ran: fallback_ran)
+                          end
 
       assembled = assemble_context(pipeline, filtered, classification, budget)
       build_result(
@@ -403,10 +411,39 @@ module Woods
         strategy: execution_result.strategy, budget: budget, type_rank_context: type_rank_context
       ).tap do |result|
         result.trace = build_trace(result, execution_result, filtered, assembled, start_time)
+        attach_scope(result, scope)
       end
     end
 
     private
+
+    def resolve_scope(pipeline, packages, source_paths, types, excluded)
+      return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+
+      Retrieval::Scope.new(metadata_store: translate_store(pipeline.metadata_store, :metadata),
+                           packages: packages, source_paths: source_paths, types: types,
+                           exclude_types: DEFAULT_EXCLUDE_TYPES + Array(excluded).map(&:to_s))
+    end
+
+    def scoped_pipeline(pipeline, scope)
+      vector = Retrieval::ScopedVectorStore.new(store: pipeline.vector_store, scope: scope)
+      graph = Retrieval::ScopedGraphStore.new(store: pipeline.graph_store, scope: scope)
+      build_pipeline(vector_store: vector, metadata_store: scope.metadata_store, graph_store: graph)
+    end
+
+    def attach_scope(result, scope)
+      return result unless scope
+
+      result.applied_scope = scope.summary.merge(
+        outcome: if scope.keys.empty?
+                   :empty_scope
+                 else
+                   (result.trace.ranked_count.zero? ? :no_match : :matched)
+                 end,
+        candidate_count: result.trace.candidate_count, returned_units: result.sources.size
+      )
+      result
+    end
 
     def retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
       excluded = DEFAULT_EXCLUDE_TYPES + Array(exclude_types).map(&:to_s)
