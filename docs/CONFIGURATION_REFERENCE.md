@@ -615,7 +615,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
 | `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
 | `WOODS_ALLOW_PURGE` | unset | Set to `"1"` to override the 30%-deletion purge guard in `woods:embed`/`woods:embed_incremental`. |
-| `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain, and — when the JSON snapshot store is in use — how many temporal snapshots (`snapshots/`) to keep. A payload pinned by an active reader process is kept temporarily beyond this bound and reconsidered after the pin is released. |
+| `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain, and — when the JSON snapshot store is in use — how many temporal snapshots (`snapshots/`) to keep. JSON snapshot retention counts corrupt or unreadable SHA-named files and prunes them first; the just-captured snapshot is protected. Cleanup failures are non-fatal. A payload pinned by an active reader process is kept temporarily beyond this bound and reconsidered after the pin is released. |
 | `WOODS_MCP_CACHE_TTL_MS` | `10000` | Cache TTL advertised in tool result `_meta`. `0` disables caching. |
 | `WOODS_NO_UPDATE_CHECK` | unset | Set to `"1"` to skip the `woods_status` RubyGems version check. |
 | `XDG_CACHE_HOME` | `~/.cache` | Base directory for the best-effort update-check cache (`$XDG_CACHE_HOME/woods/update_check.json`). An unset or empty value uses `~/.cache`; if the home directory cannot be resolved, Woods falls back to the system temporary directory. |
@@ -716,6 +716,13 @@ metadata. Extraction still succeeds when git is unavailable or history cannot
 be read completely. Git enrichment is omitted in either case; a failed or
 incomplete streamed history read logs a warning.
 This requirement and the history policy below are unreleased after 2.0.0.beta2.
+
+Per-unit enrichment also requires a non-shallow repository. A shallow checkout
+or a failed repository-depth probe omits enrichment with one warning per
+extractor instance. Fetch complete history (`git fetch --unshallow`, or
+`actions/checkout` with `fetch-depth: 0`) and run full extraction to refresh
+retained metadata. If depth cannot be verified, check git access and version.
+A source archive without a repository remains quiet.
 
 Full and incremental extraction use one streamed `HEAD` history walk, restricted
 to the last 365 days by git's `--since` traversal. Only requested app-owned paths

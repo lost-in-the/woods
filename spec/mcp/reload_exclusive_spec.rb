@@ -178,7 +178,7 @@ RSpec.describe 'Index MCP exclusive reload contract' do
       Thread.current[:later_structure] = true
       dispatch_tool('structure')
     end
-    Timeout.timeout(1) { later_attempted.pop }
+    wait_for_thread_signal(later_attempted, later: later, reload: reload)
     completed_early = later.join(0.05)
     entered_during_reload = completed_early || !later_entered.empty?
 

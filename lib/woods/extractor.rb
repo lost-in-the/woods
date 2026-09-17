@@ -2023,7 +2023,7 @@ module Woods
     # to say. Enrichment then wrote `commit_count: 0` and
     # `change_frequency: new` onto every unit, which reads exactly like a file
     # that was never committed, where an absent git directory correctly omits
-    # the keys (B-186). HEAD has to resolve.
+    # the keys (B-186). HEAD has to resolve, with complete ancestry (B-189).
     #
     # Memoized, so the warning below is emitted at most once per run.
     #
@@ -2032,11 +2032,29 @@ module Woods
       return @git_available if defined?(@git_available)
 
       _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
-      @git_available = status.success?
-      warn_unresolvable_git(error) unless @git_available
-      @git_available
+      unless status.success?
+        warn_unresolvable_git(error)
+        return @git_available = false
+      end
+
+      @git_available = complete_git_history?
     rescue StandardError
       @git_available = false
+    end
+
+    # A shallow HEAD resolves but represents an incomplete ancestry. Do not
+    # turn that boundary into apparent one-commit/new-file churn facts.
+    def complete_git_history?
+      output, _error, status = Open3.capture3(*git_argv('rev-parse', '--is-shallow-repository'))
+      return true if status.success? && output.strip == 'false'
+
+      shallow = status.success? && output.strip == 'true'
+      reason = shallow ? 'shallow repository' : 'repository depth could not be verified'
+      Rails.logger.warn(
+        "[Woods] Git enrichment omitted: #{reason}. Fetch full history with git fetch --unshallow " \
+        '(or actions/checkout fetch-depth: 0), then run full extraction to refresh git metadata.'
+      )
+      false
     end
 
     # Say once why no unit will carry git metadata, but only when there is a
