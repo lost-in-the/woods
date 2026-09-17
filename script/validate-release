@@ -183,6 +183,12 @@ begin
     fail_release("release SHA #{release_sha} is not reachable from #{main_ref}")
   end
 
+  entry_paths = git('ls-tree', '-r', '--name-only', '-z', release_sha, '--', 'changelog').split("\0")
+  pending_entries = entry_paths.select do |path|
+    path.end_with?('.md') || path == 'changelog' || path.match?(%r{\Achangelog/[^/]+\.md/})
+  end
+  fail_release("unconsumed changelog entries: #{pending_entries.join(', ')}") unless pending_entries.empty?
+
   changelog = release_file('CHANGELOG.md', release_sha, trusted_checkout)
   heading = changelog.match(/^## \[#{Regexp.escape(version)}\] - (\d{4}-\d{2}-\d{2})$/)
   fail_release("missing dated CHANGELOG.md section for #{version}") unless heading

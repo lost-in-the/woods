@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
+
 ### Fixed
 
 - Stabilize controller inline callback and condition labels across processes and
