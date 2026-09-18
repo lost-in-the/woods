@@ -61,7 +61,13 @@ RSpec.describe 'Embedding publication integrity' do
     artifact = Woods::IndexArtifact.new(@root)
     vectors = Woods::Storage::Snapshotter::Vector.load_or_empty(artifact)
     metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact)
-    { ids: vectors.each_entry.to_a.map(&:first).sort, metadata: metadata.each_entry.to_a,
+    # Hydration stamps a new in-memory updated_at. Compare the public records
+    # and exact persisted bytes, including the original serialized timestamps.
+    records = metadata.each_entry.map { |id, _record| [id, metadata.find(id)] }
+    files = %w[metadata.msgpack vectors.bin vectors.idx].to_h do |name|
+      [name, File.binread(artifact.latest_dump_path.join(name))]
+    end
+    { ids: vectors.each_entry.to_a.map(&:first).sort, metadata: records, files: files,
       checkpoint: File.binread(File.join(@root, 'checkpoint.json')), dump: artifact.latest_dump_path.to_s }
   end
 
