@@ -35,7 +35,7 @@ module PackagedGemSpec
   # `release:reopen` only ever run from a source checkout of this repository.
   RELEASE_MACHINERY = %r{\Alib/(tasks/release\.rake|woods/release/)}
   SEMANTIC_REOPEN_BOOTSTRAP = <<~'RUBY'
-    # Activate the installed gem's dependencies before instrumentation loads JSON.
+    # The isolated installed bundle is active before instrumentation loads JSON.
     require 'woods'
     require 'json'
 
@@ -160,7 +160,8 @@ RSpec.describe 'packaged gem' do
   # other branch is covered in spec/release_v2/gemspec_spec.rb.
   it 'derives source, changelog, and documentation metadata from the version state' do
     metadata = @package.spec.metadata
-    release_ref = Woods::VERSION.end_with?('.alpha') ? 'main' : "v#{Woods::VERSION}"
+    version = @package.spec.version.to_s
+    release_ref = version.end_with?('.alpha') ? 'main' : "v#{version}"
 
     expect(metadata.fetch('source_code_uri')).to eq("https://github.com/lost-in-the/woods/tree/#{release_ref}")
     expect(metadata.fetch('changelog_uri'))
@@ -350,6 +351,27 @@ RSpec.describe 'packaged gem' do
         '--install-dir', @gem_home, @artifact
       )
       raise output unless status.success?
+
+      prepare_installed_bundle
+    end
+
+    # Resolve only installed gems, as a host's `bundle exec` launch does. Keep
+    # this independent of the source checkout's Gemfile and dependency lock.
+    def prepare_installed_bundle
+      gemfile = File.join(@package_tmp, 'Gemfile')
+      File.write(gemfile, <<~GEMFILE)
+        source 'https://rubygems.org'
+        gem 'woods', '= #{@package.spec.version}'
+        gem 'rails'
+        gem 'sqlite3'
+        gem 'webrick'
+      GEMFILE
+      stdout, stderr, status = Open3.capture3(
+        installed_env, Gem.ruby, '-S', 'bundle', 'lock', '--local', chdir: @package_tmp
+      )
+      raise "installed bundle resolution failed:\n#{stdout}\n#{stderr}" unless status.success?
+
+      @installed_gemfile = gemfile
     end
 
     def installed_env
@@ -360,6 +382,8 @@ RSpec.describe 'packaged gem' do
       dependency_paths = ENV.fetch('WOODS_PACKAGE_GEM_PATH', '').split(File::PATH_SEPARATOR).reject(&:empty?)
       clean_env.merge(
         'BUNDLE_IGNORE_CONFIG' => '1',
+        'BUNDLE_GEMFILE' => @installed_gemfile,
+        'RUBYOPT' => @installed_gemfile && '-rbundler/setup',
         'GEM_HOME' => @gem_home,
         'GEM_PATH' => ([@gem_home] + dependency_paths + Gem.path + Gem.default_path).uniq.join(File::PATH_SEPARATOR),
         'OPENAI_API_KEY' => nil,
@@ -371,7 +395,14 @@ RSpec.describe 'packaged gem' do
     end
 
     def run_installed(*command, chdir: @package_tmp)
-      Open3.capture3(installed_env, *command, chdir: chdir)
+      env = installed_env
+      app_gemfile = File.join(chdir, 'Gemfile')
+      if chdir != @package_tmp && File.file?(app_gemfile)
+        # Rails binstubs / bundle exec establish the app's own bundle. In
+        # particular, the initial local install must run before setup loads it.
+        env = env.merge('BUNDLE_GEMFILE' => app_gemfile, 'RUBYOPT' => nil)
+      end
+      Open3.capture3(env, *command, chdir: chdir)
     end
 
     def build_installed_preset_artifact(preset, index_dir) # rubocop:disable Metrics/MethodLength
@@ -524,7 +555,7 @@ RSpec.describe 'packaged gem' do
       evidence_path = File.join(isolated_cwd, 'boot-evidence.json')
       env = installed_reopen_env(index_dir, isolated_cwd, evidence_path).merge(
         'WOODS_RETRIEVAL_MODE' => 'lexical', 'WOODS_NO_UPDATE_CHECK' => '1',
-        'RUBYOPT' => "-r#{lexical_guard_file}"
+        'RUBYOPT' => "-rbundler/setup -r#{lexical_guard_file}"
       )
       transport = installed_reopen_transport(env)
       assert_lexical_query(MCP::Client.new(transport: transport))
@@ -538,7 +569,7 @@ RSpec.describe 'packaged gem' do
       base = URI("http://127.0.0.1:#{port}/")
       env = installed_env.merge('PORT' => port.to_s, 'HOST' => '127.0.0.1', 'WOODS_MCP_HTTP_STATELESS' => '1',
                                 'WOODS_RETRIEVAL_MODE' => 'lexical', 'WOODS_NO_UPDATE_CHECK' => '1',
-                                'RUBYOPT' => "-r#{lexical_guard_file}")
+                                'RUBYOPT' => "-rbundler/setup -r#{lexical_guard_file}")
       stdin, output, wait_thread = Open3.popen2e(env, File.join(@gem_home, 'bin/woods-mcp-http'),
                                                  index_dir, chdir: @package_tmp)
       wait_for_http(base, wait_thread, output)
@@ -623,7 +654,7 @@ RSpec.describe 'packaged gem' do
           gem 'activerecord', require: false
           gem 'railties', require: false
           gem 'sqlite3', require: false
-          gem 'woods', '= #{Woods::VERSION}', require: false
+          gem 'woods', '= #{@package.spec.version}', require: false
         GEMFILE
         'Rakefile' => <<~RUBY,
           require_relative 'config/application'
@@ -708,7 +739,23 @@ RSpec.describe 'packaged gem' do
       stdout, stderr, status = Open3.capture3(env, 'ruby', '-e', script, chdir: @package_tmp)
 
       expect_success(['ruby', '-e', 'require woods'], stdout, stderr, status)
-      expect(stdout).to eq("#{Woods::VERSION}\n")
+      expect(stdout).to eq("#{@package.spec.version}\n")
+    end
+
+    it 'resolves installed dependencies before instrumentation can preload JSON' do
+      script = <<~RUBY
+        require 'json'
+        require 'woods'
+        json = Gem.loaded_specs.fetch('json').version
+        dependency = Gem.loaded_specs.fetch('woods').dependencies.find { |item| item.name == 'json' }
+        abort "JSON outside artifact requirement: \#{json}" unless dependency.requirement.satisfied_by?(json)
+        abort 'repository bundle leaked' unless ENV.fetch('BUNDLE_GEMFILE').start_with?(#{@package_tmp.inspect})
+        puts json
+      RUBY
+      stdout, stderr, status = run_installed(Gem.ruby, '-e', script)
+      expect_success(['installed bundle JSON activation'], stdout, stderr, status)
+      dependency = @package.spec.dependencies.find { |item| item.name == 'json' }
+      expect(dependency.requirement).to be_satisfied_by(Gem::Version.new(stdout.strip))
     end
 
     it 'loads all installed executables to their safe startup boundaries' do
@@ -786,7 +833,7 @@ RSpec.describe 'packaged gem' do
           File.join(index_dir, 'manifest.json')
         )
         snapshot = {
-          schema_version: 1, gem_version: Woods::VERSION, created_at: Time.now.utc.iso8601,
+          schema_version: 1, gem_version: @package.spec.version.to_s, created_at: Time.now.utc.iso8601,
           embedding_provider: { class: 'Woods::Embedding::Provider::Fake', model: 'installed', dimension: 8 },
           stores: { vector_store: adapter, metadata_store: 'in_memory', graph_store: 'in_memory' },
           store_options: {
@@ -843,8 +890,8 @@ RSpec.describe 'packaged gem' do
       woods_migration = Dir[File.join(app, 'db/migrate/*_create_woods_tables.rb')].fetch(0)
       pgvector_migration = Dir[File.join(app, 'db/migrate/*_add_pgvector_to_woods.rb')].fetch(0)
       stdout, stderr, status = run_installed(
-        'bundle', 'exec', 'ruby', '-rlogger', '-ractive_record', '-e',
-        'print ActiveRecord::Migration.current_version', chdir: app
+        'bundle', 'exec', 'ruby', '-e',
+        "require 'logger'; require 'active_record'; print ActiveRecord::Migration.current_version", chdir: app
       )
       expect_success(['ActiveRecord::Migration.current_version'], stdout, stderr, status)
       # The migration templates open with a documentation comment, so assert
