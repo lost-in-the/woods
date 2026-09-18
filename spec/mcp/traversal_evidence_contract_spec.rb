@@ -61,6 +61,22 @@ RSpec.describe 'Traversal explanation contract' do
   end
 
   %i[markdown plain claude].each do |format|
+    it "renders typed ambiguity, transitive uncertainty and recorded false attributes in #{format}" do
+      path = File.join(directory, 'dependency_graph.json')
+      graph = JSON.parse(File.read(path))
+      graph['variants'] = [{ 'identifier' => 'Post', 'type' => 'service', 'edges' => [] }]
+      graph['edges']['Comment'] = [{ 'target' => 'Post', 'via' => 'has_many', 'through' => 'subscriptions',
+                                     'through_db' => 'reporting', 'disable_joins' => false }]
+      graph['edges']['Post'] = [{ 'target' => 'Outside', 'via' => 'calls' }]
+      graph['reverse']['Outside'] = ['Post']
+      File.write(path, JSON.generate(graph))
+      text = call_tool(format: format, identifier: 'Comment', explain: true).dig('structuredContent', 'text')
+      expect(text).to include('Post (ambiguous; candidate types: model, service)',
+                              'Outside (unresolved; candidate types: none)',
+                              'via=has_many; through=subscriptions; through_db=reporting; disable_joins=false',
+                              'Outside: transitive; parent=Post;', 'typed path complete=no')
+    end
+
     it "renders the same directed edges, unknowns, witnesses and context in #{format}" do
       result = call_tool(format: format, identifier: 'Comment', explain: true, limit: 1, offset: 1)
       text = result.dig('structuredContent', 'text')

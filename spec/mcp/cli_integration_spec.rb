@@ -74,6 +74,25 @@ RSpec.describe 'MCP CLI integration' do
         end
       end
     end
+    it 'returns traversal explanation evidence over the packaged stdio boundary' do
+      meta = {
+        'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+        'io.modelcontextprotocol/clientInfo' => { name: 'traversal-cli', version: '1' },
+        'io.modelcontextprotocol/clientCapabilities' => {}
+      }
+      request = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                  params: { name: 'dependencies', arguments: { identifier: 'Comment', explain: true }, _meta: meta } }
+      output, errors, status = Dir.mktmpdir('woods-traversal-cli') do |index_dir|
+        FileUtils.cp_r(File.join(fixture_dir, '.'), index_dir)
+        initialize_over_stdio(request, index_dir)
+      end
+      expect(status.success?).to be(true), utf8(errors)
+      result = JSON.parse(output).fetch('result')
+      expect(result['isError']).to be(false)
+      text = result.fetch('content').first.fetch('text')
+      expect(text).to include('Comment (model) -> Post (model)', 'via=unknown',
+                              'Post: direct; parent=Comment; edge=e0')
+    end
   end
 
   # ── exe/woods-mcp-start wrapper ──────────────────────────────────
