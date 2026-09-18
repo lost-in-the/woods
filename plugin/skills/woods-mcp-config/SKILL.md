@@ -7,7 +7,7 @@ description: Configure Woods MCP connections with the exact client JSON shapes a
 
 ## Managed configuration availability
 
-`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+`woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the
 installed version and test `bundle exec woods-agent-config --help` in the
 selected application bundle. When supported, use its saved setup/update/remove
 plan and explicit client/scope/root selection; apply the reviewed plan within
@@ -30,7 +30,7 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 Default to Index-only. It reads generated code context and exposes 14 tools. Console MCP boots Rails and reads live data; ask before enabling it.
 
-Initialization guidance (#402) is unreleased after `2.0.0.beta2`; check the
+Initialization guidance (#402) is available in Woods `2.0.0.beta3`; check the
 installed gem before expecting MCP `instructions`. Supporting servers provide
 a short workflow through initialization or modern discovery; protocol
 `2024-11-05` omits it. Missing instructions alone are not a connection failure.
@@ -55,8 +55,8 @@ when unavailable. See the
 
 Use this shape for any stdio-capable MCP client, adapted to the client's configuration location. `woods-mcp-start` validates and launches; it does not install or auto-restart.
 
-Writer-version provenance (#323) is unreleased; check the installed gem version's
-release notes before expecting `index.woods_version` in `woods_status`. It reports
+Writer-version provenance (#323) is available in Woods `2.0.0.beta3`; check the installed
+gem version's release notes before expecting `index.woods_version` in `woods_status`. It reports
 the last manifest publisher, independently of `server.version`. Treat missing/null
 as unknown and see [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
@@ -79,7 +79,7 @@ Use a host-side bundle only after verifying Ruby, the application bundle, and th
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
 
 For host MCP reading a container daemon's shared index, foreign heartbeat trust
-(#321) is unreleased. Verify the installed gem version's release notes before
+(#321) is available in Woods `2.0.0.beta3`. Verify the installed gem version's release notes before
 offering `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in the MCP environment. It makes
 `woods_status.watch.alive` use the same bounded freshness policy as task readers;
 see [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness).
@@ -97,8 +97,8 @@ end
 
 The token authenticates HTTP requests and is not sent by a stdio client.
 Before suggesting `console_mcp_http_enabled = false`, verify that the installed
-version supports it: the option is unreleased in Woods 2.0.0.beta2. Supported
-stdio-only hosts can set it to `false` and omit the HTTP token; existing
+version supports it: the option is available in Woods `2.0.0.beta3`. Supported
+stdio-only hosts can set it to `false` and omit the HTTP token; older
 versions require the token at production boot whenever Console is enabled.
 For HTTP, retain a strong token, allowed origins and TLS. Use installed-version
 tagged documentation; the [canonical Console guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md)
@@ -165,7 +165,7 @@ query. Scoping can hide relevant cross-boundary relationships, so broaden the
 request deliberately when the task needs them. See the
 [scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).
 
-## Source-content freshness (unreleased #405)
+## Source-content freshness (Woods 2.0.0.beta3; #405)
 
 Check installed-version support before using `woods-extract` or the optional
 `woods_status.source_check` argument. With support, inspect

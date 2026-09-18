@@ -16,7 +16,7 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 ## Managed configuration availability
 
-`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+`woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the
 installed version and test `bundle exec woods-agent-config --help` in the
 selected application bundle. When supported, use its saved setup/update/remove
 plan and explicit client/scope/root selection; apply the reviewed plan within
@@ -48,7 +48,7 @@ whether boot inputs keep changing during initialization or catch-up.
 
 ### Watch misses edits under a shared directory alias
 
-Check the installed version: logical alias preservation (#445) is unreleased.
+Check the installed version: logical alias preservation (#445) is available in Woods `2.0.0.beta3`.
 Older polling/catch-up walkers could visit an irrelevant alias first and suppress
 `app/models` when both point to the same physical directory. Compare the logical
 path with the extraction input path; a running daemon alone does not prove coverage.
@@ -58,8 +58,8 @@ See the installed version's watch guide before assuming this behavior.
 
 ### Session trace reports ambiguous identity
 
-The `session_trace` `ambiguous_identity` error (#213) is unreleased after
-`2.0.0.beta2`; check the installed gem before expecting it. It names a dependency
+The `session_trace` `ambiguous_identity` error (#213) is available in Woods `2.0.0.beta3`;
+check the installed gem before expecting it. It names a dependency
 with multiple published extraction types, so no partial session context is
 returned. Use `depth: 0` for the timeline or inspect the named candidates with
 explicit `lookup` types. Do not choose one by index order or suggest that a full
@@ -72,7 +72,7 @@ For a `same-type identifier collision`, inspect both named source files and the
 Rails loader before suggesting source edits. Wrapper-nested class naming needs
 Zeitwerk mode and Zeitwerk >= 2.6.9; an older loader or classic mode can produce
 the collision even when the namespace wrappers are valid. The expanded error
-guidance (B-149) is unreleased after `2.0.0.beta2`; check the installed version
+guidance (B-149) is available in Woods `2.0.0.beta3`; check the installed version
 first. Follow the [loader compatibility guidance](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#check-the-loader-for-wrapper-nested-classes).
 
 ```bash
@@ -82,7 +82,7 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
-Semantic graph validation (#413) is unreleased after `2.0.0.beta2`; verify the
+Semantic graph validation (#413) is available in Woods `2.0.0.beta3`; verify the
 installed gem before expecting these errors. Supporting versions check typed
 unit identity, graph/index agreement and forward/reverse/file/type memberships
 within one pinned generation. Preserve the failing generation and exact error,
@@ -95,7 +95,7 @@ an external name from an internal unit omitted everywhere. Follow the
 
 If external targets such as `http_api` lose dependents after incremental
 extraction, check whether the installed Woods version includes B-193.
-The fix is unreleased; installing this plugin does not upgrade the gem.
+The fix is available in Woods `2.0.0.beta3`; installing this plugin does not upgrade the gem.
 Affected indexes need one full extraction after upgrading to a fixed version.
 Follow the [recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#external-dependency-targets-lose-dependents-after-incremental-extraction).
 
@@ -107,7 +107,7 @@ Confirm the installed release and filesystem support retention locks before
 using the pinning examples; flat layouts need writers stopped for a consistent copy.
 
 A host reader can report a container daemon dead because foreign-host records
-are rejected by default. Foreign heartbeat trust (#321) is unreleased: first
+are rejected by default. Foreign heartbeat trust (#321) is available in Woods `2.0.0.beta3`: first
 check the installed Woods version and that version's release notes. Only for a
 supporting version, offer `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in every relevant
 task/MCP reader and follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness).
@@ -115,8 +115,8 @@ Fresh `degraded` still means incremental work is needed; a fresh `running`
 record can outlive a crashed foreign daemon by up to 15 minutes. Older versions
 need their status check run in the daemon's own container.
 
-Writer-version provenance (#323) is unreleased: verify the installed gem version's
-release notes before expecting it. If `index.woods_version` exists, compare it
+Writer-version provenance (#323) is available in Woods `2.0.0.beta3`: verify the installed
+gem version's release notes before expecting it. If `index.woods_version` exists, compare it
 with `server.version`; missing/null is unknown, not a failure. A validator
 major-version warning calls for full extraction and upgrade review, while a match
 does not certify retained units were migrated. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
@@ -139,12 +139,12 @@ tracks current source.
 For volatile-dependency reports dominated by one target, compare the full
 `stats.volatile_dependency_count` with the persisted array and use the
 [ratio tuning guidance](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pipeline-options).
-The optional per-target cap (B-188) is unreleased after 2.0.0.beta2; check the
+The optional per-target cap (B-188) is available in Woods `2.0.0.beta3`; check the
 installed gem before suggesting `volatile_dependency_limit_per_target`.
 Re-extract to publish configuration changes; the report remains informational.
 
 For a shallow-checkout git-enrichment warning, the shallow guard (B-189) is
-unreleased after `2.0.0.beta2`; check the installed version first. Fetch complete
+available in Woods `2.0.0.beta3`; check the installed version first. Fetch complete
 history with `git fetch --unshallow` or `actions/checkout` `fetch-depth: 0`, then
 run full extraction. Depth two only enables a two-commit diff; it does not
 restore complete churn history. See the
@@ -152,7 +152,7 @@ restore complete churn history. See the
 
 For `Git enrichment omitted: history could not be read completely`, first check
 whether the installed Woods release documents the new streamed-history policy;
-it is unreleased after 2.0.0.beta2. Supporting versions require Git 2.31 or newer.
+it is available in Woods `2.0.0.beta3`. Supporting versions require Git 2.31 or newer.
 Check `git --version` in the extraction container and repository/object-store
 access with its `WOODS_GIT_DIR` setting. A failed history stream is discarded;
 repair git access and run full extraction to refresh retained metadata. See the
@@ -162,14 +162,14 @@ After a bundle change or removal of a dynamically defined job, incremental
 extraction can retain stale runtime units. Use a fresh process with the updated
 bundle for full extraction, then validate. For missing external gem paths,
 first distinguish an upgraded bundle from a reader on a different host/mount.
-The more explicit `woods:validate` bundle-update remedy (B-166) is unreleased
-after `2.0.0.beta2`; the full-extraction recovery works on older versions too.
+The more explicit `woods:validate` bundle-update remedy (B-166) is available in Woods
+`2.0.0.beta3`; the full-extraction recovery works on older versions too.
 See [runtime removals and bundle updates](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#runtime-removals-and-bundle-updates).
 
 ### Export identity checks
 
-For Notion or Unblocked exports, typed selection checks (#213) are unreleased
-after `2.0.0.beta2`; check the installed gem before expecting them. A missing or
+For Notion or Unblocked exports, typed selection checks (#213) are available in Woods
+`2.0.0.beta3`; check the installed gem before expecting them. A missing or
 mismatched export identity calls for index validation and a fresh extraction,
 not a force flag. An `ambiguous export URI` means two types share an identifier
 and source file: preserve existing documents and report the collision; do not
@@ -192,20 +192,20 @@ For Docker-only bundles, test the configured container command instead, for exam
 
 For corrupt pipeline cooldown state, first confirm this is a custom server
 with `pipeline_repair` registered; packaged `woods-mcp` does not wire it.
-Recovery through `reset_cooldowns` (B-159) is unreleased after `2.0.0.beta2`.
+Recovery through `reset_cooldowns` (B-159) is available in Woods `2.0.0.beta3`.
 Check the installed version before attempting it and follow the
 [corrupt cooldown recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#corrupt-pipeline-cooldown-state).
 
 ## Deferred refresh hooks
 
-Expanded hook coverage and `woods:hook_refresh` (#408) are unreleased after
-Woods 2.0.0.beta2. Verify the installed task through the configured host/container
+Expanded hook coverage and `woods:hook_refresh` (#408) are available in Woods
+`2.0.0.beta3`. Verify the installed task through the configured host/container
 command before diagnosing this plugin's queue. Read `<output>/hook.log` and
 `hook-pending/`; status 75 means an active daemon deferred work, not that it was
 consumed. Fix task availability, boot/publication failures or a stalled command,
 then retry with the same output and command prefix. Preserve pending events.
 For mkdir fallback locks, inspect the recorded owner PID before manual removal.
-The concurrent dead-owner recovery fix is unreleased after plugin 2.3.35.
+The concurrent dead-owner recovery fix is included in plugin `2.3.36`.
 If competing hooks leave an empty lock without a drain, preserve the queued
 events and follow the canonical recovery guide below.
 A Docker timeout does not prove the application process stopped. Prefer a
@@ -214,8 +214,8 @@ resident watcher for sustained edits and follow the
 
 ## Partial dependency answers
 
-Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods
-2.0.0.beta2. Check the installed gem version and connected tool schema before
+Traversal budgets (`max_nodes`/`max_edges`, #311) are available in Woods `2.0.0.beta3`.
+Check the installed gem version and connected tool schema before
 using them; installing this plugin does not upgrade the gem. On a supporting
 server, `partial`/`partial_reason` means the walk stopped early, independently
 of page truncation. Do not claim an exhaustive blast radius or treat empty
@@ -225,7 +225,7 @@ paging alone only visits the discovered prefix. See the
 
 ## 4. Check semantic retrieval
 
-Configured retrieval defaults (#446) are unreleased after beta2. For an installed
+Configured retrieval defaults (#446) are available in Woods `2.0.0.beta3`. For an installed
 version that supports them, an omitted tool budget uses the serving retriever's
 configured default; an explicit budget overrides it. Standalone MCP does not
 inherit the host initializer's token setting from the embedding snapshot.
@@ -233,7 +233,7 @@ Do not tune relevance with similarity_threshold: it is inert and deprecated.
 Use query/type/scope selection and inspect ranking evidence instead. See
 [retrieval tuning](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#tuning).
 
-Native embedding completeness checks (#442/#444) are unreleased after beta2;
+Native embedding completeness checks (#442/#444) are available in Woods `2.0.0.beta3`;
 confirm the installed version first. If embedding reports `Embedding input
 incomplete`, repair the named published extraction artifact or rebuild extraction
 before retrying. Do not use `WOODS_ALLOW_PURGE=1` to bypass an integrity failure;
@@ -252,7 +252,7 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 For metadata appearing in another index or worktree, compare `WOODS_OUTPUT`,
 `config.output_dir`, and any explicit `metadata_store_options[:database]`.
 The default SQLite path following `WOODS_OUTPUT` during embedding (B-156) is
-unreleased after `2.0.0.beta2`; check the installed version before relying on it.
+available in Woods `2.0.0.beta3`; check the installed version before relying on it.
 An explicit database path still wins. See the
 [SQLite path contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#sqlite-metadata)
 for isolation and upgrade steps.
@@ -261,7 +261,7 @@ for isolation and upgrade steps.
 
 For repeated missing-token boot warnings on a stdio-only host, check whether
 its installed version supports `console_mcp_http_enabled = false` before
-suggesting it; this option is unreleased in Woods 2.0.0.beta2. The default
+suggesting it; this option is available in Woods `2.0.0.beta3`. The default
 preserves HTTP enablement, so selecting stdio as a client alone does not
 suppress HTTP token validation. Never disable authentication on an HTTP
 endpoint to silence this warning.
@@ -303,7 +303,7 @@ query. Scoping can hide relevant cross-boundary relationships, so broaden the
 request deliberately when the task needs them. See the
 [scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).
 
-## Source-content freshness (unreleased #405)
+## Source-content freshness (Woods 2.0.0.beta3; #405)
 
 Check installed-version support before using `woods-extract` or the optional
 `woods_status.source_check` argument. With support, inspect
@@ -326,7 +326,7 @@ coordinates are not physical file offsets; unknown generation remains unknown.
 Keep full-source access available. See the canonical
 [evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
 
-## Explicit edit adapters (unreleased #409)
+## Explicit edit adapters (Woods 2.0.0.beta3; #409)
 
 Check the installed gem exposes `woods:hook_refresh` before enabling hooks.
 Claude's registered wrapper covers one documented edit path; OpenCode 1.18.27
@@ -341,7 +341,7 @@ user's setup request. Follow [client hooks](https://github.com/lost-in-the/woods
 ## Optional context hints
 
 Check installed `bundle exec woods-hook-context --help` before enabling
-`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is unreleased after beta2 and the
+`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is available in Woods `2.0.0.beta3` and the
 plugin does not upgrade the gem. Context and refresh opt-ins are independent;
 `WOODS_HOOKS_DISABLED=1` disables both. Native Claude context is synchronous and
 bounded, with served-generation and pre-refresh/unknown labels. Verify candidate
@@ -352,7 +352,8 @@ for output/time limits, container root mapping and emitted-hint suppression.
 
 ### Obsidian destination conflicts
 
-Destination ownership preflight (#441) is unreleased; first check the installed Woods version and
+Destination ownership preflight (#441) is available in Woods `2.0.0.beta3`; first check
+the installed Woods version and
 its matching guide. On versions with this check, `refusing <path>: unmanaged or modified destination`
 means the export preserved a conflicting note, setting, or sidecar and skipped the stale-note sweep.
 A `.woods-vault` sentinel or force-purge flag does not authorize overwriting it. Inspect and back up
