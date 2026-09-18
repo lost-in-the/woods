@@ -8,6 +8,7 @@ require_relative 'mappers/column_mapper'
 require_relative 'mappers/migration_mapper'
 require_relative 'rate_limiter'
 require_relative 'sync_manifest'
+require_relative '../export/typed_reader'
 
 module Woods
   module Notion
@@ -83,6 +84,7 @@ module Woods
         @database_ids = config.notion_database_ids || {}
         @client = client || Client.new(api_token: api_token)
         @reader = reader || build_reader(index_dir)
+        @typed_reader = Export::TypedReader.new(@reader)
         @manifest = manifest || build_manifest(index_dir)
         @force_full = force_full.nil? ? env_force? : force_full
         @page_id_cache = {}
@@ -94,7 +96,7 @@ module Woods
       # @return [Hash] { data_models: Integer, columns: Integer,
       #   skipped: Integer, errors: Array<String> }
       def sync_all
-        with_pinned_index do
+        with_prepared_index do
           model_stats = @database_ids[:data_models] ? sync_data_models : empty_stats
           warn_columns_without_data_models if @database_ids[:columns] && !@database_ids[:data_models]
           column_stats = @database_ids[:columns] ? sync_columns : empty_stats
@@ -124,12 +126,20 @@ module Woods
       #
       # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
       def sync_data_models
+        return empty_stats unless @database_ids[:data_models]
+
+        with_prepared_index(%w[model migration]) { sync_data_models_prepared }
+      end
+
+      def sync_data_models_prepared
         database_id = @database_ids[:data_models]
         return empty_stats unless database_id
 
+        prepared = false
         begin
           migration_dates = load_migration_dates
           shared_tables = shared_table_names
+          prepared = true
           stats = sync_units('model', database_id, 'Table Name', SCOPE_DATA_MODELS) do |unit_data|
             properties = Mappers::ModelMapper.new.map(unit_data)
             # Enrichment reads the bare table name from the title — run it
@@ -141,9 +151,10 @@ module Woods
           @manifest.prune(SCOPE_DATA_MODELS, stats.delete(:current_keys))
           stats
         ensure
-          save_manifest
+          save_manifest if prepared
         end
       end
+      private :sync_data_models_prepared
 
       # Sync column data to the Columns Notion database.
       #
@@ -160,14 +171,23 @@ module Woods
       #
       # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
       def sync_columns
+        return empty_stats unless @database_ids[:columns]
+
+        with_prepared_index(['model']) { sync_columns_prepared }
+      end
+
+      def sync_columns_prepared
         database_id = @database_ids[:columns]
         return empty_stats unless database_id
 
+        prepared = false
         begin
           totals = { synced: 0, skipped: 0, errors: [] }
           current_keys = []
+          groups = column_groups
+          prepared = true
 
-          column_groups.each do |group|
+          groups.each do |group|
             result = sync_table_columns(group, database_id, current_keys)
             totals[:synced] += result[:synced]
             totals[:skipped] += result[:skipped]
@@ -177,11 +197,39 @@ module Woods
           @manifest.prune(SCOPE_COLUMNS, current_keys)
           totals
         ensure
-          save_manifest
+          save_manifest if prepared
+        end
+      end
+      private :sync_columns_prepared
+
+      private
+
+      # Reuse one validated snapshot through preprocessing and remote mapping.
+      # Standalone public sync methods have the same pin as sync_all.
+      def with_prepared_index(types = nil)
+        return yield if @published_units
+
+        with_pinned_index do
+          types ||= configured_types
+          @published_units = types.empty? ? [] : @typed_reader.all(only: types)
+          begin
+            yield
+          ensure
+            @published_units = nil
+          end
         end
       end
 
-      private
+      def units_for(type)
+        @published_units.select { |unit| unit['type'] == type }
+      end
+
+      def configured_types
+        types = []
+        types << 'model' if @database_ids[:data_models] || @database_ids[:columns]
+        types << 'migration' if @database_ids[:data_models]
+        types
+      end
 
       # Sync all units of a type, yielding each for property mapping.
       #
@@ -196,9 +244,8 @@ module Woods
       def sync_units(type, database_id, title_property, scope)
         stats = { synced: 0, skipped: 0, errors: [], current_keys: [] }
 
-        @reader.list_units(type: type).each do |entry|
-          unit_data = @reader.find_unit(entry['identifier'])
-          next unless unit_data
+        units_for(type).each do |unit_data|
+          entry = unit_data
 
           begin
             properties, legacy_title = yield(unit_data)
@@ -227,12 +274,7 @@ module Woods
       #
       # @yield [Hash, Hash] Index entry and full unit data
       def each_model_unit
-        @reader.list_units(type: 'model').each do |entry|
-          unit_data = @reader.find_unit(entry['identifier'])
-          next unless unit_data
-
-          yield(entry, unit_data)
-        end
+        units_for('model').each { |unit_data| yield(unit_data, unit_data) }
       end
 
       # Run a multi-read export body against one index generation.
@@ -436,10 +478,7 @@ module Woods
       # @return [Hash<String, String>] { table_name => latest_date }
       def load_migration_dates
         mapper = Mappers::MigrationMapper.new
-        units = @reader.list_units(type: 'migration').filter_map { |e| @reader.find_unit(e['identifier']) }
-        mapper.latest_changes(units)
-      rescue StandardError
-        {}
+        mapper.latest_changes(units_for('migration'))
       end
 
       # Upsert a Notion page: find by title, update if exists, create if not.

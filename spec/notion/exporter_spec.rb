@@ -77,6 +77,7 @@ RSpec.describe Woods::Notion::Exporter do
     [
       {
         'identifier' => '20260101_CreateUsers',
+        'type' => 'migration',
         'metadata' => { 'tables_affected' => ['users'] },
         'extracted_at' => '2026-01-01T12:00:00Z'
       }
@@ -91,8 +92,8 @@ RSpec.describe Woods::Notion::Exporter do
     allow(r).to receive(:list_units).with(type: 'migration').and_return(
       migration_units.map { |u| { 'identifier' => u['identifier'] } }
     )
-    allow(r).to receive(:find_unit) do |identifier|
-      (model_units + migration_units).find { |u| u['identifier'] == identifier }
+    allow(r).to receive(:find_unit) do |identifier, type:|
+      (model_units + migration_units).find { |u| u['identifier'] == identifier && u['type'] == type }
     end
     r
   end
@@ -322,9 +323,9 @@ RSpec.describe Woods::Notion::Exporter do
         reads << pinned
         (type == 'model' ? model_units : migration_units).map { |u| { 'identifier' => u['identifier'] } }
       end
-      allow(reader).to receive(:find_unit) do |identifier|
+      allow(reader).to receive(:find_unit) do |identifier, type:|
         reads << pinned
-        (model_units + migration_units).find { |u| u['identifier'] == identifier }
+        (model_units + migration_units).find { |u| u['identifier'] == identifier && u['type'] == type }
       end
 
       exporter.sync_all

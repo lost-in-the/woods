@@ -152,15 +152,16 @@ RSpec.describe Woods::Unblocked::Exporter do
 
     it 'syncs each unit via the client' do
       unit = { 'identifier' => 'User', 'type' => 'model' }
-      allow(reader).to receive(:list_units).and_return([unit])
+      allow(reader).to receive(:list_units).and_return([])
+      allow(reader).to receive(:list_units).with(type: 'model').and_return([unit])
       allow(reader).to receive(:list_units).with(type: 'poro').and_return([])
       allow(reader).to receive(:list_units).with(type: 'lib').and_return([])
-      allow(reader).to receive(:find_unit).with('User').and_return({
-                                                                     'type' => 'model',
-                                                                     'identifier' => 'User',
-                                                                     'file_path' => 'app/models/user.rb',
-                                                                     'metadata' => {}
-                                                                   })
+      allow(reader).to receive(:find_unit).with('User', type: 'model').and_return({
+                                                                                    'type' => 'model',
+                                                                                    'identifier' => 'User',
+                                                                                    'file_path' => 'app/models/user.rb',
+                                                                                    'metadata' => {}
+                                                                                  })
 
       stats = exporter.sync_all
       expect(stats[:synced]).to be > 0
@@ -174,10 +175,10 @@ RSpec.describe Woods::Unblocked::Exporter do
       # for :model. Writing them the other way around overwrites the specific stub.
       allow(reader).to receive(:list_units).and_return([])
       allow(reader).to receive(:list_units).with(type: 'model').and_return([unit_a, unit_b])
-      allow(reader).to receive(:find_unit).with('A').and_return({ 'type' => 'model', 'identifier' => 'A',
-                                                                  'file_path' => 'a.rb' })
-      allow(reader).to receive(:find_unit).with('B').and_return({ 'type' => 'model', 'identifier' => 'B',
-                                                                  'file_path' => 'b.rb' })
+      allow(reader).to receive(:find_unit).with('A', type: 'model').and_return({ 'type' => 'model', 'identifier' => 'A',
+                                                                                 'file_path' => 'a.rb' })
+      allow(reader).to receive(:find_unit).with('B', type: 'model').and_return({ 'type' => 'model', 'identifier' => 'B',
+                                                                                 'file_path' => 'b.rb' })
 
       call_count = 0
       allow(client).to receive(:put_document) do
@@ -203,8 +204,9 @@ RSpec.describe Woods::Unblocked::Exporter do
       unit_b = { 'identifier' => 'B', 'type' => 'model' }
       allow(reader).to receive(:list_units).and_return([])
       allow(reader).to receive(:list_units).with(type: 'model').and_return([unit_a, unit_b])
-      allow(reader).to receive(:find_unit).and_return({ 'type' => 'model', 'identifier' => 'X',
-                                                        'file_path' => 'x.rb' })
+      allow(reader).to receive(:find_unit) do |identifier, type:|
+        { 'type' => type, 'identifier' => identifier, 'file_path' => "#{identifier}.rb" }
+      end
       allow(client).to receive(:put_document).and_raise(Woods::Error, 'budget exhausted for this run')
 
       stats = exporter.sync_all
@@ -221,8 +223,9 @@ RSpec.describe Woods::Unblocked::Exporter do
       end
       allow(reader).to receive(:list_units).and_return([])
       allow(reader).to receive(:list_units).with(type: 'model').and_return(many_units)
-      allow(reader).to receive(:find_unit).and_return({ 'type' => 'model', 'identifier' => 'X',
-                                                        'file_path' => 'x.rb' })
+      allow(reader).to receive(:find_unit) do |identifier, type:|
+        { 'type' => type, 'identifier' => identifier, 'file_path' => "#{identifier}.rb" }
+      end
       allow(client).to receive(:put_document).and_raise(StandardError, 'api down')
 
       stats = exporter.sync_all
@@ -236,7 +239,7 @@ RSpec.describe Woods::Unblocked::Exporter do
       allow(reader).to receive(:list_units).and_return([])
       allow(reader).to receive(:list_units).with(type: 'model')
                                            .and_return([{ 'identifier' => 'User', 'type' => 'model' }])
-      allow(reader).to receive(:find_unit).with('User')
+      allow(reader).to receive(:find_unit).with('User', type: 'model')
                                           .and_return({ 'type' => 'model', 'identifier' => 'User',
                                                         'file_path' => 'app/models/user.rb', 'metadata' => {} })
     end
@@ -345,7 +348,7 @@ RSpec.describe Woods::Unblocked::Exporter do
       it 'sync_type works standalone (regression: nil @current_uris crash)' do
         allow(reader).to receive(:list_units).with(type: 'model')
                                              .and_return([{ 'identifier' => 'User', 'type' => 'model' }])
-        allow(reader).to receive(:find_unit).with('User')
+        allow(reader).to receive(:find_unit).with('User', type: 'model')
                                             .and_return({ 'type' => 'model', 'identifier' => 'User',
                                                           'file_path' => 'app/models/user.rb', 'metadata' => {} })
 
@@ -359,7 +362,7 @@ RSpec.describe Woods::Unblocked::Exporter do
       it 'sync_type_partial works standalone' do
         allow(reader).to receive(:list_units).with(type: 'poro')
                                              .and_return([{ 'identifier' => 'Util', 'type' => 'poro' }])
-        allow(reader).to receive(:find_unit).with('Util')
+        allow(reader).to receive(:find_unit).with('Util', type: 'poro')
                                             .and_return({ 'type' => 'poro', 'identifier' => 'Util',
                                                           'file_path' => 'lib/util.rb', 'metadata' => {} })
 
@@ -471,7 +474,7 @@ RSpec.describe Woods::Unblocked::Exporter do
         units = (1..3).map { |i| { 'identifier' => "Poro#{i}", 'type' => 'poro' } }
         allow(reader).to receive(:list_units).with(type: 'poro').and_return(units)
         (1..3).each do |i|
-          allow(reader).to receive(:find_unit).with("Poro#{i}").and_return(
+          allow(reader).to receive(:find_unit).with("Poro#{i}", type: 'poro').and_return(
             { 'type' => 'poro', 'identifier' => "Poro#{i}",
               'file_path' => "lib/poro#{i}.rb", 'metadata' => {},
               'dependents' => Array.new(4 - i) { { 'type' => 'model', 'identifier' => 'X' } } }
@@ -524,12 +527,18 @@ RSpec.describe Woods::Unblocked::Exporter do
       end
     end
 
-    context 'when a sync type raises mid-run' do
+    context 'when index preparation or a sync type raises' do
       let(:manifest) { manifest_double }
 
-      it 'still saves the manifest from the ensure block' do
+      it 'does not rewrite the manifest after failed index preparation' do
         allow(reader).to receive(:list_units).and_raise(RuntimeError, 'index unreadable')
         expect { exporter.sync_all }.to raise_error(RuntimeError, /index unreadable/)
+        expect(manifest).not_to have_received(:save)
+      end
+
+      it 'still saves the manifest after preparation succeeded' do
+        allow(exporter).to receive(:sync_type).and_raise(RuntimeError, 'sync interrupted')
+        expect { exporter.sync_all }.to raise_error(RuntimeError, /sync interrupted/)
         expect(manifest).to have_received(:save)
       end
     end
@@ -588,7 +597,7 @@ RSpec.describe Woods::Unblocked::Exporter do
         allow(reader).to receive(:list_units).and_return([])
         allow(reader).to receive(:list_units).with(type: 'model')
                                              .and_return([{ 'identifier' => 'Ghost', 'type' => 'model' }])
-        allow(reader).to receive(:find_unit).with('Ghost')
+        allow(reader).to receive(:find_unit).with('Ghost', type: 'model')
                                             .and_return({ 'type' => 'model', 'identifier' => 'Ghost',
                                                           'file_path' => nil, 'metadata' => {} })
 
@@ -604,7 +613,7 @@ RSpec.describe Woods::Unblocked::Exporter do
         allow(reader).to receive(:list_units).and_return([])
         allow(reader).to receive(:list_units).with(type: 'model')
                                              .and_return([{ 'identifier' => 'Ghost', 'type' => 'model' }])
-        allow(reader).to receive(:find_unit).with('Ghost')
+        allow(reader).to receive(:find_unit).with('Ghost', type: 'model')
                                             .and_return({ 'type' => 'model', 'identifier' => 'Ghost',
                                                           'file_path' => nil, 'metadata' => {} })
         captured = nil
@@ -633,10 +642,10 @@ RSpec.describe Woods::Unblocked::Exporter do
         ]
         allow(reader).to receive(:list_units).and_return([])
         allow(reader).to receive(:list_units).with(type: 'model').and_return(entries)
-        allow(reader).to receive(:find_unit).with('Order').and_return(
+        allow(reader).to receive(:find_unit).with('Order', type: 'model').and_return(
           { 'type' => 'model', 'identifier' => 'Order', 'file_path' => shared_path, 'metadata' => {} }
         )
-        allow(reader).to receive(:find_unit).with('Order::Line').and_return(
+        allow(reader).to receive(:find_unit).with('Order::Line', type: 'model').and_return(
           { 'type' => 'model', 'identifier' => 'Order::Line', 'file_path' => shared_path, 'metadata' => {} }
         )
       end
@@ -678,7 +687,7 @@ RSpec.describe Woods::Unblocked::Exporter do
         allow(reader).to receive(:list_units).with(type: 'model')
                                              .and_return([{ 'identifier' => 'Solo', 'type' => 'model',
                                                             'file_path' => 'app/models/solo.rb' }])
-        allow(reader).to receive(:find_unit).with('Solo').and_return(
+        allow(reader).to receive(:find_unit).with('Solo', type: 'model').and_return(
           { 'type' => 'model', 'identifier' => 'Solo', 'file_path' => 'app/models/solo.rb', 'metadata' => {} }
         )
         pushed = nil

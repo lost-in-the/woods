@@ -146,6 +146,18 @@ The more explicit `woods:validate` bundle-update remedy (B-166) is unreleased
 after `2.0.0.beta2`; the full-extraction recovery works on older versions too.
 See [runtime removals and bundle updates](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#runtime-removals-and-bundle-updates).
 
+### Export identity checks
+
+For Notion or Unblocked exports, typed selection checks (#213) are unreleased
+after `2.0.0.beta2`; check the installed gem before expecting them. A missing or
+mismatched export identity calls for index validation and a fresh extraction,
+not a force flag. An `ambiguous export URI` means two types share an identifier
+and source file: preserve existing documents and report the collision; do not
+rename public identifiers or force deletion. Follow the canonical
+[Notion](https://github.com/lost-in-the/woods/blob/main/docs/NOTION_INTEGRATION.md#sync-manifest-incremental-sync)
+and [Unblocked](https://github.com/lost-in-the/woods/blob/main/docs/UNBLOCKED_INTEGRATION.md#uri-scheme)
+guides for recovery and current limitations.
+
 ## 3. Check the MCP process and path
 
 Compare the client config with the exact command, absolute `cwd`, bundle, and index path visible to that process. Run the configured executable manually to read stderr. For a host bundle:

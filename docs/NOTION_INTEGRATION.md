@@ -34,6 +34,19 @@ Sync is incremental. A **sync manifest** (`<output_dir>/notion_sync_manifest.jso
 
 Manifest entries for models/columns that vanished from the current extraction are pruned, but **no Notion page is ever deleted** by the sync, there is no delete path. A renamed or removed model just leaves its old page in Notion untouched.
 
+Models and migration dates are loaded by `(identifier, type)`. A same-named
+PORO, library unit, or other extracted type cannot supply a model's table or
+column payload. Public identifiers, page titles, and manifest keys are unchanged.
+If a listed model or migration cannot be read with its exact identity, the
+affected sync refuses before mapping pages or pruning its manifest. Preserve
+the error, validate the index, and regenerate it before retrying; force sync
+does not bypass identity checks. Each public sync method, including standalone
+model or column sync, uses one validated generation snapshot through mapping
+and API calls. Native readers validate the published index before selecting
+model/migration payloads. Custom readers must provide complete published
+enumeration or complete per-bucket listings plus
+`find_unit(identifier, type:)` returning the requested identity.
+
 If the manifest is missing (first run, or a CI cache miss), the exporter falls back to the full lookup/create path for every page and rebuilds the manifest, correct, just more API calls than a steady-state run.
 
 ### Escape hatch

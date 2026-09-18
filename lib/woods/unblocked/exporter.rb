@@ -8,6 +8,7 @@ require_relative 'client'
 require_relative 'rate_limiter'
 require_relative 'document_builder'
 require_relative 'sync_manifest'
+require_relative '../export/typed_reader'
 
 module Woods
   module Unblocked
@@ -75,6 +76,7 @@ module Woods
 
         @client = client || Client.new(api_token: api_token, rate_limiter: limiter)
         @reader = reader || build_reader(index_dir)
+        @typed_reader = Export::TypedReader.new(@reader)
         # Cite the ref the index was actually extracted from. `main` was
         # hardcoded, so citations on a `master`-default repo pointed at a
         # branch that need not exist.
@@ -96,10 +98,11 @@ module Woods
       #
       # @return [Hash] { synced:, skipped:, deleted:, errors: }
       def sync_all
-        with_pinned_index do
+        prepared = false
+        with_prepared_index do
+          prepared = true
           @current_uris = Set.new
           @budget_exhausted = false
-          build_uri_index
           reconcile_from_remote if @manifest.empty?
 
           synced = 0
@@ -108,6 +111,7 @@ module Woods
 
           FULL_SYNC_TYPES.each do |type|
             break if @budget_exhausted
+            next if type.start_with?('graphql_') # the family already includes these actual types
 
             result = sync_type(type)
             synced += result[:synced]
@@ -124,11 +128,11 @@ module Woods
             errors.concat(result[:errors])
           end
 
-          deleted = @budget_exhausted ? 0 : purge_stale(errors)
+          deleted = @budget_exhausted || @ambiguous_uris.any? ? 0 : purge_stale(errors)
           { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
         end
       ensure
-        save_manifest
+        save_manifest if prepared
       end
 
       # Sync all units of a given type.
@@ -136,10 +140,12 @@ module Woods
       # @param type [String] Unit type (e.g. "model", "controller")
       # @return [Hash] { synced:, skipped:, errors: }
       def sync_type(type)
-        units = @reader.list_units(type: type)
-        log "  #{type}: #{units.size} units"
+        with_prepared_index do
+          units = units_for(type)
+          log "  #{type}: #{units.size} units"
 
-        sync_units(units)
+          sync_unit_data(units.map { |unit| [unit, unit] })
+        end
       end
 
       # Sync the top N most-connected units of a type (by dependent count).
@@ -148,35 +154,42 @@ module Woods
       # @param max_count [Integer] Maximum units to sync
       # @return [Hash] { synced:, skipped:, errors: }
       def sync_type_partial(type, max_count)
-        units = @reader.list_units(type: type)
-        return empty_stats if units.empty?
-
-        # Load full data to sort by dependent count
-        units_with_data = units.filter_map do |entry|
-          data = @reader.find_unit(entry['identifier'])
-          next unless data
-
-          dep_count = (data['dependents'] || []).size
-          { entry: entry, data: data, dep_count: dep_count }
+        with_prepared_index do
+          units = units_for(type)
+          units.each { |unit| track_uri(unit) }
+          top = units.sort_by { |unit| -(unit['dependents'] || []).size }.first(max_count)
+          log "  #{type}: #{top.size}/#{units.size} units (top by dependents)"
+          result = sync_unit_data(top.map { |unit| [unit, unit] })
+          result[:skipped] += units.size - top.size
+          result
         end
-
-        # Every unit of this type still exists — track its URI so partial units
-        # that fall *out* of the top-N are never mistaken for deletions.
-        units_with_data.each { |u| track_uri(u[:data]) }
-
-        top_units = units_with_data.sort_by { |u| -u[:dep_count] }.first(max_count)
-        # Count against what was actually synced — units.size includes entries
-        # whose unit data was missing (dropped by the filter_map above).
-        skipped_count = units.size - top_units.size
-
-        log "  #{type}: #{top_units.size}/#{units.size} units (top by dependents)"
-
-        result = sync_unit_data(top_units.map { |u| [u[:entry], u[:data]] })
-        result[:skipped] += skipped_count
-        result
       end
 
       private
+
+      # Complete preflight precedes all remote writes and destructive pruning.
+      # Nested sync methods share this snapshot; standalone methods pin as well.
+      def with_prepared_index
+        return yield if @prepared_index
+
+        with_pinned_index do
+          @published_units = @typed_reader.all
+          build_uri_index
+          @prepared_index = true
+          begin
+            yield
+          ensure
+            @prepared_index = false
+            @published_units = nil
+          end
+        end
+      end
+
+      def units_for(type)
+        # The historical graphql family includes all four actual subtypes.
+        types = type == 'graphql' ? MCP::IndexReader::UNIT_TYPES_BY_DIR.fetch('graphql') : [type]
+        @published_units.select { |unit| types.include?(unit['type']) }
+      end
 
       # Run a multi-read export body against one index generation.
       #
@@ -195,36 +208,6 @@ module Woods
         return yield unless @reader.respond_to?(:with_pinned_generation)
 
         @reader.with_pinned_generation(&block)
-      end
-
-      def sync_units(units)
-        synced = 0
-        skipped = 0
-        errors = []
-
-        units.each do |entry|
-          unit_data = @reader.find_unit(entry['identifier'])
-          unless unit_data
-            skipped += 1
-            next
-          end
-
-          track_uri(unit_data)
-          if push_document(unit_data) == :skipped
-            skipped += 1
-          else
-            synced += 1
-          end
-        rescue Woods::Error => e
-          errors << "#{entry['identifier']}: #{e.message}"
-          break if note_budget_exhaustion(e)
-        rescue StandardError => e
-          # Include the class — "undefined method for nil" without it is
-          # unactionable in CI logs.
-          errors << "#{entry['identifier']}: #{e.class}: #{e.message}"
-        end
-
-        { synced: synced, skipped: skipped, errors: errors }
       end
 
       def sync_unit_data(entries_with_data)
@@ -256,6 +239,10 @@ module Woods
       #
       # @return [Symbol] :synced or :skipped
       def push_document(unit_data)
+        if @ambiguous_uris.include?(@builder.uri_for(unit_data))
+          raise ExtractionError,
+                "ambiguous export URI for #{unit_data['type']}:#{unit_data['identifier']} — push skipped"
+        end
         # No file_path → the URI falls back to the bare repo URL, which every
         # such unit would share: they'd overwrite each other remotely and
         # ping-pong the manifest hash forever. Skip them.
@@ -411,24 +398,26 @@ module Woods
         "#{base}?unit=#{URI.encode_www_form_component(unit_data['identifier'])}"
       end
 
-      # One cheap pass over the type indexes (entries already carry file_path,
-      # and read_index is cached) to find files that define more than one synced
-      # unit. For each such base URI, the lexically-smallest identifier — the
+      # Inspect the complete validated snapshot, including excluded types, for
+      # same-name cross-type collisions. For files with distinct synced names,
+      # the lexically-smallest identifier — the
       # outer/top-level class — keeps the bare URI; siblings are suffixed. Solo
       # files (the overwhelming majority) are absent from the map and unchanged,
       # so this introduces no churn for them.
       def build_uri_index
         groups = Hash.new { |h, k| h[k] = [] }
-        synced_types.each do |type|
-          @reader.list_units(type: type).each do |entry|
-            next unless entry['file_path']
+        @published_units.each do |unit|
+          next unless unit['file_path']
 
-            groups[@builder.uri_for(entry)] << entry['identifier']
-          end
+          groups[@builder.uri_for(unit)] << unit
         end
 
-        @uri_primary = groups.each_with_object({}) do |(uri, identifiers), primary|
-          unique = identifiers.uniq
+        @ambiguous_uris = groups.each_with_object(Set.new) do |(uri, units), ambiguous|
+          identities = units.map { |unit| [unit['identifier'], unit['type']] }.uniq
+          ambiguous << uri if identities.group_by(&:first).any? { |_, variants| variants.size > 1 }
+        end
+        @uri_primary = groups.each_with_object({}) do |(uri, units), primary|
+          unique = units.select { |unit| synced_types.include?(unit['type']) }.map { |unit| unit['identifier'] }.uniq
           primary[uri] = unique.min if unique.size > 1
         end
       end
