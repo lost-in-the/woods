@@ -335,7 +335,7 @@ The embed run writes `woods.json` + `dumps/<ISO8601>/vectors.bin` + `metadata.ms
 
 Requirements:
 - `output_dir` must be set and readable by both the embed process and the MCP server.
-- The MCP server must know the same `output_dir` (pass via `woods-mcp <DIR>` or set `WOODS_DIR`).
+- The MCP server must know the same `output_dir` (pass via `woods-mcp <DIR>` or set `WOODS_DIR`; see MCP path precedence below).
 
 ## Presets
 
@@ -652,7 +652,8 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WOODS_RETRIEVAL_MODE` | `semantic` | Explicit packaged MCP retrieval mode: `semantic` or `lexical`. Lexical reads extraction unit JSON without provider autodetection, credentials or vector artifacts. |
-| `WOODS_DIR` | `Dir.pwd` | Path to the extraction output directory. |
+| `WOODS_DIR` | unset | MCP extraction-index path, after a positional argument and before `WOODS_OUTPUT`. See precedence below. |
+| `WOODS_OUTPUT` | unset | MCP index-path fallback when neither a positional path nor `WOODS_DIR` is set; unreleased after `2.0.0.beta3`. |
 | `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
 | `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
@@ -667,6 +668,20 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Model to use when Ollama is auto-detected. |
 | `WOODS_QDRANT_URL`, `WOODS_QDRANT_COLLECTION`, `WOODS_QDRANT_API_KEY` | n/a | Override/require Qdrant connection settings when a pgvector/Qdrant-backed index is served outside its host application (no `Woods.configuration` available). |
 | `WOODS_PG_URL` | n/a | Required when a pgvector-backed index is served outside its host application. |
+
+**MCP index path precedence (unreleased after `2.0.0.beta3`):** positional
+argument → `WOODS_DIR` → `WOODS_OUTPUT` → current directory for `woods-mcp`
+and `woods-mcp-http`. `woods-mcp-start` still requires one of the first three;
+it never silently selects the current directory. An explicitly empty
+`WOODS_DIR` remains an invalid override rather than falling through. Earlier
+versions accept the positional path or `WOODS_DIR`; use an explicit path for
+portable client configuration.
+
+Paths are resolved in the MCP process's working directory and filesystem.
+A published index can have `generation.json` pointing to a payload's
+`manifest.json`; a root `manifest.json` is only the legacy flat layout. If
+startup cannot find a manifest, check the reported directory and point at the
+existing index before deciding another extraction is needed.
 
 ### Rake tasks
 

@@ -100,7 +100,7 @@ RSpec.describe 'MCP CLI integration' do
   describe 'woods-mcp-start wrapper' do
     it 'exits non-zero with a usage message when no index directory is given' do
       # Make sure no env override is present during this run.
-      _out, err, status = Open3.capture3({ 'WOODS_DIR' => nil }, wrapper)
+      _out, err, status = Open3.capture3({ 'WOODS_DIR' => nil, 'WOODS_OUTPUT' => nil }, wrapper)
 
       expect(status.exitstatus).to eq(1)
       expect(utf8(err)).to match(/No index directory specified/i)
