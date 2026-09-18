@@ -1,0 +1,2506 @@
+{
+  "protocol": {
+    "source_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+    "task_revision": "5327efe54dd767d662ab89332f6a4285fef07bd8",
+    "tasks": [
+      "ar-announce-once",
+      "aj-enqueue-after-commit",
+      "ar-archive-book-access"
+    ],
+    "conditions": [
+      "full",
+      "compact"
+    ],
+    "repetitions": 2,
+    "max_turns": 40,
+    "model": "claude-sonnet-5",
+    "client": "2.1.267",
+    "retrieval_budget": 1200,
+    "default_compact_lookup_budget": 1200,
+    "full_lookup": "complete existing behavior; no unsupported budget injected",
+    "explicit_modes": "preserved, including full source escape hatch",
+    "concurrency": 2,
+    "reason": "20turn calibration pair both reached cap and failed same1/10check; retained separately. This12trial protocol fixed before primary outputs.",
+    "latency_note": "Two tasks may overlap; wall latency exploratory, not isolated performance evidence.",
+    "omission_note": "No reference solution or verifier copied into task container before agent finishes."
+  },
+  "complete": true,
+  "tokenizer": "cl100k_base; independent representation-size measurement, not Claude tokenizer",
+  "json_metric": "re-serialized MCP response including text and structuredContent; not assumed to equal model-visible context",
+  "client_usage": "official-client reported repeated input/cache/output; list-price estimate is not a billed charge",
+  "timing": "two concurrent trials; descriptive agent wall only, not isolated Woods performance",
+  "summary": {
+    "full": {
+      "trials": 6,
+      "valid": 6,
+      "tasks_passed": 5,
+      "agent_wall_seconds": {
+        "median": 180.29369810249773,
+        "sum": 897.7515048539935
+      },
+      "agent_turns": {
+        "median": 34.5,
+        "sum": 180
+      },
+      "mcp_content_tokens_cl100k": {
+        "median": 8661.0,
+        "sum": 72516
+      },
+      "evidence_content_tokens_cl100k": {
+        "median": 7698.5,
+        "sum": 65351
+      },
+      "mcp_response_json_tokens_cl100k": {
+        "median": 19389.0,
+        "sum": 160148
+      },
+      "list_price_estimate_usd": {
+        "median": 0.7051536,
+        "sum": 3.8050416
+      },
+      "mcp_tool_counts": {
+        "woods_status": 6,
+        "lookup": 26,
+        "framework": 3,
+        "search": 12
+      },
+      "aggregate_client_usage": {
+        "input_tokens": 270,
+        "cache_creation_input_tokens": 279087,
+        "cache_read_input_tokens": 10085668,
+        "output_tokens": 67102
+      }
+    },
+    "compact": {
+      "trials": 6,
+      "valid": 6,
+      "tasks_passed": 4,
+      "agent_wall_seconds": {
+        "median": 132.81565623699862,
+        "sum": 786.5647005270002
+      },
+      "agent_turns": {
+        "median": 32.0,
+        "sum": 186
+      },
+      "mcp_content_tokens_cl100k": {
+        "median": 2316.0,
+        "sum": 19203
+      },
+      "evidence_content_tokens_cl100k": {
+        "median": 1347.0,
+        "sum": 12685
+      },
+      "mcp_response_json_tokens_cl100k": {
+        "median": 6681.0,
+        "sum": 55020
+      },
+      "list_price_estimate_usd": {
+        "median": 0.4947567,
+        "sum": 2.8871792000000003
+      },
+      "mcp_tool_counts": {
+        "woods_status": 6,
+        "lookup": 20,
+        "search": 12,
+        "dependents": 1
+      },
+      "aggregate_client_usage": {
+        "input_tokens": 274,
+        "cache_creation_input_tokens": 162983,
+        "cache_read_input_tokens": 8479696,
+        "output_tokens": 53876
+      }
+    }
+  },
+  "trials": [
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "compact",
+      "rep": 1,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 191.30104529800155,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 54,
+        "cache_creation_input_tokens": 32843,
+        "cache_read_input_tokens": 1715966,
+        "output_tokens": 10812,
+        "output_tokens_details": {
+          "thinking_tokens": 4513
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 32843,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 54,
+          "outputTokens": 10812,
+          "cacheReadInputTokens": 1715966,
+          "cacheCreationInputTokens": 32843,
+          "webSearchRequests": 0,
+          "costUSD": 0.5827932,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 4513,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 32,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.5827932,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "2c2e6ae31146983a892cb5ade7404c01d2634a42f840e419d6b92635111d589e",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 841,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2501,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "c5f01f77bfd43d9d8632a3eefb0696e928bc322331b4689172d18afc053a90a9",
+          "text_bytes": 2474,
+          "text_tokens_cl100k": 616,
+          "response_json_bytes": 6841,
+          "response_json_tokens_cl100k": 1733,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 1
+      },
+      "evidence_mode_counts": {
+        "compact": 1
+      },
+      "mcp_content_tokens_cl100k": 1457,
+      "mcp_response_json_tokens_cl100k": 4234,
+      "evidence_content_tokens_cl100k": 616,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "7ffb63a873ee9ab03401bbe7f382d4ca875a90b05dc770fe92ee9f8882f785b3",
+        "agent.json": "0b85577ead262e70bda7a289f1a7a7738c660e98a103fa5972f7a83d3f7cc048",
+        "verifier.log": "4e9fd73c4d893ce2f2eca45074687bb42421fbbbc2e715ef7bb5dd8a4befebfb",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "setup.log": "d3207cf2145bf9d9f1549a2b2786d6d2616e771d4da64e1006761b287ac5b564",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "compact",
+      "rep": 2,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 119.62028478999855,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 54,
+        "cache_creation_input_tokens": 23300,
+        "cache_read_input_tokens": 1555071,
+        "output_tokens": 8408,
+        "output_tokens_details": {
+          "thinking_tokens": 2545
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 23300,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 54,
+          "outputTokens": 8408,
+          "cacheReadInputTokens": 1555071,
+          "cacheCreationInputTokens": 23300,
+          "webSearchRequests": 0,
+          "costUSD": 0.4884022,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 2545,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 36,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.4884022,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "f22be6052e6ecf6f2b388c8d2bba1cc966db2d3a3a871a0070c03d500a7029b1",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 841,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2501,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "c5f01f77bfd43d9d8632a3eefb0696e928bc322331b4689172d18afc053a90a9",
+          "text_bytes": 2474,
+          "text_tokens_cl100k": 616,
+          "response_json_bytes": 6841,
+          "response_json_tokens_cl100k": 1733,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 1
+      },
+      "evidence_mode_counts": {
+        "compact": 1
+      },
+      "mcp_content_tokens_cl100k": 1457,
+      "mcp_response_json_tokens_cl100k": 4234,
+      "evidence_content_tokens_cl100k": 616,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "ae3fe8b77e3e4873a31a3c821d76fa40f0ec5a41969fad091f6340f2483b01e2",
+        "agent.json": "6bfe2c1f2345831f767462f5a546dc1f25b76c73de1540ef17ed11b43b435538",
+        "verifier.log": "1ff8d4ffbc658640205f09a6897d93504588eeab4d2c57fa5966eebf0e2360be",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "setup.log": "9997b5fc99ddab541199f0590a61f1f147c7967dfb8d31f2566bd141654e7a5e",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "full",
+      "rep": 1,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 185.5862090149967,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 50,
+        "cache_creation_input_tokens": 59609,
+        "cache_read_input_tokens": 1838114,
+        "output_tokens": 11756,
+        "output_tokens_details": {
+          "thinking_tokens": 6362
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 59609,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 50,
+          "outputTokens": 11756,
+          "cacheReadInputTokens": 1838114,
+          "cacheCreationInputTokens": 59609,
+          "webSearchRequests": 0,
+          "costUSD": 0.7237188,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 6362,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 37,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.7237188,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "4f610985f1ba9a8101d3320457556588fa02883dacf0cdeccd2ee392f7fe20e2",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 841,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2501,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "c81b281c97b5f72f860cef0b88b90e2a62045f07a7c4bd63863f7ddd020a0d68",
+          "text_bytes": 17032,
+          "text_tokens_cl100k": 4265,
+          "response_json_bytes": 35999,
+          "response_json_tokens_cl100k": 9119,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::CoverProcessingJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb5686a00d0f31da3f90822c672b79c3b374bf8095f5fa6eb48c7a35964a7aad",
+          "text_bytes": 1738,
+          "text_tokens_cl100k": 428,
+          "response_json_bytes": 3771,
+          "response_json_tokens_cl100k": 959,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::SearchIndexJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "d19d6785cb426d32041293729d7393614a6e9e64861413700a4ded41e5a29004",
+          "text_bytes": 1634,
+          "text_tokens_cl100k": 407,
+          "response_json_bytes": 3559,
+          "response_json_tokens_cl100k": 915,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Editing",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "428e125a8b05ec6d63825a276c8885ec68587373b5495dfc0048be9a9f32e335",
+          "text_bytes": 1998,
+          "text_tokens_cl100k": 500,
+          "response_json_bytes": 4351,
+          "response_json_tokens_cl100k": 1109,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportsController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb566edf9efdb68a52367c9bf23667c83fdedc7555477a52e1677f68f38145c3",
+          "text_bytes": 11549,
+          "text_tokens_cl100k": 2525,
+          "response_json_bytes": 23983,
+          "response_json_tokens_cl100k": 5391,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "enqueue_after_transaction_commit"
+          },
+          "error": false,
+          "text_sha256": "4f48b57aa737da095d1c4c86525f438538d9166a9e320f7f21a8ae931a62fbbe",
+          "text_bytes": 235,
+          "text_tokens_cl100k": 67,
+          "response_json_bytes": 604,
+          "response_json_tokens_cl100k": 178,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportFailureJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "8c001ae4d7da8b3c60c309c36c2ff375d4d0f5b3f873090325d5b9309e20d147",
+          "text_bytes": 1626,
+          "text_tokens_cl100k": 398,
+          "response_json_bytes": 3514,
+          "response_json_tokens_cl100k": 887,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": ".*",
+            "types": [
+              "job"
+            ]
+          },
+          "error": false,
+          "text_sha256": "c0dbc94f3e9de78e329db4a30ae80a456aa7e56db18e1ee329a8aaabe85a4a31",
+          "text_bytes": 430,
+          "text_tokens_cl100k": 112,
+          "response_json_bytes": 1008,
+          "response_json_tokens_cl100k": 273,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 6,
+        "framework": 1,
+        "search": 1
+      },
+      "evidence_mode_counts": {
+        "full": 6
+      },
+      "mcp_content_tokens_cl100k": 9543,
+      "mcp_response_json_tokens_cl100k": 21332,
+      "evidence_content_tokens_cl100k": 8523,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "d768ede24f07c5ea582c748efab5d925c501c1a555f59dc3111dba46ce143d5c",
+        "agent.json": "28996ede4751bce06d86b3193a0a401520d014505ba3058efc0dd2663677c007",
+        "verifier.log": "10a3f043317d2a94772c85ca6887b06b19a9bcb2ed6bdca3e3ce3495d0615c68",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "setup.log": "b6782a5670d108d3c084bf68820b149a952658b91b50cd642156215d2896035a",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "full",
+      "rep": 2,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 175.00118718999875,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 48,
+        "cache_creation_input_tokens": 45736,
+        "cache_read_input_tokens": 1720292,
+        "output_tokens": 15949,
+        "output_tokens_details": {
+          "thinking_tokens": 9386
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 45736,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 48,
+          "outputTokens": 15949,
+          "cacheReadInputTokens": 1720292,
+          "cacheCreationInputTokens": 45736,
+          "webSearchRequests": 0,
+          "costUSD": 0.6865884,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 9386,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 34,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.6865884,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "7abe45f35e6e1cc07648c2a545ddec10ad82c01b357247aa391f516b6ac237a1",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 841,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2501,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "c81b281c97b5f72f860cef0b88b90e2a62045f07a7c4bd63863f7ddd020a0d68",
+          "text_bytes": 17032,
+          "text_tokens_cl100k": 4265,
+          "response_json_bytes": 35999,
+          "response_json_tokens_cl100k": 9119,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "enqueue_after_transaction_commit"
+          },
+          "error": false,
+          "text_sha256": "4f48b57aa737da095d1c4c86525f438538d9166a9e320f7f21a8ae931a62fbbe",
+          "text_bytes": 235,
+          "text_tokens_cl100k": 67,
+          "response_json_bytes": 603,
+          "response_json_tokens_cl100k": 178,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "after_commit"
+          },
+          "error": false,
+          "text_sha256": "4b3926e6aed925c1e7aa9e167445118fb58e4098cb84ac609e842b87facf2197",
+          "text_bytes": 1053,
+          "text_tokens_cl100k": 302,
+          "response_json_bytes": 2247,
+          "response_json_tokens_cl100k": 656,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 1,
+        "framework": 2
+      },
+      "evidence_mode_counts": {
+        "full": 1
+      },
+      "mcp_content_tokens_cl100k": 5475,
+      "mcp_response_json_tokens_cl100k": 12454,
+      "evidence_content_tokens_cl100k": 4265,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "0978e19ca65264d738754f4ba6cae85589ccae5c8838d8881cb7cc08f3e86df3",
+        "agent.json": "4e41725e7a00ae030035341ba90fe13585766b2fe35349f008f6bf5a793a546c",
+        "verifier.log": "e9a6e8bb516d946393681b644f7c39d26c428e1def1dd9d63b5e24700713afb2",
+        "diff.patch": "99dffea0094e55f8ff808c66268fe7802e73d4d9aa42c7bd1d32b12da10f59bc",
+        "setup.log": "147468adbf22140a10266c7fc6c14b28abfa7a95666a1e1ddcd437e2c30b8e33",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "ar-announce-once",
+      "condition": "compact",
+      "rep": 1,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-announce-once:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "05ceb3540dcce7cd12a5ba681a0ae830400b61a18802b5d9220a8d58351e6287",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 146.0110276839987,
+      "verifier_exit": 1,
+      "agent_usage": {
+        "input_tokens": 44,
+        "cache_creation_input_tokens": 29563,
+        "cache_read_input_tokens": 1329756,
+        "output_tokens": 11682,
+        "output_tokens_details": {
+          "thinking_tokens": 7738
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 29563,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 44,
+          "outputTokens": 11682,
+          "cacheReadInputTokens": 1329756,
+          "cacheCreationInputTokens": 29563,
+          "webSearchRequests": 0,
+          "costUSD": 0.5011112,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 7738,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 32,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.5011112,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "ae6af26eac25d8067c846f2de9db11f6669cad6a53267f8ed292a74912b7da1b",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 845,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2513,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "sitting",
+            "limit": 30
+          },
+          "error": false,
+          "text_sha256": "fbe446d7de0f590ac486ef0ad50af869efea1d67f2291872ef5a23358bf07b29",
+          "text_bytes": 145,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 425,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "announce|Announc",
+            "limit": 30
+          },
+          "error": false,
+          "text_sha256": "204687fc3a59b26c604e13c90175b042f51bc3af90043325e53c8415f7e6546d",
+          "text_bytes": 276,
+          "text_tokens_cl100k": 72,
+          "response_json_bytes": 691,
+          "response_json_tokens_cl100k": 189,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "live",
+            "fields": [
+              "identifier"
+            ],
+            "limit": 30
+          },
+          "error": false,
+          "text_sha256": "5b141af7d60441127ef1e106d8f20ec5d33830d6b90f75b11b552afc45e01979",
+          "text_bytes": 370,
+          "text_tokens_cl100k": 86,
+          "response_json_bytes": 879,
+          "response_json_tokens_cl100k": 217,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "book",
+            "types": [
+              "model"
+            ],
+            "limit": 30
+          },
+          "error": false,
+          "text_sha256": "b26e215a29507de6bf1c17737aac47e9d6bc961c174445087f5847e2d3a435c3",
+          "text_bytes": 186,
+          "text_tokens_cl100k": 49,
+          "response_json_bytes": 509,
+          "response_json_tokens_cl100k": 143,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "9d8ee1b8118bff9daedaa8c34f013414caf748d9e73209ed2cc409fd21e54b54",
+          "text_bytes": 2474,
+          "text_tokens_cl100k": 621,
+          "response_json_bytes": 6841,
+          "response_json_tokens_cl100k": 1755,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Announceable",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "96867f8c320610f91c0688b42eee263e5df9fad562f90e74a0c6f2d1997fd525",
+          "text_bytes": 668,
+          "text_tokens_cl100k": 171,
+          "response_json_bytes": 2494,
+          "response_json_tokens_cl100k": 703,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AnnouncePublicationJob",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "51de3dd2e2e5ac827e7907b70d93dadb582b3eae49730606b2d3776e278dbfee",
+          "text_bytes": 687,
+          "text_tokens_cl100k": 174,
+          "response_json_bytes": 2482,
+          "response_json_tokens_cl100k": 683,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "b60f6159c2ee9d694275786b004b8616ca6c588ea37328c0c38c2cbd1121c248",
+          "text_bytes": 5049,
+          "text_tokens_cl100k": 1323,
+          "response_json_bytes": 11696,
+          "response_json_tokens_cl100k": 3219,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 4,
+        "lookup": 4
+      },
+      "evidence_mode_counts": {
+        "compact": 4
+      },
+      "mcp_content_tokens_cl100k": 3379,
+      "mcp_response_json_tokens_cl100k": 9543,
+      "evidence_content_tokens_cl100k": 2289,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 45,
+        "failures": 1,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [
+        "VerifierTest#test_a_sitting_that_takes_the_book_live_and_back_down_again_announces_nothing [/tmp/verification_test.rb:44]:"
+      ],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "e8c475790d911e23920723281911bebca33a8869c158ac45b32f4ab32f26b761",
+        "agent.json": "dd7e5665628485cbeefd91a7ff5aeb11f0a208acc638a87f6e275ddee974dc55",
+        "verifier.log": "5c42721d19c2cd91adf593fd85966888813032f245e1983ba49fe07295bbb8c4",
+        "diff.patch": "1a341e83fe7796efcae0b27f2b40bb74405ed2895cfeb1a49fca14b4dc257233",
+        "setup.log": "049d4115a11cdbd7ec85bd8d456bfe51031d7a97d11dcf4cfd456c4cd3b56670",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "ar-announce-once",
+      "condition": "compact",
+      "rep": 2,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-announce-once:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "05ceb3540dcce7cd12a5ba681a0ae830400b61a18802b5d9220a8d58351e6287",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 176.20413491399813,
+      "verifier_exit": 1,
+      "agent_usage": {
+        "input_tokens": 60,
+        "cache_creation_input_tokens": 45933,
+        "cache_read_input_tokens": 2215896,
+        "output_tokens": 14055,
+        "output_tokens_details": {
+          "thinking_tokens": 7538
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 45933,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 60,
+          "outputTokens": 14055,
+          "cacheReadInputTokens": 2215896,
+          "cacheCreationInputTokens": 45933,
+          "webSearchRequests": 0,
+          "costUSD": 0.7675812000000002,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 7538,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 40,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.7675812000000002,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "042aa75941a9660ee3db7f9ca58ff5d15020ca29f8afd664aa0cdca3a82163d5",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 845,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2513,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "sitting",
+            "limit": 40
+          },
+          "error": false,
+          "text_sha256": "fbe446d7de0f590ac486ef0ad50af869efea1d67f2291872ef5a23358bf07b29",
+          "text_bytes": 145,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 425,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "announc",
+            "limit": 40,
+            "fields": [
+              "identifier",
+              "source_code"
+            ]
+          },
+          "error": false,
+          "text_sha256": "24729381d11159ff4e12724901012c1a78a36bc7157b6e228893c63dc4bbd7cd",
+          "text_bytes": 313,
+          "text_tokens_cl100k": 83,
+          "response_json_bytes": 767,
+          "response_json_tokens_cl100k": 211,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "9d8ee1b8118bff9daedaa8c34f013414caf748d9e73209ed2cc409fd21e54b54",
+          "text_bytes": 2474,
+          "text_tokens_cl100k": 621,
+          "response_json_bytes": 6841,
+          "response_json_tokens_cl100k": 1755,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Announceable",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "96867f8c320610f91c0688b42eee263e5df9fad562f90e74a0c6f2d1997fd525",
+          "text_bytes": 668,
+          "text_tokens_cl100k": 171,
+          "response_json_bytes": 2493,
+          "response_json_tokens_cl100k": 703,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AnnouncePublicationJob",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "51de3dd2e2e5ac827e7907b70d93dadb582b3eae49730606b2d3776e278dbfee",
+          "text_bytes": 687,
+          "text_tokens_cl100k": 174,
+          "response_json_bytes": 2481,
+          "response_json_tokens_cl100k": 683,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "dependents",
+          "arguments": {
+            "identifier": "Book::Announceable",
+            "depth": 2
+          },
+          "error": false,
+          "text_sha256": "c48187e6e6404f84267deffb7183d1a234f2bfb1f6503e0875c96d413df3a9bc",
+          "text_bytes": 834,
+          "text_tokens_cl100k": 245,
+          "response_json_bytes": 1860,
+          "response_json_tokens_cl100k": 578,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "BooksController",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "5a5b9ecb385667f12b7cb98cd707aa76f257270fb05cee7e88bfd524f7afd3dc",
+          "text_bytes": 5495,
+          "text_tokens_cl100k": 1179,
+          "response_json_bytes": 13091,
+          "response_json_tokens_cl100k": 3060,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "transaction",
+            "fields": [
+              "identifier",
+              "source_code"
+            ],
+            "limit": 40
+          },
+          "error": false,
+          "text_sha256": "9c0adb03864c572881bd9ae15f598b96c86718d2c776e7c30bb5913e99081209",
+          "text_bytes": 1899,
+          "text_tokens_cl100k": 488,
+          "response_json_bytes": 3970,
+          "response_json_tokens_cl100k": 1021,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::PublicationsController",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "c86f59625964123557c97ad7b5d8f0603e4cce67357536a7ee9690b6355b8a51",
+          "text_bytes": 5545,
+          "text_tokens_cl100k": 1200,
+          "response_json_bytes": 13485,
+          "response_json_tokens_cl100k": 3198,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf::Editable",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "83236aa4a92423be2fa729ff9e4f56adcc8af21fad42f3643d66a0ae1a8be202",
+          "text_bytes": 2952,
+          "text_tokens_cl100k": 735,
+          "response_json_bytes": 9190,
+          "response_json_tokens_cl100k": 2589,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "b60f6159c2ee9d694275786b004b8616ca6c588ea37328c0c38c2cbd1121c248",
+          "text_bytes": 5049,
+          "text_tokens_cl100k": 1323,
+          "response_json_bytes": 11696,
+          "response_json_tokens_cl100k": 3219,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "rails/activerecord/activerecord/lib/active_record/transactions.rb",
+            "include_source": true,
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "ecf98bfbde0322472ceb4de0c929c652c43f3bea370c60cefdb47e045e2f702e",
+          "text_bytes": 4746,
+          "text_tokens_cl100k": 1067,
+          "response_json_bytes": 14283,
+          "response_json_tokens_cl100k": 3731,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "add_record|records.uniq|committed!",
+            "fields": [
+              "identifier",
+              "source_code"
+            ],
+            "types": [
+              "rails_source"
+            ],
+            "limit": 20
+          },
+          "error": false,
+          "text_sha256": "9a32211139b870bbe8ce49fb35578257947bcf496676323e713f9be28a8a0926",
+          "text_bytes": 430,
+          "text_tokens_cl100k": 109,
+          "response_json_bytes": 1000,
+          "response_json_tokens_cl100k": 265,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 4,
+        "lookup": 8,
+        "dependents": 1
+      },
+      "evidence_mode_counts": {
+        "compact": 8
+      },
+      "mcp_content_tokens_cl100k": 8278,
+      "mcp_response_json_tokens_cl100k": 23647,
+      "evidence_content_tokens_cl100k": 6470,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 45,
+        "failures": 1,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [
+        "VerifierTest#test_a_sitting_that_takes_the_book_live_and_back_down_again_announces_nothing [/tmp/verification_test.rb:44]:"
+      ],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "3a86a389c24ab2711c80f10ba8021ce50c6de021a88f3217997c8527bb080844",
+        "agent.json": "ead4114db9649c2f32bf376712334e29d63bbd513c4c3451ded650e69657b241",
+        "verifier.log": "1a463ed6c0e07f2c4b3cde9e007b55a696078385dff199d4be5c491d6099db0f",
+        "diff.patch": "b029b46795d78c65ed3253984117634f2221ca44f3de1acefd93c997be0a444b",
+        "setup.log": "e0d24c2763a543bdd6354be3801472e3efb4689700ad699eda9c73a0c602e051",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "ar-announce-once",
+      "condition": "full",
+      "rep": 1,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-announce-once:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "05ceb3540dcce7cd12a5ba681a0ae830400b61a18802b5d9220a8d58351e6287",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 218.7356931309987,
+      "verifier_exit": 1,
+      "agent_usage": {
+        "input_tokens": 68,
+        "cache_creation_input_tokens": 66665,
+        "cache_read_input_tokens": 2974893,
+        "output_tokens": 17786,
+        "output_tokens_details": {
+          "thinking_tokens": 11900
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 66665,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 68,
+          "outputTokens": 17786,
+          "cacheReadInputTokens": 2974893,
+          "cacheCreationInputTokens": 66665,
+          "webSearchRequests": 0,
+          "costUSD": 1.0396345999999999,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 11900,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 38,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 1.0396345999999999,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "ae6af26eac25d8067c846f2de9db11f6669cad6a53267f8ed292a74912b7da1b",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 845,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2513,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "sitting|announce|live",
+            "limit": 40
+          },
+          "error": false,
+          "text_sha256": "e48d3051613e3e730121fa6663b403176e2f48b2cc14065f7782b41fba61e708",
+          "text_bytes": 509,
+          "text_tokens_cl100k": 123,
+          "response_json_bytes": 1161,
+          "response_json_tokens_cl100k": 291,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Announceable",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "1cc6ab5ded83aa6c671cc725dffe85bfb95ec7c8b35ab32f7e41c95f17129cbd",
+          "text_bytes": 1906,
+          "text_tokens_cl100k": 470,
+          "response_json_bytes": 4143,
+          "response_json_tokens_cl100k": 1039,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AnnouncePublicationJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "176dac6a1e2fbb5120372a9c67f1e2115aaba036f3fa5b030b26f3a96a4d4c8a",
+          "text_bytes": 1650,
+          "text_tokens_cl100k": 402,
+          "response_json_bytes": 3565,
+          "response_json_tokens_cl100k": 899,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "6ff6b1506669ebfbfa3fec7522509312ec00a5b607e4268f55da5b1242796595",
+          "text_bytes": 17274,
+          "text_tokens_cl100k": 4337,
+          "response_json_bytes": 36513,
+          "response_json_tokens_cl100k": 9261,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "sitting",
+            "fields": [
+              "identifier",
+              "source_code",
+              "metadata"
+            ],
+            "limit": 40
+          },
+          "error": false,
+          "text_sha256": "fbe446d7de0f590ac486ef0ad50af869efea1d67f2291872ef5a23358bf07b29",
+          "text_bytes": 145,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 425,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "BooksController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "39d5943203629af429460db3d7cf44f0b36abf09da32fcc2f1564a8ba717c0cb",
+          "text_bytes": 16789,
+          "text_tokens_cl100k": 4013,
+          "response_json_bytes": 35478,
+          "response_json_tokens_cl100k": 8711,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Page",
+            "limit": 20
+          },
+          "error": false,
+          "text_sha256": "1ba7c1aec21c03d9ae8c74316727c19d01abd0954107229399ccd57716fd6a55",
+          "text_bytes": 1652,
+          "text_tokens_cl100k": 418,
+          "response_json_bytes": 3486,
+          "response_json_tokens_cl100k": 885,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Publication",
+            "limit": 30
+          },
+          "error": false,
+          "text_sha256": "11fc7f533ed213a3cf6b703c7ecd60daecc0e36b2b1af8ebcc97a187b649634d",
+          "text_bytes": 936,
+          "text_tokens_cl100k": 220,
+          "response_json_bytes": 2028,
+          "response_json_tokens_cl100k": 485,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::PublicationsController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "0f4c4abd28c90b3b409e7d84ab993c80a343b297bcef1682fe471ca41b2f0b9d",
+          "text_bytes": 14436,
+          "text_tokens_cl100k": 3214,
+          "response_json_bytes": 30118,
+          "response_json_tokens_cl100k": 6891,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Page",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "90b7f5498c09fa3253717be53dcb699c6a9371c116668205b045e0a3d32435e5",
+          "text_bytes": 11984,
+          "text_tokens_cl100k": 3074,
+          "response_json_bytes": 25290,
+          "response_json_tokens_cl100k": 6539,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "7335ff58707ca16c9fa49219ea79100d0f0584902a9742c70deca483992831b1",
+          "text_bytes": 24996,
+          "text_tokens_cl100k": 6512,
+          "response_json_bytes": 52546,
+          "response_json_tokens_cl100k": 13883,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 4,
+        "lookup": 7
+      },
+      "evidence_mode_counts": {
+        "full": 7
+      },
+      "mcp_content_tokens_cl100k": 23666,
+      "mcp_response_json_tokens_cl100k": 51518,
+      "evidence_content_tokens_cl100k": 22022,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 45,
+        "failures": 1,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [
+        "VerifierTest#test_a_sitting_that_takes_the_book_live_and_back_down_again_announces_nothing [/tmp/verification_test.rb:44]:"
+      ],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "29f87a19f9aa365b74b2dfbcbec7bb2720ec39921dc206174e3027ddf2695228",
+        "agent.json": "480878c2e73880951d36119ec0194665f0ff7f0389ca4680e6d0c59b9cc09103",
+        "verifier.log": "d5862e45c02175f2e3421391b8da9bc65bacc53d7816cee51d23021af9574ad1",
+        "diff.patch": "600a840d134def21db4dc1c40e752924089dcca8009bd72d454af1f6292af53f",
+        "setup.log": "049d4115a11cdbd7ec85bd8d456bfe51031d7a97d11dcf4cfd456c4cd3b56670",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "ar-announce-once",
+      "condition": "full",
+      "rep": 2,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-announce-once:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "05ceb3540dcce7cd12a5ba681a0ae830400b61a18802b5d9220a8d58351e6287",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 188.43678066299617,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 52,
+        "cache_creation_input_tokens": 57467,
+        "cache_read_input_tokens": 2064486,
+        "output_tokens": 14105,
+        "output_tokens_details": {
+          "thinking_tokens": 8440
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 57467,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 52,
+          "outputTokens": 14105,
+          "cacheReadInputTokens": 2064486,
+          "cacheCreationInputTokens": 57467,
+          "webSearchRequests": 0,
+          "costUSD": 0.7839192,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 8440,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 35,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.7839192,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "f84b606062d83157ad21734087b3cd78217d63b17274cae09a8ae630ec1afbed",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 845,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2513,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "sitting"
+          },
+          "error": false,
+          "text_sha256": "fbe446d7de0f590ac486ef0ad50af869efea1d67f2291872ef5a23358bf07b29",
+          "text_bytes": 145,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 425,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "announce"
+          },
+          "error": false,
+          "text_sha256": "160597a05aee228f122e4a0c4ea6849f96ecee4ac34450c656925bee99315313",
+          "text_bytes": 268,
+          "text_tokens_cl100k": 69,
+          "response_json_bytes": 675,
+          "response_json_tokens_cl100k": 183,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "live"
+          },
+          "error": false,
+          "text_sha256": "5b141af7d60441127ef1e106d8f20ec5d33830d6b90f75b11b552afc45e01979",
+          "text_bytes": 370,
+          "text_tokens_cl100k": 86,
+          "response_json_bytes": 879,
+          "response_json_tokens_cl100k": 217,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Announceable",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "1cc6ab5ded83aa6c671cc725dffe85bfb95ec7c8b35ab32f7e41c95f17129cbd",
+          "text_bytes": 1906,
+          "text_tokens_cl100k": 470,
+          "response_json_bytes": 4143,
+          "response_json_tokens_cl100k": 1039,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AnnouncePublicationJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "176dac6a1e2fbb5120372a9c67f1e2115aaba036f3fa5b030b26f3a96a4d4c8a",
+          "text_bytes": 1650,
+          "text_tokens_cl100k": 402,
+          "response_json_bytes": 3565,
+          "response_json_tokens_cl100k": 899,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Book",
+            "types": [
+              "model"
+            ]
+          },
+          "error": false,
+          "text_sha256": "0162ebe3cf1d2a7ccc9af14bf60685f3ab371a5ec9244775fef058c5ca4d9ef1",
+          "text_bytes": 186,
+          "text_tokens_cl100k": 49,
+          "response_json_bytes": 510,
+          "response_json_tokens_cl100k": 143,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "6ff6b1506669ebfbfa3fec7522509312ec00a5b607e4268f55da5b1242796595",
+          "text_bytes": 17274,
+          "text_tokens_cl100k": 4337,
+          "response_json_bytes": 36514,
+          "response_json_tokens_cl100k": 9261,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "published",
+            "fields": [
+              "source_code"
+            ]
+          },
+          "error": false,
+          "text_sha256": "7840159234d95caef8bcf46d4dc52b9e7e5c65fc9a584fb5d9518d8cf5747a85",
+          "text_bytes": 1694,
+          "text_tokens_cl100k": 394,
+          "response_json_bytes": 3570,
+          "response_json_tokens_cl100k": 837,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::PublicationsController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "0f4c4abd28c90b3b409e7d84ab993c80a343b297bcef1682fe471ca41b2f0b9d",
+          "text_bytes": 14436,
+          "text_tokens_cl100k": 3214,
+          "response_json_bytes": 30118,
+          "response_json_tokens_cl100k": 6891,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "PagesController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "142d6f78c3c7e6ab26dde7c0976b83a8b4a358487efbfc76631f87f0b4d6ab9a",
+          "text_bytes": 16003,
+          "text_tokens_cl100k": 3715,
+          "response_json_bytes": 33474,
+          "response_json_tokens_cl100k": 7975,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "7335ff58707ca16c9fa49219ea79100d0f0584902a9742c70deca483992831b1",
+          "text_bytes": 24996,
+          "text_tokens_cl100k": 6512,
+          "response_json_bytes": 52546,
+          "response_json_tokens_cl100k": 13883,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 5,
+        "lookup": 6
+      },
+      "evidence_mode_counts": {
+        "full": 6
+      },
+      "mcp_content_tokens_cl100k": 20131,
+      "mcp_response_json_tokens_cl100k": 43962,
+      "evidence_content_tokens_cl100k": 18650,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 47,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "d73f34ceeabe3cc519efaa8afab60561290e93f1058708eb83d8980dfdf296b1",
+        "agent.json": "ba7c8e69a5b3efc7603ac1f54b52b61ea3ed0636c4fb1e4a4ecd402ba0c0f20b",
+        "verifier.log": "6c9effbff7d8e793568fe315c88e5e5f2298df6de5567c777ef6b19992e24838",
+        "diff.patch": "1f7057194e74efb8441ef763b15ae622665e811f6b3d3616b4d8a25b91b4f7b8",
+        "setup.log": "0db583c92feaabcb5d769fe3814de458f42fa7946a2ac9e2d507c9150411569f",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "ar-archive-book-access",
+      "condition": "compact",
+      "rep": 1,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-archive-book-access:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "8218645628dcdbcd3b05211155a0e84d4b8bf47caac2752f5d72c106cba7ba00",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 54.524416316002316,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 28,
+        "cache_creation_input_tokens": 14461,
+        "cache_read_input_tokens": 741131,
+        "output_tokens": 4012,
+        "output_tokens_details": {
+          "thinking_tokens": 1551
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 14461,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 28,
+          "outputTokens": 4012,
+          "cacheReadInputTokens": 741131,
+          "cacheCreationInputTokens": 14461,
+          "webSearchRequests": 0,
+          "costUSD": 0.24624620000000003,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1551,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 20,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.24624620000000003,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "15bd73ea19af31cc16369f1b77d90a4f8e19748de596408283dc56b1bf71d205",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 839,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2495,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "AccessArchive"
+          },
+          "error": false,
+          "text_sha256": "280967acbba6982de24543d8c29844aa616a35f8b7909530ff6cd0c4589a017f",
+          "text_bytes": 270,
+          "text_tokens_cl100k": 66,
+          "response_json_bytes": 679,
+          "response_json_tokens_cl100k": 177,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "b9f8c7e5a88cfe19243ba8b3acdce4416949ad59a3496e1c5ccf4586b9554e15",
+          "text_bytes": 2824,
+          "text_tokens_cl100k": 694,
+          "response_json_bytes": 7808,
+          "response_json_tokens_cl100k": 1995,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AccessArchive",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "4a5cb341f438acd13035003f25e994f1213184f568256b44bbfa30ccc1b2ff92",
+          "text_bytes": 2961,
+          "text_tokens_cl100k": 647,
+          "response_json_bytes": 7288,
+          "response_json_tokens_cl100k": 1754,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Access",
+            "types": [
+              "model"
+            ]
+          },
+          "error": false,
+          "text_sha256": "4473fca85efb31b54eb7f8fd0ecd896b68c22b177b9a08ef03d67602936736ee",
+          "text_bytes": 245,
+          "text_tokens_cl100k": 62,
+          "response_json_bytes": 629,
+          "response_json_tokens_cl100k": 169,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Accessable",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": true,
+          "text_sha256": "7289755e40b66a419c945bb77083f42d77eb7aee93d0b4483d0fe52f3649c33e",
+          "text_bytes": 26,
+          "text_tokens_cl100k": 6,
+          "response_json_bytes": 337,
+          "response_json_tokens_cl100k": 87,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 2,
+        "lookup": 3
+      },
+      "evidence_mode_counts": {
+        "compact": 3
+      },
+      "mcp_content_tokens_cl100k": 2314,
+      "mcp_response_json_tokens_cl100k": 6677,
+      "evidence_content_tokens_cl100k": 1347,
+      "mcp_errors": 1,
+      "verifier_counts": {
+        "runs": 6,
+        "assertions": 20,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "62babbb0f6c63bb471d1c4e4a5eb2c77298c96b5c2760d514fedae3be693de70",
+        "agent.json": "c51b0fb6949c981dc7b8a07b50e0a830cc2c63dc23c5d986030d7e22bdb80222",
+        "verifier.log": "1e070967a5b22290a3fdd36bc34e207db89f913ac7e47796fea031ef39c240c2",
+        "diff.patch": "b7cf1c5c445f1e81c6bfd47611333c7b8e399ec168da41812e164828b7d8467d",
+        "setup.log": "722c3e4523b5ccef0ff618c8ba9a2d4edf759656fb838b4ffa88ea438cdf72d2",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      },
+      "mcp_error_note": "Agent requested Accessable and Woods returned Unit not found: Accessable. Retained tool error, not transport failure."
+    },
+    {
+      "task": "ar-archive-book-access",
+      "condition": "compact",
+      "rep": 2,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-archive-book-access:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "8218645628dcdbcd3b05211155a0e84d4b8bf47caac2752f5d72c106cba7ba00",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 98.903791525001,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 34,
+        "cache_creation_input_tokens": 16883,
+        "cache_read_input_tokens": 921876,
+        "output_tokens": 4907,
+        "output_tokens_details": {
+          "thinking_tokens": 1972
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 16883,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 34,
+          "outputTokens": 4907,
+          "cacheReadInputTokens": 921876,
+          "cacheCreationInputTokens": 16883,
+          "webSearchRequests": 0,
+          "costUSD": 0.30104519999999996,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1972,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 26,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.30104519999999996,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "adfbcdf911053da4a7f84b2420a37d8cac4c659ceedc20c6f88e092f1a44a9cc",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 839,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2495,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "AccessArchive|access_archives"
+          },
+          "error": false,
+          "text_sha256": "6a52874d14fc07921a9b62fbbac900b5330299ea00b0fa8cdad777512e79a9b5",
+          "text_bytes": 286,
+          "text_tokens_cl100k": 70,
+          "response_json_bytes": 711,
+          "response_json_tokens_cl100k": 185,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AccessArchive",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "4a5cb341f438acd13035003f25e994f1213184f568256b44bbfa30ccc1b2ff92",
+          "text_bytes": 2961,
+          "text_tokens_cl100k": 647,
+          "response_json_bytes": 7288,
+          "response_json_tokens_cl100k": 1754,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": false,
+          "text_sha256": "b9f8c7e5a88cfe19243ba8b3acdce4416949ad59a3496e1c5ccf4586b9554e15",
+          "text_bytes": 2824,
+          "text_tokens_cl100k": 694,
+          "response_json_bytes": 7808,
+          "response_json_tokens_cl100k": 1995,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Access",
+            "types": [
+              "model"
+            ]
+          },
+          "error": false,
+          "text_sha256": "4473fca85efb31b54eb7f8fd0ecd896b68c22b177b9a08ef03d67602936736ee",
+          "text_bytes": 245,
+          "text_tokens_cl100k": 62,
+          "response_json_bytes": 629,
+          "response_json_tokens_cl100k": 169,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Accessable",
+            "evidence": "compact",
+            "budget": 1200
+          },
+          "error": true,
+          "text_sha256": "7289755e40b66a419c945bb77083f42d77eb7aee93d0b4483d0fe52f3649c33e",
+          "text_bytes": 26,
+          "text_tokens_cl100k": 6,
+          "response_json_bytes": 337,
+          "response_json_tokens_cl100k": 87,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 2,
+        "lookup": 3
+      },
+      "evidence_mode_counts": {
+        "compact": 3
+      },
+      "mcp_content_tokens_cl100k": 2318,
+      "mcp_response_json_tokens_cl100k": 6685,
+      "evidence_content_tokens_cl100k": 1347,
+      "mcp_errors": 1,
+      "verifier_counts": {
+        "runs": 6,
+        "assertions": 20,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "a63b5fe3075eb7951e1acd492db5de6401ed2a00ca9b15c826dc16b8f16d8358",
+        "agent.json": "08fdd64b6e2db1dc4e622ae59ebeada8ea71dd0ed33884ee4f3fd6025497ee61",
+        "verifier.log": "837a4dadbef4e3850844a8133adf5a3a50a2807be3455c2c2720f7167500b3f2",
+        "diff.patch": "cd68e0b08264a85e85eeafdd91699dc9e45f8006164eedb76a3996b4ec9fef66",
+        "setup.log": "9b45d4af94bcf0df6b6508960c5dc30a4a42eb327a071b994424d69ced96800a",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      },
+      "mcp_error_note": "Agent requested Accessable and Woods returned Unit not found: Accessable. Retained tool error, not transport failure."
+    },
+    {
+      "task": "ar-archive-book-access",
+      "condition": "full",
+      "rep": 1,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-archive-book-access:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "8218645628dcdbcd3b05211155a0e84d4b8bf47caac2752f5d72c106cba7ba00",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 64.95545870300703,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 26,
+        "cache_creation_input_tokens": 30372,
+        "cache_read_input_tokens": 751003,
+        "output_tokens": 3445,
+        "output_tokens_details": {
+          "thinking_tokens": 1162
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 30372,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 26,
+          "outputTokens": 3445,
+          "cacheReadInputTokens": 751003,
+          "cacheCreationInputTokens": 30372,
+          "webSearchRequests": 0,
+          "costUSD": 0.3061906000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1162,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 18,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.3061906000000001,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "dbbbf544828e3de27e490fd48223b75f38c77c30e8cae0b8e68fdbefe7b97c9b",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 839,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2495,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "AccessArchive"
+          },
+          "error": false,
+          "text_sha256": "280967acbba6982de24543d8c29844aa616a35f8b7909530ff6cd0c4589a017f",
+          "text_bytes": 270,
+          "text_tokens_cl100k": 66,
+          "response_json_bytes": 679,
+          "response_json_tokens_cl100k": 177,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "96da7dc05281073264e628dbd4f77bcdb15fe34c8a912c9cb9d2d6701e04fd21",
+          "text_bytes": 16380,
+          "text_tokens_cl100k": 4189,
+          "response_json_bytes": 34671,
+          "response_json_tokens_cl100k": 8951,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AccessArchive",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "fbfbc5c09061026f173fee68b9cb1a5d6fe4d5bef0a4e214367da1172dc5fe47",
+          "text_bytes": 3429,
+          "text_tokens_cl100k": 828,
+          "response_json_bytes": 7307,
+          "response_json_tokens_cl100k": 1813,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "CreateAccessArchives",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "34ad40a6e7623f74a8b3a6d83e529f996cea7bebda72fdfcbed5c76e000e1d02",
+          "text_bytes": 2340,
+          "text_tokens_cl100k": 599,
+          "response_json_bytes": 4979,
+          "response_json_tokens_cl100k": 1287,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Access",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "ae45385f3fcd4b897e377b11835f6587b3430c65a9d11324c9fb21b31b9c4c07",
+          "text_bytes": 4932,
+          "text_tokens_cl100k": 1258,
+          "response_json_bytes": 10497,
+          "response_json_tokens_cl100k": 2723,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 1,
+        "lookup": 4
+      },
+      "evidence_mode_counts": {
+        "full": 4
+      },
+      "mcp_content_tokens_cl100k": 7779,
+      "mcp_response_json_tokens_cl100k": 17446,
+      "evidence_content_tokens_cl100k": 6874,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 6,
+        "assertions": 20,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "e56ffe7d78673f148417aba1e230fbc27197d157439d73f381ba43fc3dd0ec3d",
+        "agent.json": "fd67c052a513fafc6a145310b52865f5caa26378d859b7bfe02ab747723a180f",
+        "verifier.log": "edabad1769c4aa982b80476b5fa828911dfb17ce4422305072782f4138258a75",
+        "diff.patch": "2dda661732b4f33e4da5caeee9349bbecb34342cf7731783e619f9914874b0aa",
+        "setup.log": "19bc55d6b5c31923f541a4c2a1663a12a540332a4d85a3837720af41aeef443b",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    },
+    {
+      "task": "ar-archive-book-access",
+      "condition": "full",
+      "rep": 2,
+      "woods_sha": "33abd6da8e072c7f510d052292aaff4260c30c7f",
+      "image": "woods-agent-task-ar-archive-book-access:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "8218645628dcdbcd3b05211155a0e84d4b8bf47caac2752f5d72c106cba7ba00",
+      "scope": "default evidence mode; explicit choices and full follow-ups remain available; local lexical retrieval",
+      "agent_exit": 0,
+      "agent_wall_seconds": 65.03617615199619,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 26,
+        "cache_creation_input_tokens": 19238,
+        "cache_read_input_tokens": 736880,
+        "output_tokens": 4061,
+        "output_tokens_details": {
+          "thinking_tokens": 1422
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 19238,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 26,
+          "outputTokens": 4061,
+          "cacheReadInputTokens": 736880,
+          "cacheCreationInputTokens": 19238,
+          "webSearchRequests": 0,
+          "costUSD": 0.26499,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 1422,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 18,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.26499,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "bc4a8781f7f4c5dc4d95cd90500e5394f30792cb75e90733519523f35475e965",
+          "text_bytes": 2346,
+          "text_tokens_cl100k": 839,
+          "response_json_bytes": 7186,
+          "response_json_tokens_cl100k": 2495,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "96da7dc05281073264e628dbd4f77bcdb15fe34c8a912c9cb9d2d6701e04fd21",
+          "text_bytes": 16380,
+          "text_tokens_cl100k": 4189,
+          "response_json_bytes": 34671,
+          "response_json_tokens_cl100k": 8951,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "AccessArchive"
+          },
+          "error": false,
+          "text_sha256": "280967acbba6982de24543d8c29844aa616a35f8b7909530ff6cd0c4589a017f",
+          "text_bytes": 270,
+          "text_tokens_cl100k": 66,
+          "response_json_bytes": 679,
+          "response_json_tokens_cl100k": 177,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "AccessArchive",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "fbfbc5c09061026f173fee68b9cb1a5d6fe4d5bef0a4e214367da1172dc5fe47",
+          "text_bytes": 3429,
+          "text_tokens_cl100k": 828,
+          "response_json_bytes": 7307,
+          "response_json_tokens_cl100k": 1813,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 2,
+        "search": 1
+      },
+      "evidence_mode_counts": {
+        "full": 2
+      },
+      "mcp_content_tokens_cl100k": 5922,
+      "mcp_response_json_tokens_cl100k": 13436,
+      "evidence_content_tokens_cl100k": 5017,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 6,
+        "assertions": 20,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "raw_artifact_sha256": {
+        "mcp.jsonl": "0ce1d6af130650f1ba098c875abad4026fc96650bcd1676ecbf08e8506d1e760",
+        "agent.json": "25ea714e404dac7a23f4474f7118173328bbdb47fbb7bb945009e0ca3264d938",
+        "verifier.log": "00254fd0b75681bfdc9b8ca548924a6c2c65001eb6d7544c03cfc8fde86304e5",
+        "diff.patch": "b4cb6006930e76fc270a617ae1b886b83ddac82f976f0da12798a0d19ef8945d",
+        "setup.log": "62636dcd49e46618e698c63f50f905ca2e0e9e1e9c6f428354b8c832a551c47a",
+        "mcp-preflight.log": "f2a4608b46379bdbf316b6d64b832427b265a6f5b8db6916f84991f6c941d8a4"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "fixture_images": [
+    {
+      "task": "ar-announce-once",
+      "image": "woods-agent-task-ar-announce-once:5327efe",
+      "image_id": "sha256:60799120833cbcb6788b7536b0246752f13ff59deedfca91fc1a32050e630e4c",
+      "task_revision": "5327efe54dd767d662ab89332f6a4285fef07bd8",
+      "solutions_or_verifiers_copied": false
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "image_id": "sha256:6f7e9088ca85e8f7a7956967e6594f2144e2061ac471ae4bced766ec9058befd",
+      "task_revision": "5327efe54dd767d662ab89332f6a4285fef07bd8",
+      "solutions_or_verifiers_copied": false
+    },
+    {
+      "task": "ar-archive-book-access",
+      "image": "woods-agent-task-ar-archive-book-access:5327efe",
+      "image_id": "sha256:b80925899f1a6676a455bed318a5c4cd082ebccc9151dcc0bc76c28f646eb585",
+      "task_revision": "5327efe54dd767d662ab89332f6a4285fef07bd8",
+      "solutions_or_verifiers_copied": false
+    }
+  ],
+  "fixture_prechecks": [
+    {
+      "task": "ar-announce-once",
+      "condition": "defect",
+      "exit_code": 1,
+      "wall_seconds": 9.428581134001433,
+      "log": "ar-announce-once-defect.log"
+    },
+    {
+      "task": "ar-announce-once",
+      "condition": "reference",
+      "exit_code": 0,
+      "wall_seconds": 9.127180382998631,
+      "log": "ar-announce-once-reference.log"
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "defect",
+      "exit_code": 1,
+      "wall_seconds": 9.176791065998259,
+      "log": "aj-enqueue-after-commit-defect.log"
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "reference",
+      "exit_code": 0,
+      "wall_seconds": 9.277101315001346,
+      "log": "aj-enqueue-after-commit-reference.log"
+    },
+    {
+      "task": "ar-archive-book-access",
+      "condition": "defect",
+      "exit_code": 1,
+      "wall_seconds": 8.17513575400153,
+      "log": "ar-archive-book-access-defect.log"
+    },
+    {
+      "task": "ar-archive-book-access",
+      "condition": "reference",
+      "exit_code": 0,
+      "wall_seconds": 8.275405245000002,
+      "log": "ar-archive-book-access-reference.log"
+    }
+  ],
+  "task_repository": "https://github.com/rails/ai-evals",
+  "app": "basecamp/writebook v1.2.1, Ruby3.4.7",
+  "pilots": [
+    {
+      "kind": "invalid harness pilot",
+      "reason": "index files owned by root instead of agent UID; no valid MCP connection",
+      "included_in_primary": false
+    },
+    {
+      "kind": "20-turn calibration",
+      "full": "9/10 checks; max turns reached",
+      "compact": "9/10 checks; max turns reached",
+      "decision": "40-turn allowance fixed for both modes before any primary output",
+      "included_in_primary": false
+    }
+  ],
+  "conclusion": "Full passed5/6 primary trials; compact4/6. Smaller compact tool responses did not improve task success. Keep opt-in; no superiority or release-quality claim.",
+  "limitations": [
+    "Three selected public framework-API tasks, two repetitions each; too small for causal or broad product claims.",
+    "Actual client used lookup, not codebase_retrieve; this evaluates evidence rendering/default choice, not retrieval ranking.",
+    "Compact lookup receives1200 estimated-token budget; existing full lookup is unbounded. Identical-budget ranking/assembly comparison is the separate168-case corpus experiment.",
+    "No mode overrides or full SHA-guarded follow-ups were requested in primary trials.",
+    "No compact query argument was supplied by these agents; query-relevant selection is exercised by the separate fixed-query corpus and regression cases.",
+    "cl100k counts MCP text and reconstructed complete JSON separately; neither is assumed to be Claude model-visible token count.",
+    "Provider usage includes repeated input/cache tokens; reported cost is list-price estimate, not billed charge.",
+    "Two concurrent trials make wall time descriptive only.",
+    "Failures remain in the report; no outcome-dependent retries.",
+    "Full raw transcripts and app source responses retained locally; only hashes, metrics and method names are published here."
+  ]
+}

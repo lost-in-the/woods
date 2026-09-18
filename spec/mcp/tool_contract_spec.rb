@@ -914,8 +914,7 @@ RSpec.describe 'Index MCP tool contracts' do
     when 'graph_analysis'
       assert_graph_enum(data, value)
     when 'pipeline_repair'
-      outcome = value == 'clear_locks' ? 'cleared' : 'reset'
-      expect(data).to eq('repaired' => true, 'action' => value, 'outcome' => outcome)
+      assert_repair_enum(data, value)
     when 'structure'
       expected = { 'manifest' => expected_manifest, 'template_engines' => ['erb'] }
       expected['summary'] = expected_summary if value == 'full'
@@ -923,6 +922,11 @@ RSpec.describe 'Index MCP tool contracts' do
     else
       raise "Missing enum semantic oracle for #{name}.#{value}"
     end
+  end
+
+  def assert_repair_enum(data, value)
+    outcome = value == 'clear_locks' ? 'cleared' : 'reset'
+    expect(data).to eq('repaired' => true, 'action' => value, 'outcome' => outcome)
   end
 
   def assert_evidence_enum(name, value, result)

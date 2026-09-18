@@ -360,3 +360,46 @@ Use the same tokenizer version/vocabulary recorded by the capture. Raw contexts
 are an external artifact; the checked file retains hashes, exact counts, unit
 outcomes and source-span counts. Candidate ranking and ownership diversity are
 outside this experiment.
+
+### Public Writebook task attempts
+
+[`public_task_evidence_capture.json`](../bench/evaluation/public_task_evidence_capture.json)
+records twelve actual agent attempts on the Rails Foundation's public
+[`ai-evals`](https://github.com/rails/ai-evals) Writebook tasks at revision
+`5327efe54dd767d662ab89332f6a4285fef07bd8` (Writebook 1.2.1):
+`ar-announce-once`, `aj-enqueue-after-commit`, and `ar-archive-book-access`.
+Each task ran twice per condition with the same task prompt, client 2.1.267,
+resolved model `claude-sonnet-5`, 40-turn cap and Woods source revision
+`33abd6da8e072c7f510d052292aaff4260c30c7f`. Hidden verifiers remained outside the
+agent workspace until the attempt finished. Baseline failure/reference success
+prechecks and prompt/artifact hashes are retained in the capture.
+
+The intervention changed the default evidence mode at the MCP boundary. Full
+lookup kept its existing complete output; compact lookup used a 1200-estimated-token
+budget. Explicit evidence choices, metadata-only reads and full-source follow-ups
+remained available. This measures a default-mode change, not a forced mode on
+every call. All actual evidence calls used `lookup` (26 full-condition calls and
+20 compact-condition calls); there were no `codebase_retrieve` calls, query hints,
+or explicit full follow-ups. Consequently this does not establish retrieval
+ranking or query-guided compact evidence benefits.
+
+| Condition | Hidden task suites passed | Median MCP text tokens (cl100k) | Median agent wall time |
+|---|---:|---:|---:|
+| Full | 5/6 | 8661 | 180.3 s |
+| Compact | 4/6 | 2316 | 132.8 s |
+
+Both compact announcement attempts failed the go-live-then-return-to-draft edge;
+the second full attempt passed it. Both conditions passed both repetitions of the
+other tasks. Two compact `Accessable` lookups returned not-found errors; these are
+retained as valid tool errors, not discarded trials. The earlier 20-turn calibration
+pair hit the turn cap and failed the same announcement edge in both modes; the
+fixed 40-turn primary protocol and all failed/setup pilots are recorded separately.
+
+Compact delivered less MCP text in this small sample but passed one fewer task.
+That is a reason to keep it explicit and retain full-source verification, not to
+change the default. Two trials could overlap, so wall times are descriptive rather
+than isolated performance estimates. `cl100k_base` measures representation size,
+not the Claude tokenizer or billing. The capture separately records serialized MCP
+response counts, client-reported usage and list-price estimates; these must not be
+substituted for model-visible context or billed charges. It contains metrics,
+arguments and hashes, without shipping application source or agent transcripts.
