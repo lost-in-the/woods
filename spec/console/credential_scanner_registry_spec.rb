@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'weakref'
+require 'open3'
 require 'woods/console/credential_scanner'
 require 'woods/console/credential_scanner_registry'
 
@@ -43,6 +44,30 @@ RSpec.describe Woods::Console::CredentialScannerRegistry do
 
     expect(reference.weakref_alive?).to be_falsey
     expect(registry.rebuild { raise 'must not build' }).to be_nil
+  end
+
+  it 'keeps the live scanner snapshot alive while rebuilding allocates and collects' do
+    owners = [registry.register { Woods::Console::CredentialScanner.new(secret_index: old_index) }]
+    reference = WeakRef.new(owners.first)
+    survivor = nil
+
+    registry.rebuild do
+      owners.clear
+      GC.start(full_mark: true, immediate_sweep: true)
+      expect(reference.weakref_alive?).to be_truthy
+      survivor = reference.__getobj__
+      new_index
+    end
+
+    expect(survivor.scan('new-synthetic-secret').first).to eq('[REDACTED:credential]')
+  end
+
+  it 'refreshes live scanners safely while garbage collection reclaims abandoned scanners' do
+    fixture = File.expand_path('../fixtures/credential_registry_gc.rb', __dir__)
+    stdout, stderr, status = Open3.capture3(RbConfig.ruby, fixture)
+
+    expect(status).to be_success, "#{stdout}\n#{stderr}"
+    expect(stdout).to eq("live scanners refreshed\n")
   end
 end
 
