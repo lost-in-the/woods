@@ -9,9 +9,9 @@ module ReleaseProfile
   MAINTENANCE_TAG = 'v1.6.2'
   MAINTENANCE_BRANCH = 'release/1.6.2'
   MAINTENANCE_BASE = '73423a42644176b09961be373e13648c94690933'
-  # Intentionally disabled until the prepared maintenance commit is reviewed.
-  # Replace only through a separate reviewed main PR, before tagging/dispatch.
-  MAINTENANCE_APPROVED_SHA = nil
+  # Prepared and reviewed in maintenance PR #464; pin the protected branch's
+  # exact merge commit, never a moving branch tip or caller-supplied revision.
+  MAINTENANCE_APPROVED_SHA = '4b40e17fd68122a70ccf00d9d2ffb8af42171d3d'
   MAINTENANCE_JOBS = [
     'Unit specs (Ruby 3.0)',
     'Unit specs (Ruby 3.1)',
