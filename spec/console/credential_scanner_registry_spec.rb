@@ -27,13 +27,17 @@ RSpec.describe Woods::Console::CredentialScannerRegistry do
   end
 
   def register_unowned_scanner(registry)
-    WeakRef.new(registry.register { Woods::Console::CredentialScanner.new })
+    # A returned Ruby stack frame can still conservatively root the scanner
+    # on older Rubies. End its owning thread before asking GC to collect it.
+    Thread.new do
+      WeakRef.new(registry.register { Woods::Console::CredentialScanner.new })
+    end.value
   end
 
   it 'does not retain abandoned scanners or their transports' do
     reference = register_unowned_scanner(registry)
     5.times do
-      GC.start
+      GC.start(full_mark: true, immediate_sweep: true)
       break unless reference.weakref_alive?
     end
 
