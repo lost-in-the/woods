@@ -246,6 +246,14 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
   end
 
+  it 'marks a whole-file cache profile while retaining its controller in the file map (#417)' do
+    graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
+    path = 'app/controllers/profiled_controller.rb'
+    expect(graph.fetch('file_map').fetch(path)).to include('ProfiledController', path)
+    expect(graph.fetch('nodes').fetch(path)).to include('type' => 'caching', 'kind' => 'file_profile')
+    expect(graph.fetch('nodes').fetch('ProfiledController')).not_to have_key('kind')
+  end
+
   it 'extracts runtime recurring configuration with relative ERB, aliases and conditions (#364)' do
     units = units_in(:scheduled_jobs)
     expect(units.map { |unit| unit['identifier'] }).to eq(['scheduled:publish_posts'])

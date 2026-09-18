@@ -84,6 +84,27 @@ Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
 
+### File profiles and file membership
+
+`file_map[path]` lists units associated with a source file, including whole-file
+profiles. It does not promise that every identifier names a Ruby constant. New
+writers mark graph nodes of types `caching`, `configuration`, `test_mapping`,
+`rails_source`, and `gem_source` with `"kind": "file_profile"`. The same field
+appears on non-primary typed variants.
+
+For example, `app/controllers/things_controller.rb` can map to both
+`ThingsController` and a caching unit named `app/controllers/things_controller.rb`.
+Inspect each typed node's `kind` to distinguish the profile; both retain their
+file membership so a source edit refreshes both units. Do not classify units by
+comparing the identifier with the path, and do not interpret a missing `kind` as
+proof that the unit names a constant.
+
+Older indexes omit the marker. Woods derives it from these known extractor types
+when loading and republishing a graph, including unchanged incremental nodes.
+Raw consumers of older indexes must treat absent markers as unclassified or use
+the documented type list. Identifiers, `file_map`, and type membership retain
+their existing shapes; older readers can ignore `kind`.
+
 ### Reverse relationship records
 
 New writers add `reverse_via` to `dependency_graph.json`. Each target identifier

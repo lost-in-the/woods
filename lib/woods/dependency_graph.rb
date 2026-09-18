@@ -32,8 +32,13 @@ module Woods
     # enforce_dependencies: package units (Task 7)
     # commit_count, change_frequency: git enrichment (Task 5)
     NODE_ATTRIBUTE_KEYS = %i[
-      database table foreign_key_tables package enforce_dependencies commit_count change_frequency
+      database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind
     ].freeze
+
+    # These extractors describe a whole source file rather than one constant.
+    # Other types remain unclassified: a path-like identifier is not evidence
+    # that a unit is a profile, and an unmarked unit need not name a constant.
+    FILE_PROFILE_TYPES = %i[caching configuration test_mapping rails_source gem_source].freeze
 
     # Optional edge keys beyond target and via. `through` is the through
     # association name; `through_db` is the through model's resolved
@@ -645,7 +650,7 @@ module Woods
     # @return [Hash{Symbol => Object}] normalized, nil-free
     def node_attributes_from(unit)
       metadata = unit.respond_to?(:metadata) && unit.metadata.is_a?(Hash) ? unit.metadata : {}
-      attrs = {}
+      attrs = self.class.file_profile_attributes(unit.type)
       attrs[:database] = metadata[:database] unless metadata[:database].nil?
       attrs[:table] = metadata[:table_name] if unit.type == :model && !metadata[:table_name].nil?
       tables = Array(metadata[:foreign_keys]).filter_map { |fk| fk[:to_table] || fk['to_table'] if fk.is_a?(Hash) }
@@ -816,7 +821,12 @@ module Woods
 
     # @return [Hash{String => Hash}] identifier => primary node
     def primary_nodes
-      @nodes.transform_values { |nodes| primary_of(nodes) }
+      # Late enrichment and JSON loading can insert optional fields in a
+      # different order. Canonicalize like variant_records so a graph's JSON
+      # fingerprint is stable across full and incremental publication.
+      @nodes.transform_values do |nodes|
+        primary_of(nodes).slice(:type, :file_path, :namespace, *NODE_ATTRIBUTE_KEYS)
+      end
     end
     private :primary_nodes
 
@@ -991,10 +1001,17 @@ module Woods
     # @param node [Hash]
     # @return [Hash{Symbol => Object}]
     def self.persisted_node_attributes(node)
-      NODE_ATTRIBUTE_KEYS.each_with_object({}) do |key, attrs|
+      attributes = NODE_ATTRIBUTE_KEYS.each_with_object({}) do |key, attrs|
         value = node.key?(key) ? node[key] : node[key.to_s]
         attrs[key] = normalize_node_attribute(key, value) unless value.nil?
       end
+      attributes.merge(file_profile_attributes(node[:type] || node['type']))
+    end
+
+    # Backfill the additive marker when an older graph is republished, so
+    # unchanged nodes in an incremental run agree with a fresh full graph.
+    def self.file_profile_attributes(type)
+      FILE_PROFILE_TYPES.include?(type&.to_sym) ? { kind: 'file_profile' } : {}
     end
 
     # Edge attributes present in a dependency or persisted edge hash.
