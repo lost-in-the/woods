@@ -1,0 +1,284 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'fileutils'
+require 'json'
+require 'open3'
+require 'tmpdir'
+require_relative '../../script/release_profile'
+
+RSpec.describe 'trusted maintenance release profile' do
+  let(:root) { File.expand_path('../..', __dir__) }
+
+  def git(repository, *args)
+    output, status = Open3.capture2e('git', *args, chdir: repository)
+    raise output unless status.success?
+
+    output.strip
+  end
+
+  def write_candidate(repository, version)
+    FileUtils.mkdir_p(File.join(repository, 'lib/woods'))
+    File.write(File.join(repository, 'lib/woods/version.rb'), "module Woods\n VERSION = '#{version}'\nend\n")
+    File.write(File.join(repository, 'CHANGELOG.md'), "## [#{version}] - 2026-09-18\n")
+    git(repository, 'add', '.')
+    git(repository, 'commit', '-m', version)
+    git(repository, 'rev-parse', 'HEAD')
+  end
+
+  def fixture
+    Dir.mktmpdir('woods-maintenance-release') do |directory|
+      repository = File.join(directory, 'checkout')
+      remote = File.join(directory, 'remote.git')
+      FileUtils.mkdir_p(repository)
+      git(repository, 'init', '-b', 'main')
+      git(repository, 'config', 'user.name', 'Maintenance tests')
+      git(repository, 'config', 'user.email', 'maintenance@example.invalid')
+      base = write_candidate(repository, '1.6.1')
+      git(repository, 'checkout', '-b', 'release/1.6.2')
+      candidate = write_candidate(repository, '1.6.2')
+      git(repository, 'tag', 'v1.6.2')
+      git(repository, 'init', '--bare', remote)
+      git(repository, 'remote', 'add', 'origin', remote)
+      git(repository, 'push', 'origin', 'main', 'release/1.6.2', 'refs/tags/v1.6.2')
+      git(repository, 'checkout', 'main')
+      install_trusted_scripts(repository, candidate, base)
+      yield repository, remote, candidate, base
+    end
+  end
+
+  def install_trusted_scripts(repository, candidate, base)
+    FileUtils.mkdir_p(File.join(repository, 'script'))
+    %w[validate-release validate-release-run verify-release-tag release_profile.rb].each do |name|
+      FileUtils.cp(File.join(root, 'script', name), File.join(repository, 'script', name))
+    end
+    profile_path = File.join(repository, 'script/release_profile.rb')
+    profile = File.read(profile_path)
+                  .sub("MAINTENANCE_BASE = '#{ReleaseProfile::MAINTENANCE_BASE}'", "MAINTENANCE_BASE = '#{base}'")
+                  .sub(/MAINTENANCE_APPROVED_SHA = (?:nil|'[0-9a-f]{40}')/,
+                       "MAINTENANCE_APPROVED_SHA = '#{candidate}'")
+    File.write(profile_path, profile)
+    git(repository, 'add', '.')
+    git(repository, 'commit', '-m', 'trusted tooling with reviewed candidate pin')
+  end
+
+  def validate(repository, candidate, script: 'validate-release', extra: {}, trusted: true)
+    env = {
+      'RELEASE_TAG' => 'v1.6.2', 'RELEASE_SHA' => candidate,
+      'RELEASE_TRUSTED_SHA' => git(repository, 'rev-parse', 'HEAD'),
+      'RUBYGEMS_VERSIONS_JSON' => '[]'
+    }.merge(extra)
+    args = trusted ? ['--trusted-checkout'] : []
+    Open3.capture3(env, 'ruby', File.join(repository, 'script', script), *args, chdir: repository)
+  end
+
+  it 'keeps the reviewed pin either disabled or a full immutable commit SHA' do
+    expect(ReleaseProfile::MAINTENANCE_APPROVED_SHA).to be_nil.or match(/\A[0-9a-f]{40}\z/)
+  end
+
+  it 'is disabled until a reviewed main commit pins the complete candidate SHA' do
+    stub_const('ReleaseProfile::MAINTENANCE_APPROVED_SHA', nil)
+    expect { ReleaseProfile.validate_candidate!('v1.6.2', 'a' * 40) }
+      .to raise_error(ReleaseProfile::Error, /disabled until/)
+  end
+
+  it 'does not select maintenance requirements for any other tag or caller environment' do
+    %w[v1.6.1 v1.6.3 v2.0.0.beta3].each do |tag|
+      expect(ReleaseProfile.maintenance?(tag)).to be(false)
+      expect(ReleaseProfile.branch(tag)).to eq('main')
+      expect(ReleaseProfile.package_spec(tag)).to eq('spec/integration/packaged_gem_spec.rb')
+    end
+    expect(ReleaseProfile.package_spec('v1.6.2')).to eq('spec/integration/maintenance_packaged_gem_spec.rb')
+  end
+
+  it 'accepts a pinned maintenance candidate outside main and verifies its live remote tag' do
+    fixture do |repository, _remote, candidate, _base|
+      _stdout, stderr, status = validate(repository, candidate)
+      expect(status).to be_success, stderr
+      _stdout, stderr, status = validate(repository, candidate, script: 'verify-release-tag')
+      expect(status).to be_success, stderr
+    end
+  end
+
+  it 'refuses an unapproved SHA before history or candidate content can authorize it' do
+    fixture do |repository, _remote, _candidate, base|
+      %w[validate-release verify-release-tag].each do |script|
+        _stdout, stderr, status = validate(repository, base, script: script)
+        expect(status).not_to be_success
+        expect(stderr).to include('differs from the approved maintenance SHA')
+      end
+    end
+  end
+
+  it 'refuses candidate-checkout maintenance validation even when the SHA was approved' do
+    fixture do |repository, _remote, candidate, _base|
+      %w[validate-release verify-release-tag].each do |script|
+        _stdout, stderr, status = validate(repository, candidate, script: script, trusted: false)
+        expect(status).not_to be_success
+        expect(stderr).to match(/trusted-checkout|checked-out HEAD/)
+      end
+    end
+  end
+
+  it 'refuses a target branch that no longer contains the approved candidate' do
+    fixture do |repository, remote, candidate, base|
+      git(remote, 'update-ref', 'refs/heads/release/1.6.2', base)
+      _stdout, stderr, status = validate(repository, candidate)
+      expect(status).not_to be_success
+      expect(stderr).to include('not reachable')
+    end
+  end
+
+  it 'does not let a caller substitute main for the fixed maintenance branch' do
+    fixture do |repository, remote, candidate, _base|
+      git(remote, 'update-ref', 'refs/heads/main', candidate)
+      git(remote, 'update-ref', '-d', 'refs/heads/release/1.6.2')
+      _stdout, stderr, status = validate(repository, candidate, extra: { 'RELEASE_MAIN_REF' => 'refs/heads/main' })
+      expect(status).not_to be_success
+      expect(stderr).to include('refs/heads/release/1.6.2')
+    end
+  end
+
+  it 'refuses a moved remote tag both during validation and immediately before publication' do
+    fixture do |repository, remote, candidate, base|
+      git(remote, 'update-ref', 'refs/tags/v1.6.2', base)
+      %w[validate-release verify-release-tag].each do |script|
+        _stdout, stderr, status = validate(repository, candidate, script: script)
+        expect(status).not_to be_success
+        expect(stderr).to include('not release SHA')
+      end
+    end
+  end
+
+  it 'refuses a reviewed candidate whose pinned legacy base is not its ancestor' do
+    fixture do |repository, _remote, candidate, _base|
+      path = File.join(repository, 'script/release_profile.rb')
+      source = File.read(path).sub(/MAINTENANCE_BASE = '[0-9a-f]{40}'/,
+                                   "MAINTENANCE_BASE = '#{git(repository, 'rev-parse', 'HEAD')}'")
+      File.write(path, source)
+      git(repository, 'add', '.')
+      git(repository, 'commit', '-m', 'invalid base fixture')
+      _stdout, stderr, status = validate(repository, candidate)
+      expect(status).not_to be_success
+      expect(stderr).to include('does not descend from approved v1.6.1 base')
+    end
+  end
+
+  it 'retains the already-published refusal for maintenance' do
+    fixture do |repository, _remote, candidate, _base|
+      _stdout, stderr, status = validate(
+        repository, candidate, extra: { 'RUBYGEMS_VERSIONS_JSON' => '[{"number":"1.6.2"}]' }
+      )
+      expect(status).not_to be_success
+      expect(stderr).to include('already published')
+    end
+  end
+  def maintenance_run(sha)
+    {
+      'id' => 123, 'workflow_id' => 678, 'path' => '.github/workflows/ci.yml',
+      'conclusion' => 'success', 'event' => 'push', 'head_branch' => 'v1.6.2', 'head_sha' => sha,
+      'repository' => { 'full_name' => 'lost-in-the/woods' },
+      'head_repository' => { 'full_name' => 'lost-in-the/woods' }
+    }
+  end
+
+  def run_responses(sha, jobs, artifact)
+    {
+      '/repos/lost-in-the/woods/actions/runs/123' => maintenance_run(sha),
+      '/repos/lost-in-the/woods/actions/workflows/ci.yml' =>
+        { 'id' => 678, 'path' => '.github/workflows/ci.yml', 'name' => 'CI' },
+      '/repos/lost-in-the/woods/actions/runs/123/jobs' => { 'jobs' => jobs },
+      '/repos/lost-in-the/woods/actions/runs/123/artifacts' => {
+        'artifacts' => if artifact
+                         [{ 'id' => 900, 'name' => "woods-release-#{sha}",
+                            'digest' => "sha256:#{'f' * 64}" }]
+                       else
+                         []
+                       end
+      },
+      '/repos/lost-in-the/woods/environments/release' => {
+        'protection_rules' => [{ 'type' => 'required_reviewers' }], 'can_admins_bypass' => false
+      }
+    }
+  end
+
+  def write_fake_api(repository)
+    fake_bin = File.join(repository, '.git/fake-bin')
+    FileUtils.mkdir_p(fake_bin)
+    File.write(File.join(fake_bin, 'gh'), <<~SCRIPT)
+      #!/usr/bin/env ruby
+      require 'json'
+      puts JSON.generate(JSON.parse(ENV.fetch('RESPONSES')).fetch(ARGV.last))
+    SCRIPT
+    FileUtils.chmod(0o755, File.join(fake_bin, 'gh'))
+    fake_bin
+  end
+
+  def validate_run(repository, candidate, jobs: nil, sha: candidate, artifact: true)
+    jobs ||= ReleaseProfile::MAINTENANCE_JOBS.map { |name| { 'name' => name, 'conclusion' => 'success' } }
+    responses = run_responses(sha, jobs, artifact)
+    fake_bin = write_fake_api(repository)
+    output = File.join(repository, '.git/output')
+    env = {
+      'PATH' => "#{fake_bin}:#{ENV.fetch('PATH')}", 'CI_RUN_ID' => '123',
+      'GITHUB_REPOSITORY' => 'lost-in-the/woods', 'GITHUB_OUTPUT' => output,
+      'RELEASE_TAG' => 'v1.6.2', 'RESPONSES' => JSON.generate(responses)
+    }
+    stdout, stderr, status = Open3.capture3(env, 'ruby', File.join(repository, 'script/validate-release-run'))
+    [stdout, stderr, status, File.exist?(output) ? File.read(output) : '']
+  end
+
+  it 'accepts every exact maintenance job and emits only the trusted v1 package spec and exact artifact' do
+    fixture do |repository, _remote, candidate, _base|
+      _stdout, stderr, status, outputs = validate_run(repository, candidate)
+      expect(status).to be_success, stderr
+      expect(outputs).to include('package-spec=spec/integration/maintenance_packaged_gem_spec.rb')
+      expect(outputs).to include("release-sha=#{candidate}", 'artifact-id=900')
+    end
+  end
+
+  it 'refuses a successful run for any SHA other than the reviewed pin' do
+    fixture do |repository, _remote, candidate, base|
+      _stdout, stderr, status, outputs = validate_run(repository, candidate, sha: base)
+      expect(status).not_to be_success
+      expect(stderr).to include('differs from the approved maintenance SHA')
+      expect(outputs).to be_empty
+    end
+  end
+
+  it 'requires each matrix cell rather than accepting one row with a common prefix' do
+    fixture do |repository, _remote, candidate, _base|
+      ReleaseProfile::MAINTENANCE_JOBS.each do |missing|
+        jobs = (ReleaseProfile::MAINTENANCE_JOBS - [missing]).map do |name|
+          { 'name' => name, 'conclusion' => 'success' }
+        end
+        _stdout, stderr, status, outputs = validate_run(repository, candidate, jobs: jobs)
+        expect(status).not_to be_success
+        expect(stderr).to include(missing)
+        expect(outputs).to be_empty
+      end
+    end
+  end
+
+  it 'refuses skipped, failed or duplicate maintenance job rows' do
+    fixture do |repository, _remote, candidate, _base|
+      %w[skipped failure duplicate].each do |condition|
+        jobs = ReleaseProfile::MAINTENANCE_JOBS.map { |name| { 'name' => name, 'conclusion' => 'success' } }
+        condition == 'duplicate' ? jobs.push(jobs.first.dup) : jobs.first['conclusion'] = condition
+        _stdout, stderr, status, outputs = validate_run(repository, candidate, jobs: jobs)
+        expect(status).not_to be_success
+        expect(stderr).to include('exactly one successful maintenance job')
+        expect(outputs).to be_empty
+      end
+    end
+  end
+
+  it 'retains the immutable artifact requirement for an otherwise approved maintenance run' do
+    fixture do |repository, _remote, candidate, _base|
+      _stdout, stderr, status, outputs = validate_run(repository, candidate, artifact: false)
+      expect(status).not_to be_success
+      expect(stderr).to include('no artifact named')
+      expect(outputs).to be_empty
+    end
+  end
+end

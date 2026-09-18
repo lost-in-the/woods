@@ -200,6 +200,48 @@ RSpec.describe 'release workflow contract' do
     expect(run_commands(package_test)).not_to include('gem install --no-document --local')
   end
 
+  it 'selects only literal package commands from the trusted profile and preserves v2 invocation' do
+    package = release.fetch('jobs').fetch('package-test')
+    command = steps(package).find do |step|
+      step['name'] == 'Test the installed artifact outside the repository load path'
+    end
+    expect(command.dig('env', 'PACKAGE_SPEC')).to eq('${{ needs.release-context.outputs.package-spec }}')
+    expect(command.fetch('run')).to include('case "$PACKAGE_SPEC" in')
+    expect(command.fetch('run')).to include('--options /dev/null spec/integration/maintenance_packaged_gem_spec.rb')
+    legacy_command = command.fetch('run').split("spec/integration/packaged_gem_spec.rb)\n", 2).last
+    expect(legacy_command).not_to include('--options /dev/null')
+    expect(command.fetch('run')).to include("*) echo 'Unknown trusted package test profile' >&2; exit 1 ;;")
+  end
+
+  it 'activates the reviewed MCP floor only in the maintenance oldest-Ruby package row' do
+    package_steps = steps(release.fetch('jobs').fetch('package-test'))
+    floor = package_steps.find { |step| step['name'] == 'Install the maintenance SDK floor' }
+    installation = package_steps.find { |step| step['name'] == 'Install package-test dependencies' }
+    smoke = package_steps.find do |step|
+      step['name'] == 'Test the installed artifact outside the repository load path'
+    end
+    expect(floor.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0'")
+    expect(floor.fetch('run')).to eq("gem install --no-document mcp -v '0.23.0'")
+    expect(package_steps.index(floor)).to be < package_steps.index(installation)
+    expect(smoke.dig('env', 'WOODS_EXPECT_MCP_VERSION')).to eq(
+      "${{ needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0' && '0.23.0' || '' }}"
+    )
+  end
+
+  it 'rechecks maintenance history and publication state before requesting protected credentials' do
+    publish_steps = steps(release.fetch('jobs').fetch('publish'))
+    revalidation = publish_steps.find { |step| step['name'] == 'Revalidate maintenance release after approval' }
+    credentials = publish_steps.find { |step| step['name'] == 'Configure RubyGems credentials' }
+    expect(revalidation.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.2'")
+    expect(revalidation.fetch('run')).to eq('script/validate-release --trusted-checkout')
+    expect(revalidation.fetch('env')).to include(
+      'RELEASE_SHA' => '${{ needs.release-context.outputs.release-sha }}',
+      'RELEASE_TAG' => '${{ needs.release-context.outputs.tag }}',
+      'RELEASE_TRUSTED_SHA' => '${{ github.sha }}'
+    )
+    expect(publish_steps.index(revalidation)).to be < publish_steps.index(credentials)
+  end
+
   it 'publishes the verified artifact bytes without rebuilding or using a wildcard' do
     publish = release.fetch('jobs').fetch('publish')
     commands = run_commands(publish)

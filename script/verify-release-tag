@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require 'open3'
+require_relative 'release_profile'
 
 class ReleaseTagVerificationError < StandardError; end
 
@@ -46,6 +47,11 @@ begin
     )
   end
 
+  if ReleaseProfile.maintenance?(tag)
+    fail_verification('maintenance releases require trusted-checkout verification') unless trusted_checkout
+    ReleaseProfile.validate_candidate!(tag, release_sha)
+  end
+
   verification_ref = "refs/release-validation/#{tag}"
   git('check-ref-format', verification_ref)
   system('git', 'update-ref', '-d', verification_ref, out: File::NULL, err: File::NULL)
@@ -54,7 +60,7 @@ begin
   fail_verification("#{tag} resolves to #{tag_sha}, not release SHA #{release_sha}") unless tag_sha == release_sha
 
   puts "Verified current remote tag #{tag} at #{release_sha}"
-rescue KeyError, ReleaseTagVerificationError => e
+rescue KeyError, ReleaseProfile::Error, ReleaseTagVerificationError => e
   warn "Release tag verification failed: #{e.message}"
   exit 1
 end

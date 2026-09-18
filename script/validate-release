@@ -7,6 +7,7 @@ require 'net/http'
 require 'open3'
 require 'prism'
 require 'uri'
+require_relative 'release_profile'
 
 class ReleaseValidationError < StandardError; end
 
@@ -49,7 +50,7 @@ def trusted_release_refs(tag, remote, main_ref)
   system('git', 'update-ref', '-d', verification_ref, out: File::NULL, err: File::NULL)
   git(
     'fetch', '--atomic', '--force', '--no-tags', remote,
-    "refs/heads/main:#{main_ref}",
+    "refs/heads/#{ReleaseProfile.branch(tag)}:#{main_ref}",
     "refs/tags/#{tag}:#{verification_ref}"
   )
   verification_ref
@@ -147,6 +148,12 @@ begin
   main_ref = ENV.fetch('RELEASE_MAIN_REF', 'refs/remotes/origin/main')
   remote = ENV.fetch('RELEASE_REMOTE', 'origin')
 
+  if ReleaseProfile.maintenance?(tag)
+    fail_release('maintenance releases require trusted-checkout validation') unless trusted_checkout
+    ReleaseProfile.validate_candidate!(tag, release_sha)
+    main_ref = 'refs/release-validation/maintenance-branch'
+  end
+
   fail_release('release tag must be a version tag') unless tag.match?(/\Av[0-9A-Za-z][0-9A-Za-z._-]*\z/)
   fail_alpha('release tag', tag) if tag.end_with?(ALPHA_MARKER)
   fail_release("release SHA #{release_sha.inspect} is not a full Git SHA") unless release_sha.match?(/\A[0-9a-f]{40}\z/)
@@ -183,6 +190,12 @@ begin
     fail_release("release SHA #{release_sha} is not reachable from #{main_ref}")
   end
 
+  if ReleaseProfile.maintenance?(tag) &&
+     !system('git', 'merge-base', '--is-ancestor', ReleaseProfile::MAINTENANCE_BASE, release_sha,
+             out: File::NULL, err: File::NULL)
+    fail_release("maintenance release SHA #{release_sha} does not descend from approved v1.6.1 base")
+  end
+
   entry_paths = git('ls-tree', '-r', '--name-only', '-z', release_sha, '--', 'changelog').split("\0")
   pending_entries = entry_paths.select do |path|
     path.end_with?('.md') || path == 'changelog' || path.match?(%r{\Achangelog/[^/]+\.md/})
@@ -205,7 +218,7 @@ begin
   end
 
   puts "Validated #{tag} at #{release_sha} with CHANGELOG.md date #{release_date.iso8601}"
-rescue Date::Error, KeyError, ReleaseValidationError => e
+rescue Date::Error, KeyError, ReleaseProfile::Error, ReleaseValidationError => e
   warn "Release validation failed: #{e.message}"
   exit 1
 end
