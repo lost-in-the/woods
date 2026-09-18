@@ -725,16 +725,27 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
         rescue IOError
           crashed << true
         end
-        Timeout.timeout(5) { publish_started.pop }
+        wait_for_thread_signal(publish_started, timeout: 5, "writer_iteration_#{index}": writer)
         cache.before_write_if_absent = nil
         bounded.clear('shared')
         cache.before_delete_attempt = lambda do |key|
           raise IOError, 'crash before rollback' if key.include?(':record:')
         end
         release_publish << true
-        Timeout.timeout(5) { crashed.pop }
+        wait_for_thread_signal(crashed, timeout: 5, "writer_iteration_#{index}": writer)
         cache.before_delete_attempt = nil
         Timeout.timeout(5) { writer.join }
+      ensure
+        release_publish << true if writer&.alive?
+        begin
+          writer&.join(5) || writer&.kill&.join(1)
+        rescue StandardError
+          # The signal diagnostic already captured an unexpected producer error.
+          nil
+        ensure
+          cache.before_write_if_absent = nil
+          cache.before_delete_attempt = nil
+        end
       end
 
       expect(cache.keys.grep(/:record:/).size).to be <= 1
