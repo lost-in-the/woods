@@ -28,13 +28,35 @@ RSpec.describe 'Installed maintenance package', :maintenance_package do
     raise result unless status.success?
 
     @installed = File.join(@gem_home, 'gems', "woods-#{@version}")
+    prepare_installed_bundle
   end
 
   after(:context) { FileUtils.remove_entry(@root) if @root && File.directory?(@root) }
 
+  # Match supported `bundle exec` launchers. Bare RubyGems may activate its
+  # newest default JSON gem before resolving Woods' declared JSON constraint.
+  def prepare_installed_bundle
+    gemfile = File.join(@root, 'Gemfile')
+    File.write(gemfile, <<~GEMFILE)
+      source 'https://rubygems.org'
+      gem 'woods', '= #{@version}'
+      gem 'rails'
+      gem 'sqlite3'
+      gem 'rspec'
+      # Explicitly prove the minimum SDK even with newer versions installed.
+      #{"gem 'mcp', '= #{@expected_mcp}'" unless @expected_mcp.empty?}
+    GEMFILE
+    @env['BUNDLE_GEMFILE'] = gemfile
+    @env['BUNDLE_APP_CONFIG'] = File.join(@root, '.bundle')
+    result, status = Open3.capture2e(@env, Gem.ruby, '-S', 'bundle', 'lock', '--local',
+                                     chdir: @root)
+    raise result unless status.success?
+  end
+
   def run_child(*args, input: '', timeout: 60)
     result = nil
-    Open3.popen3(@env, Gem.ruby, *args, chdir: @root, pgroup: true) do |stdin, stdout, stderr, waiter|
+    Open3.popen3(@env, Gem.ruby, '-rbundler/setup', *args,
+                 chdir: @root, pgroup: true) do |stdin, stdout, stderr, waiter|
       readers = [Thread.new { stdout.read }, Thread.new { stderr.read }]
       begin
         Timeout.timeout(timeout) do
@@ -65,6 +87,9 @@ RSpec.describe 'Installed maintenance package', :maintenance_package do
       abort 'unsafe MCP dependency' unless Gem::Requirement.new('>= 0.23.0', '< 1.0').satisfied_by?(mcp)
       expected = #{@expected_mcp.inspect}
       abort 'wrong exact MCP floor' unless expected.empty? || mcp.to_s == expected
+      json = Gem.loaded_specs.fetch('json').version
+      abort 'incompatible JSON dependency' unless Gem::Requirement.new('>= 2.19.9', '< 3').satisfied_by?(json)
+      puts "JSON_ARTIFACT_VERSION=\#{json}"
       puts "MCP_ARTIFACT_VERSION=\#{mcp}"
       puts 'INSTALLED_WOODS_PROVENANCE_OK'
     RUBY
@@ -84,6 +109,16 @@ RSpec.describe 'Installed maintenance package', :maintenance_package do
     end
   end
 
+  it 'constrains serialization and framework dependencies to the supported major lines' do
+    { 'json' => ['2.19.9', '3.0.0'], 'msgpack' => ['1.5.0', '2.0.0'],
+      'railties' => ['6.0.0', '9.0.0'] }.each do |name, (floor, next_major)|
+      dependency = @package.spec.dependencies.find { |item| item.name == name }
+      expect(dependency).not_to be_nil
+      expect(dependency.requirement).to be_satisfied_by(Gem::Version.new(floor))
+      expect(dependency.requirement).not_to be_satisfied_by(Gem::Version.new(next_major))
+    end
+  end
+
   it 'loads the installed artifact with its declared legacy MCP dependency' do
     source = <<~RUBY
       gem 'mcp', '= #{@expected_mcp}' unless #{@expected_mcp.empty?}
@@ -96,7 +131,7 @@ RSpec.describe 'Installed maintenance package', :maintenance_package do
     output, status = run_child('-e', source)
     expect(status).to be_success, output.join("\n")
     expect(output.first).to include('INSTALLED_WOODS_PROVENANCE_OK')
-    RSpec.configuration.reporter.message(output.first.lines.grep(/MCP_ARTIFACT_VERSION=/).join)
+    RSpec.configuration.reporter.message(output.first.lines.grep(/(?:MCP|JSON)_ARTIFACT_VERSION=/).join)
   end
 
   it 'serves initialization, lookup and structured errors through the installed stdio executable' do
@@ -156,6 +191,6 @@ RSpec.describe 'Installed maintenance package', :maintenance_package do
     output, status = run_child('-e', source)
     expect(status).to be_success, output.join("\n")
     expect(output.first).to include('9 examples, 0 failures', 'INSTALLED_WOODS_PROVENANCE_OK')
-    RSpec.configuration.reporter.message(output.first.lines.grep(/MCP_ARTIFACT_VERSION=/).join)
+    RSpec.configuration.reporter.message(output.first.lines.grep(/(?:MCP|JSON)_ARTIFACT_VERSION=/).join)
   end
 end

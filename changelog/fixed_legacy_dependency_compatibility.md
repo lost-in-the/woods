@@ -1,0 +1,1 @@
+Keep JSON on `>= 2.19.9, < 3` so supported Rails encoders can serialize metadata after a fresh bundle resolution; JSON 3 removes their `quirks_mode` option. Bound MessagePack below 2 and Railties below 9, retaining their existing minimum versions and the strict package-build gate.
