@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
@@ -59,14 +61,14 @@ module Woods
       def scan_file(file_path, event_map)
         source = cached_source(file_path)
         unless source
-          Rails.logger.error("Failed to scan #{file_path} for events: file unreadable")
+          SourceInputs::ConsumerErrors.log(self, "Failed to scan #{file_path} for events: file unreadable")
           return
         end
 
         scan_active_support_notifications(source, file_path, event_map)
         scan_wisper_patterns(source, file_path, event_map)
       rescue StandardError => e
-        Rails.logger.error("Failed to scan #{file_path} for events: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to scan #{file_path} for events: #{e.message}")
       end
 
       private

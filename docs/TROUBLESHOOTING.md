@@ -24,7 +24,7 @@ This guide covers the most common problems encountered when installing, extracti
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
-| Git metadata missing | Shallow clone in CI | Use `fetch-depth: 2` or higher |
+| Git metadata missing | Shallow clone in CI | Use `fetch-depth: 0` for complete history |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
 | HTTP transport refuses to start on `0.0.0.0` | Missing bearer token | Set `WOODS_MCP_HTTP_TOKEN=…` or bind loopback only |
 | HTTP transport returns `403 Origin not allowed` | Origin header not in allow-list | Set `WOODS_MCP_HTTP_ALLOWED_ORIGINS="https://example.com"` (comma-separated; default is loopback-only) |
@@ -51,6 +51,46 @@ or null value is normal for older indexes. Compare `index.woods_version` with
 version. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).
 
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
+
+### Semantic graph validation errors
+
+In development versions containing #413, `woods:validate` rejects graphs that
+parse as JSON but disagree with their indexes. Errors name the section and
+identity, for example `reverse["http_api"]: missing "Order"`, a duplicate typed
+variant, or an indexed unit absent from `nodes`. This is unreleased after
+`2.0.0.beta2`; check the installed gem before expecting these diagnostics.
+
+Keep the failing generation and report the exact errors. Run a full extraction
+in a fresh application process with the intended bundle, then validate again.
+Do not edit derived reverse/file/type indexes to silence the check. If a fresh
+full run still fails, report the invariant and source units as an extraction bug.
+The checker never repairs or republishes the index itself.
+
+An unresolved target is legal; missing both a node and its unit cannot be
+classified as external versus accidentally omitted from current metadata alone.
+A green report also does not prove that an indexed relationship executes at
+runtime. See [the checked invariants and limitations](INDEX_LAYOUT.md#semantic-graph-validation).
+
+### Corrupt pipeline cooldown state
+
+In a custom Index MCP server configured with an `operator` and
+`pipeline_guard`, a corrupt `pipeline_guard.json` denies full pipeline runs
+until repaired. The packaged `woods-mcp` executable does not expose pipeline
+operations; confirm the connected server's tools before using this recovery.
+
+For versions containing B-159, call `pipeline_repair` with
+`{"action":"reset_cooldowns"}` to replace malformed JSON, non-object JSON, or an
+empty guard file with an empty state object under the guard's file lock. This
+explicit action clears the extraction and embedding cooldowns; subsequent runs
+can start immediately. The direct Ruby equivalent is `guard.reset!(:all)`.
+Scoped resets leave corrupt state untouched. Valid state keeps any unrelated
+operation entries, and missing state remains a no-op without creating a file.
+A permission failure must be corrected before repair can succeed.
+
+This recovery is unreleased after `2.0.0.beta2`; check the installed version.
+Older versions report corrupt state as nothing to repair. Stop pipeline writers,
+back up the configured guard state's `pipeline_guard.json`, and remove only that
+file before restarting, or upgrade to a version containing the fix.
 
 ## Extraction Problems
 
@@ -194,18 +234,26 @@ Loading an already damaged graph does not restore discarded entries. See the
 
 ### Git metadata is missing or shows zeros
 
-**Symptom:** Units have `last_modified_at: null` or `change_frequency: 0` in the JSON output.
+**Symptom:** Per-unit `metadata.git` is absent, or an older Woods version reports
+most files as `change_frequency: new` in a shallow CI checkout.
 
-**Cause:** The git repository is a shallow clone (common in CI with `fetch-depth: 1`). Woods uses `git log` to compute change frequency, a shallow clone has no history to analyze.
+**Cause:** A shallow clone truncates HEAD ancestry. The shallow-checkout guard is
+unreleased after 2.0.0.beta2: current source omits git enrichment and warns once,
+rather than treating the truncated history as complete. If repository depth
+cannot be verified, enrichment is also omitted; check git access and version.
 
-**Fix:** Fetch at least two commits:
+**Fix:** Fetch complete history (`git fetch --unshallow` for an existing shallow
+clone), then run full extraction to replace retained metadata:
 
 ```yaml
 # .github/workflows/index.yml
 - uses: actions/checkout@v4
   with:
-    fetch-depth: 2    # minimum for incremental; use 0 for full history
+    fetch-depth: 0
 ```
+
+Two commits can suffice for an incremental diff, but do not establish the full
+ancestry needed for churn metadata.
 
 ---
 
@@ -895,3 +943,11 @@ With startup snapshot support, a fresh environment boot performs the full
 reconciliation automatically. Changes during environment initialization or live
 watching still require restart. Do not prepend `environment` to the watch command
 or start it inside an already initialized process when relying on this recovery.
+
+## Source freshness is unknown or drifted
+
+Read `woods_status.index.source_freshness.reasons`. Old indexes, an inaccessible
+source root/private key, a quick scan limit and an unverified boot boundary are
+different causes. Try `source_check: "deep"` for a budget limit; use the fresh
+launcher for a new verified baseline. Do not delete pending hook events or alter
+key permissions just to suppress a warning. See [source freshness](SOURCE_FRESHNESS.md).

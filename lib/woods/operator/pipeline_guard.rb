@@ -85,14 +85,18 @@ module Woods
 
       # Reset one supported operation or all supported operations atomically.
       #
+      # An explicit :all reset also repairs corrupt state; scoped resets leave it
+      # untouched so unknown cooldowns are not silently discarded.
+      #
       # @param operation [Symbol, String] `:extraction`, `:embedding`, or `:all`
-      # @return [Boolean] true when at least one cooldown was removed
+      # @return [Boolean] true when a cooldown was removed or corrupt state repaired
       # @raise [ArgumentError] when the operation is unsupported
       def reset!(operation)
         operations = reset_operations(operation)
-        return false unless requested_state_present?(operations)
+        repair_corrupt = operation.to_s == 'all'
+        return false unless requested_state_present?(operations, repair_corrupt: repair_corrupt)
 
-        with_existing_locked_state do |state|
+        with_existing_locked_state(repair_corrupt: repair_corrupt) do |state|
           changed = false
           operations.each do |key|
             next unless state.key?(key)
@@ -135,28 +139,29 @@ module Woods
         end
       end
 
-      def parse_state(content)
-        state = content.empty? ? {} : JSON.parse(content)
-        state.is_a?(Hash) ? state : {}
+      def parse_state(content, fallback: {})
+        state = JSON.parse(content)
+        state.is_a?(Hash) ? state : fallback
       rescue JSON::ParserError
-        {}
+        fallback
       end
 
-      def requested_state_present?(operations)
+      def requested_state_present?(operations, repair_corrupt:)
         File.open(@state_path, File::RDONLY) do |file|
           file.flock(File::LOCK_SH)
-          state = parse_state(file.read)
-          operations.any? { |key| state.key?(key) }
+          state = parse_state(file.read, fallback: nil)
+          state ? operations.any? { |key| state.key?(key) } : repair_corrupt
         end
       rescue Errno::ENOENT
         false
       end
 
-      def with_existing_locked_state
+      def with_existing_locked_state(repair_corrupt:)
         File.open(@state_path, File::RDWR) do |file|
           file.flock(File::LOCK_EX)
-          state = parse_state(file.read)
-          changed = yield(state)
+          parsed = parse_state(file.read, fallback: nil)
+          state = parsed || {}
+          changed = yield(state) || (repair_corrupt && parsed.nil?)
           if changed
             file.rewind
             file.write(JSON.generate(state))

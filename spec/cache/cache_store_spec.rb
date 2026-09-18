@@ -196,7 +196,29 @@ RSpec.describe Woods::Cache do
   describe '.cache_key' do
     it 'builds a namespaced key' do
       key = described_class.cache_key(:embeddings, 'abc123')
-      expect(key).to eq('woods:cache:embeddings:abc123')
+      expect(key).to eq('woods:cache:embeddings:6:abc123')
+    end
+
+    it 'does not reuse one part as the length-prefixed representation of several parts' do
+      store = Woods::Cache::InMemory.new
+      single = described_class.cache_key(:context, '4:abc22:xy')
+      multiple = described_class.cache_key(:context, 'abc2', 'xy')
+      store.write(single, 'single-part response')
+      store.write(multiple, 'multi-part response')
+
+      expect(store.read(single)).to eq('single-part response')
+      expect(store.read(multiple)).to eq('multi-part response')
+    end
+
+    it 'keeps the arity distinction when both serialized keys are hashed' do
+      part = 'x' * 70
+      expect(described_class.cache_key(:context, "70:#{part}2:xy"))
+        .not_to eq(described_class.cache_key(:context, part, 'xy'))
+    end
+
+    it 'distinguishes zero parts from one or several empty parts' do
+      keys = [[], [''], ['', '']].map { |parts| described_class.cache_key(:context, *parts) }
+      expect(keys.uniq.size).to eq(3)
     end
 
     it 'hashes long keys with SHA256' do
@@ -766,6 +788,21 @@ RSpec.describe Woods::Cache::CachedRetriever do
       expect(result.strategy).to eq(:vector)
       expect(result.tokens_used).to eq(42)
       expect(retriever).to have_received(:retrieve).once
+    end
+
+    it 'forwards independent scopes and preserves applied scope through JSON cache round trips' do
+      retrieval_result.applied_scope = { packages: ['packs/billing'], source_paths: [], eligible_units: 1,
+                                         outcome: :matched, candidate_count: 1, returned_units: 1 }
+      allow(retriever).to receive(:retrieve).and_return(retrieval_result)
+      fresh = cached_retriever.retrieve('billing', packages: ['packs/billing'])
+      cached = cached_retriever.retrieve('billing', packages: ['packs/billing'])
+      cached_retriever.retrieve('billing', packages: ['packs/other'])
+      cached_retriever.retrieve('billing', source_paths: ['packs/billing'])
+      cached_retriever.retrieve('billing')
+      expect(cached.applied_scope).to eq(fresh.applied_scope)
+      expect(retriever).to have_received(:retrieve).exactly(4).times
+      expect(retriever).to have_received(:retrieve).with('billing', budget: 8000, types: nil, exclude_types: nil,
+                                                                    packages: ['packs/billing'], source_paths: nil).once
     end
 
     it 'round-trips type_rank_context through the cache with symbol keys preserved (#108)' do

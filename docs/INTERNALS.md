@@ -145,6 +145,11 @@ The `DependencyGraph` is a directed graph where nodes are `ExtractedUnit` identi
 - **Forward edges** (`@edges`): what each unit depends on, populated when units are registered
 - **Reverse edges** (`@reverse`): what depends on each unit, built during registration and in the resolve phase
 
+The published graph also carries additive `reverse_via` target buckets with
+typed source identities, relationship labels and association attributes. The
+bare-name `reverse` map remains compatible. See the
+[reverse relationship format](INDEX_LAYOUT.md#reverse-relationship-records).
+
 ```ruby
 graph = DependencyGraph.new
 graph.register(user_unit)     # adds User to nodes, adds User→Order edge (from belongs_to)
@@ -175,7 +180,7 @@ Scores feed into the retrieval ranker as one signal in the final ranking formula
 | **Cycles** | Circular dependencies, A→B→C→A. Detected via DFS, and capped: `graph_cycle_limit` (default 500) bounds how many are enumerated and `graph_cycle_max_length` (default 50) skips one longer than that. Either cap firing sets `stats.cycle_limit_reached`. Set both to `nil` for exhaustive enumeration. |
 | **Bridges** | Edges whose removal would disconnect the graph, high-risk structural connections |
 | **Cross-database edges** | Association or foreign-key edges whose two ends resolve to different databases. A `has_many :through` is reported as `join_through_across_databases` when `disable_joins` is false and `from_db`, `through_db` (the join model's database), or `to_db` disagree. A foreign key never resolves to an owner in the source database, even when another database also claims the table; when every owner sits elsewhere and they span more than one database, the entry comes back with `to: nil` and an `ambiguous_owners` list instead of guessing. Read from graph node and edge attributes, so full and incremental runs agree. Scoped to primary nodes (units registered in the graph), not variants. |
-| **Volatile dependencies** | Edges that point at a unit changing at least `volatile_dependency_ratio` times more often than the dependent (POODR: depend on things that change less often than you do). Dependencies with fewer than 5 commits or a `new` change frequency are skipped. Ranked by the dependency's PageRank; the persisted list keeps the top 20, while `stats.volatile_dependency_count` reports the full qualifying count and `stats.volatile_dependencies_limit` reports the cap. |
+| **Volatile dependencies** | Edges that point at a unit changing at least `volatile_dependency_ratio` times more often than the dependent (POODR: depend on things that change less often than you do). Dependencies with fewer than 5 commits or a `new` change frequency are skipped. Ranked by the dependency's PageRank; an optional `volatile_dependency_limit_per_target` selects edges per typed dependency before the persisted top 20, while `stats.volatile_dependency_count` reports the full qualifying count and `stats.volatile_dependencies_limit` reports the cap. |
 | **Undeclared package edges** | Edges that cross a Packwerk package boundary the source package does not list in `dependencies`. Membership comes from each unit's `package` node attribute, declarations from the package unit's own `package_dependency` edges. Woods reports the boundary; enforcement stays with `packwerk check` / `pks check`. |
 
 Analysis results are written to `graph_analysis.json` and surfaced in `SUMMARY.md`.
@@ -194,7 +199,7 @@ persisted rather than every hub in the graph.
 | `cycles` | `stats.cycle_count`, `stats.cycle_limit_reached` | yes, `graph_cycle_limit` cycles of at most `graph_cycle_max_length` nodes | the count is the persisted array; the flag says whether either cap fired |
 | `bridges` | none | yes, top 10 by score | not counted |
 | `cross_database_edges` | `stats.cross_database_edge_count` | no | every crossing edge |
-| `volatile_dependencies` | `stats.volatile_dependency_count`, `stats.volatile_dependencies_limit` | yes, top 20 by the dependency's PageRank | the count is every qualifying edge; the limit is the cap |
+| `volatile_dependencies` | `stats.volatile_dependency_count`, `stats.volatile_dependencies_limit`; optional `stats.volatile_dependencies_limit_per_target`, `stats.volatile_dependency_reported_count` | yes, optional per-target cap followed by top 20 by the dependency's PageRank | count is every qualifying edge before caps; reported count is the final array length and appears only when the per-target cap is enabled |
 | `undeclared_package_edges` | `stats.undeclared_package_edge_count` | no | every undeclared crossing |
 
 A capped section means the array on disk is a page, not the population.

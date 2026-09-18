@@ -55,7 +55,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       run(dir, 'git', 'add', '-A')
       run(dir, 'git', 'commit', '--quiet', '-m', 'rename and edit')
 
-      changed, = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD', root: dir)
+      changed, = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: dir)
 
       # Both halves of the rename reach the change set — the new path (so the
       # unit is re-extracted) and the old one (so its unit is pruned).
@@ -80,7 +80,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       run(dir, 'git', 'add', '-A')
       run(dir, 'git', 'commit', '--quiet', '-m', 'edit')
 
-      changed, = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD', root: dir)
+      changed, = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: dir)
 
       expect(changed).to eq(['app/models/user.rb'])
     end
@@ -134,7 +134,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     end
 
     it 'reports the failure instead of an empty change set' do
-      paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD')
+      paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD')
 
       expect(paths).to be_nil
       expect(failure).to be_a(String)
@@ -143,7 +143,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     end
 
     it 'exits non-zero when the range fails and no daemon covers the index' do
-      expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+      expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
         .to output(/HEAD~1/).to_stderr
         .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
     end
@@ -151,7 +151,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     it 'stands down with exit 0 for a failed range when a running daemon covers the index' do
       live_daemon_status!('running')
 
-      expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+      expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
         .to output(/daemon/).to_stdout
         .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(0) }
     end
@@ -159,7 +159,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     it 'does not stand down for a degraded daemon: a failed range still exits 1' do
       live_daemon_status!('degraded')
 
-      expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+      expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
         .to output(/HEAD~1/).to_stderr
         .and output('').to_stdout
         .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
@@ -172,7 +172,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
         allow(ENV).to receive(:[]).and_call_original
         allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
 
-        expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+        expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
           .to raise_error(SystemExit) { |error| expect(error.status).to eq(state == 'running' ? 0 : 1) }
       end
     end
@@ -192,7 +192,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       end
 
       it 'returns the same [nil, failure] shape the decision matrix reads' do
-        paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD')
+        paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD')
 
         expect(paths).to be_nil
         expect(failure).to be_a(String)
@@ -200,7 +200,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       end
 
       it 'exits 1 with the remediation text when no daemon covers the index' do
-        expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+        expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
           .to output(/git unavailable/).to_stderr
           .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
       end
@@ -208,7 +208,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       it 'stands down with exit 0 when a running daemon covers the index' do
         live_daemon_status!('running')
 
-        expect { Object.new.send(:woods_incremental_changed_paths, repo_dir) }
+        expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
           .to output(/daemon/).to_stdout
           .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(0) }
       end
@@ -255,7 +255,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     end
 
     it 'reports a failure without the override, because no ref resolves' do
-      paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD', root: worktree)
+      paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: worktree)
 
       expect(paths).to be_nil
       expect(failure).to be_a(String)
@@ -264,7 +264,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     it 'resolves the range when WOODS_GIT_DIR names the canonical git directory' do
       stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => File.join(main_repo, '.git')))
 
-      paths, failure = Object.new.send(:woods_changed_paths_for_range, 'HEAD~1..HEAD', root: worktree)
+      paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: worktree)
 
       expect(failure).to be_nil
       expect(paths).to eq(['app/models/user.rb'])

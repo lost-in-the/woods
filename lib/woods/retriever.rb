@@ -8,6 +8,11 @@ require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
 require_relative 'retrieval/context_assembler'
+require_relative 'retrieval/lexical_index'
+require_relative 'retrieval/lexical_assembler'
+require_relative 'retrieval/scope'
+require_relative 'retrieval/scoped_vector_store'
+require_relative 'retrieval/scoped_graph_store'
 require_relative 'embedding/token_counter'
 require_relative 'token_utils'
 
@@ -59,6 +64,7 @@ module Woods
     ).freeze
 
     # Diagnostic trace for retrieval quality analysis.
+    # +tokens_used+ counts the final delivered context, including postprocessing.
     #
     # +skipped_missing_metadata+ carries {Retrieval::ContextAssembler}'s count
     # of candidates dropped because the metadata store had no record for
@@ -98,7 +104,7 @@ module Woods
     #
     # Nil for unfiltered queries.
     RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace,
-                                 :type_rank_context, keyword_init: true)
+                                 :type_rank_context, :applied_scope, keyword_init: true)
 
     # Raised when a metadata-store access fails during retrieval (M8). One
     # shared typed error for every store call site: the retriever used to
@@ -191,7 +197,7 @@ module Woods
     # The reload transaction swaps the whole struct via {#swap_stores!}.
     #
     # @return [Pipeline]
-    attr_reader :pipeline
+    attr_reader :pipeline, :mode
 
     # Optional callback invoked with the pipeline struct the moment
     # {#retrieve} resolves it, before any pipeline work runs. Nil in
@@ -207,7 +213,10 @@ module Woods
     # @param graph_store [Storage::GraphStore::Interface] Graph store adapter
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
-    def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil)
+    def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil, mode: :semantic)
+      raise ArgumentError, 'unknown retrieval mode' unless %i[semantic lexical].include?(mode)
+
+      @mode = mode
       @embedding_provider = embedding_provider
       @formatter = formatter
       @classifier = Retrieval::QueryClassifier.new
@@ -246,7 +255,9 @@ module Woods
     # they make raises the typed {StoreError} instead of a raw adapter error
     # (MCP-6); the struct keeps the raw adapters for identity and capability
     # checks.
-    def build_pipeline(vector_store:, metadata_store:, graph_store:)
+    def build_pipeline(vector_store:, metadata_store:, graph_store:) # rubocop:disable Metrics/MethodLength
+      return build_lexical_pipeline(metadata_store, graph_store) if @mode == :lexical
+
       translated_vector = translate_store(vector_store, :vector)
       translated_metadata = translate_store(metadata_store, :metadata)
       translated_graph = translate_store(graph_store, :graph)
@@ -269,6 +280,14 @@ module Woods
         graph_store: graph_store
       )
     end
+
+    def build_lexical_pipeline(metadata_store, graph_store)
+      executor = Retrieval::LexicalIndex.new(metadata_store: translate_store(metadata_store, :metadata))
+      Pipeline.new(executor: executor, assembler: Retrieval::LexicalAssembler.new, metadata_store: metadata_store,
+                   vector_store: nil, graph_store: graph_store)
+    end
+    private :build_lexical_pipeline
+
     private :build_pipeline
 
     # Wrap one store adapter for the pipeline components. Nil stays nil — a
@@ -357,8 +376,10 @@ module Woods
     #   unit types (overrides DEFAULT_EXCLUDE_TYPES).
     # @param exclude_types [Array<String, Symbol>, nil] Additional types to
     #   exclude. Applied on top of DEFAULT_EXCLUDE_TYPES unless +types:+ is set.
-    # @return [RetrievalResult] Complete retrieval result
-    def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
+    # @param packages [Array<String>, nil] Exact published nearest package owners
+    # @param source_paths [Array<String>, nil] Application-relative directory prefixes
+    # @return [RetrievalResult] Complete retrieval result; scoped calls carry applied_scope
+    def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       validate_query!(query)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # One atomic read of the bundle reference: everything this query does
@@ -366,7 +387,14 @@ module Woods
       # SAME store set even if a reload swaps the pipeline mid-flight (M7).
       pipeline = @pipeline
       @pipeline_observer&.call(pipeline)
+      scope = resolve_scope(pipeline, packages, source_paths, types, exclude_types)
+      pipeline = scoped_pipeline(pipeline, scope) if scope
       classification = @classifier.classify(query)
+      if @mode == :lexical
+        result = retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+        return attach_scope(result, scope)
+      end
+
       execution_result = pipeline.executor.execute(query: query, classification: classification)
       ranked = pipeline.ranker.rank(execution_result.candidates, classification: classification)
 
@@ -374,19 +402,60 @@ module Woods
       filtered, fallback_ran = apply_type_filter(pipeline, ranked, query, classification,
                                                  types: types, type_list: type_list,
                                                  exclude_types: exclude_types)
-      type_rank_context = build_type_rank_context_for(ranked, pipeline, type_list, filtered,
-                                                      fallback_ran: fallback_ran)
+      type_rank_context = unless scope
+                            build_type_rank_context_for(ranked, pipeline, type_list, filtered,
+                                                        fallback_ran: fallback_ran)
+                          end
 
       assembled = assemble_context(pipeline, filtered, classification, budget)
-      trace = build_trace(classification, execution_result, filtered, assembled, start_time)
-
       build_result(
-        assembled: assembled, classification: classification, strategy: execution_result.strategy,
-        budget: budget, trace: trace, type_rank_context: type_rank_context
-      )
+        assembled: assembled, assembler: pipeline.assembler, classification: classification,
+        strategy: execution_result.strategy, budget: budget, type_rank_context: type_rank_context
+      ).tap do |result|
+        result.trace = build_trace(result, execution_result, filtered, assembled, start_time)
+        attach_scope(result, scope)
+      end
     end
 
     private
+
+    def resolve_scope(pipeline, packages, source_paths, types, excluded)
+      return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+
+      Retrieval::Scope.new(metadata_store: translate_store(pipeline.metadata_store, :metadata),
+                           packages: packages, source_paths: source_paths, types: types,
+                           exclude_types: DEFAULT_EXCLUDE_TYPES + Array(excluded).map(&:to_s))
+    end
+
+    def scoped_pipeline(pipeline, scope)
+      vector = Retrieval::ScopedVectorStore.new(store: pipeline.vector_store, scope: scope)
+      graph = Retrieval::ScopedGraphStore.new(store: pipeline.graph_store, scope: scope)
+      build_pipeline(vector_store: vector, metadata_store: scope.metadata_store, graph_store: graph)
+    end
+
+    def attach_scope(result, scope)
+      return result unless scope
+
+      result.applied_scope = scope.summary.merge(
+        outcome: if scope.keys.empty?
+                   :empty_scope
+                 else
+                   (result.trace.ranked_count.zero? ? :no_match : :matched)
+                 end,
+        candidate_count: result.trace.candidate_count, returned_units: result.sources.size
+      )
+      result
+    end
+
+    def retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+      excluded = DEFAULT_EXCLUDE_TYPES + Array(exclude_types).map(&:to_s)
+      execution = pipeline.executor.execute(query: query, type_filter: types, exclude_types: excluded)
+      assembled = pipeline.assembler.assemble(candidates: execution.candidates, budget: budget)
+      result = build_result(assembled: assembled, assembler: pipeline.assembler, classification: classification,
+                            strategy: :lexical, budget: budget)
+      result.trace = build_trace(result, execution, execution.candidates, assembled, start_time)
+      result
+    end
 
     # Validate +query+ before any classify/execute/rank work happens.
     #
@@ -476,11 +545,12 @@ module Woods
     # Build a RetrievalResult from assembled context and pipeline metadata.
     #
     # @param assembled [AssembledContext] Assembled context
+    # @param assembler [Retrieval::ContextAssembler] Counter configuration used for assembly
     # @param classification [QueryClassifier::Classification] Query classification
     # @param strategy [Symbol] Search strategy used
     # @param budget [Integer] Token budget
     # @return [RetrievalResult]
-    def build_result(assembled:, classification:, strategy:, budget:, trace: nil, type_rank_context: nil)
+    def build_result(assembled:, assembler:, classification:, strategy:, budget:, type_rank_context: nil)
       context = @formatter ? @formatter.call(assembled.context) : assembled.context
       context = append_type_rank_context(context, type_rank_context) if type_rank_context
 
@@ -489,9 +559,8 @@ module Woods
         sources: assembled.sources,
         classification: classification,
         strategy: strategy,
-        tokens_used: assembled.tokens_used,
+        tokens_used: assembler.estimate_tokens(context),
         budget: budget,
-        trace: trace,
         type_rank_context: type_rank_context
       )
     end
@@ -534,14 +603,14 @@ module Woods
       filter_by_type(pipeline, ranked, types: type_array, exclude_types: exclude_types)
     end
 
-    def build_trace(classification, execution_result, filtered, assembled, start_time)
+    def build_trace(result, execution_result, filtered, assembled, start_time)
       elapsed_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
       RetrievalTrace.new(
-        classification: classification,
+        classification: result.classification,
         strategy: execution_result.strategy,
         candidate_count: execution_result.candidates.size,
         ranked_count: filtered.size,
-        tokens_used: assembled.tokens_used,
+        tokens_used: result.tokens_used,
         elapsed_ms: elapsed_ms,
         skipped_missing_metadata: assembled.skipped_missing_metadata.to_i
       )

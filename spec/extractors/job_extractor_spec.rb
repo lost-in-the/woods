@@ -370,6 +370,37 @@ RSpec.describe Woods::Extractors::JobExtractor do
   # ── Perform Params ───────────────────────────────────────────────────
 
   describe 'extract_perform_params' do
+    it 'does not fabricate parameters from keyword and nested positional defaults' do
+      path = create_file('app/jobs/precise_job.rb', <<~RUBY)
+        class PreciseJob < ApplicationJob
+          def perform(user_id, values = [1, 2], *rest, required:, notify: true, client: Client.new(1, 2), **options, &block)
+          end
+        end
+      RUBY
+      params = described_class.new.extract_job_file(path).metadata[:perform_params]
+      expect(params).to eq([
+                             { name: 'user_id', splat: nil, has_default: false },
+                             { name: 'values', splat: nil, has_default: true },
+                             { name: 'rest', splat: :single, has_default: false },
+                             { name: 'required', splat: nil, has_default: false },
+                             { name: 'notify', splat: nil, has_default: true },
+                             { name: 'client', splat: nil, has_default: true },
+                             { name: 'options', splat: :double, has_default: false },
+                             { name: 'block', splat: nil, has_default: false }
+                           ])
+    end
+
+    it 'accepts unparenthesized parameters and does not invent names for anonymous forwarding' do
+      path = create_file('app/jobs/forward_job.rb', <<~RUBY)
+        class ForwardJob < ApplicationJob
+          def perform user_id, ...
+          end
+        end
+      RUBY
+      expect(described_class.new.extract_job_file(path).metadata[:perform_params])
+        .to eq([{ name: 'user_id', splat: nil, has_default: false }])
+    end
+
     it 'extracts regular parameters' do
       path = create_file('app/jobs/basic_job.rb', <<~RUBY)
         class BasicJob < ApplicationJob

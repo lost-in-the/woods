@@ -81,6 +81,14 @@ RSpec.describe 'MCP executable contract with the official Ruby client' do
     response = client.call_tool(name: 'lookup', arguments: { identifier: 'Post' })
     expect(response.dig('result', 'isError')).not_to be(true)
     expect(response.dig('result', 'structuredContent', 'text')).to include('Post')
+    assert_search_contract(client)
+  end
+
+  def assert_search_contract(client)
+    search = client.call_tool(name: 'search', arguments: { query: '.', limit: 1 })
+    expect(search.dig('result', 'isError')).to be(false)
+    expect(search.dig('result', 'structuredContent', 'text'))
+      .to include('1 result returned', 'partial (result_limit)', 'More matches: yes', 'total matches: unknown')
   end
 
   # A read timeout surfaces as RequestHandlerError with no child context: the

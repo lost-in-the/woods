@@ -36,6 +36,7 @@ module WoodsConsoleDialectContract
     ['', 'ANSI_QUOTES', 'NO_BACKSLASH_ESCAPES', 'ANSI_QUOTES,NO_BACKSLASH_ESCAPES'].each do |mode|
       connection.execute("SET SESSION sql_mode = '#{mode}'")
       mysql_mode_queries(mode).each { |sql| assert_request!(executor, sql, false) }
+      verify_scope_array!(connection, executor, mode)
       assert_request!(executor, 'SELECT 1--1 AS harmless', true)
       assert_request!(executor, "SELECT 'customer''s request for update' AS body", true)
       unless mode.include?('NO_BACKSLASH_ESCAPES')
@@ -44,6 +45,25 @@ module WoodsConsoleDialectContract
     end
   ensure
     connection.execute("SET SESSION sql_mode = '#{previous}'") if previous&.match?(/\A[A-Z0-9_,]*\z/)
+  end
+
+  # Exercise the legacy/direct scope-array defense against actual MySQL
+  # parsing, while supported tool schemas keep their narrower scope grammar.
+  def self.verify_scope_array!(connection, executor, mode)
+    quoted = mode.include?('NO_BACKSLASH_ESCAPES') ? %q('a\') : %q('a\'b')
+    template = "1 = #{quoted} OR 1 IN (SELECT 1) OR 1 = 'z'"
+    unless connection.select_value("SELECT 1 WHERE #{template}") == 1
+      raise 'MySQL scope fixture did not execute its subquery'
+    end
+
+    begin
+      executor.send(:validate_scope_array!, [template])
+    rescue Woods::Console::ValidationError => e
+      raise unless e.message.include?('forbidden SQL keywords')
+
+      return
+    end
+    raise "Console scope contract permitted a subquery under sql_mode=#{mode}"
   end
 
   def self.mysql_mode_queries(mode)

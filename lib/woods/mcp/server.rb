@@ -18,6 +18,7 @@ require_relative 'bootstrap_state'
 require_relative 'errors'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
+require_relative 'initialization_guidance'
 require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
@@ -90,6 +91,7 @@ module Woods
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
                   bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil)
           reader = IndexReader.new(index_dir)
+          retriever.bind_reader(reader) if retriever.respond_to?(:bind_reader)
           reader.warmup! if warmup
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
@@ -193,6 +195,7 @@ module Woods
           register_resource_handler(server, reader)
           ToolContract.apply!(server)
           IndexReaderPinning.install(server, reader: reader)
+          server.instructions = InitializationGuidance.for(server.tools.keys)
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one
@@ -487,8 +490,9 @@ module Woods
           server.define_tool(
             name: 'search',
             description: 'Find code units whose identifiers (or source/metadata) match a regex. ' \
-                         'Example: search("Worker|Job") returns all workers and jobs; search("^Post") ' \
-                         'returns units starting with "Post". Returns [{identifier, type, match_field}]. ' \
+                         'Example: search("Worker|Job") finds workers and jobs; search("^Post") ' \
+                         'returns units starting with "Post". Returns [{identifier, type, match_field}] plus completeness. ' \
+                         'Check completeness before treating discovery as exhaustive; a limit is only a page size. ' \
                          'Use `lookup` for exact identifiers, `dependencies`/`dependents` for graph traversal. ' \
                          'Gotchas: query is a Ruby regex — literal pipe needs escaping as \\|; ' \
                          'types restricts which index directories are scanned (e.g. ["mailer"] scans only ' \
@@ -502,6 +506,10 @@ module Woods
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict scan to these unit types: model, controller, service, job, mailer, etc.'
                 },
+                packages: { type: 'array', items: { type: 'string' },
+                            description: 'Exact published package owners, OR within the list; AND with source_paths and types.' },
+                source_paths: { type: 'array', items: { type: 'string' },
+                                description: 'Application-relative directory prefixes; segment-aware, OR within the list. Applied before limits.' },
                 fields: {
                   type: 'array', items: { type: 'string', enum: %w[identifier metadata source_code] },
                   description: 'Fields to search: identifier (default), source_code, metadata'
@@ -519,7 +527,8 @@ module Woods
                 }
               }
             }
-          ) do |server_context:, query: nil, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil|
+          ) do |server_context:, query: nil, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil,
+                packages: nil, source_paths: nil|
             if (query.nil? || query.empty?) &&
                (exact_prefix.nil? || exact_prefix.empty?) &&
                (exact_suffix.nil? || exact_suffix.empty?)
@@ -540,17 +549,29 @@ module Woods
               fields: fields || %w[identifier],
               limit: limit || 20,
               exact_prefix: exact_prefix,
-              exact_suffix: exact_suffix
+              exact_suffix: exact_suffix,
+              packages: packages, source_paths: source_paths
             )
             results = search_result[:results]
             payload = {
               query: query,
               result_count: results.size,
-              results: results
+              results: results,
+              completeness: search_result[:completeness]
             }
+            payload[:applied_scope] = search_result[:applied_scope] if search_result[:applied_scope]
             payload[:note] = search_result[:note] if search_result[:note]
             payload[:partial] = true if search_result[:partial]
+            payload[:hint] = search_result[:hint] if search_result[:hint]
             respond.call(renderer.render(:search, payload))
+          rescue Retrieval::Scope::InvalidScopeError => e
+            respond_err.call(e.message, code: :unsupported_argument, tool: 'search', argument: 'scope')
+          rescue IOError, SystemCallError, JSON::ParserError, EncodingError
+            respond_err.call(
+              'Search completeness: unknown (unreadable_or_corrupt_source). ' \
+              'An Index artifact is unavailable or malformed; inspect woods_status and run woods:validate.',
+              code: :corrupt_artifact, tool: 'search', completeness: SearchResults.unavailable
+            )
           end
         end
 
@@ -882,13 +903,14 @@ module Woods
           coerce = method(:coerce_array)
           stale_check = method(:stale_index_result?)
           degraded_response = method(:degraded_retrieval_response)
+          retrieval_mode = retriever.respond_to?(:mode) ? retriever.mode : :semantic
           server.define_tool(
             name: 'codebase_retrieve',
-            description: 'Semantic search: retrieve relevant code units for a natural-language question. ' \
+            description: 'Ranked retrieval: relevant code units for a natural-language question. ' \
                          'Example: codebase_retrieve("how does billing work?") returns ranked source context. ' \
                          'Returns a token-budgeted context string ready to paste into a prompt. ' \
                          'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
-                         'Requires an embedding provider — disabled if OPENAI_API_KEY is unset and Ollama is unreachable. ' \
+                         'Uses configured embeddings, or explicit WOODS_RETRIEVAL_MODE=lexical over extraction units. ' \
                          'By default excludes test_mappings (~33% of a typical index) so spec filenames do not ' \
                          'dominate semantic rank; pass types: ["test_mapping"] to opt back in. ' \
                          'Parameter: use `budget` for the token budget (not `limit` — that means result count ' \
@@ -903,7 +925,8 @@ module Woods
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
                                'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
-                               'When the unfiltered top-K has no candidate of a requested type, the retriever ' \
+                               'Lexical mode and explicit package/path scopes filter before limits and omit the global rank table. ' \
+                               'In semantic mode, when the unfiltered top-K has no requested type, the retriever ' \
                                'falls back to rank-within-type so the response is populated whenever units of ' \
                                'the requested type exist in the index. The response appends a "Type rank ' \
                                'context" table with per-type: source, rank in unfiltered top-K, global_k, ' \
@@ -912,6 +935,10 @@ module Woods
                                '(index has this type but other requested types filled the result), absent ' \
                                '(zero units of this type in the index).'
                 },
+                packages: { type: 'array', items: { type: 'string' },
+                            description: 'Exact published nearest package owners. OR within the list; AND with paths and type eligibility.' },
+                source_paths: { type: 'array', items: { type: 'string' },
+                                description: 'Application-relative directory prefixes. Scope applies before candidate limits; graph expansion stays inside it.' },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Additional types to exclude on top of the default test_mapping exclusion.'
@@ -919,7 +946,7 @@ module Woods
               },
               required: ['query']
             }
-          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil|
+          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil, packages: nil, source_paths: nil|
             # `limit` isn't declared in the schema but clients still send it
             # because sibling tools (search, recent_changes, pagerank) use
             # `limit` as a result count. Mapping it to `budget` here would
@@ -957,12 +984,19 @@ module Woods
             end
             if retriever
               begin
+                scope_options = if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+                                  { packages: packages, source_paths: source_paths }
+                                else
+                                  {}
+                                end
                 result = retriever.retrieve(
                   query,
                   budget: budget || 8000,
                   types: types,
-                  exclude_types: exclude_types
+                  exclude_types: exclude_types, **scope_options
                 )
+              rescue Retrieval::Scope::InvalidScopeError => e
+                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'scope')
               rescue Woods::Retriever::StoreError => e
                 # M8: a metadata-store failure mid-query must not surface as
                 # a raw raise through the tool boundary (or as the misleading
@@ -971,7 +1005,7 @@ module Woods
                   respond_err,
                   reason: e.message,
                   stores: [e.store],
-                  phase: 'query'
+                  phase: 'query', mode: retrieval_mode
                 )
               end
               if stale_check.call(result)
@@ -983,7 +1017,15 @@ module Woods
                   tool: 'codebase_retrieve'
                 )
               end
-              respond.call(result.context)
+              if result.respond_to?(:applied_scope) && result.applied_scope
+                ::MCP::Tool::Response.new(
+                  [{ type: 'text', text: result.context }],
+                  structured_content: { text: result.context, data: { applied_scope: result.applied_scope, sources: result.sources } },
+                  meta: { applied_scope: result.applied_scope }
+                )
+              else
+                respond.call(result.context)
+              end
             else
               respond_err.call(
                 'Semantic search is disabled — no embedding provider is configured. ' \
@@ -1028,7 +1070,16 @@ module Woods
         # @param phase [String] 'boot' (hydration failure) or 'query'
         #   (store failure at query time)
         # @return [MCP::Tool::Response]
-        def degraded_retrieval_response(respond_err, reason:, stores:, phase:)
+        def degraded_retrieval_response(respond_err, reason:, stores:, phase:, mode: :semantic)
+          if mode == :lexical
+            return respond_err.call(
+              "Lexical retrieval is degraded: #{reason}. No partial lexical snapshot was served. " \
+              'Inspect woods_status and repair or re-extract the published index, then retry.',
+              code: :degraded_index, tool: 'codebase_retrieve', degraded: true,
+              phase: phase, stores: stores, reason: reason, mode: 'lexical'
+            )
+          end
+
           respond_err.call(
             "Semantic search is degraded: #{reason}. The affected store(s) return no data, so " \
             'queries would come back empty — this is NOT "no results". ' \
@@ -1987,13 +2038,17 @@ module Woods
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / failed + reason), feature flags, and a ready flag. ' \
-                         'Call this first on cold connect to learn what the server knows.',
-            input_schema: { type: 'object', properties: {} }
-          ) do |server_context:|
+                         'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
+                         'Incomplete evidence is unknown. Call this first on cold connect.',
+            input_schema: { type: 'object', properties: {
+              source_check: { type: 'string', enum: %w[quick deep], default: 'quick',
+                              description: 'Bounded source content verification: quick (250ms) or deep (5s).' }
+            } }
+          ) do |server_context:, source_check: 'quick'|
             _ = server_context
             status = Woods::MCP::Server.build_status(
               reader: reader, retriever: retriever, index_dir: index_dir,
-              bootstrap_state: bootstrap_state
+              bootstrap_state: bootstrap_state, source_check: source_check
             )
             respond.call(JSON.pretty_generate(status))
           end
@@ -2012,21 +2067,21 @@ module Woods
         # provider in use. Without this, operators debugging "wrong provider" see
         # status claiming +embedding_model: "text-embedding-3-small"+ next to
         # +embedding_provider: "ollama"+ and reasonably distrust every field.
-        def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
+        def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil, source_check: 'quick')
           # Pin the generation across the whole payload. Without this the
           # manifest can be read at generation N and `generation_fields` then
           # report N+1 — a status report that describes counts from one index
           # while announcing the number of another, which is precisely the
           # confusion this tool exists to resolve.
-          return build_status_payload(reader, retriever, index_dir, bootstrap_state) unless
+          return build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check) unless
             reader.respond_to?(:with_pinned_generation)
 
           reader.with_pinned_generation do
-            build_status_payload(reader, retriever, index_dir, bootstrap_state)
+            build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           end
         end
 
-        def build_status_payload(reader, retriever, index_dir, bootstrap_state)
+        def build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
           staleness = staleness_seconds(extracted_at)
@@ -2044,14 +2099,15 @@ module Woods
               index_dir: index_dir.to_s,
               update: Woods::UpdateCheck.status_hash
             },
-            index: index_section(manifest, extracted_at, staleness, index_dir, reader),
+            index: index_section(manifest, extracted_at, staleness, index_dir, reader, source_check),
             watch: watch_section(index_dir),
             retriever: {
               configured: !retriever.nil?,
-              class: retriever&.class&.name
+              class: retriever&.class&.name,
+              **(retriever.respond_to?(:mode) && retriever.mode == :lexical ? { mode: 'lexical' } : {})
             },
             bootstrap: bootstrap_state&.to_h,
-            features: features_from(config, resolved)
+            features: retrieval_features(config, resolved, retriever)
           }
         end
 
@@ -2074,7 +2130,7 @@ module Woods
         # diff directly. This is an observability signal, not a hard gate —
         # hard-refusing responses would be much more disruptive than a loudly-
         # visible staleness flag that agents can branch on.
-        def index_section(manifest, extracted_at, staleness, index_dir, reader = nil)
+        def index_section(manifest, extracted_at, staleness, index_dir, reader = nil, source_check = 'quick')
           base = {
             extracted_at: extracted_at,
             staleness_seconds: staleness,
@@ -2089,6 +2145,11 @@ module Woods
             schema_sha: manifest && manifest['schema_sha']
           }
 
+          base[:source_freshness] = if reader.respond_to?(:source_freshness)
+                                      reader.source_freshness(mode: source_check)
+                                    else
+                                      { 'state' => 'unknown', 'reasons' => ['source_reader_unavailable'], 'complete' => false }
+                                    end
           base.merge!(generation_fields(index_dir, reader))
           base.merge!(working_tree_fields(index_dir))
 
@@ -2272,6 +2333,13 @@ module Woods
         # historic status payloads always reported +false+ regardless of the
         # actual console MCP state. Advertising a misleading field is worse
         # than not advertising it at all.
+        def retrieval_features(config, resolved, retriever)
+          features = features_from(config, resolved)
+          return features unless retriever.respond_to?(:mode) && retriever.mode == :lexical
+
+          features.merge(retrieval_mode: 'lexical', embedding_model: nil, embedding_provider: nil, vector_store: nil)
+        end
+
         def features_from(config, resolved)
           provider_hash = resolved&.embedding_provider || {}
           resolved_provider = resolved_provider_symbol(provider_hash[:class])

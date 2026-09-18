@@ -21,6 +21,7 @@ A typical structural index looks like this; optional entries need not exist:
 ├── payloads/
 │   └── gen-42/
 │       ├── manifest.json
+│       ├── source_inputs.json          # optional on older indexes
 │       ├── dependency_graph.json
 │       ├── graph_analysis.json
 │       ├── SUMMARY.md
@@ -65,6 +66,7 @@ gates below deliberately fail more strictly.
 | Artifact | Presence and meaning |
 |---|---|
 | `manifest.json` | Required for a complete structural publication. Counts by extractor directory, totals, extraction timestamp and provenance. Optional fields vary by writer/version; see [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance). |
+| `source_inputs.json` | Versioned source-input identities and per-consumer provenance for this exact generation; old indexes may omit it. See [source freshness](SOURCE_FRESHNESS.md). |
 | `dependency_graph.json` | Required for a complete structural publication. Typed graph data; an empty graph is valid. |
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
 | `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. |
@@ -80,9 +82,95 @@ identifier can exist in multiple types. The full unit fields are documented in
 
 The graph's `nodes`, typed variants, forward/reverse relationships and relationship
 metadata belong to the graph format; preserve them when transporting the index.
+Extractor directories can contain multiple unit types: `graphql/` contains
+`graphql_type`, `graphql_mutation`, `graphql_resolver`, and `graphql_query`, while
+`rails_source/` contains `rails_source` and `gem_source`. Validate and retain the
+artifact's actual type instead of deriving it by singularizing the directory.
+
 Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
+
+### Semantic graph validation
+
+`woods:validate` checks raw graph data against the unit indexes and artifacts in
+one pinned published generation. This validation is unreleased after
+`2.0.0.beta2`. It checks the shapes of `nodes`, `edges`, `reverse`, `file_map`,
+`type_index`, and optional `variants`; typed identities must be unique and agree
+with the actual indexed units. Forward sources must exist. Reverse, file, and
+type memberships must match the union of primary and variant contributions.
+When present, `reverse_via` must preserve the typed forward records and their
+relationship attributes, including duplicate-record multiplicity.
+
+Cycles, recursion, shared paths, cross-type identifier collisions, nil file paths,
+and legacy bare-string edges are valid. Absent optional legacy fields remain
+legal. A target absent from the nodes is an unresolved reference, not automatically
+corruption: current metadata cannot distinguish an intentional external target
+from an internal node and unit that are both missing. Validation cannot certify a
+unique target type when several types share its name. A missing node whose typed
+unit remains indexed is detectable and is an error.
+
+The checker does not repair data, rerun extraction, or become a publication gate.
+It reports identity/path diagnostics through the existing validation report and
+nonzero task exit. It also supports the Woods static source map's explicitly
+recorded type families; that does not give the map Rails runtime fidelity.
+See [running validation from Ruby](PUBLISHED_INDEX.md#validate-a-published-generation)
+and [semantic error recovery](TROUBLESHOOTING.md#semantic-graph-validation-errors).
+
+### File profiles and file membership
+
+`file_map[path]` lists units associated with a source file, including whole-file
+profiles. It does not promise that every identifier names a Ruby constant. New
+writers mark graph nodes of types `caching`, `configuration`, `test_mapping`,
+`rails_source`, and `gem_source` with `"kind": "file_profile"`. The same field
+appears on non-primary typed variants.
+
+For example, `app/controllers/things_controller.rb` can map to both
+`ThingsController` and a caching unit named `app/controllers/things_controller.rb`.
+Inspect each typed node's `kind` to distinguish the profile; both retain their
+file membership so a source edit refreshes both units. Do not classify units by
+comparing the identifier with the path, and do not interpret a missing `kind` as
+proof that the unit names a constant.
+
+Older indexes omit the marker. Woods derives it from these known extractor types
+when loading and republishing a graph, including unchanged incremental nodes.
+Raw consumers of older indexes must treat absent markers as unclassified or use
+the documented type list. Identifiers, `file_map`, and type membership retain
+their existing shapes; older readers can ignore `kind`.
+
+### Reverse relationship records
+
+New writers add `reverse_via` to `dependency_graph.json`. Each target identifier
+maps to its incoming relationship records, including the owning source type:
+
+```json
+{
+  "reverse": { "Gadget": ["Widget"] },
+  "reverse_via": {
+    "Gadget": [{ "source": "Widget", "source_type": "service", "via": "render" }]
+  }
+}
+```
+
+The existing `reverse` arrays retain their bare identifiers. `reverse_via` includes
+edges from primary nodes and typed variants; several records can share a source
+and target while differing in type, relationship, or association attributes.
+Optional `through`, `through_db`, and `disable_joins` values match the forward
+edge. A `null` relationship means unknown legacy evidence. Target type remains
+unresolved when the target identifier belongs to multiple types; the source type
+does not resolve that ambiguity.
+
+These are recorded dependencies, not proof that changing a target breaks every
+source. For example, `factory_for` and migration `reference` edges describe
+different relationships from a runtime `render` edge. Consumers can inspect one
+target bucket without scanning the whole forward graph. Buckets and records are
+deterministically ordered, but consumers should treat the ordering as incidental.
+
+Older graphs omit `reverse_via`; absence means relationship detail must be derived
+from forward edges and variants, not that there are no dependents. Woods rebuilds
+this derived index from forward evidence when loading and republishing a graph.
+Existing readers can ignore the additive field; a subsequent changed extraction
+or full run publishes it. A no-op leaves the previous generation unchanged.
 
 ### What is outside this structural snapshot
 
@@ -92,6 +180,10 @@ have separate lifecycles. Their presence is configuration-dependent. Do not glob
 them into a structural payload or assume `generation.json` commits them together.
 A semantic/MCP deployment also needs its configured stores and artifacts; copying
 a structural payload alone does not clone that deployment.
+
+`<output>/.source-inputs.key` is private operational state used to verify source
+identities. Never include it in a published/exported structural snapshot; without
+it, a recipient can still read the index but source freshness is unknown.
 
 Temporary filenames, abandoned payloads, lock sidecars, retained-directory counts,
 and summary formatting are implementation details. Never remove or modify locks

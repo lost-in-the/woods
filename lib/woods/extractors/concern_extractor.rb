@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
@@ -50,18 +52,20 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of concern units
       def extract_all
-        find_files_in_directories(@directories).filter_map do |file|
-          extract_concern_file(file)
-        end
+        conventional = find_files_in_directories(@directories).filter_map { |file| extract_concern_file(file) }
+        conventional + runtime_model_mixins.keys.flat_map { |file| extract_model_mixin_file(file) }
       end
 
       # Extract a single concern file
       #
       # @param file_path [String] Path to the concern file
+      # @param module_name [String, nil] Runtime identity for a discovered model mixin
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
-      def extract_concern_file(file_path)
+      def extract_concern_file(file_path, module_name: nil)
         source = File.read(file_path)
-        module_name = extract_module_name(file_path, source)
+        # Runtime discovery supplies each included module's identity. Ordinary
+        # concern files retain their canonical identity, including nested helpers.
+        module_name ||= extract_module_name(file_path, source)
 
         return nil unless module_name
         return nil unless concern_module?(source)
@@ -79,11 +83,65 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract concern #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract concern #{file_path}: #{e.message}")
         nil
       end
 
+      # Extract a module outside concerns directories only when a live model
+      # includes it. Filenames alone cannot establish that a module is a mixin.
+      #
+      # @param file_path [String] Changed application source path
+      # @return [Array<ExtractedUnit>, nil]
+      def extract_model_mixin_file(file_path)
+        modules = model_mixin_paths[file_path.to_s]
+        return unless modules
+
+        modules.filter_map { |mod| extract_concern_file(file_path, module_name: mod.name) }
+      end
+
+      # Runtime mixins that have no conventional concern-directory discovery.
+      # @return [Hash<String, Array<Module>>] Source paths and their included modules
+      def runtime_model_mixins
+        model_mixin_paths.reject { |path, _mod| conventional_concern_path?(path) }
+      end
+
+      # @param path [String] Absolute source path
+      # @return [Boolean] Whether directory-based discovery owns this source
+      def conventional_concern_path?(path)
+        @directories.any? { |directory| path.to_s.start_with?("#{directory}/") }
+      end
+
       private
+
+      # Runtime ownership is authoritative; never import gem mixins even when
+      # the application adds methods to them.
+      # @return [Hash<String, Array<Module>>] App-owned included modules by source path
+      def model_mixin_paths
+        return {} unless defined?(ActiveRecord::Base)
+
+        @model_mixin_paths ||= discover_model_mixin_paths
+      end
+
+      # @return [Hash<String, Array<Module>>] Reflected module source locations
+      def discover_model_mixin_paths
+        models = ActiveRecord::Base.descendants.reject { |model| model.respond_to?(:abstract_class?) && model.abstract_class? }
+        models.flat_map(&:included_modules).uniq.each_with_object({}) do |mod, paths|
+          next unless mod.name
+
+          definition = begin
+            Object.const_source_location(mod.name)&.first
+          rescue NameError
+            # Removed/reloaded models can remain in descendants until GC.
+            next
+          end
+          next if definition && !app_source?(definition, "#{Rails.root}/")
+
+          path = resolve_source_location(mod, app_root: "#{Rails.root}/", fallback: nil)
+          next unless app_source?(path, "#{Rails.root}/") && File.file?(path)
+
+          (paths[path] ||= []) << mod
+        end
+      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Module Discovery

@@ -332,6 +332,9 @@ module Woods
           request(:put, "/collections/#{@collection}/points#{WAIT_FOR_WRITE}", body)
         end
 
+        # Native raw-ID eligibility is applied before ranking and the limit.
+        def supports_id_filter? = true
+
         # Search for similar vectors.
         #
         # The query vector is dimension-checked before the request, mirroring
@@ -348,14 +351,11 @@ module Woods
         # @raise [Woods::Error] if the query vector's length disagrees with the
         #   configured dimension
         # @see Interface#search
-        def search(query_vector, limit: 10, filters: {})
+        def search(query_vector, limit: 10, filters: {}, ids: nil)
+          return [] if ids == []
+
           validate_dimensions!(query_vector) if @dimensions
-          body = {
-            vector: query_vector,
-            limit: limit,
-            with_payload: true
-          }
-          body[:filter] = build_filter(filters) unless filters.empty?
+          body = search_body(query_vector, limit, filters, ids)
 
           response = request(:post, "/collections/#{@collection}/points/search", body)
           results = response['result'] || []
@@ -577,6 +577,16 @@ module Woods
           got = vector.respond_to?(:length) ? vector.length : vector.class
           raise Woods::Error,
                 "Vector dimension mismatch#{where}: got #{got}, expected #{@dimensions}"
+        end
+
+        def search_body(query_vector, limit, filters, ids)
+          body = { vector: query_vector, limit: limit, with_payload: true }
+          body[:filter] = build_filter(filters) unless filters.empty? && ids.nil?
+          if ids
+            body[:filter][:must] << { key: IDENTIFIER_KEY, match: { any: ids } }
+            body[:params] = { exact: true }
+          end
+          body
         end
 
         # Build a Qdrant filter from metadata key-value pairs.

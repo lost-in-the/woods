@@ -1491,7 +1491,7 @@ module Woods
         # `SqlNoiseStripper` is the same module SqlValidator uses. The
         # combined single-pass strip_noise resolves comments and literals
         # together so a comment marker inside a literal can't hide a keyword.
-        stripped = SqlNoiseStripper.strip_noise(template)
+        stripped = SqlNoiseStripper.strip_noise(template, dialect: sql_dialect || :postgres, **mysql_quote_modes)
         if SCOPE_TEMPLATE_FORBIDDEN.match?(stripped)
           raise ValidationError,
                 'scope template contains forbidden SQL keywords ' \

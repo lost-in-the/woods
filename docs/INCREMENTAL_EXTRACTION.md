@@ -28,6 +28,10 @@ Three differences are tolerated, and nothing else:
 | Ordering inside a unit's `dependents` | Full extraction appends in extractor order, incremental in graph order. Same multiset. |
 | PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
 
+The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
+A nested metadata field with the same name is application data: changing it
+rewrites the unit in both compact and pretty JSON output.
+
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
 exactly. Tolerating the ordering there meant the harness, the only test that
@@ -60,6 +64,10 @@ failure a CI chain cannot afford:
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
 | There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
 
+Changed paths are normalized lexically before dispatch: trailing root slashes,
+duplicate separators and `.`/`..` segments do not create separate changes or
+bypass matching. Missing files remain representable; symlinks are not resolved.
+
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
 `origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default). An
 unresolvable range — a GitLab zero-SHA on a new branch, an unfetched base ref,
@@ -83,6 +91,12 @@ Recovery choices, in the order they are worth trying:
 The diff itself is rooted at the extracted application (`git -C Rails.root`),
 so it cannot read whatever checkout the process happened to start in — the
 same rooting rule the manifest's git provenance follows.
+
+Named, source-defined app modules included by runtime models are tracked as concern units even
+outside `concerns/` directories. Changing their source refreshes their includers,
+including inlined code and callback analysis. Multiple runtime mixins sharing a source
+file retain separate identities and refresh all their includers. Run a full extraction after upgrading
+to populate these previously missing source mappings.
 
 ## What a run does, in order
 
@@ -187,7 +201,8 @@ automatically.
 | `app/decorators`, `app/presenters`, `app/form_objects` | decorators |
 | `app/managers` / `app/policies` / `app/validators` | managers / policies + pundit_policies / validators |
 | `app/**/concerns/**/*.rb` | concerns |
-| `app/models/**/*.rb` (outside `concerns/`) | poros, caching |
+| `app/models/**/*.rb` (outside `concerns/`) | poros, caching; concerns when runtime model inclusion confirms a mixin |
+| `app/**/*.rb`, `lib/**/*.rb` (outside `concerns/`) | runtime model mixins also dispatch to concerns |
 | `app/controllers/**/*.rb` | caching |
 | `app/views/**/*.erb` | view_templates, caching |
 | `config/locales/**/*.yml` | i18n |
@@ -270,6 +285,34 @@ the reload, stays in `descendants`, and the in-process full extraction the
 oracle compares against emits it too, both sides agree, wrongly. The coverage
 is in `spec/extractor_spec.rb`, driving the reconciler with a shrinking
 discovery set.
+
+### Runtime removals and bundle updates
+
+Jobs discovered through `ApplicationJob.descendants` supplement the job-file
+scan, but jobs are not part of `CLASS_BASED_DISCOVERY` removal reconciliation.
+If a dynamically defined or gem-owned job disappears without a tracked source
+path changing, its unit can survive subsequent incremental runs. A full
+extraction in a fresh Rails process removes it; an in-process full extraction
+can still see an old constant retained by that process (B-165).
+
+After adding, removing, or updating bundled gems, boot the updated bundle in a
+fresh process and run:
+
+```bash
+bundle exec rake woods:extract woods:validate
+```
+
+A `Gemfile.lock` change refreshes engines, middleware, and optional framework
+sources. It does not refresh every gem-owned model, job, or other runtime unit.
+Their recorded paths or metadata can remain stale, including absolute paths to
+a removed gem version and paths under `vendor/`. A full extraction rebuilds
+those units against the installed bundle (B-166).
+
+An absent external source path can also mean the validator runs on a different
+host or mount from extraction. Confirm the bundle and filesystem context before
+rebuilding; a full run in one container does not make its gem paths visible on
+another host. Validation warnings identify missing paths, but do not prove a
+retained unit matches the currently installed gem when its path still exists.
 
 ### Deletion
 

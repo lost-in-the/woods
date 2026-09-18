@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -73,7 +75,7 @@ module Woods
           build_unit(task_data, file_path, data[:source], sibling_definitions(task_data[:full_name], file_path))
         end
       rescue StandardError => e
-        Rails.logger.error("Failed to extract rake tasks from #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract rake tasks from #{file_path}: #{e.message}")
         []
       end
 
@@ -100,7 +102,7 @@ module Woods
           { source: source, tasks: parse_tasks(source) }
         end
       rescue StandardError => e
-        Rails.logger.error("Failed to scan rake tasks in #{file}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to scan rake tasks in #{file}: #{e.message}")
         nil
       end
 

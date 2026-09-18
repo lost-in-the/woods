@@ -110,6 +110,11 @@ module Woods
     #   on disk and passes the populated store here.
     # @return [Retriever, Cache::CachedRetriever] A fully wired retriever
     def build_retriever(vector_store: nil, metadata_store: nil, graph_store: nil)
+      if @config.retrieval_mode == :lexical
+        return build_lexical_retriever(metadata_store: metadata_store,
+                                       graph_store: graph_store)
+      end
+
       provider = build_resilient_embedding_provider
       cache = build_cache_store
 
@@ -124,6 +129,14 @@ module Woods
 
       cache ? wrap_with_retriever_cache(retriever, cache) : retriever
     end
+
+    def build_lexical_retriever(metadata_store:, graph_store:)
+      retriever = Retriever.new(vector_store: nil, metadata_store: metadata_store || build_metadata_store,
+                                graph_store: graph_store, embedding_provider: nil, mode: :lexical)
+      cache = build_cache_store
+      cache ? wrap_with_retriever_cache(retriever, cache) : retriever
+    end
+    private :build_lexical_retriever
 
     # Instantiate the vector store adapter specified by the configuration.
     #
@@ -482,19 +495,21 @@ module Woods
 
     # Instantiate the metadata store adapter specified by the configuration.
     #
+    # @param output_dir [String, Pathname] Default SQLite database directory; an
+    #   explicit metadata_store_options[:database] still takes precedence.
     # @return [Storage::MetadataStore::Interface] Metadata store adapter instance
     # @raise [ArgumentError] if the configured type is not recognized
-    def build_metadata_store
+    def build_metadata_store(output_dir: @config.output_dir)
       case @config.metadata_store
       when :in_memory then Storage::MetadataStore::InMemory.new
-      when :sqlite then Storage::MetadataStore::SQLite.new(**sqlite_metadata_options)
+      when :sqlite then Storage::MetadataStore::SQLite.new(**sqlite_metadata_options(output_dir))
       else raise ArgumentError, "Unknown metadata_store: #{@config.metadata_store}"
       end
     end
 
-    def sqlite_metadata_options
+    def sqlite_metadata_options(output_dir)
       opts = (@config.metadata_store_options || {}).transform_keys(&:to_sym)
-      opts[:database] ||= File.join(@config.output_dir.to_s, 'metadata.sqlite3')
+      opts[:database] ||= File.join(output_dir.to_s, 'metadata.sqlite3')
       opts
     end
     private :sqlite_metadata_options

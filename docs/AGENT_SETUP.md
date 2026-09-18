@@ -120,6 +120,77 @@ For Docker, extraction runs inside the Rails container. If Woods is installed on
 
 Reconnect the client and call `woods_status`. Confirm a current generation and non-zero unit counts before claiming setup works.
 
+### Managed Claude Code configuration
+
+The development command `woods-agent-config` is unreleased after 2.0.0.beta2.
+Check `bundle exec woods-agent-config --help` in the selected application bundle;
+use the manual client configuration below when it is absent. The supported
+client format is Claude Code (tested with 2.1.267).
+
+Create a private plan, inspect its paths and diff, then apply that same plan:
+
+```bash
+bundle exec woods-agent-config setup --client claude --scope project \
+  --root "$PWD" --instructions CLAUDE.md,AGENTS.md --plan /tmp/woods-setup.json --diff
+bundle exec woods-agent-config apply /tmp/woods-setup.json \
+  --client claude --scope project --root "$PWD"
+```
+
+Choose a new, unused plan filename for each preview. Preview writes only the
+requested plan file; it does not edit managed configuration. Plans contain the
+complete replacement bytes, including unrelated settings, and use mode 0600:
+keep them private and remove them when no longer needed. `show FILE` prints its
+summary; `show FILE --diff` checks the original snapshots and prints a unified
+diff. Applying a changed snapshot fails rather than replacing the new content.
+A repeated identical setup makes no configuration edits.
+
+| Selection | Managed files |
+|---|---|
+| `--scope project` | `<root>/.mcp.json`, explicitly selected `<root>/CLAUDE.md` and/or `AGENTS.md`, `<root>/.woods-agent-config.json` ownership receipt |
+| `--scope user` | `~/.claude.json`, explicitly selected `~/.claude/CLAUDE.md`, application-specific receipt in `~/.claude/` |
+
+With `CLAUDE_CONFIG_DIR`, user scope uses that directory's `.claude.json`,
+`CLAUDE.md`, and receipt instead. Instruction edits are opt-in with
+`--instructions`; existing selections carry forward on update. The command
+configures the Index Server. Client trust and project approval remain Claude
+Code settings; apply does not change them.
+
+Preflight runs the selected installed bundle, validates its index, and checks
+its actual registered capabilities. It does not boot Rails or contact an
+embedding provider. The bundle must already resolve in frozen mode; prepare
+its lockfile separately if Bundler reports a mismatch. Host mode uses the
+application's absolute Gemfile and index paths. `--index tmp/woods` is relative
+to the selected root. For Compose, also select `--mode compose --service web
+--container-root /app`; run the configuration command where Docker Compose can
+access that project. Preflight verifies the index and installed gem inside that
+service. Both host and container subprocesses have time limits.
+
+Use `update --plan FILE` with the same client/scope/root and the desired launch
+options to change the owned entry or instruction selection. Update explicitly
+records the current template and installed-gem evidence; background hooks never
+update configuration. `remove --plan FILE` previews deletion of owned content
+and does not require the application bundle or index to remain available.
+Use `--name NAME` consistently if the installation uses a nondefault server name.
+Apply each operation's saved plan with the same explicit client/scope/root.
+
+Ownership comes from the receipt and exact managed section, not from a server
+named `woods`. Existing unowned names, edited managed content, malformed JSON,
+duplicate markers, symlinks, and concurrent edits cause conflicts. Preserve the
+receipt for future update/removal. Unrelated servers, hooks, settings,
+instruction text, permissions, and line-ending conventions are retained;
+changing JSON may reformat its whitespace.
+
+Writes use atomic replacement per file and a private recovery journal beside
+the receipt. The plan summary names the `.lock` and `.pending` runtime paths;
+a lock file may remain after completion. Multiple files are not one atomic
+transaction. An ordinary write failure restores original files when safe; an
+interruption or concurrent edit can retain the journal. Resolve reported
+conflicts, then use `recover --client claude --scope project --root "$PWD"`
+(or the original user scope). Recovery refuses to overwrite concurrent edits.
+Keep journals private because they contain original configuration bytes. A plan
+whose recovery journal would exceed 8 MiB is refused before any managed file
+is changed; reduce the selected configuration before applying.
+
 ## 7. Verify useful behavior
 
 Use a class known to exist in the application:

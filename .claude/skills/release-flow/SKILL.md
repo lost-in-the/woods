@@ -33,8 +33,9 @@ The state is derived from `Woods::VERSION` alone, by
 
 - **Never edit `lib/woods/version.rb` by hand.** Only `release:prepare` and
   `release:reopen` write it.
-- **Changelog entries go under `## [Unreleased]` only**, beneath one of its
-  `###` headings. An entry directly under `## [Unreleased]` with no heading
+- **Changelog entries go under `## [Unreleased]`**, beneath one of its
+  `###` headings, **or in `changelog/<type>_<slug>.md`** (format and supported
+  types in CONTRIBUTING.md). Entry files contain Markdown without headings. An entry directly under `## [Unreleased]` with no heading
   blocks the next release. Duplicate headings are fine; they merge at release
   time, in the order they first appear.
 - **Never hand-edit a `release-state` fence.** The four fences (README version
@@ -55,10 +56,15 @@ or publishes.
 | Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
 | After the release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
 
-`release:prepare` bumps VERSION, folds `## [Unreleased]` into
+`release:prepare` bumps VERSION, folds `## [Unreleased]` and optional entry files into
 `## [<version>] - <date>` with one block per `###` heading, leaves an empty
 Unreleased behind, restates the fences, regenerates the surface inventory, and
-prints the tag and dispatch commands. `release:reopen` sets the next alpha and
+prints the tag and dispatch commands. Entry files are folded in filename order
+after inline entries, then only the consumed files are removed. Invalid types,
+empty entries, headings, or symlinks refuse before any write. A prepared release
+has no entry files; the tag validator rejects any leftovers at the release SHA
+even if more inline Unreleased notes exist. Ordinary beta-cycle work can still
+collect new entries before the next prepare. `release:reopen` sets the next alpha and
 restores the alpha documentation state; it leaves the changelog alone.
 
 Every rewrite is computed before any of it is written, so a refusal leaves the
@@ -79,7 +85,7 @@ version: cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into
 `## [2.0.0] - <date>` and removes their headings, prerelease entries first and
 anything written after them second. So an empty `## [Unreleased]` is legitimate
 for a final release cut straight from a release candidate, and is a refusal for
-a beta or a release candidate, which has nothing to absorb.
+a beta or a release candidate without entry files, which has nothing to absorb.
 
 It refuses a version that moves backwards, a version whose base is not the line
 `main` is developing (`2.0.0.alpha` releases only `2.0.0`), an alpha target for

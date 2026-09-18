@@ -1103,6 +1103,115 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(Dir.children(dumps).sort).to eq(before)
     end
 
+    context 'when only unit metadata changes (B-119)' do
+      let(:output_dir) { Dir.mktmpdir('woods-metadata-snapshot') }
+
+      before { fresh_indexer.index_incremental }
+
+      def update_user_metadata
+        updated = unit_data.merge('file_path' => 'app/domain/user.rb',
+                                  'dependencies' => ['Account'],
+                                  'metadata' => { 'description' => 'Current account owner' })
+        File.write(File.join(output_dir, 'user.json'), JSON.generate(updated))
+        updated
+      end
+
+      it 'publishes current metadata without calling the embedding provider or changing source checkpoints' do
+        updated = update_user_metadata
+        original_checkpoint = checkpoint_on_disk
+        calls = provider.embed_batch_calls
+
+        stats = fresh_indexer.index_incremental
+
+        metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(Woods::IndexArtifact.new(output_dir))
+        expect(metadata.find('User')).to eq(updated)
+        expect(metadata.find('PaymentService')).to eq(second_unit_data)
+        expect(stats).to eq(processed: 0, skipped: 2, errors: 0)
+        expect(provider.embed_batch_calls).to eq(calls)
+        expect(checkpoint_on_disk).to eq(original_checkpoint)
+        expect(persisted_vector_ids).to contain_exactly('User', 'PaymentService')
+      end
+
+      it 'restores current paths on every chunk when an MCP reader reloads the promoted stores' do
+        require 'woods/mcp/bootstrapper'
+        chunked = unit_data.merge('chunks' => [{ 'content' => 'first chunk' }, { 'content' => 'second chunk' }])
+        File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked))
+        fresh_indexer.index_all
+        artifact = Woods::IndexArtifact.new(output_dir)
+        original_vectors = File.binread(artifact.latest_dump_path.join('vectors.bin'))
+        chunked['file_path'] = 'app/domain/user.rb'
+        File.write(File.join(output_dir, 'user.json'), JSON.generate(chunked))
+        calls = provider.embed_batch_calls
+
+        fresh_indexer.index_incremental
+
+        vectors = Woods::Storage::Snapshotter::Vector.load_or_empty(artifact)
+        metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact)
+        Woods::MCP::Bootstrapper.send(:populate_vector_metadata, vectors, metadata)
+        chunks = vectors.each_entry.select { |id, _vector, _meta| id.start_with?('User#chunk_') }
+        expect(chunks.map(&:first)).to contain_exactly('User#chunk_0', 'User#chunk_1')
+        expect(chunks.map { |_id, _vector, meta| meta[:file_path] }).to all(eq('app/domain/user.rb'))
+        expect(File.binread(artifact.latest_dump_path.join('vectors.bin'))).to eq(original_vectors)
+        expect(provider.embed_batch_calls).to eq(calls)
+      end
+
+      it 'retains metadata for units protected by the mass-deletion guard when publishing another change' do
+        update_user_metadata
+        File.delete(File.join(output_dir, 'payment_service.json'))
+
+        expect { fresh_indexer.index_incremental }.to output(/refusing to prune/).to_stderr
+
+        artifact = Woods::IndexArtifact.new(output_dir)
+        metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact)
+        expect(metadata.find('PaymentService')).to eq(second_unit_data)
+        expect(metadata.find('User')['file_path']).to eq('app/domain/user.rb')
+        expect(persisted_vector_ids).to contain_exactly('User', 'PaymentService')
+      end
+
+      it 'does not rotate dumps again after a reused indexer publishes the metadata change' do
+        update_user_metadata
+        reused = fresh_indexer
+        reused.index_incremental
+        artifact = Woods::IndexArtifact.new(output_dir)
+        latest = artifact.latest_dump_path
+
+        reused.index_incremental
+
+        expect(artifact.latest_dump_path).to eq(latest)
+        expect(Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).find('User')['file_path'])
+          .to eq('app/domain/user.rb')
+      end
+
+      it 'rebuilds a missing metadata snapshot without re-embedding existing vectors' do
+        artifact = Woods::IndexArtifact.new(output_dir)
+        File.delete(artifact.latest_dump_path.join('metadata.msgpack'))
+        calls = provider.embed_batch_calls
+
+        fresh_indexer.index_incremental
+
+        expect(Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).find('User')).to eq(unit_data)
+        expect(provider.embed_batch_calls).to eq(calls)
+      end
+
+      it 'keeps the promoted metadata and checkpoint intact if publication fails, then retries' do
+        update_user_metadata
+        artifact = Woods::IndexArtifact.new(output_dir)
+        latest = artifact.latest_dump_path
+        original_checkpoint = File.read(File.join(output_dir, 'checkpoint.json'))
+        failing = fresh_indexer
+        allow(failing).to receive(:persist_snapshot).and_raise(IOError, 'disk full')
+
+        expect { failing.index_incremental }.to raise_error(IOError, 'disk full')
+        expect(artifact.latest_dump_path).to eq(latest)
+        expect(File.read(File.join(output_dir, 'checkpoint.json'))).to eq(original_checkpoint)
+        expect(Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).find('User')).to eq(unit_data)
+
+        fresh_indexer.index_incremental
+        expect(Woods::Storage::Snapshotter::Metadata.load_or_empty(artifact).find('User')['file_path'])
+          .to eq('app/domain/user.rb')
+      end
+    end
+
     # B-069: the dump gate skipped persist_snapshot on processed==0, which also
     # froze metadata.msgpack — so a deleted unit kept both its stale vector AND
     # its metadata, taking the vector from inert to retrievable. Deleting a unit

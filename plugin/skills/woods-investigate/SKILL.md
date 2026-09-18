@@ -9,6 +9,13 @@ Woods is runtime evidence: resolved routes, schema, associations, callbacks, inl
 
 ## Preflight
 
+Supporting servers include concise MCP initialization/discovery guidance without
+this plugin. That feature (#402) is unreleased after `2.0.0.beta2`; check the
+installed server version, and do not require it from protocol `2024-11-05`.
+Follow the [agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
+when instructions are absent. A registered tool does not establish retrieval
+readiness or authorize maintenance or live Console access.
+
 Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; use `codebase_retrieve` only when status reports retrieval enabled. If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist.
 
 ## The default loop
@@ -32,6 +39,19 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 The normal packaged Index Server registers 14 tools; conditional schemas register only when their wiring is configured — use the connected server's own tool list, never the source inventory. Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure. Never work around a block, validation error, or redaction.
 
+## Partial search answers
+
+Search completeness (#410) is unreleased after `2.0.0.beta2`. Verify the installed
+server version and response before relying on it; this plugin does not upgrade
+the gem. On supporting versions, `result_count` counts returned rows, while
+`completeness.reason: exhausted` establishes an exact total for the requested
+index/query domain. `result_limit` proves at least one additional match;
+`scan_budget` and `regex_timeout` leave more matches and totals unknown. Narrow
+types, literal prefix/suffix filters, or deep fields when `partial` is true.
+Artifact errors have unknown completeness. Missing metadata on older servers,
+a full page, and an empty partial result never establish exhaustive absence.
+See the [search contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#search-completeness).
+
 ## Partial dependency answers
 
 Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods
@@ -43,8 +63,46 @@ deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
 paging alone only visits the discovered prefix. See the
 [budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
 
+## Volatile dependency reports
+
+Read `stats.volatile_dependency_count` before judging the top-20 array: it
+counts all qualifying edges. A frequently changed dependency can occupy most
+rows. Use the installed version's ratio tuning guidance; the optional
+`volatile_dependency_limit_per_target` setting (B-188) is unreleased after
+2.0.0.beta2, so verify gem support before recommending it. Supporting versions
+can cap each typed target before selecting the global top 20 and expose the
+cap plus `volatile_dependency_reported_count` in stats. Re-extract after
+configuration changes. Treat the report as candidates for source review, never
+an automatic gate. See the
+[configuration reference](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pipeline-options).
+
 ## Report evidence
 
 Name the tools and exact identifiers used, cite the source paths Woods returned, separate direct Woods evidence from inference, and state generation/staleness caveats. Say when a claim still needs source or test verification.
 
 Canonical guides: [AGENT_GUIDE.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md), [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_TOOL_COOKBOOK.md).
+
+## Lexical retrieval capability check
+
+This is a development capability. Before proposing it, verify the installed gem
+exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
+`WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
+from the plugin version or an unreleased checkout.
+
+When status reports lexical mode, use the matching fields/terms as discovery
+evidence and verify key units with `lookup`. The ranked top 20 is not exhaustive;
+no lexical match does not establish absence. Continue using `budget`, not `limit`.
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for the supported contract, checked against the installed gem version.
+
+## Explicit package or path scope
+
+Check the connected tool's advertised input schema before sending `packages` or
+`source_paths`; older installed gems may not support them. When present, both
+`search` and `codebase_retrieve` apply explicit scope before candidate limits.
+Use published nearest package names or application-relative directory prefixes,
+then inspect `applied_scope` and search completeness. Unknown packages are argument
+errors; unsupported custom vector adapters degrade instead of running a global
+query. Scoping can hide relevant cross-boundary relationships, so broaden the
+request deliberately when the task needs them. See the
+[scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).

@@ -418,6 +418,7 @@ module Woods
       def vector_store   = @retriever.vector_store
       def metadata_store = @retriever.metadata_store
       def graph_store    = @retriever.graph_store
+      def mode = @retriever.respond_to?(:mode) ? @retriever.mode : :semantic
 
       # Invalidate every cached context result. Called from the MCP +reload+
       # tool after the retriever's stores have been re-hydrated from a fresh
@@ -449,12 +450,14 @@ module Woods
       # @param types [Array<String, Symbol>, nil] Include-only filter
       # @param exclude_types [Array<String, Symbol>, nil] Additional exclusions
       # @return [Retriever::RetrievalResult]
-      def retrieve(query, budget: 8000, types: nil, exclude_types: nil)
-        key = context_key(query, budget, types: types, exclude_types: exclude_types)
+      def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/ParameterLists
+        scoped = Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+        scope_options = scoped ? { packages: packages, source_paths: source_paths } : {}
+        key = context_key(query, budget, types: types, exclude_types: exclude_types, **scope_options)
         cached = @cache_store.read(key)
         return rehydrate_cached(cached, budget) if cached
 
-        result = @retriever.retrieve(query, budget: budget, types: types, exclude_types: exclude_types)
+        result = @retriever.retrieve(query, budget: budget, types: types, exclude_types: exclude_types, **scope_options)
 
         begin
           @cache_store.write(key, serialize_result(result), ttl: @context_ttl)
@@ -478,8 +481,13 @@ module Woods
       # @param types [Array<String, Symbol>, nil]
       # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
-      def context_key(query, budget, types: nil, exclude_types: nil)
-        Cache.cache_key(:context, query, budget.to_s, fingerprint(types), fingerprint(exclude_types))
+      def context_key(query, budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/ParameterLists
+        parts = [query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
+        parts << 'lexical' if mode == :lexical
+        if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+          parts << JSON.generate(packages: packages, source_paths: source_paths)
+        end
+        Cache.cache_key(:context, *parts)
       end
 
       def fingerprint(types)
@@ -504,7 +512,8 @@ module Woods
           tokens_used: cached['tokens_used'],
           budget: budget,
           trace: nil,
-          type_rank_context: rehydrate_type_rank_context(cached['type_rank_context'])
+          type_rank_context: rehydrate_type_rank_context(cached['type_rank_context']),
+          applied_scope: rehydrate_scope(cached['applied_scope'])
         )
       end
 
@@ -514,8 +523,15 @@ module Woods
           'sources' => result.sources,
           'strategy' => result.strategy&.to_s,
           'tokens_used' => result.tokens_used,
-          'type_rank_context' => serialize_type_rank_context(result.type_rank_context)
+          'type_rank_context' => serialize_type_rank_context(result.type_rank_context),
+          'applied_scope' => result.applied_scope
         }
+      end
+
+      def rehydrate_scope(scope)
+        return nil unless scope
+
+        scope.transform_keys(&:to_sym).tap { |value| value[:outcome] = value[:outcome]&.to_sym }
       end
 
       # type_rank_context is a Hash<String => Hash<Symbol, ...>> with

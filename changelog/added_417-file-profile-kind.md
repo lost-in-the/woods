@@ -1,0 +1,1 @@
+- Mark whole-file caching, configuration, test mapping, Rails source, and gem source graph nodes and typed variants with `kind: "file_profile"`, preserving file membership and identifiers while letting consumers distinguish profiles from constant-owned units (#417).

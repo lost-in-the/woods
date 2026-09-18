@@ -14,6 +14,55 @@ Three harnesses, three questions.
 
 `woods:evaluate:baseline[grep|random|file_level]` scores a naive strategy on the same query set for comparison.
 
+## Paired lexical comparison (#404 / #227)
+
+`bench/evaluation/lexical_comparison.rb` runs **all 28 existing questions at their
+existing budgets** through semantic retrieval, lexical-only retrieval, a fixed
+query-seeded graph experiment, and the existing identifier-substring grep baseline.
+Unlike the strategy groups below, these conditions answer the same questions.
+The semantic condition replays the same captured real MiniLM vectors; labels,
+source snapshot and the original quality floors are unchanged.
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/lexical_comparison.rb /tmp/woods-paired.json
+# Use the pinned tokenizer environment described below:
+python bench/evaluation/capture_tokens.py /tmp/woods-paired.json lexical_comparison_capture.json
+```
+
+The second command writes `bench/evaluation/lexical_comparison_capture.json`.
+It retains every query's outcomes, context hash and exact token count, including
+misses. Raw returned contexts remain in `/tmp/woods-paired.json`. The capture binds
+its corpus/vector hashes and tokenizer provenance. It is reviewed experimental
+evidence, not a replacement for the required semantic gate.
+
+Initial Ruby 4.0.6 comparison (five warm pipeline repetitions per question):
+
+| Condition | Precision@5 | Recall | MRR | Mean actual context tokens | Median query latency (ms) |
+|---|---:|---:|---:|---:|---:|
+| Existing semantic pipeline | 0.536 | 0.580 | 0.857 | 1,000.7 | 3.019 |
+| Explicit lexical | 0.492 | 0.666 | 0.780 | 1,152.6 | 0.407 |
+| Lexical + query-seeded graph experiment | 0.396 | 0.476 | 0.750 | 1,159.8 | 3.292 |
+| Existing identifier grep baseline | 0.342 | 0.288 | 0.336 | 592.9 | 0.628 |
+
+Lexical retrieval improves recall on this small set while losing precision and
+first-hit rank against the semantic pipeline. This supports an explicit offline
+option, not semantic equivalence or a new default. The seeded graph condition
+loses on these measures and stays **evaluation-only**. It uses 20 iterations,
+restart probability 0.15, normalized positive lexical seeds, bidirectional
+recorded relationships within type eligibility, and no seeds for a no-match
+query. These choices were fixed before scoring; no weights were tuned to labels.
+The grep baseline matches identifiers, not source text; it retains its existing
+ordering, with eligibility applied before its limit and the same budgeted renderer.
+
+Latencies are warm in-process measurements over 62 units. They exclude lexical
+snapshot construction, live embedding/network latency and Rails extraction; they
+are not host-scale performance claims. Exact tokens count returned context only,
+using the existing `cl100k_base` capture machinery. Agent task outcomes were not
+measured. Ambiguous typed identities, concern/callback metadata and unrelated-hub
+controls also have targeted regressions; those synthetic controls do not replace
+representative host evaluation. Broader production/provider/agent evidence remains
+open under #227.
+
 ## Checked-in Canopy retrieval gate
 
 The required CI `coverage` job runs this offline command before its test suite:
@@ -58,21 +107,20 @@ not always by five. Recall divides retrieved relevant units by all annotated
 relevant units. MRR is the mean reciprocal rank of the first relevant hit; a
 query with no relevant hit contributes zero.
 
-`profiles.json` binds measured Ruby runtimes to independently scored captures.
-Ruby 3.0.7, 3.1.7, and 3.2.11 share the legacy capture; Ruby 3.3.1, 3.4.10, and
-4.0.6 share the capture above. Other Ruby engines or major/minor versions fail
-with a recapture instruction. All six runtimes now produce the aggregate metrics
-above. B-191 orders equal PageRank scores lexically by identifier before assigning
-the existing ordinal percentiles; their importance maps no longer depend on Ruby's
-tie ordering. Vector precision/recall/MRR are 0.313 / 0.375 / 0.625 in both groups.
-The original positive quality floors remain unchanged.
+`profiles.json` binds six measured Ruby runtimes to a shared context capture:
+Ruby 3.0.7, 3.1.7, 3.2.11, 3.3.1, 3.4.10, and 4.0.6. Other Ruby engines or
+major/minor versions fail with a recapture instruction. All six produce identical
+retrieved identifiers, context bytes, token counts and quality metrics for every
+query. The original positive per-runtime quality floors remain unchanged in
+`baseline.json` and `baseline_legacy.json`.
 
-Separate context captures remain necessary for **B-192**: hybrid candidate sorting
-still orders equal scores differently before truncation and RRF. On `hybrid-2`,
-`Newsletter::DeliverJob` and `Newsletter::Delivery` exchange leading positions
-between the two runtime groups. Their quality metrics and exact token counts
-match, but context bytes differ. The harness preserves this measured difference;
-it does not reorder production answers to make the profiles agree.
+B-191 orders equal PageRank scores lexically by identifier. B-192 orders hybrid
+candidates by descending score, identifier, then source before truncation and
+RRF; the same ordering selects the three vector seeds for graph expansion.
+Only `hybrid-2` changes from the prior Ruby 3.3–4.0 capture: `Newsletter::DeliverJob`
+now precedes `Newsletter::Delivery`, matching the prior Ruby 3.0–3.2 answer.
+No quality metric or exact token count changes. This is production retrieval
+ordering, with no answer reordering in the evaluation harness.
 
 These are separate annotated query groups, **not a controlled comparison of six
 strategies on identical questions**. Relevance annotations were written from
@@ -124,9 +172,10 @@ bundle exec ruby -Ilib -r./bench/evaluation/runner -e \
 /tmp/woods-eval-venv/bin/python bench/evaluation/capture_tokens.py /tmp/retrieval-capture.json
 ```
 
-For a legacy-runtime capture pass `capture_report_legacy.json` as the second
-argument to `capture_tokens.py`. Use the matching runtime in `profiles.json`,
-and retain its exact version in the report.
+Replay all six measured Ruby lines before replacing the shared capture. Retain
+the exact capture runtime in the report and preserve each runtime’s original
+quality floors. A newly observed runtime difference needs separate reviewed
+captures rather than being hidden by answer reordering.
 
 Review every changed answer and score before updating the matching baseline digests or
 floors. Never lower a floor merely to make CI pass. Keep labels independent of
@@ -210,3 +259,48 @@ The Rails Foundation's "Agents on Rails" benchmark (announced 2026-08-13, built 
 ### Reading the numbers
 
 A negative `delta.mean_tokens` with an equal or higher `delta.resolution_rate` is the result that sells the index, on the tasks actually run. It does not, by itself, establish that the index causes the difference: run at least ten tasks, two conditions on five tasks is noise, and remember that agent runs are not perfectly reproducible even at a fixed baseline SHA. Keep the baseline SHA and Woods generation fixed across a comparison (both are recorded per result), and do not let the `on` agent run `woods:extract` mid-task.
+
+## Explicit scope comparison
+
+`bench/evaluation/scope_comparison.rb` reuses #227's 62-unit Canopy extraction,
+28 original questions, captured MiniLM vectors, unchanged gold labels, and the
+same 1200-token budgets. Fixed domain-word rules choose the existing billing,
+newsletter, or support directories across models, controllers, jobs, and use
+cases. Other questions are unscoped controls. This assigns **no package ownership**
+to Canopy. Expected units outside a requested directory remain in the gold labels,
+so restricting scope can reduce recall for questions about cross-boundary behavior.
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/scope_comparison.rb /tmp/woods-scope-raw.json
+python bench/evaluation/capture_tokens.py /tmp/woods-scope-raw.json scope_comparison_capture.json
+```
+
+Use the pinned Python requirements in this directory's existing evaluation runbook.
+The capture records per-query scope, outcomes, context hashes, exact cl100k counts,
+and the existing precision@5, recall, and MRR metrics. Warm replay latency includes
+scope preparation and excludes provider/network time. This is a filtering and
+ranking comparison, not a coding-task or live-host performance claim.
+
+`spec/retrieval/package_scope_spec.rb` separately builds a synthetic Packwerk
+filesystem fixture and obtains root, nested, and sibling ownership from the real
+`PackageExtractor`. It verifies package boundaries without inventing ownership in
+a captured host corpus. Live pgvector/Qdrant tests cover a small eligible package
+behind globally stronger matches, typed chunks, and old vectors without metadata
+payload fields. The broader task-quality question in #227 remains open.
+
+The reviewed capture uses 11 scoped questions and 17 unchanged controls per mode.
+On the 11 questions with a requested directory scope:
+
+| Mode | Scope | Precision@5 | Recall | MRR | Mean exact context tokens |
+|---|---|---:|---:|---:|---:|
+| Semantic | none | 0.5758 | 0.6530 | 0.9545 | 907.55 |
+| Semantic | explicit paths | 0.6364 | 0.5621 | 0.9091 | 820.73 |
+| Lexical | none | 0.5394 | 0.7364 | 0.8636 | 1201.45 |
+| Lexical | explicit paths | 0.6970 | 0.6455 | 0.8030 | 936.73 |
+
+Scope improves precision here while losing cross-boundary expected units. It is
+an explicit intent filter, not a default ranking improvement. Scoped lexical
+median query time was 2.30 ms versus 0.41 ms unscoped on these 11 replay questions;
+preparing the full metadata snapshot is visible even on this small corpus.
+Exact token counts measure the returned context, not MCP metadata or agent prompts;
+Woods' 1200-token budget is an estimate and can differ from cl100k counts.

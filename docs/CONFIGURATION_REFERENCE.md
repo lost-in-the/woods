@@ -108,6 +108,7 @@ Columns:
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
 | `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
+| `retrieval_mode` | Symbol | `:semantic` | user-settable | `:semantic` uses configured embeddings; explicit `:lexical` ranks published text without a provider/vector store. See [retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval). |
 | `max_context_tokens` | Integer | `8000` | user-settable | Maximum tokens for retrieval context windows |
 | `similarity_threshold` | Float | `0.7` | user-settable | Minimum similarity score (0.0-1.0) for retrieval results |
 | `context_format` | Symbol | `:markdown` | user-settable | Output format for retrieval: `:claude`, `:markdown`, `:plain`, `:json` |
@@ -134,6 +135,17 @@ config.embedding_options = {
   dimensions: 1536
 }
 ```
+
+OpenAI embedding batches are sent in slices of at most 36 texts, preserving
+input order. For inputs within the API's 8,192-token per-text limit, this stays
+below both the 2,048-input limit and the 300,000-token total request limit.
+See the [OpenAI embedding request contract](https://developers.openai.com/api/reference/resources/embeddings/methods/create).
+Woods retains its conservative 8,191-token chunking ceiling; slicing does not
+make an individually oversized text valid. This bound avoids relying on token
+estimates and adds HTTP requests for batches containing many short chunks.
+All slices must validate, including consistent vector dimensions, before the
+provider returns any vectors for the batch. Ollama and custom providers keep
+their existing batching behavior.
 
 ### Ollama embeddings
 
@@ -224,6 +236,15 @@ config.metadata_store_options = {
 }
 ```
 
+Without an explicit `database` option, SQLite uses
+`<output_dir>/metadata.sqlite3`. For `woods:embed` and
+`woods:embed_incremental`, `WOODS_OUTPUT` overrides that directory together
+with the index and embedding dumps. An explicit `database` path (including
+`:memory:`) still takes precedence, so configure a separate path for each
+worktree when overriding it. Existing databases at the old configured output
+path are not moved or deleted; run `woods:embed` for the selected index after
+upgrading to populate its default metadata database.
+
 Requires the `sqlite3` gem in your host bundle. Rails apps backed by
 MySQL or PostgreSQL won't have it by default, selecting `:sqlite`
 without it raises `Woods::ConfigurationError` with install
@@ -236,10 +257,13 @@ unless cross-process metadata persistence matters.
 config.metadata_store = :in_memory
 ```
 
-Pure-Ruby hash-backed store. No external dependencies, no persistence, vectors and metadata both live in the building process and die with
-it. The `_index.json` manifest under `output_dir` is the durable
-metadata for the index MCP server, so this is a reasonable default
-for hosts that don't bundle `sqlite3`.
+Pure-Ruby hash-backed store with no external dependencies. For local vector
+presets, embedding runs persist it as `metadata.msgpack` alongside `vectors.bin`
+in the promoted dump; the index MCP server loads that snapshot at startup or
+reload. Incremental embedding publishes changes to paths, dependencies, and
+other unit metadata even when unchanged source needs no new embedding. A run
+with no content or metadata changes keeps the existing dump and retention
+window. This is a reasonable default for hosts that don't bundle `sqlite3`.
 
 ## Retrieval cache options
 
@@ -277,6 +301,13 @@ Redis/Solid Cache store layer when a write supplies no TTL. The `ttl:` hash
 overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
+
+`Woods::Cache.cache_key` length-prefixes every component, including a single
+component, so different argument counts cannot share a response. Existing
+multi-component keys used by Woods' wrappers remain unchanged. Custom callers
+using single-component keys must clear their affected persistent cache domain
+when upgrading, since older unprefixed entries can alias the new encoding;
+subsequent calls refill it normally. Namespace clearing still covers both formats.
 
 ## Deployment shapes
 
@@ -358,11 +389,40 @@ end
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
 | `volatile_dependency_ratio` | Float | `3.0` | A dependency whose commit count (last 365 days) exceeds the dependent's by this ratio appears in the `volatile_dependencies` report (top 20, ranked by PageRank). Must be greater than 1. Report only, never a gate. |
+| `volatile_dependency_limit_per_target` | Integer or `nil` | `nil` | Optional maximum report edges per dependency (type and identifier), applied after ranking and before the global top 20. Positive integers only; `nil` leaves the default report unchanged. Distinct relationships consume separate slots. |
 | `graph_cycle_limit` | Integer or `nil` | `500` | How many distinct cycles `GraphAnalyzer` enumerates before it stops. Cycle detection finds one cycle per DFS back-edge, so a dense graph has tens of thousands of them and enumerating every one is the largest single cost of the analysis that runs on every extraction. Set to `nil` for exhaustive enumeration. |
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
 
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
+
+**Tuning volatile dependency reports.** Start with
+`graph_analysis.json`'s `stats.volatile_dependency_count`: it counts every
+qualifying edge before either cap, while the array normally keeps only 20.
+Raise `volatile_dependency_ratio` until the remaining candidates are useful
+for your application. A measured 7k-unit app had 544 qualifying edges at 3.0;
+8–10 was a useful ratio there, not a universal recommendation. Commit counts
+cover the last 365 days and need complete git history; missing git data is not
+proof of stability.
+
+If one hot dependency still fills the list, set
+`volatile_dependency_limit_per_target` to a small positive integer such as 3.
+Each dependency keeps its highest-ranked edges before the global limit applies,
+allowing other dependencies into the report. Different relationship labels
+remain separate edges and consume separate slots. With this option enabled,
+`stats.volatile_dependencies_limit_per_target` records the setting and
+`stats.volatile_dependency_reported_count` counts the final persisted array;
+`stats.volatile_dependency_count` still counts all qualifying edges. The extra
+stats are absent at the default `nil`. This limits the report, not the work of
+finding qualifying edges. Run extraction again after changing either setting;
+MCP reads the published report. These findings remain informational, never a
+release or architecture gate.
+
+When the JSON snapshot fallback is in use, malformed JSON, top-level values
+other than objects, and files that cannot be read (including concurrent retention
+removals) are warned about and treated as absent. Snapshot lists and unit history
+omit them; direct lookup returns no snapshot, and a diff with an unavailable
+snapshot returns empty added, modified, and deleted lists.
 
 `incremental_blast_radius_depth` is unbounded by default because a unit two hops
 out really can have content that depends on the changed file. An STI grandchild
@@ -412,6 +472,20 @@ config.session_store = Woods::SessionTracer::FileStore.new(
 )
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```
+
+### Redis session index compatibility
+
+`RedisStore` lists and clears both legacy SET indexes and recency ZSET indexes.
+Listing removes expired members and orders summaries by their last request.
+Reads and clears preserve a legacy SET, so upgrading only readers does not
+break older writers. Type checks and index operations run atomically in Redis
+and tolerate a concurrent writer converting the index.
+
+The first `record` from a newer writer converts the SET to a ZSET atomically.
+Upgrade writers together: older SET writers cannot write after that conversion.
+Migrated members receive score zero, so they evict in lexical order at the
+retention limit until recorded again; new records use their request timestamp.
+Session list contents and TTLs are preserved by the index conversion.
 
 ### Solid Cache session retention and compatibility
 
@@ -577,13 +651,14 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
+| `WOODS_RETRIEVAL_MODE` | `semantic` | Explicit packaged MCP retrieval mode: `semantic` or `lexical`. Lexical reads extraction unit JSON without provider autodetection, credentials or vector artifacts. |
 | `WOODS_DIR` | `Dir.pwd` | Path to the extraction output directory. |
-| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. |
+| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
 | `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
 | `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
 | `WOODS_ALLOW_PURGE` | unset | Set to `"1"` to override the 30%-deletion purge guard in `woods:embed`/`woods:embed_incremental`. |
-| `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain, and — when the JSON snapshot store is in use — how many temporal snapshots (`snapshots/`) to keep. A payload pinned by an active reader process is kept temporarily beyond this bound and reconsidered after the pin is released. |
+| `WOODS_PAYLOAD_RETENTION` | `3` | How many past generations' payload directories (`payloads/gen-N/`) to retain, and — when the JSON snapshot store is in use — how many temporal snapshots (`snapshots/`) to keep. JSON snapshot retention counts corrupt or unreadable SHA-named files and prunes them first; the just-captured snapshot is protected. Cleanup failures are non-fatal. A payload pinned by an active reader process is kept temporarily beyond this bound and reconsidered after the pin is released. |
 | `WOODS_MCP_CACHE_TTL_MS` | `10000` | Cache TTL advertised in tool result `_meta`. `0` disables caching. |
 | `WOODS_NO_UPDATE_CHECK` | unset | Set to `"1"` to skip the `woods_status` RubyGems version check. |
 | `XDG_CACHE_HOME` | `~/.cache` | Base directory for the best-effort update-check cache (`$XDG_CACHE_HOME/woods/update_check.json`). An unset or empty value uses `~/.cache`; if the home directory cannot be resolved, Woods falls back to the system temporary directory. |
@@ -620,7 +695,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean` proceed even when a daemon is (or claims to be) running. For `woods:incremental` this removes daemon coverage: a git range that fails to resolve then exits 1 instead of standing down (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains)). |
+| `WOODS_IGNORE_WATCH` | unset | Set to `"1"` to make `woods:incremental`/`woods:clean`/`woods:hook_refresh` proceed even when a daemon is (or claims to be) running. For `woods:incremental` this removes daemon coverage: a git range that fails to resolve then exits 1 instead of standing down (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#exit-behavior-in-ci-chains)). |
 | `WOODS_LOCK_WAIT` | `Watch::Daemon::LOCK_STALE_TIMEOUT` (600s) | How long a rake writer waits for `PipelineLock` before exiting non-zero. |
 | `WOODS_WATCH_POLL` | auto-detected | Set to `"1"`/`"0"` to force/disable polling mode (vs. `listen` gem, e.g. in a container without inotify). |
 | `WOODS_WATCH_POLL_INTERVAL` | `1.0` (seconds) | Positive, finite delay between polling scans; also used on native-watcher fallback. Does not force polling. Larger values reduce scan frequency and can delay detection and shutdown. |
@@ -630,11 +705,33 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
 | `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset (disabled) | Set to `"1"` in each task/MCP reader to trust a foreign daemon's heartbeat for up to 15 minutes, without a local pid check. See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for clock bounds, degraded coverage, and startup limitations. |
 
+### Opt-in plugin refresh hooks
+
+These settings control the plugin shell worker. Check installed
+`woods:hook_refresh` support first; the task is unreleased after 2.0.0.beta2.
+See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `WOODS_HOOKS_ENABLED` | unset (disabled) | Exact `1` enables the refresh/session hooks when an index exists. |
+| `WOODS_HOOKS_DISABLED` | unset | Exact `1` overrides enablement. |
+| `WOODS_HOOK_RAKE` | `bundle exec rake` | Application command prefix; supports `docker compose exec -T app bundle exec rake`. Use a wrapper for shell quoting or explicit container environment. |
+| `WOODS_SOURCE_CAPTURE` | internal | Private, one-use `woods-extract` child handoff. Do not set or persist this variable manually; see [source freshness](SOURCE_FRESHNESS.md). |
+| `WOODS_HOOK_TIMEOUT_SECONDS` | `600` | PostToolUse worker deadline (SessionStart uses a fixed ten seconds), integer 1–3600 seconds; failed/deferred batches remain queued. Docker-side cancellation requires separate verification. |
+| `WOODS_HOOK_LOCK_STALE_SECONDS` | `1800` | Age used only to reclaim legacy empty mkdir locks; live PID owners are never reclaimed merely by age. |
+
+`woods:hook_refresh[<base64 JSON>]` is the internal plugin transport. Version 1
+contains `output` and an `events` array of `{path, operation}` records; paths are
+application-relative and operations are `add`, `update`, `delete`, or `move`.
+The task validates inputs, defers active daemons with exit 75 before Rails boot,
+and checks publication failure before acknowledging work. Use ordinary extraction
+tasks for manual refreshes; hook transport is not a general shell execution API.
+
 ### Extraction rake tasks
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for `woods:extract`/`woods:incremental`/`woods:watch` without editing the initializer. |
+| `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for extraction/watch and embedding tasks without editing the initializer; embedding also places its default SQLite metadata database there. Explicit database options take precedence. |
 | `CHANGED_FILES` | unset | Comma-separated explicit changed-path list for `woods:incremental`; when set, git range resolution is skipped entirely. |
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
@@ -685,6 +782,13 @@ be read completely. Git enrichment is omitted in either case; a failed or
 incomplete streamed history read logs a warning.
 This requirement and the history policy below are unreleased after 2.0.0.beta2.
 
+Per-unit enrichment also requires a non-shallow repository. A shallow checkout
+or a failed repository-depth probe omits enrichment with one warning per
+extractor instance. Fetch complete history (`git fetch --unshallow`, or
+`actions/checkout` with `fetch-depth: 0`) and run full extraction to refresh
+retained metadata. If depth cannot be verified, check git access and version.
+A source archive without a repository remains quiet.
+
 Full and incremental extraction use one streamed `HEAD` history walk, restricted
 to the last 365 days by git's `--since` traversal. Only requested app-owned paths
 are retained. Commit counts and contributors describe **HEAD-reachable touched-path
@@ -721,3 +825,12 @@ All storage options work with both MySQL and PostgreSQL, except:
 - **SQLite metadata store**: uses a standalone SQLite database file, independent of your app's database
 
 See [BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.
+
+### Explicit retrieval and discovery scope
+
+On a server whose tool schema advertises them, `packages` and `source_paths` narrow
+`search` and `codebase_retrieve` before candidate limits. These are per-call
+arguments, not configuration settings. Inspect applied scope and completeness;
+a narrow graph query can omit relevant cross-boundary dependencies. See the
+[scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
+root/nested ownership, path normalization, errors, storage support, and cost.

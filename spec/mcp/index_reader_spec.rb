@@ -1199,7 +1199,7 @@ RSpec.describe Woods::MCP::IndexReader do
     # on newer Rubies (where it is the standing condition on 3.0/3.1).
     it 'propagates unrelated phase-two failures instead of masking them' do
       failing_reader = described_class.new(fixture_dir)
-      allow(failing_reader).to receive(:find_unit).and_raise(IOError, 'disk gone')
+      allow(failing_reader).to receive(:load_unit).and_raise(IOError, 'disk gone')
 
       has_timeout_error = Regexp.const_defined?(:TimeoutError, false)
       original = Regexp.const_get(:TimeoutError, false) if has_timeout_error

@@ -7,11 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
+
 ### Fixed
+
+- Reflect model callbacks from Rails' per-event chains instead of nonexistent
+  per-kind readers; include `before_commit` and keep `callback_count` equal to
+  the emitted callback list. Preserve framework callbacks with stable Proc/lambda
+  source-site labels and address-free default callback-object descriptions in
+  metadata and chunks, including Rails 6's `raw_filter`, so separate-process
+  extractions of unchanged models remain equivalent. Preserve custom object labels.
+
+- Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
+  and upgrade guidance before suggesting changes to valid namespace wrappers
+  on older-loader or classic-mode hosts (B-149).
+
+- Stabilize controller inline callback and condition labels across processes and
+  checkout paths, including action chunks; retain `unless` conditions in the
+  generated filter-chain header (B-167).
+
+- Publish metadata-only changes in local embedding snapshots without re-embedding
+  unchanged source; retain no-op dumps and source-hash checkpoints (B-119).
+
+- Search Boolean metadata fields as `true`/`false` consistently in SQLite and
+  InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
+
+- Keep the default SQLite metadata database inside the effective `WOODS_OUTPUT`
+  directory for embedding tasks, isolating indexes while preserving explicit
+  database overrides (B-156). Existing databases are not moved; run `woods:embed`
+  for the selected index after upgrading.
+
+- Treat non-object JSON snapshots and files removed or made unreadable during
+  a read as absent across lookup, listing, diffs, and unit history (B-158).
+
+- Count corrupt and unreadable SHA-named JSON snapshots toward retention and
+  evict them before valid history, preserving the just-captured snapshot and
+  unrelated files (B-163).
+
+- Count the final retrieval context after formatting and type-rank metadata,
+  keeping `tokens_used` and its trace consistent with the configured counter
+  or estimate (B-197, #354).
+
+- Order tied hybrid retrieval candidates deterministically before graph seed
+  selection, truncation and reciprocal-rank fusion across supported Ruby versions
+  (B-192).
+
+- Bound OpenAI embedding requests to 36 valid inputs, preserving chunk order and
+  rejecting partial or dimension-inconsistent batches (B-157). Chunk-heavy runs
+  use more HTTP requests to stay within the API's input and total-token limits.
+
+- Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
+
+- Prevent single-component cache keys from colliding with multi-component or
+  empty keys by uniformly length-prefixing components (B-155). Custom callers
+  using persistent single-component keys should clear that cache domain on upgrade.
+
+- Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
+
+- Omit per-unit git enrichment for shallow checkouts or unverifiable repository
+  depth, with one warning and full-history recovery guidance, instead of
+  reporting truncated commit counts as complete churn data (B-189).
+
+- Validate direct/legacy Console scope arrays with the active SQL dialect and
+  MySQL session quote modes, refusing subqueries hidden by mismatched quote
+  stripping while retaining the supported tools' narrower scope grammar (B-154).
+
+- Read and clear legacy Redis session indexes before any new record without
+  `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
+  and keeps reader-only upgrades compatible with older SET writers (B-162).
+
+- Allow full extraction when ActionMailer is absent and skip non-app mailers
+  instead of publishing empty units at fabricated paths; share that ownership
+  gate with incremental class discovery (B-153).
+
+- Repair corrupt pipeline cooldown state on an explicit all-reset, including
+  `pipeline_repair` in custom operator-configured servers; ordinary reads still
+  deny operations and scoped resets preserve corrupt state (B-159).
+
+- Normalize incremental change paths before deduplication and dispatch, including
+  trailing root slashes, repeated separators and dot segments (B-148).
+
+- Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
+
+- Reflect model methods after schema loading so full and incremental runs agree
+  on Rails-generated constructors while preserving application overrides (B-202, #363).
+
+- Parse job `perform_params` and shared `initialize_params` from Ruby parameter
+  syntax, avoiding phantom names from keyword/default expressions while preserving
+  the existing metadata fields and named rest/block arguments (B-151).
+
+- Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
+  loading, including relative requires, conditional entries, aliases and custom
+  environment sections (B-203, #364).
+
+- Preserve navigation edges for real named routes such as `file_path`,
+  `image_url`, `download_path`, and `root_path`; unresolved asset/filesystem
+  helper names still produce no edge (B-152).
+
+- Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
+
+- Explain the full-extraction recovery for runtime job removals and bundle
+  upgrades; missing gem-path warnings now include the bundle-update remedy
+  without changing incremental discovery rules (B-165, B-166).
 
 - Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
 
+- Preserve changes to nested `extracted_at` metadata when deciding whether to
+  rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
+
 ### Added
+
+- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
+  from filling the volatility report (B-188). Apply the per-target edge cap before
+  the global top 20, preserve the default output, and expose the configured cap
+  and reported count alongside the full qualifying count when enabled.
 
 - Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
   real MiniLM vectors, per-strategy quality floors, latency observations, and
@@ -99,6 +210,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without this optional provenance field (#323).
 
 ### Changed
+
+- Clarify the existing search-regex timeout exclusion: Ruby 3.0/3.1 remain
+  supported without a per-match time bound. Run the Index MCP process on Ruby
+  3.2+ for the one-second per-match limit; no runtime mitigation was added
+  for older interpreters (B-161).
 
 - Reduce payload-clone allocation and traversal overhead while preserving
   hardlinks, copy fallback and immutable generation ownership (#305).
@@ -537,7 +653,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a previous version migrates automatically on the first record through a
   single atomic server-side script, so concurrent writers racing the legacy
   index cannot erase each other's members or fail mid-migration; eviction
-  order (oldest last request) is unchanged. Adds a live-Redis contract spec
+  order follows oldest last request for newly scored members. Migrated members
+  receive score zero and evict lexicographically until recorded again (B-160).
+  Adds a live-Redis contract spec
   (`spec/session_tracer/redis_store_live_spec.rb`, `WOODS_RUN_LIVE_BACKENDS=1`).
 
 ### Documentation

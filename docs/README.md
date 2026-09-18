@@ -40,6 +40,8 @@ and stdio or Streamable HTTP endpoints directly.
 
 ## Index lifecycle
 
+- [Source freshness](SOURCE_FRESHNESS.md): verify dirty source against a served generation, establish a fresh-process baseline, and understand bounded unknown results.
+
 - [Retrieval guide](RETRIEVAL_GUIDE.md): configure embeddings and understand semantic retrieval, ranking, and token budgets.
 - [Embedding models](EMBEDDING_MODELS.md): choose and size local Ollama models.
 - [Upgrade to Woods 2.0](UPGRADING_TO_2.md): identifier changes, atomic payloads, durable-store reconciliation, and rollback.
@@ -91,6 +93,7 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | Contributor policy | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Coding-agent repository instructions | [AGENTS.md](https://github.com/lost-in-the/woods/blob/main/AGENTS.md) |
 | Non-MCP Ruby access to a published index | [PUBLISHED_INDEX.md](PUBLISHED_INDEX.md) |
+| Generation-bound source evidence and fresh extraction | [SOURCE_FRESHNESS.md](SOURCE_FRESHNESS.md) |
 | Published filesystem layout for external readers | [INDEX_LAYOUT.md](INDEX_LAYOUT.md) |
 | Evaluation harnesses | [EVALUATION.md](EVALUATION.md) |
 

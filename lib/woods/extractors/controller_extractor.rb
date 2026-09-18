@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
@@ -120,8 +122,8 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
-        Rails.logger.error("[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
+        SourceInputs::ConsumerErrors.log(self, "[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
         nil
       end
 
@@ -253,6 +255,7 @@ module Woods
           opts << "only: [#{f[:only].map { |a| ":#{a}" }.join(', ')}]" if f[:only]&.any?
           opts << "except: [#{f[:except].map { |a| ":#{a}" }.join(', ')}]" if f[:except]&.any?
           opts << "if: #{f[:if]}" if f[:if]
+          opts << "unless: #{f[:unless]}" if f[:unless]
 
           opts_str = opts.any? ? " (#{opts.join('; ')})" : ''
           "  #{f[:kind].to_s.ljust(8)} :#{f[:filter]}#{opts_str}"
@@ -272,13 +275,19 @@ module Woods
         controller._process_action_callbacks.map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
-          result = { kind: callback.kind, filter: callback.filter }
+          result = { kind: callback.kind, filter: callback_filter(callback) }
           result[:only] = only if only.any?
           result[:except] = except if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           result
         end
+      end
+
+      # Override only controller Proc conditions; the shared model/mailer
+      # condition format is a separate extraction contract.
+      def condition_label(condition)
+        condition.is_a?(Proc) ? stable_filter(condition) : super
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -734,7 +743,7 @@ module Woods
         applicable = controller._process_action_callbacks.select do |cb|
           callback_applies_to_action?(cb, action_name)
         end
-        applicable.map { |cb| { kind: cb.kind, filter: cb.filter } }
+        applicable.map { |cb| { kind: cb.kind, filter: callback_filter(cb) } }
       end
 
       # Determine if a callback applies to a given action name.

@@ -2,6 +2,14 @@
 
 This guide is for coding agents using an already connected Woods MCP server. Woods is evidence from the running Rails application and its extracted graph; it complements file search, tests, git history, and direct source inspection.
 
+Supporting servers also send a concise version of this workflow in MCP
+initialization/discovery instructions, without requiring an installed plugin.
+Check the connected server's version and registered tools; this feature is
+unreleased after `2.0.0.beta2`, and protocol `2024-11-05` omits the field.
+The [initialization contract](MCP_SERVERS.md#initialization-guidance) describes
+availability. This guide remains the detailed reference when instructions are
+absent or the client does not display them.
+
 ## Start every session with status
 
 Call `woods_status` before relying on the index. Check:
@@ -108,6 +116,17 @@ fields: ["identifier", "source_code", "metadata"]
 
 Start with identifier search. Add source or metadata only when name discovery fails. Restrict types and keep result limits small enough to inspect.
 
+On supporting versions, read `completeness` before calling search exhaustive.
+`result_count` counts returned rows. `result_limit` proves one more match exists;
+`scan_budget` and `regex_timeout` leave that unknown. Only `exhausted` establishes
+an exact total within the requested index/query domain. Narrow types, literal
+prefix/suffix filters, or deep fields when `partial` is true. A detected artifact
+failure remains an error with unknown completeness, never proof of no matches.
+
+This metadata is unreleased after `2.0.0.beta2`; older servers may omit it.
+Do not infer completeness from a full page or missing metadata. See the
+[search response contract](MCP_SERVERS.md#search-completeness).
+
 ## Traverse deliberately
 
 `dependencies` means “what this unit uses.” `dependents` means “what uses this unit.” Both default to bounded breadth-first traversal and accept type or relationship filters.
@@ -127,9 +146,9 @@ before using `max_nodes`/`max_edges`, and follow the
 
 Use returned relationship labels as evidence. Do not infer call order from a dependency edge alone.
 
-## Use semantic retrieval only when ready
+## Use ranked retrieval only when ready
 
-`codebase_retrieve` answers natural-language questions with token-budgeted context. Use it when `woods_status` reports a configured embedding provider and current vector data.
+`codebase_retrieve` answers natural-language questions with token-budgeted context. Use it when `woods_status` reports explicit lexical mode over a current published index, or a configured embedding provider and current vector data in semantic mode. Lexical mode explains matching terms/fields and does not infer synonyms absent from the text; a no-match response is not proof of missing behavior.
 
 Important parameters:
 
@@ -213,3 +232,22 @@ Verification: <source/test/history checked or still needed>
 - [Extractor reference](EXTRACTOR_REFERENCE.md): indexed unit and edge contracts.
 - [Retrieval guide](RETRIEVAL_GUIDE.md): embeddings, ranking, and token budgets.
 - [Troubleshooting](TROUBLESHOOTING.md): stale indexes, disabled retrieval, and startup failures.
+
+### Explicit retrieval and discovery scope
+
+On a server whose tool schema advertises them, `packages` and `source_paths` narrow
+`search` and `codebase_retrieve` before candidate limits. These are per-call
+arguments, not configuration settings. Inspect applied scope and completeness;
+a narrow graph query can omit relevant cross-boundary dependencies. See the
+[scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
+root/nested ownership, path normalization, errors, storage support, and cost.
+
+### Verify source content before relying on freshness
+
+When supported by the installed version, inspect `woods_status.index.source_freshness`.
+Repeated edits can leave the porcelain fingerprint unchanged. A quick-budget
+`unknown` can justify one explicit `source_check: "deep"` call; persistent unknown
+needs the reported limitation resolved, not repeated status polling. Use
+`bundle exec woods-extract full` to establish verified preboot source evidence.
+A named refresh does not certify unrelated consumers or external runtime state.
+Follow [source freshness](SOURCE_FRESHNESS.md) and keep ordinary query scopes narrow.

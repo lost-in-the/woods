@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
+require_relative 'middleware_argument'
+
 module Woods
   module Extractors
     # MiddlewareExtractor handles Rack middleware stack extraction via runtime introspection.
@@ -42,7 +46,7 @@ module Woods
 
         [unit]
       rescue StandardError => e
-        Rails.logger.error("Failed to extract middleware stack: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract middleware stack: #{e.message}")
         []
       end
 
@@ -80,7 +84,9 @@ module Woods
       # @param position [Integer] Position in the stack
       # @return [Hash, nil]
       def extract_single_middleware(middleware, position)
-        name = if middleware.respond_to?(:name)
+        name = if middleware.respond_to?(:klass) && middleware.klass.is_a?(Module)
+                 MiddlewareArgument.render(middleware.klass)
+               elsif middleware.respond_to?(:name)
                  middleware.name
                elsif middleware.respond_to?(:klass)
                  middleware.klass.to_s
@@ -89,7 +95,7 @@ module Woods
                end
 
         args = if middleware.respond_to?(:args)
-                 middleware.args.map(&:to_s)
+                 middleware.args.map { |argument| MiddlewareArgument.render(argument) }
                else
                  []
                end

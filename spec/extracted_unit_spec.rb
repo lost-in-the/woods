@@ -69,6 +69,10 @@ RSpec.describe Woods::ExtractedUnit do
         .to match(/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})\z/)
     end
 
+    it 'ends serialization with the timestamp and source hash used by the write-skip mask' do
+      expect(unit.to_h.keys.last(2)).to eq(%i[extracted_at source_hash])
+    end
+
     it 'includes source_hash' do
       hash = unit.to_h
       expect(hash[:source_hash]).to eq(Digest::SHA256.hexdigest('class User < ApplicationRecord; end'))

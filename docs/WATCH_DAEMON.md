@@ -457,13 +457,11 @@ party) behaves exactly as it always did.
 was told the index matched HEAD while every answer described the tree before
 those edits.
 
-The fingerprint (a digest of `git status --porcelain`) is *as of the call*.
-Nothing records the digest the index was built at, so it cannot tell you "this
-is the same dirty state the index describes", it gives a stable identity for
-the current dirty state, so two of your own calls can be compared to detect the
-tree moving underneath you. Pair it with `generation` to distinguish "tree
-changed and the index followed" from "tree changed and the index has not caught
-up".
+The fingerprint hashes the current `git status --porcelain` path/status list.
+Repeated edits to the same already-dirty file can leave it identical. It is not
+content identity. Use `index.source_freshness` for generation-bound content
+verification; see [source freshness](SOURCE_FRESHNESS.md) for `current`, `drifted`,
+`unknown`, scan budgets, fresh-process capture and partial-runtime limitations.
 
 ### Multi-file read consistency
 
@@ -627,42 +625,92 @@ hooks (`plugin/hooks/hooks.json`), both shipped disabled:
 
 | Hook | When | What it does |
 |---|---|---|
-| `PostToolUse` (`Edit`, `Write`, `MultiEdit`), async | An edit under `app/models`, `config/routes*`, `db/migrate`, `db/*_migrate`, `db/schema.rb`, `db/structure.sql`, or any `package.yml` / `packwerk.yml` | Appends the path to `hook-pending.txt` under a lock, then runs `CHANGED_FILES=<paths> woods:incremental` for whatever is pending, output to `hook.log` |
-| `SessionStart` (`startup`, `resume`) | Session begins | Prints a warning when `generation.json`'s `updated_at` predates `git log -1` |
+| `PostToolUse` (`Edit`, `Write`, `MultiEdit`), async | A supported extraction or boot input changes | Queues an immutable JSON event, then calls `woods:hook_refresh[<encoded batch>]`; output goes to `hook.log` |
+| `SessionStart` (`startup`, `resume`) | Session begins | Checks source content through `woods:source_status`; warns on drift or unknown evidence |
 
-Both read `cwd` from the hook payload, not `CLAUDE_PROJECT_DIR`, which stays
-at the launch root inside a worktree. Both do nothing until
-`tmp/woods/generation.json` exists, and neither runs at all until
-`WOODS_HOOKS_ENABLED=1` is set; `WOODS_HOOKS_DISABLED=1` turns them back off
-without touching that setting. `woods:incremental` still stands down under a
-`:running` daemon, so a hook and a daemon on the same worktree never
-contend. `WOODS_HOOK_RAKE` sets the command prefix (Docker:
-`docker compose exec -T app bundle exec rake`); `WOODS_OUTPUT` points the
-hooks at a non-default index directory, the same variable
-`woods:incremental`/`woods:watch_status` already read.
+Both read `cwd` from the hook payload, so a linked worktree uses its own index.
+Both require an existing `generation.json` and `WOODS_HOOKS_ENABLED=1`;
+`WOODS_HOOKS_DISABLED=1` overrides enablement. The broader refresh task is
+**unreleased after Woods 2.0.0.beta2**. Check the installed gem's task list
+(`bundle exec rake -T woods:hook_refresh`, through the application container
+when appropriate) before enabling this plugin version. An older gem's unknown
+task error leaves queued events in place; installing the plugin does not upgrade
+the gem.
 
-A hook invocation that finds another one already draining the pending file
-does not wait for it: it appends its own path and returns, and the
-in-progress drainer picks that path up on its next pass, looping until a
-drain comes back empty. The one gap this leaves is an append that lands
-between the drainer's last (empty) drain and its releasing the lock: that
-edit is delayed to the next graph-changing edit rather than lost outright,
-and the `SessionStart` warning is the backstop for it.
+The portable path predicate is generated from `PathDispatcher` and
+`ReloadPolicy` with `bundle exec ruby -Ilib script/generate-hook-rules`.
+A contract test rejects stale generated rules. It covers services, controllers,
+jobs, concerns, views, locales, supported test/lib files, routes, package
+boundaries, and the remaining standard extractor triggers. Unrelated documents
+stay quiet. Normal edits use fresh-process incremental extraction; changes to
+initializers, boot configuration, dependencies, schema, or other restart inputs
+use fresh-process full extraction. The transport also preserves explicit
+`add`, `update`, `delete`, and `move` operations; a relevant deletion/move selects
+full extraction to remove runtime classes absent from the next boot. The current
+Claude hook receives one `tool_input.file_path`; it does not infer additional
+paths from shell commands or parse patch text. Client adapters are responsible
+for supplying any additional paths/operations. Custom runtime roots outside the
+standard dispatcher rules require an explicit refresh; the portable predicate
+cannot discover application configuration without booting it.
 
-On a host without `flock`, the mkdir-based fallback lock has no kernel-enforced
-release, so a hook killed mid-drain would otherwise leave a lock directory
-behind forever; each lock directory is reclaimed once its mtime is older than
-`WOODS_HOOK_LOCK_STALE_SECONDS` (default 1800), while a fresh one is still
-respected as busy.
-The age check needs `stat`; on a host with neither `flock` nor `stat`, a crashed
-pending-lock holder can still make the next hook wait until the hook timeout.
+`WOODS_HOOK_RAKE` sets the command prefix (Docker:
+`docker compose exec -T app bundle exec rake`). The encoded JSON task argument
+carries paths and the output setting across the container boundary, without
+assuming Docker forwards host environment variables or can read a host queue
+filename. The host needs Bash 3.2 or later, standard Unix tools, and either `jq`
+or Ruby; it does not need the application bundle. Prefix words are split without
+shell evaluation: use an executable wrapper for quoted arguments or extra
+container environment settings. `WOODS_OUTPUT` overrides `tmp/woods`, relative
+to each process's application root or as an explicitly supplied absolute path;
+absolute paths must be valid on both sides of a container bind mount.
 
-The `SessionStart` warning compares two commit-adjacent timestamps only:
-the generation's `updated_at` against the last commit's time. It says
-nothing about uncommitted changes in the working tree, and a checkout
-sitting on an older commit than the one that produced the generation can
-still read as fresh under this check. Treat a quiet session start as "not
-behind the last commit," not as a general freshness guarantee.
+Each event remains under `<output>/hook-pending/` until the task succeeds.
+Successful no-op consumption is acknowledged too. Contending invocations enqueue
+and return while the owner drains bounded batches (up to 16 events / 48 KiB of
+JSON). Commas, spaces, and newlines are preserved. An empty drain releases the
+lock before checking again, so a final arriving event can acquire ownership.
+A failed command, killed worker, incompatible gem, or publication failure retains
+its batch for retry: delivery is **at least once**, so crash recovery can repeat
+already completed work. Pending events in the previous `hook-pending.txt` format
+are imported on the next relevant edit. Event filenames are private hook state;
+do not modify them while a worker is running.
+
+An active daemon produces exit **75** before Rails boots. This is a deferral,
+not acknowledgement: the hook cannot prove which queued events the daemon has
+consumed. It retains the queue and writes a diagnostic. It does not start, stop,
+or restart the daemon. After resolving the cause, the next relevant edit retries
+the queue. To retry immediately, invoke `woods-post-edit.sh` with the original
+JSON event on stdin and the same opt-in/output/prefix settings; with a running
+daemon, stop it first or explicitly configure `WOODS_IGNORE_WATCH=1` in the
+application command's environment. A quiet `SessionStart` does not acknowledge
+the queue. Prefer a resident watcher for sustained edits; enabling both does not
+make refresh faster and can accumulate deferred events.
+
+The hook enforces its own `WOODS_HOOK_TIMEOUT_SECONDS` deadline (default 600,
+integer range 1–3600), including subsequent batches. It terminates the local
+command process group and retains work on timeout. For a Docker exec prefix,
+local process termination cannot guarantee cancellation inside the container;
+check the application process and extraction lock before retrying a timed-out
+container run. Async client hook timeouts are not a reliable worker deadline.
+With `flock`, kernel locks release after process exit. The mkdir fallback records
+an owner PID and reclaims dead owners; it never steals a live owner's lock based
+only on age. Legacy empty lock directories use `stat` and
+`WOODS_HOOK_LOCK_STALE_SECONDS` (default 1800) for conservative recovery.
+A reused PID can delay recovery until that process exits; inspect the recorded
+owner before manually removing a lock. Hooks sharing this filesystem must run in
+the same host PID namespace; run the actual extraction through the container
+prefix instead of running competing host/container hook workers.
+
+Broader coverage increases the number of Rails boots. A view or locale edit now
+costs a fresh incremental run, while a boot/config edit costs a full run. There
+is no provider or embedding call added by this hook. Opt in for occasional agent
+edits; use `woods:watch` for repeated work, and keep full extraction for large
+change sets as described above.
+
+The `SessionStart` hook uses the shared quick source verifier through
+`WOODS_HOOK_RAKE`. It has a ten-second command deadline, including startup;
+failed commands and old gems lacking `woods:source_status` report unknown.
+It does not initialize Rails or start a provider. See [source freshness](SOURCE_FRESHNESS.md#containers-and-hooks).
 
 ### Reader multiplicity is free
 

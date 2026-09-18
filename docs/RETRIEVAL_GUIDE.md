@@ -145,11 +145,54 @@ bundle exec rake woods:embed
 
 ---
 
+## Embedding-free lexical retrieval
+
+Opt into ranked retrieval over an extract-only published index:
+
+```bash
+WOODS_RETRIEVAL_MODE=lexical bundle exec woods-mcp-start ./tmp/woods
+```
+
+For a Ruby-built retriever, set `config.retrieval_mode = :lexical` and supply a
+populated metadata store to `Builder#build_retriever`. The packaged MCP server
+loads published unit JSON itself; it does not boot Rails or read current source
+files. Neither path constructs an embedding provider or vector adapter. The
+existing `:semantic` mode remains the default; provider failures never switch
+modes automatically. A Rails initializer is not loaded by the standalone MCP
+process, so set the environment variable in that process's client configuration.
+
+Lexical results use field-aware BM25 scoring over identifiers, source paths,
+published source and selected runtime metadata (including callbacks, associations
+and validations). Exact full identifiers rank first, with ambiguous typed owners
+retained. Other ties are deterministic. Responses name the lexical mode and
+matching fields/terms; runtime-field hits include the selected published runtime
+values. Lexical Ruby results leave the semantic-only `type_rank_context` table
+`nil`; they do not report a global vector rank or vector fallback. The top 20 eligible positive matches are considered for the
+output budget; this is ranked discovery, not an exhaustive match listing. Explicit
+`types` filters override default exclusions, as in semantic retrieval, and apply
+before that limit. A query with no lexical evidence returns no matches; unrelated
+graph hubs are never added. Query-seeded graph ranking is evaluation-only.
+
+The budget covers headers, matching explanations and truncation notices using a
+labelled character-based estimate, not an exact provider tokenizer. Full source
+remains available through `lookup`. Very small budgets can omit all sources. The
+reader pins one published generation for building and querying its immutable
+lexical snapshot, rebuilding after publication. Corrupt units fail explicitly;
+they cannot quietly become a successful partial index. Older flat indexes rebuild
+on each query because they lack an immutable generation identity.
+
+See [evaluation](EVALUATION.md) for measured query coverage and limits. Lexical
+matching cannot infer synonyms absent from the published text; a miss is not proof
+that application behavior is absent. Static Woods self-maps can opt into the same
+mode but remain static source maps, not resolved Rails runtime evidence.
+
+---
+
 ## Running Retrieval
 
 ### MCP tool: `codebase_retrieve`
 
-The primary interface for agents. Available in the Index Server when an embedding provider is configured and `rake woods:embed` has been run.
+The primary interface for agents. Available with explicit lexical mode over extraction output, or with an embedding provider and completed `rake woods:embed` in the default semantic mode.
 
 ```
 codebase_retrieve(query: "how does billing work?")
@@ -183,6 +226,12 @@ result.tokens_used  # => 4200
 result.sources      # => [{ identifier: "User", type: "model", score: 0.91, ... }]
 result.trace        # => RetrievalTrace with elapsed_ms, candidate_count, etc.
 ```
+
+`result.tokens_used` and `result.trace.tokens_used` count the final returned
+`context`, including the optional formatter output and type-rank table. Counting
+uses the same injected token counter or chars-per-token estimate as assembly;
+it does not guarantee an exact count for the downstream model. `budget` limits
+context assembly, so postprocessing can make the final count exceed it.
 
 Override the token budget per call:
 
@@ -284,3 +333,67 @@ bundle exec rake woods:embed
 | Very slow retrieval | Large vector index without HNSW index, or Qdrant cold start | For pgvector: create an HNSW index (see `BACKEND_MATRIX.md`). For Qdrant: check collection status |
 | `codebase_retrieve` tool listed but disabled | Embedding provider not configured or API key missing | Set `embedding_provider`, run `woods:embed`, and check `woods_status` |
 | Results clustered around one type | Diversity penalty insufficient for codebase shape | Lower `similarity_threshold` slightly and widen the query scope |
+
+## Explicit package and source-path scopes
+
+Both `codebase_retrieve` and `search` accept `packages` and `source_paths` arrays.
+The Ruby API uses the same keyword arguments:
+
+```ruby
+retriever.retrieve('How are payments collected?', budget: 1200,
+                   packages: ['packs/billing'], source_paths: ['packs/billing/app'])
+```
+
+These filters select eligible published units **before candidate limits**. Each
+list uses OR; package, path, and type restrictions combine with AND. Empty or
+omitted scope lists add no restriction. Existing unscoped calls keep their behavior.
+
+- **Packages:** exact, case-sensitive published nearest owners. A parent package
+  excludes its nested packages unless both names are requested. `.` selects only
+  root-owned units. Missing ownership does not match a package restriction;
+  it can still match a source path. Unknown package names return an argument error;
+  a declared package with no eligible units is a valid empty scope.
+- **Paths:** application-relative directory prefixes, compared at segment
+  boundaries. `packs/billing` includes descendants, including nested packages,
+  and excludes `packs/billing_admin`. `.` covers all published application-relative
+  paths. Repeated separators and `.` are normalized; internal `..` segments are
+  resolved, while attempts to escape the root, absolute paths, Windows paths,
+  backslashes, and NUL are rejected. External gem paths and missing paths do not
+  match. No host `realpath` or current source-file reads determine ownership.
+- **Types and graph:** existing inclusion/exclusion rules remain authoritative.
+  Scoped discovery uses actual published unit types, including `gem_source` units
+  in the shared `rails_source` directory. Graph seeds and expansion stay within
+  eligibility. Existing bare graph edges can still be ambiguous between typed
+  units sharing an identifier; scope does not establish a missing edge target type.
+
+`RetrievalResult#applied_scope` reports normalized lists, `eligible_units`,
+`candidate_count`, `returned_units`, and `outcome` (`empty_scope`, `no_match`, or
+`matched`). A matched candidate need not fit a tiny output budget. Scoped MCP
+retrieval exposes this object in `structuredContent.data.applied_scope` and `_meta`,
+with typed source provenance in `structuredContent.data.sources`; the budget continues
+to apply to the context text. Scoped results omit `type_rank_context`, whose global
+rank fields would otherwise describe the wrong population.
+
+Search adds `applied_scope` beside its existing completeness evidence. Zero
+eligible units means an empty scope; positive eligibility with a complete zero-match
+search means no match. A partial zero-match search remains inconclusive.
+
+### Storage and cost
+
+Scope preparation reads the complete metadata snapshot from the selected store
+bundle. Packaged discovery and lexical retrieval keep that read and the query on
+one published generation. Discovery's deep-field scan budget applies to matching
+after scope preparation; it does **not** cap the initial metadata read.
+
+Vector search enumerates eligible raw vector IDs, including typed and chunk IDs,
+and searches every batch of at most 100 IDs before merging the best candidates.
+It embeds the query once per vector execution. In-memory, pgvector, and Qdrant
+adapters support this without adding package fields or re-embedding old vectors.
+Scoped pgvector queries materialize eligible rows before exact distance ranking;
+scoped Qdrant requests use exact search. Custom adapters must explicitly support
+native ID filters and ID enumeration; unsupported adapters return a degraded
+error instead of falling back to global results. Broad scopes can cost more than
+ordinary approximate search. Automatic package balancing is not enabled.
+
+See [scope evaluation](EVALUATION.md#explicit-scope-comparison) for the matched
+budget replay and its cross-boundary recall tradeoff.

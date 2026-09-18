@@ -7,6 +7,19 @@ description: Make a repository's coding agents use the Woods index by default â€
 
 Installing the gem gives one operator an index; this skill gives every future agent session one. Wiring is three small, reviewable changes to the host repository. Each edits shared, checked-in files, so propose the diff and get approval before writing, match the repository's existing conventions, and leave unrelated content untouched.
 
+## Managed configuration availability
+
+`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+installed version and test `bundle exec woods-agent-config --help` in the
+selected application bundle. When supported, use its saved setup/update/remove
+plan and explicit client/scope/root selection; apply the reviewed plan within
+the user's existing authorization. Do not infer ownership from a server name
+or repair edited managed sections by overwriting them. Plans and recovery
+journals contain private configuration bytes. See the canonical
+[managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
+for host/Compose preflight, actual Claude file locations, conflict recovery,
+and removal. Preserve manual setup for older installed versions.
+
 ## Preflight
 
 Confirm Woods actually works before advertising it to every future session:

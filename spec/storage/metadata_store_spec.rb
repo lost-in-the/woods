@@ -59,6 +59,39 @@ RSpec.describe Woods::Storage::MetadataStore do
       end
     end
 
+    describe 'literal NUL search (#355)' do
+      before do
+        store.store('WithNul', { type: 'model', description: "prefix\0SUFFIX" })
+        store.store('Plain', { type: 'model', description: 'unrelated' })
+      end
+
+      it 'matches a NUL query only when the field contains NUL' do
+        expect(store.search("\0", fields: ['description']).map { |r| r['id'] }).to eq(['WithNul'])
+      end
+
+      it 'matches case-insensitively after a stored NUL' do
+        expect(store.search('suffix', fields: ['description']).map { |r| r['id'] }).to eq(['WithNul'])
+      end
+
+      it 'matches a substring spanning a NUL' do
+        expect(store.search("fix\0su", fields: ['description']).map { |r| r['id'] }).to eq(['WithNul'])
+      end
+
+      it 'does not ignore a query suffix after NUL' do
+        expect(store.search("prefix\0missing", fields: ['description'])).to be_empty
+      end
+
+      it 'preserves ordinary matches and nonmatches' do
+        expect(store.search('related', fields: ['description']).map { |r| r['id'] }).to eq(['Plain'])
+        expect(store.search('missing', fields: ['description'])).to be_empty
+      end
+
+      it 'searches the escaped JSON representation on the all-fields path' do
+        expect(store.search("\0")).to be_empty
+        expect(store.search('\\u0000').map { |r| r['id'] }).to eq(['WithNul'])
+      end
+    end
+
     describe 'search semantics (#218 / B-105)' do
       before do
         store.store('Invoice', { type: 'model', description: 'Handles Billing And Payments' })
@@ -146,6 +179,53 @@ RSpec.describe Woods::Storage::MetadataStore do
 
         ids = store.search('"strict"', fields: ['settings']).map { |r| r['id'] }
         expect(ids).to eq(['Config'])
+      end
+    end
+
+    describe 'Boolean field search (#356)' do
+      before do
+        store.store('Enabled', { type: 'model', flag: true })
+        store.store('Disabled', { type: 'model', flag: false })
+        store.store('One', { type: 'model', flag: 1 })
+        store.store('Zero', { type: 'model', flag: 0 })
+        store.store('Null', { type: 'model', flag: nil })
+        store.store('Missing', { type: 'model' })
+      end
+
+      { 'true' => 'Enabled', 'FALSE' => 'Disabled', 'ru' => 'Enabled',
+        'als' => 'Disabled', '1' => 'One', '0' => 'Zero' }.each do |query, expected|
+        it "matches #{query.inspect} without conflating Booleans and numbers" do
+          expect(store.search(query, fields: [:flag]).map { |row| row['id'] }).to eq([expected])
+        end
+      end
+
+      it 'never matches null or absent fields, even with an empty query' do
+        expect(store.search('', fields: ['flag']).map { |row| row['id'] })
+          .to contain_exactly('Enabled', 'Disabled', 'One', 'Zero')
+        expect(store.search('null', fields: ['flag'])).to be_empty
+      end
+
+      it 'matches string values literally alongside Boolean values' do
+        store.store('Text', { type: 'model', flag: 'true' })
+
+        expect(store.search('true', fields: ['flag']).map { |row| row['id'] })
+          .to contain_exactly('Enabled', 'Text')
+        expect(store.search('"true"', fields: ['flag'])).to be_empty
+      end
+
+      it 'preserves JSON Boolean spellings inside structured fields' do
+        store.store('Object', { type: 'model', flag: { enabled: true, disabled: false } })
+        store.store('Array', { type: 'model', flag: [true, false] })
+
+        expect(store.search('"enabled":true', fields: ['flag']).map { |row| row['id'] }).to eq(['Object'])
+        expect(store.search('[true,false]', fields: ['flag']).map { |row| row['id'] }).to eq(['Array'])
+      end
+
+      it 'keeps whole-record JSON matching unchanged' do
+        { '"flag":true' => 'Enabled', '"flag":false' => 'Disabled',
+          '"flag":1' => 'One', '"flag":0' => 'Zero', '"flag":null' => 'Null' }.each do |query, expected|
+          expect(store.search(query).map { |row| row['id'] }).to eq([expected])
+        end
       end
     end
 

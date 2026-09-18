@@ -85,7 +85,7 @@ Use a supported Ruby (3.0 or later; the repository intentionally has no single v
 
 ### Index MCP
 
-- The packaged default exposes 14 tools. `codebase_retrieve` registers but needs embeddings to return semantic context.
+- The packaged default exposes 14 tools. `codebase_retrieve` needs embeddings in default semantic mode; explicit `WOODS_RETRIEVAL_MODE=lexical` ranks published extraction units without a provider or vector artifacts.
 - The other 15 schemas require specialized builder collaborators or configuration. The packaged executable does not wire pipeline-operator or feedback-store capabilities.
 - Extraction runs in Rails; the Index Server reads the published index without booting Rails.
 - Docker clients must use a path visible to the process that starts MCP. Prefer running MCP through the application container when Woods is installed only there; a host launch requires the host bundle and a host-visible index.
@@ -129,7 +129,7 @@ Summarize and link from secondary pages; do not copy full setup blocks into FAQ 
 `main` carries `X.Y.Z.alpha` between releases and never claims a released version. `.claude/skills/release-flow/SKILL.md` is the agent-facing contract; the release flow section of `CONTRIBUTING.md` is the runbook.
 
 - Never edit `lib/woods/version.rb` or a `release-state` documentation fence by hand.
-- Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings.
+- Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings, or in `changelog/<type>_<slug>.md` (format in CONTRIBUTING.md).
 - One command per transition: `bin/rake "release:prepare[<version>]"`, `bin/rake "release:reopen[<next>.alpha]"`.
 - Never create or push a tag, run `gem push`, or trigger the release workflow. Those are maintainer steps.
 

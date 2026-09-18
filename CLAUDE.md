@@ -131,7 +131,7 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - If a boot-time change doesn't take effect, clear `tmp/cache/bootsnap/` inside the container. This bites often: bootsnap has served stale compiles of just-edited files repeatedly, and a file written on the host can be read back partially over the bind mount. Any script that edits a file and immediately executes it in-container should clear `tmp/cache/bootsnap/` and pause briefly first — an otherwise unexplained exit 1 in a probe is likely this.
 - A testbed container has no `.git` at the app root, so `capture_snapshot` sees an `"unknown"` SHA and returns early (#137) — `woods:extract` then never builds the snapshot store or runs the SQLite migrator. To exercise snapshot/migration paths in a variant, set `GIT_SHA` (honored exactly when there is no `.git`). A probe of those paths without it looks green while exercising nothing.
 - For the same reason, `woods:incremental` in a container exits 1 at changed-file-set resolution (a *git range* error) before ever reaching `prepare_incremental_run` — an exit-code-only probe of the incremental baseline guard is a false green. Supply `CHANGED_FILES=<paths>` so the run reaches the guard.
-- When byte-diffing unit JSON between two extractions, establish a full-vs-full control first: controllers with inline proc filters differ between any two processes (`Proc#inspect` embeds a memory address in the filter-chain annotation, B-167). Only differences beyond that control set are real divergence.
+- When byte-diffing unit JSON between extractions, establish a full-vs-full control first. Controller inline proc filters and conditions use stable, root-relative source-site labels (B-167); do not scrub their source hashes or filter metadata out of the comparison.
 
 Keep host-specific paths, credentials, and session notes outside the repository. Use the companion testbed for reproducible runtime validation.
 
@@ -208,7 +208,7 @@ exe/
 - **Dependency graph is bidirectional.** First pass: each extractor records forward dependencies. Second pass: the graph resolves reverse edges (dependents). Both directions matter for retrieval.
 - **PageRank for importance scoring.** `DependencyGraph` computes PageRank over the unit graph to surface high-importance nodes for retrieval ranking. `GraphAnalyzer` provides structural analysis, orphans, dead ends, hubs, cycles, and bridges, for codebase health insights.
 - **Behavioral depth over structural metadata.** Extraction output answers "what happens when X runs?" not just "what exists." Callback side-effects (columns written, jobs enqueued, services called) are detected via `CallbackAnalyzer`. `BehavioralProfile` introspects resolved `Rails.application.config` values. `FlowPrecomputer` generates per-action request flow maps (opt-in via `precompute_flows` config flag, default false).
-- **Navigation edges trace route helper references.** Dependency edges carry a `:via` label that distinguishes relationship types (`:belongs_to`, `:code_reference`, `:render`, `:link_to`, `:redirect_to`, `:form_action`). Navigation edges (`link_to`, `redirect_to`, `form_action`) are resolved from `_path`/`_url` route helpers via `RouteHelperResolver`. These edges mean "this unit references a route helper pointing at that controller", the scanner matches all `_path`/`_url` usages, not just those inside `link_to` calls. `IGNORED_HELPER_PREFIXES` filters known false positives (`file_path`, `root_path`, etc.).
+- **Navigation edges trace route helper references.** Dependency edges carry a `:via` label that distinguishes relationship types (`:belongs_to`, `:code_reference`, `:render`, `:link_to`, `:redirect_to`, `:form_action`). Navigation edges (`link_to`, `redirect_to`, `form_action`) are resolved from `_path`/`_url` route helpers via `RouteHelperResolver`. These edges mean "this unit references a route helper pointing at that controller", the scanner matches all `_path`/`_url` usages, not just those inside `link_to` calls. The live named-route map is authoritative: genuine `file_path`, `root_path`, and other formerly suppressed names resolve; names without a controller/action route produce no edge.
 
 ## Code Conventions
 
@@ -267,7 +267,7 @@ See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking it
 
 ## Release Flow
 
-`main` carries `X.Y.Z.alpha` between releases and never claims a released version. Never edit `lib/woods/version.rb` by hand, never hand-edit a `release-state` fence, and put changelog entries under `## [Unreleased]` only. One command per transition: `bin/rake "release:prepare[<version>]"` and `bin/rake "release:reopen[<next>.alpha]"`. Tagging and publication are maintainer steps; nothing is published from a laptop.
+`main` carries `X.Y.Z.alpha` between releases and never claims a released version. Never edit `lib/woods/version.rb` by hand, never hand-edit a `release-state` fence, and put changelog entries under `## [Unreleased]` or in `changelog/<type>_<slug>.md` (see CONTRIBUTING.md). One command per transition: `bin/rake "release:prepare[<version>]"` and `bin/rake "release:reopen[<next>.alpha]"`. Tagging and publication are maintainer steps; nothing is published from a laptop.
 
 See `.claude/skills/release-flow/SKILL.md` for the states, the refusals, and what to report, and the release flow section of `CONTRIBUTING.md` for the user-facing runbook.
 
@@ -319,7 +319,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 ### MCP servers
 
 - Tool dispatch uses a `Mutex`. Do not call tool handlers from multiple threads outside the server's dispatch.
-- The Index Server boots in **pattern-only mode** when no `woods.json` is present and no provider is configured (#138). `codebase_retrieve` activates only with a provider. `WOODS_REQUIRE_INDEX=1` restores fail-closed boot. `WOODS_ALLOW_AUTODETECT` is a back-compat no-op. See `ConfigResolver.resolve_without_artifact`.
+- The Index Server defaults to **pattern-only mode** when no `woods.json` is present and no provider is configured (#138). Default semantic `codebase_retrieve` needs a provider; explicit `WOODS_RETRIEVAL_MODE=lexical` instead loads the published extraction units without provider resolution or vector artifacts (#404). Lexical mode requires a valid extraction index and never activates as a hidden fallback. `WOODS_REQUIRE_INDEX=1` restores fail-closed semantic boot. `WOODS_ALLOW_AUTODETECT` is a back-compat no-op. See `ConfigResolver.resolve_without_artifact` and `PublishedLexicalRetriever`.
 - Every payload reader resolves through `Generation#payload_dir`. A flat (pre-2.0) index resolves to the root; never read `manifest.json` from the root directly.
 - Both servers are `MCP::Server` instances from the `mcp` gem (`>= 1.2, < 2.0`). Woods writes no protocol code.
 - **Never pin `MCP_PROTOCOL_VERSION`.** The SDK server is dual-era; pinning collapses it to one. The env var is an escape hatch only.

@@ -91,6 +91,17 @@ RSpec.describe Woods::Extractors::RouteHelperResolver do
                            })
     end
 
+    %w[
+      file image video log download root file_preview image_gallery video_stream log_archive download_archive
+    ].each do |name|
+      it "resolves the real #{name} named route despite its non-navigation prefix" do
+        named_routes[name.to_sym] = posts_index_route
+
+        expect(subject.resolve_route_helper("#{name}_path")).to include(controller: 'PostsController', action: 'index')
+        expect(subject.resolve_route_helper("#{name}_url")).to include(controller: 'PostsController', action: 'index')
+      end
+    end
+
     it 'returns nil for an unknown route helper' do
       expect(subject.resolve_route_helper('nonexistent_path')).to be_nil
     end
@@ -149,6 +160,19 @@ RSpec.describe Woods::Extractors::RouteHelperResolver do
       resolver = test_class.new(named_routes)
       map = resolver.instance_variable_get(:@route_helper_map)
       expect(map.keys).to contain_exactly('posts', 'new_post', 'post', 'admin_users')
+    end
+
+    it 'loads lazy routes before caching named helpers' do
+      lazy_routes = double('LazyRouteSet', named_routes: {})
+      allow(lazy_routes).to receive(:routes) do
+        allow(lazy_routes).to receive(:named_routes).and_return(named_routes)
+        []
+      end
+      allow(Rails.application).to receive(:routes).and_return(lazy_routes)
+
+      resolver = test_class.new(named_routes)
+
+      expect(resolver.resolve_route_helper('posts_path')).to include(controller: 'PostsController')
     end
 
     it 'handles missing Rails gracefully' do

@@ -84,16 +84,19 @@ module Woods
         # adapter — they were substitutable in name only until the semantics
         # were written down):
         #
-        # - **Substring match**, not word or prefix match.
+        # - **Literal substring match**, including embedded NUL, not word or prefix match.
         # - **Case-insensitive.** InMemory used a case-sensitive
         #   `String#include?` while SQLite used `LIKE`, so the same query
         #   returned different results depending on the configured backend.
         #   Case-insensitive is both the search-like expectation and what the
-        #   durable adapter already did. (SQLite's `LIKE` folds ASCII only, so
+        #   durable adapter already did. (SQLite's `lower` folds ASCII only, so
         #   non-ASCII case folding remains backend-specific — do not rely on
         #   it either way.)
         # - **`fields: nil` searches the whole record**, including keys, as
         #   serialized JSON. A query can therefore match a field *name*.
+        # - **Field-scoped values use JSON spellings.** Strings are unquoted,
+        #   objects/arrays use JSON text, Booleans use `true`/`false`, and
+        #   numbers remain numeric text. Null and absent fields never match.
         # - **LIKE metacharacters are literal.** `%` and `_` in a query match
         #   themselves rather than acting as wildcards.
         # - Field names are validated against {SEARCH_FIELD_NAME} by every
@@ -218,15 +221,14 @@ module Woods
         # @see Interface#search
         #
         # Matching is literal substring inclusion — `%` and `_` in the query
-        # have no special meaning here, and the SQLite adapter escapes them
-        # so the two adapters agree.
+        # have no special meaning here or in the SQLite adapter.
         #
         # @raise [ArgumentError] if a field name fails {SEARCH_FIELD_NAME}
         def search(query, fields: nil)
           fields = validate_search_fields!(fields)
           return [] if fields == []
 
-          # Case-insensitive, matching the SQLite adapter's `LIKE` (see the
+          # Case-insensitive, matching the SQLite adapter's `lower` (see the
           # contract note on {Interface#search}). This used to be a
           # case-sensitive `String#include?`, so the same query returned
           # different results depending on which backend a host had configured.
@@ -312,9 +314,9 @@ module Woods
           JSON.parse(JSON.generate(metadata))
         end
 
-        # The text SQLite's +json_extract(data, '$.field')+ would compare
-        # against for one field value: strings come back raw, structured
-        # values as their JSON text, scalars as their decimal form. A Ruby
+        # The searchable text for one field value: strings come back raw,
+        # structured values as JSON text, Booleans as true/false, and numbers
+        # as their decimal form. A Ruby
         # +Hash#to_s+ haystack used to leak `=>` and `:sym` syntax that no
         # JSON document contains (STO-8).
         #
@@ -425,23 +427,22 @@ module Woods
         # Field names are interpolated into a `json_extract` JSON-path
         # literal, so they are validated against {SEARCH_FIELD_NAME} first —
         # a crafted name could otherwise break out of the literal and alter
-        # the SQL shape. LIKE metacharacters (`%`, `_`, `\`) in the query are
-        # escaped (with an explicit ESCAPE clause) so they match literally,
-        # aligning with the InMemory adapter's substring semantics instead of
-        # silently broadening matches.
+        # the SQL shape. instr and lower perform literal, ASCII-case-insensitive
+        # substring matching without LIKE's truncation at embedded NUL bytes.
+        # Wildcard characters need no escaping.
         #
         # @raise [ArgumentError] if a field name fails the whitelist
         def search(query, fields: nil)
           fields = validate_search_fields!(fields)
           return [] if fields == []
 
-          pattern = "%#{escape_like(query)}%"
+          needle = query.to_s
           if fields
-            conditions = fields.map { "json_extract(data, '$.#{_1}') LIKE ? ESCAPE '\\'" }.join(' OR ')
-            params = Array.new(fields.size, pattern)
+            conditions = fields.map { "instr(lower(#{field_haystack_sql(_1)}), lower(?)) > 0" }.join(' OR ')
+            params = Array.new(fields.size, needle)
             rows = @db.execute("SELECT id, data FROM units WHERE #{conditions}", params)
           else
-            rows = @db.execute("SELECT id, data FROM units WHERE data LIKE ? ESCAPE '\\'", [pattern])
+            rows = @db.execute('SELECT id, data FROM units WHERE instr(lower(data), lower(?)) > 0', [needle])
           end
 
           rows.map { |row| parse_row(row) }
@@ -489,15 +490,14 @@ module Woods
           defined?(SQLite3::BusyException) && error.is_a?(SQLite3::BusyException)
         end
 
-        # Escape SQL LIKE metacharacters in a user query so they match
-        # literally under the `ESCAPE '\'` clause {#search} emits. Without
-        # this, `%` and `_` in a query act as wildcards and silently broaden
-        # matches (`"user_name"` would match `"userXname"`).
-        #
-        # @param query [String] Raw search query
-        # @return [String] Query safe for embedding in a LIKE pattern
-        def escape_like(query)
-          query.to_s.gsub(/[\\%_]/) { |ch| "\\#{ch}" }
+        # JSON1 extracts Boolean scalars as integers; use their JSON type to
+        # preserve true/false without conflating them with numeric 1/0.
+        # Field names have already passed validate_search_fields!.
+        def field_haystack_sql(field)
+          path = "$.#{field}"
+          "CASE json_type(data, '#{path}') " \
+            "WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " \
+            "ELSE json_extract(data, '#{path}') END"
         end
 
         # Parse a database row into a metadata hash with the id field injected.

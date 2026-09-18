@@ -7,6 +7,19 @@ description: Install, upgrade, and first-run-configure the Woods Rails code-inte
 
 Install a structural Index Server first. Embeddings and Console MCP are separate opt-ins.
 
+## Managed configuration availability
+
+`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+installed version and test `bundle exec woods-agent-config --help` in the
+selected application bundle. When supported, use its saved setup/update/remove
+plan and explicit client/scope/root selection; apply the reviewed plan within
+the user's existing authorization. Do not infer ownership from a server name
+or repair edited managed sections by overwriting them. Plans and recovery
+journals contain private configuration bytes. See the canonical
+[managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
+for host/Compose preflight, actual Claude file locations, conflict recovery,
+and removal. Preserve manual setup for older installed versions.
+
 ## Preflight
 
 Read repository instructions and preserve unrelated changes. Record:
@@ -88,7 +101,7 @@ When Woods is installed only in Docker, launch it through the application servic
 }
 ```
 
-Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings.
+Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
 
 Offer to add `bundle exec rake woods:watch` to the existing development process manager. When authorized, it catches up missed changes and automatically maintains the structural index; the Index Server refreshes on its next call, so ordinary edits need no manual extraction or MCP restart. Use the standalone watch command; do not prepend the `environment` task. Check the installed version's watch guide before relying on automatic startup reconciliation. State that live boot-captured changes require supervisor restart, Docker may need `WOODS_WATCH_POLL=1`, and semantic vectors still need `woods:embed_incremental`.
 
@@ -106,7 +119,28 @@ polling frequency at the cost of detection latency. Use the installed preflight 
 [canonical watch guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md)
 tracks current source and may describe unreleased behavior.
 
-The plugin also ships two hooks (Woods 2.3 or later), shipped disabled. A `PostToolUse` hook runs `woods:incremental` in the background when an edit touches models, routes, migrations, schema, or a `package.yml`, reading `cwd` from the hook payload so linked worktrees refresh their own index; it batches paths from overlapping edits instead of dropping them under lock contention. A `SessionStart` hook warns when the published generation predates the last commit, a check scoped to commit timestamps, so it does not cover uncommitted edits or an older checkout. Both do nothing until `tmp/woods/generation.json` exists and until the user sets `WOODS_HOOKS_ENABLED=1`; set `WOODS_HOOK_RAKE="docker compose exec -T app bundle exec rake"` when the bundle lives in a container, `WOODS_OUTPUT` when the index directory is non-default, and `WOODS_HOOKS_DISABLED=1` to turn both back off.
+The plugin ships opt-in refresh and session-start hooks. The expanded refresh
+contract (#408) is unreleased after Woods 2.0.0.beta2: first verify the installed
+gem exposes `woods:hook_refresh` through the actual application command. Do not
+infer support from the plugin version. With support, edits to standard services,
+controllers, jobs, views, concerns, locales, supported tests/lib files, routes,
+and packages queue incremental work; boot/config/schema edits request a fresh
+full extraction. A live daemon defers without acknowledging the queue. Failed or
+deferred events remain under `<output>/hook-pending/` and retry on the next
+relevant edit. Inspect `hook.log` before retrying; never delete pending events to
+hide a failure. Prefer `woods:watch` for sustained edits because hook coverage
+increases Rails boot frequency.
+
+Both hooks require an existing index and `WOODS_HOOKS_ENABLED=1`; disable with
+`WOODS_HOOKS_DISABLED=1`. Use `WOODS_HOOK_RAKE="docker compose exec -T app bundle
+exec rake"` for a container-only bundle and `WOODS_OUTPUT` for a non-default
+index. The host needs Bash and either jq or Ruby, not the application bundle.
+The refresh worker has its own bounded deadline, but cancelling Docker exec does
+not prove its container process stopped. Source freshness (#405) is unreleased after beta2: verify the installed command
+exposes `woods:source_status` and `woods-extract` before using it. Supporting
+SessionStart hooks check source content and report missing/failed evidence as
+unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
+for transport, retry and custom-root limits.
 
 ## Ask before expanding scope
 
@@ -117,3 +151,16 @@ Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets,
 Report the Woods version, branch, files changed, commands/results, index path, MCP calls verified, semantic retrieval status, Console status, and unresolved risks. Never infer availability from source schemas alone.
 
 Canonical runbook: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md).
+
+## Lexical retrieval capability check
+
+This is a development capability. Before proposing it, verify the installed gem
+exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
+`WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
+from the plugin version or an unreleased checkout.
+
+When supported and authorized, offer explicit lexical mode for ranked discovery
+over extraction output without provider credentials or vectors. Semantic mode
+remains the default; setting up embeddings is a separate choice.
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for the supported contract, checked against the installed gem version.

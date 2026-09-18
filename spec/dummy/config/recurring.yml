@@ -1,0 +1,13 @@
+<% require_relative "schedule_settings" %>
+production: &production
+  publish_posts:
+    class: PublishPostJob
+    schedule: <%= WoodsDummySchedule.frequency %>
+    queue: default
+  <% if WoodsDummySchedule.disabled? %>
+  disabled_job:
+    class: DisabledJob
+    schedule: every hour
+  <% end %>
+beta: {}
+test: *production
