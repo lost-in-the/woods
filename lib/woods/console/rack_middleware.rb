@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'woods/mcp/http_transport_options'
 require 'woods/observability/structured_logger'
 
 module Woods
@@ -131,7 +132,9 @@ module Woods
           Rails.application.eager_load!
 
           server = build_embedded_server
-          @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(server)
+          @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(
+            server, **Woods::MCP::HttpTransportOptions.for(Woods.configuration.console_mcp_allowed_origins)
+          )
           server.transport = @transport
           @transport
         end

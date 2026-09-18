@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-09-18
+
+### Fixed
+
+- Refresh encrypted Rails credentials from disk when rebuilding the Console credential index, update every live scanner, and preserve the last valid index if refresh fails. Each response uses one consistent index snapshot.
+Keep credential scanner refresh snapshots limited to live weakly referenced
+scanners on older Ruby versions, avoiding unsafe receiver access after garbage
+collection while preserving updates to every live Console server.
+Keep JSON on `>= 2.19.9, < 3` so supported Rails encoders can serialize metadata after a fresh bundle resolution; JSON 3 removes their `quirks_mode` option. Bound MessagePack below 2 and Railties below 9, retaining their existing minimum versions and the strict package-build gate.
+- Preserve version-aware missing-tool guidance with MCP 0.23 by installing its dispatch override before the SDK captures request handlers.
+
+### Build
+
+- Add a no-publish, one-off 1.6.2 maintenance preparation flow and installed-package CI. Disable the legacy automatic publisher; publication requires the trusted main maintenance profile and its reviewed candidate SHA.
+
+### Security
+
+- Require MCP 0.23.0 or newer within the 0.x line for upstream transport security fixes; run `bundle update woods mcp` when upgrading. Ruby 3.0 remains supported. The newer SDK removes the old json-schema/addressable dependency chain. Existing Index and Console HTTP origin settings now reach the SDK Host/Origin guards; cross-origin browser access requires the actual configured port.
+
 ## [1.6.1] - 2026-07-22
 
 ### Fixed

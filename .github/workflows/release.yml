@@ -1,56 +1,12 @@
-name: Release
-
+# Deliberately inert on this legacy branch. Never restore the old tag-push
+# publisher: the trusted main workflow owns approved maintenance publication.
+name: Legacy publication disabled
 on:
-  push:
-    tags:
-      - 'v*'
-
-# Top-level least-privilege default. The `publish` job overrides this with
-# `contents: write` + `id-token: write` for the gem push + GitHub release.
+  workflow_dispatch:
 permissions:
   contents: read
-
 jobs:
-  test:
+  notice:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-      - name: Run tests
-        run: bundle exec rspec
-      - name: Run linter
-        run: bundle exec rubocop
-
-  publish:
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-    environment: release
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-      - name: Configure RubyGems credentials
-        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
-        with:
-          gem-server: https://rubygems.org
-          audience: rubygems.org
-      - name: Build gem
-        run: gem build woods.gemspec
-      - name: Push to RubyGems
-        run: gem push woods-*.gem
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          generate_release_notes: true
+      - run: echo 'Publication is disabled here; use the reviewed trusted main maintenance profile.'

@@ -43,8 +43,7 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
     )
     allow(Woods).to receive(:configuration).and_return(config_dbl)
 
-    # Reset module-level state between tests
-    described_class.instance_variable_set(:@active_scanner, nil)
+    stub_const('Woods::Console::Server::SCANNERS', Woods::Console::CredentialScannerRegistry.new)
   end
 
   it 'returns nil and does not raise when no scanner has been registered yet' do
@@ -57,7 +56,7 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
       secrets: ['old_secret_value_for_testing']
     )
     scanner = Woods::Console::CredentialScanner.new(secret_index: old_index)
-    described_class.instance_variable_set(:@active_scanner, scanner)
+    described_class.const_get(:SCANNERS).register { scanner }
 
     new_app = build_app_stub({ api_key: 'new_secret_value_for_testing' })
     described_class.rebuild_credential_index(rails_app: new_app)
@@ -69,7 +68,7 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
 
   it 'returns the newly built CredentialIndex' do
     scanner = Woods::Console::CredentialScanner.new
-    described_class.instance_variable_set(:@active_scanner, scanner)
+    described_class.const_get(:SCANNERS).register { scanner }
 
     app = build_app_stub({ token: 'fresh_secret_value_for_rebuild' })
     result = described_class.rebuild_credential_index(rails_app: app)
@@ -93,7 +92,7 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
     allow(Woods).to receive(:configuration).and_return(config_dbl)
 
     scanner = Woods::Console::CredentialScanner.new
-    described_class.instance_variable_set(:@active_scanner, scanner)
+    described_class.const_get(:SCANNERS).register { scanner }
 
     result = described_class.rebuild_credential_index(rails_app: build_app_stub({}))
     expect(result).to be_nil

@@ -2,6 +2,9 @@
 
 require_relative 'lib/woods/version'
 
+# Prepared maintenance gems link their own reviewed tag; development stays on its target.
+release_ref = Woods::VERSION.end_with?('.alpha') ? 'release/1.6.2' : "v#{Woods::VERSION}"
+
 Gem::Specification.new do |spec|
   spec.name          = 'woods'
   spec.version       = Woods::VERSION
@@ -22,10 +25,10 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = '>= 3.0.0'
 
   spec.metadata['homepage_uri'] = spec.homepage
-  spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/main"
-  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/#{release_ref}"
+  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/#{release_ref}/CHANGELOG.md"
   spec.metadata['bug_tracker_uri'] = "#{spec.homepage}/issues"
-  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/main/docs"
+  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/#{release_ref}/docs"
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
@@ -38,14 +41,17 @@ Gem::Specification.new do |spec|
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md'
   ]
+  spec.files.reject! { |path| path.match?(%r{\Alib/(?:tasks/release\.rake|woods/release(?:\.rb|/))}) }
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
                         woods-mcp-http]
   spec.require_paths = ['lib']
 
   # Runtime dependencies
-  spec.add_dependency 'mcp', '>= 0.9.2', '< 1.0'
-  spec.add_dependency 'msgpack', '>= 1.5'
+  spec.add_dependency 'mcp', '>= 0.23.0', '< 1.0'
+  # Supported Rails encoders pass quirks_mode, removed by JSON 3.
+  spec.add_dependency 'json', '>= 2.19.9', '< 3'
+  spec.add_dependency 'msgpack', '>= 1.5', '< 2'
   # `prism` ships in stdlib on Ruby 3.3+; the gem fills the gap for 3.0–3.2.
   # EvalGuard reuses the existing Woods::Ast::Parser, which already auto-detects
   # Prism vs the parser gem — this dep guarantees the Prism path on the lower
@@ -55,5 +61,5 @@ Gem::Specification.new do |spec|
   # MCP serving). The only 6.1-introduced APIs touched (connection_db_config,
   # has_many_inversing) are respond_to?-guarded and degrade on 6.0. The Rails
   # version matrix in CI gates this floor. See #135 / #136.
-  spec.add_dependency 'railties', '>= 6.0'
+  spec.add_dependency 'railties', '>= 6.0', '< 9'
 end

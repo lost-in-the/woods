@@ -4,6 +4,12 @@
 
 # Woods
 
+<!-- release-state:maintenance-banner -->
+> **Woods 1.6.2: prepared maintenance candidate.** This tree remains on the 1.6 maintenance line.
+> Preparation does not establish publication. Check [RubyGems versions](https://rubygems.org/gems/woods/versions)
+> before selecting an install version. See [maintenance release policy](CONTRIBUTING.md#maintenance-release).
+<!-- release-state:end -->
+
 **Your AI coding assistant is guessing about your Rails app. Woods gives it the real answers.**
 
 Rails hides enormous amounts of behavior behind conventions, concerns, and runtime magic. When you ask an AI assistant "what callbacks fire when a User saves?" or "what routes map to this controller?", it guesses from training data — and gets it wrong. Woods runs *inside* your Rails app, extracts what's actually happening at runtime, and serves that context directly to your AI tools via [MCP](https://modelcontextprotocol.io/).

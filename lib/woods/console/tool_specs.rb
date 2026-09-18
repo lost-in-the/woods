@@ -5,7 +5,7 @@
 # Metrics/ModuleLength is disabled here because the module body is almost
 # entirely declarative data, not imperative logic. Decomposition would just
 # scatter the tool catalogue across many files with no readability gain.
-# rubocop:disable Metrics/ModuleLength
+# rubocop:disable-next Metrics/ModuleLength
 module Woods
   module Console
     module Server
@@ -549,4 +549,3 @@ module Woods
     end
   end
 end
-# rubocop:enable Metrics/ModuleLength
