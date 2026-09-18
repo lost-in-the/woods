@@ -27,10 +27,10 @@ RSpec.describe 'MCP conformance dependencies' do
     lock = JSON.parse(File.read(File.join(root, 'package-lock.json')))
     inspector = lock.dig('packages', 'node_modules/@modelcontextprotocol/inspector')
 
-    expect(package.dig('devDependencies', '@modelcontextprotocol/inspector')).to eq('2.6.0')
+    expect(package.dig('devDependencies', '@modelcontextprotocol/inspector')).to eq('2.7.0')
     expect(inspector).to include(
-      'version' => '2.6.0',
-      'integrity' => 'sha512-e/kC3Xx+iqsYg17nxZtp9H6ZfpK8gVlGklsT/4LcpbSgMVaAQZCa5jihRvcrmnksNl+h5dcwm7WgH/ao2gI1ew=='
+      'version' => '2.7.0',
+      'integrity' => 'sha512-V1SqfR+m3NWMkEe2i3v2GMm00pZtAl/JISAHQzYnOZElEuwuLLkU8vTWBYg5HMCYTgpvuMmzb+MZz98HjdcGuw=='
     )
   end
 
