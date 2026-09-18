@@ -1,1 +1,0 @@
-- Preserve each logical directory alias in polling and startup catch-up so an earlier irrelevant alias cannot hide an extraction input such as `app/models`. Detect cycles per traversal branch while retaining ignored-subtree pruning.

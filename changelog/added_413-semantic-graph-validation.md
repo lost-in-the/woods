@@ -1,3 +1,0 @@
-`woods:validate` now checks semantic graph invariants against typed unit indexes and artifacts within one pinned published generation. It detects broken reverse membership, invalid sources, duplicate typed variants, file/type index drift, and missing indexed nodes while accepting cycles, unresolved targets, legacy string edges, and the Woods static source map. Validation remains read-only, preserves existing report/exit behavior, and reports actionable identities without repairing the graph.
-
-The validator, deep search, and lexical retrieval accept all four GraphQL unit types in the shared `graphql/` directory, preserving actual typed identities and existing directory-family search labels.

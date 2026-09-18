@@ -1,1 +1,0 @@
-- Add explicit package and application-relative source-path scopes to ranked retrieval and discovery, with eligibility before candidate limits, typed scope metadata, and native scoped vector searches without re-embedding.
