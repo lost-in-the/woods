@@ -67,7 +67,8 @@ RSpec.describe 'Booted hook refresh', :booted_app do
 
   def hook(app, path)
     env = { 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => "#{RbConfig.ruby} #{root}/bin/rake" }
-    payload = JSON.generate(cwd: app, tool_input: { file_path: File.join(app, path) })
+    payload = JSON.generate(cwd: app, hook_event_name: 'PostToolUse', tool_name: 'Write',
+                            tool_input: { file_path: File.join(app, path) })
     _out, err, status = Open3.capture3(env, 'bash', File.join(root, 'plugin/hooks/woods-post-edit.sh'),
                                        stdin_data: payload)
     expect(status).to be_success, err

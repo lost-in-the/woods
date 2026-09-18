@@ -1,0 +1,55 @@
+{
+  "directory": "/fixture/worktree",
+  "worktree": "/fixture/worktree",
+  "input": {
+    "tool": "apply_patch",
+    "callID": "capture_patch",
+    "args": {
+      "patchText": "*** Begin Patch\n*** Add File: add.rb\n+added\n*** Update File: update.rb\n@@\n-old\n+updated\n*** Delete File: delete.rb\n*** Update File: move.rb\n*** Move to: moved.rb\n@@\n-old\n+moved\n*** End Patch"
+    }
+  },
+  "output": {
+    "title": "Success. Updated the following files:\nA add.rb\nM update.rb\nD delete.rb\nM moved.rb",
+    "metadata": {
+      "diff": "Index: /fixture/worktree/add.rb\n===================================================================\n--- /fixture/worktree/add.rb\n+++ /fixture/worktree/add.rb\n@@ -0,0 +1,1 @@\n+added\n\nIndex: /fixture/worktree/update.rb\n===================================================================\n--- /fixture/worktree/update.rb\n+++ /fixture/worktree/update.rb\n@@ -1,1 +1,1 @@\n-old\n+updated\n\nIndex: /fixture/worktree/delete.rb\n===================================================================\n--- /fixture/worktree/delete.rb\n+++ /fixture/worktree/delete.rb\n@@ -1,1 +0,0 @@\n-old\n\nIndex: /fixture/worktree/move.rb\n===================================================================\n--- /fixture/worktree/move.rb\n+++ /fixture/worktree/move.rb\n@@ -1,1 +1,1 @@\n-old\n+moved\n\n",
+      "files": [
+        {
+          "filePath": "/fixture/worktree/add.rb",
+          "relativePath": "add.rb",
+          "type": "add",
+          "patch": "Index: /fixture/worktree/add.rb\n===================================================================\n--- /fixture/worktree/add.rb\n+++ /fixture/worktree/add.rb\n@@ -0,0 +1,1 @@\n+added\n",
+          "additions": 1,
+          "deletions": 0
+        },
+        {
+          "filePath": "/fixture/worktree/update.rb",
+          "relativePath": "update.rb",
+          "type": "update",
+          "patch": "Index: /fixture/worktree/update.rb\n===================================================================\n--- /fixture/worktree/update.rb\n+++ /fixture/worktree/update.rb\n@@ -1,1 +1,1 @@\n-old\n+updated\n",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "filePath": "/fixture/worktree/delete.rb",
+          "relativePath": "delete.rb",
+          "type": "delete",
+          "patch": "Index: /fixture/worktree/delete.rb\n===================================================================\n--- /fixture/worktree/delete.rb\n+++ /fixture/worktree/delete.rb\n@@ -1,1 +0,0 @@\n-old\n",
+          "additions": 0,
+          "deletions": 2
+        },
+        {
+          "filePath": "/fixture/worktree/move.rb",
+          "relativePath": "moved.rb",
+          "type": "move",
+          "patch": "Index: /fixture/worktree/move.rb\n===================================================================\n--- /fixture/worktree/move.rb\n+++ /fixture/worktree/move.rb\n@@ -1,1 +1,1 @@\n-old\n+moved\n",
+          "additions": 1,
+          "deletions": 1,
+          "movePath": "/fixture/worktree/moved.rb"
+        }
+      ],
+      "diagnostics": {},
+      "truncated": false
+    },
+    "output": "Success. Updated the following files:\nA add.rb\nM update.rb\nD delete.rb\nM moved.rb"
+  }
+}

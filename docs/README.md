@@ -36,6 +36,7 @@ and stdio or Streamable HTTP endpoints directly.
 - [MCP tool cookbook](MCP_TOOL_COOKBOOK.md): scenario-based calls with parameters and expected response shapes.
 - [Console MCP setup](CONSOLE_MCP_SETUP.md): Console transports, blocked tables, credential scanning, redaction, SQL validation, and production safeguards.
 - [MCP HTTP transport](MCP_HTTP_TRANSPORT.md): shared/remote Index Server transport, authentication, origins, and protocol details.
+- [Edit client adapters](CLIENT_HOOKS.md): opt-in Claude/OpenCode registration, complete path batches, and recovery.
 - [MCP worktree setup](MCP_WORKTREE_SETUP.md): register Woods correctly when agents work in linked git worktrees.
 
 ## Index lifecycle

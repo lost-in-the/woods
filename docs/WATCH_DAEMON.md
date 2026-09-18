@@ -619,6 +619,9 @@ custom or reused identical container hostnames retain the local-pid limitation.
 
 ### Hooks for agent sessions
 
+For client registration and the supported Claude/OpenCode event shapes, see
+[edit client adapters](CLIENT_HOOKS.md). Both use the shared queue below.
+
 The daemon covers a human's editor session. A `claude -p` run in a worktree
 with no daemon needs a different trigger, so the Woods plugin ships two
 hooks (`plugin/hooks/hooks.json`), both shipped disabled:
@@ -646,10 +649,10 @@ stay quiet. Normal edits use fresh-process incremental extraction; changes to
 initializers, boot configuration, dependencies, schema, or other restart inputs
 use fresh-process full extraction. The transport also preserves explicit
 `add`, `update`, `delete`, and `move` operations; a relevant deletion/move selects
-full extraction to remove runtime classes absent from the next boot. The current
-Claude hook receives one `tool_input.file_path`; it does not infer additional
-paths from shell commands or parse patch text. Client adapters are responsible
-for supplying any additional paths/operations. Custom runtime roots outside the
+full extraction to remove runtime classes absent from the next boot. The Claude adapter receives one
+`tool_input.file_path`. The OpenCode adapter supplies every verified patch metadata
+path, including both rename sides. Neither infers paths from shell commands or
+parses patch text. Custom runtime roots outside the
 standard dispatcher rules require an explicit refresh; the portable predicate
 cannot discover application configuration without booting it.
 
@@ -666,8 +669,8 @@ absolute paths must be valid on both sides of a container bind mount.
 
 Each event remains under `<output>/hook-pending/` until the task succeeds.
 Successful no-op consumption is acknowledged too. Contending invocations enqueue
-and return while the owner drains bounded batches (up to 16 events / 48 KiB of
-JSON). Commas, spaces, and newlines are preserved. An empty drain releases the
+and return while the owner drains bounded batches (up to 16 queue files / 1,000 paths / 48 KiB of
+JSON, without splitting a multi-file event). Commas, spaces, and newlines are preserved. An empty drain releases the
 lock before checking again, so a final arriving event can acquire ownership.
 A failed command, killed worker, incompatible gem, or publication failure retains
 its batch for retry: delivery is **at least once**, so crash recovery can repeat

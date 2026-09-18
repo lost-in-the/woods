@@ -25,11 +25,13 @@ RSpec.describe 'plugin hooks (#280)' do
   let(:bash_path) { `which bash`.strip }
 
   def run_hook(script, payload, env = {})
+    payload = { 'hook_event_name' => 'PostToolUse', 'tool_name' => 'Write' }.merge(payload) if script == post_edit
     Open3.capture3(env, bash_path, script, stdin_data: JSON.generate(payload))
   end
 
   def edit_payload(dir, relative_path)
-    { 'cwd' => dir, 'tool_input' => { 'file_path' => File.join(dir, relative_path) } }
+    { 'cwd' => dir, 'hook_event_name' => 'PostToolUse', 'tool_name' => 'Write',
+      'tool_input' => { 'file_path' => File.join(dir, relative_path) } }
   end
 
   def make_app(dir, with_index: true, tmp_subdir: 'tmp/woods', updated_at: '2026-09-01T00:00:00Z')
@@ -109,7 +111,7 @@ RSpec.describe 'plugin hooks (#280)' do
     end
 
     it 'has scripts that parse' do
-      [post_edit, session_start].each do |script|
+      [post_edit, session_start, File.join(plugin_root, 'hooks', 'woods-refresh.sh')].each do |script|
         _out, err, status = Open3.capture3(bash_path, '-n', script)
         expect(status).to be_success, err
       end
