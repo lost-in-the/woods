@@ -46,6 +46,16 @@ For versions documenting environment-boot snapshots, confirm that the command is
 `bundle exec rake woods:watch`, with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
+### Session trace reports ambiguous identity
+
+The `session_trace` `ambiguous_identity` error (#213) is unreleased after
+`2.0.0.beta2`; check the installed gem before expecting it. It names a dependency
+with multiple published extraction types, so no partial session context is
+returned. Use `depth: 0` for the timeline or inspect the named candidates with
+explicit `lookup` types. Do not choose one by index order or suggest that a full
+extraction will remove a legitimate cross-type collision. See the canonical
+[session identity contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#index-server).
+
 ## 2. Check the published index
 
 For a `same-type identifier collision`, inspect both named source files and the

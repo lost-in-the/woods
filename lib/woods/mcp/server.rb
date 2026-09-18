@@ -15,6 +15,7 @@ require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative '../retrieval/source_evidence'
+require_relative '../session_tracer/unit_resolver'
 require_relative 'bootstrap_state'
 require_relative 'errors'
 require_relative 'index_reader'
@@ -1228,6 +1229,9 @@ module Woods
             )
             doc = assembler.assemble(session_id, budget: budget || 8000, depth: depth || 1)
             respond.call(doc.to_markdown)
+          rescue Woods::SessionTracer::AmbiguousUnitError => e
+            respond_err.call(e.message, code: :ambiguous_identity, tool: 'session_trace',
+                                        identifier: e.identifier, types: e.types)
           rescue StandardError => e
             respond_err.call(
               "Session trace failed: #{e.message}",

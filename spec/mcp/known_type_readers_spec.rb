@@ -98,6 +98,18 @@ RSpec.describe 'Readers with an already known unit type (#213)' do
     expect(document.dependency_map.fetch('SharedController')).to eq(['ExpectedService'])
   end
 
+  it 'rejects an ambiguous dependency before it can occupy a later controller context key' do
+    write_unit('EarlierController', 'controller', 'earlier-controller', '2026-01-01', ['SharedController'])
+    File.write(File.join(index, 'manifest.json'), JSON.generate(counts: @entries.transform_values(&:size)))
+    File.write(File.join(index, 'dependency_graph.json'), JSON.generate(graph.to_h))
+    store.record('multi', { 'controller' => 'EarlierController', 'action' => 'index' })
+    store.record('multi', { 'controller' => 'SharedController', 'action' => 'index' })
+    assembler = Woods::SessionTracer::SessionFlowAssembler.new(store: store, reader: reader)
+
+    expect { assembler.assemble('multi', depth: 1) }
+      .to raise_error(StandardError, /Ambiguous session unit.*SharedController.*controller.*poro.*rails_source/)
+  end
+
   it 'does not substitute a different type when the captured controller is absent' do
     FileUtils.remove_entry(File.join(index, 'controllers'))
     @entries.delete('controllers')
