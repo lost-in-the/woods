@@ -11,6 +11,7 @@ require_relative '../generation'
 require_relative '../source_inputs/status'
 require_relative 'search_results'
 require_relative '../retrieval/scope'
+require_relative 'traversal_evidence'
 
 module Woods
   module MCP
@@ -293,6 +294,7 @@ module Woods
         @raw_graph_data = nil
         @normalized_graph_edges = nil
         @graph_node_types = nil
+        @traversal_evidence_index = nil
         remove_instance_variable(:@multi_database_graph) if defined?(@multi_database_graph)
       end
 
@@ -597,7 +599,12 @@ module Woods
       #   incomplete walks add partial: true, partial_reason (node_budget or edge_budget),
       #   and traversal_budget (max_nodes, max_edges, visited_nodes, visited_edges).
       #   Already discovered rows remain; empty deps in a partial result need not mean a leaf.
-      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000)
+      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000, explain: false)
+        if explain
+          return traverse_with_evidence(identifier, depth: depth, types: types, via: via, direction: :forward,
+                                                    max_nodes: max_nodes, max_edges: max_edges)
+        end
+
         traverse(identifier, depth: depth, types: types, via: via, direction: :forward, max_nodes: max_nodes, max_edges: max_edges)
       end
 
@@ -614,7 +621,12 @@ module Woods
       #   incomplete walks add partial: true, partial_reason (node_budget or edge_budget),
       #   and traversal_budget (max_nodes, max_edges, visited_nodes, visited_edges).
       #   Already discovered rows remain; empty deps in a partial result need not mean a leaf.
-      def traverse_dependents(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000)
+      def traverse_dependents(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000, explain: false)
+        if explain
+          return traverse_with_evidence(identifier, depth: depth, types: types, via: via, direction: :reverse,
+                                                    max_nodes: max_nodes, max_edges: max_edges)
+        end
+
         traverse(identifier, depth: depth, types: types, via: via, direction: :reverse, max_nodes: max_nodes, max_edges: max_edges)
       end
 
@@ -1358,6 +1370,16 @@ module Woods
         end.freeze
         when Array then value.each { |item| deep_freeze_json(item) }.freeze
         else value.freeze
+        end
+      end
+
+      # Ownership/type preparation is cached once per retained generation, like
+      # graph_node_types. It never flattens adjacency; the per-query walker charges
+      # every candidate edge, including legacy reverse evidence recovery.
+      def traverse_with_evidence(identifier, **options)
+        with_pinned_generation do
+          @traversal_evidence_index ||= TraversalEvidenceIndex.new(raw_graph_data)
+          TraversalEvidence.new(@traversal_evidence_index).call(identifier, **options)
         end
       end
 

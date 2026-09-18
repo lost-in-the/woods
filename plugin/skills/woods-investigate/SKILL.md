@@ -63,6 +63,20 @@ deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
 paging alone only visits the discovered prefix. See the
 [budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
 
+## Explain recorded relationships
+
+`explain: true` on `dependencies`/`dependents` (#414) is unreleased after
+2.0.0.beta2. Verify the installed gem and connected tool schema before using it;
+installing this plugin does not add server capabilities. Supporting servers
+preserve original source-to-target direction and labels in both traversal
+modes. Follow shared `parent`/`edge_id` witnesses, distinguish direct records
+from transitive inferred impact, and treat `context: true` ancestors as page
+context. Null attributes and candidate type ambiguities remain unknown;
+`typed_path_complete: false` never establishes a uniquely typed path. Budget
+cutoffs still apply. Verify important conclusions in source and tests, since
+recorded reachability does not establish observed execution. See the
+[explanation contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#traversal-explanations).
+
 ## Volatile dependency reports
 
 Read `stats.volatile_dependency_count` before judging the top-20 array: it

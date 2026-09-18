@@ -183,4 +183,21 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
       load path
     end
   end
+
+  it 'explains real reflected through associations in both traversal directions' do
+    require 'woods/mcp/index_reader'
+    reader = Woods::MCP::IndexReader.new(@output_dir)
+    forward = reader.traverse_dependencies('MultiAccount', depth: 1, explain: true, via: ['has_many'])
+    edge = forward.fetch(:explanation).fetch(:edges).values.find do |record|
+      record[:target][:identifier] == 'MultiReplicaAccount'
+    end
+    expect(edge).to include(source: { identifier: 'MultiAccount', type: 'model' },
+                            target: { identifier: 'MultiReplicaAccount', type: 'model' },
+                            via: 'has_many', through: 'subscriptions', disable_joins: nil)
+    expect(edge[:through_db]).to eq(database_identity_supported? ? 'reporting' : nil)
+    reverse = reader.traverse_dependents('MultiReplicaAccount', depth: 1, explain: true, via: ['has_many'])
+    expect(reverse.fetch(:explanation).fetch(:edges).values).to include(edge)
+    expect(reverse[:explanation][:witnesses]['MultiAccount']).to include(parent: 'MultiReplicaAccount',
+                                                                         impact: 'direct')
+  end
 end

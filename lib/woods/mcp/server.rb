@@ -159,7 +159,8 @@ module Woods
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
                                              "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
-                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff.',
+                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff. ' \
+                                             'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependencies,
                                 render_key: :dependencies)
           define_traversal_tool(server, reader, respond, renderer,
@@ -168,7 +169,8 @@ module Woods
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
                                              "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
-                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff.',
+                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff. ' \
+                                             'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependents,
                                 render_key: :dependents)
           define_structure_tool(server, reader, respond, renderer)
@@ -586,6 +588,7 @@ module Woods
               properties: {
                 identifier: { type: 'string', description: 'Unit identifier to start from' },
                 depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' },
+                explain: { type: 'boolean', description: 'Include recorded relationship evidence and shared shortest witnesses (default: false)' },
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Filter to these types'
@@ -611,7 +614,7 @@ module Woods
               },
               required: ['identifier']
             }
-          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil, max_nodes: nil, max_edges: nil|
+          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil, max_nodes: nil, max_edges: nil, explain: nil|
             types = coerce.call(types)
             via = coerce.call(via)
             depth = coerce_int.call(depth)
@@ -619,12 +622,13 @@ module Woods
             offset = coerce_int.call(offset)
             result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
                                                             max_nodes: coerce_int.call(max_nodes) || 1000,
-                                                            max_edges: coerce_int.call(max_edges) || 10_000)
+                                                            max_edges: coerce_int.call(max_edges) || 10_000, explain: explain || false)
             if result[:found] == false
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
+            TraversalEvidencePage.apply(result)
             respond.call(renderer.render(render_key, result))
           end
         end

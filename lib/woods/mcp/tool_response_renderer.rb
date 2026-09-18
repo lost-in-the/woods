@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'traversal_evidence_index'
+require_relative 'traversal_evidence_text'
+
 module Woods
   module MCP
     # Base class for rendering MCP tool responses in different output formats.

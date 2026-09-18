@@ -44,6 +44,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                  required: %w[identifier], properties: {
                                    'identifier' => string_contract(1, 10_000),
                                    'depth' => integer_contract(0, 20),
+                                   'explain' => boolean_contract,
                                    'max_nodes' => integer_contract(1, 10_000),
                                    'max_edges' => integer_contract(1, 100_000),
                                    'types' => array_contract(1_000, 10_000),
@@ -66,6 +67,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                required: %w[identifier], properties: {
                                  'identifier' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20),
+                                 'explain' => boolean_contract,
                                  'max_nodes' => integer_contract(1, 10_000),
                                  'max_edges' => integer_contract(1, 100_000),
                                  'types' => array_contract(1_000, 10_000),

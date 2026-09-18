@@ -240,6 +240,56 @@ metadata). They do not cap that initial load, elapsed time, or total process
 memory. These arguments are unreleased in Woods 2.0.0.beta2; check the connected
 server's tool schema before sending them to an older installation.
 
+### Traversal explanations
+
+Supporting development versions accept `explain: true` on `dependencies` and
+`dependents`. Check the connected schema first; this option is unreleased after
+2.0.0.beta2. Omitted or false keeps the existing compact response.
+
+The additive `explanation` object contains:
+
+- `direction`: `forward` or `reverse`, plus the requested `root` identity.
+- `edges`: records keyed by response-local IDs such as `e0`. Every record keeps
+  the original **source → target** direction, even during reverse traversal.
+  `source` contains its recorded `identifier` and `type`; `target` contains its
+  identifier and the unique type when the published graph establishes one.
+  `via`, `through`, `through_db`, and `disable_joins` preserve recorded values;
+  absent legacy attributes are null (shown as unknown in text), including an
+  unrecorded `disable_joins` rather than an invented false value.
+- `witnesses`: one shortest breadth-first predecessor per admitted identifier,
+  keyed by identifier. Each has `parent`, `edge_id`, `impact` (`root`, `direct`,
+  or `transitive`), and `typed_path_complete`. Follow parent references to the
+  root to reconstruct one witness; alternative paths are not enumerated.
+
+A target name shared by several types has `type: null`,
+`resolution: "ambiguous"`, and sorted `candidate_types`. An unresolved target has
+`resolution: "unresolved"` and an empty candidate list. Forward artifacts do not
+record target types, so the response cannot choose among candidates. A witness
+through an ambiguous or unresolved identity sets `typed_path_complete: false`;
+it describes identifier-level reachability, never a uniquely typed path.
+`types` filters retain the compact traversal's identifier-level semantics: any
+registered type can qualify a name, while edge evidence keeps its actual source
+owner. Multiple relationship kinds between the same endpoints remain separate.
+
+Direct witnesses establish a recorded root relationship; transitive witnesses
+represent inferred downstream reachability through recorded relationships.
+Neither establishes observed execution, confidence, call order, or test coverage.
+
+Node pagination retains required ancestor witnesses once, marked `context: true`
+when outside the page; returned rows have `context: false`. Context records do
+not increase the result-row count. Page evidence retains the witness edges and
+other observed relationships among its visible/context endpoints; an empty page
+has empty edge/witness maps. Edge IDs are local to this traversal response.
+
+All examined evidence shares the existing edge budget, before `via`/`types`
+filtering. Current `reverse_via` buckets allow direct reverse evidence lookup;
+legacy recovery charges each reverse candidate and every inspected forward edge.
+The shared predecessor forest and emitted records remain bounded by admitted
+nodes and inspected edges. Per-generation JSON loading and the cached
+O(nodes + variants) ownership/type preparation are outside the walk budget;
+explanation mode never flattens all forward edges as per-request preparation.
+Partial traversal and pagination metadata retain the budget contract above.
+
 ### Conditional Index capabilities
 
 The Ruby server builder contains 15 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, and Notion sync. They register only when their required collaborators or configuration are wired.

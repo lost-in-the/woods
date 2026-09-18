@@ -289,6 +289,8 @@ module Woods
             deps.each { |d| lines << "#{indent}  -> #{d}" }
           end
 
+          lines.concat(TraversalEvidenceText.lines(fetch_key(data, :explanation)))
+
           if fetch_key(data, :partial)
             lines << "Partial traversal (#{fetch_key(data, :partial_reason)}); narrow depth/types/via or increase max_nodes/max_edges."
           end
