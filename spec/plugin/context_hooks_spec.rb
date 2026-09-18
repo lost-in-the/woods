@@ -105,6 +105,33 @@ RSpec.describe 'Opt-in Claude context hook entry points' do
     expect(File.exist?(File.join(output, 'hook-context-state.json'))).to be(false)
   end
 
+  %w[mktemp wc cat].each do |utility|
+    it "keeps response preparation within the deadline when #{utility} would block" do
+      shims = File.join(root, 'bin')
+      FileUtils.mkdir_p(shims)
+      shim = File.join(shims, utility)
+      File.write(shim, "#!/bin/bash\nsleep 2\nexec /usr/bin/#{utility} \"$@\"\n")
+      File.chmod(0o755, shim)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      stdout, stderr, status = invoke('PATH' => "#{shims}:#{ENV.fetch('PATH')}")
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.25
+      expect(status).to be_success
+      expect(stderr).to eq('')
+      expect(JSON.parse(stdout).dig('hookSpecificOutput', 'additionalContext')).to include('generation 1')
+    end
+  end
+
+  it 'discards a partial response when the producer exceeds the deadline' do
+    blocked = File.join(root, 'partial')
+    File.write(blocked, "#!/bin/bash\nprintf '{\"hookSpecificOutput\":'\nsleep 10\n")
+    File.chmod(0o755, blocked)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    stdout, stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => blocked)
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.25
+    expect([stdout, stderr]).to eq(['', ''])
+    expect(status).to be_success
+  end
+
   it 'emits a bounded orientation on the real SessionStart entry point' do
     stdout, = invoke(input: payload.merge(hook_event_name: 'SessionStart'), kind: 'SessionStart')
     expect(JSON.parse(stdout).dig('hookSpecificOutput', 'additionalContext')).to include('generation 1', 'woods_status')
