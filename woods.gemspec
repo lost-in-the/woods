@@ -67,7 +67,7 @@ Gem::Specification.new do |spec|
   )
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
-                        woods-mcp-http]
+                        woods-mcp-http woods-agent-config]
   spec.require_paths = ['lib']
 
   # Runtime dependencies

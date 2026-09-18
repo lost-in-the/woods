@@ -15,7 +15,7 @@ require 'uri'
 
 module PackagedGemSpec
   ROOT = File.expand_path('../..', __dir__)
-  EXECUTABLES = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console woods-mcp-http].freeze
+  EXECUTABLES = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console woods-mcp-http woods-agent-config].freeze
   COMMUNITY_FILES = %w[
     LICENSE.txt
     README.md
@@ -106,7 +106,7 @@ RSpec.describe 'packaged gem' do
     end
   end
 
-  it 'contains every runtime file (excluding release_v2 audit machinery) and the exact five executables' do
+  it 'contains every runtime file (excluding release_v2 audit machinery) and the exact supported executables' do
     relative_lib_files = Dir[File.join(PackagedGemSpec::ROOT, 'lib/**/*')]
                          .select { |path| File.file?(path) }
                          .map { |path| Pathname(path).relative_path_from(Pathname(PackagedGemSpec::ROOT)).to_s }
@@ -238,6 +238,14 @@ RSpec.describe 'packaged gem' do
 
       expect(status).to be_success, "require 'woods' failed outside the checkout:\n#{stderr}"
       expect(stdout).to eq("ok\n")
+    end
+
+    it 'loads the installed configuration lifecycle command without Rails or a repository load path' do
+      exe = File.join(@smoke_gem_home, 'bin', 'woods-agent-config')
+      stdout, stderr, status = Open3.capture3(smoke_env, exe, '--help', chdir: @package_tmp)
+      expect(status).to be_success, stderr
+      expect(stdout).to include('setup|update|remove', '--client claude', '--scope project|user')
+      expect(stderr).to be_empty
     end
 
     it 'boots the installed woods-mcp and answers an initialize request with protocol-pure stdout' do
@@ -660,13 +668,14 @@ RSpec.describe 'packaged gem' do
       expect(stdout).to eq("#{Woods::VERSION}\n")
     end
 
-    it 'loads all five installed executables to their safe startup boundaries' do
+    it 'loads all installed executables to their safe startup boundaries' do
       cases = {
         'woods-mcp' => ['/definitely/missing/woods-index'],
         'woods-mcp-start' => [],
         'woods-console-mcp' => [],
         'woods-console' => [],
-        'woods-mcp-http' => ['/definitely/missing/woods-index']
+        'woods-mcp-http' => ['/definitely/missing/woods-index'],
+        'woods-agent-config' => ['unsupported-command']
       }
 
       cases.each do |name, arguments|

@@ -14,6 +14,19 @@ git status --short --branch
 
 This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Diagnose against capabilities the recorded installed version actually provides.
 
+## Managed configuration availability
+
+`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+installed version and test `bundle exec woods-agent-config --help` in the
+selected application bundle. When supported, use its saved setup/update/remove
+plan and explicit client/scope/root selection; apply the reviewed plan within
+the user's existing authorization. Do not infer ownership from a server name
+or repair edited managed sections by overwriting them. Plans and recovery
+journals contain private configuration bytes. See the canonical
+[managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
+for host/Compose preflight, actual Claude file locations, conflict recovery,
+and removal. Preserve manual setup for older installed versions.
+
 ## 1. Check Rails
 
 ```bash
