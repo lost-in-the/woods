@@ -62,6 +62,10 @@ The default setup provides structural code intelligence. It does not require an 
 
 ### 1. Install Woods
 
+First [choose a version that is published on RubyGems](docs/GETTING_STARTED.md#1-install-the-gem).
+The example below requires a stable 2.x release; beta and release-candidate
+installations need an exact published prerelease pin from that guide.
+
 ```ruby
 # Gemfile
 group :development do

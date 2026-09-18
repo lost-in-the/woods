@@ -46,7 +46,15 @@ Do not infer permission to configure Console MCP from a request to “set up Woo
 
 ## 3. Install on a branch
 
-Create or switch to the branch requested by the repository owner. Add only the development dependency:
+Create or switch to the branch requested by the repository owner. Select the
+published version using the [installation guide](GETTING_STARTED.md#1-install-the-gem).
+Before stable 2.x is published, use the exact published prerelease constraint
+from the README release table; `~> 2.0` will not select a beta or release candidate.
+Use the selected version's tag documentation and verify its capabilities before
+configuring features described on `main`.
+
+Add only the development dependency. The following constraint applies **after a
+stable 2.x release is published**:
 
 ```ruby
 # Gemfile

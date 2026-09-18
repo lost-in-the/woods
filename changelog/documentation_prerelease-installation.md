@@ -1,0 +1,1 @@
+- Qualify the `~> 2.0` installation examples for stable releases and direct prerelease adopters to the exact published version in the README release table. Keep agent setup and plugin guidance aligned with installed-version capabilities; clarify that the refresh-hook deadline starts after complete event input is collected and queued.
