@@ -49,6 +49,17 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+Semantic graph validation (#413) is unreleased after `2.0.0.beta2`; verify the
+installed gem before expecting these errors. Supporting versions check typed
+unit identity, graph/index agreement and forward/reverse/file/type memberships
+within one pinned generation. Preserve the failing generation and exact error,
+then run a fresh full extraction with the intended bundle and validate again.
+Do not hand-edit derived graph indexes to silence failures. A repeated error on
+a fresh full run is evidence to report as an extraction defect. Unresolved
+targets can be valid; validation cannot prove runtime execution or distinguish
+an external name from an internal unit omitted everywhere. Follow the
+[semantic recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#semantic-graph-validation-errors).
+
 If external targets such as `http_api` lose dependents after incremental
 extraction, check whether the installed Woods version includes B-193.
 The fix is unreleased; installing this plugin does not upgrade the gem.

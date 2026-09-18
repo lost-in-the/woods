@@ -8,6 +8,9 @@ require_relative '../filename_utils'
 require_relative '../atomic_file'
 
 require_relative '../generation'
+require_relative '../published_index'
+require_relative 'graph_invariant_validator'
+require_relative 'index_validator/graph_checks'
 
 module Woods
   module Resilience
@@ -18,6 +21,8 @@ module Woods
     # - All files referenced in the index exist on disk
     # - Content hashes (source_hash) match the actual source_code
     # - No stale unit files exist that aren't listed in the index
+    # - Typed graph identities and reverse/file/type memberships agree
+    # All checks share one pinned generation; the validator never repairs it.
     #
     # **This class knows nothing about vectors or embedding dimensions.** Six
     # documents used to credit it with detecting dimension mismatches; it never
@@ -34,6 +39,7 @@ module Woods
     #   puts report.errors if !report.valid?
     class IndexValidator # rubocop:disable Metrics/ClassLength
       include Woods::FilenameUtils
+      include GraphChecks
 
       # Report produced by {#validate}.
       #
@@ -84,13 +90,19 @@ module Woods
           return ValidationReport.new(valid?: false, warnings: warnings, errors: errors)
         end
 
-        payload_type_dirs(errors).each do |type_dir|
-          validate_type_directory(type_dir, warnings, errors)
+        with_validation_payload do
+          @graph_index_entries = []
+          payload_type_dirs(errors).each do |type_dir|
+            validate_type_directory(type_dir, warnings, errors)
+          end
+          validate_flow_artifacts(errors)
+          validate_against_manifest(warnings, errors)
         end
-        validate_flow_artifacts(errors)
-        validate_against_manifest(warnings, errors)
 
         ValidationReport.new(valid?: errors.empty?, warnings: warnings, errors: errors)
+      rescue IOError, SystemCallError, ArgumentError, JSON::ParserError, Woods::PublishedIndex::CorruptPointerError => e
+        errors << "Cannot read published index: #{e.class}: #{e.message}"
+        ValidationReport.new(valid?: false, warnings: warnings, errors: errors)
       end
 
       # The checks `woods:validate` used to carry inline: manifest counts
@@ -107,16 +119,32 @@ module Woods
         manifest_path = File.join(payload, 'manifest.json')
         return unless File.exist?(manifest_path)
 
-        manifest = JSON.parse(Woods::AtomicFile.read(manifest_path))
+        manifest = read_validation_manifest(manifest_path, errors)
+        return unless manifest
+
         validate_writer_version(manifest['woods_version'], warnings)
         unresolvable = Hash.new { |hash, key| hash[key] = [] }
 
-        (manifest['counts'] || {}).each do |type, expected_count|
+        manifest.fetch('counts', {}).each do |type, expected_count|
           validate_manifest_type(payload, type, expected_count, unresolvable, warnings, errors)
         end
 
         warn_unresolvable_paths(warnings, unresolvable)
         validate_dependency_graph(payload, errors)
+      end
+
+      def read_validation_manifest(path, errors)
+        manifest = JSON.parse(Woods::AtomicFile.read(path))
+        unless manifest.is_a?(Hash)
+          errors << 'manifest.json: expected an object'
+          return
+        end
+        unless manifest.fetch('counts', {}).is_a?(Hash)
+          errors << 'manifest.json counts: expected an object'
+          return
+        end
+
+        manifest
       end
 
       # The version records the last publisher, not the producer of every
@@ -197,6 +225,10 @@ module Woods
       # @param errors [Array<String>]
       def validate_unit_file(file, type, unresolvable, errors)
         data = JSON.parse(Woods::AtomicFile.read(file))
+        unless data.is_a?(Hash)
+          errors << "#{file}: expected a unit object"
+          return
+        end
         errors << "#{file}: missing identifier" unless data['identifier']
         errors << "#{file}: missing source_code" unless data['source_code']
         file_path = data['file_path']
@@ -233,13 +265,14 @@ module Woods
           return
         end
 
-        JSON.parse(Woods::AtomicFile.read(graph_path))
+        graph = JSON.parse(Woods::AtomicFile.read(graph_path))
+        errors.concat(GraphInvariantValidator.new(graph: graph, index_entries: @graph_index_entries).validate)
       rescue JSON::ParserError
         errors << 'dependency_graph.json: invalid JSON'
       end
 
       def payload_dir
-        Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
+        @validation_payload || Woods::Generation.new(output_dir: @index_dir).payload_dir.to_s
       end
 
       private
@@ -314,12 +347,18 @@ module Woods
       # failure RAISES: {#payload_type_dirs} converts it to a validation
       # error rather than degrading to a silently empty allowlist.
       #
+      # The explicit Woods static-map provenance additionally admits the
+      # GemMapper's own type families; arbitrary directories stay excluded.
       # `flows/` is deliberately absent: it holds `flow_index.json` and
       # per-flow documents, which {#validate_flow_artifacts} owns.
       #
       # @return [Array<String>]
       def type_directory_allowlist
-        @type_directory_allowlist ||= self.class.unit_type_directories
+        directories = self.class.unit_type_directories
+        return directories unless static_source_map?
+
+        require_relative '../gem_mapper'
+        directories | Woods::GemMapper::TYPE_DIRECTORIES.values
       end
 
       # Validate the flows/ artifact family (G-2): `flow_index.json` parses,
@@ -383,13 +422,12 @@ module Woods
           return
         end
 
-        index_entries = JSON.parse(Woods::AtomicFile.read(index_path))
         indexed_identifiers = Set.new
-
-        index_entries.each do |entry|
+        validation_index_entries(index_path, errors).each do |entry|
           identifier = entry['identifier']
           indexed_identifiers << identifier
-          validate_index_entry(type_dir, type_name, identifier, errors)
+          data = validate_index_entry(type_dir, type_name, identifier, errors)
+          collect_graph_index_entry(type_dir, entry, data, errors)
         end
 
         check_stale_files(type_dir, type_name, indexed_identifiers, warnings)
@@ -435,11 +473,23 @@ module Woods
       # @param errors [Array<String>] Accumulated errors
       def validate_content_hash(unit_file, identifier, errors)
         data = JSON.parse(Woods::AtomicFile.read(unit_file))
+        unless data.is_a?(Hash)
+          errors << "#{unit_file}: expected a unit object"
+          return
+        end
+        check_content_hash(data, identifier, errors)
+        data
+      end
+
+      def check_content_hash(data, identifier, errors)
         source_code = data['source_code']
         stored_hash = data['source_hash']
-
         return unless source_code && stored_hash
 
+        unless source_code.is_a?(String) && stored_hash.is_a?(String)
+          errors << "#{identifier}: source_code and source_hash must be strings"
+          return
+        end
         expected_hash = Digest::SHA256.hexdigest(source_code)
         return if stored_hash == expected_hash
 

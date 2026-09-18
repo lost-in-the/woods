@@ -308,6 +308,22 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     dir
   end
 
+  it 'independently validates full and incremental graph invariants (#413)' do
+    require 'woods/resilience/index_validator'
+    baseline = full_extraction
+    initial = Woods::Resilience::IndexValidator.new(index_dir: baseline).validate
+    expect(initial.errors).to be_empty
+    changed = write_file('app/services/invariant_service.rb', 'class InvariantService; def call; Post.count; end; end')
+
+    Woods::Extractor.new(output_dir: baseline).extract_changed([changed])
+    oracle = full_extraction
+    [baseline, oracle].each do |directory|
+      report = Woods::Resilience::IndexValidator.new(index_dir: directory).validate
+      expect(report.errors).to be_empty
+    end
+    expect(Woods::Generation.new(output_dir: baseline).current.number).to be >= 2
+  end
+
   # Baseline the tree, then apply operations one at a time through
   # extract_changed, asserting equivalence at every quiescent point.
   def run_sequence(operations)

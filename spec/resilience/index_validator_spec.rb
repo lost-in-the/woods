@@ -19,9 +19,9 @@ RSpec.describe Woods::Resilience::IndexValidator do
     File.write(full_path, JSON.generate(data))
   end
 
-  def write_unit_file(type_dir, filename, source_code: 'class Foo; end')
+  def write_unit_file(type_dir, filename, source_code: 'class Foo; end', identifier: filename.sub('.json', ''))
     data = {
-      'identifier' => filename.sub('.json', ''),
+      'identifier' => identifier,
       'type' => 'model',
       'source_code' => source_code,
       'source_hash' => Digest::SHA256.hexdigest(source_code)
@@ -32,7 +32,7 @@ RSpec.describe Woods::Resilience::IndexValidator do
   describe '#validate' do
     context 'with manifest writer-version provenance (#323)' do
       before do
-        write_json('dependency_graph.json', { 'nodes' => {}, 'edges' => [] })
+        write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })
       end
 
       [nil, Woods::VERSION, "#{Gem::Version.new(Woods::VERSION).segments.first}.99.0.beta1"].each do |version|
@@ -65,6 +65,21 @@ RSpec.describe Woods::Resilience::IndexValidator do
           report = described_class.new(index_dir: tmp_dir).validate
           expect(report.valid?).to be true
           expect(report.warnings).to include(a_string_matching(/Invalid manifest woods_version/))
+        end
+      end
+    end
+
+    context 'with malformed manifest structure' do
+      [[], nil, { 'counts' => [] }, { 'counts' => nil }].each do |manifest|
+        it "reports #{manifest.inspect} through ValidationReport without raising" do
+          write_json('manifest.json', manifest)
+          report = nil
+
+          expect { report = described_class.new(index_dir: tmp_dir).validate }.not_to raise_error
+          expect(report.valid?).to be(false)
+          field = manifest.is_a?(Hash) ? 'manifest.json counts' : 'manifest.json'
+          expected = "#{field}: expected an object"
+          expect(report.errors).to include(expected)
         end
       end
     end
@@ -234,7 +249,11 @@ RSpec.describe Woods::Resilience::IndexValidator do
         write_unit_file('models', 'User.json', source_code: 'class User; end')
         write_json('models/_index.json', [{ 'identifier' => 'User', 'file_path' => 'app/models/user.rb' }])
         write_json('manifest.json', { 'counts' => { 'models' => 1 } })
-        write_json('dependency_graph.json', { 'nodes' => {} })
+        write_json('dependency_graph.json', {
+                     'nodes' => { 'User' => { 'type' => 'model', 'file_path' => 'app/models/user.rb' } },
+                     'edges' => { 'User' => [] }, 'reverse' => {},
+                     'file_map' => { 'app/models/user.rb' => ['User'] }, 'type_index' => { 'model' => ['User'] }
+                   })
         write_json('flows/flow_index.json', { 'PostsController#show' => 'flows/PostsController_show.json' })
         write_json('flows/PostsController_show.json', { 'entry_point' => 'PostsController#show', 'steps' => [] })
       end
@@ -449,7 +468,8 @@ RSpec.describe Woods::Resilience::IndexValidator do
     context 'with a namespaced unit file on disk' do
       before do
         # Write a unit file using Extractor-style naming
-        write_unit_file('models', 'Admin__UsersController.json', source_code: 'class Admin::UsersController; end')
+        write_unit_file('models', 'Admin__UsersController.json', source_code: 'class Admin::UsersController; end',
+                                                                 identifier: 'Admin::UsersController')
         index = [{ 'identifier' => 'Admin::UsersController',
                    'file_path' => 'app/controllers/admin/users_controller.rb' }]
         write_json('models/_index.json', index)

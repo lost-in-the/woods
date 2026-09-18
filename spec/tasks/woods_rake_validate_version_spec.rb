@@ -12,7 +12,8 @@ RSpec.describe 'woods:validate writer-version warnings (#323)' do
       root = File.expand_path('../..', __dir__)
       writer = "#{Gem::Version.new(Woods::VERSION).segments.first + 1}.0.0"
       File.write(File.join(app_root, 'manifest.json'), JSON.generate(counts: {}, woods_version: writer))
-      File.write(File.join(app_root, 'dependency_graph.json'), JSON.generate(nodes: {}, edges: []))
+      graph = %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] }
+      File.write(File.join(app_root, 'dependency_graph.json'), JSON.generate(graph))
       File.write(File.join(app_root, 'Rakefile'), <<~RUBY)
         $LOAD_PATH.unshift(#{File.join(root, 'lib').inspect})
         require 'rake'
