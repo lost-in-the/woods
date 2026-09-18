@@ -180,7 +180,12 @@ WOODS_RETRIEVAL_MODE=lexical bundle exec woods-mcp-start ./tmp/woods
 For a Ruby-built retriever, set `config.retrieval_mode = :lexical` and supply a
 populated metadata store to `Builder#build_retriever`. The packaged MCP server
 loads published unit JSON itself; it does not boot Rails or read current source
-files. Neither path constructs an embedding provider or vector adapter. The
+files. Neither path constructs an embedding provider or vector adapter. If a
+no-provider error suggests only OpenAI, Ollama or `search`, explicit lexical
+mode is still available from `2.0.0.beta3`: set the variable in the MCP client
+configuration and restart that server. Confirm `woods_status.retriever.mode`
+is `lexical`; setting it only in a Rails initializer does not configure a
+separate MCP process. The
 existing `:semantic` mode remains the default; provider failures never switch
 modes automatically. A Rails initializer is not loaded by the standalone MCP
 process, so set the environment variable in that process's client configuration.

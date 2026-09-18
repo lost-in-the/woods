@@ -7,7 +7,7 @@
 # same as when launched directly. RubyGems loads gem executables as Ruby, so
 # this wrapper must remain a Ruby program when packaged.
 
-index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil)
+index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
 
 if index_dir.nil? || index_dir.empty?
   warn 'Error: No index directory specified.'
@@ -15,9 +15,13 @@ if index_dir.nil? || index_dir.empty?
   exit 1
 end
 
+index_dir = File.expand_path(index_dir)
+path_remedy = 'Point at the existing index with an explicit path, WOODS_DIR, or WOODS_OUTPUT. ' \
+              'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
+
 unless File.directory?(index_dir)
   warn "Error: Index directory does not exist: #{index_dir}"
-  warn 'Run extraction first: bundle exec rake woods:extract'
+  warn path_remedy
   exit 1
 end
 
@@ -39,20 +43,21 @@ def manifest_present?(index_dir)
   require 'json'
   require_relative '../lib/woods/atomic_file'
   payload_name = JSON.parse(Woods::AtomicFile.read(generation_path))['payload']
-  return false if payload_name.nil? || payload_name.empty?
+  return false unless payload_name.is_a?(String) && !payload_name.empty?
 
   root = File.expand_path(index_dir)
   candidate = File.expand_path(File.join(root, payload_name))
   return false unless candidate.start_with?("#{root}#{File::SEPARATOR}")
 
   File.file?(File.join(candidate, 'manifest.json'))
-rescue JSON::ParserError, SystemCallError
+rescue JSON::ParserError, SystemCallError, TypeError, NoMethodError
   false
 end
 
 unless manifest_present?(index_dir)
-  warn "Error: No manifest.json in: #{index_dir}"
-  warn 'Run extraction first: bundle exec rake woods:extract'
+  warn "Error: No manifest.json found in: #{index_dir}"
+  warn 'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json.'
+  warn path_remedy
   exit 1
 end
 

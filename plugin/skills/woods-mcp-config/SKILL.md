@@ -74,7 +74,7 @@ When Woods is installed only in Docker, prefer running the server through the ap
 }
 ```
 
-Use a host-side bundle only after verifying Ruby, the application bundle, and the index are available on the host. Always pass the path visible to the process that runs `woods-mcp`.
+Use a host-side bundle only after verifying Ruby, the application bundle, and the index are available on the host. Always pass the path visible to the process that runs `woods-mcp`. Prefer an explicit index path on all versions. After `2.0.0.beta3`, an unreleased change adds `WOODS_OUTPUT` as a fallback after the positional path and `WOODS_DIR`; check the installed version's configuration guide before relying on it. `woods-mcp-start` still refuses a missing path rather than selecting its working directory.
 
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
 
@@ -142,14 +142,14 @@ Canonical guide: [MCP_SERVERS.md](https://github.com/lost-in-the/woods/blob/main
 
 ## Lexical retrieval capability check
 
-This is a development capability. Before proposing it, verify the installed gem
+Lexical retrieval is available from `2.0.0.beta3`. Before proposing it, verify the installed gem
 exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
 `WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
 from the plugin version or an unreleased checkout.
 
 When supported, put `WOODS_RETRIEVAL_MODE=lexical` in the environment of the
 process launching Index MCP (stdio or HTTP). A Rails initializer alone is not
-loaded by that process. Confirm `woods_status.retriever.mode` reports `lexical`.
+loaded by that process. Restart the MCP server after changing its environment, then confirm `woods_status.retriever.mode` reports `lexical`. A beta3 no-provider error may omit this option; it does not mean embeddings are required for explicit lexical mode.
 See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
 for the supported contract, checked against the installed gem version.
 

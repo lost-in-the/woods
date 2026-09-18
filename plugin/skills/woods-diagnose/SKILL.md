@@ -186,6 +186,13 @@ Compare the client config with the exact command, absolute `cwd`, bundle, and in
 bundle exec woods-mcp-start ./tmp/woods
 ```
 
+If the error names a missing `manifest.json`, first check the selected index
+path: an atomic index uses `generation.json` to locate its payload manifest.
+Point at an existing index before suggesting a new extraction. Prefer the
+explicit path above; `WOODS_DIR` is also supported. An unreleased change after
+`2.0.0.beta3` adds `WOODS_OUTPUT` after those two choices, so verify the installed
+version's configuration guide before relying on that fallback.
+
 Then reconnect through the MCP client and call `woods_status`. Use client-native tool inspection after initialization. Expect 14 packaged Index tools, not all conditional schemas.
 
 For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
@@ -241,7 +248,7 @@ it only permits intentional mass deletion. Source-empty units deliberately retai
 metadata without vectors. See the canonical
 [input-integrity guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#input-integrity-and-source-empty-units).
 
-Only diagnose this layer when structural tools work and `codebase_retrieve` fails. First check `woods_status.retriever.mode`. For lexical mode, validate the published extraction index and follow the capability check below. For semantic mode, check the configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
+Only diagnose this layer when structural tools work and `codebase_retrieve` fails. If a no-provider message recommends only embeddings or `search`, check the lexical capability below: beta3 supports explicit `WOODS_RETRIEVAL_MODE=lexical` even though that error omits it. Put the setting in the MCP process environment and restart; never silently change retrieval modes. First check `woods_status.retriever.mode`. For lexical mode, validate the published extraction index and follow the capability check below. For semantic mode, check the configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
 
 - OpenAI: verify the key exists without printing it.
 - Ollama: verify the service and configured model locally.
@@ -280,7 +287,7 @@ Canonical guide: [TROUBLESHOOTING.md](https://github.com/lost-in-the/woods/blob/
 
 ## Lexical retrieval capability check
 
-This is a development capability. Before proposing it, verify the installed gem
+Lexical retrieval is available from `2.0.0.beta3`. Before proposing it, verify the installed gem
 exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
 `WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
 from the plugin version or an unreleased checkout.
