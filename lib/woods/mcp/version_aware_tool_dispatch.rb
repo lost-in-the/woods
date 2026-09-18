@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
+require 'mcp'
 require_relative '../update_check'
 
 module Woods
   module MCP
-    # Prepended onto a built +MCP::Server+ instance so that a call to a tool the
+    # Prepended before +MCP::Server+ initialization so that a call to a tool the
     # installed gem does not define produces version-aware, self-healing
     # guidance instead of a bare "Tool not found".
     #
@@ -12,8 +13,7 @@ module Woods
     # to call a tool that only exists in a later Woods release. The upstream
     # +mcp+ gem raises +RequestHandlerError("Tool not found: X")+ with no seam to
     # customize the message, so we intercept the built server's +call_tool+
-    # (dispatched directly by +handle_request+, so a prepend on the instance is
-    # honored on both the stdio and HTTP transports) and re-raise with the
+    # before the SDK captures its bound handler method and re-raise with the
     # installed version plus an update hint the agent can relay to the user.
     #
     # Only the genuine tool-not-found case is rewritten; every other
@@ -42,6 +42,11 @@ module Woods
       def tool_not_found_error?(error)
         error.error_type == :invalid_params && error.message.to_s.start_with?('Tool not found:')
       end
+    end
+    # MCP 0.9 captures method(:call_tool) during initialization. The override
+    # must already exist then; a later singleton prepend misses that handler.
+    class VersionAwareServer < ::MCP::Server
+      prepend VersionAwareToolDispatch
     end
   end
 end

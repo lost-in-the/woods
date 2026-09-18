@@ -10,6 +10,7 @@ require_relative '../tasks'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
+require_relative 'error_response'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -93,15 +94,12 @@ module Woods
             )
           end
 
-          server = ::MCP::Server.new(
+          server = VersionAwareServer.new(
             name: 'woods',
             version: Woods::VERSION,
             resources: resources,
             resource_templates: resource_templates
           )
-          # Rewrite "Tool not found" into version-aware update guidance for agents
-          # running against an older gem than the skill they're following assumes.
-          server.singleton_class.prepend(VersionAwareToolDispatch)
 
           define_lookup_tool(server, reader, respond, respond_err, renderer)
           define_search_tool(server, reader, respond, respond_err, renderer)
@@ -200,11 +198,7 @@ module Woods
           meta[:config_key] = config_key if config_key
           meta[:doc_link] = doc_link if doc_link
           meta.merge!(extra) unless extra.empty?
-          ::MCP::Tool::Response.new(
-            [{ type: 'text', text: message }],
-            error: true,
-            meta: meta
-          )
+          ErrorResponse.new([{ type: 'text', text: message }], meta: meta)
         end
 
         def truncate_section(array, limit)
