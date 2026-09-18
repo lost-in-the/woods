@@ -468,7 +468,7 @@ require 'woods/session_tracer/file_store' # the stores are not autoloaded
 
 config.session_tracer_enabled = true
 config.session_store = Woods::SessionTracer::FileStore.new(
-  Rails.root.join('tmp/session_traces')
+  base_dir: Rails.root.join('tmp/session_traces')
 )
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```

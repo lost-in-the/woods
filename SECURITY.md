@@ -60,11 +60,12 @@ Woods runs inside your Rails application and has access to:
 - **Application source code**: extracted and written to the output directory as JSON
 - **Database schema**: column names, types, indexes, and foreign keys (no row data)
 - **Git metadata**: commit history, contributors, file change frequency
-- **Runtime state** (Console MCP Server only), live database queries within a rolled-back transaction
+- **Optional session traces**: session/trace identifiers, request paths and controller/action timelines when session tracing is configured
+- **Live database rows** (Console MCP Server), queries within a rolled-back transaction
 
 ### Output Directory
 
-Extracted data is written to `tmp/woods/` by default. This directory contains your application's source code and schema in structured JSON format. Treat it with the same sensitivity as your source code, do not expose it to untrusted parties.
+Extracted data is written to `tmp/woods/` by default. This directory contains your application's source code and schema in structured JSON format. Source literals, comments and configuration metadata may contain sensitive values. Treat the index with the same sensitivity as your source code; do not expose it to untrusted parties. Optional session stores can be configured under this directory and add request metadata that may be more sensitive than the source itself. Apply the [session tracing access and retention guidance](docs/CONFIGURATION_REFERENCE.md#session-tracer-options) to those stores too.
 
 ### Console Server
 
@@ -80,13 +81,15 @@ If extraction output leaks, what can an attacker do with it?
 
 **What the output contains.** Application source code (inlined concerns, callback-resolved behavior), database schema (column names, types, indexes, foreign keys), route tables, migration history, gem versions, and git metadata (commit history, contributor emails, file change frequency).
 
-**What the output does not contain.** No row-level data from your database. Woods extracts schema only. No environment variables, no `Rails.application.credentials`, no API keys, no session state, no request logs, no customer data.
+**Structural extraction boundaries.** Structural extraction collects schema rather than dumping live database rows, and does not intentionally collect environment variables or the Rails encrypted credential store. This is not a guarantee that output is free of secrets or customer information: extracted source can contain hardcoded values, comments or examples, and Index tools can return that source. Console redaction and export-specific scrubbing do not sanitize the structural index.
+
+**Optional session data.** When configured, session tracing records session/trace identifiers, request paths and controller/action timelines. Request paths and identifiers can contain sensitive user information. The configured session store controls where these records live; configured Index session tools can return them. Session storage and access need their own retention and authorization controls. Console MCP is a separate live-data boundary described above.
 
 | Leak scenario | Attacker gains | Attacker does not gain |
 |---|---|---|
-| `tmp/woods/` directory exfiltrated | Source code + schema equivalent to a git clone + `rails db:schema:dump` | Database rows, secrets, tokens, customer data |
-| MCP Index Server token leaked (HTTP transport) | Read-only query access to the extracted index, no write or execution paths | Shell access, database row data, secrets |
+| `tmp/woods/` directory exfiltrated | Source code, schema and metadata, including sensitive values present in source; session records if their store is configured here | No additional live database or shell access merely from possessing these files |
+| MCP Index Server token leaked (HTTP transport) | Access to published source/metadata and configured session tools, including sensitive content they contain | The packaged default does not boot Rails or provide live database queries or shell execution; custom tool wiring has its own access boundary |
 | Notion sync database compromised | Model and column summaries synced to Notion | Anything not mirrored, source code stays local |
-| Console MCP Server exposed (dev/staging) | Read-only database access through a rolled-back transaction, bounded by TableGate + Redactor + SqlValidator | Write access (rolled back), full credentials (redacted), blocked tables |
+| Console MCP Server exposed (dev/staging) | Live database access constrained by TableGate, credential scanning, Redactor and SqlValidator; this remains admin-trust access | Supported packaged modes expose no write or eval tools; rollback and redaction have the limits described in the Console guide |
 
 **Mitigation.** Treat `tmp/woods/` as source-equivalent, keep it out of world-readable directories and public container images. Rotate `WOODS_MCP_HTTP_TOKEN` on compromise. Keep `console_mcp_enabled = false` in production regardless of environment, since the console layers are defense-in-depth and not primary controls.
