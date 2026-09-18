@@ -96,7 +96,7 @@ bin/rubocop
 
 Before requesting review, run the full unit suite and style check unless the PR explains why one cannot run.
 
-Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces the aggregate line floor and measures branches, but does not enforce a branch floor. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
+Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces a 90% aggregate line floor and measures branches, but does not enforce a branch floor. The line gate was calibrated against local and CI default-suite results on 2026-09-18; it does not establish per-file coverage or coverage across the opt-in lanes. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
 
 ### Pending examples in CI
 
