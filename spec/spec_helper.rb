@@ -37,6 +37,7 @@ RSpec.configure do |config|
   # default suite; opt in with `rspec --tag perf` from a dedicated job
   # against a predictable box.
   config.filter_run_excluding(perf: true) unless ENV['WOODS_RUN_PERF_SPECS']
+  config.filter_run_excluding(maintenance_package: true) unless ENV['WOODS_RUN_MAINTENANCE_PACKAGE']
 
   # Booted-app specs (spec/integration/booted_extraction_spec.rb) boot a real
   # Rails app in-process and require full Rails (activerecord + actionpack),

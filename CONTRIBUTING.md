@@ -125,3 +125,52 @@ Woods uses runtime introspection, not static parsing. If your feature requires a
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
+
+## Maintenance release
+
+This tree has a one-off, no-publish preparation adapter for the reviewed 1.6.2
+security patch while `main` carries the newer 2.0 prerelease line. It does not
+establish a permanent stable branch or authorize another maintenance version.
+The approved target is `release/1.6.2`, based on immutable `v1.6.1`. Create that
+remote target only after the trusted main maintenance policy is reviewed.
+
+From a clean checkout, the only supported transitions are:
+
+```sh
+bin/rake "release:reopen[1.6.2.alpha]"
+# Review and commit the generated development-state diff.
+bin/rake "release:prepare[1.6.2]"
+```
+
+The tasks never commit, tag, push, dispatch or publish. Never edit VERSION or the
+README maintenance `release-state` banner manually. The first reopen creates that
+banner; prepare updates it and folds classified Unreleased notes and optional
+`changelog/<type>_<slug>.md` entries into a dated release heading. Entry files are
+nonempty Markdown without headings; supported types include `fixed`, `security`,
+`build`, and `documentation`. Invalid transitions, dirty trees, malformed notes,
+and missing/duplicate/unknown fences refuse before writes. This legacy profile
+has no v2 migration guide or v2 surface inventory requirement.
+
+Validate the full suite, lint, booted extraction, real Console credential rotation,
+and installed maintenance package tests. CI builds one gem plus its SHA-256
+sidecar into `woods-release-<commit SHA>` and tests that artifact on Ruby 3.0/Rails
+6.0 with exactly MCP 0.23.0 and Ruby 4.0/Rails 8.1 with the latest compatible 0.x SDK.
+MCP >=0.23.0 is required for upstream transport security fixes; update Woods and
+MCP together (`bundle update woods mcp`). Ruby 3.0 remains supported.
+The optional package specs require `WOODS_GEM_PATH` and
+run standalone, without the repository's `spec_helper` or implementation path:
+
+```sh
+ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' -- \
+  --options /dev/null spec/integration/maintenance_packaged_gem_spec.rb
+```
+
+Preparation is not publication; check RubyGems before describing 1.6.2 as released.
+The legacy automatic tag publisher is disabled, and Bundler's `release`,
+`release:rubygem_push`, and `release:source_control_push` tasks abort. Only a
+maintainer may later tag the reviewed merge commit and dispatch the trusted
+**main** workflow. That workflow must explicitly allow the exact tag, protected
+maintenance branch, immutable 1.6.1 base, reviewed final candidate SHA, required
+CI jobs, and immutable artifact. An unpinned candidate remains blocked. First merge a reviewed trusted-main profile update pinning `approved_sha` to that
+exact maintenance merge SHA; only then may the maintainer tag it. The
+workflow publishes the already tested gem bytes; never rebuild or publish locally.

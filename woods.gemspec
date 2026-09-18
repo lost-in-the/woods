@@ -2,6 +2,9 @@
 
 require_relative 'lib/woods/version'
 
+# Prepared maintenance gems link their own reviewed tag; development stays on its target.
+release_ref = Woods::VERSION.end_with?('.alpha') ? 'release/1.6.2' : "v#{Woods::VERSION}"
+
 Gem::Specification.new do |spec|
   spec.name          = 'woods'
   spec.version       = Woods::VERSION
@@ -22,10 +25,10 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = '>= 3.0.0'
 
   spec.metadata['homepage_uri'] = spec.homepage
-  spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/main"
-  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['source_code_uri'] = "#{spec.homepage}/tree/#{release_ref}"
+  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/#{release_ref}/CHANGELOG.md"
   spec.metadata['bug_tracker_uri'] = "#{spec.homepage}/issues"
-  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/main/docs"
+  spec.metadata['documentation_uri'] = "#{spec.homepage}/tree/#{release_ref}/docs"
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   # Specify which files should be added to the gem
@@ -38,6 +41,7 @@ Gem::Specification.new do |spec|
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md'
   ]
+  spec.files.reject! { |path| path.match?(%r{\Alib/(?:tasks/release\.rake|woods/release(?:\.rb|/))}) }
   spec.bindir = 'exe'
   spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
                         woods-mcp-http]
