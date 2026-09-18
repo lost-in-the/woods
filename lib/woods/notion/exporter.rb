@@ -8,6 +8,7 @@ require_relative 'mappers/column_mapper'
 require_relative 'mappers/migration_mapper'
 require_relative 'rate_limiter'
 require_relative 'sync_manifest'
+require_relative '../export/typed_reader'
 
 module Woods
   module Notion
@@ -83,6 +84,7 @@ module Woods
         @database_ids = config.notion_database_ids || {}
         @client = client || Client.new(api_token: api_token)
         @reader = reader || build_reader(index_dir)
+        @typed_reader = Export::TypedReader.new(@reader)
         @manifest = manifest || build_manifest(index_dir)
         @force_full = force_full.nil? ? env_force? : force_full
         @page_id_cache = {}
@@ -127,9 +129,11 @@ module Woods
         database_id = @database_ids[:data_models]
         return empty_stats unless database_id
 
+        prepared = false
         begin
           migration_dates = load_migration_dates
           shared_tables = shared_table_names
+          prepared = true
           stats = sync_units('model', database_id, 'Table Name', SCOPE_DATA_MODELS) do |unit_data|
             properties = Mappers::ModelMapper.new.map(unit_data)
             # Enrichment reads the bare table name from the title — run it
@@ -141,7 +145,7 @@ module Woods
           @manifest.prune(SCOPE_DATA_MODELS, stats.delete(:current_keys))
           stats
         ensure
-          save_manifest
+          save_manifest if prepared
         end
       end
 
@@ -163,11 +167,14 @@ module Woods
         database_id = @database_ids[:columns]
         return empty_stats unless database_id
 
+        prepared = false
         begin
           totals = { synced: 0, skipped: 0, errors: [] }
           current_keys = []
+          groups = column_groups
+          prepared = true
 
-          column_groups.each do |group|
+          groups.each do |group|
             result = sync_table_columns(group, database_id, current_keys)
             totals[:synced] += result[:synced]
             totals[:skipped] += result[:skipped]
@@ -177,7 +184,7 @@ module Woods
           @manifest.prune(SCOPE_COLUMNS, current_keys)
           totals
         ensure
-          save_manifest
+          save_manifest if prepared
         end
       end
 
@@ -197,8 +204,7 @@ module Woods
         stats = { synced: 0, skipped: 0, errors: [], current_keys: [] }
 
         @reader.list_units(type: type).each do |entry|
-          unit_data = @reader.find_unit(entry['identifier'])
-          next unless unit_data
+          unit_data = @typed_reader.find(entry['identifier'], type)
 
           begin
             properties, legacy_title = yield(unit_data)
@@ -228,8 +234,7 @@ module Woods
       # @yield [Hash, Hash] Index entry and full unit data
       def each_model_unit
         @reader.list_units(type: 'model').each do |entry|
-          unit_data = @reader.find_unit(entry['identifier'])
-          next unless unit_data
+          unit_data = @typed_reader.find(entry['identifier'], 'model')
 
           yield(entry, unit_data)
         end
@@ -436,10 +441,8 @@ module Woods
       # @return [Hash<String, String>] { table_name => latest_date }
       def load_migration_dates
         mapper = Mappers::MigrationMapper.new
-        units = @reader.list_units(type: 'migration').filter_map { |e| @reader.find_unit(e['identifier']) }
+        units = @reader.list_units(type: 'migration').map { |e| @typed_reader.find(e['identifier'], 'migration') }
         mapper.latest_changes(units)
-      rescue StandardError
-        {}
       end
 
       # Upsert a Notion page: find by title, update if exists, create if not.
