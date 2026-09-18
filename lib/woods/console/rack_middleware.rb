@@ -81,17 +81,12 @@ module Woods
       #   for compatibility. Passing it fails closed because console_eval is unavailable.
       # @param unsafe_eval_audit_log_path [String, Pathname, nil] Legacy option retained
       #   for compatibility. Passing it fails closed because console_eval is unavailable.
-      def initialize(app, path: '/mcp/console', embedded_read_tools: false, # rubocop:disable Metrics/ParameterLists
-                     unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil,
-                     stateless: true)
-        @app = app
-        @path = path
-        @embedded_read_tools = embedded_read_tools
-        @unsafe_eval_confirmation = unsafe_eval_confirmation
-        @unsafe_eval_audit_log_path = unsafe_eval_audit_log_path
-        @stateless = stateless
-        @mutex = Mutex.new
-        @transport = nil
+      # Rails 6.0 forwards middleware options as a positional hash on Ruby 3.
+      # Delegate to explicit keywords to preserve required/unknown option checks.
+      def initialize(app, options = {}, **keywords)
+        raise TypeError, 'middleware options must be a Hash' unless options.is_a?(Hash)
+
+        initialize_options(app, **options, **keywords)
       end
 
       # Rack interface — intercepts requests at the configured path.
@@ -118,6 +113,19 @@ module Woods
       end
 
       private
+
+      def initialize_options(app, path: '/mcp/console', embedded_read_tools: false, # rubocop:disable Metrics/ParameterLists
+                             unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil,
+                             stateless: true)
+        @app = app
+        @path = path
+        @embedded_read_tools = embedded_read_tools
+        @unsafe_eval_confirmation = unsafe_eval_confirmation
+        @unsafe_eval_audit_log_path = unsafe_eval_audit_log_path
+        @stateless = stateless
+        @mutex = Mutex.new
+        @transport = nil
+      end
 
       # Whether the console is enabled, read from the live configuration on
       # every request. Nil-safe: the railtie mounts this middleware in every

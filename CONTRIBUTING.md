@@ -133,8 +133,41 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
 
 The unit suite evaluates every hand-maintained Rails gemfile and checks its
 Appraisal requirements, old-Rails compatibility pins, and CI matrix membership.
-This detects configuration drift; it does not establish minimum-dependency
-resolution or replace the booted rows.
+This detects configuration drift; it does not replace the booted rows.
+
+### Exact runtime dependency floors
+
+The separate `minimum-dependencies` CI job runs on Ruby 3.0 with Bundler 2.5.23:
+
+```bash
+gem install bundler -v 2.5.23
+ruby script/test-minimum-dependencies
+```
+
+Run outside `bundle exec`. The harness builds and installs the candidate gem,
+resolves `gemfiles/minimum_runtime.gemfile` independently of the development
+bundle, and verifies every loaded Woods library comes from that installed gem.
+All five direct runtime dependencies are pinned to their advertised gemspec
+floors. Transitive dependencies are compatible solver selections, **not** a
+claim that every transitive version is minimal. CI retains the full resolved
+version/platform list, lockfile, candidate gem and SHA-256 under the
+`minimum-runtime-dependencies` artifact; local output defaults to
+`tmp/minimum-dependencies/`.
+
+The probe exercises lexical retrieval and typed lookup over a synthetic published
+index, MCP SDK dispatch, Prism parsing, and MessagePack snapshots. It also boots
+an actual Rails 6.0.0 API-style app, loads Woods tasks, and checks the real Rails
+middleware stack for disabled Console passthrough, authorized requests, missing
+and incorrect token refusal, and forbidden origins. Static serving is explicitly
+disabled: Rails 6.0.0's own Static middleware predates Ruby 3 keyword forwarding.
+This is a bounded Woods runtime-floor contract, not evidence that arbitrary
+Rails 6.0.0 applications boot on Ruby 3. The booted Rails matrix uses compatible
+patch releases and covers full extraction; enabled database-backed Console and
+optional storage/provider combinations remain in their separate lanes.
+
+The exact-floor job is required by release CI validation. Changing a runtime
+lower bound requires updating its explicit pin and retaining a successful
+installed-artifact run, rather than silently advancing a pin to make CI pass.
 
 When adding a Rails line, update `Appraisals`, the corresponding hand-maintained gemfile, and `.github/workflows/ci.yml`. For Rails below 7.1, copy an existing 6.x gemfile so its sqlite3 and concurrent-ruby compatibility pins are preserved.
 

@@ -1,0 +1,50 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Run outside bundle exec: this lane must not inherit development dependencies.
+require 'digest'
+require 'fileutils'
+require 'json'
+require 'rbconfig'
+require 'rubygems/package'
+require 'tmpdir'
+
+abort 'Run with Ruby 3.0 to verify the advertised interpreter floor' unless RUBY_VERSION.start_with?('3.0.')
+abort 'Run outside bundle exec' if defined?(Bundler)
+
+checkout = File.expand_path('..', __dir__)
+evidence = File.expand_path(ARGV.fetch(0, 'tmp/minimum-dependencies'), checkout)
+FileUtils.mkdir_p(evidence)
+ruby = RbConfig.ruby
+spec = Dir.chdir(checkout) { Gem::Specification.load('woods.gemspec') }
+artifact = File.join(evidence, "woods-#{spec.version}.gem")
+Dir.chdir(checkout) { Gem::Package.build(spec, false, false, artifact) }
+File.write(File.join(evidence, 'artifact.sha256'), "#{Digest::SHA256.file(artifact)}  #{File.basename(artifact)}\n")
+
+Dir.mktmpdir('woods-minimum-runtime-') do |sandbox|
+  gem_home = File.join(sandbox, 'gems')
+  gemfile = File.join(sandbox, 'Gemfile')
+  FileUtils.cp(File.join(checkout, 'gemfiles/minimum_runtime.gemfile'), gemfile)
+  installed = File.join(gem_home, 'gems', "woods-#{spec.version}")
+  env = ENV.keys.grep(/\A(?:BUNDLE_|WOODS_)/).to_h { |key| [key, nil] }.merge(
+    'RUBYLIB' => nil, 'RUBYOPT' => nil,
+    'GEM_HOME' => gem_home, 'GEM_PATH' => ([gem_home] + Gem.path).join(File::PATH_SEPARATOR),
+    'BUNDLE_GEMFILE' => gemfile, 'BUNDLE_USER_CONFIG' => File.join(sandbox, 'bundle-config'),
+    'BUNDLE_APP_CONFIG' => File.join(sandbox, 'bundle-app-config'),
+    'WOODS_MINIMUM_VERSION' => spec.version.to_s,
+    'WOODS_MINIMUM_INSTALLED' => installed, 'WOODS_MINIMUM_EVIDENCE' => evidence
+  )
+  run = lambda do |*command|
+    puts "+ #{command.join(' ')}"
+    system(env, *command, chdir: sandbox) || abort("Command failed: #{command.first}")
+  end
+  begin
+    run.call(ruby, '-S', 'gem', 'install', '--local', artifact, '--ignore-dependencies', '--no-document')
+    run.call(ruby, '-S', 'bundle', '_2.5.23_', 'install', '--jobs', '4')
+    run.call(ruby, '-S', 'bundle', '_2.5.23_', 'exec', ruby,
+             File.join(checkout, 'script/minimum_dependency_probe.rb'))
+  ensure
+    lock = "#{gemfile}.lock"
+    FileUtils.cp(lock, File.join(evidence, 'Gemfile.lock')) if File.file?(lock)
+  end
+end
