@@ -124,7 +124,7 @@ module Woods
         vector_store: vector_store || build_vector_store(dimensions: vector_dimensions(provider)),
         metadata_store: metadata_store || build_metadata_store,
         graph_store: graph_store || build_graph_store,
-        embedding_provider: provider
+        embedding_provider: provider, default_budget: @config.max_context_tokens
       )
 
       cache ? wrap_with_retriever_cache(retriever, cache) : retriever
@@ -132,7 +132,8 @@ module Woods
 
     def build_lexical_retriever(metadata_store:, graph_store:)
       retriever = Retriever.new(vector_store: nil, metadata_store: metadata_store || build_metadata_store,
-                                graph_store: graph_store, embedding_provider: nil, mode: :lexical)
+                                graph_store: graph_store, embedding_provider: nil, mode: :lexical,
+                                default_budget: @config.max_context_tokens)
       cache = build_cache_store
       cache ? wrap_with_retriever_cache(retriever, cache) : retriever
     end

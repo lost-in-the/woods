@@ -221,6 +221,14 @@ paging alone only visits the discovered prefix. See the
 
 ## 4. Check semantic retrieval
 
+Configured retrieval defaults (#446) are unreleased after beta2. For an installed
+version that supports them, an omitted tool budget uses the serving retriever's
+configured default; an explicit budget overrides it. Standalone MCP does not
+inherit the host initializer's token setting from the embedding snapshot.
+Do not tune relevance with similarity_threshold: it is inert and deprecated.
+Use query/type/scope selection and inspect ranking evidence instead. See
+[retrieval tuning](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#tuning).
+
 Native embedding completeness checks (#442/#444) are unreleased after beta2;
 confirm the installed version first. If embedding reports `Embedding input
 incomplete`, repair the named published extraction artifact or rebuild extraction

@@ -11,9 +11,10 @@ module Woods
     # snapshot construction AND the query, so a publication cannot mix units.
     # No provider, vector adapter, host source read, or context cache is involved.
     class PublishedLexicalRetriever
-      attr_reader :reader, :snapshot
+      attr_reader :reader, :snapshot, :default_budget
 
-      def initialize(index_dir:, reader: nil)
+      def initialize(index_dir:, reader: nil, default_budget: 8000)
+        @default_budget = default_budget
         @index_dir = Pathname.new(index_dir)
         @reader = reader || IndexReader.new(index_dir)
         @snapshot_mutex = Mutex.new
@@ -39,7 +40,7 @@ module Woods
         self
       end
 
-      def retrieve(query, budget: 8000, **options)
+      def retrieve(query, budget: @default_budget, **options)
         validate_publication!
         reader.with_pinned_generation do
           retriever = snapshot_for_reader

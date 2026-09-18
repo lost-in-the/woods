@@ -419,6 +419,7 @@ module Woods
       def metadata_store = @retriever.metadata_store
       def graph_store    = @retriever.graph_store
       def mode = @retriever.respond_to?(:mode) ? @retriever.mode : :semantic
+      def default_budget = @retriever.respond_to?(:default_budget) ? @retriever.default_budget : 8000
 
       # Invalidate every cached context result. Called from the MCP +reload+
       # tool after the retriever's stores have been re-hydrated from a fresh
@@ -450,7 +451,7 @@ module Woods
       # @param types [Array<String, Symbol>, nil] Include-only filter
       # @param exclude_types [Array<String, Symbol>, nil] Additional exclusions
       # @return [Retriever::RetrievalResult]
-      def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil,
+      def retrieve(query, budget: default_budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil,
                    evidence: 'full') # rubocop:disable Metrics/ParameterLists
         Retrieval::SourceEvidence.validate_mode!(evidence)
         scoped = Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)

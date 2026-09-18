@@ -1,0 +1,1 @@
+- Honor configured context-token defaults in Builder-created semantic/lexical retrieval, caches, and MCP while preserving explicit budgets and the legacy custom-collaborator fallback. Deprecate the inert similarity_threshold option with a warning instead of changing ranking behavior (#446).

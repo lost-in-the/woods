@@ -197,7 +197,7 @@ module Woods
     # The reload transaction swaps the whole struct via {#swap_stores!}.
     #
     # @return [Pipeline]
-    attr_reader :pipeline, :mode
+    attr_reader :pipeline, :mode, :default_budget
 
     # Optional callback invoked with the pipeline struct the moment
     # {#retrieve} resolves it, before any pipeline work runs. Nil in
@@ -213,10 +213,13 @@ module Woods
     # @param graph_store [Storage::GraphStore::Interface] Graph store adapter
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
-    def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil, mode: :semantic)
+    # @param default_budget [Integer] Token budget when retrieve omits budget
+    def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil, mode: :semantic,
+                   default_budget: 8000)
       raise ArgumentError, 'unknown retrieval mode' unless %i[semantic lexical].include?(mode)
 
       @mode = mode
+      @default_budget = default_budget
       @embedding_provider = embedding_provider
       @formatter = formatter
       @classifier = Retrieval::QueryClassifier.new
@@ -379,7 +382,7 @@ module Woods
     # @param packages [Array<String>, nil] Exact published nearest package owners
     # @param source_paths [Array<String>, nil] Application-relative directory prefixes
     # @return [RetrievalResult] Complete retrieval result; scoped calls carry applied_scope
-    def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil,
+    def retrieve(query, budget: @default_budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil,
                  evidence: 'full', evidence_generation: nil) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       validate_query!(query)
       Retrieval::SourceEvidence.validate_mode!(evidence)

@@ -24,9 +24,6 @@ Woods.configure do |config|
   # Maximum tokens returned in a retrieval context window.
   # config.max_context_tokens = 8_000
 
-  # Minimum vector similarity score (0.0–1.0) for retrieval results.
-  # config.similarity_threshold = 0.7
-
   # Output format for retrieval: :claude, :markdown, :plain, :json
   # config.context_format = :markdown
 
