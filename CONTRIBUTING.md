@@ -436,7 +436,9 @@ fetched maintenance branch and to descend from the fixed legacy base. They retai
 exact tag/VERSION/changelog checks, the unpublished-version check, one immutable
 CI artifact ID/digest, and protected `release` environment approval. Both Ruby
 package-test rows install that same artifact and run the pinned v1-specific
-`maintenance_packaged_gem_spec.rb` outside the repository load path. Candidate
+`maintenance_packaged_gem_spec.rb` outside the repository load path. The oldest
+Ruby maintenance row explicitly activates MCP 0.23.0, the reviewed security
+floor; the latest row resolves the candidate's supported SDK range. Candidate
 code still executes only in secret-free, read-only jobs. After environment
 approval, maintenance history/publication checks run again before requesting
 RubyGems credentials; the remote tag is checked again immediately before push.

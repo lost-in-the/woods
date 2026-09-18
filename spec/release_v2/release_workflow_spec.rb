@@ -213,6 +213,21 @@ RSpec.describe 'release workflow contract' do
     expect(command.fetch('run')).to include("*) echo 'Unknown trusted package test profile' >&2; exit 1 ;;")
   end
 
+  it 'activates the reviewed MCP floor only in the maintenance oldest-Ruby package row' do
+    package_steps = steps(release.fetch('jobs').fetch('package-test'))
+    floor = package_steps.find { |step| step['name'] == 'Install the maintenance SDK floor' }
+    installation = package_steps.find { |step| step['name'] == 'Install package-test dependencies' }
+    smoke = package_steps.find do |step|
+      step['name'] == 'Test the installed artifact outside the repository load path'
+    end
+    expect(floor.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0'")
+    expect(floor.fetch('run')).to eq("gem install --no-document mcp -v '0.23.0'")
+    expect(package_steps.index(floor)).to be < package_steps.index(installation)
+    expect(smoke.dig('env', 'WOODS_EXPECT_MCP_VERSION')).to eq(
+      "${{ needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0' && '0.23.0' || '' }}"
+    )
+  end
+
   it 'rechecks maintenance history and publication state before requesting protected credentials' do
     publish_steps = steps(release.fetch('jobs').fetch('publish'))
     revalidation = publish_steps.find { |step| step['name'] == 'Revalidate maintenance release after approval' }
