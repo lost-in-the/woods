@@ -269,18 +269,29 @@ In all cases, errors in individual components produce empty candidate sets for t
 
 ### `similarity_threshold`
 
-Controls which vector search results are considered. Range: `0.0`–`1.0`. Default: `0.7`.
-
-```ruby
-config.similarity_threshold = 0.6  # Include less similar results (broader)
-config.similarity_threshold = 0.8  # Require higher similarity (narrower)
-```
-
-Lower values return more candidates, which can improve recall for broad queries at the cost of precision. Raise it if results seem loosely related.
+Deprecated and inert. Woods retains numeric validation (`0.0`–`1.0`) and
+readback for compatibility, but setting this option emits a warning. It has not
+filtered retrieval results; changing it does not change scores or candidates.
+Use explicit type, package or source-path scopes to select eligible units, and
+inspect returned ranking evidence to assess relevance. No new score cutoff is
+introduced by this deprecation.
 
 ### `max_context_tokens`
 
-Sets the default token budget for context assembly. Default: `8000`. The `budget` parameter on `codebase_retrieve` and `Retriever#retrieve` overrides this per call.
+Sets the default token budget for context assembly. Default: `8000`. Builder
+captures this value when constructing semantic or lexical retrievers, including
+cached retrievers. The `budget` parameter on `codebase_retrieve` and
+`Retriever#retrieve` overrides it per call; omitted and explicitly equal budgets
+share a cache entry. Changing configuration affects newly constructed retrievers.
+Direct `Retriever.new` callers can pass `default_budget:`; otherwise they retain
+8000. Custom MCP collaborators without `default_budget` also retain the legacy
+8000 fallback.
+
+The setting applies to the serving process's configuration. It is not embedded
+in `woods.json`; a standalone MCP process that does not load the host initializer
+uses its own default unless a tool call supplies `budget`. Token accounting uses
+the configured estimator, and very small budgets can still include formatting
+overhead.
 
 ```ruby
 config.max_context_tokens = 12_000  # More context per retrieval
@@ -332,7 +343,7 @@ bundle exec rake woods:embed
 | Empty results for a known class name | Keyword strategy not finding the identifier | Try a conceptual query with `codebase_retrieve`; or use `search` for exact name lookup |
 | Very slow retrieval | Large vector index without HNSW index, or Qdrant cold start | For pgvector: create an HNSW index (see `BACKEND_MATRIX.md`). For Qdrant: check collection status |
 | `codebase_retrieve` tool listed but disabled | Embedding provider not configured or API key missing | Set `embedding_provider`, run `woods:embed`, and check `woods_status` |
-| Results clustered around one type | Diversity penalty insufficient for codebase shape | Lower `similarity_threshold` slightly and widen the query scope |
+| Results clustered around one type | Diversity penalty insufficient for codebase shape | Use explicit type filters or a more specific query; inspect ranking evidence |
 
 ## Explicit package and source-path scopes
 

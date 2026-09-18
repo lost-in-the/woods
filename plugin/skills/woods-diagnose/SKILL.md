@@ -211,6 +211,14 @@ paging alone only visits the discovered prefix. See the
 
 ## 4. Check semantic retrieval
 
+Configured retrieval defaults (#446) are unreleased after beta2. For an installed
+version that supports them, an omitted tool budget uses the serving retriever's
+configured default; an explicit budget overrides it. Standalone MCP does not
+inherit the host initializer's token setting from the embedding snapshot.
+Do not tune relevance with similarity_threshold: it is inert and deprecated.
+Use query/type/scope selection and inspect ranking evidence instead. See
+[retrieval tuning](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#tuning).
+
 Only diagnose this layer when structural tools work and `codebase_retrieve` fails. First check `woods_status.retriever.mode`. For lexical mode, validate the published extraction index and follow the capability check below. For semantic mode, check the configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
 
 - OpenAI: verify the key exists without printing it.

@@ -171,7 +171,8 @@ module Woods
       def self.build_lexical_retriever(index_dir)
         state = BootstrapState.new
         state.mark(:hydrating)
-        retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir)
+        retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir,
+                                                  default_budget: Woods.configuration.max_context_tokens)
         retriever.warmup!
         state.mark(:hydrated)
         warn '[woods-mcp] lexical retrieval: hydrated (published extraction units; no embeddings)'

@@ -261,6 +261,7 @@ module Woods
       @max_context_tokens = value
     end
 
+    # Deprecated compatibility setting; retrieval never applies this cutoff.
     # @param value [Numeric] Must be between 0.0 and 1.0 inclusive
     # @raise [ConfigurationError] if value is out of range or not numeric
     def similarity_threshold=(value)
@@ -271,6 +272,8 @@ module Woods
         raise ConfigurationError, "similarity_threshold must be between 0.0 and 1.0, got #{value.inspect}"
       end
 
+      warn '[woods] similarity_threshold is deprecated and does not filter retrieval results; ' \
+           'use explicit types/scopes and inspect returned ranking evidence instead.'
       @similarity_threshold = float_val
     end
 

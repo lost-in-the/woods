@@ -109,8 +109,8 @@ Columns:
 | `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
 | `retrieval_mode` | Symbol | `:semantic` | user-settable | `:semantic` uses configured embeddings; explicit `:lexical` ranks published text without a provider/vector store. See [retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval). |
-| `max_context_tokens` | Integer | `8000` | user-settable | Maximum tokens for retrieval context windows |
-| `similarity_threshold` | Float | `0.7` | user-settable | Minimum similarity score (0.0-1.0) for retrieval results |
+| `max_context_tokens` | Integer | `8000` | user-settable | Default context-assembly token budget captured when a retriever is built; per-call budget overrides it |
+| `similarity_threshold` | Float | `0.7` | deprecated, inert | Accepted for compatibility; setting it warns. It does not filter or change retrieval ranking |
 | `context_format` | Symbol | `:markdown` | user-settable | Output format for retrieval: `:claude`, `:markdown`, `:plain`, `:json` |
 | `include_framework_sources` | Boolean | `true` | user-settable | Extract Rails and gem source code |
 | `concurrent_extraction` | Boolean | `false` | user-settable | Enable parallel extraction (experimental) |

@@ -420,7 +420,7 @@ When you run `rake woods:embed`, Woods generates embedding vectors for each extr
 Several options for tuning retrieval:
 
 - **Increase `max_context_tokens`** to include more units per query (at the cost of larger LLM context).
-- **Lower `similarity_threshold`** (default 0.7) to include less similar results.
+- **Use explicit retrieval scopes** and inspect ranking evidence. `similarity_threshold` is deprecated and does not filter results; see [retrieval tuning](RETRIEVAL_GUIDE.md#tuning).
 - **Enable framework sources** (`include_framework_sources: true`) if Rails internals are relevant to your queries.
 - **Use retrieval feedback only in a custom embedded server** that wires a feedback store. The normal packaged executable does not register feedback tools.
 

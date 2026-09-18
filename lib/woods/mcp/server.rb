@@ -953,7 +953,7 @@ module Woods
                 query: { type: 'string',
                          description: 'Natural language question (e.g. "How does user authentication work?")' },
                 budget: { type: 'integer',
-                          description: 'Token budget for context assembly (default: 8000).' },
+                          description: 'Token budget for context assembly (configured max_context_tokens; otherwise 8000).' },
                 evidence: { type: 'string', enum: %w[full compact outline],
                             description: 'Explicit complete spans or API outline within each ranked unit; default full retains existing output.' },
                 types: {
@@ -989,10 +989,10 @@ module Woods
             # budget). Surface a helpful typed error instead.
             unless limit.nil?
               next respond_err.call(
-                'codebase_retrieve uses `budget` (token budget, default 8000), not `limit`. ' \
+                'codebase_retrieve uses `budget` (token budget, configured default), not `limit`. ' \
                 '`limit` is the result-count parameter on sibling tools (search, recent_changes, pagerank). ' \
                 "Pass `budget: #{coerce_int.call(limit)}` if you meant a #{coerce_int.call(limit)}-token context, " \
-                'or drop the kwarg entirely for the default 8000.',
+                'or drop the kwarg entirely for the configured default.',
                 code: :unsupported_argument,
                 tool: 'codebase_retrieve',
                 argument: 'limit',
@@ -1032,7 +1032,7 @@ module Woods
                 scope_options[:evidence] = evidence unless evidence == 'full'
                 result = retriever.retrieve(
                   query,
-                  budget: budget || 8000,
+                  budget: budget || (retriever.respond_to?(:default_budget) ? retriever.default_budget : 8000),
                   types: types,
                   exclude_types: exclude_types, **scope_options
                 )
