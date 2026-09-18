@@ -12,7 +12,19 @@ If an agent will perform the installation, use the safety and handoff checklist 
 
 ## 1. Install the gem
 
-Add Woods to the development group:
+Use the [README release table](../README.md) to choose a version, then confirm
+that **exact version is published** on the [RubyGems versions page](https://rubygems.org/gems/woods/versions)
+before editing the Gemfile. A prepared release checkout can update the README
+before its gem is published; if the version is absent, choose an available
+version or wait for publication.
+
+If the published 2.x line has only beta or release-candidate versions, use an
+exact pin to the published prerelease, following the README's prerelease
+instructions; `~> 2.0` does not select prereleases. Follow the selected version's
+tag documentation. The `main` guides may describe features absent from the
+published gem.
+
+Once a stable 2.x release is published, add Woods to the development group with:
 
 ```ruby
 # Gemfile

@@ -36,7 +36,14 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 ## Install and inspect
 
-Add `gem "woods", "~> 2.0"` to the development group, then:
+Choose the published version using the canonical
+[installation guide](https://github.com/lost-in-the/woods/blob/main/docs/GETTING_STARTED.md#1-install-the-gem)
+and its linked README release table. When only prereleases are published for
+2.x, add the exact published beta/RC constraint shown there to the development
+group; `~> 2.0` does not select prereleases. Use `gem "woods", "~> 2.0"` only after
+a stable 2.x release is published. Follow the selected version's tag docs and
+verify installed capabilities; installing this plugin does not install `main`
+features. Then run:
 
 ```bash
 bundle install
@@ -135,8 +142,11 @@ Both hooks require an existing index and `WOODS_HOOKS_ENABLED=1`; disable with
 `WOODS_HOOKS_DISABLED=1`. Use `WOODS_HOOK_RAKE="docker compose exec -T app bundle
 exec rake"` for a container-only bundle and `WOODS_OUTPUT` for a non-default
 index. The host needs Bash and either jq or Ruby, not the application bundle.
-The refresh worker has its own bounded deadline, but cancelling Docker exec does
-not prove its container process stopped. Source freshness (#405) is unreleased after beta2: verify the installed command
+The refresh worker's deadline starts after the complete event input has been
+collected, validated, and queued; it does not bound input collection. It includes
+subsequent batches, but cancelling Docker exec does not prove its container
+process stopped. See the [hook deadline and retry contract](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
+Source freshness (#405) is unreleased after beta2: verify the installed command
 exposes `woods:source_status` and `woods-extract` before using it. Supporting
 SessionStart hooks check source content and report missing/failed evidence as
 unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
