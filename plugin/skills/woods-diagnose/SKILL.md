@@ -285,3 +285,15 @@ settings and pending events, and inspect the generation and hook log before
 claiming refresh. Unsupported tool shapes and symlink paths need watch or an
 explicit extraction. Do not install native client registration without the
 user's setup request. Follow [client hooks](https://github.com/lost-in-the/woods/blob/main/docs/CLIENT_HOOKS.md).
+
+## Optional context hints
+
+Check installed `bundle exec woods-hook-context --help` before enabling
+`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is unreleased after beta2 and the
+plugin does not upgrade the gem. Context and refresh opt-ins are independent;
+`WOODS_HOOKS_DISABLED=1` disables both. Native Claude context is synchronous and
+bounded, with served-generation and pre-refresh/unknown labels. Verify candidate
+dependents and suggested tests manually; silence is not no impact. Do not clear
+refresh queues when optional hints time out. See the canonical
+[context guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
+for output/time limits, container root mapping and emitted-hint suppression.

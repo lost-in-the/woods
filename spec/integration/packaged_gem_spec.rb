@@ -17,6 +17,7 @@ module PackagedGemSpec
   ROOT = File.expand_path('../..', __dir__)
   EXECUTABLES = %w[
     woods-mcp woods-mcp-start woods-console-mcp woods-console woods-mcp-http woods-agent-config woods-extract
+    woods-hook-context
   ].freeze
   COMMUNITY_FILES = %w[
     LICENSE.txt
@@ -255,6 +256,26 @@ RSpec.describe 'packaged gem' do
       stdout, stderr, status = Open3.capture3(smoke_env, executable, '--help', chdir: @package_tmp)
       expect(status).to be_success, stderr
       expect(stdout).to include('full | incremental PATH... | refresh TYPE...', '--source-root PATH')
+    end
+
+    it 'loads the installed context helper and returns a generation-tagged Claude hint without Rails boot' do
+      executable = File.join(@smoke_gem_home, 'bin', 'woods-hook-context')
+      stdout, stderr, status = Open3.capture3(smoke_env, executable, '--help', chdir: @package_tmp)
+      expect(status).to be_success, stderr
+      expect(stdout).to include('SessionStart|PostToolUse', 'WOODS_HOOK_CONTEXT_ENABLED')
+
+      output = File.join(@package_tmp, 'context-index')
+      payload = File.join(output, 'payloads/gen-1')
+      FileUtils.mkdir_p(payload)
+      FileUtils.cp_r(File.join(PackagedGemSpec::ROOT, 'spec/fixtures/woods/.'), payload)
+      Woods::Generation.new(output_dir: output).bump!(payload: 'payloads/gen-1')
+      event = JSON.generate(hook_event_name: 'SessionStart', cwd: @package_tmp, session_id: 'packaged')
+      env = smoke_env.merge('WOODS_HOOK_CONTEXT_ENABLED' => '1', 'WOODS_HOOKS_DISABLED' => '0',
+                            'WOODS_OUTPUT' => output, 'WOODS_HOOK_CONTEXT_ROOT' => nil)
+      stdout, stderr, status = Open3.capture3(env, executable, 'SessionStart', stdin_data: event, chdir: @package_tmp)
+      expect(status).to be_success, stderr
+      expect(JSON.parse(stdout).dig('hookSpecificOutput', 'additionalContext')).to include('generation 1')
+      expect(stdout.bytesize).to be <= 2048
     end
 
     it 'boots the installed woods-mcp and answers an initialize request with protocol-pure stdout' do

@@ -11,6 +11,16 @@
             "timeout": 600
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/woods-context.sh\" PostToolUse",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -21,6 +31,16 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/woods-session-start.sh\"",
             "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/woods-context.sh\" SessionStart",
+            "timeout": 2
           }
         ]
       }

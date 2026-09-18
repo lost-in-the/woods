@@ -623,7 +623,7 @@ For client registration and the supported Claude/OpenCode event shapes, see
 [edit client adapters](CLIENT_HOOKS.md). Both use the shared queue below.
 
 The daemon covers a human's editor session. A `claude -p` run in a worktree
-with no daemon needs a different trigger, so the Woods plugin ships two
+with no daemon needs a different trigger, so the Woods plugin ships two freshness
 hooks (`plugin/hooks/hooks.json`), both shipped disabled:
 
 | Hook | When | What it does |
@@ -788,3 +788,66 @@ is established to participate in the readiness handshake.
 
 `#process` is one whole cycle and is the supported embedding point. `#run` only
 supplies batches to it.
+
+### Optional bounded context hints
+
+Context hints are a separate Claude Code opt-in, **unreleased after Woods
+2.0.0.beta2**. Verify `bundle exec woods-hook-context --help` in the installed
+application bundle before enabling `WOODS_HOOK_CONTEXT_ENABLED=1`. The plugin
+version alone does not establish gem support. `WOODS_HOOKS_DISABLED=1` disables
+both context and refresh; `WOODS_HOOKS_ENABLED` controls only the existing
+freshness/refresh hooks. Either feature can work without the other.
+
+Separate synchronous SessionStart and PostToolUse entries emit Claude's
+`hookSpecificOutput.additionalContext`. SessionStart gives a short served-index
+orientation. After a relevant native Edit/Write/MultiEdit, the hint identifies
+candidates from one retained published generation. Direct candidates and
+transitive candidates are distinguished; test mappings are suggestions, never
+proof of coverage. Post-edit hints always say **pre-refresh snapshot** because
+an edit can precede publication. Source freshness is checked against that same
+payload; unknown/drifted evidence remains explicit. An unresolved or ambiguous
+edited identity directs the agent to manual search and typed lookup. No match
+within the bounded snapshot establishes neither absence nor no impact.
+
+Limits are fixed: depth 2, at most 10 visited nodes including the root, 100
+examined edges, and 2 KiB for the **entire JSON output**, preserving whole rows.
+An index is refused above 16 MiB per required artifact or 50,000 combined graph
+nodes/variants. These preparation checks, JSON parsing, cache construction,
+source verification, path/content hashing, formatting and suppression state all
+run within the hook's private process-group deadline: the worker is killed at
+850 ms, leaving dispatch/cleanup headroom within a one-second work budget.
+The helper also has a 650 ms inner deadline. OS scheduling can delay observation
+of a deadline. Cold bundle/container startup can therefore produce no hint;
+the deadline is not extended. Oversized evidence is marked truncated; missing,
+corrupt, unsupported or timed-out input produces a short unknown notice or
+silence. Silence is never a complete/no-impact claim. The hint boots no Rails
+application and calls no provider.
+
+The synchronous opt-in can add up to this budget to a supported tool call. It
+makes context available to Claude's next model request; it does not rely on the
+later-turn delivery of the independent asynchronous refresh worker. A reminder
+need not appear as a visible transcript entry. See the
+[Claude context-output contract](https://code.claude.com/docs/en/hooks#add-context-for-claude).
+
+The default command is `bundle exec woods-hook-context`. Set
+`WOODS_HOOK_CONTEXT_COMMAND` to an executable wrapper or argv prefix for a
+container-only bundle. Prefix words are split without shell evaluation; a
+wrapper handles quoted arguments. Explicit `WOODS_HOOK_CONTEXT_ROOT` maps the
+hook payload's original cwd and contained edit path onto a runtime-visible
+application root. For example, a container prefix can include
+`docker compose exec -T -e WOODS_HOOK_CONTEXT_ENABLED=1 -e WOODS_HOOK_CONTEXT_ROOT=/app app bundle exec woods-hook-context`.
+Forward a custom `WOODS_OUTPUT` explicitly too. Running Claude inside the
+application container avoids external container startup and path mapping.
+
+Repeat suppression uses session/worktree, served generation/token, changed-file
+content identity and normalized hint content. Repeated identical evidence stays
+quiet; later same-file edits and generation changes can reappear. Missing session
+or bounded content identity disables suppression. Private `hook-context-state.json`
+retains at most 32 sessions and 32 emitted identities per session under a separate
+nonblocking lock. It records **emitted**, not confirmed delivered, hints.
+Contending or unavailable state may skip optional context. Its bounded atomic
+state update never reads, acknowledges, or clears `hook-pending`, nor acquires
+refresh/watch locks. Disable context to roll back without changing refresh.
+
+Only the native Claude context entries are supported here; the OpenCode adapter
+continues to provide refresh events. No prompt-triggered retrieval is injected.

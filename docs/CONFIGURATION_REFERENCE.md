@@ -709,12 +709,16 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 
 These settings control the plugin shell worker. Check installed
 `woods:hook_refresh` support first; the task is unreleased after 2.0.0.beta2.
-See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions).
+See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions) and
+[optional context limits](WATCH_DAEMON.md#optional-bounded-context-hints).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WOODS_HOOKS_ENABLED` | unset (disabled) | Exact `1` enables the refresh/session hooks when an index exists. |
-| `WOODS_HOOKS_DISABLED` | unset | Exact `1` overrides enablement. |
+| `WOODS_HOOKS_DISABLED` | unset | Exact `1` disables both refresh and optional context hooks. |
+| `WOODS_HOOK_CONTEXT_ENABLED` | unset (disabled) | Exact `1` enables separate bounded Claude orientation/impact hints; independent of refresh enablement. |
+| `WOODS_HOOK_CONTEXT_COMMAND` | `bundle exec woods-hook-context` | Installed helper argv prefix; startup counts toward the fixed context deadline. Use a wrapper for quoting/container environment. |
+| `WOODS_HOOK_CONTEXT_ROOT` | payload cwd | Explicit runtime-visible application root for context path mapping; set inside a container when host paths differ. |
 | `WOODS_HOOK_RAKE` | `bundle exec rake` | Application command prefix; supports `docker compose exec -T app bundle exec rake`. Use a wrapper for shell quoting or explicit container environment. |
 | `WOODS_SOURCE_CAPTURE` | internal | Private, one-use `woods-extract` child handoff. Do not set or persist this variable manually; see [source freshness](SOURCE_FRESHNESS.md). |
 | `WOODS_HOOK_TIMEOUT_SECONDS` | `600` | PostToolUse worker deadline (SessionStart uses a fixed ten seconds), integer 1–3600 seconds; failed/deferred batches remain queued. Docker-side cancellation requires separate verification. |
