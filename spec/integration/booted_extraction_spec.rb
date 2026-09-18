@@ -74,6 +74,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     @output_dir = Dir.mktmpdir('woods_booted')
     require 'woods'
     require 'woods/extractor'
+    require 'woods/mcp/index_reader'
     @original_woods_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.concurrent_extraction = false
@@ -379,6 +380,39 @@ RSpec.describe 'Booted-app extraction', :booted_app do
         index_dir: @output_dir, vault_path: @vault_dir, output: StringIO.new
       ).export_all
       expect(File.binread(File.join(@vault_dir, 'models/Post.md'))).to eq(before_bytes)
+    end
+  end
+
+  describe 'public extraction publication failures' do
+    around do |example|
+      previous_output = Woods.configuration.output_dir
+      Dir.mktmpdir('woods_public_publish') do |dir|
+        Woods.configuration.output_dir = dir
+        Woods.extract!
+        example.run
+      end
+    ensure
+      Woods.configuration.output_dir = previous_output
+    end
+
+    %i[extract! extract_changed!].each do |operation|
+      it "raises from #{operation} and retains the prior published generation" do
+        dir = Woods.configuration.output_dir.to_s
+        marker = File.join(dir, 'generation.json')
+        before_bytes = File.binread(marker)
+        allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |method, path, content|
+          raise Errno::EACCES, 'publication blocked' if path.to_s == marker
+
+          method.call(path, content)
+        end
+
+        expect do
+          operation == :extract! ? Woods.extract! : Woods.extract_changed!(['app/models/post.rb'])
+        end.to raise_error(Woods::ExtractionError, /Could not publish generation/)
+        expect(File.binread(marker)).to eq(before_bytes)
+        expect(Woods::MCP::IndexReader.new(dir).find_unit('Post', type: 'model')).not_to be_nil
+        expect(File).not_to exist(File.join(dir, 'extraction.lock'))
+      end
     end
   end
 

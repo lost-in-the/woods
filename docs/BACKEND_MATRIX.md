@@ -329,6 +329,15 @@ A recursive-CTE graph store (MySQL 8.0+ or PostgreSQL, storing edges in a table 
 
 Indexing can be triggered synchronously (rake task, inline) or from a background job. The pipeline itself is job-system-agnostic, it's synchronous Ruby, and the wrapper below is just scheduling and concurrency control. Use `Woods.extract!` for a full run; incremental runs need a changed-file list, so a job usually just shells out to `rake woods:incremental` (which computes that list from git) rather than calling `Woods.extract_changed!` directly.
 
+Both Ruby helpers hold the same heartbeat-maintained extraction lock as the
+tasks and watch daemon. `WOODS_LOCK_WAIT` controls the wait (600 seconds by
+default); timeout raises `Woods::Coordination::LockError`. Failed generation
+publication raises `Woods::ExtractionError`, allowing job retries instead of
+reporting unpublished work as success. The low-level `Woods::Extractor` remains
+an orchestration building block: callers using it directly own locking and
+publication-failure handling. Do not wrap the public helpers in a second Woods
+extraction lock.
+
 ### Sidekiq
 
 ```ruby
