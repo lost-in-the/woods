@@ -65,7 +65,8 @@ RSpec.describe 'Embedding publication integrity' do
       checkpoint: File.binread(File.join(@root, 'checkpoint.json')), dump: artifact.latest_dump_path.to_s }
   end
 
-  %i[corrupt missing missing_index wrong_type count_mismatch bad_manifest bad_marker missing_payload].each do |damage|
+  %i[corrupt missing missing_index wrong_type count_mismatch bad_manifest bad_marker missing_payload
+     null_pointer omitted_pointer missing_marker].each do |damage|
     [false, true].each do |force|
       it "refuses #{damage} before mutation, including purge override=#{force}" do
         payload = publish(units)
@@ -81,6 +82,11 @@ RSpec.describe 'Embedding publication integrity' do
         when :bad_manifest then File.write(File.join(payload, 'manifest.json'), JSON.generate(counts: nil))
         when :bad_marker then File.write(File.join(@root, 'generation.json'), '{broken')
         when :missing_payload then FileUtils.rm_rf(payload)
+        when :null_pointer, :omitted_pointer
+          marker = { number: 1, token: 'damaged' }
+          marker[:payload] = nil if damage == :null_pointer
+          File.write(File.join(@root, 'generation.json'), JSON.generate(marker))
+        when :missing_marker then File.unlink(File.join(@root, 'generation.json'))
         end
         calls = provider.calls.size
         previous = ENV.fetch('WOODS_ALLOW_PURGE', nil)

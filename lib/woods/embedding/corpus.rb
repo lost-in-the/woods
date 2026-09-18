@@ -28,17 +28,18 @@ module Woods
 
       def native?
         path = File.join(@output_dir, Generation::FILENAME)
-        unless File.exist?(path)
+        if File.exist?(path)
+          marker = JSON.parse(AtomicFile.read(path))
+          raise IOError, 'invalid generation marker' unless marker.is_a?(Hash)
+        end
+
+        if !marker || marker['payload'].nil?
           if File.directory?(File.join(@output_dir, 'payloads'))
-            raise IOError, 'missing generation marker beside payloads'
+            raise IOError, 'missing publication pointer beside payloads'
           end
 
           return false
         end
-
-        marker = JSON.parse(AtomicFile.read(path))
-        raise IOError, 'invalid generation marker' unless marker.is_a?(Hash)
-        return false if marker['payload'].nil?
 
         validate_marker(marker)
         true
