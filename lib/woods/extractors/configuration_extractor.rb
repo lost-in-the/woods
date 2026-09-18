@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'behavioral_profile'
@@ -40,12 +42,14 @@ module Woods
           extract_configuration_file(file)
         end
 
-        profile = BehavioralProfile.new.extract
+        profiler = BehavioralProfile.new
+        profile = profiler.extract
+        SourceInputs::ConsumerErrors.record(self) if SourceInputs::ConsumerErrors.failed?(profiler)
         units << profile if profile
 
         units
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile integration failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile integration failed: #{e.message}")
         units || []
       end
 
@@ -71,7 +75,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract configuration #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract configuration #{file_path}: #{e.message}")
         nil
       end
 

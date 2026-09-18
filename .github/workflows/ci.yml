@@ -86,6 +86,10 @@ jobs:
 
       - name: Run opt-in hook refresh through fresh Rails processes
         run: bundle exec rspec spec/integration/hook_refresh_spec.rb
+      - name: Fresh-process source provenance
+        env:
+          WOODS_RUN_BOOTED_APP: '1'
+        run: bundle exec rspec spec/integration/source_input_drift_spec.rb
 
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
       # Each example boots its own subprocess with the matrix appraisal.

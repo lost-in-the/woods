@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require 'yaml'
 begin
   require 'active_support/configuration_file'
@@ -83,7 +85,7 @@ module Woods
           []
         end
       rescue StandardError, SyntaxError, LoadError => e
-        Rails.logger.error("Failed to extract scheduled jobs from #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract scheduled jobs from #{file_path}: #{e.message}")
         []
       end
 

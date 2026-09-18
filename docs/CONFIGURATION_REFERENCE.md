@@ -716,7 +716,8 @@ See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions).
 | `WOODS_HOOKS_ENABLED` | unset (disabled) | Exact `1` enables the refresh/session hooks when an index exists. |
 | `WOODS_HOOKS_DISABLED` | unset | Exact `1` overrides enablement. |
 | `WOODS_HOOK_RAKE` | `bundle exec rake` | Application command prefix; supports `docker compose exec -T app bundle exec rake`. Use a wrapper for shell quoting or explicit container environment. |
-| `WOODS_HOOK_TIMEOUT_SECONDS` | `600` | Internal worker deadline, integer 1–3600 seconds; failed/deferred batches remain queued. Docker-side cancellation requires separate verification. |
+| `WOODS_SOURCE_CAPTURE` | internal | Private, one-use `woods-extract` child handoff. Do not set or persist this variable manually; see [source freshness](SOURCE_FRESHNESS.md). |
+| `WOODS_HOOK_TIMEOUT_SECONDS` | `600` | PostToolUse worker deadline (SessionStart uses a fixed ten seconds), integer 1–3600 seconds; failed/deferred batches remain queued. Docker-side cancellation requires separate verification. |
 | `WOODS_HOOK_LOCK_STALE_SECONDS` | `1800` | Age used only to reclaim legacy empty mkdir locks; live PID owners are never reclaimed merely by age. |
 
 `woods:hook_refresh[<base64 JSON>]` is the internal plugin transport. Version 1

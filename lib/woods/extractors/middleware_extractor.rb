@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'middleware_argument'
 
 module Woods
@@ -44,7 +46,7 @@ module Woods
 
         [unit]
       rescue StandardError => e
-        Rails.logger.error("Failed to extract middleware stack: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract middleware stack: #{e.message}")
         []
       end
 

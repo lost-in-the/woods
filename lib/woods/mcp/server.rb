@@ -2038,13 +2038,17 @@ module Woods
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / failed + reason), feature flags, and a ready flag. ' \
-                         'Call this first on cold connect to learn what the server knows.',
-            input_schema: { type: 'object', properties: {} }
-          ) do |server_context:|
+                         'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
+                         'Incomplete evidence is unknown. Call this first on cold connect.',
+            input_schema: { type: 'object', properties: {
+              source_check: { type: 'string', enum: %w[quick deep], default: 'quick',
+                              description: 'Bounded source content verification: quick (250ms) or deep (5s).' }
+            } }
+          ) do |server_context:, source_check: 'quick'|
             _ = server_context
             status = Woods::MCP::Server.build_status(
               reader: reader, retriever: retriever, index_dir: index_dir,
-              bootstrap_state: bootstrap_state
+              bootstrap_state: bootstrap_state, source_check: source_check
             )
             respond.call(JSON.pretty_generate(status))
           end
@@ -2063,21 +2067,21 @@ module Woods
         # provider in use. Without this, operators debugging "wrong provider" see
         # status claiming +embedding_model: "text-embedding-3-small"+ next to
         # +embedding_provider: "ollama"+ and reasonably distrust every field.
-        def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil)
+        def build_status(reader:, retriever:, index_dir:, bootstrap_state: nil, source_check: 'quick')
           # Pin the generation across the whole payload. Without this the
           # manifest can be read at generation N and `generation_fields` then
           # report N+1 — a status report that describes counts from one index
           # while announcing the number of another, which is precisely the
           # confusion this tool exists to resolve.
-          return build_status_payload(reader, retriever, index_dir, bootstrap_state) unless
+          return build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check) unless
             reader.respond_to?(:with_pinned_generation)
 
           reader.with_pinned_generation do
-            build_status_payload(reader, retriever, index_dir, bootstrap_state)
+            build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           end
         end
 
-        def build_status_payload(reader, retriever, index_dir, bootstrap_state)
+        def build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
           staleness = staleness_seconds(extracted_at)
@@ -2095,7 +2099,7 @@ module Woods
               index_dir: index_dir.to_s,
               update: Woods::UpdateCheck.status_hash
             },
-            index: index_section(manifest, extracted_at, staleness, index_dir, reader),
+            index: index_section(manifest, extracted_at, staleness, index_dir, reader, source_check),
             watch: watch_section(index_dir),
             retriever: {
               configured: !retriever.nil?,
@@ -2126,7 +2130,7 @@ module Woods
         # diff directly. This is an observability signal, not a hard gate —
         # hard-refusing responses would be much more disruptive than a loudly-
         # visible staleness flag that agents can branch on.
-        def index_section(manifest, extracted_at, staleness, index_dir, reader = nil)
+        def index_section(manifest, extracted_at, staleness, index_dir, reader = nil, source_check = 'quick')
           base = {
             extracted_at: extracted_at,
             staleness_seconds: staleness,
@@ -2141,6 +2145,11 @@ module Woods
             schema_sha: manifest && manifest['schema_sha']
           }
 
+          base[:source_freshness] = if reader.respond_to?(:source_freshness)
+                                      reader.source_freshness(mode: source_check)
+                                    else
+                                      { 'state' => 'unknown', 'reasons' => ['source_reader_unavailable'], 'complete' => false }
+                                    end
           base.merge!(generation_fields(index_dir, reader))
           base.merge!(working_tree_fields(index_dir))
 

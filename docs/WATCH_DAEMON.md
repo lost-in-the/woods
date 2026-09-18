@@ -457,13 +457,11 @@ party) behaves exactly as it always did.
 was told the index matched HEAD while every answer described the tree before
 those edits.
 
-The fingerprint (a digest of `git status --porcelain`) is *as of the call*.
-Nothing records the digest the index was built at, so it cannot tell you "this
-is the same dirty state the index describes", it gives a stable identity for
-the current dirty state, so two of your own calls can be compared to detect the
-tree moving underneath you. Pair it with `generation` to distinguish "tree
-changed and the index followed" from "tree changed and the index has not caught
-up".
+The fingerprint hashes the current `git status --porcelain` path/status list.
+Repeated edits to the same already-dirty file can leave it identical. It is not
+content identity. Use `index.source_freshness` for generation-bound content
+verification; see [source freshness](SOURCE_FRESHNESS.md) for `current`, `drifted`,
+`unknown`, scan budgets, fresh-process capture and partial-runtime limitations.
 
 ### Multi-file read consistency
 
@@ -628,7 +626,7 @@ hooks (`plugin/hooks/hooks.json`), both shipped disabled:
 | Hook | When | What it does |
 |---|---|---|
 | `PostToolUse` (`Edit`, `Write`, `MultiEdit`), async | A supported extraction or boot input changes | Queues an immutable JSON event, then calls `woods:hook_refresh[<encoded batch>]`; output goes to `hook.log` |
-| `SessionStart` (`startup`, `resume`) | Session begins | Prints a warning when `generation.json`'s `updated_at` predates `git log -1` |
+| `SessionStart` (`startup`, `resume`) | Session begins | Checks source content through `woods:source_status`; warns on drift or unknown evidence |
 
 Both read `cwd` from the hook payload, so a linked worktree uses its own index.
 Both require an existing `generation.json` and `WOODS_HOOKS_ENABLED=1`;
@@ -709,12 +707,10 @@ is no provider or embedding call added by this hook. Opt in for occasional agent
 edits; use `woods:watch` for repeated work, and keep full extraction for large
 change sets as described above.
 
-The `SessionStart` warning compares two commit-adjacent timestamps only:
-the generation's `updated_at` against the last commit's time. It says
-nothing about uncommitted changes in the working tree, and a checkout
-sitting on an older commit than the one that produced the generation can
-still read as fresh under this check. Treat a quiet session start as "not
-behind the last commit," not as a general freshness guarantee.
+The `SessionStart` hook uses the shared quick source verifier through
+`WOODS_HOOK_RAKE`. It has a ten-second command deadline, including startup;
+failed commands and old gems lacking `woods:source_status` report unknown.
+It does not initialize Rails or start a provider. See [source freshness](SOURCE_FRESHNESS.md#containers-and-hooks).
 
 ### Reader multiplicity is free
 

@@ -112,6 +112,12 @@ namespace :woods do
     Woods::Hooks::Refresh.new(args[:batch]).call
   end
 
+  desc 'Verify indexed source content without booting Rails (encoded options are optional)'
+  task :source_status, [:options] do |_task, args|
+    require 'woods/source_inputs/status'
+    puts JSON.generate(Woods::SourceInputs::Status.from_transport(args[:options]))
+  end
+
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
 

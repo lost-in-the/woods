@@ -241,3 +241,13 @@ arguments, not configuration settings. Inspect applied scope and completeness;
 a narrow graph query can omit relevant cross-boundary dependencies. See the
 [scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
 root/nested ownership, path normalization, errors, storage support, and cost.
+
+### Verify source content before relying on freshness
+
+When supported by the installed version, inspect `woods_status.index.source_freshness`.
+Repeated edits can leave the porcelain fingerprint unchanged. A quick-budget
+`unknown` can justify one explicit `source_check: "deep"` call; persistent unknown
+needs the reported limitation resolved, not repeated status polling. Use
+`bundle exec woods-extract full` to establish verified preboot source evidence.
+A named refresh does not certify unrelated consumers or external runtime state.
+Follow [source freshness](SOURCE_FRESHNESS.md) and keep ordinary query scopes narrow.

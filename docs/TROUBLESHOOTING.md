@@ -943,3 +943,11 @@ With startup snapshot support, a fresh environment boot performs the full
 reconciliation automatically. Changes during environment initialization or live
 watching still require restart. Do not prepend `environment` to the watch command
 or start it inside an already initialized process when relying on this recovery.
+
+## Source freshness is unknown or drifted
+
+Read `woods_status.index.source_freshness.reasons`. Old indexes, an inaccessible
+source root/private key, a quick scan limit and an unverified boot boundary are
+different causes. Try `source_check: "deep"` for a budget limit; use the fresh
+launcher for a new verified baseline. Do not delete pending hook events or alter
+key permissions just to suppress a warning. See [source freshness](SOURCE_FRESHNESS.md).

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 
 module Woods
@@ -184,7 +186,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract engine #{engine.name}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract engine #{engine.name}: #{e.message}")
         nil
       end
 

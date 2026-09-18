@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
@@ -79,7 +81,7 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract mailer #{mailer.name}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract mailer #{mailer.name}: #{e.message}")
         nil
       end
 

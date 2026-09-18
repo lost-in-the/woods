@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 module Woods
   module Extractors
     # BehavioralProfile introspects resolved Rails.application.config values
@@ -52,7 +54,7 @@ module Woods
 
         build_unit(profile)
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile extraction failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile extraction failed: #{e.message}")
         nil
       end
 
@@ -86,7 +88,7 @@ module Woods
 
         result
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile database section failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile database section failed: #{e.message}")
         {}
       end
 
@@ -102,7 +104,7 @@ module Woods
           Object.const_defined?(constant_name)
         end
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile frameworks section failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile frameworks section failed: #{e.message}")
         {}
       end
 
@@ -132,7 +134,7 @@ module Woods
 
         flags
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile behavior_flags section failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile behavior_flags section failed: #{e.message}")
         {}
       end
 
@@ -152,7 +154,7 @@ module Woods
 
         { adapter: aj.queue_adapter }
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile background section failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile background section failed: #{e.message}")
         {}
       end
 
@@ -172,7 +174,7 @@ module Woods
 
         { store: store }
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile caching section failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile caching section failed: #{e.message}")
         {}
       end
 
@@ -192,7 +194,7 @@ module Woods
 
         { delivery_method: am.delivery_method }
       rescue StandardError => e
-        Rails.logger.error("BehavioralProfile email section failed: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "BehavioralProfile email section failed: #{e.message}")
         {}
       end
 

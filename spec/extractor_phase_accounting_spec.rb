@@ -17,17 +17,18 @@ RSpec.describe Woods::Extractor, 'phase accounting' do
 
   after { FileUtils.rm_rf(directory) }
 
-  it 'reports sync, pointer publication and pruning as disjoint phases' do
+  it 'reports source verification, sync, pointer publication and pruning as disjoint phases' do
     marker = double('Marker', number: 2)
     generation = instance_double(Woods::Generation, bump!: marker)
     allow(Woods::Generation).to receive(:new).and_return(generation)
     allow(extractor).to receive(:publishable_payload_name).and_return('payloads/gen-2')
     allow(extractor).to receive(:sync_payload)
     allow(extractor).to receive(:prune_payloads)
-    allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(0, 2, 2, 5, 5, 10)
+    allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(0, 1, 1, 3, 3, 6, 6, 11)
 
     expect(extractor.send(:publish_generation, 'full')).to eq(marker)
 
+    expect(logger).to have_received(:info).with('[Woods] [profile] source verification in 1s').ordered
     expect(logger).to have_received(:info).with('[Woods] [profile] payload sync in 2s').ordered
     expect(logger).to have_received(:info).with('[Woods] [profile] publish in 3s').ordered
     expect(logger).to have_received(:info).with('[Woods] [profile] payload prune in 5s').ordered

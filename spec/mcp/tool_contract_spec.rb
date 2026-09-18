@@ -345,7 +345,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                                 key_sets: {
                                                   [] => %w[ready server index watch retriever bootstrap features]
                                                 }
-                                              ))
+                                              ), properties: {
+                                                'source_check' => enum_contract(%w[quick deep], nil, 10_000)
+                                              })
     }
   end
 
@@ -887,6 +889,10 @@ RSpec.describe 'Index MCP tool contracts' do
   def assert_enum_semantics(name, value, result)
     data = result.dig('structuredContent', 'data')
     case name
+    when 'woods_status'
+      expect(data.dig('index', 'source_freshness')).to include(
+        'state' => 'unknown', 'check' => value, 'complete' => false
+      )
     when 'graph_analysis'
       assert_graph_enum(data, value)
     when 'pipeline_repair'
