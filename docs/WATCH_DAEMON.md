@@ -851,3 +851,5 @@ refresh/watch locks. Disable context to roll back without changing refresh.
 
 Only the native Claude context entries are supported here; the OpenCode adapter
 continues to provide refresh events. No prompt-triggered retrieval is injected.
+
+See the [matched public Rails task comparison](EVALUATION.md#matched-optional-context-hook-tasks-406) for delivered hints, task outcomes, measured overhead and observed limitations.

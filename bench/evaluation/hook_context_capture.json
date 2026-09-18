@@ -1,0 +1,2453 @@
+{
+  "schema_version": 1,
+  "purpose": "Matched optional context-hook comparison; observational, not a quality/default gate",
+  "protocol": {
+    "tasks": [
+      "aj-enqueue-after-commit",
+      "ar-atomic-import"
+    ],
+    "task_revision": "5327efe54dd767d662ab89332f6a4285fef07bd8",
+    "repetitions": 2,
+    "conditions": [
+      "manual",
+      "context"
+    ],
+    "model": "claude-sonnet-5",
+    "client": "2.1.267",
+    "max_turns": 40,
+    "mcp_evidence": "full existing default",
+    "refresh": "disabled in both arms; isolate context switch only; hints describe published/pre-refresh evidence",
+    "concurrency": 2,
+    "hidden_verifier": "copied only after agent exits",
+    "scope": "matched multi-file dependency questions, not broad quality/performance claim",
+    "fixture_gate": "seeded defects fail; upstream reference fixes pass before any agent trials",
+    "state": "frozen before primary outcomes",
+    "source_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+    "retrieval_budget": 1200,
+    "output_limit_bytes": 2048,
+    "hook_worker_deadline_seconds": 0.85,
+    "tokenizer": "tiktoken0.11.0/cl100k_base",
+    "trial_order": [
+      [
+        "aj-enqueue-after-commit",
+        "manual",
+        1
+      ],
+      [
+        "aj-enqueue-after-commit",
+        "context",
+        1
+      ],
+      [
+        "ar-atomic-import",
+        "context",
+        1
+      ],
+      [
+        "ar-atomic-import",
+        "manual",
+        1
+      ],
+      [
+        "aj-enqueue-after-commit",
+        "context",
+        2
+      ],
+      [
+        "aj-enqueue-after-commit",
+        "manual",
+        2
+      ],
+      [
+        "ar-atomic-import",
+        "manual",
+        2
+      ],
+      [
+        "ar-atomic-import",
+        "context",
+        2
+      ]
+    ],
+    "delivery_metric": "official client hook_additional_context attachments; local protocol fixture additionally verifies exact hints enter actual model requests",
+    "measurement_wrapper": "preserves actual registered entrypoint input/output; 850ms budget measures entrypoint call, wrapper overhead is outside it",
+    "negative_smoke": "early missing executable stubs invalidated setup; bundle install --local now regenerates stubs while asserting unchanged lock",
+    "harness_sha256": {
+      "run_tasks.py": "63cb96a52b100b27364a0e3f9280ed723ff711e2c34ac794f5f15dd66c61b65a",
+      "run_batch.py": "ca256b7dce6ec969d49cbc1c6da02a2c5ada0479647416048db305f4cb39fbee",
+      "hook_probe.rb": "739140bc51971361bf2eca41eda89a692d961aef9590073386749746e762ec07",
+      "mcp_proxy.rb": "ffbe3ff382598753bf64515f9f257ff767b93c061806884d12e3d0d8d4ffdd40",
+      "analyze_tasks.py": "cf1009335f11059e9a011e0836828fc69a09048dc2924e0a7c4202d4118f3608",
+      "smoke_client.py": "0c04f73b4aab3fd975fd0acac3325f8634fe61ec161984a3dae869462fbddbe9",
+      "helper_probe.rb": "d1c594f076ecf14a41e82da5808f84e50476b75504445bc5bd8a71fe641148ad"
+    }
+  },
+  "analysis_revision": {
+    "original_sha256": "cf1009335f11059e9a011e0836828fc69a09048dc2924e0a7c4202d4118f3608",
+    "revised_sha256": "f01734a8d0dbfcac7d912f10521d2d1e08552a86f954d88e7fe51c63d5925324",
+    "reason": "Reviewer identified aggregate would crash on retained invalid setup/model output. Catch per-trial analysis failures and retain original result metadata plus explicit analysis_error. No source, prompts, run conditions, trials or metric formulas changed.",
+    "timing": "before first primary trial result"
+  },
+  "final_native_plugin_delivery_probe": [
+    {
+      "event": "SessionStart",
+      "actual_request_indexes": [
+        0,
+        1,
+        2
+      ],
+      "output_bytes": 347,
+      "helper_elapsed_seconds": 0.6094557520045782
+    },
+    {
+      "event": "PostToolUse",
+      "actual_request_indexes": [
+        2
+      ],
+      "output_bytes": 1072,
+      "helper_elapsed_seconds": 0.6338589080041857
+    }
+  ],
+  "source_status_before_probe": {
+    "state": "unknown",
+    "mode": "content",
+    "generation": 1,
+    "checked_at": "2026-09-18T02:02:47Z",
+    "reasons": [
+      "unverified_consumption_scopes"
+    ],
+    "complete": true,
+    "counts": {
+      "added": 0,
+      "changed": 0,
+      "removed": 0
+    },
+    "truncated": false,
+    "changes": {
+      "added": [],
+      "changed": [],
+      "removed": []
+    },
+    "metrics": {
+      "visited_files": 461,
+      "hashed_files": 228,
+      "bytes": 235073,
+      "elapsed_ms": 64.151
+    },
+    "check": "quick"
+  },
+  "summary": {
+    "manual": {
+      "trials": 4,
+      "passed": 4,
+      "official_client_usage_total": {
+        "input_tokens": 160,
+        "cache_creation_input_tokens": 217920,
+        "cache_read_input_tokens": 5715709,
+        "output_tokens": 40884
+      },
+      "hook_invocations": 19,
+      "hints_emitted": 0,
+      "hints_delivered": 0,
+      "hint_output_max_bytes": 0,
+      "hook_seconds_min_median_max": [
+        0.0014945069997338578,
+        0.0017529199976706877,
+        0.005856339994352311
+      ],
+      "agent_wall_seconds": {
+        "sum": 516.5227577559854,
+        "median": 118.94130799899722,
+        "min": 105.25992847799353,
+        "max": 173.3802132799974
+      },
+      "mcp_content_tokens_cl100k": {
+        "sum": 45834,
+        "median": 12207.5,
+        "min": 5479,
+        "max": 15940
+      },
+      "hook_delivered_context_tokens_cl100k": {
+        "sum": 0,
+        "median": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "list_price_estimate_usd": {
+        "sum": 2.4239818,
+        "median": 0.5762328,
+        "min": 0.4682242000000001,
+        "max": 0.8032920000000001
+      }
+    },
+    "context": {
+      "trials": 4,
+      "passed": 4,
+      "official_client_usage_total": {
+        "input_tokens": 158,
+        "cache_creation_input_tokens": 206056,
+        "cache_read_input_tokens": 5467210,
+        "output_tokens": 42000
+      },
+      "hook_invocations": 16,
+      "hints_emitted": 16,
+      "hints_delivered": 16,
+      "hint_output_max_bytes": 1067,
+      "hook_seconds_min_median_max": [
+        0.5903878399985842,
+        0.6131274990002566,
+        0.8181391719990643
+      ],
+      "agent_wall_seconds": {
+        "sum": 598.8869941270023,
+        "median": 137.4087327164998,
+        "min": 113.6380455010003,
+        "max": 210.43148319300235
+      },
+      "mcp_content_tokens_cl100k": {
+        "sum": 39550,
+        "median": 9323.5,
+        "min": 5718,
+        "max": 15185
+      },
+      "hook_delivered_context_tokens_cl100k": {
+        "sum": 1914,
+        "median": 478.5,
+        "min": 273,
+        "max": 684
+      },
+      "list_price_estimate_usd": {
+        "sum": 2.3379820000000002,
+        "median": 0.6400431000000001,
+        "min": 0.37381,
+        "max": 0.6840858000000003
+      }
+    }
+  },
+  "measurement_limits": [
+    "Two public Rails tasks with two repetitions per condition; no general improvement claim.",
+    "Both arms use full MCP evidence and lexical retrieval; refresh disabled to isolate context.",
+    "Actual official-client usage is separate from cl100k representation size. List-price estimates are not billed charges.",
+    "Two concurrent trials; agent wall is descriptive, not isolated Woods latency.",
+    "Callbacks were instrumented by a wrapper preserving entrypoint input/output. Native plugin registration was separately exercised against captured model requests.",
+    "The tracked-only diff.patch omits newly created untracked tests. Their native Write/Edit operations and test runs remain in retained transcripts; reconstructed test artifacts are labelled separately.",
+    "The source freshness check reported unverified_consumption_scopes before editing. Pre-refresh/unknown/drifted and truncation notices remain explicit.",
+    "All attempts and failed probes retained; early smoke setup lacked newly added executable stubs and was invalidated before primary trials.",
+    "All 16 emitted context hints appeared as official-client hook_additional_context attachments; this is not proof the model used each hint."
+  ],
+  "quality_review": {
+    "relationship_claims_checked": 44,
+    "incorrect_relationship_claims": 0,
+    "observation": "Core owners were commonly already inspected. Atomic-import repetition 1 prompted an extra DemoContent check that found nothing; broad transitive hints can add redundant work. New test paths received honest unresolved notices."
+  },
+  "trials": [
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "context",
+      "rep": 1,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 113.6380455010003,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 40,
+        "cache_creation_input_tokens": 83101,
+        "cache_read_input_tokens": 1361859,
+        "output_tokens": 7923,
+        "output_tokens_details": {
+          "thinking_tokens": 3431
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 83101,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 40,
+          "outputTokens": 7923,
+          "cacheReadInputTokens": 1361859,
+          "cacheCreationInputTokens": 83101,
+          "webSearchRequests": 0,
+          "costUSD": 0.6840858000000003,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 3431,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 38,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.6840858000000003,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "8b3ca7fc25753ffcac7243b385d34c9d6d168a4b14dfa8b817b76c6cba48350a",
+          "text_bytes": 2963,
+          "text_tokens_cl100k": 1020,
+          "response_json_bytes": 8965,
+          "response_json_tokens_cl100k": 3034,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "CoverProcessingJob"
+          },
+          "error": false,
+          "text_sha256": "a55d5deacdc876f1b8b7db0d6b6e82066f52833a7836a3ea62ce8bcbf1f0016a",
+          "text_bytes": 218,
+          "text_tokens_cl100k": 55,
+          "response_json_bytes": 573,
+          "response_json_tokens_cl100k": 155,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Book",
+            "exact_prefix": "Book"
+          },
+          "error": false,
+          "text_sha256": "dfc4d77b3f96ddaf43744914a9cddefdc0000080062199d3573217c99632d3b9",
+          "text_bytes": 1634,
+          "text_tokens_cl100k": 394,
+          "response_json_bytes": 3451,
+          "response_json_tokens_cl100k": 837,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "c81b281c97b5f72f860cef0b88b90e2a62045f07a7c4bd63863f7ddd020a0d68",
+          "text_bytes": 17032,
+          "text_tokens_cl100k": 4265,
+          "response_json_bytes": 35999,
+          "response_json_tokens_cl100k": 9119,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Editing",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "428e125a8b05ec6d63825a276c8885ec68587373b5495dfc0048be9a9f32e335",
+          "text_bytes": 1998,
+          "text_tokens_cl100k": 500,
+          "response_json_bytes": 4351,
+          "response_json_tokens_cl100k": 1109,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::CoverProcessingJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb5686a00d0f31da3f90822c672b79c3b374bf8095f5fa6eb48c7a35964a7aad",
+          "text_bytes": 1738,
+          "text_tokens_cl100k": 428,
+          "response_json_bytes": 3771,
+          "response_json_tokens_cl100k": 959,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::SearchIndexJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "d19d6785cb426d32041293729d7393614a6e9e64861413700a4ded41e5a29004",
+          "text_bytes": 1634,
+          "text_tokens_cl100k": 407,
+          "response_json_bytes": 3560,
+          "response_json_tokens_cl100k": 915,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportFailureJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "8c001ae4d7da8b3c60c309c36c2ff375d4d0f5b3f873090325d5b9309e20d147",
+          "text_bytes": 1626,
+          "text_tokens_cl100k": 398,
+          "response_json_bytes": 3514,
+          "response_json_tokens_cl100k": 887,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportsController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb566edf9efdb68a52367c9bf23667c83fdedc7555477a52e1677f68f38145c3",
+          "text_bytes": 11549,
+          "text_tokens_cl100k": 2525,
+          "response_json_bytes": 23984,
+          "response_json_tokens_cl100k": 5391,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "nightly"
+          },
+          "error": false,
+          "text_sha256": "cd065e261cd1c3c2fb0bec3b7f16a4a4343140c39954ca8c825212829e37707b",
+          "text_bytes": 145,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 426,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Import"
+          },
+          "error": false,
+          "text_sha256": "72449a80a3fd43e761cd020530bafa88884e544bb8e1f431f78ec881bd01d56a",
+          "text_bytes": 394,
+          "text_tokens_cl100k": 98,
+          "response_json_bytes": 932,
+          "response_json_tokens_cl100k": 241,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "enqueue_after_transaction_commit"
+          },
+          "error": false,
+          "text_sha256": "4f48b57aa737da095d1c4c86525f438538d9166a9e320f7f21a8ae931a62fbbe",
+          "text_bytes": 235,
+          "text_tokens_cl100k": 67,
+          "response_json_bytes": 604,
+          "response_json_tokens_cl100k": 178,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Job$",
+            "types": [
+              "job"
+            ]
+          },
+          "error": false,
+          "text_sha256": "8641fba5c96781e5259d8df7cade18bca31d414ac43ceaf4d2cc0cc15aa9b546",
+          "text_bytes": 432,
+          "text_tokens_cl100k": 113,
+          "response_json_bytes": 1012,
+          "response_json_tokens_cl100k": 273,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 5,
+        "lookup": 6,
+        "framework": 1
+      },
+      "evidence_mode_counts": {
+        "full": 6
+      },
+      "mcp_content_tokens_cl100k": 10308,
+      "mcp_response_json_tokens_cl100k": 23219,
+      "evidence_content_tokens_cl100k": 8523,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.8181391719990643,
+          "exit": 0,
+          "output_bytes": 347,
+          "output_sha256": "aa3f128bc2f532d2e0fa53aac9f02e5fca5c4d1713d2d1c2490245f1f53bb321",
+          "emitted": true,
+          "context_sha256": "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+          "context_tokens_cl100k": 60,
+          "observed_in_client_attachment": true,
+          "context": "Woods index generation 1; source freshness: unknown. Use woods_status, search and typed lookup; dependents explain:true suggests checks.\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "c3edde46e31a3ac420c5f4f45fd4bd19186c9be97dceed40fe7e11d3507bb7eb"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.619335602998035,
+          "exit": 0,
+          "output_bytes": 527,
+          "output_sha256": "f050e656d26b9fe3258e4108754fc9dd9d86734722c010c014cfb058f51cadd7",
+          "emitted": true,
+          "context_sha256": "88d05509cd66e1b02ce527d7c90a28506d677d96f01a837462081525c80c8da2",
+          "context_tokens_cl100k": 107,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/jobs/book/cover_processing_job.rb\".\ndirect candidate: Book::Editing (concern) --via=code_reference--> Book::CoverProcessingJob (job)\ntransitive candidate: Book (model) --via=include--> Book::Editing (concern)\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "a85000b7af931362f1254349f13dcee5fc6cf2ef0a0d74a988ffbb005ee15247"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.6069193950024783,
+          "exit": 0,
+          "output_bytes": 519,
+          "output_sha256": "f964ebb72ffd5bd09604966447b91731b4d84126ca043d5c07ae031e08d75e7d",
+          "emitted": true,
+          "context_sha256": "06991913d3d26dd969e611611f0ed8041bb0d3abd52f65c5db2e67e0b964065d",
+          "context_tokens_cl100k": 106,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/jobs/book/search_index_job.rb\".\ndirect candidate: Book::Editing (concern) --via=code_reference--> Book::SearchIndexJob (job)\ntransitive candidate: Book (model) --via=include--> Book::Editing (concern)\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "b087eae1ef2c7aa3c8d1c8e9403cf6dfd898f5fb8a6f274ccf85a6e1bd06e9e6"
+        }
+      ],
+      "hook_invocations": 3,
+      "hooks_emitted": 3,
+      "hook_output_max_bytes": 527,
+      "hook_elapsed_median_seconds": 0.619335602998035,
+      "hook_elapsed_max_seconds": 0.8181391719990643,
+      "hook_emitted_context_tokens_cl100k": 273,
+      "hook_delivered_attachment_count": 3,
+      "hook_delivered_context_tokens_cl100k": 273,
+      "hook_delivered_context_sha256": [
+        "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+        "88d05509cd66e1b02ce527d7c90a28506d677d96f01a837462081525c80c8da2",
+        "06991913d3d26dd969e611611f0ed8041bb0d3abd52f65c5db2e67e0b964065d"
+      ],
+      "artifact_sha256": {
+        "result.json": "88e25188b61b8e25b95951ca9fe48377146d4bad6778084ec39f3e0255b3261e",
+        "agent.json": "2f2be2da5979f96c97c1b8df978f3f0368f9d4496b7acbe013579c3b27f7bb23",
+        "mcp.jsonl": "4433a4234ffb16f91c57971c7f7c5b648d5179157eb253d431cc21c7739302fb",
+        "hooks.jsonl": "89c86d747af53449295bf9cf70f4d95121dc7b3eef73fa17389922998a4c0bf3",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "verifier.log": "e4db7f3a1733a3e0f9425a5e7631e930b6294c0746c0714ae7c4b105a97cc230",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "6433a50512d67a628f1d09af1b29b2072f71bfbc2749dd6cc3a0268f23f93efc",
+        "snapshot-generation.json": "cad4a1f891a97cf878f160ab496fd508afceb2c28cfa58e79bef721c2780b6cc"
+      },
+      "transcript_sha256": {
+        "931376fe-f07e-4499-b296-5af740fecbc2.jsonl": "ca81e94039a2a00a4051a7bf9a91625af08da97f9b5646aee3ebf76f28632927"
+      },
+      "hook_context_judgment": "All relationship claims checked against the trial snapshot; no incorrect claim found. Candidates can be redundant or broad; task benefit unproven."
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "context",
+      "rep": 2,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 154.8964381419937,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 48,
+        "cache_creation_input_tokens": 39407,
+        "cache_read_input_tokens": 1691301,
+        "output_tokens": 11729,
+        "output_tokens_details": {
+          "thinking_tokens": 5113
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 39407,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 48,
+          "outputTokens": 11729,
+          "cacheReadInputTokens": 1691301,
+          "cacheCreationInputTokens": 39407,
+          "webSearchRequests": 0,
+          "costUSD": 0.6132742000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 5113,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 35,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.6132742000000001,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "7a4e867aaf9e95bec98431ccc03b0e797ccab243755a7df14a4e1ccf747f1921",
+          "text_bytes": 2963,
+          "text_tokens_cl100k": 1020,
+          "response_json_bytes": 8965,
+          "response_json_tokens_cl100k": 3034,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "CoverProcessingJob"
+          },
+          "error": false,
+          "text_sha256": "a55d5deacdc876f1b8b7db0d6b6e82066f52833a7836a3ea62ce8bcbf1f0016a",
+          "text_bytes": 218,
+          "text_tokens_cl100k": 55,
+          "response_json_bytes": 573,
+          "response_json_tokens_cl100k": 155,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "c81b281c97b5f72f860cef0b88b90e2a62045f07a7c4bd63863f7ddd020a0d68",
+          "text_bytes": 17032,
+          "text_tokens_cl100k": 4265,
+          "response_json_bytes": 35999,
+          "response_json_tokens_cl100k": 9119,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::SearchIndexJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "d19d6785cb426d32041293729d7393614a6e9e64861413700a4ded41e5a29004",
+          "text_bytes": 1634,
+          "text_tokens_cl100k": 407,
+          "response_json_bytes": 3559,
+          "response_json_tokens_cl100k": 915,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportsController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb566edf9efdb68a52367c9bf23667c83fdedc7555477a52e1677f68f38145c3",
+          "text_bytes": 11549,
+          "text_tokens_cl100k": 2525,
+          "response_json_bytes": 23983,
+          "response_json_tokens_cl100k": 5391,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "enqueue_after_transaction_commit"
+          },
+          "error": false,
+          "text_sha256": "4f48b57aa737da095d1c4c86525f438538d9166a9e320f7f21a8ae931a62fbbe",
+          "text_bytes": 235,
+          "text_tokens_cl100k": 67,
+          "response_json_bytes": 603,
+          "response_json_tokens_cl100k": 178,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 1,
+        "lookup": 3,
+        "framework": 1
+      },
+      "evidence_mode_counts": {
+        "full": 3
+      },
+      "mcp_content_tokens_cl100k": 8339,
+      "mcp_response_json_tokens_cl100k": 18792,
+      "evidence_content_tokens_cl100k": 7197,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.6403153179999208,
+          "exit": 0,
+          "output_bytes": 347,
+          "output_sha256": "aa3f128bc2f532d2e0fa53aac9f02e5fca5c4d1713d2d1c2490245f1f53bb321",
+          "emitted": true,
+          "context_sha256": "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+          "context_tokens_cl100k": 60,
+          "observed_in_client_attachment": true,
+          "context": "Woods index generation 1; source freshness: unknown. Use woods_status, search and typed lookup; dependents explain:true suggests checks.\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "7c3a1860b05b0701e1055638c2c5ec732f034fe0a56d22e0327508c3b65db7ed"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.5912001089964178,
+          "exit": 0,
+          "output_bytes": 527,
+          "output_sha256": "f050e656d26b9fe3258e4108754fc9dd9d86734722c010c014cfb058f51cadd7",
+          "emitted": true,
+          "context_sha256": "88d05509cd66e1b02ce527d7c90a28506d677d96f01a837462081525c80c8da2",
+          "context_tokens_cl100k": 107,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/jobs/book/cover_processing_job.rb\".\ndirect candidate: Book::Editing (concern) --via=code_reference--> Book::CoverProcessingJob (job)\ntransitive candidate: Book (model) --via=include--> Book::Editing (concern)\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "21b7815f78b1c8c88920adac5a1ebb07f4c1413bca7a3d1fa074d34751677ec4"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.6009105760022067,
+          "exit": 0,
+          "output_bytes": 519,
+          "output_sha256": "f964ebb72ffd5bd09604966447b91731b4d84126ca043d5c07ae031e08d75e7d",
+          "emitted": true,
+          "context_sha256": "06991913d3d26dd969e611611f0ed8041bb0d3abd52f65c5db2e67e0b964065d",
+          "context_tokens_cl100k": 106,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/jobs/book/search_index_job.rb\".\ndirect candidate: Book::Editing (concern) --via=code_reference--> Book::SearchIndexJob (job)\ntransitive candidate: Book (model) --via=include--> Book::Editing (concern)\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "59edea9c90aeb0dfc9659e62db3685d47bbd776749b16949e8bc865e1845ced2"
+        }
+      ],
+      "hook_invocations": 3,
+      "hooks_emitted": 3,
+      "hook_output_max_bytes": 527,
+      "hook_elapsed_median_seconds": 0.6009105760022067,
+      "hook_elapsed_max_seconds": 0.6403153179999208,
+      "hook_emitted_context_tokens_cl100k": 273,
+      "hook_delivered_attachment_count": 3,
+      "hook_delivered_context_tokens_cl100k": 273,
+      "hook_delivered_context_sha256": [
+        "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+        "88d05509cd66e1b02ce527d7c90a28506d677d96f01a837462081525c80c8da2",
+        "06991913d3d26dd969e611611f0ed8041bb0d3abd52f65c5db2e67e0b964065d"
+      ],
+      "artifact_sha256": {
+        "result.json": "5469de3d62a60eaf13607baab83872b70d704ce268733acb0d8666bec94f186e",
+        "agent.json": "a7f6cd0296556cd3c18cbf502f58befcebba2b9817989d7a06b68b562bbf6887",
+        "mcp.jsonl": "f181899e02617419102afdd3bff6ad4c00f2a1e20ac4098fd7c311286cba5998",
+        "hooks.jsonl": "f9239c46f82fb6361b92808974061cd554343c7df899ea7478dd602b33b48fb8",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "verifier.log": "76c6c8faa995f870286c4c46b528d022901b6f17e692114516519a923598c65a",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "6433a50512d67a628f1d09af1b29b2072f71bfbc2749dd6cc3a0268f23f93efc",
+        "snapshot-generation.json": "e8a07515fc23d369b6710d2a4c0a6e744cfaee63e083f660ec0ab38d8b18d741"
+      },
+      "transcript_sha256": {
+        "62ed8528-bc2a-4246-ba35-f790048febcf.jsonl": "4329f2b05b7ff14f5e15f364b21490e16fd08a6f000dbda89b4330703e8b5576"
+      },
+      "hook_context_judgment": "All relationship claims checked against the trial snapshot; no incorrect claim found. Candidates can be redundant or broad; task benefit unproven."
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "manual",
+      "rep": 1,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 111.33477471199876,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 38,
+        "cache_creation_input_tokens": 73461,
+        "cache_read_input_tokens": 1134404,
+        "output_tokens": 9213,
+        "output_tokens_details": {
+          "thinking_tokens": 4644
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 73461,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 38,
+          "outputTokens": 9213,
+          "cacheReadInputTokens": 1134404,
+          "cacheCreationInputTokens": 73461,
+          "webSearchRequests": 0,
+          "costUSD": 0.6129308,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 4644,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 29,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.6129308,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "7a989fe2f89b227f69fc17f3d90cae9e76d3800318638a0d487a3b99f217a6b0",
+          "text_bytes": 2964,
+          "text_tokens_cl100k": 1020,
+          "response_json_bytes": 8968,
+          "response_json_tokens_cl100k": 3034,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "c81b281c97b5f72f860cef0b88b90e2a62045f07a7c4bd63863f7ddd020a0d68",
+          "text_bytes": 17032,
+          "text_tokens_cl100k": 4265,
+          "response_json_bytes": 35999,
+          "response_json_tokens_cl100k": 9119,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "CoverProcessingJob"
+          },
+          "error": false,
+          "text_sha256": "a55d5deacdc876f1b8b7db0d6b6e82066f52833a7836a3ea62ce8bcbf1f0016a",
+          "text_bytes": 218,
+          "text_tokens_cl100k": 55,
+          "response_json_bytes": 573,
+          "response_json_tokens_cl100k": 155,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "Import",
+            "types": [
+              "job"
+            ]
+          },
+          "error": false,
+          "text_sha256": "952ee8ce3a96f5fdada7093483682d15e3fe20981da6695e2bbf86d284981f24",
+          "text_bytes": 205,
+          "text_tokens_cl100k": 53,
+          "response_json_bytes": 547,
+          "response_json_tokens_cl100k": 151,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "enqueue_after_transaction_commit"
+          },
+          "error": false,
+          "text_sha256": "4f48b57aa737da095d1c4c86525f438538d9166a9e320f7f21a8ae931a62fbbe",
+          "text_bytes": 235,
+          "text_tokens_cl100k": 67,
+          "response_json_bytes": 603,
+          "response_json_tokens_cl100k": 178,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "rails/activejob/activejob/lib/active_job/enquing.rb",
+            "type": "rails_source",
+            "evidence": "full"
+          },
+          "error": true,
+          "text_sha256": "ef3d8801d7339d0075ade3866359c21b978a297a1f09b5dea3ba2c4881a7c4d1",
+          "text_bytes": 67,
+          "text_tokens_cl100k": 19,
+          "response_json_bytes": 460,
+          "response_json_tokens_cl100k": 126,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 2,
+        "search": 2,
+        "framework": 1
+      },
+      "evidence_mode_counts": {
+        "full": 2
+      },
+      "mcp_content_tokens_cl100k": 5479,
+      "mcp_response_json_tokens_cl100k": 12763,
+      "evidence_content_tokens_cl100k": 4284,
+      "mcp_errors": 1,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.0021555709972744808,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "a9c0f8622968f0122716136416c1975b2e9fd3d63f4dc45c06dccdafa5b602aa"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0017961490011657588,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "c0df9abd13e9e8887bb4a7ac20a727a3a4a5e02f00534d4f3816ab0cbfa813da"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0017529199976706877,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "3544b9da495f9bad862ded2701c7dd074d6df4c753e28357e3fdb376c5f00467"
+        }
+      ],
+      "hook_invocations": 3,
+      "hooks_emitted": 0,
+      "hook_output_max_bytes": 0,
+      "hook_elapsed_median_seconds": 0.0017961490011657588,
+      "hook_elapsed_max_seconds": 0.0021555709972744808,
+      "hook_emitted_context_tokens_cl100k": 0,
+      "hook_delivered_attachment_count": 0,
+      "hook_delivered_context_tokens_cl100k": 0,
+      "hook_delivered_context_sha256": [],
+      "artifact_sha256": {
+        "result.json": "5ae06d02f2deee88a0966649416e82d8eed90c431d3a83465da0c26cf7f7b2cc",
+        "agent.json": "047dc4d35ad0fb2674b6315887e30f4f155231d0be5c81382426de90e79d9e59",
+        "mcp.jsonl": "be89b61f9f06f0afc8c14490f792724b157d6aeb1bd7835c96919170f8849a6a",
+        "hooks.jsonl": "45f7f4f20144bf0b32a5ed33e5ee96e8156bc84eb3fa22e61fe9f3d512d03e3f",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "verifier.log": "8acee50ffd0fe7321ab3cc3fb0583f9755b92b9604a42943aad0dccca91ea9d2",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "6433a50512d67a628f1d09af1b29b2072f71bfbc2749dd6cc3a0268f23f93efc",
+        "snapshot-generation.json": "3145d1fe6527b76d2d76c6c54bb55ef2281edb4f38ad29b8f6f83d48118b8fad"
+      },
+      "transcript_sha256": {
+        "4b25b975-7135-47e6-bab1-0de51689ef5b.jsonl": "c8a2b1b0a0b277ed53add12c4f0605e318ea4498d1ac1e04b6d93aa43106daa8"
+      },
+      "hook_context_judgment": "No context emitted; manual-tool control."
+    },
+    {
+      "task": "aj-enqueue-after-commit",
+      "condition": "manual",
+      "rep": 2,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-aj-enqueue-after-commit:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "b9d437b9853e53309bfe1e5608c6eedf3e66aed9bfb6e3011182aa92c7e8e621",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 173.3802132799974,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 58,
+        "cache_creation_input_tokens": 53846,
+        "cache_read_input_tokens": 2274010,
+        "output_tokens": 13299,
+        "output_tokens_details": {
+          "thinking_tokens": 6852
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 53846,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 58,
+          "outputTokens": 13299,
+          "cacheReadInputTokens": 2274010,
+          "cacheCreationInputTokens": 53846,
+          "webSearchRequests": 0,
+          "costUSD": 0.8032920000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 6852,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 40,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.8032920000000001,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "b84bba870f0d0b0458d63fbf82c33b8417ac6db43f2e5b833954b7512849a417",
+          "text_bytes": 2962,
+          "text_tokens_cl100k": 1020,
+          "response_json_bytes": 8962,
+          "response_json_tokens_cl100k": 3034,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "c81b281c97b5f72f860cef0b88b90e2a62045f07a7c4bd63863f7ddd020a0d68",
+          "text_bytes": 17032,
+          "text_tokens_cl100k": 4265,
+          "response_json_bytes": 35999,
+          "response_json_tokens_cl100k": 9119,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::CoverProcessingJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb5686a00d0f31da3f90822c672b79c3b374bf8095f5fa6eb48c7a35964a7aad",
+          "text_bytes": 1738,
+          "text_tokens_cl100k": 428,
+          "response_json_bytes": 3771,
+          "response_json_tokens_cl100k": 959,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::SearchIndexJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "d19d6785cb426d32041293729d7393614a6e9e64861413700a4ded41e5a29004",
+          "text_bytes": 1634,
+          "text_tokens_cl100k": 407,
+          "response_json_bytes": 3559,
+          "response_json_tokens_cl100k": 915,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import",
+            "types": [
+              "controller",
+              "job"
+            ]
+          },
+          "error": false,
+          "text_sha256": "466465a576642f686ab034c368161aa6234c7221d4f4e60a7534d9e851e5f3d6",
+          "text_bytes": 276,
+          "text_tokens_cl100k": 68,
+          "response_json_bytes": 691,
+          "response_json_tokens_cl100k": 181,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportsController",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "eb566edf9efdb68a52367c9bf23667c83fdedc7555477a52e1677f68f38145c3",
+          "text_bytes": 11549,
+          "text_tokens_cl100k": 2525,
+          "response_json_bytes": 23983,
+          "response_json_tokens_cl100k": 5391,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Books::ImportFailureJob",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "8c001ae4d7da8b3c60c309c36c2ff375d4d0f5b3f873090325d5b9309e20d147",
+          "text_bytes": 1626,
+          "text_tokens_cl100k": 398,
+          "response_json_bytes": 3514,
+          "response_json_tokens_cl100k": 887,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "nightly|importer|Import"
+          },
+          "error": false,
+          "text_sha256": "65461b444096ab7e639ccbe80f37281109700b0d2c676d9ed1bcb9d8d16770a4",
+          "text_bytes": 411,
+          "text_tokens_cl100k": 104,
+          "response_json_bytes": 966,
+          "response_json_tokens_cl100k": 253,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "enqueue_after_transaction_commit"
+          },
+          "error": false,
+          "text_sha256": "4f48b57aa737da095d1c4c86525f438538d9166a9e320f7f21a8ae931a62fbbe",
+          "text_bytes": 235,
+          "text_tokens_cl100k": 67,
+          "response_json_bytes": 604,
+          "response_json_tokens_cl100k": 178,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "/usr/local/bundle/bundler/gems/rails-3a4961048ad2/activejob/lib/active_job/enqueuing.rb",
+            "evidence": "full"
+          },
+          "error": true,
+          "text_sha256": "4e716d4ca045433a4d7cfac254b37e6ac333f267e5d81646a8fbd58abd71c9ae",
+          "text_bytes": 103,
+          "text_tokens_cl100k": 34,
+          "response_json_bytes": 569,
+          "response_json_tokens_cl100k": 170,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "lookup": 6,
+        "search": 2,
+        "framework": 1
+      },
+      "evidence_mode_counts": {
+        "full": 6
+      },
+      "mcp_content_tokens_cl100k": 9316,
+      "mcp_response_json_tokens_cl100k": 21087,
+      "evidence_content_tokens_cl100k": 8057,
+      "mcp_errors": 1,
+      "verifier_counts": {
+        "runs": 8,
+        "assertions": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.0019082389990217052,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "dc0fe39ffb7fa543bfe0501d0a2ff648f981097f7cce57151e297488c0eeec21"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0017598309932509437,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "9ec2f32e74f87612001de7d31ed8c9ba11bac38c04310ce777f7f208ad5d12ed"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0017418069983250462,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "6082a4670cf2b83b09e56a70e76a3c7decc35fee62a040f7e84d0333b3afc518"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0015948439977364615,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "d5ec50379eee72faf666db16051c902a81c99850bb138d3a785661ff73260c2c"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0015124400015338324,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "94ec6d41fa7cd201e5be6f0b8de084ec89bfd9c66d4db074e683ef59ee885ab7"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.005856339994352311,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "cb87634c2904066e824bc9f7ffe83c10f7725de6d301fdc7a2c5848d4d995e99"
+        }
+      ],
+      "hook_invocations": 6,
+      "hooks_emitted": 0,
+      "hook_output_max_bytes": 0,
+      "hook_elapsed_median_seconds": 0.001750818995787995,
+      "hook_elapsed_max_seconds": 0.005856339994352311,
+      "hook_emitted_context_tokens_cl100k": 0,
+      "hook_delivered_attachment_count": 0,
+      "hook_delivered_context_tokens_cl100k": 0,
+      "hook_delivered_context_sha256": [],
+      "artifact_sha256": {
+        "result.json": "3f4b6073887c08529a590d57f6265c7961a64313846a05bbf3ed5bcd225bfd93",
+        "agent.json": "578753052461f53a92e791104d0a2841005a9e43f180774c995863de9d520e5d",
+        "mcp.jsonl": "07c1c37cb14a0bb4acd216ed5a13204815dbdc0fb55e7a5f079fac7c838193ad",
+        "hooks.jsonl": "64b21adcfa0894f715e91132555ed069f3dedb621f65c216a488a39cd2ba99aa",
+        "diff.patch": "5374f276036b211121fd28d5e6358c8f6282d6a63682ffea8ac325c6c3362f82",
+        "verifier.log": "935a94eb184331bd63371b7e14e7aa8c2793aa33fe2577f5cb6bdcbc4117616c",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "6433a50512d67a628f1d09af1b29b2072f71bfbc2749dd6cc3a0268f23f93efc",
+        "snapshot-generation.json": "a3510d93aa50ebdf797f99e2c9b4efe463866e9165c3acdb578cb0eb5030e82f"
+      },
+      "transcript_sha256": {
+        "bf3dab9f-53d4-4b56-9206-915156cb8c8a.jsonl": "76c3f6dd0175a5eecd322601e46ddb5ac5c9bf3ef6ddb670250c015559633b0d"
+      },
+      "hook_context_judgment": "No context emitted; manual-tool control."
+    },
+    {
+      "task": "ar-atomic-import",
+      "condition": "context",
+      "rep": 1,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-ar-atomic-import:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "a89b69e74e2b7f968d163551ec26c6219a5dea058da5d0d57239307fe6753c88",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 210.43148319300235,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 38,
+        "cache_creation_input_tokens": 58658,
+        "cache_read_input_tokens": 1432920,
+        "output_tokens": 14552,
+        "output_tokens_details": {
+          "thinking_tokens": 9064
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 58658,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 38,
+          "outputTokens": 14552,
+          "cacheReadInputTokens": 1432920,
+          "cacheCreationInputTokens": 58658,
+          "webSearchRequests": 0,
+          "costUSD": 0.6668120000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 9064,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 29,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.6668120000000001,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest"
+          },
+          "error": false,
+          "text_sha256": "210e43acf709e4df6acd6f3da92dd99bf05e1c9f10784579220835ebcab6f369",
+          "text_bytes": 153,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 441,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "124f3878865c90025301a9e32712b6e20fdd3768ecd09104657c85b4bf47f780",
+          "text_bytes": 2964,
+          "text_tokens_cl100k": 1028,
+          "response_json_bytes": 8968,
+          "response_json_tokens_cl100k": 3058,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "527a07c48e537e9308e8e50ea843b782d8c8d443498261b443b0ba4a04ce4aea",
+          "text_bytes": 18571,
+          "text_tokens_cl100k": 4570,
+          "response_json_bytes": 39141,
+          "response_json_tokens_cl100k": 9763,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest",
+            "fields": [
+              "source_code"
+            ]
+          },
+          "error": false,
+          "text_sha256": "16a846ab930d955054703189b9aaf615dd765033985e8f9e4352a8948edba3d2",
+          "text_bytes": 306,
+          "text_tokens_cl100k": 82,
+          "response_json_bytes": 753,
+          "response_json_tokens_cl100k": 209,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "framework",
+          "arguments": {
+            "keyword": "within_new_transaction"
+          },
+          "error": false,
+          "text_sha256": "d50dbd569680bb803a63c08e78fe4b190b6750c82806c6bd4bf1be8286ae9153",
+          "text_bytes": 56,
+          "text_tokens_cl100k": 12,
+          "response_json_bytes": 241,
+          "response_json_tokens_cl100k": 63,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "BulkImport",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "8287fbb67a03c8538b1c59353d614c905059b9ab79785d50e81382e732770796",
+          "text_bytes": 1905,
+          "text_tokens_cl100k": 473,
+          "response_json_bytes": 4099,
+          "response_json_tokens_cl100k": 1043,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "912c09a22abc749c2f9ea082ccd9dfcd3b77f46ff84bfacdabd16c51e095c0da",
+          "text_bytes": 25237,
+          "text_tokens_cl100k": 6578,
+          "response_json_bytes": 53046,
+          "response_json_tokens_cl100k": 14027,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Section",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "ebbc3ddd2707ca71621713f71fda066494460bffed986ae57970b727d97f8f4b",
+          "text_bytes": 9116,
+          "text_tokens_cl100k": 2330,
+          "response_json_bytes": 19292,
+          "response_json_tokens_cl100k": 4975,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "book_test"
+          },
+          "error": false,
+          "text_sha256": "cf0a5eb911b4aabb0aaf1ffb61d8e3b36c459a1de174681b63388a7764f59d5a",
+          "text_bytes": 299,
+          "text_tokens_cl100k": 74,
+          "response_json_bytes": 738,
+          "response_json_tokens_cl100k": 193,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "search": 3,
+        "woods_status": 1,
+        "lookup": 4,
+        "framework": 1
+      },
+      "evidence_mode_counts": {
+        "full": 4
+      },
+      "mcp_content_tokens_cl100k": 15185,
+      "mcp_response_json_tokens_cl100k": 33452,
+      "evidence_content_tokens_cl100k": 13951,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 37,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.674876689001394,
+          "exit": 0,
+          "output_bytes": 347,
+          "output_sha256": "aa3f128bc2f532d2e0fa53aac9f02e5fca5c4d1713d2d1c2490245f1f53bb321",
+          "emitted": true,
+          "context_sha256": "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+          "context_tokens_cl100k": 60,
+          "observed_in_client_attachment": true,
+          "context": "Woods index generation 1; source freshness: unknown. Use woods_status, search and typed lookup; dependents explain:true suggests checks.\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "783759b1918e267754755e708938b33bb506700986c9fc09f900a94f1f783b24"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.6195374989983975,
+          "exit": 0,
+          "output_bytes": 1067,
+          "output_sha256": "59c45a8ed4e907121066ba2d41f293b76dcd4cc507bc2bc6129b912f680fa833",
+          "emitted": true,
+          "context_sha256": "46fd7c111ed03417501dbbf49554f041f293f5822f4696969d72c54ddfc932f5",
+          "context_tokens_cl100k": 243,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/models/concerns/batched.rb\".\ndirect candidate: Book (model) --via=include--> Batched (concern)\ntransitive candidate: Access (model) --via=belongs_to--> Book (model)\ntransitive candidate: Book::Accessable (concern) --via=code_reference--> Book (model)\ntransitive candidate: Book::Import (concern) --via=code_reference--> Book (model)\ntransitive candidate: Book::Sluggable (concern) --via=code_reference--> Book (model)\ntransitive candidate: BookScoped (concern) --via=code_reference--> Book (model)\ntransitive candidate: BooksController (controller) --via=code_reference--> Book (model)\ntransitive candidate: BulkImport (poro) --via=code_reference--> Book (model)\ntransitive candidate: DemoContent (poro) --via=code_reference--> Book (model)\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "72c59a0ae9295cea51e2d357aae946d84acac7a1a60ff8d0cc994165af3d9779"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.6025985300002503,
+          "exit": 0,
+          "output_bytes": 1053,
+          "output_sha256": "2ab1f0415f40a49eae96efed314e2b746b4e0894878fb0ceb458f0ca9b67351e",
+          "emitted": true,
+          "context_sha256": "a65381a14d0c63f2299a27226316467730d0fc3283cb3281e1b39db581b9f3de",
+          "context_tokens_cl100k": 238,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/models/book/import.rb\".\ndirect candidate: Book (model) --via=include--> Book::Import (concern)\ntransitive candidate: Access (model) --via=belongs_to--> Book (model)\ntransitive candidate: Book::Accessable (concern) --via=code_reference--> Book (model)\ntransitive candidate: Book::Sluggable (concern) --via=code_reference--> Book (model)\ntransitive candidate: BookScoped (concern) --via=code_reference--> Book (model)\ntransitive candidate: BooksController (controller) --via=code_reference--> Book (model)\ntransitive candidate: BulkImport (poro) --via=code_reference--> Book (model)\ntransitive candidate: DemoContent (poro) --via=code_reference--> Book (model)\ntransitive candidate: Leaf (model) --via=belongs_to--> Book (model)\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "e93bdaecc3d49f6ff8da4e80138191267818b29e5b5b57a7be4b76f08670a971"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.5903878399985842,
+          "exit": 0,
+          "output_bytes": 409,
+          "output_sha256": "58e42ab1e42a5eb574926320b4d76f8cb21defb8bf68a494704edb8f9768fba9",
+          "emitted": true,
+          "context_sha256": "32a0f912089fc3f1ffd7597b5faa9aad62b29f5d46051ac22b85ddb3ff96f9bc",
+          "context_tokens_cl100k": 71,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"test/models/book/import_test.rb\". unresolved changed path; verify with search and typed lookup.\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "244c4147d4becb013118757dc53392a5e088c7b3bf19ae3fe0f2647a4486a68e"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.6026628679974237,
+          "exit": 0,
+          "output_bytes": 409,
+          "output_sha256": "6382ba109f1efddab80c2d5dbee0ee2b4d66c48dac5bfa8fd29d335b3058989c",
+          "emitted": true,
+          "context_sha256": "57e696fc2f5ac2382f53a2439b95eb35c070829a13e1da463950b7d1ebd6aaa7",
+          "context_tokens_cl100k": 72,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"test/models/bulk_import_test.rb\". unresolved changed path; verify with search and typed lookup.\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "03c1127dfbbfe23d041648454437b274bec0aeca2318366622485f3cab0d2577"
+        }
+      ],
+      "hook_invocations": 5,
+      "hooks_emitted": 5,
+      "hook_output_max_bytes": 1067,
+      "hook_elapsed_median_seconds": 0.6026628679974237,
+      "hook_elapsed_max_seconds": 0.674876689001394,
+      "hook_emitted_context_tokens_cl100k": 684,
+      "hook_delivered_attachment_count": 5,
+      "hook_delivered_context_tokens_cl100k": 684,
+      "hook_delivered_context_sha256": [
+        "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+        "46fd7c111ed03417501dbbf49554f041f293f5822f4696969d72c54ddfc932f5",
+        "a65381a14d0c63f2299a27226316467730d0fc3283cb3281e1b39db581b9f3de",
+        "32a0f912089fc3f1ffd7597b5faa9aad62b29f5d46051ac22b85ddb3ff96f9bc",
+        "57e696fc2f5ac2382f53a2439b95eb35c070829a13e1da463950b7d1ebd6aaa7"
+      ],
+      "artifact_sha256": {
+        "result.json": "e38ad2c9822dd42f510dd3fa18768a566964f4604867b651ecd3db26237fe206",
+        "agent.json": "f62db5133b11b28b2ff42b5930fa5c1cebfd7be38715c3aba081c2098d8bb614",
+        "mcp.jsonl": "6d9bffb06a1e342011f9101109f424de847e62d2c51c9597fa6fe0f47fe86cef",
+        "hooks.jsonl": "35d0ea49a5b9d303bc17a1f8bab05c08a0bf06f5c9f0c82e687bb316c81df8f8",
+        "diff.patch": "2c48576f11f0759561cd96c9a333f8d971261a7dfae6c85f95ee20391b43a022",
+        "verifier.log": "d9b481dffec52d83b484a58588fa6662bdcf441cf19cc02eb3d57d654a533f20",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "88a0e0cc0538ef3733c744c1f98a717aa2d9e824c29f4a1735a021a07b2954fc",
+        "snapshot-generation.json": "d8ba79e3a5b45c4c8f3cbe9d90212311d4b1ccb148302e00617419416af489d9"
+      },
+      "transcript_sha256": {
+        "f4bfc1cc-04fd-4a93-9e50-d7778cc6de98.jsonl": "64899501f7af0e78c0c051a549a6ee2abcc2f49b741dbf0a9c9164fc7614f501"
+      },
+      "hook_context_judgment": "All relationship claims checked against the trial snapshot; no incorrect claim found. Candidates can be redundant or broad; task benefit unproven."
+    },
+    {
+      "task": "ar-atomic-import",
+      "condition": "context",
+      "rep": 2,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-ar-atomic-import:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "a89b69e74e2b7f968d163551ec26c6219a5dea058da5d0d57239307fe6753c88",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 119.92102729100588,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 32,
+        "cache_creation_input_tokens": 24890,
+        "cache_read_input_tokens": 981130,
+        "output_tokens": 7796,
+        "output_tokens_details": {
+          "thinking_tokens": 4210
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 24890,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 32,
+          "outputTokens": 7796,
+          "cacheReadInputTokens": 981130,
+          "cacheCreationInputTokens": 24890,
+          "webSearchRequests": 0,
+          "costUSD": 0.37381,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 4210,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 22,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.37381,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "2aa5442a374d4373fa7e7b8cd4237b926c5019c33d6a47d5a153caa0276c82f0",
+          "text_bytes": 2964,
+          "text_tokens_cl100k": 1028,
+          "response_json_bytes": 8968,
+          "response_json_tokens_cl100k": 3058,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest"
+          },
+          "error": false,
+          "text_sha256": "210e43acf709e4df6acd6f3da92dd99bf05e1c9f10784579220835ebcab6f369",
+          "text_bytes": 153,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 441,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest",
+            "fields": [
+              "source_code"
+            ]
+          },
+          "error": false,
+          "text_sha256": "16a846ab930d955054703189b9aaf615dd765033985e8f9e4352a8948edba3d2",
+          "text_bytes": 306,
+          "text_tokens_cl100k": 82,
+          "response_json_bytes": 753,
+          "response_json_tokens_cl100k": 209,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "527a07c48e537e9308e8e50ea843b782d8c8d443498261b443b0ba4a04ce4aea",
+          "text_bytes": 18571,
+          "text_tokens_cl100k": 4570,
+          "response_json_bytes": 39141,
+          "response_json_tokens_cl100k": 9763,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 2,
+        "lookup": 1
+      },
+      "evidence_mode_counts": {
+        "full": 1
+      },
+      "mcp_content_tokens_cl100k": 5718,
+      "mcp_response_json_tokens_cl100k": 13151,
+      "evidence_content_tokens_cl100k": 4570,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 37,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.6679858220013557,
+          "exit": 0,
+          "output_bytes": 347,
+          "output_sha256": "aa3f128bc2f532d2e0fa53aac9f02e5fca5c4d1713d2d1c2490245f1f53bb321",
+          "emitted": true,
+          "context_sha256": "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+          "context_tokens_cl100k": 60,
+          "observed_in_client_attachment": true,
+          "context": "Woods index generation 1; source freshness: unknown. Use woods_status, search and typed lookup; dependents explain:true suggests checks.\ntruncated: no; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "ad0618579f7ee44ebbe0820cc9e5ea0a12d1072107ee5053ebf3cb1b5f561996"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.5997892619998311,
+          "exit": 0,
+          "output_bytes": 1067,
+          "output_sha256": "59c45a8ed4e907121066ba2d41f293b76dcd4cc507bc2bc6129b912f680fa833",
+          "emitted": true,
+          "context_sha256": "46fd7c111ed03417501dbbf49554f041f293f5822f4696969d72c54ddfc932f5",
+          "context_tokens_cl100k": 243,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/models/concerns/batched.rb\".\ndirect candidate: Book (model) --via=include--> Batched (concern)\ntransitive candidate: Access (model) --via=belongs_to--> Book (model)\ntransitive candidate: Book::Accessable (concern) --via=code_reference--> Book (model)\ntransitive candidate: Book::Import (concern) --via=code_reference--> Book (model)\ntransitive candidate: Book::Sluggable (concern) --via=code_reference--> Book (model)\ntransitive candidate: BookScoped (concern) --via=code_reference--> Book (model)\ntransitive candidate: BooksController (controller) --via=code_reference--> Book (model)\ntransitive candidate: BulkImport (poro) --via=code_reference--> Book (model)\ntransitive candidate: DemoContent (poro) --via=code_reference--> Book (model)\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "7034cc2487553e01ac6d312a76fb9962d3f95fbe26eb5faa28df54b70bdee75c"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.6292703610015451,
+          "exit": 0,
+          "output_bytes": 1053,
+          "output_sha256": "2ab1f0415f40a49eae96efed314e2b746b4e0894878fb0ceb458f0ca9b67351e",
+          "emitted": true,
+          "context_sha256": "a65381a14d0c63f2299a27226316467730d0fc3283cb3281e1b39db581b9f3de",
+          "context_tokens_cl100k": 238,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"app/models/book/import.rb\".\ndirect candidate: Book (model) --via=include--> Book::Import (concern)\ntransitive candidate: Access (model) --via=belongs_to--> Book (model)\ntransitive candidate: Book::Accessable (concern) --via=code_reference--> Book (model)\ntransitive candidate: Book::Sluggable (concern) --via=code_reference--> Book (model)\ntransitive candidate: BookScoped (concern) --via=code_reference--> Book (model)\ntransitive candidate: BooksController (controller) --via=code_reference--> Book (model)\ntransitive candidate: BulkImport (poro) --via=code_reference--> Book (model)\ntransitive candidate: DemoContent (poro) --via=code_reference--> Book (model)\ntransitive candidate: Leaf (model) --via=belongs_to--> Book (model)\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "701d42ff04b82d4ddb4deaf97ee8e3efece3baa62faaacde3e1a4c0777d635df"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.593844311995781,
+          "exit": 0,
+          "output_bytes": 409,
+          "output_sha256": "58e42ab1e42a5eb574926320b4d76f8cb21defb8bf68a494704edb8f9768fba9",
+          "emitted": true,
+          "context_sha256": "32a0f912089fc3f1ffd7597b5faa9aad62b29f5d46051ac22b85ddb3ff96f9bc",
+          "context_tokens_cl100k": 71,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"test/models/book/import_test.rb\". unresolved changed path; verify with search and typed lookup.\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "0f4b01170a70fc293241e13ad076ae19a42428f2ba228db15c2162f98c6fb2c8"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.643313021006179,
+          "exit": 0,
+          "output_bytes": 409,
+          "output_sha256": "6382ba109f1efddab80c2d5dbee0ee2b4d66c48dac5bfa8fd29d335b3058989c",
+          "emitted": true,
+          "context_sha256": "57e696fc2f5ac2382f53a2439b95eb35c070829a13e1da463950b7d1ebd6aaa7",
+          "context_tokens_cl100k": 72,
+          "observed_in_client_attachment": true,
+          "context": "Woods candidates from generation 1 (pre-refresh snapshot; source freshness: drifted). Changed path: \"test/models/bulk_import_test.rb\". unresolved changed path; verify with search and typed lookup.\ntruncated: yes; depth<=2, nodes<=10, edges<=100. Verify with dependents explain:true; candidates and test suggestions are not proof.",
+          "input_sha256": "6ab2e6d210f2312e1610e3ebbc392fdb3eeb311ade8aae59ad86c7e90e6a8e2e"
+        }
+      ],
+      "hook_invocations": 5,
+      "hooks_emitted": 5,
+      "hook_output_max_bytes": 1067,
+      "hook_elapsed_median_seconds": 0.6292703610015451,
+      "hook_elapsed_max_seconds": 0.6679858220013557,
+      "hook_emitted_context_tokens_cl100k": 684,
+      "hook_delivered_attachment_count": 5,
+      "hook_delivered_context_tokens_cl100k": 684,
+      "hook_delivered_context_sha256": [
+        "c847162fe94623860b568f31f785a54a7710c34a0d2308d81893d601fe52b976",
+        "46fd7c111ed03417501dbbf49554f041f293f5822f4696969d72c54ddfc932f5",
+        "a65381a14d0c63f2299a27226316467730d0fc3283cb3281e1b39db581b9f3de",
+        "32a0f912089fc3f1ffd7597b5faa9aad62b29f5d46051ac22b85ddb3ff96f9bc",
+        "57e696fc2f5ac2382f53a2439b95eb35c070829a13e1da463950b7d1ebd6aaa7"
+      ],
+      "artifact_sha256": {
+        "result.json": "26598c20e8f9aaa0f3e318379908a52033c5ba1ff90dcc9beb9d4893937575dc",
+        "agent.json": "359313bc3db5eea50b0b6119798a9297fc8d3235b68c12c3755894d5c1ec28c1",
+        "mcp.jsonl": "b7d9d7adb8207f8898e9ef4af14bab49cbd89c1c07af64b89dc2ee269f21f3be",
+        "hooks.jsonl": "d3451e001cba6804d2d298b8d9ae9e6f6d180df2a49d844f194a67921e2be513",
+        "diff.patch": "78c0b925a28b672b7be03afae3c86eddf774f3aac7e00d6295a76d90261f34ac",
+        "verifier.log": "80ea8f343f621728dab7eb07675af805ee6ffb1e78dd1d9364da16265f21dd1d",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "88a0e0cc0538ef3733c744c1f98a717aa2d9e824c29f4a1735a021a07b2954fc",
+        "snapshot-generation.json": "5bcec6f1393b1f23fd626149e32fbc57e0832b20932680e6b3f68d66ae55c328"
+      },
+      "transcript_sha256": {
+        "7ae535c4-d829-4c12-a832-679177d32569.jsonl": "e26d898adb0d27a004f8cea2fa3d5dc00655ed499b147bdba890b4d96a442713"
+      },
+      "hook_context_judgment": "All relationship claims checked against the trial snapshot; no incorrect claim found. Candidates can be redundant or broad; task benefit unproven."
+    },
+    {
+      "task": "ar-atomic-import",
+      "condition": "manual",
+      "rep": 1,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-ar-atomic-import:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "a89b69e74e2b7f968d163551ec26c6219a5dea058da5d0d57239307fe6753c88",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 105.25992847799353,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 34,
+        "cache_creation_input_tokens": 51028,
+        "cache_read_input_tokens": 1234024,
+        "output_tokens": 8855,
+        "output_tokens_details": {
+          "thinking_tokens": 4249
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 51028,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 34,
+          "outputTokens": 8855,
+          "cacheReadInputTokens": 1234024,
+          "cacheCreationInputTokens": 51028,
+          "webSearchRequests": 0,
+          "costUSD": 0.5395348,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 4249,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 28,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.5395348,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "9f0211fc30c5b852a6e4dcd8e982d2188925a7d94271fcb57be3b9c72d981fde",
+          "text_bytes": 2964,
+          "text_tokens_cl100k": 1028,
+          "response_json_bytes": 8968,
+          "response_json_tokens_cl100k": 3058,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest"
+          },
+          "error": false,
+          "text_sha256": "210e43acf709e4df6acd6f3da92dd99bf05e1c9f10784579220835ebcab6f369",
+          "text_bytes": 153,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 441,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest",
+            "fields": [
+              "source_code"
+            ]
+          },
+          "error": false,
+          "text_sha256": "16a846ab930d955054703189b9aaf615dd765033985e8f9e4352a8948edba3d2",
+          "text_bytes": 306,
+          "text_tokens_cl100k": 82,
+          "response_json_bytes": 753,
+          "response_json_tokens_cl100k": 209,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "527a07c48e537e9308e8e50ea843b782d8c8d443498261b443b0ba4a04ce4aea",
+          "text_bytes": 18571,
+          "text_tokens_cl100k": 4570,
+          "response_json_bytes": 39141,
+          "response_json_tokens_cl100k": 9763,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Section",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "ebbc3ddd2707ca71621713f71fda066494460bffed986ae57970b727d97f8f4b",
+          "text_bytes": 9116,
+          "text_tokens_cl100k": 2330,
+          "response_json_bytes": 19291,
+          "response_json_tokens_cl100k": 4975,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "BulkImport",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "8287fbb67a03c8538b1c59353d614c905059b9ab79785d50e81382e732770796",
+          "text_bytes": 1905,
+          "text_tokens_cl100k": 473,
+          "response_json_bytes": 4099,
+          "response_json_tokens_cl100k": 1043,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book::Import",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "e7b71725b958d435beba7fd55b0ce3620df037561403ebbec58c9c3d1e62f11f",
+          "text_bytes": 2354,
+          "text_tokens_cl100k": 586,
+          "response_json_bytes": 5078,
+          "response_json_tokens_cl100k": 1297,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "912c09a22abc749c2f9ea082ccd9dfcd3b77f46ff84bfacdabd16c51e095c0da",
+          "text_bytes": 25237,
+          "text_tokens_cl100k": 6578,
+          "response_json_bytes": 53046,
+          "response_json_tokens_cl100k": 14027,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "dependents",
+          "arguments": {
+            "identifier": "Batched"
+          },
+          "error": false,
+          "text_sha256": "72665251f2aedebe8802c51a47007983dbc89f070dca56dc2631cbc3b435ccf8",
+          "text_bytes": 867,
+          "text_tokens_cl100k": 255,
+          "response_json_bytes": 1932,
+          "response_json_tokens_cl100k": 606,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 2,
+        "lookup": 5,
+        "dependents": 1
+      },
+      "evidence_mode_counts": {
+        "full": 5
+      },
+      "mcp_content_tokens_cl100k": 15940,
+      "mcp_response_json_tokens_cl100k": 35099,
+      "evidence_content_tokens_cl100k": 14537,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 37,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.002259423999930732,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "8e621247410fd38e8aaa8e6ca37938d24e98efd29b317482f0d34e9e0d426a16"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0018672820006031543,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "9169d60306d2a6c9eae7353a8610ab828f87b54f3d123da2f0c80d73d667c885"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0014945069997338578,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "533a5cfd37f181da835800637ac8fcb12bae3ff3aaa2452778526168d7e79ae9"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0016028390018618666,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "c42db9962916ce19c7cc81930f297ee217d462d4791bb989176680dbad0d9385"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0017332819988951087,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "c149d829131de93e7b05bf7b7c62a4a26130fc0ca4df6b9c98406f28e86ebb88"
+        }
+      ],
+      "hook_invocations": 5,
+      "hooks_emitted": 0,
+      "hook_output_max_bytes": 0,
+      "hook_elapsed_median_seconds": 0.0017332819988951087,
+      "hook_elapsed_max_seconds": 0.002259423999930732,
+      "hook_emitted_context_tokens_cl100k": 0,
+      "hook_delivered_attachment_count": 0,
+      "hook_delivered_context_tokens_cl100k": 0,
+      "hook_delivered_context_sha256": [],
+      "artifact_sha256": {
+        "result.json": "0bae7e721ad6eed0003497d32cf1d32f81ddf7ab5ef41839b9839229215c778e",
+        "agent.json": "0beae7622c1e1a398a947bb7eb9782a4c2510e7ff7a6b4b453d99c371695db08",
+        "mcp.jsonl": "d3e4a0835c6d34b9a3e1f503c42e18a700cb8684f85238b3257e4735ac3c86aa",
+        "hooks.jsonl": "730c57a9da1fc2dae5896847c161982624221d465be29fd67de87f5456e66a5c",
+        "diff.patch": "3dae49b4c064907149d838bd8354451470310f914f9d8cb8fcc2e45c8d2ca54d",
+        "verifier.log": "e9fda64ec0ce74c4f4aa45605985c4466807762fa659d26ebcb10ddfb1ab0ec6",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "88a0e0cc0538ef3733c744c1f98a717aa2d9e824c29f4a1735a021a07b2954fc",
+        "snapshot-generation.json": "c9e1715961ceb8838ee76c070658108c98de22b228e67ad3fc9fada6b5e601a7"
+      },
+      "transcript_sha256": {
+        "c0889634-05b8-44b1-9ef5-e182a282150c.jsonl": "f183d181143318a066ebf3a7c961a43911260a6f52a15b7e8ea2f304fdef13b5"
+      },
+      "hook_context_judgment": "No context emitted; manual-tool control."
+    },
+    {
+      "task": "ar-atomic-import",
+      "condition": "manual",
+      "rep": 2,
+      "woods_sha": "21a578d60239ae5c7f13ae18471a49ddfe514d36",
+      "image": "woods-agent-task-ar-atomic-import:5327efe",
+      "client": "Claude Code2.1.267",
+      "model": "claude-sonnet-5",
+      "max_turns": 40,
+      "retrieval_budget": 1200,
+      "prompt_sha256": "a89b69e74e2b7f968d163551ec26c6219a5dea058da5d0d57239307fe6753c88",
+      "scope": "context hints on/off; full evidence and local lexical MCP identical; refresh disabled in both arms",
+      "agent_exit": 0,
+      "agent_wall_seconds": 126.54784128599567,
+      "verifier_exit": 0,
+      "agent_usage": {
+        "input_tokens": 30,
+        "cache_creation_input_tokens": 39585,
+        "cache_read_input_tokens": 1073271,
+        "output_tokens": 9517,
+        "output_tokens_details": {
+          "thinking_tokens": 5386
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 39585,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard"
+      },
+      "agent_model_usage": {
+        "claude-sonnet-5": {
+          "inputTokens": 30,
+          "outputTokens": 9517,
+          "cacheReadInputTokens": 1073271,
+          "cacheCreationInputTokens": 39585,
+          "webSearchRequests": 0,
+          "costUSD": 0.4682242000000001,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 5386,
+          "canonicalModel": "claude-sonnet-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "agent_turns": 22,
+      "agent_subtype": "success",
+      "list_price_estimate_usd": 0.4682242000000001,
+      "valid_trial": true,
+      "mcp_calls": [
+        {
+          "name": "woods_status",
+          "arguments": {},
+          "error": false,
+          "text_sha256": "e5c1a5fbd7e3a0a9091e77735cc67195c40e300cc57c5186088b3f62e5b83f3c",
+          "text_bytes": 2964,
+          "text_tokens_cl100k": 1028,
+          "response_json_bytes": 8968,
+          "response_json_tokens_cl100k": 3058,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest"
+          },
+          "error": false,
+          "text_sha256": "210e43acf709e4df6acd6f3da92dd99bf05e1c9f10784579220835ebcab6f369",
+          "text_bytes": 153,
+          "text_tokens_cl100k": 38,
+          "response_json_bytes": 441,
+          "response_json_tokens_cl100k": 121,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "search",
+          "arguments": {
+            "query": "import_manifest",
+            "fields": [
+              "source_code"
+            ]
+          },
+          "error": false,
+          "text_sha256": "16a846ab930d955054703189b9aaf615dd765033985e8f9e4352a8948edba3d2",
+          "text_bytes": 306,
+          "text_tokens_cl100k": 82,
+          "response_json_bytes": 753,
+          "response_json_tokens_cl100k": 209,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Book",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "527a07c48e537e9308e8e50ea843b782d8c8d443498261b443b0ba4a04ce4aea",
+          "text_bytes": 18571,
+          "text_tokens_cl100k": 4570,
+          "response_json_bytes": 39141,
+          "response_json_tokens_cl100k": 9763,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Leaf",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "912c09a22abc749c2f9ea082ccd9dfcd3b77f46ff84bfacdabd16c51e095c0da",
+          "text_bytes": 25237,
+          "text_tokens_cl100k": 6578,
+          "response_json_bytes": 53045,
+          "response_json_tokens_cl100k": 14027,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "Section",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "ebbc3ddd2707ca71621713f71fda066494460bffed986ae57970b727d97f8f4b",
+          "text_bytes": 9116,
+          "text_tokens_cl100k": 2330,
+          "response_json_bytes": 19291,
+          "response_json_tokens_cl100k": 4975,
+          "structured_text_matches_content": true
+        },
+        {
+          "name": "lookup",
+          "arguments": {
+            "identifier": "BulkImport",
+            "evidence": "full"
+          },
+          "error": false,
+          "text_sha256": "8287fbb67a03c8538b1c59353d614c905059b9ab79785d50e81382e732770796",
+          "text_bytes": 1905,
+          "text_tokens_cl100k": 473,
+          "response_json_bytes": 4100,
+          "response_json_tokens_cl100k": 1043,
+          "structured_text_matches_content": true
+        }
+      ],
+      "unanswered_tool_requests": [],
+      "mcp_tool_counts": {
+        "woods_status": 1,
+        "search": 2,
+        "lookup": 4
+      },
+      "evidence_mode_counts": {
+        "full": 4
+      },
+      "mcp_content_tokens_cl100k": 15099,
+      "mcp_response_json_tokens_cl100k": 33196,
+      "evidence_content_tokens_cl100k": 13951,
+      "mcp_errors": 0,
+      "verifier_counts": {
+        "runs": 10,
+        "assertions": 37,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      },
+      "failed_checks": [],
+      "transcript_files": 1,
+      "hooks": [
+        {
+          "event": "SessionStart",
+          "elapsed_seconds": 0.001834962000430096,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "41dc68c0ea33683031f9a0427679ff8a4f4bdc836ae72cd9a74488eeb8b35da0"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.001792372000636533,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "6ca2402f6783ff62e0515982b86cb142bdf53f72b276e9e78034d844af0ee34b"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.001742007996654138,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "f1d54185b08fc0ac2d7a1b6a20a7a2f9bae1cbc3dcdf8c4dcf9c56f37775cee4"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0016846409998834133,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "2f178bed4a5cf2126f563ba3ee73d8591147b8a141e90b8aa45638857a1d3bbe"
+        },
+        {
+          "event": "PostToolUse",
+          "elapsed_seconds": 0.0017361470017931424,
+          "exit": 0,
+          "output_bytes": 0,
+          "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "emitted": false,
+          "context_sha256": null,
+          "context_tokens_cl100k": 0,
+          "observed_in_client_attachment": false,
+          "context": null,
+          "input_sha256": "6abd33bad3e1161a1a50fc9d18cec3f76d306e1eb71a65378e380a293f20be59"
+        }
+      ],
+      "hook_invocations": 5,
+      "hooks_emitted": 0,
+      "hook_output_max_bytes": 0,
+      "hook_elapsed_median_seconds": 0.001742007996654138,
+      "hook_elapsed_max_seconds": 0.001834962000430096,
+      "hook_emitted_context_tokens_cl100k": 0,
+      "hook_delivered_attachment_count": 0,
+      "hook_delivered_context_tokens_cl100k": 0,
+      "hook_delivered_context_sha256": [],
+      "artifact_sha256": {
+        "result.json": "d29498f6a95d005f3e9e526789258f1ed8ec11da6cb5cffbbd3e441c8a3be9ce",
+        "agent.json": "2c8f3e14d105fe6f2b3eb85c680c24247777432ad7da4312473f70f9142806f0",
+        "mcp.jsonl": "ffa5410c012b19ed69a892ecbe4694482fdeb50e3193101422760d78d969c897",
+        "hooks.jsonl": "df5f7d4336a086c525f4cdb5bac95f83cbda16fb9fe87c77ec641646529a2f0f",
+        "diff.patch": "e0f894b97cc1c7b6ad0b0074b5b0a585c487afb3313df0624fcd1657586e7a95",
+        "verifier.log": "cf1126f50a70b3082d24984145b933d7a8494924e9744e5ac7d7317c4dd4c5ca",
+        "settings.json": "ff08697b33515d0680e203908b3e010905b06045033fab9a65eb874f12214f38",
+        "snapshot-graph.json": "88a0e0cc0538ef3733c744c1f98a717aa2d9e824c29f4a1735a021a07b2954fc",
+        "snapshot-generation.json": "1041f2083a4f45f568fc2c8d2ee1539dcb071f33a20f306726d98f69191f2b64"
+      },
+      "transcript_sha256": {
+        "c1a087d7-5b6e-43bc-a924-7c4451326ca3.jsonl": "d56790b66d133366f2d8aa40a3c50fa250b46875e7dce58de036eba16a6f8cea"
+      },
+      "hook_context_judgment": "No context emitted; manual-tool control."
+    }
+  ]
+}
