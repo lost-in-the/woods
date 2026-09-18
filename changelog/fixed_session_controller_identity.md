@@ -1,1 +1,0 @@
-- Preserve the dispatched controller's runtime class name in session traces, with a Rails-inflector fallback, so acronym namespaces retain source context in `session_trace`.

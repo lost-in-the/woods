@@ -7,9 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0.beta3] - 2026-09-18
+
 ### Added
 
 - Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
+- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
+  from filling the volatility report (B-188). Apply the per-target edge cap before
+  the global top 20, preserve the default output, and expose the configured cap
+  and reported count alongside the full qualifying count when enabled.
+
+- Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
+  real MiniLM vectors, per-strategy quality floors, latency observations, and
+  exact output-token counts. Preserve known failed queries in the evidence (#227).
+- Bound `dependencies` and `dependents` traversal work independently of response
+  pagination, with configurable node/edge budgets and explicit partial-result
+  reasons. Filtered edges and reverse relationship checks consume the edge
+  budget; complete small results retain their existing shape (#311).
+
+- Document the published filesystem layout for non-Ruby consumers, with pinned
+  Bash/jq and Python reads, retention-race handling, and structural snapshot
+  publication guidance (#306).
+
+- `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets watch status, incremental/clean guards,
+  daemon startup checks, and MCP trust fresh foreign-container heartbeats without
+  checking an unrelated local pid. This is opt-in; foreign records expire after
+  15 minutes, and malformed or excessively future timestamps are rejected (#321).
+
+- `WOODS_WATCH_POLL_INTERVAL` configures positive, finite seconds between watch
+  polling scans, including fallback from native watching (default 1.0; #322).
+
+- Published manifests record `woods_version`, the last publisher's gem version,
+  for Rails extraction and static self-maps. MCP exposes it independently of the
+  reader version, and `woods:validate` gives nonfatal warnings for malformed
+  writer versions or different major versions. Older manifests remain valid
+  without this optional provenance field (#323).
+- Supply concise, capability-aware Index MCP instructions through initialization and modern discovery, with status-first retrieval guidance, bounded traversal and source verification. Preserve the SDK's omission for protocol `2024-11-05`; tool registration and authorization remain unchanged. (#402)
+- Added generation-bound source-input evidence with bounded `current` / `drifted` / `unknown` status, per-consumer incremental provenance, private keyed content identities, and a fresh-process `woods-extract` launcher. The opt-in session hook now checks source content through the shared no-environment status task. Old indexes and unproved boot/runtime consumption remain explicitly unknown.
+Add separately opt-in, bounded Claude orientation and post-edit candidate context from a retained published generation, with explicit uncertainty, repeat suppression, independent refresh controls, and an installed `woods-hook-context` helper.
+Explicit Claude and OpenCode edit adapters preserve every affected patch path,
+including both rename sides, through the shared durable refresh queue. Native
+OpenCode registration is optional and version-pinned; unsupported or escaping
+events produce diagnostics without claiming refresh.
+MCP `search` now reports whether its returned matches exhaust the requested domain, prove an additional match, or leave the remainder unknown after a scan budget or regex timeout. Bounded lookahead shares the existing scan budget, deep reads preserve typed identities, and detected artifact corruption remains an error. JSON and text formats distinguish returned counts from exact totals; agent guidance explains how to narrow partial searches. Mixed Rails/gem source directories remain searchable and loadable by lexical retrieval while rejecting unrelated type mismatches.
+`woods:validate` now checks semantic graph invariants against typed unit indexes and artifacts within one pinned published generation. It detects broken reverse membership, invalid sources, duplicate typed variants, file/type index drift, and missing indexed nodes while accepting cycles, unresolved targets, legacy string edges, and the Woods static source map. Validation remains read-only, preserves existing report/exit behavior, and reports actionable identities without repairing the graph.
+
+The validator, deep search, and lexical retrieval accept all four GraphQL unit types in the shared `graphql/` directory, preserving actual typed identities and existing directory-family search labels.
+`dependencies` and `dependents` accept optional `explain: true` to retain typed source ownership, original edge direction and relationship attributes, and bounded shortest witnesses. Explanations distinguish direct records from transitive reachability, preserve unknown labels and ambiguous target candidates, and retain ancestor context across pages. Existing compact responses remain unchanged; explanation work shares traversal budgets.
+Publish additive `reverse_via` target buckets with typed source identities, relationship labels and association attributes, preserving existing `reverse` arrays and legacy graph loading.
+- Mark whole-file caching, configuration, test mapping, Rails source, and gem source graph nodes and typed variants with `kind: "file_profile"`, preserving file membership and identifiers while letting consumers distinguish profiles from constant-owned units (#417).
+Add `woods-agent-config` for explicit Claude Code project/user setup, update, and removal. Preview saves one private edit plan; apply checks its original snapshots, preserves unrelated configuration, tracks owned entries and instruction sections, and supports recovery after interrupted writes. Host/Compose preflight checks the installed Index Server and published index.
+- Add opt-in compact source evidence and declared API outlines to retrieval and lookup, with complete published spans, explicit omissions, honest generation/source provenance, and typed SHA-guarded full-source follow-up. Existing full-source behavior remains the default.
+- Add explicit embedding-free lexical retrieval over published extraction units. Set `WOODS_RETRIEVAL_MODE=lexical` for Index MCP or `config.retrieval_mode = :lexical` for Ruby builders; field-aware ranked results preserve typed identity, generation consistency and budgeted matching evidence without provider or vector access. Semantic retrieval remains the default.
+- Add explicit package and application-relative source-path scopes to ranked retrieval and discovery, with eligibility before candidate limits, typed scope metadata, and native scoped vector searches without re-embedding.
 
 ### Fixed
 
@@ -116,20 +166,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve changes to nested `extracted_at` metadata when deciding whether to
   rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
-
-### Added
-
-- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
-  from filling the volatility report (B-188). Apply the per-target edge cap before
-  the global top 20, preserve the default output, and expose the configured cap
-  and reported count alongside the full qualifying count when enabled.
-
-- Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
-  real MiniLM vectors, per-strategy quality floors, latency observations, and
-  exact output-token counts. Preserve known failed queries in the evidence (#227).
-
-### Fixed
-
 - Read per-unit git enrichment in one streamed HEAD history walk instead of
   repeated 500-path batches (B-195, #305). Merge commits compare with their first
   parent while all HEAD ancestry is visited; counts can change from legacy
@@ -183,31 +219,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-existing row when the adapter reports matched rows as affected rows.
   Validate ownership using the per-attempt serialized payload, with live MySQL
   contention/recovery coverage and documented crash/eviction limits (#228).
-
-### Added
-
-- Bound `dependencies` and `dependents` traversal work independently of response
-  pagination, with configurable node/edge budgets and explicit partial-result
-  reasons. Filtered edges and reverse relationship checks consume the edge
-  budget; complete small results retain their existing shape (#311).
-
-- Document the published filesystem layout for non-Ruby consumers, with pinned
-  Bash/jq and Python reads, retention-race handling, and structural snapshot
-  publication guidance (#306).
-
-- `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets watch status, incremental/clean guards,
-  daemon startup checks, and MCP trust fresh foreign-container heartbeats without
-  checking an unrelated local pid. This is opt-in; foreign records expire after
-  15 minutes, and malformed or excessively future timestamps are rejected (#321).
-
-- `WOODS_WATCH_POLL_INTERVAL` configures positive, finite seconds between watch
-  polling scans, including fallback from native watching (default 1.0; #322).
-
-- Published manifests record `woods_version`, the last publisher's gem version,
-  for Rails extraction and static self-maps. MCP exposes it independently of the
-  reader version, and `woods:validate` gives nonfatal warnings for malformed
-  writer versions or different major versions. Older manifests remain valid
-  without this optional provenance field (#323).
+- Keep Notion model/column/migration data and Unblocked full/partial documents tied to their exact extracted type. Refuse incomplete export reads before mutation, and preserve remote documents when same-name, same-file types cannot be represented safely by Unblocked's existing URI scheme.
+Preserve the selected extraction type when framework search and recent changes read colliding identifiers. Session controller lookup and root outgoing-edge selection now retain the controller type. Public untyped lookup, downstream references and the bare-name multi-step context pool retain their existing contracts.
+Obsidian export preserves same-name units of different types, their separate outgoing links, and original public identifiers. Collision-bearing vaults publish a version-2 typed manifest; ordinary version-1 manifests and note paths remain unchanged. Ambiguous bare targets are omitted with a diagnostic, and incomplete typed reads cannot trigger stale-note deletion.
+- Reject ambiguous cross-type dependencies in session context with an actionable `ambiguous_identity` MCP error instead of silently selecting a source or reusing another type's context key. Leave unresolved controllers in the timeline without a misleading source reference. Pin candidate discovery and all assembly reads to one generation; retain typed controller roots, metadata-only timelines, and successful response shapes. Refs #213; this does not migrate global identifiers.
+- Refresh Console credential indexes from a fresh encrypted-file and key snapshot, retain the last valid index when refresh fails, and update all live embedded servers without retaining abandoned servers. Each response scan uses one complete credential index.
+Keep credential scanner refresh snapshots limited to live weakly referenced
+scanners on older Ruby versions, avoiding unsafe receiver access after garbage
+collection while preserving updates to every live Console server.
+- Refuse incomplete native embedding input before changing stores or checkpoints, retaining legacy flat-index support while rejecting malformed JSON. A source-empty unit now retires superseded vectors and checkpoints its no-content state without calling the embedding provider (#442, #444).
+- Terminate the evaluation command's owned process group on timeout, including ordinary descendants whose parent has already exited.
+- Refuse Obsidian exports that would overwrite unmanaged notes, indexes, settings, or sidecars. Preflight all destinations, record generated asset digests separately from the public manifest, and suppress sweeps on conflicts or write failures. Legacy assets are adopted only when byte-identical; changed legacy sidecars require inspection and backup or a fresh export directory.
+- Coordinate `Woods.extract!` and `Woods.extract_changed!` with task/watch writers and raise on lock timeout or failed generation publication, so background jobs can retry unsuccessful extraction.
+- Accept Rails 6.0 positional middleware options on Ruby 3 while preserving explicit keyword precedence, required bearer tokens, and unknown-option refusal. Add an installed-gem CI contract for all advertised direct runtime dependency floors, with a constrained Rails 6.0.0 fixture and recorded transitive resolution.
+- Honor configured context-token defaults in Builder-created semantic/lexical retrieval, caches, and MCP while preserving explicit budgets and the legacy custom-collaborator fallback. Deprecate the inert similarity_threshold option with a warning instead of changing ranking behavior (#446).
+- Preserve the dispatched controller's runtime class name in session traces, with a Rails-inflector fallback, so acronym namespaces retain source context in `session_trace`.
+- Preserve each logical directory alias in polling and startup catch-up so an earlier irrelevant alias cannot hide an extraction input such as `app/models`. Detect cycles per traversal branch while retaining ignored-subtree pruning.
 
 ### Changed
 
@@ -221,6 +248,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Make extraction profiling additive: report git enrichment, reconciliation,
   finalization, pointer publication and retention separately, with a distinct
   whole-run wall-time line (#305).
+- Expand opt-in refresh hooks to the shared extraction input rules, including
+  services, controllers, jobs, views, locales, and supported tests/lib paths.
+  Restart inputs request fresh full extraction. Preserve queued edits across
+  failures and daemon deferral, bound the worker lifetime, and carry JSON batches
+  through Docker command prefixes without host-bundle or environment-forwarding
+  assumptions. Existing manual incremental and watch behavior is unchanged.
+Add a trusted, disabled-by-default release profile for the supported 1.6.2 security maintenance line. Publication requires a separately reviewed exact candidate SHA pin on main, all fixed maintenance CI rows, and the existing immutable artifact and protected publication safeguards. The v2 release path retains its existing requirements.
+
+### Documentation
+
+- Clarify that source literals and optional session traces can contain sensitive information, and correct the session FileStore configuration example.
+- Qualify the `~> 2.0` installation examples for stable releases and direct prerelease adopters to the exact published version in the README release table. Keep agent setup and plugin guidance aligned with installed-version capabilities; clarify that the refresh-hook deadline starts after complete event input is collected and queued.
+
+### Testing
+
+- Raise the default-suite CI line-coverage floor from 85% to 90%, calibrated against current local and CI measurements. Branch coverage remains measured without a gate; per-file floors and combined opt-in coverage remain separate work.
 
 ## [2.0.0.beta2] - 2026-09-10
 

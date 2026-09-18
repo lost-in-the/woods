@@ -1,1 +1,0 @@
-- Raise the default-suite CI line-coverage floor from 85% to 90%, calibrated against current local and CI measurements. Branch coverage remains measured without a gate; per-file floors and combined opt-in coverage remain separate work.

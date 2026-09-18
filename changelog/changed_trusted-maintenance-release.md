@@ -1,1 +1,0 @@
-Add a trusted, disabled-by-default release profile for the supported 1.6.2 security maintenance line. Publication requires a separately reviewed exact candidate SHA pin on main, all fixed maintenance CI rows, and the existing immutable artifact and protected publication safeguards. The v2 release path retains its existing requirements.
