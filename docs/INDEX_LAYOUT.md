@@ -80,9 +80,40 @@ identifier can exist in multiple types. The full unit fields are documented in
 
 The graph's `nodes`, typed variants, forward/reverse relationships and relationship
 metadata belong to the graph format; preserve them when transporting the index.
+Extractor directories can contain multiple unit types: `graphql/` contains
+`graphql_type`, `graphql_mutation`, `graphql_resolver`, and `graphql_query`, while
+`rails_source/` contains `rails_source` and `gem_source`. Validate and retain the
+artifact's actual type instead of deriving it by singularizing the directory.
+
 Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
+
+### Semantic graph validation
+
+`woods:validate` checks raw graph data against the unit indexes and artifacts in
+one pinned published generation. This validation is unreleased after
+`2.0.0.beta2`. It checks the shapes of `nodes`, `edges`, `reverse`, `file_map`,
+`type_index`, and optional `variants`; typed identities must be unique and agree
+with the actual indexed units. Forward sources must exist. Reverse, file, and
+type memberships must match the union of primary and variant contributions.
+When present, `reverse_via` must preserve the typed forward records and their
+relationship attributes, including duplicate-record multiplicity.
+
+Cycles, recursion, shared paths, cross-type identifier collisions, nil file paths,
+and legacy bare-string edges are valid. Absent optional legacy fields remain
+legal. A target absent from the nodes is an unresolved reference, not automatically
+corruption: current metadata cannot distinguish an intentional external target
+from an internal node and unit that are both missing. Validation cannot certify a
+unique target type when several types share its name. A missing node whose typed
+unit remains indexed is detectable and is an error.
+
+The checker does not repair data, rerun extraction, or become a publication gate.
+It reports identity/path diagnostics through the existing validation report and
+nonzero task exit. It also supports the Woods static source map's explicitly
+recorded type families; that does not give the map Rails runtime fidelity.
+See [running validation from Ruby](PUBLISHED_INDEX.md#validate-a-published-generation)
+and [semantic error recovery](TROUBLESHOOTING.md#semantic-graph-validation-errors).
 
 ### File profiles and file membership
 

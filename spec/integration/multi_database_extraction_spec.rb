@@ -149,12 +149,19 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
     expect(crossings).not_to include(a_hash_including('via' => 'foreign_key'))
   end
 
+  def expect_valid_graph(index)
+    require 'woods/resilience/index_validator'
+    report = Woods::Resilience::IndexValidator.new(index_dir: index).validate
+    expect(report.errors).to be_empty
+  end
+
   it 'keeps the complete incremental index equivalent as an association moves between databases' do
     relative = 'app/models/multi_invoice.rb'
     path = File.join(@app_root, relative)
     original = File.read(path)
     index = File.join(@scratch_dir, 'incremental')
     Woods::Extractor.new(output_dir: index).extract_all
+    expect_valid_graph(index)
 
     [original.sub("class_name: 'MultiAccount'", "class_name: 'MultiReplicaAccount'"),
      original].each_with_index do |source, step|
@@ -163,6 +170,7 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
       Woods::Extractor.new(output_dir: index).extract_changed([relative])
       oracle = File.join(@scratch_dir, "oracle-#{step}")
       Woods::Extractor.new(output_dir: oracle).extract_all
+      [index, oracle].each { |directory| expect_valid_graph(directory) }
       expect(differences(index, oracle)).to eq([])
       next unless database_identity_supported?
 

@@ -52,6 +52,25 @@ version. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-pro
 
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
 
+### Semantic graph validation errors
+
+In development versions containing #413, `woods:validate` rejects graphs that
+parse as JSON but disagree with their indexes. Errors name the section and
+identity, for example `reverse["http_api"]: missing "Order"`, a duplicate typed
+variant, or an indexed unit absent from `nodes`. This is unreleased after
+`2.0.0.beta2`; check the installed gem before expecting these diagnostics.
+
+Keep the failing generation and report the exact errors. Run a full extraction
+in a fresh application process with the intended bundle, then validate again.
+Do not edit derived reverse/file/type indexes to silence the check. If a fresh
+full run still fails, report the invariant and source units as an extraction bug.
+The checker never repairs or republishes the index itself.
+
+An unresolved target is legal; missing both a node and its unit cannot be
+classified as external versus accidentally omitted from current metadata alone.
+A green report also does not prove that an indexed relationship executes at
+runtime. See [the checked invariants and limitations](INDEX_LAYOUT.md#semantic-graph-validation).
+
 ### Corrupt pipeline cooldown state
 
 In a custom Index MCP server configured with an `operator` and

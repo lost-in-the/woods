@@ -43,10 +43,13 @@ module Woods
       TYPE_TO_DIR = DIR_TO_TYPE.invert.freeze
 
       # Most output directories contain one unit type. RailsSourceExtractor
-      # also publishes gem_source units in rails_source/; directory-filtered
-      # search retains its historical labels while deep readers accept both.
+      # emits gem_source units in rails_source/, while GraphQL publishes four
+      # subtypes in graphql/. Directory-filtered search retains its historical
+      # family labels while artifact readers preserve the actual unit type.
       UNIT_TYPES_BY_DIR = DIR_TO_TYPE.transform_values { |type| [type].freeze }
-                                     .merge('rails_source' => %w[rails_source gem_source].freeze).freeze
+                                     .merge('rails_source' => %w[rails_source gem_source].freeze,
+                                            'graphql' => %w[graphql_type graphql_mutation graphql_resolver graphql_query].freeze)
+                                     .freeze
 
       # Maximum number of loaded unit files to cache in memory.
       MAX_UNIT_CACHE = 50
