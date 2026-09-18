@@ -80,6 +80,11 @@ identifier can exist in multiple types. The full unit fields are documented in
 
 The graph's `nodes`, typed variants, forward/reverse relationships and relationship
 metadata belong to the graph format; preserve them when transporting the index.
+Extractor directories can contain multiple unit types: `graphql/` contains
+`graphql_type`, `graphql_mutation`, `graphql_resolver`, and `graphql_query`, while
+`rails_source/` contains `rails_source` and `gem_source`. Validate and retain the
+artifact's actual type instead of deriving it by singularizing the directory.
+
 Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
