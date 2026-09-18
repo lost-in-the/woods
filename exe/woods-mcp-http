@@ -28,6 +28,7 @@ require_relative '../lib/woods/mcp/server'
 require_relative '../lib/woods/mcp/bootstrapper'
 require_relative '../lib/woods/mcp/bearer_auth'
 require_relative '../lib/woods/mcp/origin_guard'
+require_relative '../lib/woods/mcp/http_transport_options'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
@@ -63,10 +64,11 @@ server = Woods::MCP::Server.build(
   index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
   bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
 )
-transport = MCP::Server::Transports::StreamableHTTPTransport.new(server)
-server.transport = transport
-
 allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
+transport = MCP::Server::Transports::StreamableHTTPTransport.new(
+  server, **Woods::MCP::HttpTransportOptions.for(allowed_origins)
+)
+server.transport = transport
 
 inner = proc { |env| transport.handle_request(Rack::Request.new(env)) }
 app = token ? Woods::MCP::BearerAuth.new(inner, token: token) : inner

@@ -1,0 +1,1 @@
+- Preserve version-aware missing-tool guidance with MCP 0.23 by installing its dispatch override before the SDK captures request handlers.

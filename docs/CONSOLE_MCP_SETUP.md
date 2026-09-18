@@ -180,6 +180,15 @@ The middleware registers itself automatically via the gem's Railtie when `consol
 config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
 ```
 
+The existing `console_mcp_allowed_origins` setting is applied to both Woods'
+Origin guard and the SDK transport guard; allowed hostnames are derived from
+these explicit origins. Loopback remains the default. For a remote endpoint,
+include its public origin and each browser origin, with the actual port when
+cross-origin (for example `https://console.example.com` and
+`https://dashboard.example.com:8443`). Keep the configured Console bearer token;
+allowlisting an origin does not authenticate a request. See
+[HTTP origin and Host checks](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
+
 ### MCP Client Configuration
 
 **Claude Code** (streamable-http transport):

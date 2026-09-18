@@ -10,7 +10,6 @@ require_relative '../tasks'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative 'index_reader'
-require_relative 'error_response'
 require_relative 'tool_response_renderer'
 require_relative 'version_aware_tool_dispatch'
 
@@ -198,7 +197,7 @@ module Woods
           meta[:config_key] = config_key if config_key
           meta[:doc_link] = doc_link if doc_link
           meta.merge!(extra) unless extra.empty?
-          ErrorResponse.new([{ type: 'text', text: message }], meta: meta)
+          ::MCP::Tool::Response.new([{ type: 'text', text: message }], error: true, meta: meta)
         end
 
         def truncate_section(array, limit)

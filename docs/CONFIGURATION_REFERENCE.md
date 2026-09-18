@@ -328,7 +328,7 @@ deployment guide including defense layers.
 |---|---|---|---|
 | `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, the Railtie does not mount the Console MCP middleware. |
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every HTTP request. **Required in production** — the Railtie raises `Woods::ConfigurationError` when `console_mcp_enabled` is true but no token is set. In non-prod without a token the middleware refuses to mount (warn + skip). Generate with `SecureRandom.hex(32)`. |
-| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
+| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | HTTP Origin allowlist, also forwarded to the SDK with derived hostnames. Cross-origin browser requests require the actual scheme, hostname and port (for example `http://localhost:3000`). See [HTTP security](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense). |
 | `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
 | `console_embedded_read_tools` | Boolean | `false` | Enable the Tier 4 read tools `console_sql` / `console_query` in embedded (Rack) mode. Bridge-mode deployments always expose them. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |

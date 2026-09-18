@@ -43,7 +43,8 @@ module Woods
         error.error_type == :invalid_params && error.message.to_s.start_with?('Tool not found:')
       end
     end
-    # MCP 0.9 captures method(:call_tool) during initialization. The override
+
+    # MCP 0.23 captures method(:call_tool) during initialization. The override
     # must already exist then; a later singleton prepend misses that handler.
     class VersionAwareServer < ::MCP::Server
       prepend VersionAwareToolDispatch
