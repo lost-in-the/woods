@@ -153,7 +153,9 @@ extraction (or run a full `woods:extract`) before retrying embedding.
 integrity check. Corpus reads hold one generation pin while collecting the input.
 
 Legacy flat indexes retain arbitrary unit filenames and do not require a manifest
-or type listing. Malformed JSON now refuses embedding instead of silently dropping
+or type listing. A `payloads/` directory requires a valid publication pointer;
+missing or null pointers refuse embedding even when stale flat files remain.
+Malformed JSON now refuses embedding instead of silently dropping
 that file. Without an authoritative listing, a missing legacy file still denotes
 a deletion; regenerate extraction into the native publication layout for stronger
 completeness checks.
