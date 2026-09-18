@@ -150,7 +150,8 @@ network time. `vectors.json` separately records the warm embedding batch time,
 input counts, model/package provenance, and SHA-256 of each model asset. Timing
 is observational and has no shared-runner CI threshold. This baseline does not
 validate OpenAI/Ollama quality, their latency, production-scale storage, or agent
-outcomes; #227 remains open for broader representative-provider evidence.
+outcomes. The baseline scope of #227 is complete; broader provider and
+production-scale evaluation remain separate follow-up work.
 
 ### Reproduce or review a new capture
 
@@ -286,7 +287,8 @@ filesystem fixture and obtains root, nested, and sibling ownership from the real
 `PackageExtractor`. It verifies package boundaries without inventing ownership in
 a captured host corpus. Live pgvector/Qdrant tests cover a small eligible package
 behind globally stronger matches, typed chunks, and old vectors without metadata
-payload fields. The broader task-quality question in #227 remains open.
+payload fields. Broader agent task-quality evidence remains unmeasured by this
+scope comparison.
 
 The reviewed capture uses 11 scoped questions and 17 unchanged controls per mode.
 On the 11 questions with a requested directory scope:
