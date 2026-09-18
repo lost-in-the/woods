@@ -1,0 +1,1 @@
+Add `woods-agent-config` for explicit Claude Code project/user setup, update, and removal. Preview saves one private edit plan; apply checks its original snapshots, preserves unrelated configuration, tracks owned entries and instruction sections, and supports recovery after interrupted writes. Host/Compose preflight checks the installed Index Server and published index.

@@ -70,6 +70,12 @@ Keep stdout reserved for MCP protocol messages. Diagnose startup failures from s
 
 ### Client configuration locations
 
+Supporting development builds offer preview/apply/update/remove ownership for
+Claude Code project or explicit user configuration. See
+[managed configuration](AGENT_SETUP.md#managed-claude-code-configuration) for
+`woods-agent-config`, host/Compose preflight, conflict handling, and recovery.
+Manual configuration remains available for older gems and other clients.
+
 MCP clients expose project or user-level server settings in different locations. Use project scope when available, preserve the `command`, `args`, and absolute `cwd` semantics above, and translate only the surrounding client-specific format. Woods is model-independent: compatibility depends on the client supporting MCP stdio or Streamable HTTP, not on whether the connected model is from OpenAI, Anthropic, Google, xAI, or another provider.
 
 Client configuration formats can change independently of Woods. If a client rejects otherwise valid JSON, check that client's current MCP documentation.

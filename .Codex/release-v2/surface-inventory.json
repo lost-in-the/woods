@@ -431,6 +431,7 @@
     }
   ],
   "executables": [
+    "woods-agent-config",
     "woods-console",
     "woods-console-mcp",
     "woods-mcp",
@@ -1002,7 +1003,7 @@
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
-    "executables": 5,
+    "executables": 6,
     "extractor_registrations": 35,
     "index_mcp_resource_templates": 2,
     "index_mcp_resources": 2,
