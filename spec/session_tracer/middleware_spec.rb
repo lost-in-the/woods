@@ -138,6 +138,36 @@ RSpec.describe Woods::SessionTracer::Middleware do
   end
 
   describe 'controller classification' do
+    it 'records the dispatched controller class instead of guessing from the route' do
+      stub_const('RuntimeAuditController', Class.new)
+      env = base_env.merge('action_controller.instance' => RuntimeAuditController.new)
+
+      middleware.call(env)
+
+      expect(store).to have_received(:record).with(anything, hash_including('controller' => 'RuntimeAuditController'))
+    end
+
+    it 'uses configured Rails acronyms when no dispatched instance is available' do
+      inflections = ActiveSupport::Inflector::Inflections.new
+      inflections.acronym('API')
+      allow(ActiveSupport::Inflector).to receive(:inflections).and_return(inflections)
+      env = base_env.merge(
+        'action_dispatch.request.path_parameters' => { controller: 'api/orders', action: 'index' }
+      )
+
+      middleware.call(env)
+
+      expect(store).to have_received(:record).with(anything, hash_including('controller' => 'API::OrdersController'))
+    end
+
+    it 'falls back to the route for an anonymous dispatched controller' do
+      env = base_env.merge('action_controller.instance' => Class.new.new)
+
+      middleware.call(env)
+
+      expect(store).to have_received(:record).with(anything, hash_including('controller' => 'OrdersController'))
+    end
+
     it 'classifies simple controller names' do
       middleware.call(base_env)
 
