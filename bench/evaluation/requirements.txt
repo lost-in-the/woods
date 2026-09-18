@@ -1,4 +1,4 @@
-fastembed==0.7.3
+fastembed==0.8.0
 onnxruntime==1.30.0
 tokenizers==0.23.2
 numpy==2.5.3
