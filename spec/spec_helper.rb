@@ -34,12 +34,12 @@ if ENV['COVERAGE']
     # by construction: track_files above measures the whole lib tree, not
     # just what that one spec happens to touch.
     #
-    # Provisional floor, a few points below the observed value so it gates
-    # regressions without failing the suite today. Measured line coverage on
-    # the default unit suite (COVERAGE=1 bin/rspec) was 90.42% on 2026-08-20;
-    # branch coverage was 74.85% (not gated, see above). A later full-run
-    # calibration can raise this. See Task 8.
-    minimum_coverage line: 85 if ENV['CI']
+    # Calibrated on 2026-09-18: current local/CI default-suite line coverage
+    # is 92.56–92.79%. A 90% floor leaves room for supported-runtime variance
+    # while tightening the former provisional 85% gate. Branch coverage is
+    # measured, not gated: current CI spans 79.99–80.15%, and opt-in lanes
+    # are not yet collated. See the release verification record and #231.
+    minimum_coverage line: 90 if ENV['CI']
   end
 end
 

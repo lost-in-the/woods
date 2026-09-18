@@ -690,8 +690,10 @@ application command's environment. A quiet `SessionStart` does not acknowledge
 the queue. Prefer a resident watcher for sustained edits; enabling both does not
 make refresh faster and can accumulate deferred events.
 
-The hook enforces its own `WOODS_HOOK_TIMEOUT_SECONDS` deadline (default 600,
-integer range 1–3600), including subsequent batches. It terminates the local
+After the complete event input has been read, validated, and queued, the refresh
+hook starts its `WOODS_HOOK_TIMEOUT_SECONDS` deadline (default 600, integer range
+1–3600), including subsequent batches. The producer must close stdin: the 1 MiB
+input limit bounds bytes, not time waiting for EOF. The deadline terminates the local
 command process group and retains work on timeout. For a Docker exec prefix,
 local process termination cannot guarantee cancellation inside the container;
 check the application process and extraction lock before retrying a timed-out
