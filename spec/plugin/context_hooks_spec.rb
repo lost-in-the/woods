@@ -132,6 +132,15 @@ RSpec.describe 'Opt-in Claude context hook entry points' do
     expect(status).to be_success
   end
 
+  it 'discards failed producer output even when it ends with a success-like suffix' do
+    failed = File.join(root, 'failed')
+    File.write(failed, "#!/bin/bash\nprintf '{}\\n0'\nexit 7\n")
+    File.chmod(0o755, failed)
+    stdout, stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => failed)
+    expect([stdout, stderr]).to eq(['', ''])
+    expect(status).to be_success
+  end
+
   it 'emits a bounded orientation on the real SessionStart entry point' do
     stdout, = invoke(input: payload.merge(hook_event_name: 'SessionStart'), kind: 'SessionStart')
     expect(JSON.parse(stdout).dig('hookSpecificOutput', 'additionalContext')).to include('generation 1', 'woods_status')
