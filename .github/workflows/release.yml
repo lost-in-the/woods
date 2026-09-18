@@ -26,6 +26,7 @@ jobs:
       artifact-id: ${{ steps.run.outputs.artifact-id }}
       artifact-digest: ${{ steps.run.outputs.artifact-digest }}
       gem-name: ${{ steps.release.outputs.gem-name }}
+      package-spec: ${{ steps.run.outputs.package-spec }}
     steps:
       - name: Check out trusted default-branch SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -113,6 +114,9 @@ jobs:
         env:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
         run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
+      - name: Install the maintenance SDK floor
+        if: needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0'
+        run: gem install --no-document mcp -v '0.23.0'
       - name: Install package-test dependencies
         run: |
           gem install --no-document rspec -v '~> 3.13'
@@ -129,9 +133,20 @@ jobs:
         env:
           WOODS_GEM_PATH: ${{ github.workspace }}/dist/${{ needs.release-context.outputs.gem-name }}
           WOODS_RUN_PACKAGE_SMOKE: '1'
-        run: >-
-          ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' --
-          spec/integration/packaged_gem_spec.rb
+          PACKAGE_SPEC: ${{ needs.release-context.outputs.package-spec }}
+          WOODS_EXPECT_MCP_VERSION: ${{ needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0' && '0.23.0' || '' }}
+        run: |
+          case "$PACKAGE_SPEC" in
+            spec/integration/maintenance_packaged_gem_spec.rb)
+              ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' -- \
+                --options /dev/null spec/integration/maintenance_packaged_gem_spec.rb
+              ;;
+            spec/integration/packaged_gem_spec.rb)
+              ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' -- \
+                spec/integration/packaged_gem_spec.rb
+              ;;
+            *) echo 'Unknown trusted package test profile' >&2; exit 1 ;;
+          esac
 
   publish:
     needs: [release-context, package-test]
@@ -174,6 +189,15 @@ jobs:
         env:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
         run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
+      # The maintenance profile pins the entire reviewed candidate tree in
+      # trusted main. Repeat publication/history checks after environment approval.
+      - name: Revalidate maintenance release after approval
+        if: needs.release-context.outputs.tag == 'v1.6.2'
+        env:
+          RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
+          RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
+          RELEASE_TRUSTED_SHA: ${{ github.sha }}
+        run: script/validate-release --trusted-checkout
       - name: Configure RubyGems credentials
         uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
         with:

@@ -176,10 +176,29 @@ gh release create v<version> --verify-tag --prerelease --notes-file <file> # bet
 that version's dated heading. Agents may draft `<file>`'s contents; running
 `gh release create` and choosing when to run it are maintainer steps.
 
+## 10. Approved 1.6.2 maintenance exception
+
+Follow CONTRIBUTING's **One-off 1.6.2 security maintenance release** runbook.
+Only `v1.6.2` from `release/1.6.2`, descending from the fixed v1.6.1 commit,
+can use this exception. Trusted main's `script/release_profile.rb` must pin the
+exact prepared candidate SHA in a separately reviewed main PR; `nil` disables
+publication. Review the candidate's complete CI and package tests before pinning,
+since that immutable SHA is the execution trust boundary. Candidate changes need
+a new reviewed pin and fresh tag-push CI, not an environment override.
+
+The remote target must be protected before creation. The legacy preparation
+adapter must disable the old automatic publisher and use its own supported
+`release:reopen` / `release:prepare` transitions; do not hand-edit VERSION or
+transplant v2 documentation fences. This is a security patch for the supported
+1.6.x line, not a final v2 release or an indefinite stable branch. The usual
+maintainer-only tag, dispatch and publication restrictions still apply.
+
 ## Anti-patterns
 
 - Do not "fix" the enforcement spec to match a hand-edited tree. It describes
   the flow; the tree is what is wrong.
 - Do not cut a release to make a check pass.
 - Do not create a stable branch speculatively. `N-M-stable` exists only when a
-  released line needs a patch after a newer major has shipped.
+  released line needs a patch after a newer major has shipped. The one-off
+  `release/1.6.2` exception above is explicitly approved security maintenance,
+  not speculative branch creation.
