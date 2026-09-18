@@ -376,7 +376,9 @@ module Woods
     #   unit types (overrides DEFAULT_EXCLUDE_TYPES).
     # @param exclude_types [Array<String, Symbol>, nil] Additional types to
     #   exclude. Applied on top of DEFAULT_EXCLUDE_TYPES unless +types:+ is set.
-    # @return [RetrievalResult] Complete retrieval result
+    # @param packages [Array<String>, nil] Exact published nearest package owners
+    # @param source_paths [Array<String>, nil] Application-relative directory prefixes
+    # @return [RetrievalResult] Complete retrieval result; scoped calls carry applied_scope
     def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       validate_query!(query)
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)

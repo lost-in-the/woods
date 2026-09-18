@@ -214,3 +214,15 @@ the index; adding provider credentials cannot repair a corrupt lexical index.
 Semantic provider failure never switches to lexical automatically.
 See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
 for the supported contract, checked against the installed gem version.
+
+## Explicit package or path scope
+
+Check the connected tool's advertised input schema before sending `packages` or
+`source_paths`; older installed gems may not support them. When present, both
+`search` and `codebase_retrieve` apply explicit scope before candidate limits.
+Use published nearest package names or application-relative directory prefixes,
+then inspect `applied_scope` and search completeness. Unknown packages are argument
+errors; unsupported custom vector adapters degrade instead of running a global
+query. Scoping can hide relevant cross-boundary relationships, so broaden the
+request deliberately when the task needs them. See the
+[scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).

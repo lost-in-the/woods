@@ -452,6 +452,18 @@ RSpec.describe 'packaged gem' do
                                 arguments: { query: 'Which model validates title presence?', types: ['model'] })
       expect(result.dig('result', 'isError')).to be(false)
       expect(result.dig('result', 'structuredContent', 'text')).to include('Mode: lexical', 'Post', 'validates')
+      assert_scoped_lexical_query(client)
+    end
+
+    def assert_scoped_lexical_query(client)
+      scoped = client.call_tool(name: 'codebase_retrieve',
+                                arguments: { query: 'Which model validates title presence?',
+                                             source_paths: ['app/models'] })
+      expect(scoped.dig('result', 'structuredContent', 'data', 'applied_scope', 'eligible_units')).to be_positive
+      expect(scoped.dig('result', 'structuredContent', 'data', 'sources')).to include(include('identifier' => 'Post'))
+      discovery = client.call_tool(name: 'search', arguments: { query: 'Post', source_paths: ['app/models'] })
+      expect(discovery.dig('result', 'isError')).to be(false)
+      expect(discovery.dig('result', 'structuredContent', 'text')).to include('app/models')
     end
 
     def assert_installed_lexical_retrieval(index_dir)

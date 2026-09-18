@@ -337,3 +337,12 @@ Report vulnerabilities privately through [SECURITY.md](../SECURITY.md).
 5. Check [Troubleshooting](TROUBLESHOOTING.md) for the exact stderr message.
 
 For agent query behavior after connection, continue to [Agent guide](AGENT_GUIDE.md).
+
+### Explicit retrieval and discovery scope
+
+On a server whose tool schema advertises them, `packages` and `source_paths` narrow
+`search` and `codebase_retrieve` before candidate limits. These are per-call
+arguments, not configuration settings. Inspect applied scope and completeness;
+a narrow graph query can omit relevant cross-boundary dependencies. See the
+[scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
+root/nested ownership, path normalization, errors, storage support, and cost.

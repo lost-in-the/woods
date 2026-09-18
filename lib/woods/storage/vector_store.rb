@@ -90,6 +90,8 @@ module Woods
         # @param limit [Integer] Maximum number of results to return
         # @param filters [Hash] Optional metadata filters — values may be
         #   scalars or Arrays
+        # @param ids [Array<String>, nil] Raw vector IDs eligible before ranking;
+        #   optional capability advertised by #supports_id_filter?. Empty matches none.
         # @return [Array<SearchResult>] Results sorted by descending similarity
         # @raise [NotImplementedError] if not implemented by adapter
         def search(query_vector, limit: 10, filters: {}, ids: nil)
