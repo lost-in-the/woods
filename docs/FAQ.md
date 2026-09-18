@@ -448,16 +448,9 @@ Snapshots prefer their own SQLite database (`woods.sqlite3` in the output direct
 
 The session tracer is middleware that records which Rails actions are invoked during a browser session, assembles the relevant extracted units, and makes that context available via the `session_trace` MCP tool. It is useful for giving an AI tool accurate context about what code path was active during a specific user interaction.
 
-Session tracing is disabled by default. To enable it:
-
-```ruby
-config.session_tracer_enabled = true
-config.session_store = Woods::SessionTracer::FileStore.new(
-  Rails.root.join('tmp/session_traces')
-)
-```
-
-The `session_store` option is required, there is no default store.
+Session tracing is disabled by default and requires an explicit `session_store`.
+Follow the [canonical configuration example](CONFIGURATION_REFERENCE.md#session-tracer-options)
+for store construction and review trace retention and access controls before enabling it.
 
 ---
 
