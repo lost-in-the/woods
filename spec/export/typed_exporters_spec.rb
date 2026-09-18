@@ -120,7 +120,7 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
     File.unlink(unit_path(model))
     expect do
       notion(Woods::MCP::IndexReader.new(@index_dir)).sync_all
-    end.to raise_error(Woods::ExtractionError, /model:Report/)
+    end.to raise_error(Woods::ExtractionError, /incomplete/)
     expect(pages).to be_empty
     expect(File.binread(path)).to eq(before)
   end
@@ -131,6 +131,53 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
     File.write(unit_path(model), JSON.generate(unit('poro').to_h))
     expect { notion(reader).sync_all }.to raise_error(Woods::ExtractionError, /identity/)
     expect(pages).to be_empty
+  end
+
+  %w[missing malformed count_mismatch].each do |corruption|
+    it "refuses a #{corruption} model index before Notion writes or manifest pruning" do
+      notion(publish(unit('model'))).sync_all
+      manifest_path = File.join(@index_dir, 'notion_sync_manifest.json')
+      before = File.binread(manifest_path)
+      File.write(File.join(@index_dir, 'manifest.json'), JSON.generate(total_units: 1, counts: { models: 1 }))
+      path = File.join(@index_dir, 'models', '_index.json')
+      if corruption == 'missing'
+        File.unlink(path)
+      else
+        File.write(path, corruption == 'malformed' ? '{}' : '[]')
+      end
+      pages.clear
+      expect { notion(Woods::MCP::IndexReader.new(@index_dir)).sync_all }.to raise_error(Woods::ExtractionError)
+      expect(pages).to be_empty
+      expect(File.binread(manifest_path)).to eq(before)
+    end
+  end
+
+  %i[sync_data_models sync_columns].each do |operation|
+    it "keeps standalone #{operation} reads and page mapping inside one generation pin" do
+      reader = publish(unit('model'))
+      depth = 0
+      observations = []
+      allow(reader).to receive(:with_pinned_generation).and_wrap_original do |method, &block|
+        depth += 1
+        begin
+          method.call(&block)
+        ensure
+          depth -= 1
+        end
+      end
+      allow(reader).to receive(:read_published_unit).and_wrap_original do |method, *args|
+        observations << depth
+        method.call(*args)
+      end
+      allow(notion_client).to receive(:create_page) do |**arguments|
+        observations << depth
+        pages << arguments
+        { 'id' => 'page' }
+      end
+      notion(reader).public_send(operation)
+      expect(observations.size).to eq(2) # one source read, then one mapped page
+      expect(observations).to all(be_positive)
+    end
   end
 
   it 'uploads the requested full-sync type with its original URI' do

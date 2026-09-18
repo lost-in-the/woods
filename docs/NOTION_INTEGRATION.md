@@ -40,8 +40,12 @@ column payload. Public identifiers, page titles, and manifest keys are unchanged
 If a listed model or migration cannot be read with its exact identity, the
 affected sync refuses before mapping pages or pruning its manifest. Preserve
 the error, validate the index, and regenerate it before retrying; force sync
-does not bypass identity checks. Custom readers must support
-`find_unit(identifier, type:)` and return the requested identity.
+does not bypass identity checks. Each public sync method, including standalone
+model or column sync, uses one validated generation snapshot through mapping
+and API calls. Native readers validate the published index before selecting
+model/migration payloads. Custom readers must provide complete published
+enumeration or complete per-bucket listings plus
+`find_unit(identifier, type:)` returning the requested identity.
 
 If the manifest is missing (first run, or a CI cache miss), the exporter falls back to the full lookup/create path for every page and rebuilds the manifest, correct, just more API calls than a steady-state run.
 

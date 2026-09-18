@@ -26,19 +26,24 @@ module Woods
 
       # IndexReader validates every published artifact, including mixed buckets.
       # The fallback supports injected readers with the documented list/find API.
-      def all
-        return @reader.each_unit.to_a if @reader.respond_to?(:each_unit)
-
-        MCP::IndexReader::UNIT_TYPES_BY_DIR.flat_map do |dir, types|
-          @reader.list_units(type: MCP::IndexReader::DIR_TO_TYPE.fetch(dir)).map do |entry|
-            find(entry['identifier'], entry_type(entry, types))
-          end
-        end
+      def all(only: nil)
+        units = @reader.respond_to?(:each_unit) ? @reader.each_unit : injected_units(only)
+        units.select { |unit| !only || only.include?(unit['type']) }
       rescue IOError, SystemCallError, JSON::ParserError => e
         raise ExtractionError, "export index incomplete: #{e.message}"
       end
 
       private
+
+      def injected_units(only)
+        MCP::IndexReader::UNIT_TYPES_BY_DIR.flat_map do |dir, types|
+          next [] if only && (types & only).empty?
+
+          @reader.list_units(type: MCP::IndexReader::DIR_TO_TYPE.fetch(dir)).map do |entry|
+            find(entry['identifier'], entry_type(entry, types))
+          end
+        end
+      end
 
       def entry_type(entry, types)
         type = entry['type'] || (types.first if types.one?)

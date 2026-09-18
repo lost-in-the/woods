@@ -398,9 +398,9 @@ module Woods
         "#{base}?unit=#{URI.encode_www_form_component(unit_data['identifier'])}"
       end
 
-      # One cheap pass over the type indexes (entries already carry file_path,
-      # and read_index is cached) to find files that define more than one synced
-      # unit. For each such base URI, the lexically-smallest identifier — the
+      # Inspect the complete validated snapshot, including excluded types, for
+      # same-name cross-type collisions. For files with distinct synced names,
+      # the lexically-smallest identifier — the
       # outer/top-level class — keeps the bare URI; siblings are suffixed. Solo
       # files (the overwhelming majority) are absent from the map and unchanged,
       # so this introduces no churn for them.
