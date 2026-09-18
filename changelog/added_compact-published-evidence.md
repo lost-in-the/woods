@@ -1,0 +1,1 @@
+- Add opt-in compact source evidence and declared API outlines to retrieval and lookup, with complete published spans, explicit omissions, honest generation/source provenance, and typed SHA-guarded full-source follow-up. Existing full-source behavior remains the default.

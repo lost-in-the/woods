@@ -59,4 +59,15 @@ RSpec.describe 'Opt-in compact retrieval' do
     expect(result.sources.first[:evidence]).to include(mode: 'compact', generation_status: 'unavailable')
     expect(result.trace.ranked_count).to eq(ordinary.trace.ranked_count)
   end
+  it 'retains the fixed target method that full assembly loses at the identical budget' do
+    prefix = (1..80).map { |i| "def unrelated_#{i}; #{'nil; ' * 25}end\n" }.join
+    method = "def refund(payment)\n payment.reverse!\nend"
+    store.store('Invoice', { identifier: 'Invoice', type: 'model', file_path: 'app/models/invoice.rb',
+                             source_code: "class Invoice\n#{prefix}#{method}\nend" })
+    full = retriever.retrieve('refund payment', evidence: 'full', budget: 450)
+    compact = retriever.retrieve('refund payment', evidence: 'compact', budget: 450)
+    expect(full.context).not_to include(method)
+    expect(compact.context).to include(method)
+    expect([full.tokens_used, compact.tokens_used]).to all(be <= 450)
+  end
 end

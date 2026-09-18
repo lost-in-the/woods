@@ -90,4 +90,15 @@ RSpec.describe 'Published compact evidence tools' do
     explicit = call_tool('codebase_retrieve', query: 'refund', budget: 400, evidence: 'full')
     expect(explicit).to eq(omitted)
   end
+  it 'refuses a symlinked typed directory before opening an outside unit' do
+    original = File.join(index_dir, 'models')
+    outside = Dir.mktmpdir('woods-evidence-outside')
+    FileUtils.cp_r(Dir.glob(File.join(original, '*')), outside)
+    FileUtils.remove_entry(original)
+    File.symlink(outside, original)
+    reader = Woods::MCP::IndexReader.new(index_dir)
+    expect { reader.find_unit('Invoice', type: 'model') }.to raise_error(IOError, /symlink unit directory/)
+  ensure
+    FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
 end

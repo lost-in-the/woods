@@ -304,3 +304,59 @@ median query time was 2.30 ms versus 0.41 ms unscoped on these 11 replay questio
 preparing the full metadata snapshot is visible even on this small corpus.
 Exact token counts measure the returned context, not MCP metadata or agent prompts;
 Woods' 1200-token budget is an estimate and can differ from cl100k counts.
+
+## Compact evidence comparison (#403)
+
+`bench/evaluation/evidence_comparison.rb` replays the same #227 Canopy corpus,
+28 questions, expected unit labels, captured MiniLM vectors and per-question
+budgets with full, compact and outline evidence, separately for semantic and
+lexical retrieval. Only within-unit evidence formatting varies within each
+strategy. The checked capture binds all 168 returned contexts to exact
+`tiktoken 0.11.0` `cl100k_base` counts; full-mode hashes match the approved prior
+comparison. The original labels are unit-level labels, not method/span relevance
+or task-correctness labels.
+
+| Strategy / evidence | P@5 | Unit recall | MRR | Mean exact context tokens |
+|---|---:|---:|---:|---:|
+| Semantic / full | 0.5363 | 0.5798 | 0.8571 | 1000.68 |
+| Semantic / compact | 0.4786 | 0.6476 | 0.8571 | 1034.68 |
+| Semantic / outline | 0.4536 | 0.8304 | 0.8571 | 976.86 |
+| Lexical / full | 0.4917 | 0.6661 | 0.7798 | 1152.64 |
+| Lexical / compact | 0.4881 | 0.7077 | 0.7887 | 1063.79 |
+| Lexical / outline | 0.3857 | 0.7964 | 0.7887 | 1014.75 |
+
+These results do not justify a default change. Outlines can expose more unit names
+without their method bodies; 19 of 100 returned semantic compact units and 13 of
+103 lexical compact units have no selected source span (the response explicitly
+reports omissions and may contain runtime metadata). Per-unit selected/omitted
+span counts remain in the capture. Increased unit recall is not evidence that an
+agent saw the implementation it needed. Compact semantic context consumed more
+actual tokens on average. Structured provenance and MCP envelopes are additional
+output tokens, outside the context-only counts above.
+
+Median warm query time across questions was 3.59/11.24/11.27 ms for semantic
+full/compact/outline and 0.41/4.49/6.42 ms for lexical modes. This measures local
+replay and includes source parsing; semantic provider/network time is excluded.
+It does not establish live-host performance.
+
+A separate deterministic long-prefix regression fixes the target method before
+selection: 80 unrelated methods precede `refund(payment)`. Under the same small
+context allowance the compact selector includes its entire body and exact
+published byte/hash coordinates. This is a synthetic retention test, separate
+from the real-corpus unit metrics above. Unicode, shared-line declarations, nested
+blocks, commented inlined concern display, inherited metadata, unknown physical
+locations and unknown generation are covered by source-evidence contract tests.
+Installed stdio and HTTP checks exercise generation attribution and typed,
+SHA-guarded full lookup on a real Rails extraction.
+
+Reproduce the corpus comparison without changing labels:
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/evidence_comparison.rb /tmp/woods-evidence-raw.json
+python bench/evaluation/capture_tokens.py /tmp/woods-evidence-raw.json evidence_comparison_capture.json
+```
+
+Use the same tokenizer version/vocabulary recorded by the capture. Raw contexts
+are an external artifact; the checked file retains hashes, exact counts, unit
+outcomes and source-span counts. Candidate ranking and ownership diversity are
+outside this experiment.
