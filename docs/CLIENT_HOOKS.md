@@ -101,3 +101,11 @@ Inspect `<output>/hook.log`, the pending queue and the published generation to
 confirm refresh. Malformed input diagnostics omit the original tool payload.
 For rollback, disable hooks before removing registration; preserve pending
 multi-file records until a compatible runner has consumed them.
+
+## Optional Claude context
+
+Claude has a separate opt-in for bounded synchronous orientation and change-impact
+reminders. It does not change either client’s refresh queue contract and is not
+enabled by `WOODS_HOOKS_ENABLED`. Check the installed helper, timing, path-mapping
+and uncertainty contract in [bounded context hints](WATCH_DAEMON.md#optional-bounded-context-hints).
+OpenCode refresh support does not imply context delivery support.

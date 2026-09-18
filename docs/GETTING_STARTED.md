@@ -154,7 +154,7 @@ When dependencies, initializers, database configuration, credentials, or schema 
 
 The watcher maintains the structural index. If semantic retrieval is enabled, also run `bin/rails woods:embed_incremental` to update vectors. Without a resident watcher, run `bin/rails woods:incremental` after changes. Use a full `woods:extract` after major upgrades or when validation reports drift. CI and shared-artifact patterns are covered in [Incremental extraction](INCREMENTAL_EXTRACTION.md).
 
-On Rails 8.1, `config/ci.rb` can refresh the index before any gate that reads it: `step "Woods: refresh", "bin/rails woods:incremental"`. With the Claude Code plugin installed, an opt-in `PostToolUse` hook refreshes the index after graph-changing edits and an opt-in `SessionStart` hook warns when it predates the last commit; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](WATCH_DAEMON.md#hooks-for-agent-sessions).
+On Rails 8.1, `config/ci.rb` can refresh the index before any gate that reads it: `step "Woods: refresh", "bin/rails woods:incremental"`. With the Claude Code plugin installed, an opt-in `PostToolUse` hook refreshes the index after graph-changing edits and an opt-in `SessionStart` hook warns about source-content drift or unknown evidence; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](WATCH_DAEMON.md#hooks-for-agent-sessions).
 
 ### Enable the Console Server
 

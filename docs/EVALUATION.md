@@ -479,3 +479,76 @@ The checked capture retains all 72 results, unchanged #227 gold labels, fixed-ca
 requirements, source hashes, actual context counts/hashes, original scores and
 selection/deferral/budget-exhaustion traces. It retains failed cases. Use the
 recorded `tiktoken` version and vocabulary; keep raw contexts outside the checkout.
+
+
+## Matched optional context-hook tasks (#406)
+
+**Both conditions passed all four task attempts.** This small comparison does not
+establish a task-quality or efficiency improvement. Hints remained optional.
+The context condition returned less MCP text in aggregate, added its own context,
+and had a higher median agent wall time; individual repetitions varied.
+
+`bench/evaluation/hook_context_capture.json` records all eight preselected trials,
+returned-context hashes and actual token counts, official-client usage, emitted
+and delivered hints, callback latency and hidden-verifier outcomes. Two tasks
+from Rails Foundation's public `ai-evals` at
+`5327efe54dd767d662ab89332f6a4285fef07bd8` used disposable Writebook 1.2.1/Ruby 3.4.7
+images. Seeded defects failed and reference fixes passed before agent trials.
+Both arms used Claude Code 2.1.267, `claude-sonnet-5`, a 40-turn limit, the same
+prompt and source snapshot, full MCP evidence, and lexical retrieval. Refresh
+was disabled in both arms to isolate the independent context switch. Each
+condition ran twice per task; two trials ran concurrently. The hidden verifier
+was copied only after the agent exited.
+
+| Task attempt | Manual agent wall (s) | Context agent wall (s) | Hidden verifier, manual / context |
+|---|---:|---:|---|
+| `aj-enqueue-after-commit`, rep 1 | 111.3 | 113.6 | pass / pass |
+| `aj-enqueue-after-commit`, rep 2 | 173.4 | 154.9 | pass / pass |
+| `ar-atomic-import`, rep 1 | 105.3 | 210.4 | pass / pass |
+| `ar-atomic-import`, rep 2 | 126.5 | 119.9 | pass / pass |
+
+| Measure | Manual tools | Context enabled |
+|---|---:|---:|
+| Tasks passed | 4 / 4 | 4 / 4 |
+| Median agent wall (s) | 118.9 | 137.4 |
+| Total MCP text, actual cl100k tokens | 45,834 | 39,550 |
+| Additional delivered hint tokens, cl100k | 0 | 1,914 |
+| Emitted / delivered hints | 0 / 0 | 16 / 16 |
+| Client-reported input tokens | 160 | 158 |
+| Client-reported cache creation tokens | 217,920 | 206,056 |
+| Client-reported cache read tokens | 5,715,709 | 5,467,210 |
+| Client-reported output tokens | 40,884 | 42,000 |
+
+The 16 context callbacks took 0.590–0.818s (median
+0.613s); the largest complete JSON envelope was 1,067 bytes.
+Disabled callbacks took 1.75ms median and emitted nothing.
+Every emitted hint appeared in the official client's `hook_additional_context`
+attachments. A separate native-plugin probe also matched SessionStart and
+PostToolUse hint strings inside captured model requests. Attachment delivery does
+not establish that the model used a hint. Callback measurement wraps the actual
+entrypoint and excludes the instrumentation wrapper's own startup; agent wall
+includes the whole client run. OS scheduling and cold startup can still cause a
+silent timeout under the fixed deadline.
+
+An independent review checked all 44 rendered relationship claims against each
+trial's typed graph and found no incorrect claim. Useful owners were often
+already inspected; broad transitive candidates were sometimes redundant. One
+atomic-import run explicitly followed the DemoContent candidate and found no
+matching call site. New test files received honest unresolved-path notices.
+Source freshness was initially unknown because of `unverified_consumption_scopes`,
+then edits were marked drifted; truncated and pre-refresh qualifications remained
+visible. Correct candidates are not proof of task benefit or complete impact.
+
+Exact cl100k counts measure representation size, separately from the client's
+repeated input/cache/output accounting. The client's summed list-price estimates
+were $2.424 / $2.338; these are not billed charges or evidence of a
+repeatable saving. This two-task sample and overlapping execution cannot establish
+isolated performance or general quality. Raw traces remain local review artifacts;
+the checked capture binds their hashes. `diff.patch` covers tracked files only;
+new untracked tests are preserved through native Write/Edit records and separately
+labelled transcript reconstructions, not claimed as disk-captured final trees.
+
+The measured hook implementation is `21a578d6`; subsequent main integration left
+its helper and entrypoint bytes unchanged. The earlier smoke setup missing new
+bundle executable stubs is retained as an invalid setup attempt. The fixed
+primary trials all completed and none was discarded or replaced.

@@ -442,6 +442,7 @@
     "woods-console",
     "woods-console-mcp",
     "woods-extract",
+    "woods-hook-context",
     "woods-mcp",
     "woods-mcp-http",
     "woods-mcp-start"
@@ -1011,7 +1012,7 @@
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
-    "executables": 7,
+    "executables": 8,
     "extractor_registrations": 35,
     "index_mcp_resource_templates": 2,
     "index_mcp_resources": 2,

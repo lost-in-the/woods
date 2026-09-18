@@ -271,3 +271,13 @@ you need full source; its SHA guard refuses changed source instead of validating
 a different publication accidentally. Published-unit line/byte ranges can include
 synthesized or commented concern source and are not physical file coordinates.
 See the [evidence contract](RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
+
+### Optional hook hints
+
+When explicitly enabled on a supporting installed gem, Claude hook context offers
+a small served-generation orientation and post-edit candidate dependents. Treat
+pre-refresh, unknown freshness, truncation and ambiguous identity labels as limits
+on the evidence. Verify direct and inferred downstream candidates using typed
+lookup and `dependents explain:true`; suggested tests do not prove coverage.
+Silence does not establish no impact. See [bounded context hints](WATCH_DAEMON.md#optional-bounded-context-hints)
+for opt-in, independent refresh controls, limits and repeat suppression.

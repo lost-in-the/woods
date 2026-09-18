@@ -131,3 +131,15 @@ returned typed, SHA-guarded `full_evidence` lookup for verification. Published-u
 coordinates are not physical file offsets; unknown generation remains unknown.
 Keep full-source access available. See the canonical
 [evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
+
+## Optional context hints
+
+Check installed `bundle exec woods-hook-context --help` before enabling
+`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is unreleased after beta2 and the
+plugin does not upgrade the gem. Context and refresh opt-ins are independent;
+`WOODS_HOOKS_DISABLED=1` disables both. Native Claude context is synchronous and
+bounded, with served-generation and pre-refresh/unknown labels. Verify candidate
+dependents and suggested tests manually; silence is not no impact. Do not clear
+refresh queues when optional hints time out. See the canonical
+[context guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
+for output/time limits, container root mapping and emitted-hint suppression.
