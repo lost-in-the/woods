@@ -46,6 +46,16 @@ For versions documenting environment-boot snapshots, confirm that the command is
 `bundle exec rake woods:watch`, with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
+### Watch misses edits under a shared directory alias
+
+Check the installed version: logical alias preservation (#445) is unreleased.
+Older polling/catch-up walkers could visit an irrelevant alias first and suppress
+`app/models` when both point to the same physical directory. Compare the logical
+path with the extraction input path; a running daemon alone does not prove coverage.
+Use a manual extraction for recovery until upgrading. The corrected walker keeps
+independent aliases and prunes ancestor cycles; do not remove cycle or ignore guards.
+See the installed version's watch guide before assuming this behavior.
+
 ### Session trace reports ambiguous identity
 
 The `session_trace` `ambiguous_identity` error (#213) is unreleased after

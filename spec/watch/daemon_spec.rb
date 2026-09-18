@@ -39,6 +39,16 @@ RSpec.describe Woods::Watch::Daemon do
     )
   end
 
+  it 'includes every logical shared-directory alias during startup catch-up' do
+    Dir.mktmpdir('woods_catch_up_shared') do |shared|
+      File.write(File.join(shared, 'user.rb'), 'source')
+      FileUtils.mkdir_p(File.join(root, 'app'))
+      File.symlink(shared, File.join(root, 'a_shared'))
+      File.symlink(shared, File.join(root, 'app/models'))
+      expect(build.send(:uncovered_paths)).to include(File.join(root, 'app/models/user.rb'))
+    end
+  end
+
   def publish_generation(reason)
     Woods::Generation.new(output_dir: output_dir).bump!(reason: reason)
   end

@@ -273,6 +273,14 @@ Ignored by default: `.git`, `node_modules`, `tmp`, `log`, `coverage`,
 `vendor/bundle`, `public/assets`, `public/packs`, `storage`. That ignore list is
 what keeps a polling scan bounded.
 
+Polling and startup catch-up preserve each logical path when multiple directory
+symlinks point to the same source tree. For example, `a_shared/user.rb` and
+`app/models/user.rb` both remain visible; an earlier alias must not hide the path
+that extraction recognizes. Cycles back to a directory already on the current
+traversal branch are pruned, while independent sibling aliases remain visible.
+This can increase scan work for deliberately repeated aliases; avoid unnecessary
+aliases in large watched trees. Ignored logical paths are still pruned.
+
 ## Placement
 
 The spike asked for three placements to be compared and one chosen. Every
