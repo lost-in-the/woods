@@ -1,0 +1,12 @@
+# frozen_string_literal: true
+
+# Exact advertised direct floors, deliberately independent of development gems.
+# The candidate is installed from a freshly built gem by script/test-minimum-dependencies.
+source 'https://rubygems.org'
+
+gem 'json', '= 2.19.9'
+gem 'mcp', '= 1.2.0'
+gem 'msgpack', '= 1.8.2'
+gem 'prism', '= 1.4.0'
+gem 'railties', '= 6.0.0'
+gem 'woods', "= #{ENV.fetch('WOODS_MINIMUM_VERSION')}"

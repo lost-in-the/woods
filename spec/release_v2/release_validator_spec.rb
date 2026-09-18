@@ -105,6 +105,7 @@ RSpec.describe 'release validation' do
       'rails-matrix' => 'Booted extraction (Ruby 4.0 / Rails 8.1)',
       'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)',
       'http-transport' => 'MCP transports (official clients)',
+      'minimum-dependencies' => 'Minimum runtime dependencies (Ruby 3.0)',
       'coverage' => 'coverage',
       'security' => 'security',
       'lint' => 'lint',

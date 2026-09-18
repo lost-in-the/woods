@@ -36,12 +36,13 @@ RSpec.describe 'release environment protection' do
       'test' => 'Unit specs (Ruby 4.0)',
       'rails-matrix' => 'Booted extraction (Ruby 4.0 / Rails 8.1)',
       'live-backends' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)',
-      'http-transport' => 'MCP transports (official clients)'
+      'http-transport' => 'MCP transports (official clients)',
+      'minimum-dependencies' => 'Minimum runtime dependencies (Ruby 3.0)'
     }
   end
 
   def full_job_set
-    %w[test rails-matrix live-backends http-transport coverage security lint build].map do |id|
+    %w[test rails-matrix live-backends http-transport minimum-dependencies coverage security lint build].map do |id|
       { 'name' => matrixed_job_names.fetch(id, id), 'conclusion' => 'success' }
     end
   end
@@ -73,7 +74,7 @@ RSpec.describe 'release environment protection' do
     fake_bin
   end
 
-  def validate_ci_run(environment:)
+  def validate_ci_run(environment:, jobs: full_job_set)
     Dir.mktmpdir('woods-environment-protection') do |directory|
       env = {
         'PATH' => "#{write_fake_gh(directory)}:#{ENV.fetch('PATH')}",
@@ -84,7 +85,7 @@ RSpec.describe 'release environment protection' do
         'GH_API_LOG' => File.join(directory, 'gh-api.log'),
         'GH_RUN_JSON' => JSON.generate(ci_run),
         'GH_WORKFLOW_JSON' => JSON.generate('id' => 678, 'path' => '.github/workflows/ci.yml', 'name' => 'CI'),
-        'GH_JOBS_JSON' => JSON.generate('jobs' => full_job_set),
+        'GH_JOBS_JSON' => JSON.generate('jobs' => jobs),
         'GH_ARTIFACTS_JSON' => artifacts_json,
         'GH_ENVIRONMENT_JSON' => JSON.generate(environment)
       }
@@ -102,6 +103,16 @@ RSpec.describe 'release environment protection' do
 
     expect(status).to be_success, stderr
     expect(calls).to include('/repos/lost-in-the/woods/environments/release')
+  end
+
+  it 'rejects a release CI run that omitted the exact runtime floor gate' do
+    jobs = full_job_set.reject { |job| job['name'] == 'Minimum runtime dependencies (Ruby 3.0)' }
+    _stdout, stderr, status, = validate_ci_run(
+      environment: { 'protection_rules' => [{ 'type' => 'required_reviewers' }], 'can_admins_bypass' => false },
+      jobs: jobs
+    )
+    expect(status).not_to be_success
+    expect(stderr).to include('minimum-dependencies')
   end
 
   it 'fails closed when the live release environment has no protection rules' do

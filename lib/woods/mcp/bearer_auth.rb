@@ -35,19 +35,12 @@ module Woods
       # @param enabled [#call, nil] Optional request-time predicate. When it
       #   returns falsy the request passes through unguarded. Nil (the
       #   default) means always guard.
-      def initialize(app, token:, path: nil, enabled: nil)
-        @app = app
-        @path = path
-        @enabled = enabled
-        @warned_unusable_token = false
+      # Rails 6.0 forwards middleware options as a positional hash on Ruby 3.
+      # Delegate to explicit keywords to preserve required/unknown option checks.
+      def initialize(app, options = {}, **keywords)
+        raise TypeError, 'middleware options must be a Hash' unless options.is_a?(Hash)
 
-        if token.respond_to?(:call)
-          @token_source = token
-        else
-          validate_static_token!(token)
-          static_token = token.to_s
-          @token_source = -> { static_token }
-        end
+        initialize_options(app, **options, **keywords)
       end
 
       # Rack entry point. Out-of-scope requests (non-matching `path:` prefix
@@ -71,6 +64,21 @@ module Woods
       end
 
       private
+
+      def initialize_options(app, token:, path: nil, enabled: nil)
+        @app = app
+        @path = path
+        @enabled = enabled
+        @warned_unusable_token = false
+
+        if token.respond_to?(:call)
+          @token_source = token
+        else
+          validate_static_token!(token)
+          static_token = token.to_s
+          @token_source = -> { static_token }
+        end
+      end
 
       # @param env [Hash] Rack environment
       # @return [Boolean] whether this request falls under the guard
