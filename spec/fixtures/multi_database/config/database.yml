@@ -1,0 +1,18 @@
+# The fixture receives an isolated directory with three real SQLite files.
+# No aliases: Rails 6.x database.yml loading must also work with Psych 4+.
+test:
+  primary:
+    adapter: sqlite3
+    database: <%= File.join(ENV.fetch("WOODS_MULTIDATABASE_DIR"), "primary.sqlite3") %>
+    pool: 5
+    timeout: 5000
+  billing:
+    adapter: sqlite3
+    database: <%= File.join(ENV.fetch("WOODS_MULTIDATABASE_DIR"), "billing.sqlite3") %>
+    pool: 5
+    timeout: 5000
+  reporting:
+    adapter: sqlite3
+    database: <%= File.join(ENV.fetch("WOODS_MULTIDATABASE_DIR"), "reporting.sqlite3") %>
+    pool: 5
+    timeout: 5000

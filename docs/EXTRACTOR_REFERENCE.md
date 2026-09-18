@@ -60,9 +60,13 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)
+- Named, source-defined app model mixins (for example `Card::Pinnable` in `app/models/card/pinnable.rb`) resolve through runtime source locations, with conventional concern paths as fallbacks. Included mixins also receive `:concern` units, so their actual files map to the includer through dependency edges. Gem-owned modules stay outside this discovery. Conventional concern files retain their existing identity even when nested helpers share the same file. Outside those directories, each included runtime mixin receives its own concern identity even when several share a source file; editing that file refreshes every includer.
 - Inlines concerns: all `include FooConcern` references are resolved and the concern source is appended to `source_code`. Inlined concern names are recorded in `metadata[:inlined_concerns]`
-- Extracts all 19 callback types: `before_validation`, `after_validation`, `before_save`, `after_save`, `around_save`, `before_create`, `after_create`, `around_create`, `before_update`, `after_update`, `around_update`, `before_destroy`, `after_destroy`, `around_destroy`, `after_commit`, `after_rollback`, `after_initialize`, `after_find`, `after_touch`
+- Reads Rails' per-event callback chains (`_save_callbacks`, `_create_callbacks`, and the other lifecycle events), preserving each chain's order and each entry's `kind`, filter and conditions. The public `type` combines kind and event, such as `before_save` or `after_create`; Rails' separate `before_commit` event is reported as `before_commit`, not `before_before_commit`. `callback_count` equals the emitted callback list's length. The list includes framework-registered callbacks; it is runtime metadata, not an application-only filter or a cross-event execution trace. Regenerate the index after upgrading to pick up corrected callback metadata.
+- Proc/lambda filters, including Rails-generated association callbacks, use stable source-site labels in both metadata and callback chunks: `#<Proc app/models/post.rb:12>` (or `lambda`). App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Rails 6's numeric filter identity is resolved through `raw_filter`. These labels describe location and callable kind, not captured closure state; callbacks are never executed. Model condition labels retain their existing format.
+- Default callback-object representations omit process addresses: an instance becomes `#<CleanupCallback>`, an anonymous class becomes `#<Class>`, and its instance becomes `#<#<Class>>`. Anonymous namespace prefixes are normalized too (for example, `#<Module>::CleanupCallback`). Named classes and custom `to_s` labels retain their text. These labels do not distinguish arbitrary object state; separate registered callbacks remain separate entries even when their descriptive labels match. Controller object-filter formatting is unchanged.
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
+- Reflects model class and instance methods after reading the schema, so Rails schema-loading optimizations produce the same method metadata in cold and warmed runs. Application-defined constructors remain visible; Rails versions that install an optimized singleton `new` during schema loading consistently include it in `class_methods`.
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
@@ -158,6 +162,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each action becomes a `:action` chunk with its applicable filters and route
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- Inline callbacks use stable source-site labels in filter metadata, controller annotations and action chunks: `#<Proc app/controllers/posts_controller.rb:12>` (or `lambda`). The controller filter metadata and annotations use the same labels for `if`/`unless` procs. App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Labels describe the callable location and kind, not captured closure state, and never execute callbacks.
+- Route helper resolution accepts every live named controller/action route, including `file_path`, `image_url`, `download_path`, and `root_path`. Unknown filesystem/asset helpers produce no edge; matching names are conservative source references, not proof a call executes.
 - Extracts `redirect_to` navigation edges: named route helpers (`posts_path`, `users_url`) are resolved to controller targets via `RouteHelperResolver`, producing `:redirect_to` dependency edges (gated by `extract_navigation_edges` config)
 
 **Edge cases:**
@@ -194,6 +200,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Scans: `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`
 - Extracts public entry points (`call`, `perform`, `execute`, `run`), custom error classes, and dependency references
 - File-based discovery (not class introspection), so it catches services with non-standard superclasses
+- `initialize_params` describes declared names, default presence and keyword status from Ruby syntax. Nested/comma-bearing defaults are not evaluated or treated as parameters; named rest, keyword-rest and block parameters retain their names. Anonymous forwarding has no name to report; malformed source produces an empty parameter list.
 
 **Example output (abbreviated):**
 
@@ -218,6 +225,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Scans: `app/jobs`, `app/workers`, `app/sidekiq`
 - Extracts queue name, retry configuration, concurrency options, perform method arguments, and callbacks
+- `perform_params` uses the same syntax-aware signature parsing as service initializers and preserves its `name`, `splat` (`single`/`double`/null), and `has_default` fields. Keyword defaults do not invent additional argument names.
 - Records what triggers this job (reverse lookup via dependency graph after extraction)
 - Supports both ActiveJob and Sidekiq native workers
 
@@ -243,7 +251,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **What it captures:** ActionMailer classes with their mailer actions, defaults, template paths, callbacks, and helper usage.
 
 **Key details:**
-- Discovers via class introspection (`ActionMailer::Base.descendants`)
+- Discovers `ApplicationMailer.descendants` when that class exists, otherwise `ActionMailer::Base.descendants`; an app without ActionMailer contributes no mailer units.
+- Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata
 - Extracts `default from:`, `layout`, and per-action subject patterns
 
@@ -294,7 +303,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Key details:**
 - Extracts the entire stack as one unit (not one per middleware)
-- Records middleware class names, insertion order, and any initialization arguments
+- Records middleware class names, insertion order, and initialization arguments as readable strings
+- Argument rendering preserves literal strings and nested array/hash configuration. Procs use source locations; anonymous classes (including Ruby temporary names used by Rails executors/reloaders) use parent names and method source locations. Opaque objects using Ruby's default `to_s` are represented by class, without walking private runtime state. Custom `to_s` output is preserved, so application-defined nondeterministic renderers can still vary. Closure captures and opaque object internals are not serialized.
 - No per-file mapping, so incremental re-extraction re-runs `MiddlewareExtractor` wholesale when `config/application.rb`, `Gemfile.lock`, or a file under `config/initializers`/`config/environments` changes
 
 ---
@@ -331,6 +341,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - File-based scanning, no Rails boot needed for the actual file reading
 - Records which partials a template renders and which instance variables it expects
+- Loads the runtime route collection before caching named helpers, including Rails lazy route sets. Fresh-process incremental view extraction resolves the same navigation targets as full extraction.
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
@@ -531,7 +542,17 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 **Key details:**
 - Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever)
 - Extracts job class name, cron expression, queue, and any arguments
-- File-based (static read, no Rails introspection needed)
+- Resolves trusted application `recurring.yml` through Rails' configuration loader,
+  including ERB, filename-relative `require_relative`, and YAML aliases. On Rails
+  6.0 (before that loader existed), evaluates ERB with its filename and retains
+  safe YAML loading of scalars, hashes, arrays and symbols. ERB runs application
+  code in the extraction process; index only applications you trust.
+- Environment-wrapped task maps select the current Rails environment, including
+  custom names; an absent environment falls back to the first section, while an
+  explicitly empty section stays empty. Flat task maps remain supported.
+- Sidekiq-Cron remains safe-loaded YAML; Whenever remains a static DSL scan.
+  Invalid YAML/ERB, missing required files and runtime configuration errors are
+  logged and omit that schedule file. Source remains the original file text.
 - No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes
 
 ---

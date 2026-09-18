@@ -266,6 +266,11 @@ module Woods
       # `@current_identifiers` is what this run saw. Anything in the first and
       # not the second is stale, and the dump has to be rewritten to drop it.
       #
+      # Existing units can also change metadata without changing source (B-119).
+      # Compare their complete records with the promoted metadata snapshot;
+      # publishing those changes must not require a provider call or invalidate
+      # the source-hash checkpoint contract.
+      #
       # Full runs always dump: they rebuild the store from scratch, so "nothing
       # processed" there means the store is genuinely empty and the dump must
       # say so rather than leave a stale one promoted.
@@ -274,7 +279,7 @@ module Woods
       def snapshot_worth_writing?(stats, vanished, incremental:)
         return true unless incremental
 
-        stats[:processed].positive? || vanished.positive?
+        stats[:processed].positive? || vanished.positive? || @metadata_changed
       end
 
       # Fraction of the persisted units the vanished-unit sweep may remove
@@ -489,6 +494,9 @@ module Woods
         @current_identifiers = Set.new
         @durable_ids = nil
         @checkpoint_misses = 0
+        @metadata_changed = false
+        @persisted_metadata = nil
+        hydrate_persisted_metadata if incremental && persistable?
         hydrate_persisted_vectors if incremental && persistable?
         load_durable_store_ids if reconcilable?
       end
@@ -635,7 +643,22 @@ module Woods
       def persist_unit_metadata(unit_data)
         return unless @metadata_store
 
-        @metadata_store.store(storage_id(unit_data), unit_data)
+        id = storage_id(unit_data)
+        @metadata_changed ||= @persisted_metadata && @persisted_metadata.find(id) != unit_data
+        @metadata_store.store(id, unit_data)
+      end
+
+      # Compare with the promoted artifact, not a fresh metadata store or the
+      # source-only checkpoint. Retain old records until the guarded vanished
+      # sweep permits their deletion, just as vector hydration does.
+      def hydrate_persisted_metadata
+        return unless @metadata_store.respond_to?(:each_entry) && @metadata_store.respond_to?(:bulk_load)
+
+        require_relative '../index_artifact'
+        require_relative '../storage/snapshotter'
+
+        @persisted_metadata = Storage::Snapshotter::Metadata.load_or_empty(IndexArtifact.new(@output_dir))
+        @metadata_store.bulk_load(@persisted_metadata.each_entry)
       end
 
       # Refuse to index a unit whose real identifier already matches the

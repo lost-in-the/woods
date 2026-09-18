@@ -95,6 +95,50 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     FileUtils.rm_f(external) if external
   end
 
+  it 'omits full and incremental churn from a real shallow clone with one actionable warning' do
+    commit('second main commit')
+    commit('third main commit')
+    shallow = root.join('shallow')
+    git('clone', '-q', '--depth', '1', "file://#{root}", shallow.to_s)
+    output, status = Open3.capture2('git', '-C', shallow.to_s, 'rev-parse', '--is-shallow-repository')
+    expect(status.success?).to be(true)
+    expect(output.strip).to eq('true')
+    allow(Rails).to receive(:root).and_return(shallow)
+    allow(Open3).to receive(:capture3).and_call_original
+    expect(Open3).to receive(:capture3)
+      .with('git', '-C', shallow.to_s, 'rev-parse', '--is-shallow-repository').once.and_call_original
+    logger = Rails.logger
+    expect(logger).to receive(:warn).once.with(/shallow.*git fetch --unshallow.*fetch-depth: 0/)
+    expect(Woods::GitHistory).not_to receive(:new)
+
+    unit = Woods::ExtractedUnit.new(type: :service, identifier: 'Sample', file_path: shallow.join('sample.rb').to_s)
+    extractor.instance_variable_set(:@results, { services: [unit] })
+    extractor.dependency_graph.register(unit)
+    extractor.send(:enrich_with_git_data)
+    extractor.send(:annotate_graph_with_git_data)
+
+    expect(unit.metadata).not_to have_key(:git)
+    expect(extractor.dependency_graph.to_h[:nodes]['Sample']).not_to have_key(:commit_count)
+    expect(extractor.send(:incremental_git_data, ['Sample'])).to eq({})
+  end
+
+  it 'omits enrichment when repository depth cannot be verified' do
+    allow(Open3).to receive(:capture3).and_call_original
+    allow(Open3).to receive(:capture3)
+      .with('git', '-C', root.to_s, 'rev-parse', '--is-shallow-repository')
+      .and_return(['', 'repository inaccessible', double(success?: false)])
+    expect(Rails.logger).to receive(:warn).once.with(/repository depth could not be verified/)
+
+    2.times { expect(extractor.send(:git_available?)).to be(false) }
+  end
+
+  it 'keeps source archives without a repository quiet' do
+    FileUtils.rm_rf(root.join('.git'))
+    expect(Rails.logger).not_to receive(:warn)
+
+    expect(extractor.send(:git_available?)).to be(false)
+  end
+
   it 'includes side-branch changes after they are merged into HEAD' do
     git('merge', '--no-ff', '-qm', 'merge side', 'unmerged')
 

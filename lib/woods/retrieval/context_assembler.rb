@@ -132,6 +132,20 @@ module Woods
         build_result(sections, sources, effective_budget, @skipped_missing_metadata)
       end
 
+      # Estimate token count. Prefers the injected {TokenCounter} — which
+      # loads the provider's real tokenizer and returns exact counts — and
+      # falls back to the configured chars-per-token ratio when no counter
+      # is wired.
+      #
+      # @param text [String]
+      # @return [Integer]
+      def estimate_tokens(text)
+        return 0 if text.nil? || text.empty?
+        return @token_counter.count(text) if @token_counter
+
+        (text.length / @chars_per_token).ceil
+      end
+
       private
 
       # Suffix the Indexer appends when a single unit is split into multiple
@@ -398,20 +412,6 @@ module Woods
         # tokenizer runs again on the truncated output.
         target_chars = (token_budget * effective_chars_per_token * 0.9).to_i
         "#{text[0...target_chars]}\n... [truncated]"
-      end
-
-      # Estimate token count. Prefers the injected {TokenCounter} — which
-      # loads the provider's real tokenizer and returns exact counts — and
-      # falls back to the configured chars-per-token ratio when no counter
-      # is wired.
-      #
-      # @param text [String]
-      # @return [Integer]
-      def estimate_tokens(text)
-        return 0 if text.nil? || text.empty?
-        return @token_counter.count(text) if @token_counter
-
-        (text.length / @chars_per_token).ceil
       end
 
       # Effective chars-per-token for chunk-size sizing. When an exact

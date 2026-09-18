@@ -30,12 +30,12 @@ RSpec.describe 'lib/tasks/woods.rake woods:retrieve' do
 
   # From the `def <name>` line to the next def/desc/task at the same indent.
   def helper_body(name)
-    lines = source.lines
-    start = lines.index { |line| line.match?(/^  def #{Regexp.escape(name)}\b/) }
-    raise "could not locate the #{name} helper in lib/tasks/woods.rake" if start.nil?
+    lines = File.readlines(File.expand_path('../../lib/woods/rake_helpers.rb', __dir__), encoding: 'UTF-8')
+    start = lines.index { |line| line.match?(/^    def #{Regexp.escape(name)}\b/) }
+    raise "could not locate the #{name} helper in lib/woods/rake_helpers.rb" if start.nil?
 
     rest = lines[(start + 1)..]
-    stop = rest.index { |line| line.match?(/^  (def|desc|task)\b/) } || rest.length
+    stop = rest.index { |line| line.match?(/^    (def|desc|task)\b/) } || rest.length
     rest[0...stop].join
   end
 
@@ -88,7 +88,7 @@ RSpec.describe 'lib/tasks/woods.rake woods:retrieve' do
 
       expect(Woods::Embedding::Provider::Ollama).not_to receive(:new)
 
-      output = Object.new.send(:woods_run_retrieval, 'How does authentication work?')
+      output = Woods::RakeHelpers.woods_run_retrieval('How does authentication work?')
 
       expect(output).to include('Codebase Context')
     end
@@ -99,7 +99,7 @@ RSpec.describe 'lib/tasks/woods.rake woods:retrieve' do
       builder = Woods::Builder.new(Woods.configuration)
       expect(Woods::Builder).to receive(:new).with(Woods.configuration).and_return(builder)
 
-      Object.new.send(:woods_run_retrieval, 'anything at all')
+      Woods::RakeHelpers.woods_run_retrieval('anything at all')
     end
 
     it 'passes config.max_context_tokens as the retrieval budget' do
@@ -113,7 +113,7 @@ RSpec.describe 'lib/tasks/woods.rake woods:retrieve' do
       )
       expect(fake_retriever).to receive(:retrieve).with('q', budget: 1234).and_return(result)
 
-      Object.new.send(:woods_run_retrieval, 'q')
+      Woods::RakeHelpers.woods_run_retrieval('q')
     end
   end
 end

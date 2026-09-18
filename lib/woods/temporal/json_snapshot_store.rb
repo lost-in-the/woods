@@ -22,7 +22,8 @@ module Woods
     #
     # Implements the same public interface as SnapshotStore so the MCP server
     # tools work identically.
-    # Malformed retained snapshots are warned about and treated as absent:
+    # Malformed, non-object, or unreadable retained snapshots (including files
+    # removed during retention) are warned about and treated as absent:
     # +find+ returns nil, +diff+ returns an empty result, and history/list scans
     # omit the corrupt file.
     #
@@ -122,9 +123,9 @@ module Woods
         value.positive? ? value : PayloadStore::DEFAULT_RETENTION
       end
 
-      # Delete snapshots beyond the retention count, oldest by extracted_at
-      # first. +protect+ names the snapshot just captured; it is the newest
-      # anyway, and a tie on extracted_at must not delete it.
+      # Delete snapshots beyond the retention count, corrupt/unreadable files
+      # first, then oldest by extracted_at. +protect+ names the snapshot just
+      # captured; even an older timestamp must not cause its deletion.
       #
       # Failures are non-fatal: retention is housekeeping, and a failed
       # prune leaves the store growing as it did before rather than
@@ -133,7 +134,7 @@ module Woods
       # @param protect [String] git SHA of the just-captured snapshot
       # @return [void]
       def prune_snapshots(protect:)
-        summaries = load_all_summaries
+        summaries = retention_summaries
         overflow = summaries.size - @retention
         return unless overflow.positive?
 
@@ -142,7 +143,21 @@ module Woods
         warn "[Woods] Snapshot retention failed: #{e.message}"
       end
 
-      # Oldest `overflow` snapshots by extracted_at, never the protected one.
+      # Include unreadable snapshots in the bound. Only files named like a
+      # snapshot are eligible; the filename owns identity, not JSON content.
+      def retention_summaries
+        Dir.glob(File.join(@dir, '*.json')).filter_map do |path|
+          sha = File.basename(path, '.json')
+          next unless sha.match?(/\A[0-9a-f]+\z/i) && File.file?(path)
+
+          data = read_snapshot(path) || {}
+          timestamp = data['extracted_at']
+          valid = data['git_sha'] == sha && timestamp.is_a?(String)
+          { git_sha: sha, extracted_at: valid ? timestamp : '', corrupt: !valid }
+        end
+      end
+
+      # Corrupt files, then oldest `overflow` snapshots, never the protected one.
       # The protected SHA is rejected before sorting and slicing: it is
       # captured last, so its extracted_at can tie or precede older entries,
       # and letting it occupy the victim slice would leave the store one file
@@ -154,7 +169,7 @@ module Woods
       # @return [Array<String>]
       def retention_victims(summaries, overflow, protect)
         summaries.reject { |summary| summary[:git_sha] == protect }
-                 .sort_by { |summary| summary[:extracted_at] || '' }
+                 .sort_by { |summary| [summary[:corrupt] ? 0 : 1, summary[:extracted_at], summary[:git_sha]] }
                  .first(overflow)
                  .map { |summary| summary[:git_sha] }
       end
@@ -264,9 +279,15 @@ module Woods
       end
 
       def read_snapshot(path)
-        JSON.parse(AtomicFile.read(path))
+        data = JSON.parse(AtomicFile.read(path))
+        raise JSON::ParserError, 'expected a JSON object' unless data.is_a?(Hash)
+
+        data
       rescue JSON::ParserError => e
         warn "[Woods] Skipping corrupt snapshot #{File.basename(path)}: #{e.message}"
+        nil
+      rescue SystemCallError => e
+        warn "[Woods] Skipping unreadable snapshot #{File.basename(path)}: #{e.message}"
         nil
       end
 

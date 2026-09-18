@@ -16,7 +16,7 @@ module Woods
       #   provider = Woods::Embedding::Provider::OpenAI.new(api_key: ENV['OPENAI_API_KEY'])
       #   vector = provider.embed("class User < ApplicationRecord; end")
       #   vectors = provider.embed_batch(["text1", "text2"])
-      class OpenAI
+      class OpenAI # rubocop:disable Metrics/ClassLength
         include Interface
         include DiscardableClient
 
@@ -26,12 +26,19 @@ module Woods
           'text-embedding-3-small' => 1536,
           'text-embedding-3-large' => 3072
         }.freeze
-        # OpenAI embedding models share an 8191-token input cap across
+        # Conservatively chunk below OpenAI's 8192-token input limit across
         # text-embedding-3-small / -3-large / ada-002. The chunker uses
-        # this as a hard ceiling — the actual chunk size lands well
+        # 8191 as its ceiling — the actual chunk size lands well
         # below it once chars-per-token estimation and the prefix
         # allowance are factored in (see Builder#build_chunker).
         MAX_INPUT_TOKENS = 8191
+
+        # The API accepts at most 2048 inputs and 300,000 total tokens per
+        # request, with 8192 tokens per valid input. At most 36 inputs keeps
+        # even maximum-size texts below both limits without token estimates.
+        # https://developers.openai.com/api/reference/resources/embeddings/methods/create
+        MAX_REQUEST_INPUTS = 36
+        private_constant :MAX_REQUEST_INPUTS
 
         # @param api_key [String] OpenAI API key
         # @param model [String] OpenAI embedding model name (default: text-embedding-3-small)
@@ -57,7 +64,7 @@ module Woods
           vectors.first
         end
 
-        # Embed multiple texts in a single request.
+        # Embed multiple texts in bounded requests, preserving input order.
         #
         # Sorts results by the index field to guarantee ordering matches input.
         #
@@ -71,8 +78,12 @@ module Woods
             raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
           end
 
-          response = post_request(request_body(texts))
-          extract_validated_batch(response, texts.size)
+          vectors = texts.each_slice(MAX_REQUEST_INPUTS).flat_map do |slice|
+            response = post_request(request_body(slice))
+            extract_validated_batch(response, slice.size)
+          end
+          VectorValidation.validate!(vectors, expected_count: texts.size, provider: 'OpenAI')
+          vectors
         end
 
         # Return the dimensionality of vectors produced by this model.

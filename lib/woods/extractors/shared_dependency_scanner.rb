@@ -204,8 +204,8 @@ module Woods
       # Match _path/_url route helpers anywhere in source.
       # This intentionally matches all usages (assignments, string interpolation, etc.)
       # not just link_to/redirect_to calls — any reference to a route helper indicates
-      # a dependency on that controller. False positives from non-route _path/_url
-      # suffixes (file_path, base_url, etc.) are filtered by RouteHelperResolver::IGNORED_HELPER_PREFIXES.
+      # a dependency on that controller. RouteHelperResolver accepts only names
+      # present in the live controller/action route map, excluding unknown helpers.
       # Requires the including class to also include RouteHelperResolver
       # and call build_route_helper_map in its initializer.
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/

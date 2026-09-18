@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
@@ -151,7 +153,9 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract GraphQL file #{file_path}: #{e.message}") if defined?(Rails)
+        if defined?(Rails)
+          SourceInputs::ConsumerErrors.log(self, "Failed to extract GraphQL file #{file_path}: #{e.message}")
+        end
         nil
       end
 
@@ -191,7 +195,9 @@ module Woods
 
         unit
       rescue StandardError => e
-        Rails.logger.error("Failed to extract GraphQL type #{type_class.name}: #{e.message}") if defined?(Rails)
+        if defined?(Rails)
+          SourceInputs::ConsumerErrors.log(self, "Failed to extract GraphQL type #{type_class.name}: #{e.message}")
+        end
         nil
       end
 

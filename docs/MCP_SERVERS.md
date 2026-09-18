@@ -27,6 +27,15 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
+For embedding-free ranked retrieval, start Index MCP with
+`WOODS_RETRIEVAL_MODE=lexical`. This opt-in reads the published extraction units;
+it does not probe providers or load vectors. `woods_status.retriever.mode` reports
+`lexical`, and inactive embedding fields are `null`. The default semantic mode
+keeps its existing embedding setup and failure behavior. See
+[retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) for scoring,
+query limits and measured tradeoffs. Both packaged stdio and HTTP launches honor
+the setting; put it in the MCP process's environment, not just a Rails initializer.
+
 The stdio server can then run outside Rails. Point it at the index root (`tmp/woods/` by default), not at an internal generation or payload directory.
 
 ### Configure a stdio client
@@ -60,6 +69,12 @@ bundle exec woods-mcp ./tmp/woods
 Keep stdout reserved for MCP protocol messages. Diagnose startup failures from stderr or by running the same command in a terminal.
 
 ### Client configuration locations
+
+Supporting development builds offer preview/apply/update/remove ownership for
+Claude Code project or explicit user configuration. See
+[managed configuration](AGENT_SETUP.md#managed-claude-code-configuration) for
+`woods-agent-config`, host/Compose preflight, conflict handling, and recovery.
+Manual configuration remains available for older gems and other clients.
 
 MCP clients expose project or user-level server settings in different locations. Use project scope when available, preserve the `command`, `args`, and absolute `cwd` semantics above, and translate only the surrounding client-specific format. Woods is model-independent: compatibility depends on the client supporting MCP stdio or Streamable HTTP, not on whether the connected model is from OpenAI, Anthropic, Google, xAI, or another provider.
 
@@ -103,6 +118,27 @@ Reconnect the client, then call:
 
 Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Modern MCP 2026-07-28 requests carry per-request protocol metadata and can use `server/discover` without an initialization handshake; older clients still use `initialize`. A valid raw smoke test must implement one complete flow rather than sending an isolated `tools/list` or `tools/call` request.
 
+### Initialization guidance
+
+The Index Server supplies a short, client-neutral `instructions` field through
+the SDK's `initialize` response and modern `server/discover`. It describes the
+status → discovery → inspection → bounded traversal → source-verification
+workflow, and lists only the tools actually registered by this server.
+Instructions are stable for unchanged tool registration and bounded to 2,048
+UTF-8 bytes across supported configurations. Building the text does not probe
+providers, extract code, or write configuration.
+
+Registration alone does not establish retrieval readiness: check `woods_status`
+before using `codebase_retrieve`, including after reload. The guidance grants
+no extraction, configuration-change, or Console authorization. Detailed usage
+belongs in the [agent guide](AGENT_GUIDE.md).
+
+This addition is unreleased after `2.0.0.beta2`. The SDK omits `instructions`
+when negotiating protocol `2024-11-05`; that behavior is preserved. Older gems,
+legacy clients, and clients that do not show server instructions can use the
+agent guide or investigation skill. Leave protocol negotiation enabled rather
+than pinning a newer version solely to obtain guidance.
+
 ### Tools (29 — 14 registered in the packaged default)
 
 The Index Server defines 29 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.
@@ -122,7 +158,7 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 | `domain_clusters` | Discover connected domains in the graph |
 | `pagerank` | Find structurally central units |
 | `reload` | Reload a newly published generation without restarting the client |
-| `codebase_retrieve` | Natural-language retrieval; returns a configuration error until embeddings exist |
+| `codebase_retrieve` | Natural-language retrieval with embeddings or explicit lexical mode over extraction output |
 
 The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
 
@@ -133,6 +169,43 @@ directory. If it cannot acquire or create that lock, reload returns a typed degr
 error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
+
+### Search completeness
+
+Search responses retain `query`, `result_count`, and `results`; `result_count`
+is the number returned, not an estimated total. The additive `completeness`
+object describes the requested types, literal filters, and fields in the pinned
+generation. This contract is unreleased after `2.0.0.beta2`.
+
+| `reason` | `status` | `has_more` | `total_matches` |
+|---|---|---|---|
+| `exhausted` | `complete` | `false` | Exact count |
+| `result_limit` | `partial` | `true` | `null` (unknown) |
+| `scan_budget` or `regex_timeout` | `partial` | `null` (unknown) | `null` (unknown) |
+
+`matched_lower_bound` counts distinct observed `(type, identifier)` matches,
+including at most one lookahead match beyond `limit`. A result-limit response
+therefore establishes another match; an exactly full page can instead be
+complete if the requested domain is exhausted. Deep lookahead shares
+`WOODS_SEARCH_MAX_SCAN` with the initial scan and retains round-robin scanning
+across types. Search does not count the entire omitted tail or offer pagination.
+The existing `types` filter and result labels name directory families:
+`rails_source` includes both Rails and gem source units. Deep reads accept those
+two stored types only in that shared directory; `lookup` and lexical retrieval
+retain the unit's actual `rails_source` or `gem_source` type.
+
+All partial responses retain `partial: true` and include a narrowing `hint`.
+JSON exposes these fields; Markdown, plain text, and Claude formats label the
+returned count, stopping reason, known/unknown remainder, and total explicitly.
+Narrow `types`, literal `exact_prefix`/`exact_suffix`, or deep `fields` before
+using discovery as exhaustive evidence. Completeness applies to this index and
+query domain, not to unindexed application code.
+
+Detected missing, unreadable, or corrupt artifacts remain `isError: true` with
+`_meta.error_code: "corrupt_artifact"`. Their `_meta.completeness` has
+`status: "unknown"`, `reason: "unreadable_or_corrupt_source"`, and `null` for
+`has_more`, `total_matches`, and `matched_lower_bound`; no successful empty
+result is substituted. Inspect `woods_status` and run `woods:validate`.
 
 ### Dependency traversal budgets
 
@@ -270,3 +343,21 @@ Report vulnerabilities privately through [SECURITY.md](../SECURITY.md).
 5. Check [Troubleshooting](TROUBLESHOOTING.md) for the exact stderr message.
 
 For agent query behavior after connection, continue to [Agent guide](AGENT_GUIDE.md).
+
+### Explicit retrieval and discovery scope
+
+On a server whose tool schema advertises them, `packages` and `source_paths` narrow
+`search` and `codebase_retrieve` before candidate limits. These are per-call
+arguments, not configuration settings. Inspect applied scope and completeness;
+a narrow graph query can omit relevant cross-boundary dependencies. See the
+[scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
+root/nested ownership, path normalization, errors, storage support, and cost.
+
+### Source freshness in status
+
+`woods_status` accepts optional `source_check: "quick"` (default, 250ms scan) or
+`"deep"` (five seconds). `index.source_freshness` describes the served generation
+as `current`, `drifted` or `unknown`; missing source/key and incomplete capture
+never count as current. No Rails initialization or provider call is needed.
+See [source freshness](SOURCE_FRESHNESS.md) for scope, private-key handling and
+fresh-process extraction. Existing HEAD/dirty fields remain separate diagnostics.

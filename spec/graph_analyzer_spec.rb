@@ -3,6 +3,8 @@
 require 'spec_helper'
 
 RSpec.describe Woods::GraphAnalyzer do
+  include_context 'isolated Woods runtime'
+
   let(:graph) { Woods::DependencyGraph.new }
   let(:analyzer) { described_class.new(graph) }
 
@@ -757,6 +759,65 @@ RSpec.describe Woods::GraphAnalyzer do
 
       expect(entries.first(2).map { |e| e[:to] }).to eq(%w[Hub Hub])
       expect(analyzer.volatile_dependencies(limit: 1).size).to eq(1)
+    end
+
+    it 'lets other hot dependencies into the report by capping each target before the global limit' do
+      graph.register(churned('BusyHub', 100))
+      graph.register(churned('OtherHub', 50))
+      25.times do |i|
+        graph.register(churned(format('BusyConsumer%02d', i), 5, type: :service, dependencies: [
+                                 { type: :model, target: 'BusyHub', via: :code_reference }
+                               ]))
+      end
+      3.times do |i|
+        graph.register(churned("OtherConsumer#{i}", 5, type: :service, dependencies: [
+                                 { type: :model, target: 'OtherHub', via: :code_reference }
+                               ]))
+      end
+
+      unchanged = analyzer.analyze
+      expect(unchanged[:volatile_dependencies].map { |entry| entry[:to] }).to eq(['BusyHub'] * 20)
+      expect(described_class.new(graph, volatile_limit_per_target: nil).analyze).to eq(unchanged)
+      report = described_class.new(graph, volatile_limit_per_target: 2).analyze
+
+      expected = [%w[BusyConsumer00 BusyHub], %w[BusyConsumer01 BusyHub],
+                  %w[OtherConsumer0 OtherHub], %w[OtherConsumer1 OtherHub]]
+      expect(report[:volatile_dependencies].map { |entry| [entry[:from], entry[:to]] }).to eq(expected)
+      expect(report[:stats]).to include(
+        volatile_dependency_count: 28, volatile_dependencies_limit: 20,
+        volatile_dependencies_limit_per_target: 2, volatile_dependency_reported_count: 4
+      )
+    end
+
+    it 'budgets separately for report targets with the same identifier and different types' do
+      capped = described_class.new(graph, volatile_limit_per_target: 1)
+      # Isolate selection from the current graph's primary-node projection:
+      # typed report rows must not share a budget merely because names match.
+      rows = [
+        { from: 'A', to: 'Shared', to_type: :model, via: 'belongs_to' },
+        { from: 'B', to: 'Shared', to_type: :model, via: 'code_reference' },
+        { from: 'C', to: 'Shared', to_type: :service, via: 'code_reference' }
+      ]
+      allow(capped).to receive(:all_volatile_dependencies).and_return(rows)
+
+      expect(capped.volatile_dependencies).to eq([rows[0], rows[2]])
+    end
+
+    it 'preserves distinct relationship edges while limiting each dependency' do
+      graph.register(churned('Hub', 30))
+      graph.register(churned('Consumer', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference },
+                               { type: :model, target: 'Hub', via: :belongs_to }
+                             ]))
+      graph.register(churned('OtherConsumer', 5, type: :service, dependencies: [
+                               { type: :model, target: 'Hub', via: :code_reference }
+                             ]))
+
+      capped = described_class.new(graph, volatile_limit_per_target: 2)
+      expected = [%w[Consumer belongs_to], %w[Consumer code_reference]]
+      expect(capped.volatile_dependencies.map { |entry| [entry[:from], entry[:via]] }).to eq(expected)
+      expect(capped.volatile_dependencies(limit: 1).size).to eq(1)
+      expect(capped.analyze[:stats][:volatile_dependency_count]).to eq(3)
     end
 
     it 'is part of analyze with a count in stats' do

@@ -614,6 +614,47 @@ RSpec.describe Woods::Retrieval::SearchExecutor do
       expect(sources).to include(:vector)
     end
 
+    it 'orders equal-score candidates by identity and source before truncation and RRF' do
+      classification = classifier.classify('Explain everything about the application')
+      vector = %w[UserService Order User].map do |id|
+        described_class::Candidate.new(identifier: id, score: 0.5, source: :vector, metadata: {})
+      end
+      keyword = %w[User Order].map do |id|
+        described_class::Candidate.new(identifier: id, score: 0.5, source: :keyword, metadata: {})
+      end
+      allow(graph_store).to receive(:dependencies_of).and_return([])
+      allow(executor).to receive(:execute_vector).and_return(vector)
+      allow(executor).to receive(:execute_keyword).and_return(keyword)
+      result = executor.execute(query: 'application', classification: classification, strategy: :hybrid, limit: 2)
+      first = result.candidates.map { |candidate| [candidate.identifier, candidate.source] }
+      expect(first).to eq([['Order', :keyword], ['Order', :vector], ['User', :keyword], ['User', :vector]])
+
+      allow(executor).to receive(:execute_vector).and_return(vector.reverse)
+      allow(executor).to receive(:execute_keyword).and_return(keyword.reverse)
+      reversed = executor.execute(query: 'application', classification: classification, strategy: :hybrid, limit: 2)
+      expect(reversed.candidates.map { |candidate| [candidate.identifier, candidate.source] }).to eq(first)
+
+      ranker = Woods::Retrieval::Ranker.new(metadata_store: metadata_store, graph_store: graph_store)
+      expect(ranker.rank(reversed.candidates, classification: classification))
+        .to eq(ranker.rank(result.candidates, classification: classification))
+    end
+
+    it 'expands the same top vector seeds when scores tie and insertion order changes' do
+      classification = classifier.classify('Explain everything about the application')
+      vector = %w[UserService UsersController User Order].map do |id|
+        described_class::Candidate.new(identifier: id, score: 0.9, source: :vector, metadata: {})
+      end
+      allow(executor).to receive(:execute_vector).and_return(vector)
+      allow(executor).to receive(:execute_keyword).and_return([])
+      allow(graph_store).to receive(:dependencies_of).and_return([])
+      expect(graph_store).to receive(:dependencies_of).with('Order').once
+      expect(graph_store).to receive(:dependencies_of).with('User').once
+      expect(graph_store).to receive(:dependencies_of).with('UserService').once
+      expect(graph_store).not_to receive(:dependencies_of).with('UsersController')
+
+      executor.execute(query: 'application', classification: classification, strategy: :hybrid)
+    end
+
     # P1 fix: execute_hybrid used to run deduplicate(all).first(limit)
     # BEFORE the Ranker ever saw the candidates, keeping only the
     # best-scored source per identifier — so a unit found by both vector

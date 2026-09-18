@@ -8,6 +8,8 @@ require 'open3'
 require 'woods/extractor'
 
 RSpec.describe Woods::Extractor do
+  include_context 'isolated Woods runtime'
+
   # Use a real tmpdir so Pathname#exist? works without stubs.
   let(:tmpdir) { Dir.mktmpdir('woods_test') }
   let(:rails_root) { Pathname.new(tmpdir) }
@@ -23,6 +25,21 @@ RSpec.describe Woods::Extractor do
   end
 
   let(:extractor) { described_class.new(output_dir: File.join(tmpdir, 'output')) }
+
+  describe '#reconcile_model_mixins' do
+    it 'retains runtime mixins missing from incomplete eager-load discovery' do
+      concerns = double('ConcernExtractor', runtime_model_mixins: {})
+      extractor.instance_variable_set(:@incremental_extractors, { concerns: concerns })
+      extractor.instance_variable_set(:@eager_load_complete, false)
+      extractor.dependency_graph.register(
+        Woods::ExtractedUnit.new(type: :concern, identifier: 'Card::Pinnable',
+                                 file_path: rails_root.join('app/models/card/pinnable.rb').to_s)
+      )
+
+      expect(extractor.send(:reconcile_model_mixins, Set.new)).to be_empty
+      expect(extractor.dependency_graph.node_types('Card::Pinnable')).to include(:concern)
+    end
+  end
 
   describe '#raise_on_publication_failure!' do
     let(:output_dir) { File.join(tmpdir, 'output') }
@@ -2164,7 +2181,10 @@ RSpec.describe Woods::Extractor do
         .to raise_error(
           Woods::ExtractionError,
           %r{service 'Domain::Container'.*services/Domain::Container\.rb.*container/renderer\.rb}m
-        )
+        ) do |error|
+          expect(error.message).to include('Zeitwerk mode with Zeitwerk >= 2.6.9', 'classic-mode',
+                                           'before changing valid namespace wrappers', 'genuine duplicate')
+        end
     end
   end
 
@@ -2791,6 +2811,22 @@ RSpec.describe Woods::Extractor do
       # VOLATILE_UNIT_KEYS: an untouched unit keeping an older stamp is
       # inside the contract.
       expect(JSON.parse(Woods::AtomicFile.read(target))['extracted_at']).to eq(base_time.iso8601)
+    end
+
+    [false, true].each do |pretty|
+      it "rewrites nested extracted_at metadata changes with pretty_json=#{pretty}" do
+        Woods.configuration.pretty_json = pretty
+        unit.metadata = { imported: { extracted_at: base_time.iso8601 } }
+        extractor.send(:write_unit_file, target, unit)
+        allow(Time).to receive(:now).and_return(base_time + 3600)
+        unit.metadata[:imported][:extracted_at] = (base_time + 1800).iso8601
+
+        extractor.send(:write_unit_file, target, unit)
+
+        written = JSON.parse(Woods::AtomicFile.read(target))
+        expect(written.dig('metadata', 'imported', 'extracted_at')).to eq((base_time + 1800).iso8601)
+        expect(written['extracted_at']).to eq((base_time + 3600).iso8601)
+      end
     end
 
     it 'still rewrites when a real field changed along with the stamp' do
@@ -3575,6 +3611,14 @@ RSpec.describe Woods::Extractor do
 
       expect(Woods::GraphAnalyzer).to receive(:new)
         .with(extractor.dependency_graph, hash_including(volatile_ratio: 4.5)).and_call_original
+      extractor.send(:build_graph_analyzer)
+    end
+
+    it 'passes the optional per-target volatile dependency limit to the analyzer' do
+      Woods.configuration.volatile_dependency_limit_per_target = 3
+
+      expect(Woods::GraphAnalyzer).to receive(:new)
+        .with(extractor.dependency_graph, hash_including(volatile_limit_per_target: 3)).and_call_original
       extractor.send(:build_graph_analyzer)
     end
 

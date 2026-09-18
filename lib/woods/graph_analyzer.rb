@@ -71,12 +71,14 @@ module Woods
 
     # @param dependency_graph [DependencyGraph] The graph to analyze
     # @param volatile_ratio [Numeric] see {#volatile_dependencies}
+    # @param volatile_limit_per_target [Integer, nil] maximum edges per typed dependency, before the global limit
     # @param cycle_limit [Integer, nil] see {DEFAULT_CYCLE_LIMIT}
     # @param cycle_max_length [Integer, nil] see {DEFAULT_CYCLE_MAX_LENGTH}
-    def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO,
+    def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO, volatile_limit_per_target: nil,
                    cycle_limit: DEFAULT_CYCLE_LIMIT, cycle_max_length: DEFAULT_CYCLE_MAX_LENGTH)
       @graph = dependency_graph
       @volatile_ratio = volatile_ratio.to_f
+      @volatile_limit_per_target = volatile_limit_per_target
       @cycle_limit = cycle_limit
       @cycle_max_length = cycle_max_length
       @cycle_limit_reached = false
@@ -296,15 +298,16 @@ module Woods
     # dependencies with fewer than {VOLATILE_MIN_COMMITS} commits or a
     # `new` change frequency are skipped. Ranked by the dependency's
     # PageRank so the most-depended-on volatile unit comes first. `limit`
-    # caps what this method hands back; {#analyze}'s
+    # caps what this method hands back after the optional per-target cap; {#analyze}'s
     # `stats[:volatile_dependency_count]` reports the full qualifying count
     # regardless of `limit`, and `stats[:volatile_dependencies_limit]` reports
-    # the cap, so a reader of the array alone can tell it was truncated.
+    # the global cap. An enabled per-target cap also publishes its setting
+    # and the final reported count; the full qualifying count is unchanged.
     #
     # @param limit [Integer] maximum entries
     # @return [Array<Hash>] `{ from:, from_type:, to:, to_type:, via:, from_commits:, to_commits:, ratio:, pagerank: }`
     def volatile_dependencies(limit: DEFAULT_VOLATILE_LIMIT)
-      all_volatile_dependencies.first(limit)
+      capped_volatile_dependencies.first(limit)
     end
 
     # Edges that cross a Packwerk package boundary the source package never
@@ -397,8 +400,7 @@ module Woods
           cycle_count: computed_cycles.size,
           cycle_limit_reached: cycle_limit_reached?,
           cross_database_edge_count: computed_cross_database.size,
-          volatile_dependency_count: all_volatile_dependencies.size,
-          volatile_dependencies_limit: DEFAULT_VOLATILE_LIMIT,
+          **volatile_dependency_stats(computed_volatile),
           undeclared_package_edge_count: computed_undeclared.size
         }
       }
@@ -720,6 +722,33 @@ module Woods
     # @return [Array<Hash>] sorted by pagerank, ratio, from, to, via
     def all_volatile_dependencies
       @all_volatile_dependencies ||= compute_volatile_dependencies
+    end
+
+    # Apply the optional hub cap after ranking, before the overall report
+    # limit. Keep individual relationship edges; two `via` values consume two
+    # slots. Type is part of dependency identity, never just the display name.
+    def capped_volatile_dependencies
+      return all_volatile_dependencies unless @volatile_limit_per_target
+
+      counts = Hash.new(0)
+      all_volatile_dependencies.select do |entry|
+        target = [entry[:to_type], entry[:to]]
+        counts[target] += 1
+        counts[target] <= @volatile_limit_per_target
+      end
+    end
+
+    # Preserve the default artifact exactly; expose extra selection metadata
+    # only when the per-target cap was requested. The full count always means
+    # all ratio-qualified edges, before either cap.
+    def volatile_dependency_stats(reported)
+      stats = { volatile_dependency_count: all_volatile_dependencies.size,
+                volatile_dependencies_limit: DEFAULT_VOLATILE_LIMIT }
+      if @volatile_limit_per_target
+        stats[:volatile_dependencies_limit_per_target] = @volatile_limit_per_target
+        stats[:volatile_dependency_reported_count] = reported.size
+      end
+      stats
     end
 
     # Short-circuits to `[]`, skipping the PageRank computation entirely,

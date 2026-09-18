@@ -86,8 +86,11 @@ module Woods
           type_filter: type_filter
         )
 
+        candidates = expand_graph_candidates(candidates)
+        candidates = order_hybrid_candidates(candidates) if strategy == :hybrid
+
         ExecutionResult.new(
-          candidates: bounded_candidates(expand_graph_candidates(candidates), limit, strategy),
+          candidates: bounded_candidates(candidates, limit, strategy),
           strategy: strategy,
           query: query
         )
@@ -376,7 +379,7 @@ module Woods
 
         # Graph expansion on top vector results
         graph_candidates = []
-        vector_candidates.first(3).each do |candidate|
+        order_hybrid_candidates(vector_candidates).first(3).each do |candidate|
           deps = @graph_store.dependencies_of(StorageIdentity.identifier(candidate.identifier.sub(/#chunk_\d+\z/, '')))
           deps.each do |dep|
             graph_candidates << Candidate.new(
@@ -385,10 +388,16 @@ module Woods
           end
         end
 
-        # Sorted (not deduplicated) so the caller's later `.first(limit)`
-        # keeps the strongest candidates across all sources instead of
-        # exhausting the budget on whichever source is concatenated first.
-        (vector_candidates + keyword_candidates + graph_candidates).sort_by { |c| -c.score }
+        # Keep every source occurrence for RRF. Ordering happens after typed
+        # graph identities expand, before the caller truncates unique units.
+        vector_candidates + keyword_candidates + graph_candidates
+      end
+
+      # Equal scores must not let insertion order or Ruby's sort implementation
+      # choose graph seeds, retained units, or a source's RRF rank. Identity is
+      # the tie-break; source makes cross-source occurrences deterministic too.
+      def order_hybrid_candidates(candidates)
+        candidates.sort_by { |candidate| [-candidate.score, candidate.identifier.to_s, candidate.source.to_s] }
       end
 
       # Direct strategy: look up specific identifiers from keywords.

@@ -74,6 +74,7 @@ RSpec.describe Woods::Retriever do
     allow(executor_double).to receive(:execute).and_return(execution_result)
     allow(ranker_double).to receive(:rank).and_return(ranked_candidates)
     allow(assembler_double).to receive(:assemble).and_return(assembled_context)
+    allow(assembler_double).to receive(:estimate_tokens) { |text| (text.length / 4.0).ceil }
 
     # build_structural_context calls metadata_store.count; default to 0 (nil result)
     allow(metadata_store).to receive(:count).and_return(0)
@@ -116,10 +117,10 @@ RSpec.describe Woods::Retriever do
       expect(result.sources).to eq(assembled_context.sources)
     end
 
-    it 'includes tokens_used from assembler' do
+    it 'counts tokens in the delivered context' do
       result = retriever.retrieve('How does the User model work?')
 
-      expect(result.tokens_used).to eq(120)
+      expect(result.tokens_used).to eq((result.context.length / 4.0).ceil)
     end
 
     it 'includes budget' do
@@ -629,7 +630,7 @@ RSpec.describe Woods::Retriever do
       expect(result.trace.strategy).to eq(:vector)
       expect(result.trace.candidate_count).to eq(1)
       expect(result.trace.ranked_count).to eq(1)
-      expect(result.trace.tokens_used).to eq(120)
+      expect(result.trace.tokens_used).to eq(result.tokens_used)
       expect(result.trace.elapsed_ms).to be_a(Numeric)
       expect(result.trace.elapsed_ms).to be >= 0
     end

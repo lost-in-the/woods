@@ -59,7 +59,7 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
         ]
       }
       out = renderer.render(:search, data)
-      expect(out).to include('Search: "user" (2 results)')
+      expect(out).to include('Search: "user" (2 results returned)')
       expect(out).to include('User (model)')
       expect(out).to include('UserMailer (mailer)')
     end
@@ -67,7 +67,7 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
     it 'handles empty results' do
       data = { query: 'nothing', result_count: 0, results: [] }
       out = renderer.render(:search, data)
-      expect(out).to include('Search: "nothing" (0 results)')
+      expect(out).to include('Search: "nothing" (0 results returned)')
     end
   end
 

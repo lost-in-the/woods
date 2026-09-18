@@ -37,7 +37,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
   let(:extractor) do
     routes_double = double('Routes', routes: [], named_routes: {})
     app_double = double('Application', routes: routes_double)
-    stub_const('Rails', double('Rails', application: app_double))
+    stub_const('Rails', double('Rails', application: app_double, root: Pathname.new('/app')))
     described_class.new
   end
 
@@ -79,7 +79,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       only, _, if_labels, _unless_labels = extractor.send(:extract_callback_conditions, callback)
 
       expect(only).to eq(%w[destroy])
-      expect(if_labels).to eq(['Proc'])
+      expect(if_labels).to eq(["#<Proc #{proc_condition.source_location.join(':')}>"])
     end
 
     it 'handles callbacks with no conditions' do
@@ -100,6 +100,17 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
       expect(if_labels).to eq([':admin?'])
     end
+  end
+
+  it 'uses the callable rather than the numeric callback key exposed by Rails 6' do
+    callable = proc { true }
+    callback = build_callback(kind: :before, filter: callable.object_id)
+    callback.define_singleton_method(:raw_filter) { callable }
+    controller = double('Controller', _process_action_callbacks: [callback])
+    expected = "#<Proc #{callable.source_location.join(':')}>"
+
+    expect(extractor.send(:extract_filter_chain, controller)).to eq([{ kind: :before, filter: expected }])
+    expect(extractor.send(:applicable_filters, controller, 'index')).to eq([{ kind: :before, filter: expected }])
   end
 
   # ── callback_applies_to_action? ──────────────────────────────────────
@@ -184,8 +195,26 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(extractor.send(:condition_label, :admin?)).to eq(':admin?')
     end
 
-    it "labels procs as 'Proc'" do
-      expect(extractor.send(:condition_label, proc { true })).to eq('Proc')
+    it 'labels procs by kind and root-relative source location' do
+      callback = proc { true }
+      condition = -> { true }
+      allow(callback).to receive(:source_location).and_return(['/app/app/controllers/example_controller.rb', 12])
+      allow(condition).to receive(:source_location).and_return(['/app/app/controllers/example_controller.rb', 15])
+
+      expect(extractor.send(:condition_label, callback)).to eq('#<Proc app/controllers/example_controller.rb:12>')
+      expect(extractor.send(:condition_label, condition)).to eq('#<lambda app/controllers/example_controller.rb:15>')
+    end
+
+    it 'labels native procs without runtime identity' do
+      callback = proc { true }
+      allow(callback).to receive(:source_location).and_return(nil)
+      expect(extractor.send(:condition_label, callback)).to eq('#<Proc native>')
+    end
+
+    it 'does not strip a similar root prefix from an external source' do
+      condition = proc { true }
+      allow(condition).to receive(:source_location).and_return(['/application/callbacks.rb', 3])
+      expect(extractor.send(:condition_label, condition)).to eq('#<Proc /application/callbacks.rb:3>')
     end
 
     it 'labels strings as themselves' do

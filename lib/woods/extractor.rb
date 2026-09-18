@@ -57,6 +57,7 @@ require_relative 'flow_precomputer'
 require_relative 'change_set'
 require_relative 'generation'
 require_relative 'path_dispatcher'
+require_relative 'source_inputs/session'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -357,7 +358,7 @@ module Woods
     # flat index — the output root also holds `generation.json`, `dumps/`,
     # `tasks/`, `woods.sqlite3` and `payloads/` itself, none of which belong
     # to a generation's payload.
-    PAYLOAD_FILES = %w[manifest.json dependency_graph.json graph_analysis.json SUMMARY.md].freeze
+    PAYLOAD_FILES = %w[manifest.json source_inputs.json dependency_graph.json graph_analysis.json SUMMARY.md].freeze
 
     # Payload directories that are not per-type unit directories.
     PAYLOAD_DIRS = %w[flows].freeze
@@ -398,6 +399,7 @@ module Woods
     def extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       setup_output_directory
+      profile_phase('source capture') { begin_source_inputs('full') }
       ModelNameCache.reset!
       # @package_resolver alone is not enough: #package_resolver builds
       # through #extractor_for, which memoizes into @incremental_extractors.
@@ -501,6 +503,7 @@ module Woods
         write_structural_summary
       end
       profile_phase('snapshot') { capture_snapshot }
+      @source_inputs.full_units(@results, consumers: @extractors)
       publish_generation('full')
 
       log_summary
@@ -540,7 +543,7 @@ module Woods
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     def extract_changed(changed_files)
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
-      prepare_incremental_run
+      prepare_incremental_run(operation: 'incremental')
 
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       affected_types = Set.new
@@ -565,6 +568,7 @@ module Woods
 
       profile_phase('reconciliation') do
         touched.merge(reconcile_class_based_types(affected_types))
+        touched.merge(reconcile_model_mixins(affected_types))
         touched.merge(rerun_whole_app_extractors(change_set, affected_types))
         touched.merge(reannotate_packages(change_set, affected_types))
         pruned = prune_vanished_units(change_set, affected_types)
@@ -652,7 +656,7 @@ module Woods
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
       known.uniq!
 
-      prepare_incremental_run
+      prepare_incremental_run(operation: 'refresh')
       affected_types = Set.new
       touched = known.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
@@ -773,7 +777,8 @@ module Woods
     #
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
-    def prepare_incremental_run
+    def prepare_incremental_run(operation: 'incremental')
+      profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
       ensure_incremental_baseline!(graph_path)
@@ -859,6 +864,7 @@ module Woods
       # Resolve (and if necessary rename) the payload first, so the flush
       # below covers the directory under the name the pointer will carry.
       payload = publishable_payload_name(generation)
+      profile_phase('source verification') { write_source_inputs } if payload
       profile_phase('payload sync') { sync_payload }
       marker = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
       profile_phase('payload prune') { prune_payloads(marker.number) }
@@ -878,6 +884,38 @@ module Woods
       )
       Rails.logger.error "[Woods] #{@publication_error.message}"
       nil
+    end
+
+    # Capture before eager loading or extraction; only an explicit fresh-launch
+    # handoff can additionally establish the pre-Bundler/Rails boot boundary.
+    def begin_source_inputs(operation)
+      @source_inputs = SourceInputs::Session.new(root: Rails.root, output_dir: @output_dir,
+                                                 baseline_path: source_input_baseline_path,
+                                                 operation: operation)
+    end
+
+    def source_input_baseline_path
+      generation = Generation.new(output_dir: @output_dir)
+      marker = generation.current
+      directory = generation.payload_dir(marker)
+      return nil unless marker.payload && directory != generation.root
+
+      directory.join(SourceInputs::Manifest::FILE_NAME)
+    rescue TypeError, NoMethodError
+      nil
+    end
+
+    def source_consumer_failed?(key, consumer = extractor_for(key))
+      failed = consumer.nil? || SourceInputs::ConsumerErrors.failed?(consumer)
+      @source_inputs&.unverified("extractor:#{key}") if failed
+      failed
+    end
+
+    def write_source_inputs
+      return unless @source_inputs
+
+      manifest = @source_inputs.finish(generation: @payload_generation, eager_load_complete: @eager_load_complete)
+      AtomicFile.write(payload_dir.join(SourceInputs::Manifest::FILE_NAME), JSON.pretty_generate(manifest.data))
     end
 
     # Open the payload directory this run publishes into, seeded from the
@@ -1395,8 +1433,10 @@ module Woods
     def same_type_collision_message(type, unit, prior_path)
       "same-type identifier collision: #{type.to_s.singularize} '#{unit.identifier}' derived from " \
         "two different sources ('#{prior_path || 'no file'}' and '#{unit.file_path || 'no file'}'); " \
-        'only one unit could ever be indexed, so extraction aborted — either merge the ' \
-        'declarations into one file or split them into distinct constants'
+        'only one unit could ever be indexed, so extraction aborted. ' \
+        'Wrapper-nested class naming requires Zeitwerk mode with Zeitwerk >= 2.6.9; on older loaders or ' \
+        'classic-mode hosts, check that support before changing valid namespace wrappers. ' \
+        'For a genuine duplicate, merge the declarations into one file or split them into distinct constants'
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1778,6 +1818,7 @@ module Woods
       GraphAnalyzer.new(
         @dependency_graph,
         volatile_ratio: ratio,
+        volatile_limit_per_target: config&.volatile_dependency_limit_per_target,
         cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
         cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
       )
@@ -1950,13 +1991,13 @@ module Woods
     # exactly this value shape — no fractional seconds, `Z` or a `±hh:mm`
     # offset — and `spec/extracted_unit_spec.rb` pins that, so a change to the
     # stamp's shape fails a spec instead of quietly un-matching this mask.
-    # The value constraint is what keeps the mask honest against user code: a
-    # bare `"extracted_at":` cannot occur inside any JSON *string* value
-    # (interior quotes serialize as `\"`), so only a real JSON key can match,
-    # and only when it holds a timestamp — which no extractor emits below the
-    # top level.
+    # Match only the final top-level stamp, followed by the source_hash field
+    # and the document's closing brace. Nested metadata may use the same key
+    # and timestamp shape; changing it must still rewrite the unit. Escaped
+    # quotes inside string values cannot match these JSON field boundaries.
     EXTRACTED_AT_SCALAR =
-      /("extracted_at":\s*")\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})(?=")/
+      /("extracted_at":\s*")\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})
+       (?=",\s*"source_hash":\s*"[0-9a-f]{64}"\s*}\s*\z)/x
     # An implementation detail of the byte comparison, not part of the
     # extractor's surface (`private` does not scope constants).
     private_constant :EXTRACTED_AT_SCALAR
@@ -1990,7 +2031,7 @@ module Woods
     #   original encoding
     # @return [String] the bytes with the stamp's value removed
     def mask_extracted_at(bytes)
-      bytes.gsub(EXTRACTED_AT_SCALAR, '\1')
+      bytes.sub(EXTRACTED_AT_SCALAR, '\1')
     end
 
     def normalize_file_paths
@@ -2022,7 +2063,7 @@ module Woods
     # to say. Enrichment then wrote `commit_count: 0` and
     # `change_frequency: new` onto every unit, which reads exactly like a file
     # that was never committed, where an absent git directory correctly omits
-    # the keys (B-186). HEAD has to resolve.
+    # the keys (B-186). HEAD has to resolve, with complete ancestry (B-189).
     #
     # Memoized, so the warning below is emitted at most once per run.
     #
@@ -2031,11 +2072,29 @@ module Woods
       return @git_available if defined?(@git_available)
 
       _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
-      @git_available = status.success?
-      warn_unresolvable_git(error) unless @git_available
-      @git_available
+      unless status.success?
+        warn_unresolvable_git(error)
+        return @git_available = false
+      end
+
+      @git_available = complete_git_history?
     rescue StandardError
       @git_available = false
+    end
+
+    # A shallow HEAD resolves but represents an incomplete ancestry. Do not
+    # turn that boundary into apparent one-commit/new-file churn facts.
+    def complete_git_history?
+      output, _error, status = Open3.capture3(*git_argv('rev-parse', '--is-shallow-repository'))
+      return true if status.success? && output.strip == 'false'
+
+      shallow = status.success? && output.strip == 'true'
+      reason = shallow ? 'shallow repository' : 'repository depth could not be verified'
+      Rails.logger.warn(
+        "[Woods] Git enrichment omitted: #{reason}. Fetch full history with git fetch --unshallow " \
+        '(or actions/checkout fetch-depth: 0), then run full extraction to refresh git metadata.'
+      )
+      false
     end
 
     # Say once why no unit will carry git metadata, but only when there is a
@@ -2678,6 +2737,7 @@ module Woods
 
       @incremental_extractors[key] = EXTRACTORS[key]&.new
     rescue StandardError => e
+      @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.warn "[Woods] Could not build #{key} extractor: #{e.message}"
       @incremental_extractors[key] = nil
     end
@@ -2739,6 +2799,10 @@ module Woods
           # one method over — CORE-1).
           produced.merge(units.map { |unit| [unit.identifier, unit.type] })
           touched.merge(register_and_write(rule.extractor_key, units, affected_types))
+          unless source_consumer_failed?(rule.extractor_key)
+            @source_inputs&.consume_file(rule.extractor_key,
+                                         absolute_path)
+          end
         end
 
         next if raised
@@ -2767,7 +2831,10 @@ module Woods
       # on every changed path of that type, with the generation bumped over
       # the loss. Construction failure tells us nothing about the path; only
       # a genuinely constructed extractor that lacks the method earns the [].
-      return nil if extractor.nil?
+      if extractor.nil?
+        source_consumer_failed?(rule.extractor_key, extractor)
+        return nil
+      end
       return [] unless extractor.respond_to?(rule.method_name)
 
       result =
@@ -2782,6 +2849,7 @@ module Woods
 
       Array(result).compact
     rescue StandardError => e
+      @source_inputs&.unverified("extractor:#{rule.extractor_key}")
       Rails.logger.warn "[Woods] #{rule.extractor_key} re-extraction of #{absolute_path} failed: #{e.message}"
       # `nil`, not `[]`. The caller treats an empty result as "this path defines
       # nothing any more" and prunes the units previously registered to it — so
@@ -2849,6 +2917,34 @@ module Woods
         touched.merge(remove_stale_classes(spec, discovered, known, affected_types))
       end
 
+      touched
+    end
+
+    # Runtime-only model mixins can enter or leave discovery when their
+    # includer changes, even if the mixin file itself is untouched.
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] Added or removed concern identifiers
+    def reconcile_model_mixins(affected_types)
+      extractor = extractor_for(:concerns)
+      return Set.new unless extractor.respond_to?(:runtime_model_mixins)
+
+      live = extractor.runtime_model_mixins
+      known = @dependency_graph.units_of_type(:concern).to_set
+      added = live.flat_map do |path, modules|
+        next [] if modules.all? { |mod| known.include?(mod.name) }
+
+        Array(extractor.extract_model_mixin_file(path)).reject { |unit| known.include?(unit.identifier) }
+      end
+      touched = register_and_write(:concerns, added, affected_types)
+      return touched unless @eager_load_complete
+
+      live_names = live.values.flatten.to_set(&:name)
+      known.each do |identifier|
+        path = @dependency_graph.node(identifier, type: :concern)[:file_path]
+        next if extractor.conventional_concern_path?(path) || live_names.include?(identifier)
+
+        touched.add(identifier) if remove_unit(identifier, affected_types, type: :concern)
+      end
       touched
     end
 
@@ -2929,10 +3025,12 @@ module Woods
       units = new_classes.filter_map do |klass|
         extractor_for(key).public_send(spec[:method], klass)
       rescue StandardError => e
+        @source_inputs&.unverified("extractor:#{key}")
         Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
         nil
       end
 
+      source_consumer_failed?(key)
       register_and_write(key, units, affected_types)
     end
 
@@ -3067,6 +3165,10 @@ module Woods
     #   mutating durable state
     def replace_type_wholesale(key, affected_types)
       extractor = extractor_for(key)
+      if extractor.nil?
+        source_consumer_failed?(key, extractor)
+        return Set.new
+      end
       return Set.new unless extractor.respond_to?(:extract_all)
 
       @wholesale_mutations = 0
@@ -3075,6 +3177,8 @@ module Woods
 
       touched = register_and_write(key, units, affected_types)
       touched.merge(remove_replaced_units(key, units, affected_types))
+      @source_inputs&.consume_extractor(key, units) unless source_consumer_failed?(key, extractor)
+      touched
     rescue StandardError => e
       if @wholesale_mutations.to_i.positive?
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -3087,6 +3191,7 @@ module Woods
         MSG
       end
 
+      @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
       Set.new
     end
@@ -3248,6 +3353,7 @@ module Woods
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
+        @source_inputs&.consume_deleted(path)
       end
     end
 
@@ -3351,6 +3457,7 @@ module Woods
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
+        @source_inputs&.consume_unit(extractor_key, unit.file_path) unless source_consumer_failed?(extractor_key)
         written.add(unit.identifier)
       end
     end
@@ -3611,11 +3718,15 @@ module Woods
       return nil unless extractor_key
 
       extractor = extractor_for(extractor_key)
-      return nil unless extractor
+      if extractor.nil?
+        source_consumer_failed?(extractor_key, extractor)
+        return nil
+      end
 
       # File-based extractors can return several units from one file (a .rake
       # file defining multiple tasks, etc.); class-based extractors return one.
       units = Array(re_extracted_units(extractor, type, unit_id, file_path, extractor_key)).compact
+      source_consumer_failed?(extractor_key, extractor)
       return nil if units.empty?
 
       register_and_write(extractor_key, units, affected_types)

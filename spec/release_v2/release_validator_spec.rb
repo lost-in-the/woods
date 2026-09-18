@@ -298,6 +298,32 @@ RSpec.describe 'release validation' do
     end
   end
 
+  [false, true].each do |trusted_checkout|
+    it "rejects fragments at the tagged SHA with trusted_checkout=#{trusted_checkout}, even with inline notes" do
+      changelog = "## [Unreleased]\n\n### Fixed\n\n- another note\n\n## [2.0.0] - 2026-08-20\n"
+      build_repository(changelog: changelog) do |repository|
+        FileUtils.mkdir_p(File.join(repository, 'changelog'))
+        File.write(File.join(repository, 'changelog/fixed_pending.md'), '- missed fragment')
+        git('add', '.', chdir: repository)
+        git('commit', '-m', 'leave a fragment', chdir: repository)
+        git('tag', '-f', 'v2.0.0', chdir: repository)
+        git('update-ref', 'refs/remotes/origin/main', 'HEAD', chdir: repository)
+        candidate_sha = git('rev-parse', 'HEAD', chdir: repository)
+        if trusted_checkout
+          add_origin(repository)
+          git('rm', 'changelog/fixed_pending.md', chdir: repository)
+          git('commit', '-m', 'trusted tooling has no fragment', chdir: repository)
+          git('push', 'origin', 'main', chdir: repository)
+        end
+
+        _stdout, stderr, status = validate(repository, sha: candidate_sha, trusted_checkout: trusted_checkout)
+
+        expect(status).not_to be_success
+        expect(stderr).to include('unconsumed changelog entries: changelog/fixed_pending.md')
+      end
+    end
+  end
+
   it 'accepts a prerelease tag with its own dated changelog entry' do
     build_repository(version: '2.0.0.beta1') do |repository|
       stdout, stderr, status = validate(repository, tag: 'v2.0.0.beta1')

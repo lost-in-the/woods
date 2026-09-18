@@ -88,7 +88,7 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
         FileUtils.mkdir_p(dir)
         populate(dir)
 
-        expect(Object.new.send(:woods_clean_index, dir, wait: 0)).to eq(:cleaned)
+        expect(Woods::RakeHelpers.woods_clean_index(dir, wait: 0)).to eq(:cleaned)
         expect(Dir.exist?(dir)).to be(false)
         # The guard now lives inside the lock directory (no sibling artifact),
         # so a full clean removes it with the directory.
@@ -102,7 +102,7 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
         live_daemon_status!(dir)
 
         result = nil
-        expect { result = Object.new.send(:woods_clean_index, dir, wait: 0) }
+        expect { result = Woods::RakeHelpers.woods_clean_index(dir, wait: 0) }
           .to output(/refusing to delete/).to_stderr
         expect(result).to eq(:refused)
         expect(File.exist?(File.join(dir, 'manifest.json'))).to be(true)
@@ -117,7 +117,7 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
         allow(ENV).to receive(:[]).and_call_original
         allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
 
-        expect { expect(Object.new.send(:woods_clean_index, dir, wait: 0)).to eq(:refused) }
+        expect { expect(Woods::RakeHelpers.woods_clean_index(dir, wait: 0)).to eq(:refused) }
           .to output(/refusing to delete/).to_stderr
         expect(File).to exist(File.join(dir, 'manifest.json'))
       end
@@ -133,7 +133,7 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
         original = ENV.fetch('WOODS_IGNORE_WATCH', nil)
         ENV['WOODS_IGNORE_WATCH'] = '1'
         begin
-          expect(Object.new.send(:woods_clean_index, dir, wait: 0)).to eq(:cleaned)
+          expect(Woods::RakeHelpers.woods_clean_index(dir, wait: 0)).to eq(:cleaned)
           expect(Dir.exist?(dir)).to be(false)
         ensure
           original.nil? ? ENV.delete('WOODS_IGNORE_WATCH') : ENV['WOODS_IGNORE_WATCH'] = original
@@ -155,7 +155,7 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
           original.call(*args)
         end
 
-        Object.new.send(:woods_clean_index, dir, wait: 0)
+        Woods::RakeHelpers.woods_clean_index(dir, wait: 0)
 
         expect(seen_during).to include('extraction.lock')
       end

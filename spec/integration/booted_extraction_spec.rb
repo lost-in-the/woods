@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'json'
 require 'fileutils'
+require 'open3'
 
 # Booted-app extraction test (#136). Boots the minimal Rails app under
 # spec/dummy in-process against the Rails version the active gemfile resolves
@@ -140,9 +141,126 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(identifiers).to include('Post', 'Comment')
   end
 
+  it 'publishes the live model callback chain rather than nonexistent per-kind readers' do
+    expect(Post).not_to respond_to(:_before_save_callbacks)
+    expect(Post._save_callbacks.map(&:filter)).to include(:normalize_title)
+
+    metadata = find_unit(:models, 'Post').fetch('metadata')
+    expect(metadata.fetch('callbacks')).to include(
+      a_hash_including('type' => 'before_save', 'filter' => 'normalize_title', 'kind' => 'before')
+    )
+    expect(metadata.fetch('callback_count')).to eq(metadata.fetch('callbacks').length)
+  end
+
+  it 'reflects real Rails callback kinds and the separate before_commit event' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+      before_validation :normalize_input, if: :normalization_enabled?
+      before_save :prepare_save, unless: :skip_save?
+      around_save :wrap_save
+      after_save :finish_save
+      before_create :prepare_create
+      around_create :wrap_create
+      after_create :finish_create
+      before_update :prepare_update
+      around_update :wrap_update
+      after_update :finish_update
+      before_destroy :prepare_destroy
+      around_destroy :wrap_destroy
+      after_destroy :finish_destroy
+      after_validation :finish_validation
+      before_commit :prepare_commit
+      after_commit :finish_commit, on: :create
+      after_rollback :undo_changes
+      after_initialize :initialize_state
+      after_find :load_state
+      after_touch :refresh_state
+    end
+    stub_const('CallbackProbe', model)
+    callbacks = Woods::Extractors::ModelExtractor.new.send(:extract_callbacks, model)
+    expected = {
+      before_validation: :normalize_input, after_validation: :finish_validation, before_save: :prepare_save,
+      around_save: :wrap_save, after_save: :finish_save, before_create: :prepare_create,
+      around_create: :wrap_create, after_create: :finish_create,
+      before_update: :prepare_update, around_update: :wrap_update, after_update: :finish_update,
+      before_destroy: :prepare_destroy, around_destroy: :wrap_destroy, after_destroy: :finish_destroy,
+      before_commit: :prepare_commit, after_commit: :finish_commit,
+      after_rollback: :undo_changes, after_initialize: :initialize_state,
+      after_find: :load_state, after_touch: :refresh_state
+    }
+    expected.each do |type, filter|
+      matches = callbacks.select { |entry| entry[:type] == type && entry[:filter] == filter.to_s }
+      expect(matches.length).to eq(1), "missing or duplicated #{type}: #{filter}"
+      expect(matches.first[:kind].to_s).to eq(type.to_s.split('_').first)
+    end
+    validation = callbacks.find { |entry| entry[:filter] == 'normalize_input' }
+    expect(validation[:conditions]).to include(if: [':normalization_enabled?'])
+    save = callbacks.find { |entry| entry[:filter] == 'prepare_save' }
+    expect(save[:conditions]).to include(unless: [':skip_save?'])
+  end
+
+  it 'reflects model methods consistently before and after schema loading (#363)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+    end
+    stub_const('SchemaOrderModel', model)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    before_loading = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+    model.columns
+    after_loading = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+
+    expect(before_loading[:class_methods]).to eq(after_loading[:class_methods])
+    expect(before_loading).to eq(after_loading)
+    expect(before_loading[:class_methods]).to eq(model.methods(false).sort)
+
+    first_unit = extractor.extract_model(model)
+    second_unit = extractor.extract_model(model)
+    expect(first_unit).not_to be_nil
+    expect(second_unit.metadata).to eq(first_unit.metadata)
+    expect(second_unit.source_code).to eq(first_unit.source_code)
+    expect(second_unit.to_h[:source_hash]).to eq(first_unit.to_h[:source_hash])
+  end
+
+  it 'retains an application-defined model constructor after schema loading (#363)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+
+      def self.new(...)
+        super.tap { |record| record.title ||= 'Custom constructor' }
+      end
+    end
+    stub_const('CustomConstructorModel', model)
+    original_constructor = model.method(:new)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    metadata = extractor.send(:extract_metadata, model, nil, inlined_concerns: [])
+
+    expect(metadata[:class_methods]).to include(:new)
+    expect(model.method(:new)).to eq(original_constructor)
+    expect(model.new.title).to eq('Custom constructor')
+  end
+
   it 'extracts the controller and job units' do
     expect(index_for(:controllers).map { |u| u['identifier'] }).to include('PostsController')
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
+  end
+
+  it 'marks a whole-file cache profile while retaining its controller in the file map (#417)' do
+    graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
+    path = 'app/controllers/profiled_controller.rb'
+    expect(graph.fetch('file_map').fetch(path)).to include('ProfiledController', path)
+    expect(graph.fetch('nodes').fetch(path)).to include('type' => 'caching', 'kind' => 'file_profile')
+    expect(graph.fetch('nodes').fetch('ProfiledController')).not_to have_key('kind')
+  end
+
+  it 'extracts runtime recurring configuration with relative ERB, aliases and conditions (#364)' do
+    units = units_in(:scheduled_jobs)
+    expect(units.map { |unit| unit['identifier'] }).to eq(['scheduled:publish_posts'])
+    unit = units.first
+    expect(unit['metadata']).to include('job_class' => 'PublishPostJob', 'cron_expression' => 'every 7 hours')
+    expect(unit['source_code']).to include('<% require_relative "schedule_settings" %>')
+    expect(unit['dependencies']).to include('type' => 'job', 'target' => 'PublishPostJob', 'via' => 'scheduled')
   end
 
   # Finding G-1: files wrapped in class namespaces used to index as the
@@ -161,6 +279,46 @@ RSpec.describe 'Booted-app extraction', :booted_app do
 
     graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
     expect(graph).not_to be_empty
+    expect(graph.fetch('reverse_via').fetch('Comment')).to include(
+      include('source' => 'Post', 'source_type' => 'model', 'via' => 'has_many')
+    )
+  end
+
+  it 'keeps navigation edges to real routes whose names resemble filesystem or asset helpers' do
+    routes = ActionDispatch::Routing::RouteSet.new
+    routes.draw do
+      get '/files/:id', to: 'files#show', as: :file
+      get '/images/:id', to: 'images#show', as: :image
+      get '/videos/:id', to: 'videos#show', as: :video
+      get '/logs', to: 'logs#index', as: :log
+      get '/downloads/:id', to: 'downloads#show', as: :download
+      root 'posts#index'
+    end
+    allow(Rails.application).to receive(:routes).and_return(routes)
+    extractor = Woods::Extractors::ControllerExtractor.new
+    source = 'file_path(1); image_url(1); video_path(1); log_path; download_url(1); root_path; tmp_path; asset_path'
+
+    dependencies = extractor.send(:scan_navigation_dependencies, source, via_type: :redirect_to)
+
+    expect(dependencies).to match_array(%w[Files Images Videos Logs Downloads Posts].map do |name|
+      { type: :controller, target: "#{name}Controller", via: :redirect_to }
+    end)
+  end
+
+  it 'reports declared job and service parameters without names from default expressions' do
+    job_params = find_unit(:jobs, 'SignatureJob').fetch('metadata').fetch('perform_params')
+    service_params = find_unit(:services, 'SignatureService').fetch('metadata').fetch('initialize_params')
+    names = %w[user_id values rest required notify options block]
+    expect(job_params.map { |param| param.fetch('name') }).to eq(names)
+    expect(service_params.map { |param| param.fetch('name') }).to eq(names)
+    expect(job_params.map { |param| param.fetch('has_default') }).to eq([false, true, false, false, true, false, false])
+    expect(service_params.map do |param|
+      param.fetch('has_default')
+    end).to eq([false, true, false, false, true, false, false])
+    expect(job_params.map { |param| param.fetch('splat') }).to eq([nil, nil, 'single', nil, nil, 'double', nil])
+    expect(service_params.map { |param| param.fetch('keyword') }).to eq([false, false, false, true, true, true, false])
+    expect(SignatureJob.instance_method(:perform).parameters.map(&:last).map(&:to_s)).to eq(names)
+    expect(SignatureService.instance_method(:initialize).parameters.map(&:last).map(&:to_s)).to eq(names)
   end
 
   it 'records git provenance (resolved or "unknown"), never crashing on a non-repo dummy' do
@@ -382,5 +540,93 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       expect(node['table']).to eq('posts')
       expect(node['database']).to eq(expected_database)
     end
+  end
+end
+
+RSpec.describe 'Middleware extraction across Rails processes', :booted_app do
+  def extract_stack(setting)
+    script = File.expand_path('../fixtures/middleware/boot.rb', __dir__)
+    output, error, status = Open3.capture3({ 'MIDDLEWARE_SETTING' => setting },
+                                           RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    JSON.parse(output.lines.last)
+  end
+
+  it 'preserves the complete metadata, source and hash across independent boots' do
+    first = extract_stack('first')
+    expect(extract_stack('first')).to eq(first)
+    expect(first.fetch('source')).to include('#<Thing:0x123abc>')
+    changed = extract_stack('second')
+    expect(changed.fetch('metadata')).not_to eq(first.fetch('metadata'))
+    expect(changed.fetch('source')).not_to eq(first.fetch('source'))
+    expect(changed.fetch('hash')).not_to eq(first.fetch('hash'))
+  end
+end
+
+RSpec.describe 'Optional ActionMailer extraction', :booted_app do
+  { 'absent' => [], 'gem_only' => [], 'app' => ['LocalMailer'] }.each do |mode, expected|
+    it "publishes a valid API-only index with mailer mode #{mode}" do
+      script = File.expand_path('../fixtures/optional_mailer/boot.rb', __dir__)
+      output, error, status = Open3.capture3({ 'MAILER_MODE' => mode }, RbConfig.ruby, '-Ilib', script)
+      expect(status.success?).to be(true), error
+      result = JSON.parse(output.lines.last)
+
+      expect(result).to include('valid' => true, 'errors' => [], 'discoverable' => expected,
+                                'extracted' => expected, 'published' => expected)
+      expect(result.fetch('framework_loaded')).to eq(mode != 'absent')
+    end
+  end
+end
+
+RSpec.describe 'Model callbacks across Rails processes', :booted_app do
+  it 'preserves framework callbacks, metadata and chunk hashes across independent boots' do
+    results = Array.new(2) do
+      script = File.expand_path('../fixtures/model_callbacks/boot.rb', __dir__)
+      output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+      expect(status.success?).to be(true), error
+      JSON.parse(output.lines.last)
+    end
+
+    expect(results.last).to eq(results.first)
+    unit = results.first.fetch('unit')
+    filter = results.first.fetch('framework_filter')
+    expect(unit.fetch('metadata').fetch('callbacks')).to include(
+      a_hash_including('type' => 'before_destroy', 'kind' => 'before', 'filter' => filter)
+    )
+    chunk = unit.fetch('chunks').find { |entry| entry.fetch('chunk_type') == 'callbacks' }
+    expect(chunk.fetch('content')).to include(filter)
+    expect(chunk.fetch('content_hash')).to eq(Digest::SHA256.hexdigest(chunk.fetch('content')))
+    results.first.fetch('object_filters').tally.each do |label, count|
+      matches = unit.fetch('metadata').fetch('callbacks').count do |entry|
+        entry['type'] == 'before_save' && entry['filter'] == label
+      end
+      expect(matches).to eq(count), "missing or merged callback objects: #{label}"
+      expect(chunk.fetch('content')).to include(label)
+    end
+  end
+end
+
+RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
+  def extract_callbacks(kind)
+    script = File.expand_path('../fixtures/controller_callbacks/boot.rb', __dir__)
+    output, error, status = Open3.capture3({ 'CALLBACK_KIND' => kind }, RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    JSON.parse(output.lines.last)
+  end
+
+  it 'keeps filter metadata, source hashes and action chunks stable across independent roots and boots' do
+    first = extract_callbacks('proc')
+    expect(extract_callbacks('proc')).to eq(first)
+    expect(first.fetch('source_code')).to include('#<Proc app/controllers/callbacks_controller.rb:4>',
+                                                  'if: #<lambda app/controllers/callbacks_controller.rb:5>',
+                                                  'unless: #<Proc app/controllers/callbacks_controller.rb:5>',
+                                                  'if: :enabled?; unless: :disabled?')
+    expect(first.fetch('chunks')).not_to be_empty
+    expect(JSON.generate(first)).not_to match(/#<Proc:0x/)
+
+    changed = extract_callbacks('lambda')
+    expect(changed.fetch('metadata')).not_to eq(first.fetch('metadata'))
+    expect(changed.fetch('source_hash')).not_to eq(first.fetch('source_hash'))
+    expect(changed.fetch('chunks')).not_to eq(first.fetch('chunks'))
   end
 end

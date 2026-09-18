@@ -27,6 +27,38 @@ Woods::PublishedIndex.open(Rails.root.join('tmp/woods')) do |index|
 end
 ```
 
+## Validate a published generation
+
+```ruby
+require 'woods/resilience/index_validator'
+
+report = Woods::Resilience::IndexValidator.new(index_dir: 'tmp/woods').validate
+report.valid? # false when artifact or semantic graph errors were found
+report.errors
+report.warnings
+```
+
+`woods:validate` uses the same checker. Supporting development versions validate
+raw graph relationships as well as JSON, content hashes, and indexed files; see
+the [semantic invariants and limits](INDEX_LAYOUT.md#semantic-graph-validation).
+Errors retain typed identifiers and artifact paths. Writer-version and source-path
+warnings keep their existing advisory behavior.
+
+Each call resolves and pins one published generation for all checks. Concurrent
+publication can advance the pointer, but retention cannot remove the payload
+being validated. The next call sees the new generation. Locks release on success
+and errors; malformed pointers fail instead of falling back to stale root files.
+Legacy flat layouts remain supported but cannot provide immutable-generation
+isolation against in-place writes. Bare type-directory fixtures without a
+manifest retain structural-only validation.
+
+The reusable `Woods::Resilience::GraphInvariantValidator` accepts raw string-keyed
+`graph:` data and typed `index_entries:` and returns an array of errors without
+modifying either input. Callers supplying raw data must keep it within one pinned
+generation and verify the unit artifacts themselves, as `IndexValidator` does.
+Validation is a read-only diagnostic, not automatic repair or proof of runtime
+execution.
+
 ## Manifest writer provenance
 
 The published `manifest.json` records `woods_version`, a string naming the Woods gem version

@@ -23,47 +23,24 @@ module Woods
     #   end
     #
     module RouteHelperResolver
-      # Route helper prefixes that produce non-navigation dependencies.
-      # These generate asset URLs or are common false positives from
-      # non-route uses of _path/_url suffixes in Ruby code.
-      #
-      # NOTE: `root` is intentionally excluded — root_path is the most common
-      # Rails route helper, but it appears so frequently in non-navigation contexts
-      # (path construction, config, tests) that it generates excessive noise.
-      # The tradeoff: "what links to the home page?" won't appear in graph queries.
-      # Add new prefixes here when false positives are discovered in host apps.
-      IGNORED_HELPER_PREFIXES = %w[
-        asset
-        image
-        stylesheet
-        javascript
-        font
-        audio
-        video
-        turbo_stream
-        file
-        tmp
-        base
-        root
-        log
-        socket
-        download
-      ].freeze
-
       # Build the route helper lookup map from Rails named routes.
       # Call this once in your extractor's initialize method.
       #
       # Resilient to partial test doubles: any exception raised while
       # traversing Rails routes (unstubbed `application` on a double,
       # missing `named_routes`, etc.) is swallowed and leaves the map
-      # empty — extractors fall back to returning the helper name
-      # literal as the dependency target.
+      # empty — extractors omit unresolved navigation dependencies.
       def build_route_helper_map
         @route_helper_map = {}
         return unless defined?(Rails)
 
         routes = safe_rails_application_routes
         return unless routes
+
+        # Rails lazy route sets do not load when named_routes is read. Use the
+        # runtime route collection reader before caching helpers, just as the
+        # route extractor does. Older route sets and partial doubles still work.
+        routes.routes if routes.respond_to?(:routes)
 
         routes.named_routes.each do |name, route|
           controller = route.defaults[:controller]
@@ -78,8 +55,8 @@ module Woods
           }
         end
       rescue StandardError
-        # Leave @route_helper_map empty — navigation-edge extractors will
-        # fall back to the helper-name literal.
+        # Leave @route_helper_map empty — navigation-edge extractors omit
+        # helpers whose controller/action cannot be resolved.
         @route_helper_map = {}
       end
 
@@ -105,8 +82,8 @@ module Woods
       # @return [Hash, nil] { controller:, action:, path:, verb: } or nil if unresolvable
       def resolve_route_helper(helper_name)
         base = helper_name.sub(/_(path|url)\z/, '')
-        return nil if IGNORED_HELPER_PREFIXES.any? { |prefix| base.start_with?("#{prefix}_") || base == prefix }
-
+        # A real named route is authoritative even when its name resembles
+        # a filesystem or asset helper. Unresolved names still produce no edge.
         @route_helper_map&.[](base)
       end
 

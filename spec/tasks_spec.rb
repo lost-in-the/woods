@@ -118,6 +118,56 @@ RSpec.describe Woods::Tasks do
       ENV.delete('WOODS_OUTPUT')
     end
 
+    describe 'SQLite metadata output isolation' do
+      around do |example|
+        Woods.configuration = Woods::Configuration.new
+        Dir.mktmpdir('woods-tasks-metadata') do |dir|
+          @metadata_root = dir
+          example.run
+        end
+      end
+
+      before do
+        Woods.configure do |config|
+          config.output_dir = File.join(@metadata_root, 'configured')
+          config.metadata_store = :sqlite
+        end
+        allow(ENV).to receive(:fetch).and_call_original
+      end
+
+      it 'keeps two overridden indexes and their persisted metadata independent' do
+        stores = %w[first second].map do |name|
+          output = File.join(@metadata_root, name)
+          allow(ENV).to receive(:fetch).with('WOODS_OUTPUT', Woods.configuration.output_dir).and_return(output)
+          described_class.build_embed_indexer
+          store = captured[:metadata_store]
+          store.store('User', type: 'model', file_path: "#{name}/app/models/user.rb")
+
+          expect(captured[:output_dir]).to eq(output)
+          expect(File).to exist(File.join(output, 'metadata.sqlite3'))
+          store
+        end
+
+        expect(stores[0].find('User')).to include('file_path' => 'first/app/models/user.rb')
+        expect(stores[1].find('User')).to include('file_path' => 'second/app/models/user.rb')
+        expect(File).not_to exist(Woods.configuration.output_dir)
+      end
+
+      it 'keeps an explicitly configured database path when output is overridden' do
+        database = File.join(@metadata_root, 'custom', 'metadata.sqlite3')
+        Woods.configuration.metadata_store_options = { 'database' => database }
+        output = File.join(@metadata_root, 'overridden')
+        allow(ENV).to receive(:fetch).with('WOODS_OUTPUT', Woods.configuration.output_dir).and_return(output)
+
+        described_class.build_embed_indexer
+        captured[:metadata_store].store('User', type: 'model')
+
+        expect(File).to exist(database)
+        expect(File).not_to exist(File.join(output, 'metadata.sqlite3'))
+        expect(Woods.configuration.metadata_store_options).to eq('database' => database)
+      end
+    end
+
     # #214 / B-101. Six documents claimed IndexValidator detected dimension
     # mismatches; it never did, and nothing checked provider-vs-store width on
     # a durable backend at all. Switching embedding_model left the old table or

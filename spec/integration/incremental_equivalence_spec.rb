@@ -156,6 +156,122 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Rails.application.reload_routes!
   end
 
+  it 'tracks nested model mixins through body and callback edits' do
+    model_path = write_file('app/models/pinned_record.rb', <<~RUBY)
+      class PinnedRecord < ApplicationRecord
+        self.table_name = 'posts'
+      end
+    RUBY
+    load app_path(model_path)
+    mixin_path = 'app/models/pinned_record/pinnable.rb'
+    source = <<~RUBY
+      module PinnedRecord::Pinnable
+        extend ActiveSupport::Concern
+        included do
+          before_save :set_pin
+        end
+        def set_pin
+          self.title = 'original pin'
+        end
+      end
+    RUBY
+    write_file(mixin_path, source)
+    load app_path(mixin_path)
+    PinnedRecord.include(PinnedRecord::Pinnable)
+    # Keep the reflected inclusion in the model source as it would be on disk.
+    File.open(app_path(model_path), 'a') { |file| file.puts('PinnedRecord.include(PinnedRecord::Pinnable)') }
+    baseline = full_extraction
+    unit = Woods::Extractors::ModelExtractor.new.extract_model(PinnedRecord)
+    expect(unit.source_code).to include('original pin')
+    payload = Woods::Generation.new(output_dir: baseline).payload_dir
+    graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+    expect(graph.identifiers_for_path(app_path(mixin_path))).to include('PinnedRecord::Pinnable')
+
+    %w[body callback].each do |change|
+      source = source.sub('original pin', 'changed pin') if change == 'body'
+      source = source.sub('before_save', 'before_validation') if change == 'callback'
+      write_file(mixin_path, source)
+      PinnedRecord.reset_callbacks(:save) if change == 'callback'
+      # Reopen the same runtime module, as Rails reload would refresh its methods.
+      PinnedRecord::Pinnable.remove_instance_variable(:@_included_block)
+      load app_path(mixin_path)
+      PinnedRecord.class_eval(&PinnedRecord::Pinnable.instance_variable_get(:@_included_block))
+      Woods::Extractor.new(output_dir: baseline).extract_changed([mixin_path])
+      expect(differences(baseline, full_extraction)).to be_empty
+    end
+
+    # Removing the last include changes only the model file. The orphan
+    # runtime-only concern must leave discovery even though its file remains.
+    PinnedRecord.abstract_class = true
+    Object.send(:remove_const, :PinnedRecord)
+    model_source = File.read(app_path(model_path)).sub("PinnedRecord.include(PinnedRecord::Pinnable)\n", '')
+    write_file(model_path, model_source)
+    load app_path(model_path)
+    Woods::Extractor.new(output_dir: baseline).extract_changed([model_path])
+    expect(differences(baseline, full_extraction)).to be_empty
+
+    # Adding an include likewise discovers the untouched mixin source.
+    load app_path(mixin_path)
+    PinnedRecord.include(PinnedRecord::Pinnable)
+    write_file(model_path, "#{model_source}PinnedRecord.include(PinnedRecord::Pinnable)\n")
+    Woods::Extractor.new(output_dir: baseline).extract_changed([model_path])
+    expect(differences(baseline, full_extraction)).to be_empty
+  ensure
+    if Object.const_defined?(:PinnedRecord)
+      PinnedRecord.abstract_class = true
+      Object.send(:remove_const, :PinnedRecord)
+    end
+  end
+
+  it 'refreshes every includer when runtime mixins share a source file' do
+    mixin_path = 'app/models/shared_runtime_mixins.rb'
+    source = <<~RUBY
+      module SharedRuntimeMixins
+        module First
+          def audit_value
+            'original first'
+          end
+        end
+        module Second
+          def audit_value
+            'original second'
+          end
+        end
+      end
+    RUBY
+    write_file(mixin_path, source)
+    load app_path(mixin_path)
+    %w[First Second].each do |name|
+      path = write_file("app/models/#{name.downcase}_audit_record.rb", <<~RUBY)
+        class #{name}AuditRecord < ApplicationRecord
+          self.table_name = 'posts'
+          include SharedRuntimeMixins::#{name}
+        end
+      RUBY
+      load app_path(path)
+    end
+    baseline = full_extraction
+    payload = Woods::Generation.new(output_dir: baseline).payload_dir
+    graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+    expect(graph.identifiers_for_path(app_path(mixin_path))).to include(
+      'SharedRuntimeMixins::First', 'SharedRuntimeMixins::Second'
+    )
+
+    write_file(mixin_path, source.gsub('original', 'changed'))
+    load app_path(mixin_path)
+    touched = Woods::Extractor.new(output_dir: baseline).extract_changed([mixin_path])
+    expect(touched).to include('FirstAuditRecord', 'SecondAuditRecord')
+    expect(differences(baseline, full_extraction)).to be_empty
+  ensure
+    %i[FirstAuditRecord SecondAuditRecord].each do |name|
+      next unless Object.const_defined?(name)
+
+      Object.const_get(name).abstract_class = true
+      Object.send(:remove_const, name)
+    end
+    Object.send(:remove_const, :SharedRuntimeMixins) if Object.const_defined?(:SharedRuntimeMixins)
+  end
+
   # ── Tree mutation ────────────────────────────────────────────────────────
 
   def app_path(relative)
@@ -190,6 +306,22 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     (@scratch_dirs ||= []) << dir
     Woods::Extractor.new(output_dir: dir).extract_all
     dir
+  end
+
+  it 'independently validates full and incremental graph invariants (#413)' do
+    require 'woods/resilience/index_validator'
+    baseline = full_extraction
+    initial = Woods::Resilience::IndexValidator.new(index_dir: baseline).validate
+    expect(initial.errors).to be_empty
+    changed = write_file('app/services/invariant_service.rb', 'class InvariantService; def call; Post.count; end; end')
+
+    Woods::Extractor.new(output_dir: baseline).extract_changed([changed])
+    oracle = full_extraction
+    [baseline, oracle].each do |directory|
+      report = Woods::Resilience::IndexValidator.new(index_dir: directory).validate
+      expect(report.errors).to be_empty
+    end
+    expect(Woods::Generation.new(output_dir: baseline).current.number).to be >= 2
   end
 
   # Baseline the tree, then apply operations one at a time through
@@ -236,6 +368,17 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   describe 'gap 1 — files the index has never seen' do
     it 'indexes a service created after the baseline extraction' do
       run_sequence([-> { write_file('app/services/checkout_service.rb', service_source('CheckoutService')) }])
+    end
+
+    it 'indexes a new file passed through a change set with noncanonical paths' do
+      baseline = full_extraction
+      write_file('app/services/normalized_service.rb', service_source('NormalizedService'))
+      changes = Woods::ChangeSet.new(paths: ["#{@app_root}/app//services/./normalized_service.rb"],
+                                     root: "#{@app_root}/")
+
+      Woods::Extractor.new(output_dir: baseline).extract_changed(changes.absolute_paths)
+
+      expect(differences(baseline, full_extraction)).to be_empty
     end
 
     it 'indexes a lib file, an i18n file, and a rake file created after the baseline' do
@@ -327,6 +470,55 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'volatile dependency per-target limit (B-188)' do
+    def git_in_app(*args)
+      output, status = Open3.capture2e('git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+
+    it 'persists the cap and full qualifying count across full and incremental extraction with real history' do
+      %w[BusyHubService OtherHubService].each do |name|
+        write_file("app/services/#{name.underscore}.rb", service_source(name))
+      end
+      %w[FirstConsumer SecondConsumer ThirdConsumer].each do |name|
+        write_file("app/services/#{name.underscore}.rb", service_source(name, dependency: 'BusyHubService'))
+      end
+      write_file('app/services/other_consumer.rb', service_source('OtherConsumer', dependency: 'OtherHubService'))
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+      5.times do |i|
+        %w[busy_hub_service other_hub_service].each do |name|
+          File.open(app_path("app/services/#{name}.rb"), 'a') { |file| file.puts("# change #{i}") }
+        end
+        git_in_app('commit', '-am', "change hubs #{i}")
+      end
+
+      Woods.configuration.volatile_dependency_limit_per_target = 1
+      index_dir = full_extraction
+      before_report = read_json(index_dir, 'graph_analysis.json')
+      expect(before_report.fetch('volatile_dependencies').map { |row| row.fetch('to') })
+        .to contain_exactly('BusyHubService', 'OtherHubService')
+      expect(before_report.fetch('stats')).to include('volatile_dependency_count' => 4,
+                                                      'volatile_dependencies_limit_per_target' => 1,
+                                                      'volatile_dependency_reported_count' => 2)
+
+      changed = write_file('app/services/new_consumer.rb', service_source('NewConsumer', dependency: 'BusyHubService'))
+      git_in_app('add', changed)
+      git_in_app('commit', '-m', 'add consumer')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([changed])
+
+      expect(read_json(index_dir, 'graph_analysis.json').fetch('stats'))
+        .to include('volatile_dependency_count' => 5, 'volatile_dependency_reported_count' => 2)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.volatile_dependency_limit_per_target = nil
+      FileUtils.rm_rf(app_path('.git'))
+    end
+  end
+
   describe 'gap 4 — whole-app unit types' do
     it 'refreshes routes when config/routes.rb changes' do
       run_sequence([
@@ -353,6 +545,95 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Woods::Extractor.new(output_dir: index_dir).extract_changed(['README.md'])
 
       expect(read_json(index_dir, 'manifest.json')['extracted_at']).to eq(before)
+    end
+  end
+
+  describe 'package mutations (B-178)' do
+    def package_unit(index_dir, type, identifier)
+      unit_snapshot(index_dir).values.find do |unit|
+        unit['type'] == type && unit['identifier'] == identifier
+      end
+    end
+
+    def expect_package_membership(index_dir, type, identifier, package)
+      unit = package_unit(index_dir, type, identifier)
+      expect(unit).not_to be_nil
+      node = read_json(index_dir, 'dependency_graph.json').fetch('nodes').fetch(identifier)
+      if package
+        expect(unit.fetch('metadata')).to include('package' => package)
+        expect(node).to include('package' => package)
+      else
+        expect(unit.fetch('metadata')).not_to have_key('package')
+        expect(node).not_to have_key('package')
+      end
+    end
+
+    def expect_packages(index_dir, names)
+      packages = unit_snapshot(index_dir).values.select { |unit| unit['type'] == 'package' }
+      expect(packages.map { |unit| unit.fetch('identifier') }).to match_array(names)
+      nodes = read_json(index_dir, 'dependency_graph.json').fetch('nodes')
+      expect(nodes.select { |_id, node| node['type'] == 'package' }.keys).to match_array(names)
+    end
+
+    it 'adds a nested package and reassigns untouched runtime and file-based units' do
+      write_file('package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package_service.rb', service_source('PackageService', dependency: 'Post'))
+      index_dir = full_extraction
+      expect_packages(index_dir, ['.'])
+      expect_package_membership(index_dir, 'model', 'Post', '.')
+      expect_package_membership(index_dir, 'service', 'PackageService', '.')
+
+      changed = write_file('app/models/package.yml', "dependencies:\n  - .\nenforce_dependencies: true\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([changed])
+
+      expect_packages(index_dir, ['.', 'app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+      expect_package_membership(index_dir, 'service', 'PackageService', '.')
+      package = package_unit(index_dir, 'package', 'app/models')
+      expect(package.fetch('dependencies')).to include(
+        include('type' => 'package', 'target' => '.', 'via' => 'package_dependency')
+      )
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'removes the last package and clears membership on surviving units and nodes' do
+      path = write_file('app/models/package.yml', "enforce_dependencies: true\n")
+      index_dir = full_extraction
+      expect_packages(index_dir, ['app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+
+      delete_file(path)
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect_packages(index_dir, [])
+      expect_package_membership(index_dir, 'model', 'Post', nil)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'replaces package membership when only packwerk package_paths changes' do
+      write_file('app/models/package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package.yml', "enforce_dependencies: true\n")
+      write_file('app/services/package_service.rb', service_source('PackageService', dependency: 'Post'))
+      config_path = write_file('packwerk.yml', "package_paths:\n  - app/models\n")
+      index_dir = full_extraction
+      expect_packages(index_dir, ['app/models'])
+      expect_package_membership(index_dir, 'model', 'Post', 'app/models')
+      expect_package_membership(index_dir, 'service', 'PackageService', nil)
+
+      # Both package files and both source files remain unchanged. Only the
+      # configured discovery roots change, so the whole-app trigger must
+      # replace packages and re-annotate units absent from the change set.
+      extractor = Woods::Extractor.new(output_dir: index_dir)
+      %w[app/services app/models].each do |package_path|
+        write_file(config_path, "package_paths:\n  - #{package_path}\n")
+        extractor.extract_changed([config_path])
+
+        expect_packages(index_dir, [package_path])
+        expect_package_membership(index_dir, 'model', 'Post', package_path == 'app/models' ? package_path : nil)
+        expect_package_membership(index_dir, 'service', 'PackageService',
+                                  package_path == 'app/services' ? package_path : nil)
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
     end
   end
 

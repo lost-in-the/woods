@@ -7,14 +7,9 @@ require 'woods/extractors/model_extractor'
 RSpec.describe Woods::Extractors::ModelExtractor do
   let(:extractor) { described_class.new }
 
-  # Stub every callback-chain reader extract_callbacks and callback_count
-  # ask a model for. Empty by default; individual examples override.
+  # Only real Rails event readers: stubbing per-kind readers masks API errors.
   def stub_callback_chains(model)
-    %i[before_validation after_validation before_save after_save around_save
-       before_create after_create around_create before_update after_update
-       around_update before_destroy after_destroy around_destroy
-       after_commit after_rollback after_initialize after_find after_touch
-       validation save create update destroy commit rollback].each do |type|
+    %i[validation save create update destroy commit rollback before_commit initialize find touch].each do |type|
       allow(model).to receive(:"_#{type}_callbacks").and_return([])
     end
   end
@@ -121,9 +116,9 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
-  # ── callback_count ────────────────────────────────────────────────
+  # ── extract_callbacks ─────────────────────────────────────────────
 
-  describe '#callback_count' do
+  describe '#extract_callbacks' do
     # Mirrors ActiveSupport::Callbacks::CallbackChain: it includes
     # Enumerable (so #count works) but defines NO #size. Stubbing with a
     # plain Array here would mask a regression to #size — Arrays have both.
@@ -141,23 +136,109 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       end
     end
 
-    it 'sums callbacks across chains using an API CallbackChain actually has' do
+    it 'reads event chains once and preserves callback kinds and chain order without requiring size' do
       model = double('Model')
-      %i[validation save create update destroy commit rollback].each do |type|
-        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new(%i[a b]))
+      stub_callback_chains(model)
+      entries = %i[before around after].map do |kind|
+        double('Callback', filter: :"#{kind}_hook", kind: kind)
       end
+      expect(model).to receive(:_save_callbacks).once.and_return(chain_class.new(entries))
+      commit = double('Callback', filter: :commit_hook, kind: :after)
+      before_commit = double('Callback', filter: :prepare_commit, kind: :before)
+      allow(model).to receive(:_commit_callbacks).and_return([commit])
+      allow(model).to receive(:_before_commit_callbacks).and_return([before_commit])
 
-      expect(extractor.send(:callback_count, model)).to eq(14)
+      result = extractor.send(:extract_callbacks, model)
+      expected = [
+        [:before_save, 'before_hook', :before], [:around_save, 'around_hook', :around],
+        [:after_save, 'after_hook', :after], [:after_commit, 'commit_hook', :after],
+        [:before_commit, 'prepare_commit', :before]
+      ]
+      expect(result.map { |entry| [entry[:type], entry[:filter], entry[:kind]] }).to eq(expected)
     end
 
-    it 'counts a chain type as zero when reading it raises' do
+    it 'labels Proc and lambda filters without running them, including Rails 6 raw_filter' do
+      stub_const('Rails', double('Rails', root: '/app'))
       model = double('Model')
-      %i[validation save create update destroy commit rollback].each do |type|
-        allow(model).to receive(:"_#{type}_callbacks").and_return(chain_class.new([:a]))
+      stub_callback_chains(model)
+      callable = proc { raise 'must not execute a callback' }
+      lambda_filter = -> { raise 'must not execute a callback' }
+      native = proc { raise 'must not execute a callback' }
+      external = proc { raise 'must not execute a callback' }
+      allow(callable).to receive(:source_location).and_return(['/app/app/models/post.rb', 12])
+      allow(lambda_filter).to receive(:source_location).and_return(['/app/app/models/post.rb', 13])
+      allow(native).to receive(:source_location).and_return(nil)
+      allow(external).to receive(:source_location).and_return(['/application/framework.rb', 20])
+      callbacks = [callable, lambda_filter, native, external, :named_hook, 'string_hook'].map do |filter|
+        double('Callback', filter: filter, kind: :before)
       end
+      callbacks << double('Rails6Callback', filter: callable.object_id, raw_filter: callable, kind: :before)
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      expected = [
+        '#<Proc app/models/post.rb:12>', '#<lambda app/models/post.rb:13>', '#<Proc native>',
+        '#<Proc /application/framework.rb:20>', 'named_hook', 'string_hook', '#<Proc app/models/post.rb:12>'
+      ]
+      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(expected)
+    end
+
+    it 'removes default object identities while preserving custom and named filter labels' do
+      stub_const('NamedCallback', Class.new)
+      object = NamedCallback.new
+      anonymous = Class.new
+      custom = NamedCallback.new
+      allow(custom).to receive(:to_s).once.and_return('#<NamedCallback:0x1234>')
+      filters = [object, NamedCallback, anonymous, anonymous.new, custom, :named_hook, 'string_hook']
+      callbacks = filters.map { |filter| double('Callback', filter: filter, kind: :before) }
+      callbacks << double('Rails6Callback', filter: object.object_id, raw_filter: object, kind: :before)
+      model = double('Model')
+      stub_callback_chains(model)
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(
+        ['#<NamedCallback>', 'NamedCallback', '#<Class>', '#<#<Class>>', '#<NamedCallback:0x1234>',
+         'named_hook', 'string_hook', '#<NamedCallback>']
+      )
+    end
+
+    it 'normalizes default labels for callbacks in anonymous namespaces' do
+      namespace = Module.new
+      nested = namespace.const_set(:Nested, Class.new)
+      custom = Class.new
+      allow(custom).to receive(:to_s).once.and_return('#<Class:0x1234>')
+      callbacks = [namespace, nested, nested.new, custom].map do |filter|
+        double('Callback', filter: filter, kind: :before)
+      end
+      model = double('Model')
+      stub_callback_chains(model)
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(
+        ['#<Module>', '#<Module>::Nested', '#<#<Module>::Nested>', '#<Class:0x1234>']
+      )
+    end
+
+    it 'retains other events when reading one chain raises' do
+      model = double('Model')
+      stub_callback_chains(model)
+      callback = double('Callback', filter: :save_hook, kind: :before)
+      allow(model).to receive(:_save_callbacks).and_return([callback])
       allow(model).to receive(:_commit_callbacks).and_raise(NoMethodError)
 
-      expect(extractor.send(:callback_count, model)).to eq(6)
+      expect(extractor.send(:extract_callbacks, model)).to contain_exactly(
+        a_hash_including(type: :before_save, filter: 'save_hook', kind: :before)
+      )
+    end
+
+    it 'counts exactly the callbacks emitted by metadata, including late lifecycle events' do
+      model = stub_bare_model('Post')
+      callback = double('Callback', filter: :refresh_state, kind: :after)
+      allow(model).to receive(:_touch_callbacks).and_return([callback])
+      expect(extractor).to receive(:extract_callbacks).with(model).once.and_call_original
+
+      metadata = extractor.send(:extract_metadata, model, '', inlined_concerns: [])
+      expect(metadata[:callbacks]).to contain_exactly(a_hash_including(type: :after_touch))
+      expect(metadata[:callback_count]).to eq(metadata[:callbacks].length)
     end
   end
 
@@ -534,7 +615,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       connection = double('Connection', foreign_keys: [])
       allow(model).to receive(:connection).and_return(connection)
       callback = double('Callback', filter: :set_slug, kind: :before)
-      allow(model).to receive(:_before_save_callbacks).and_return([callback])
+      allow(model).to receive(:_save_callbacks).and_return([callback])
       stub_inlined_concern('Trackable', concern_code)
       allow(extractor).to receive(:source_file_for).and_return(model_path)
       allow(File).to receive(:exist?).and_call_original

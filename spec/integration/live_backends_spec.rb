@@ -31,6 +31,8 @@ require 'woods/storage/vector_store'
 require 'woods/storage/metadata_store'
 require 'woods/storage/pgvector'
 require 'woods/storage/qdrant'
+require 'woods/retrieval/scope'
+require 'woods/retrieval/scoped_vector_store'
 
 # Also tagged :integration so IntegrationHelpers (build_extracted_unit) is
 # included — see spec/support/integration_helpers.rb.
@@ -71,6 +73,37 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
 
     Array(@pg_cleanup).each do |connection, table|
       connection.execute("DROP TABLE IF EXISTS #{table}")
+    end
+  end
+
+  shared_examples 'complete scoped vector retrieval' do
+    it 'keeps tied scoped result prefixes stable across caller limits and backend ordering' do
+      metadata = Woods::Storage::MetadataStore::InMemory.new
+      entries = Array.new(205) do |index|
+        id = "Unit#{index.to_s.rjust(3, '0')}"
+        metadata.store(id, { identifier: id, type: 'model', metadata: { package: 'packs/billing' } })
+        { id: id, vector: vec(1, 0, 0), metadata: {} }
+      end
+      store.store_batch(entries)
+      scope = Woods::Retrieval::Scope.new(metadata_store: metadata, packages: ['packs/billing'])
+      scoped = Woods::Retrieval::ScopedVectorStore.new(store: store, scope: scope)
+      short = scoped.search(vec(1, 0, 0), limit: 3).map(&:id)
+      long = scoped.search(vec(1, 0, 0), limit: 205).first(3).map(&:id)
+      expect(short).to eq(%w[Unit000 Unit001 Unit002])
+      expect(short).to eq(long)
+    end
+
+    it 'finds a weak small-package match before limits without requiring new vector metadata' do
+      metadata = Woods::Storage::MetadataStore::InMemory.new
+      30.times { |index| store.store("Other#{index}", vec(1, 0, 0)) }
+      key = Woods::StorageIdentity.key('Invoice', 'model')
+      metadata.store(key, { identifier: 'Invoice', type: 'model', metadata: { package: 'packs/billing' } })
+      store.store("#{key}#chunk_1", vec(0.3, 0.8, 0))
+      store.store(Woods::StorageIdentity.key('Invoice', 'service'), vec(1, 0, 0))
+      scope = Woods::Retrieval::Scope.new(metadata_store: metadata, packages: ['packs/billing'])
+      scoped = Woods::Retrieval::ScopedVectorStore.new(store: store, scope: scope)
+      expect(scoped.search(vec(1, 0, 0), limit: 1).map(&:id)).to eq(["#{key}#chunk_1"])
+      expect(store.search(vec(1, 0, 0), ids: [])).to be_empty
     end
   end
 
@@ -123,6 +156,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     before { reset_pg_schema!(connection, store) }
 
     include_examples 'typed embedding persistence'
+    include_examples 'complete scoped vector retrieval'
 
     it 'creates its schema idempotently' do
       expect { store.ensure_schema! }.not_to raise_error
@@ -240,6 +274,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     before { reset_qdrant_collection!(qdrant_url, collection, 3, store) }
 
     include_examples 'typed embedding persistence'
+    include_examples 'complete scoped vector retrieval'
 
     it 'round-trips a stored vector, reverse-mapping the point id to the Woods identifier' do
       store.store('Billing::Payment', vec(1, 0, 0), { type: 'model' })

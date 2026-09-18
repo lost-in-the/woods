@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
@@ -58,7 +60,7 @@ module Woods
         units.concat(extract_state_machines_units(source, class_name, file_path))
         units
       rescue StandardError => e
-        Rails.logger.error("Failed to extract state machines from #{file_path}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract state machines from #{file_path}: #{e.message}")
         []
       end
 

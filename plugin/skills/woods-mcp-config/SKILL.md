@@ -5,6 +5,19 @@ description: Configure Woods MCP connections with the exact client JSON shapes a
 
 # Woods MCP configuration
 
+## Managed configuration availability
+
+`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+installed version and test `bundle exec woods-agent-config --help` in the
+selected application bundle. When supported, use its saved setup/update/remove
+plan and explicit client/scope/root selection; apply the reviewed plan within
+the user's existing authorization. Do not infer ownership from a server name
+or repair edited managed sections by overwriting them. Plans and recovery
+journals contain private configuration bytes. See the canonical
+[managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
+for host/Compose preflight, actual Claude file locations, conflict recovery,
+and removal. Preserve manual setup for older installed versions.
+
 ## Preflight
 
 ```bash
@@ -16,6 +29,15 @@ bin/rails woods:stats
 This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Operate only against capabilities the recorded installed version provides. Detect the MCP client, app root, host vs Docker Rails process, the filesystem context that contains the application bundle and index, and whether live-data access is actually required.
 
 Default to Index-only. It reads generated code context and exposes 14 tools. Console MCP boots Rails and reads live data; ask before enabling it.
+
+Initialization guidance (#402) is unreleased after `2.0.0.beta2`; check the
+installed gem before expecting MCP `instructions`. Supporting servers provide
+a short workflow through initialization or modern discovery; protocol
+`2024-11-05` omits it. Missing instructions alone are not a connection failure.
+Keep normal protocol negotiation and use the
+[agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
+when unavailable. See the
+[initialization contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#initialization-guidance).
 
 ## Shape 1: Index-only
 
@@ -117,3 +139,40 @@ Reconnect through the client so it performs its supported MCP negotiation. Clien
 Do not use an isolated raw JSON-RPC request as proof of MCP health. Do not claim conditional Index or inventory-only Console schemas are callable.
 
 Canonical guide: [MCP_SERVERS.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md).
+
+## Lexical retrieval capability check
+
+This is a development capability. Before proposing it, verify the installed gem
+exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
+`WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
+from the plugin version or an unreleased checkout.
+
+When supported, put `WOODS_RETRIEVAL_MODE=lexical` in the environment of the
+process launching Index MCP (stdio or HTTP). A Rails initializer alone is not
+loaded by that process. Confirm `woods_status.retriever.mode` reports `lexical`.
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for the supported contract, checked against the installed gem version.
+
+## Explicit package or path scope
+
+Check the connected tool's advertised input schema before sending `packages` or
+`source_paths`; older installed gems may not support them. When present, both
+`search` and `codebase_retrieve` apply explicit scope before candidate limits.
+Use published nearest package names or application-relative directory prefixes,
+then inspect `applied_scope` and search completeness. Unknown packages are argument
+errors; unsupported custom vector adapters degrade instead of running a global
+query. Scoping can hide relevant cross-boundary relationships, so broaden the
+request deliberately when the task needs them. See the
+[scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).
+
+## Source-content freshness (unreleased #405)
+
+Check installed-version support before using `woods-extract` or the optional
+`woods_status.source_check` argument. With support, inspect
+`index.source_freshness`: `current`, `drifted` or `unknown`. Repeated edits to an
+already-dirty file can leave the porcelain fingerprint unchanged. A quick scan
+limit may justify one `source_check: "deep"`; unavailable source/private keys or
+unproved boot/consumer coverage remain unknown. A fresh `bundle exec woods-extract full`
+inside the application environment establishes preboot evidence. Never publish
+`.source-inputs.key`, silently change its permissions, or delete queued edits to
+hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).

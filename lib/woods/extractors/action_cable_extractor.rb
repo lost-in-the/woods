@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 
@@ -199,7 +201,7 @@ module Woods
       def log_extraction_error(name, error)
         return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
 
-        Rails.logger.error("Failed to extract channel #{name}: #{error.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract channel #{name}: #{error.message}")
       end
     end
   end

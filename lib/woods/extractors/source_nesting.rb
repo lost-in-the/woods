@@ -245,7 +245,7 @@ module Woods
       # The constant path the active main loader expects for +file_path+,
       # asked through the loader's own API so its inflector, namespace
       # collapse, and ignore rules decide (a custom `api => API` inflection
-      # must win over the local camelizer). Available on Zeitwerk 2.6.4+;
+      # must win over the local camelizer). Available on Zeitwerk 2.6.9+;
       # nil — unmanaged — when the loader's API is older, declines the
       # file, or cannot derive a name. A decline is authoritative: the
       # local camelizer must not rescue it.
