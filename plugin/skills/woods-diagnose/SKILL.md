@@ -46,6 +46,16 @@ For versions documenting environment-boot snapshots, confirm that the command is
 `bundle exec rake woods:watch`, with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
+### Watch misses edits under a shared directory alias
+
+Check the installed version: logical alias preservation (#445) is unreleased.
+Older polling/catch-up walkers could visit an irrelevant alias first and suppress
+`app/models` when both point to the same physical directory. Compare the logical
+path with the extraction input path; a running daemon alone does not prove coverage.
+Use a manual extraction for recovery until upgrading. The corrected walker keeps
+independent aliases and prunes ancestor cycles; do not remove cycle or ignore guards.
+See the installed version's watch guide before assuming this behavior.
+
 ### Session trace reports ambiguous identity
 
 The `session_trace` `ambiguous_identity` error (#213) is unreleased after
@@ -219,6 +229,14 @@ Do not tune relevance with similarity_threshold: it is inert and deprecated.
 Use query/type/scope selection and inspect ranking evidence instead. See
 [retrieval tuning](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#tuning).
 
+Native embedding completeness checks (#442/#444) are unreleased after beta2;
+confirm the installed version first. If embedding reports `Embedding input
+incomplete`, repair the named published extraction artifact or rebuild extraction
+before retrying. Do not use `WOODS_ALLOW_PURGE=1` to bypass an integrity failure;
+it only permits intentional mass deletion. Source-empty units deliberately retain
+metadata without vectors. See the canonical
+[input-integrity guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#input-integrity-and-source-empty-units).
+
 Only diagnose this layer when structural tools work and `codebase_retrieve` fails. First check `woods_status.retriever.mode`. For lexical mode, validate the published extraction index and follow the capability check below. For semantic mode, check the configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
 
 - OpenAI: verify the key exists without printing it.
@@ -327,3 +345,14 @@ dependents and suggested tests manually; silence is not no impact. Do not clear
 refresh queues when optional hints time out. See the canonical
 [context guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
 for output/time limits, container root mapping and emitted-hint suppression.
+
+### Obsidian destination conflicts
+
+Destination ownership preflight (#441) is unreleased; first check the installed Woods version and
+its matching guide. On versions with this check, `refusing <path>: unmanaged or modified destination`
+means the export preserved a conflicting note, setting, or sidecar and skipped the stale-note sweep.
+A `.woods-vault` sentinel or force-purge flag does not authorize overwriting it. Inspect and back up
+the named file before moving it aside, or choose a new export directory. Older vaults can adopt
+byte-identical generated assets into `_woods/ownership.json`; changed legacy sidecars may need this
+manual recovery. Never fabricate ownership receipts or remove personal files to silence the error.
+See the installed version's `docs/OBSIDIAN_INTEGRATION.md` for the exact safety contract.

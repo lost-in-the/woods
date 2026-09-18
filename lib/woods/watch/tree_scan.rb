@@ -50,14 +50,14 @@ module Woods
       def each_file(root:, ignored:, visited: nil, &block)
         base = root.to_s
         prefix = "#{base}/"
-        visited ||= Set.new
+        visited = (visited || Set.new).dup
         visited << real_dir(base)
 
         Find.find(base) do |path|
           next if path == base
 
           skip = skip?(path.delete_prefix(prefix), ignored)
-          Find.prune if visit_entry(path, skip, ignored, visited, &block) == :prune
+          Find.prune if visit_entry(path, skip, ignored, visited, root: base, &block) == :prune
         end
       rescue Errno::ENOENT
         # The root vanished mid-walk (a worktree removed under us). Nothing to
@@ -68,7 +68,7 @@ module Woods
       # Classify one entry and act on it.
       #
       # @return [Symbol, nil] `:prune` when the caller should not descend
-      def visit_entry(path, skip, ignored, visited, &block)
+      def visit_entry(path, skip, ignored, visited, root:, &block)
         # `Find` stats with `lstat`, so it neither descends a symlinked
         # directory nor reports one as a file — the entry would just vanish. A
         # full extraction globs, and `Dir.glob` *does* follow them, so leaving
@@ -76,7 +76,7 @@ module Woods
         # symlinked `app/models`, or a monorepo linking shared code in, simply
         # never produced an event.
         if symlinked_directory?(path)
-          descend_symlink(path, ignored, visited, &block) unless skip
+          descend_symlink(path, ignored, visited | directory_ancestors(path, root), &block) unless skip
           nil
         elsif File.directory?(path)
           skip ? :prune : nil
@@ -86,18 +86,26 @@ module Woods
         end
       end
 
-      # Walk a symlinked directory, once.
-      #
-      # The `visited` set is keyed on the *resolved* path, which is what makes
-      # this terminate: a link pointing at its own ancestor is an infinite tree
-      # to any walker that follows links naively, and two links pointing at one
-      # directory would otherwise yield every file under it twice — enough to
-      # make a change look like two changes to the caller diffing walks.
+      # Detect cycles along this logical traversal branch, not across siblings.
+      # Two aliases of one target are distinct extraction paths: suppressing
+      # one can leave only an ignored alias and hide the relevant app path.
+      # Find does not expose exit events for ordinary directories, so collect
+      # their ancestors at each symlink rather than retaining a global set.
+      def directory_ancestors(path, root)
+        ancestors = Set.new
+        directory = File.dirname(path)
+        loop do
+          ancestors << real_dir(directory)
+          break if directory == root || File.dirname(directory) == directory
+
+          directory = File.dirname(directory)
+        end
+        ancestors
+      end
+
       def descend_symlink(path, ignored, visited, &block)
         target = real_dir(path)
         return if target.nil? || visited.include?(target)
-
-        visited << target
 
         # Walk the *resolved* directory — `Find.find` lstats even the root it is
         # handed, so pointing it at the link itself yields the link and stops —

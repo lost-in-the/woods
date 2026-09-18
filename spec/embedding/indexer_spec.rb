@@ -155,9 +155,10 @@ RSpec.describe Woods::Embedding::Indexer do
         File.write(File.join(output_dir, 'bad.json'), 'not valid json')
       end
 
-      it 'skips invalid files gracefully' do
-        stats = indexer.index_all
-        expect(stats[:processed]).to eq(1)
+      it 'refuses invalid legacy JSON before embedding instead of silently omitting it' do
+        expect { indexer.index_all }.to raise_error(Woods::Error, /Embedding input incomplete/)
+        expect(provider.embed_batch_calls).to eq(0)
+        expect(vector_store.count).to eq(0)
       end
     end
 

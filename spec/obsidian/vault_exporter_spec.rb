@@ -403,6 +403,132 @@ RSpec.describe Woods::Obsidian::VaultExporter do
     end
   end
 
+  describe 'destination ownership' do
+    def vault_snapshot
+      Dir.glob(File.join(@vault, '**', '*'), File::FNM_DOTMATCH)
+         .select { |path| File.file?(path) }
+         .to_h { |path| [path, File.binread(path)] }
+    end
+
+    %w[models/User.md models/_index.md _Overview.md _woods/manifest.json
+       _woods/dependency_graph.json _woods/graph_analysis.json .obsidian/app.json
+       .obsidian/types.json .obsidian/graph.json Units.base _woods/ownership.json].each do |rel|
+      it "refuses an unmanaged #{rel} collision before writing or sweeping" do
+        FileUtils.mkdir_p(File.dirname(File.join(@vault, rel)))
+        File.write(File.join(@vault, rel), 'personal content')
+        File.write(File.join(@vault, '.woods-vault'), 'woods')
+        File.write(File.join(@vault, 'stale.md'), "---\nwoods_managed: true\n---\nstale")
+        before = vault_snapshot
+
+        stats = exporter(force_purge: true).export_all
+
+        expect(stats).to include(exported: 0, indexes: 0, swept: 0)
+        expect(stats[:errors].join).to include(rel)
+        expect(vault_snapshot).to eq(before)
+      end
+    end
+
+    it 'refuses personal notes in a foreign vault without adding any files' do
+      FileUtils.mkdir_p(File.join(@vault, 'models'))
+      File.write(File.join(@vault, 'models/User.md'), 'personal')
+      before = vault_snapshot
+      expect(exporter.export_all[:errors]).not_to be_empty
+      expect(vault_snapshot).to eq(before)
+    end
+
+    it 'adopts unchanged legacy assets then permits changed generated output' do
+      exporter.export_all
+      File.delete(File.join(@vault, '_woods/ownership.json'))
+      expect(exporter.export_all[:errors]).to be_empty
+      variant = frozen_graph_variant { |g| g['nodes']['User']['file_path'] = 'changed.rb' }
+      expect(exporter(reader: reader_for(variant)).export_all[:errors]).to be_empty
+      expect(JSON.parse(read_vault('_woods/dependency_graph.json'))).to eq(variant)
+    end
+
+    it 'refuses changed legacy sidecars without modifying the old vault' do
+      exporter.export_all
+      File.delete(File.join(@vault, '_woods/ownership.json'))
+      before = vault_snapshot
+      variant = frozen_graph_variant { |g| g['nodes']['User']['file_path'] = 'changed.rb' }
+      expect(exporter(reader: reader_for(variant)).export_all[:errors].join).to include('dependency_graph.json')
+      expect(vault_snapshot).to eq(before)
+    end
+
+    it 'protects modified tracked JSON assets' do
+      exporter.export_all
+      File.write(File.join(@vault, '.obsidian/app.json'), '{"my_setting": true}')
+      before = vault_snapshot
+      expect(exporter.export_all[:errors].join).to include('.obsidian/app.json')
+      expect(vault_snapshot).to eq(before)
+    end
+
+    it 'rejects receipts containing arbitrary ownership paths' do
+      exporter.export_all
+      receipt = JSON.parse(read_vault('_woods/ownership.json'))
+      receipt['files']['../personal.json'] = 'a' * 64
+      File.write(File.join(@vault, '_woods/ownership.json'), JSON.generate(receipt))
+      before = vault_snapshot
+      expect(exporter.export_all[:errors].join).to include('ownership.json')
+      expect(vault_snapshot).to eq(before)
+    end
+
+    it 'rejects symlinked destination directories even inside the vault' do
+      FileUtils.mkdir_p(File.join(@vault, 'personal'))
+      File.write(File.join(@vault, 'personal/User.md'), 'personal')
+      File.symlink('personal', File.join(@vault, 'models'))
+      before = vault_snapshot
+      expect(exporter.export_all[:errors]).not_to be_empty
+      expect(vault_snapshot).to eq(before)
+    end
+
+    [{ 'schema_version' => 99, 'files' => {} }, [],
+     { 'schema_version' => 1, 'files' => { 'Units.base' => 'not-a-digest' } }].each do |receipt|
+      it "refuses malformed ownership receipt #{receipt.inspect}" do
+        exporter.export_all
+        File.write(File.join(@vault, '_woods/ownership.json'), JSON.generate(receipt))
+        before = vault_snapshot
+        expect(exporter.export_all[:errors].join).to include('invalid ownership receipt')
+        expect(vault_snapshot).to eq(before)
+      end
+    end
+
+    it 'rejects a tampered tracked digest when generated output changes' do
+      exporter.export_all
+      receipt = JSON.parse(read_vault('_woods/ownership.json'))
+      receipt['files']['_woods/dependency_graph.json'] = '0' * 64
+      File.write(File.join(@vault, '_woods/ownership.json'), JSON.generate(receipt))
+      before = vault_snapshot
+      variant = frozen_graph_variant { |g| g['nodes']['User']['file_path'] = 'changed.rb' }
+      expect(exporter(reader: reader_for(variant)).export_all[:errors].join).to include('dependency_graph.json')
+      expect(vault_snapshot).to eq(before)
+    end
+
+    it 'rejects a FIFO receipt without trying to read it' do
+      FileUtils.mkdir_p(File.join(@vault, '_woods'))
+      File.mkfifo(File.join(@vault, '_woods/ownership.json'))
+      expect(exporter.export_all[:errors].join).to include('not a regular destination')
+      expect(File).not_to exist(File.join(@vault, '_Overview.md'))
+    end
+
+    it 'retains ownership of an analysis asset while analysis is temporarily unavailable' do
+      exporter.export_all
+      allow(reader).to receive(:graph_analysis).and_return(nil)
+      expect(exporter.export_all[:errors]).to be_empty
+      allow(reader).to receive(:graph_analysis).and_return(analysis.merge('cycles' => [['User']]))
+      expect(exporter.export_all[:errors]).to be_empty
+    end
+
+    it 'does not sweep after a write failure' do
+      exporter.export_all
+      File.write(File.join(@vault, 'stale.md'), "---\nwoods_managed: true\n---\nstale")
+      allow(Woods::AtomicFile).to receive(:write).and_call_original
+      allow(Woods::AtomicFile).to receive(:write).with(Pathname.new(File.join(@vault, '_Overview.md')), anything)
+                                                 .and_raise(Errno::ENOSPC)
+      expect(exporter(force_purge: true).export_all[:errors]).not_to be_empty
+      expect(File).to exist(File.join(@vault, 'stale.md'))
+    end
+  end
+
   describe 'foreign-vault safety' do
     it 'writes notes additively but skips config and sweep when the vault is foreign' do
       FileUtils.mkdir_p(@vault)

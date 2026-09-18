@@ -118,19 +118,40 @@ RSpec.describe Woods::Watch::TreeScan do
       expect { described_class.files(root: root, ignored: ignored) }.not_to raise_error
     end
 
-    # Outside the root, so the only routes to it are the two links. A target
-    # that also lives inside the tree legitimately appears twice — once at its
-    # real path, once through the link — and that is not what this guards.
-    it 'yields a shared target once when two links point at it' do
+    # Aliases are distinct logical paths: only one may be extraction-relevant.
+    it 'yields a shared target under both logical aliases' do
       real = Dir.mktmpdir('woods_tree_scan_shared')
       File.write(File.join(real, 'thing.rb'), 'x')
       File.symlink(real, File.join(root, 'a_link'))
       File.symlink(real, File.join(root, 'b_link'))
 
       found = described_class.files(root: root, ignored: ignored)
-      expect(found.count { |path| path.end_with?('thing.rb') }).to eq(1)
+      expect(found).to contain_exactly(File.join(root, 'a_link/thing.rb'), File.join(root, 'b_link/thing.rb'))
     ensure
       FileUtils.rm_rf(real)
+    end
+
+    it 'prunes a link to an ordinary nested ancestor without losing sibling aliases' do
+      nested = File.join(root, 'app/models')
+      FileUtils.mkdir_p(nested)
+      target = write('app/models/user.rb')
+      File.symlink(nested, File.join(nested, 'loop'))
+      File.symlink(nested, File.join(root, 'other'))
+
+      expect(files).to contain_exactly(target, File.join(root, 'other/user.rb'))
+    end
+
+    it 'terminates mutual links while preserving both logical entry paths' do
+      first = File.join(root, 'first')
+      second = File.join(root, 'second')
+      FileUtils.mkdir_p([first, second])
+      write('first/one.rb')
+      write('second/two.rb')
+      File.symlink(second, File.join(first, 'next'))
+      File.symlink(first, File.join(second, 'next'))
+
+      expect(files).to contain_exactly(File.join(first, 'one.rb'), File.join(first, 'next/two.rb'),
+                                       File.join(second, 'two.rb'), File.join(second, 'next/one.rb'))
     end
 
     it 'does not follow a link into an ignored directory' do
