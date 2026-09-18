@@ -527,8 +527,10 @@ module Woods
             end_line: parser_node.loc.expression.last_line,
             method_name: parser_node.children[0].to_s,
             source: extract_parser_source_span(parser_node, source),
-            start_byte: source[0...parser_node.loc.expression.begin_pos].bytesize,
-            end_byte: source[0...parser_node.loc.expression.end_pos].bytesize
+            start_byte: original_byte_offset(source, parser_node.loc.expression.line,
+                                             parser_node.loc.expression.column),
+            end_byte: original_byte_offset(source, parser_node.loc.expression.last_line,
+                                           parser_node.loc.expression.last_column)
           )
         when :defs
           body = parser_node.children[3] ? convert_parser_node(parser_node.children[3], source) : nil
@@ -542,8 +544,10 @@ module Woods
             method_name: parser_node.children[1].to_s,
             receiver: receiver,
             source: extract_parser_source_span(parser_node, source),
-            start_byte: source[0...parser_node.loc.expression.begin_pos].bytesize,
-            end_byte: source[0...parser_node.loc.expression.end_pos].bytesize
+            start_byte: original_byte_offset(source, parser_node.loc.expression.line,
+                                             parser_node.loc.expression.column),
+            end_byte: original_byte_offset(source, parser_node.loc.expression.last_line,
+                                           parser_node.loc.expression.last_column)
           )
         when :send
           receiver_text = parser_node.children[0] ? extract_parser_receiver_text(parser_node.children[0], source) : nil
@@ -615,6 +619,14 @@ module Woods
             line: parser_node.loc&.line || 1
           )
         end
+      end
+
+      # parser gem normalizes CRLF in its source buffer. Its line/character
+      # columns still identify the original source, but absolute positions do
+      # not. Map through original lines to preserve both CRLF and Unicode bytes.
+      def original_byte_offset(source, line, column)
+        lines = source.lines
+        lines.take(line - 1).sum(&:bytesize) + lines.fetch(line - 1)[0, column].bytesize
       end
 
       def parser_body_children(body_node)

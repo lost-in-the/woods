@@ -36,6 +36,17 @@ RSpec.describe Woods::Retrieval::SourceEvidence do
       expect(span[:sha256]).to eq(Digest::SHA256.hexdigest('def café; :ok; end'))
       expect(result.provenance[:physical_location]).to be_nil
     end
+
+    it "preserves original CRLF bytes after Unicode with #{prism ? 'Prism' : 'parser'}" do
+      parser = Woods::Ast::Parser.new
+      allow(parser).to receive(:prism_available?).and_return(prism)
+      method = "def café\r\n    :ok\r\n  end"
+      source = "é = 1\r\nclass Invoice\r\n  #{method}\r\nend\r\n"
+      result = render(unit(source), query: 'café', parser: parser)
+      span = result.provenance[:spans].find { |entry| entry[:name] == 'café' }
+      expect(source.byteslice(span[:start_byte]...span[:end_byte])).to eq(method)
+      expect(span).to include(start_line: 3, end_line: 5, sha256: Digest::SHA256.hexdigest(method))
+    end
   end
 
   it 'keeps nested blocks and definitions inside their complete containing method' do
