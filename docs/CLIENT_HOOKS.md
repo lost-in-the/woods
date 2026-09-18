@@ -85,6 +85,9 @@ need not exist; contained symlinks are deliberately unsupported too. Spaces,
 commas, newlines and Unicode paths remain intact. Adapter input is limited to
 1 MiB and 1,000 affected paths; the OpenCode handoff is additionally limited to
 48 KiB. An unsupported oversized event requires explicit extraction or watch.
+Raw input uses a private temporary file during validation so the shell cannot
+silently remove bytes. The runner removes that file before publishing the
+path-only queue record, and cleans it up on handled exits.
 
 One immutable queue file holds a multi-file event. The owner batches up to
 16 files, 1,000 paths and 48 KiB without splitting an event. Existing single-path
