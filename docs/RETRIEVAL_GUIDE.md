@@ -464,3 +464,11 @@ inspecting the newest publication. Optional `type` disambiguates names shared by
 multiple unit types and preserves actual types within mixed storage directories.
 Full source is never disabled by compact mode. See [evaluation](EVALUATION.md#compact-evidence-comparison-403)
 for measured tradeoffs and the limits of returned-unit metrics.
+
+### Source-owner selection remains an offline experiment
+
+The [owner-overlap evaluation](EVALUATION.md#source-owner-overlap-experiment-412)
+compares complete-span overlap against current score order. It adds no retrieval
+configuration or MCP option. Display paths alone cannot prove original ownership,
+especially for inlined concern display; representative runtime task evidence is
+still needed before changing which units receive context budget.

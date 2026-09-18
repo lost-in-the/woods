@@ -403,3 +403,77 @@ not the Claude tokenizer or billing. The capture separately records serialized M
 response counts, client-reported usage and list-price estimates; these must not be
 substituted for model-visible context or billed charges. It contains metrics,
 arguments and hashes, without shipping application source or agent transcripts.
+
+
+## Source-owner overlap experiment (#412)
+
+`bench/evaluation/owner_overlap_comparison.rb` evaluates an offline selector after
+ranking, using the production context assembler's full-source appender, section
+allocations, truncation and token estimator. It does not add a runtime option.
+The strongest result stays first. A later candidate moves ahead only when the
+higher-scoring pending span is already completely covered by delivered source.
+Several disjoint methods from one file remain separate; typed units are never
+merged. Exact-target/pinpoint queries and sections with one verified owner bypass
+the policy. Unknown origins block promotion across their position. Truncated
+parents establish no complete span coverage. Candidate scores remain unchanged.
+
+Origins require a unique exact byte substring in an explicitly supplied immutable
+source snapshot. Display paths alone, ambiguous repeated text, and synthesized
+inlined concern display do not prove physical ownership. Original-file and
+published-source hashes bind the verified spans. There are no query-time host-file
+reads. These are offline fixture origins, not newly published runtime provenance.
+
+The fixed fixtures define necessary methods and budgets before selection. Seven
+synthetic cases and one real Woods source case use actual `RubyAnalyzer` output;
+the latter is static source evidence, not a booted Rails application. Synthetic
+executable oracles load only delivered snippets into an isolated namespace and
+assert their fixed multi-method behavior. The wrapper supplies the declared class
+name for a method; it supplies no absent implementation. These deterministic task
+checks are separate from an LLM answer/task benchmark.
+
+| Fixture | Necessary-method recall, baseline → overlap | Executable fixture, baseline → overlap | Exact context tokens, baseline → overlap |
+|---|---|---|---|
+| Crowded class/method overlap | 0.5 → 1.0 | fail → pass | 312 → 308 |
+| Single owner | 1.0 → 1.0 | pass → pass | 312 → 312 |
+| Exact target / pinpoint (each) | 0.5 → 0.5 | fail → fail | 312 → 312 |
+| Truncated parent | 0.0 → 0.0 | fail → fail | 165 → 165 |
+| Disjoint methods in one file | 1.0 → 1.0 | pass → pass | 97 → 97 |
+| Unknown inlined display origin | 0.5 → 0.5 | fail → fail | 325 → 325 |
+| Woods storage identity / filename source | 0.5 → 1.0 | not measured | 336 → 366 |
+
+Relevant-owner coverage equals necessary-method recall in these fixtures because
+each required owner has one method, except the disjoint-method case where both
+methods share one owner and coverage remains 1.0. The real-source case retains
+`StorageIdentity.key` and `FilenameUtils#collision_safe_filename`; that is source
+retention, not proof that every helper needed to execute a change is present.
+The budget is Woods' existing character estimate: for example, the 230-token
+crowded fixture delivers 312/308 cl100k tokens. Exact counts measure context text,
+not prompts, provenance envelopes or agent output. No new token calibration or
+section-budget borrowing is introduced.
+
+The same #227 28 Canopy questions, gold labels, vectors and budgets serve as a
+negative control. All 62 units have distinct display paths and lack verified
+original spans. Both conditions therefore return identical contexts, matching
+the approved semantic full capture byte for byte. This demonstrates safe bypass;
+it cannot demonstrate owner-selection benefit on a runtime Rails index.
+Equal scores, typed collisions, unknown-origin barriers and separate
+primary/supporting/framework allocations have additional regression coverage.
+
+**Decision: keep this evaluation-only.** Fixed overlap cases benefit, but a
+truncated strongest class still consumes the whole allowance before complementary
+evidence can be selected. Real runtime provenance and actual agent answer/task
+correctness under this selector remain unmeasured. The Writebook task attempts
+above tested evidence formatting, not this policy, and cannot fill that gap.
+A production proposal needs trustworthy published physical spans and a paired
+representative task evaluation; no default change, owner quota, or near-relevance
+promotion is justified by these fixtures.
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/owner_overlap_comparison.rb /tmp/woods-owner-overlap-raw.json
+python bench/evaluation/capture_tokens.py /tmp/woods-owner-overlap-raw.json owner_overlap_capture.json
+```
+
+The checked capture retains all 72 results, unchanged #227 gold labels, fixed-case
+requirements, source hashes, actual context counts/hashes, original scores and
+selection/deferral/budget-exhaustion traces. It retains failed cases. Use the
+recorded `tiktoken` version and vocabulary; keep raw contexts outside the checkout.
