@@ -13,6 +13,7 @@ require_relative 'audit_logger'
 require_relative 'confirmation'
 require_relative 'console_response_renderer'
 require_relative 'credential_scanner'
+require_relative 'credential_scanner_registry'
 require_relative 'eval_guard'
 require_relative 'table_gate'
 require_relative 'redactor'
@@ -34,10 +35,14 @@ module Woods
     #   transport.open
     #
     module Server # rubocop:disable Metrics/ModuleLength
+      SCANNERS = CredentialScannerRegistry.new
+      private_constant :SCANNERS
+
       class << self # rubocop:disable Metrics/ClassLength
         # Rebuild the boot-time credential index from fresh Rails credentials
-        # and hot-swap it into the active scanner without restarting the process.
+        # and hot-swap it into every live scanner without restarting the process.
         #
+        # Refresh failures propagate without replacing any live index.
         # Host rotation jobs should call this immediately after `rails credentials:edit`
         # changes are deployed. The swap is atomic on MRI (GVL) — in-flight scans see
         # either the old or the new index, never a partial one.
@@ -57,14 +62,11 @@ module Woods
         #   the rebuild was skipped.
         def rebuild_credential_index(rails_app: nil)
           return nil unless credential_defense_enabled?
-          return nil unless @active_scanner
 
           target_app = rails_app || default_rails_app
           return nil unless target_app
 
-          new_index = CredentialIndex.build(rails_app: target_app)
-          @active_scanner.replace_index!(new_index)
-          new_index
+          SCANNERS.rebuild { CredentialIndex.refresh(rails_app: target_app) }
         end
 
         # True when Woods is configured and credential defense is on.
@@ -399,19 +401,19 @@ module Woods
                                        model_reflections: model_reflections)
                        end
 
-          secret_index = build_credential_index(config)
-          disabled_patterns = Array(config&.console_disabled_scanner_patterns)
-          scanner = if disabled_patterns.include?(:all)
-                      nil
-                    else
-                      CredentialScanner.new(
-                        disabled_patterns: disabled_patterns,
-                        secret_index: secret_index
-                      )
-                    end
-          @active_scanner = scanner
+          scanner = build_scanner(config)
 
           ResponseContext.build(safe_ctx: safe_ctx, table_gate: table_gate, credential_scanner: scanner)
+        end
+
+        def build_scanner(config)
+          disabled_patterns = Array(config&.console_disabled_scanner_patterns)
+          return nil if disabled_patterns.include?(:all)
+
+          SCANNERS.register do
+            CredentialScanner.new(disabled_patterns: disabled_patterns,
+                                  secret_index: build_credential_index(config))
+          end
         end
 
         # Build the boot-time credential index from Rails.application's encrypted

@@ -68,6 +68,7 @@ module Woods
       MISSING_KEY_ERRORS = %w[
         ActiveSupport::EncryptedConfiguration::MissingKeyError
         ActiveSupport::EncryptedFile::MissingKeyError
+        ActiveSupport::EncryptedFile::MissingContentError
         ActiveSupport::MessageEncryptor::InvalidMessage
       ].freeze
 
@@ -90,11 +91,17 @@ module Woods
         # @return [CredentialIndex] populated index, or an empty index when
         #   the credentials store can't be opened.
         def build(rails_app:)
-          new(secrets: collect_secrets(rails_app))
+          refresh(rails_app: rails_app)
         rescue StandardError => e
           raise unless missing_key_error?(e)
 
           new(secrets: [])
+        end
+
+        # Strict refresh: construct the replacement completely before a caller
+        # installs it. Unlike boot-time .build, errors must preserve the old index.
+        def refresh(rails_app:)
+          new(secrets: collect_secrets(rails_app))
         end
 
         # Emit a structured log warning when any of the given credentials
@@ -136,10 +143,21 @@ module Woods
         private
 
         def collect_secrets(rails_app)
-          config = rails_app.credentials.config
+          config = fresh_credentials(rails_app.credentials).config
           collected = []
           walk(config, collected)
           collected
+        end
+
+        def fresh_credentials(credentials)
+          return credentials unless defined?(ActiveSupport::EncryptedConfiguration) &&
+                                    credentials.is_a?(ActiveSupport::EncryptedConfiguration)
+
+          require_relative 'encrypted_credential_snapshot'
+          EncryptedCredentialSnapshot.new(
+            config_path: credentials.content_path, key_path: credentials.key_path,
+            env_key: credentials.env_key, raise_if_missing_key: true
+          )
         end
 
         def walk(node, collected)

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Refresh encrypted Rails credentials from disk when rebuilding the Console credential index, update every live scanner, and preserve the last valid index if refresh fails. Each response uses one consistent index snapshot.
+
 ## [1.6.1] - 2026-07-22
 
 ### Fixed
