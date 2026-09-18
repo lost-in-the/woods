@@ -1,1 +1,0 @@
-- Add a no-publish, one-off 1.6.2 maintenance preparation flow and installed-package CI. Disable the legacy automatic publisher; publication requires the trusted main maintenance profile and its reviewed candidate SHA.

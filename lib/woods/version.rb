@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module Woods
-  VERSION = '1.6.2.alpha'
+  VERSION = '1.6.2'
 end
