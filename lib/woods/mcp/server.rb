@@ -14,6 +14,7 @@ require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../filename_utils'
 require_relative '../update_check'
+require_relative '../retrieval/source_evidence'
 require_relative 'bootstrap_state'
 require_relative 'errors'
 require_relative 'index_reader'
@@ -442,6 +443,11 @@ module Woods
                 identifier: { type: 'string',
                               description: 'Exact unit identifier (e.g. "Post", "PostsController", "Api::V1::HealthController")' },
                 name: { type: 'string', description: 'Alias for `identifier`. Either one works.' },
+                type: { type: 'string', description: 'Optional actual published unit type, to disambiguate shared identifiers.' },
+                evidence: { type: 'string', enum: %w[full compact outline], description: 'Published evidence mode (default full).' },
+                query: { type: 'string', description: 'Optional relevance query for compact evidence; absent means API orientation.' },
+                budget: { type: 'integer', minimum: 1, description: 'Compact/outline token estimate budget (default 2000); full lookup remains complete.' },
+                source_sha256: { type: 'string', description: 'Require the published source SHA256 from an earlier excerpt; refuses changed source.' },
                 include_source: { type: 'boolean', description: 'Include source_code in response (default: true)' },
                 sections: {
                   type: 'array', items: { type: 'string' },
@@ -452,7 +458,7 @@ module Woods
               # accepted alias. The handler validates that one of the two
               # was provided.
             }
-          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil|
+          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil|
             identifier ||= name
             if identifier.nil? || identifier.empty?
               next respond_err.call(
@@ -464,8 +470,30 @@ module Woods
               )
             end
             sections = coerce.call(sections)
-            unit = reader.find_unit(identifier)
+            begin
+              Retrieval::SourceEvidence.validate_mode!(evidence)
+              if evidence != 'full' && (include_source == false || sections&.any?)
+                raise ArgumentError, 'compact/outline evidence cannot be combined with include_source: false or sections'
+              end
+              if evidence == 'full' && (!query.nil? || !budget.nil?)
+                raise ArgumentError, 'query and budget apply only to compact/outline evidence'
+              end
+            rescue ArgumentError => e
+              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence')
+            end
+            unit = type ? reader.find_unit(identifier, type: type) : reader.find_unit(identifier)
             if unit
+              if source_sha256 && Digest::SHA256.hexdigest(unit['source_code'].to_s) != source_sha256
+                next respond_err.call('Published source changed since the excerpt; retrieve fresh evidence before verification.',
+                                      code: :stale_index, tool: 'lookup', argument: 'source_sha256')
+              end
+              if evidence != 'full'
+                selected = Retrieval::SourceEvidence.new(unit: unit, query: query, generation: reader.loaded_generation)
+                                                    .render(mode: evidence, budget: budget || 2000,
+                                                            counter: ->(text) { (text.length / 4.0).ceil })
+                next ::MCP::Tool::Response.new([{ type: 'text', text: selected.text }],
+                                               structured_content: { text: selected.text, data: { evidence: selected.provenance } })
+              end
               always_include = %w[type identifier file_path namespace]
               filtered = unit
               filtered = filtered.except('source_code') if include_source == false
@@ -925,6 +953,8 @@ module Woods
                          description: 'Natural language question (e.g. "How does user authentication work?")' },
                 budget: { type: 'integer',
                           description: 'Token budget for context assembly (default: 8000).' },
+                evidence: { type: 'string', enum: %w[full compact outline],
+                            description: 'Explicit complete spans or API outline within each ranked unit; default full retains existing output.' },
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
@@ -950,7 +980,7 @@ module Woods
               },
               required: ['query']
             }
-          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil, packages: nil, source_paths: nil|
+          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil, packages: nil, source_paths: nil, evidence: 'full'|
             # `limit` isn't declared in the schema but clients still send it
             # because sibling tools (search, recent_changes, pagerank) use
             # `limit` as a result count. Mapping it to `budget` here would
@@ -970,6 +1000,11 @@ module Woods
               )
             end
 
+            begin
+              Retrieval::SourceEvidence.validate_mode!(evidence)
+            rescue ArgumentError => e
+              next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'evidence')
+            end
             budget = coerce_int.call(budget)
             types = coerce.call(types)
             exclude_types = coerce.call(exclude_types)
@@ -993,6 +1028,7 @@ module Woods
                                 else
                                   {}
                                 end
+                scope_options[:evidence] = evidence unless evidence == 'full'
                 result = retriever.retrieve(
                   query,
                   budget: budget || 8000,
@@ -1021,7 +1057,7 @@ module Woods
                   tool: 'codebase_retrieve'
                 )
               end
-              if result.respond_to?(:applied_scope) && result.applied_scope
+              if evidence != 'full' || (result.respond_to?(:applied_scope) && result.applied_scope)
                 ::MCP::Tool::Response.new(
                   [{ type: 'text', text: result.context }],
                   structured_content: { text: result.context, data: { applied_scope: result.applied_scope, sources: result.sources } },

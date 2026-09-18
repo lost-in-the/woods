@@ -43,6 +43,7 @@ module Woods
         validate_publication!
         reader.with_pinned_generation do
           retriever = snapshot_for_reader
+          options[:evidence_generation] = reader.loaded_generation if options[:evidence] && options[:evidence] != 'full'
           result = retriever.retrieve(query, budget: budget, **options)
           result.sources.each { |source| source[:generation] = reader.loaded_generation }
           result

@@ -470,6 +470,19 @@ RSpec.describe 'packaged gem' do
       expect(result.dig('result', 'isError')).to be(false)
       expect(result.dig('result', 'structuredContent', 'text')).to include('Mode: lexical', 'Post', 'validates')
       assert_scoped_lexical_query(client)
+      assert_compact_evidence(client)
+    end
+
+    def assert_compact_evidence(client)
+      compact = client.call_tool(name: 'lookup', arguments: { identifier: 'Post', type: 'model',
+                                                              evidence: 'compact', query: 'publish', budget: 1000 })
+      evidence = compact.dig('result', 'structuredContent', 'data', 'evidence')
+      expect(evidence).to include('coordinate_system' => 'published_unit', 'generation_status' => 'recorded')
+      expect(evidence.fetch('owner')).to eq('identifier' => 'Post', 'type' => 'model')
+      pointer = evidence.fetch('full_evidence').dup
+      tool = pointer.delete('tool')
+      complete = client.call_tool(name: tool, arguments: pointer)
+      expect(complete.dig('result', 'isError')).not_to be(true)
     end
 
     def assert_scoped_lexical_query(client)

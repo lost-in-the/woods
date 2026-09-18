@@ -12,7 +12,8 @@ module Woods
         (text.length / 4.0).ceil
       end
 
-      def assemble(candidates:, budget:, **)
+      def assemble(candidates:, budget:, evidence: 'full', query: nil, generation: nil, **)
+        SourceEvidence.validate_mode!(evidence)
         raise ArgumentError, 'budget must be a positive Integer' unless budget.is_a?(Integer) && budget.positive?
 
         context = 'Mode: lexical (field-aware BM25; ranked top 20; token counts estimated).'
@@ -25,6 +26,19 @@ module Woods
                    "Matched: #{candidate.matched_fields.join(', ')}\n\n"
           remaining = (budget * 4) - context.length - header.length
           next unless remaining.positive?
+
+          if evidence != 'full'
+            selected = SourceEvidence.new(unit: unit, query: query, generation: generation)
+                                     .render(mode: evidence, budget: budget,
+                                             counter: ->(text) { estimate_tokens(context + header + text) })
+            next if selected.text.empty?
+
+            context += header + selected.text
+            sources << { identifier: unit['identifier'], type: unit['type'], file_path: unit['file_path'],
+                         score: candidate.score, matched_fields: candidate.matched_fields,
+                         evidence: selected.provenance }
+            next
+          end
 
           source = evidence_text(candidate)
           truncated = source.length > remaining

@@ -262,7 +262,9 @@ module Woods
           end_line: end_line_for_prism(prism_node),
           method_name: prism_node.name.to_s,
           receiver: receiver_text,
-          source: extract_prism_source_span(prism_node, source)
+          source: extract_prism_source_span(prism_node, source),
+          start_byte: prism_node.location.start_offset,
+          end_byte: prism_node.location.end_offset
         )
       end
 
@@ -524,7 +526,9 @@ module Woods
             line: parser_node.loc.line,
             end_line: parser_node.loc.expression.last_line,
             method_name: parser_node.children[0].to_s,
-            source: extract_parser_source_span(parser_node, source)
+            source: extract_parser_source_span(parser_node, source),
+            start_byte: source[0...parser_node.loc.expression.begin_pos].bytesize,
+            end_byte: source[0...parser_node.loc.expression.end_pos].bytesize
           )
         when :defs
           body = parser_node.children[3] ? convert_parser_node(parser_node.children[3], source) : nil
@@ -537,7 +541,9 @@ module Woods
             end_line: parser_node.loc.expression.last_line,
             method_name: parser_node.children[1].to_s,
             receiver: receiver,
-            source: extract_parser_source_span(parser_node, source)
+            source: extract_parser_source_span(parser_node, source),
+            start_byte: source[0...parser_node.loc.expression.begin_pos].bytesize,
+            end_byte: source[0...parser_node.loc.expression.end_pos].bytesize
           )
         when :send
           receiver_text = parser_node.children[0] ? extract_parser_receiver_text(parser_node.children[0], source) : nil
@@ -612,7 +618,7 @@ module Woods
       end
 
       def parser_body_children(body_node)
-        body_node&.type == :begin ? body_node.children : [body_node].compact
+        body_node.is_a?(Node) && body_node.type == :begin ? body_node.children : [body_node].compact
       end
 
       def extract_parser_source_span(node, source)

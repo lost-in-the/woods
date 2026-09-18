@@ -379,8 +379,11 @@ module Woods
     # @param packages [Array<String>, nil] Exact published nearest package owners
     # @param source_paths [Array<String>, nil] Application-relative directory prefixes
     # @return [RetrievalResult] Complete retrieval result; scoped calls carry applied_scope
-    def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+    def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil,
+                 evidence: 'full', evidence_generation: nil) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       validate_query!(query)
+      Retrieval::SourceEvidence.validate_mode!(evidence)
+      evidence_options = evidence == 'full' ? {} : { evidence: evidence, query: query, generation: evidence_generation }
       start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       # One atomic read of the bundle reference: everything this query does
       # from here on — execution, ranking, filtering, assembly — stays on the
@@ -391,7 +394,8 @@ module Woods
       pipeline = scoped_pipeline(pipeline, scope) if scope
       classification = @classifier.classify(query)
       if @mode == :lexical
-        result = retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+        result = retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time,
+                                  **evidence_options)
         return attach_scope(result, scope)
       end
 
@@ -407,7 +411,7 @@ module Woods
                                                         fallback_ran: fallback_ran)
                           end
 
-      assembled = assemble_context(pipeline, filtered, classification, budget)
+      assembled = assemble_context(pipeline, filtered, classification, budget, **evidence_options)
       build_result(
         assembled: assembled, assembler: pipeline.assembler, classification: classification,
         strategy: execution_result.strategy, budget: budget, type_rank_context: type_rank_context
@@ -447,10 +451,10 @@ module Woods
       result
     end
 
-    def retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time)
+    def retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time, **evidence_options)
       excluded = DEFAULT_EXCLUDE_TYPES + Array(exclude_types).map(&:to_s)
       execution = pipeline.executor.execute(query: query, type_filter: types, exclude_types: excluded)
-      assembled = pipeline.assembler.assemble(candidates: execution.candidates, budget: budget)
+      assembled = pipeline.assembler.assemble(candidates: execution.candidates, budget: budget, **evidence_options)
       result = build_result(assembled: assembled, assembler: pipeline.assembler, classification: classification,
                             strategy: :lexical, budget: budget)
       result.trace = build_trace(result, execution, execution.candidates, assembled, start_time)
@@ -533,12 +537,12 @@ module Woods
     # @param ranked [Array<Candidate>] Ranked search candidates
     # @param classification [QueryClassifier::Classification] Query classification
     # @return [AssembledContext]
-    def assemble_context(pipeline, ranked, classification, budget)
+    def assemble_context(pipeline, ranked, classification, budget, **evidence_options)
       pipeline.assembler.assemble(
         candidates: ranked,
         classification: classification,
         structural_context: build_structural_context(pipeline.metadata_store),
-        budget: budget
+        budget: budget, **evidence_options
       )
     end
 
