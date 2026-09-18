@@ -28,12 +28,15 @@ module Woods
       ASSOCIATION_ORDER = %w[belongs_to has_one has_many has_and_belongs_to_many].freeze
 
       # @param name_mapper [NameMapper] resolves ids to wikilinks/paths
-      # @param nodes [Hash] graph nodes ({ id => { 'type' => , ... } }) for edge-endpoint types
+      # @param nodes [Hash] note-key => graph node for edge-endpoint types
       # @param pagerank [Hash{String=>Float}] persisted pagerank scores
       # @param analysis [Hash, nil] parsed graph_analysis.json (hubs/cycles/orphans/bridges) or nil
       # @param include_source [Boolean] embed scrubbed source code
       # @param scanner [#scan, nil] credential scanner (required when include_source)
-      def initialize(name_mapper:, nodes:, pagerank: {}, analysis: nil, include_source: false, scanner: nil)
+      def initialize(name_mapper:, nodes:, pagerank: {}, analysis: nil, include_source: false, scanner: nil,
+                     identifiers: {}, ambiguous_identifiers: Set.new)
+        @identifiers = identifiers
+        @ambiguous_identifiers = ambiguous_identifiers
         @mapper = name_mapper
         @nodes = nodes || {}
         @pagerank = pagerank || {}
@@ -45,10 +48,10 @@ module Woods
         @cycle_members = cycle_member_set(analysis)
       end
 
-      # @param id [String] bare unit identifier (graph node key)
+      # @param id [String, Array<String>] note key: bare id for standalone use, or [identifier, type]
       # @param unit [Hash] parsed unit JSON (used only for body facts)
       # @param depends_on [Array<Hash>] [{ target:, via: }] filtered to the emitted set
-      # @param used_by [Array<String>] unique dependent ids filtered to the emitted set
+      # @param used_by [Array<String, Array<String>>] unique dependent note keys filtered to the emitted set
       # @return [String] the rendered note. A failed source scrub omits the source
       #   section (the note is still written); build never returns nil.
       def build(id:, unit:, depends_on:, used_by:)
@@ -74,7 +77,7 @@ module Woods
       def frontmatter(id, unit, depends_on, used_by)
         fm = {
           'woods_managed' => true,
-          'id' => id,
+          'id' => @identifiers.fetch(id, id),
           'type' => unit['type'],
           'file' => unit['file_path'],
           'source_hash' => unit['source_hash'],
@@ -82,17 +85,23 @@ module Woods
           'dependency_count' => depends_on.size,
           'dependent_count' => used_by.size,
           'tags' => tags_for(id, unit),
-          'aliases' => [id]
+          'aliases' => [@identifiers.fetch(id, id)]
         }.compact
         "#{fm.to_yaml}---"
       end
 
+      def analysis_identifier(id)
+        identifier = @identifiers.fetch(id, id)
+        identifier unless @ambiguous_identifiers.include?(identifier)
+      end
+
       def pagerank_for(id)
-        score = @pagerank[id]
+        score = @pagerank[analysis_identifier(id)]
         score&.round(6)
       end
 
       def tags_for(id, unit)
+        id = analysis_identifier(id)
         tags = ['woods/unit', "woods/#{unit['type']}"]
         tags << 'woods/hub' if @hubs.include?(id)
         tags << 'woods/orphan' if @orphans.include?(id)
@@ -124,11 +133,11 @@ module Woods
       end
 
       def callout(id, used_by)
-        if @hubs.include?(id)
+        if @hubs.include?(analysis_identifier(id))
           pr = pagerank_for(id)
           suffix = pr ? " (PageRank #{format('%.4f', pr)})" : ''
           "> [!warning] Hub — high blast radius\n> #{used_by.size} units depend on this#{suffix}."
-        elsif @cycle_members.include?(id)
+        elsif @cycle_members.include?(analysis_identifier(id))
           "> [!warning] Part of a dependency cycle\n> This unit participates in a circular dependency."
         end
       end
@@ -181,7 +190,7 @@ module Woods
         return [] unless items
 
         items.filter_map do |assoc|
-          link = @mapper.wikilink(assoc[:target])
+          link = @mapper.wikilink_for_identifier(assoc[:target])
           next unless link
 
           assoc[:dependent] ? "#{link} (dependent: #{assoc[:dependent]})" : link
