@@ -35,6 +35,23 @@ RSpec.describe Woods::Watch::PollingWatcher do
       expect(watcher.poll).to be_empty
     end
 
+    it 'reports changes under the relevant alias even when an ignored alias sorts first' do
+      Dir.mktmpdir('woods_shared_models') do |shared|
+        File.write(File.join(shared, 'user.rb'), 'old')
+        FileUtils.mkdir_p(File.join(root, 'app'))
+        File.symlink(shared, File.join(root, 'a_shared'))
+        File.symlink(shared, File.join(root, 'app/models'))
+        watcher.poll
+        File.write(File.join(shared, 'user.rb'), 'changed source')
+
+        expect(watcher.poll).to contain_exactly(File.join(root, 'a_shared/user.rb'),
+                                                File.join(root, 'app/models/user.rb'))
+        File.delete(File.join(shared, 'user.rb'))
+        expect(watcher.poll).to contain_exactly(File.join(root, 'a_shared/user.rb'),
+                                                File.join(root, 'app/models/user.rb'))
+      end
+    end
+
     it 'reports a created file' do
       watcher.poll
       write('app/models/user.rb')
