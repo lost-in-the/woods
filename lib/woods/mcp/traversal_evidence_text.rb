@@ -40,7 +40,7 @@ module Woods
         complete = value(witness, :typed_path_complete) ? 'yes' : 'no'
         context = value(witness, :context) ? 'yes' : 'no'
         "#{identifier}: #{value(witness, :impact)}; parent=#{parent}; edge=#{edge}; " \
-          "typed path complete=#{complete}; context only=#{context}"
+          "witness types unambiguous=#{complete}; context only=#{context}"
       end
 
       def self.value(hash, key)

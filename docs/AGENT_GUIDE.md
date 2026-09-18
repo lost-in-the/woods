@@ -129,18 +129,31 @@ Do not infer completeness from a full page or missing metadata. See the
 
 ## Traverse deliberately
 
-`dependencies` means “what this unit uses.” `dependents` means “what uses this unit.” Both default to bounded breadth-first traversal and accept type or relationship filters.
+`dependencies` shows recorded relationships from this unit; `dependents` shows
+recorded relationships to it. Both default to bounded breadth-first traversal and
+accept type or relationship filters. They are not exhaustive source-reference or
+call graphs: selective scanning can miss arbitrary method-body constant references,
+including generic PORO and library targets. No dependents or test-only dependents
+do not establish absence of production callers. Check source before claiming absence.
+The `graph_coverage` notice makes this scope explicit in supporting responses;
+that metadata is unreleased after `2.0.0.beta3`.
 
 Start at depth 1 or 2. A deeper unfiltered traversal can obscure the direct evidence that matters. Common relationship values include associations (`belongs_to`, `has_many`, `has_one`), code references, renders, redirects, form actions, and navigation links.
 
 Both return at most 50 nodes by default and say so with a `Showing N of M (truncated)`
-line. Narrow with `depth`, `types` and `via` before paging with `limit` and
+line for completed walks. Budget-limited answers in supporting versions instead
+say `Showing N of at least M (total unknown: <budget reason>)`. Narrow with `depth`, `types` and `via` before paging with `limit` and
 `offset`: narrowing answers the question, paging only splits the same answer
 across turns. In a multi-database app each row names the unit's database.
 
 A traversal can also stop at its independent node or edge budget. Treat
 `partial`/`partial_reason` as incomplete graph evidence even on the final page;
-paging cannot recover nodes the walk never reached. Check the connected schema
+paging cannot recover nodes the walk never reached. Supporting responses include
+`total_is_exact: false` for a cutoff and true for a finished walk, independently of
+pagination. This field is unreleased after `2.0.0.beta3`; on older servers inspect
+`partial` directly. `nodes_total` remains the root-inclusive admitted prefix count,
+not the full reachable total when partial. Even an exact count covers only the
+requested root, depth, filters and published graph generation. Check the connected schema
 before using `max_nodes`/`max_edges`, and follow the
 [budget contract](MCP_SERVERS.md#dependency-traversal-budgets).
 
@@ -149,7 +162,9 @@ recorded source-to-target relationships and a shared shortest witness to each
 row. Report `direct` relationships separately from `transitive` inferred impact.
 Follow `parent`/`edge_id` references; `context: true` ancestors are outside the
 current result page. Unknown labels and ambiguous candidate types stay unknown;
-`typed_path_complete: false` does not establish a uniquely typed path. See the
+`typed_path_complete: false` does not establish a uniquely typed path. True means
+only unambiguous witness types, not complete source coverage. Supporting text
+responses label this `witness types unambiguous` (unreleased after `2.0.0.beta3`). See the
 [explanation contract](MCP_SERVERS.md#traversal-explanations).
 
 Use recorded relationship labels as evidence. Do not infer execution or call
