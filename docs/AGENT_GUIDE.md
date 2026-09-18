@@ -144,7 +144,16 @@ paging cannot recover nodes the walk never reached. Check the connected schema
 before using `max_nodes`/`max_edges`, and follow the
 [budget contract](MCP_SERVERS.md#dependency-traversal-budgets).
 
-Use returned relationship labels as evidence. Do not infer call order from a dependency edge alone.
+When the connected schema supports `explain`, request `explain: true` to see
+recorded source-to-target relationships and a shared shortest witness to each
+row. Report `direct` relationships separately from `transitive` inferred impact.
+Follow `parent`/`edge_id` references; `context: true` ancestors are outside the
+current result page. Unknown labels and ambiguous candidate types stay unknown;
+`typed_path_complete: false` does not establish a uniquely typed path. See the
+[explanation contract](MCP_SERVERS.md#traversal-explanations).
+
+Use recorded relationship labels as evidence. Do not infer execution or call
+order from a dependency edge alone.
 
 ## Use ranked retrieval only when ready
 

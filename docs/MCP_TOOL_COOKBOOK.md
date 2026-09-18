@@ -266,6 +266,14 @@ that marker means the reachable graph is incomplete even after the final page.
 See [traversal budgets](MCP_SERVERS.md#dependency-traversal-budgets) before
 changing `max_nodes` or `max_edges`.
 
+To explain why a row is affected, check the connected schema and add
+`"explain": true`. The response preserves source-to-target labels even while
+walking dependents. Its predecessor witnesses distinguish direct relationships
+from transitive inferred reachability, retain ancestor context across pages, and
+mark ambiguous types explicitly. See the
+[explanation contract](MCP_SERVERS.md#traversal-explanations); these witnesses are
+not proof of observed execution.
+
 To find only which jobs depend on `User`:
 
 ```json
