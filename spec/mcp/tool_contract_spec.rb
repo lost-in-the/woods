@@ -26,6 +26,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                       required: %w[query], properties: {
                                         'query' => string_contract(1, 10_000),
                                         'budget' => integer_contract(1, 200_000),
+                                        'evidence' => enum_contract(%w[full compact outline], nil, 10_000),
                                         'types' => array_contract(1_000, 10_000),
                                         'exclude_types' => array_contract(1_000, 10_000),
                                         'packages' => array_contract(1_000, 10_000),
@@ -135,6 +136,11 @@ RSpec.describe 'Index MCP tool contracts' do
                            properties: {
                              'identifier' => string_contract(nil, 10_000),
                              'name' => string_contract(nil, 10_000),
+                             'type' => string_contract(nil, 10_000),
+                             'evidence' => enum_contract(%w[full compact outline], nil, 10_000),
+                             'query' => string_contract(nil, 10_000),
+                             'budget' => integer_contract(1, 200_000),
+                             'source_sha256' => string_contract(nil, 10_000),
                              'include_source' => boolean_contract,
                              'sections' => array_contract(1_000, 10_000)
                            }),
@@ -375,7 +381,8 @@ RSpec.describe 'Index MCP tool contracts' do
     end
   end
   let(:retriever) do
-    double('retriever', retrieve: Struct.new(:context).new("## Post\nclass Post; end"))
+    double('retriever',
+           retrieve: Struct.new(:context, :sources, :applied_scope).new("## Post\nclass Post; end", [], nil))
   end
   let(:pipeline_guard) do
     Woods::Operator::PipelineGuard.new(state_dir: File.join(runtime_root, 'operator'), cooldown: 300)
@@ -776,8 +783,15 @@ RSpec.describe 'Index MCP tool contracts' do
       %w[recent_changes limit] => :assert_limited_results,
       %w[search limit] => :assert_limited_results,
       %w[retrieval_rate score] => :assert_rating_score,
+      %w[lookup budget] => :assert_lookup_evidence_budget,
       %w[trace_flow depth] => :assert_trace_depth
     }
+  end
+
+  def assert_lookup_evidence_budget(data, value, _name)
+    evidence = data.fetch('evidence')
+    expect(evidence).to include('mode' => 'compact', 'owner' => { 'identifier' => 'Post', 'type' => 'model' })
+    expect(evidence.fetch('spans').size).to eq(value == 1 ? 0 : 1)
   end
 
   def assert_dependencies_depth(data, value, _name)
@@ -895,6 +909,8 @@ RSpec.describe 'Index MCP tool contracts' do
       expect(data.dig('index', 'source_freshness')).to include(
         'state' => 'unknown', 'check' => value, 'complete' => false
       )
+    when 'lookup', 'codebase_retrieve'
+      assert_evidence_enum(name, value, result)
     when 'graph_analysis'
       assert_graph_enum(data, value)
     when 'pipeline_repair'
@@ -907,6 +923,26 @@ RSpec.describe 'Index MCP tool contracts' do
     else
       raise "Missing enum semantic oracle for #{name}.#{value}"
     end
+  end
+
+  def assert_evidence_enum(name, value, result)
+    return assert_semantic_result(name, contract_oracle.fetch(name), result) if value == 'full'
+
+    data = result.dig('structuredContent', 'data')
+    if name == 'lookup'
+      expect(data.fetch('evidence')).to include('mode' => value, 'coordinate_system' => 'published_unit',
+                                                'owner' => { 'identifier' => 'Post', 'type' => 'model' })
+      expect(data.fetch('evidence').fetch('spans').map { |span| span.fetch('kind') }).to eq(['published_source'])
+    else
+      assert_retrieval_evidence_enum(value, result, data)
+    end
+  end
+
+  def assert_retrieval_evidence_enum(value, result, data)
+    expect(result.dig('structuredContent', 'text')).to eq("## Post\nclass Post; end")
+    expect(data).to eq('applied_scope' => nil, 'sources' => [])
+    expect(retriever).to have_received(:retrieve).with('How does Post work?',
+                                                       budget: 8000, types: nil, exclude_types: nil, evidence: value)
   end
 
   def assert_graph_enum(data, value)
@@ -1234,6 +1270,7 @@ RSpec.describe 'Index MCP tool contracts' do
 
           [property.fetch('minimum'), property.fetch('maximum')].each do |value|
             arguments = contract.fetch(:arguments).merge(name => value)
+            arguments['evidence'] = 'compact' if tool_name == 'lookup' && name == 'budget'
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
             expect(result['isError']).to be(false), label
@@ -1242,6 +1279,7 @@ RSpec.describe 'Index MCP tool contracts' do
 
           [property.fetch('minimum') - 1, property.fetch('maximum') + 1].each do |value|
             arguments = contract.fetch(:arguments).merge(name => value)
+            arguments['evidence'] = 'compact' if tool_name == 'lookup' && name == 'budget'
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
             expect(result['isError']).to be(true), label
