@@ -1,0 +1,1 @@
+Add separately opt-in, bounded Claude orientation and post-edit candidate context from a retained published generation, with explicit uncertainty, repeat suppression, independent refresh controls, and an installed `woods-hook-context` helper.

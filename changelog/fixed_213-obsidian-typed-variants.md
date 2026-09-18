@@ -1,0 +1,1 @@
+Obsidian export preserves same-name units of different types, their separate outgoing links, and original public identifiers. Collision-bearing vaults publish a version-2 typed manifest; ordinary version-1 manifests and note paths remain unchanged. Ambiguous bare targets are omitted with a diagnostic, and incomplete typed reads cannot trigger stale-note deletion.

@@ -1,0 +1,1 @@
+- Coordinate `Woods.extract!` and `Woods.extract_changed!` with task/watch writers and raise on lock timeout or failed generation publication, so background jobs can retry unsuccessful extraction.
