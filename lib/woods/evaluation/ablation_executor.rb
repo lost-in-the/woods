@@ -14,10 +14,14 @@ module Woods
       # @return [Integer, nil] the pid of the most recently spawned process
       attr_reader :pid
 
+      # @return [Integer, nil] process group owned by the current command
+      attr_reader :process_group_id
+
       # @param command [String] a full shell command line
       # @param chdir [String]
       # @return [Array(String, String, Boolean)] stdout, stderr, success
       def call(command, chdir:)
+        @pid = @process_group_id = nil
         stdout_r, stdout_w = IO.pipe
         stderr_r, stderr_w = IO.pipe
         spawn_child(command, chdir, stdout_w, stderr_w)
@@ -59,7 +63,8 @@ module Woods
       # terminated on timeout.
       def spawn_child(command, chdir, stdout_w, stderr_w)
         Thread.handle_interrupt(Timeout::Error => :never) do
-          @pid = Process.spawn(command, chdir: chdir, in: File::NULL, out: stdout_w, err: stderr_w)
+          @pid = Process.spawn(command, chdir: chdir, in: File::NULL, out: stdout_w, err: stderr_w, pgroup: true)
+          @process_group_id = @pid
         end
       end
     end

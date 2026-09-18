@@ -16,7 +16,10 @@ module Woods
     # subprocess started by the wrapped executor keeps running unless
     # something kills it. When the wrapped executor exposes its most recent
     # pid (see {AblationExecutor}), this sends TERM, waits briefly, then KILL
-    # if the process is still alive, before reporting the call as a timed-out
+    # if still alive. The default executor owns a process group, so cleanup
+    # includes ordinary descendants even if their parent already exited.
+    # Custom executors exposing only a pid retain single-process cleanup.
+    # Cleanup finishes before reporting the call as a timed-out
     # failure. An executor that does not expose a pid (for example a fake
     # executor in a spec) still gets the timeout, just without a process to
     # terminate.
@@ -47,15 +50,30 @@ module Woods
         pid = executor_pid
         return '' unless pid
 
-        Process.kill('TERM', pid)
-        Process.kill('KILL', pid) unless process_exited?(pid, within: TERM_GRACE_SECONDS)
+        target = signal_target(pid)
+        signal('TERM', target)
+        signal('KILL', target) unless process_exited?(target, within: TERM_GRACE_SECONDS)
         reap(pid, within: REAP_GRACE_SECONDS) ? '' : " (pid #{pid} did not reap within #{REAP_GRACE_SECONDS}s)"
       rescue Errno::ESRCH, Errno::ECHILD
         ''
       end
 
       def executor_pid
-        @executor.pid if @executor.respond_to?(:pid)
+        pid = @executor.pid if @executor.respond_to?(:pid)
+        pid if pid.is_a?(Integer) && pid.positive?
+      end
+
+      # A group created by spawn(pgroup: true) is named after that child.
+      # Never infer a group from a custom pid or signal our own group.
+      def signal_target(pid)
+        group = @executor.process_group_id if @executor.respond_to?(:process_group_id)
+        group == pid && group != Process.getpgrp ? -group : pid
+      end
+
+      def signal(name, target)
+        Process.kill(name, target)
+      rescue Errno::ESRCH
+        nil
       end
 
       def process_exited?(pid, within:)
