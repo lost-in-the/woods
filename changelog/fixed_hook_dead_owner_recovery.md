@@ -1,0 +1,1 @@
+- Let only the hook that removes a recorded dead-owner marker replace its mkdir lock, so concurrent recovery does not leave all edits queued behind an abandoned empty directory.
