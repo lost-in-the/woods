@@ -78,6 +78,12 @@ module Woods
           "More matches: #{more}; total matches: #{total.nil? ? 'unknown' : total}; " \
           "matched lower bound: #{fetch_key(evidence, :matched_lower_bound)}."
         ]
+        scope = fetch_key(data, :applied_scope)
+        if scope
+          lines << "Applied scope: packages=#{fetch_key(scope, :packages).inspect}; " \
+                   "source_paths=#{fetch_key(scope, :source_paths).inspect}; " \
+                   "eligible units=#{fetch_key(scope, :eligible_units)}."
+        end
         hint = fetch_key(data, :hint)
         lines << hint if hint
         lines

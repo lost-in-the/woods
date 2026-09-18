@@ -27,7 +27,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                         'query' => string_contract(1, 10_000),
                                         'budget' => integer_contract(1, 200_000),
                                         'types' => array_contract(1_000, 10_000),
-                                        'exclude_types' => array_contract(1_000, 10_000)
+                                        'exclude_types' => array_contract(1_000, 10_000),
+                                        'packages' => array_contract(1_000, 10_000),
+                                        'source_paths' => array_contract(1_000, 10_000)
                                       }),
       'dependencies' => contract(:always, { 'identifier' => 'Comment' }, exact_data({
                                                                                       'root' => 'Comment', 'found' => true,
@@ -268,6 +270,8 @@ RSpec.describe 'Index MCP tool contracts' do
         properties: {
           'query' => string_contract(nil, 10_000),
           'types' => array_contract(1_000, 10_000),
+          'packages' => array_contract(1_000, 10_000),
+          'source_paths' => array_contract(1_000, 10_000),
           'fields' => enum_array_contract(%w[identifier metadata source_code], 1_000, 10_000),
           'limit' => integer_contract(1, 1_000),
           'exact_prefix' => string_contract(nil, 10_000),

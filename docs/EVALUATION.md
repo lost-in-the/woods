@@ -259,3 +259,48 @@ The Rails Foundation's "Agents on Rails" benchmark (announced 2026-08-13, built 
 ### Reading the numbers
 
 A negative `delta.mean_tokens` with an equal or higher `delta.resolution_rate` is the result that sells the index, on the tasks actually run. It does not, by itself, establish that the index causes the difference: run at least ten tasks, two conditions on five tasks is noise, and remember that agent runs are not perfectly reproducible even at a fixed baseline SHA. Keep the baseline SHA and Woods generation fixed across a comparison (both are recorded per result), and do not let the `on` agent run `woods:extract` mid-task.
+
+## Explicit scope comparison
+
+`bench/evaluation/scope_comparison.rb` reuses #227's 62-unit Canopy extraction,
+28 original questions, captured MiniLM vectors, unchanged gold labels, and the
+same 1200-token budgets. Fixed domain-word rules choose the existing billing,
+newsletter, or support directories across models, controllers, jobs, and use
+cases. Other questions are unscoped controls. This assigns **no package ownership**
+to Canopy. Expected units outside a requested directory remain in the gold labels,
+so restricting scope can reduce recall for questions about cross-boundary behavior.
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/scope_comparison.rb /tmp/woods-scope-raw.json
+python bench/evaluation/capture_tokens.py /tmp/woods-scope-raw.json scope_comparison_capture.json
+```
+
+Use the pinned Python requirements in this directory's existing evaluation runbook.
+The capture records per-query scope, outcomes, context hashes, exact cl100k counts,
+and the existing precision@5, recall, and MRR metrics. Warm replay latency includes
+scope preparation and excludes provider/network time. This is a filtering and
+ranking comparison, not a coding-task or live-host performance claim.
+
+`spec/retrieval/package_scope_spec.rb` separately builds a synthetic Packwerk
+filesystem fixture and obtains root, nested, and sibling ownership from the real
+`PackageExtractor`. It verifies package boundaries without inventing ownership in
+a captured host corpus. Live pgvector/Qdrant tests cover a small eligible package
+behind globally stronger matches, typed chunks, and old vectors without metadata
+payload fields. The broader task-quality question in #227 remains open.
+
+The reviewed capture uses 11 scoped questions and 17 unchanged controls per mode.
+On the 11 questions with a requested directory scope:
+
+| Mode | Scope | Precision@5 | Recall | MRR | Mean exact context tokens |
+|---|---|---:|---:|---:|---:|
+| Semantic | none | 0.5758 | 0.6530 | 0.9545 | 907.55 |
+| Semantic | explicit paths | 0.6364 | 0.5621 | 0.9091 | 820.73 |
+| Lexical | none | 0.5394 | 0.7364 | 0.8636 | 1201.45 |
+| Lexical | explicit paths | 0.6970 | 0.6455 | 0.8030 | 936.73 |
+
+Scope improves precision here while losing cross-boundary expected units. It is
+an explicit intent filter, not a default ranking improvement. Scoped lexical
+median query time was 2.30 ms versus 0.41 ms unscoped on these 11 replay questions;
+preparing the full metadata snapshot is visible even on this small corpus.
+Exact token counts measure the returned context, not MCP metadata or agent prompts;
+Woods' 1200-token budget is an estimate and can differ from cl100k counts.

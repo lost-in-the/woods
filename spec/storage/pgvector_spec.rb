@@ -283,6 +283,18 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
     end
   end
 
+  describe 'explicit raw-ID eligibility' do
+    it 'materializes only eligible IDs before distance ranking, including chunk and quoted IDs' do
+      allow(connection).to receive(:execute).and_return([])
+      allow(connection).to receive(:quote) { |value| "'#{value.gsub("'", "''")}'" }
+      store.search([1.0, 0.0, 0.0], limit: 1, ids: ["Invoice'part#chunk_1"], filters: { type: ['model'] })
+      expect(connection).to have_received(:execute) do |sql|
+        expect(sql).to include('WITH eligible AS MATERIALIZED', "id IN ('Invoice''part#chunk_1')",
+                               "metadata->>'type' IN ('model')", 'FROM eligible', 'LIMIT 1')
+      end
+    end
+  end
+
   describe '#search' do
     let(:result_row) do
       { 'id' => 'doc1', 'distance' => 0.1, 'metadata' => '{"type":"model"}' }

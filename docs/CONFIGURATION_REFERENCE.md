@@ -824,3 +824,12 @@ All storage options work with both MySQL and PostgreSQL, except:
 - **SQLite metadata store**: uses a standalone SQLite database file, independent of your app's database
 
 See [BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.
+
+### Explicit retrieval and discovery scope
+
+On a server whose tool schema advertises them, `packages` and `source_paths` narrow
+`search` and `codebase_retrieve` before candidate limits. These are per-call
+arguments, not configuration settings. Inspect applied scope and completeness;
+a narrow graph query can omit relevant cross-boundary dependencies. See the
+[scope contract](RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes) for
+root/nested ownership, path normalization, errors, storage support, and cost.

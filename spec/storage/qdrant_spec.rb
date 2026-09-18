@@ -189,6 +189,28 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
     end
   end
 
+  describe 'explicit raw-ID eligibility' do
+    it 'requests exact scoped ranking with original identifier and metadata filters together' do
+      response = instance_double(Net::HTTPSuccess, body: '{"result":[]}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+      store.search([1.0, 0.0, 0.0], limit: 1, ids: ['Invoice#chunk_1'], filters: { type: ['model'] })
+      expect(http).to have_received(:request) do |request|
+        body = JSON.parse(request.body)
+        expect(body['params']).to eq('exact' => true)
+        expect(body.dig('filter', 'must')).to include(
+          { 'key' => 'woods_identifier', 'match' => { 'any' => ['Invoice#chunk_1'] } },
+          { 'key' => 'type', 'match' => { 'any' => ['model'] } }
+        )
+      end
+    end
+
+    it 'returns an explicit empty ID set without making a request' do
+      expect(http).not_to receive(:request)
+      expect(store.search([1.0, 0.0, 0.0], ids: [])).to eq([])
+    end
+  end
+
   describe '#search' do
     let(:search_response_body) do
       {

@@ -506,6 +506,10 @@ module Woods
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict scan to these unit types: model, controller, service, job, mailer, etc.'
                 },
+                packages: { type: 'array', items: { type: 'string' },
+                            description: 'Exact published package owners, OR within the list; AND with source_paths and types.' },
+                source_paths: { type: 'array', items: { type: 'string' },
+                                description: 'Application-relative directory prefixes; segment-aware, OR within the list. Applied before limits.' },
                 fields: {
                   type: 'array', items: { type: 'string', enum: %w[identifier metadata source_code] },
                   description: 'Fields to search: identifier (default), source_code, metadata'
@@ -523,7 +527,8 @@ module Woods
                 }
               }
             }
-          ) do |server_context:, query: nil, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil|
+          ) do |server_context:, query: nil, types: nil, fields: nil, limit: nil, exact_prefix: nil, exact_suffix: nil,
+                packages: nil, source_paths: nil|
             if (query.nil? || query.empty?) &&
                (exact_prefix.nil? || exact_prefix.empty?) &&
                (exact_suffix.nil? || exact_suffix.empty?)
@@ -544,7 +549,8 @@ module Woods
               fields: fields || %w[identifier],
               limit: limit || 20,
               exact_prefix: exact_prefix,
-              exact_suffix: exact_suffix
+              exact_suffix: exact_suffix,
+              packages: packages, source_paths: source_paths
             )
             results = search_result[:results]
             payload = {
@@ -553,10 +559,13 @@ module Woods
               results: results,
               completeness: search_result[:completeness]
             }
+            payload[:applied_scope] = search_result[:applied_scope] if search_result[:applied_scope]
             payload[:note] = search_result[:note] if search_result[:note]
             payload[:partial] = true if search_result[:partial]
             payload[:hint] = search_result[:hint] if search_result[:hint]
             respond.call(renderer.render(:search, payload))
+          rescue Retrieval::Scope::InvalidScopeError => e
+            respond_err.call(e.message, code: :unsupported_argument, tool: 'search', argument: 'scope')
           rescue IOError, SystemCallError, JSON::ParserError, EncodingError
             respond_err.call(
               'Search completeness: unknown (unreadable_or_corrupt_source). ' \
@@ -916,7 +925,7 @@ module Woods
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
                                'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
-                               'Lexical mode filters before its top-20 limit and omits the semantic rank table. ' \
+                               'Lexical mode and explicit package/path scopes filter before limits and omit the global rank table. ' \
                                'In semantic mode, when the unfiltered top-K has no requested type, the retriever ' \
                                'falls back to rank-within-type so the response is populated whenever units of ' \
                                'the requested type exist in the index. The response appends a "Type rank ' \
@@ -926,6 +935,10 @@ module Woods
                                '(index has this type but other requested types filled the result), absent ' \
                                '(zero units of this type in the index).'
                 },
+                packages: { type: 'array', items: { type: 'string' },
+                            description: 'Exact published nearest package owners. OR within the list; AND with paths and type eligibility.' },
+                source_paths: { type: 'array', items: { type: 'string' },
+                                description: 'Application-relative directory prefixes. Scope applies before candidate limits; graph expansion stays inside it.' },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Additional types to exclude on top of the default test_mapping exclusion.'
@@ -933,7 +946,7 @@ module Woods
               },
               required: ['query']
             }
-          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil|
+          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil, packages: nil, source_paths: nil|
             # `limit` isn't declared in the schema but clients still send it
             # because sibling tools (search, recent_changes, pagerank) use
             # `limit` as a result count. Mapping it to `budget` here would
@@ -971,12 +984,19 @@ module Woods
             end
             if retriever
               begin
+                scope_options = if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+                                  { packages: packages, source_paths: source_paths }
+                                else
+                                  {}
+                                end
                 result = retriever.retrieve(
                   query,
                   budget: budget || 8000,
                   types: types,
-                  exclude_types: exclude_types
+                  exclude_types: exclude_types, **scope_options
                 )
+              rescue Retrieval::Scope::InvalidScopeError => e
+                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'scope')
               rescue Woods::Retriever::StoreError => e
                 # M8: a metadata-store failure mid-query must not surface as
                 # a raw raise through the tool boundary (or as the misleading
@@ -997,7 +1017,15 @@ module Woods
                   tool: 'codebase_retrieve'
                 )
               end
-              respond.call(result.context)
+              if result.respond_to?(:applied_scope) && result.applied_scope
+                ::MCP::Tool::Response.new(
+                  [{ type: 'text', text: result.context }],
+                  structured_content: { text: result.context, data: { applied_scope: result.applied_scope, sources: result.sources } },
+                  meta: { applied_scope: result.applied_scope }
+                )
+              else
+                respond.call(result.context)
+              end
             else
               respond_err.call(
                 'Semantic search is disabled — no embedding provider is configured. ' \

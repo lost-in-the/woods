@@ -1,0 +1,3750 @@
+{
+  "schema_version": 1,
+  "corpus_sha256": "f2eac704dd0b773059e7268ed40046d862f47a1049223d89fcb45c8e645b5d20",
+  "vectors_sha256": "311204a33db66587269346a7d54bcef842a08176e56c0d1816cd9e1275c4c89d",
+  "ruby": "4.0.6",
+  "selection": {
+    "billing": "billing|payment|refund",
+    "newsletter": "newsletter",
+    "support": "support"
+  },
+  "scope": "Existing Canopy source paths; no package ownership claims. Same 28 queries, gold labels and budgets. Domain-named questions use fixed cross-layer directory scopes; others are unscoped controls. Expected cross-boundary units remain in gold, so restricted scope can reduce recall. Warm captured-vector replay includes per-query scope preparation, excludes provider/network latency; no task outcomes.",
+  "results": [
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 4.064771997946082,
+        "min": 3.6477159992500674,
+        "max": 8.167616000719136
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Newsletter::Campaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1027,
+      "latency_ms": {
+        "median": 6.577333999302937,
+        "min": 5.521926999790594,
+        "max": 9.733653998409864
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "8d3d8285877c8f9612b1f4557491fac9675270c036e941ee9a975711661f73ab",
+      "actual_context_tokens_cl100k": 950
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Article"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1181,
+      "latency_ms": {
+        "median": 5.314671001542592,
+        "min": 5.0773189977917355,
+        "max": 10.326226998586208
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "3e9bef8c0ac833847060e60316f23330f7fecf91a2fd704144b29cb920063f0c",
+      "actual_context_tokens_cl100k": 1016
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1164,
+      "latency_ms": {
+        "median": 9.366229001898319,
+        "min": 6.82519499969203,
+        "max": 9.785980997548904
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "51890dbd43c777e55ff7e3e9a613794cab78bf5d48c5f94ac072bdd3cef5638b",
+      "actual_context_tokens_cl100k": 1105
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 3.6426859987841453,
+        "min": 3.142845002003014,
+        "max": 5.711951002012938
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Article",
+        "Comment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 3.392419999727281,
+        "min": 3.257888998632552,
+        "max": 3.534824998496333
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "8fafde628a9f0bf38b11891e4efa84eac19353e4329fd49fa280f2c7829cf67f",
+      "actual_context_tokens_cl100k": 1090
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "AuthorMailer",
+        "Newsletter::SendCampaign",
+        "Subscriber",
+        "Publication"
+      ],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1107,
+      "latency_ms": {
+        "median": 3.0882629980624188,
+        "min": 3.0790860000706743,
+        "max": 3.1608680001227185
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "2394021c792c0fa86e49d79d3e7585d38434721ddeb03d1ed11b9f3e27129017",
+      "actual_context_tokens_cl100k": 1051
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Billing::Refund",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 3.489490998617839,
+        "min": 3.321146999951452,
+        "max": 4.0686289976292755
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "c64f3d01aeaa753ccd79365037e1f6b01d7c747d7d672aa26fe310005e33dbb4",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Billing::Invoice",
+        "Author"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1181,
+      "latency_ms": {
+        "median": 1.7225789997610264,
+        "min": 1.6979829997580964,
+        "max": 1.7785529998946004
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "5637546ee305e6e5d5129ffbc0f24ddd12d94b3e2b033442eadb6b202e513420",
+      "actual_context_tokens_cl100k": 1126
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Subscriber",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1177,
+      "latency_ms": {
+        "median": 0.37052100014989264,
+        "min": 0.2798120003717486,
+        "max": 1.5824879992578644
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "26eb22c75137636c9cd762a9205a190851a1b5e1b9f341faa86f2e6a78d3fb5d",
+      "actual_context_tokens_cl100k": 1028
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "ReviewAssignment",
+        "Author",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1023,
+      "latency_ms": {
+        "median": 0.3656919980130624,
+        "min": 0.2623190011945553,
+        "max": 0.6869400021969341
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
+      "actual_context_tokens_cl100k": 942
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Support::Ticket",
+        "Author",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1166,
+      "latency_ms": {
+        "median": 1.5090720007719938,
+        "min": 1.4689370000269264,
+        "max": 1.642179999180371
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "b0afcf5955d9f97ebf00c4471aa3c1e4870b255bcbd862742e2e0e0947aa2338",
+      "actual_context_tokens_cl100k": 1031
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 11.15110400132835,
+        "min": 10.253120999550447,
+        "max": 11.554134001926286
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "26a0feb986c09a4fe3344a988da2d8012c0d10532d15ef93b8badb6a1b8be5a0",
+      "actual_context_tokens_cl100k": 1120
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Newsletter::Delivery",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1027,
+      "latency_ms": {
+        "median": 12.308520999795292,
+        "min": 11.456211999757215,
+        "max": 13.417415997537319
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "2088d7d6834e4ff3b4a2585aecac4bfd67f9a4d87253db4f62ff2c849bbf7633",
+      "actual_context_tokens_cl100k": 950
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Article",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 11.02920699850074,
+        "min": 10.412728999654064,
+        "max": 12.115409997932147
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "18741978e79bf0b94fd6e1f40f132a40ee3f70a2c0003faee396508a2acd7230",
+      "actual_context_tokens_cl100k": 1134
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.3333333333333333,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1071,
+      "latency_ms": {
+        "median": 11.749589000828564,
+        "min": 11.2157549992844,
+        "max": 14.101470998866716
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "7e4ff722b19f80dd2fa109bbf727eea7fb45a310d206fc109472b70329e41bb3",
+      "actual_context_tokens_cl100k": 1031
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 500,
+      "latency_ms": {
+        "median": 7.27330999870901,
+        "min": 6.960577000427293,
+        "max": 8.070815998507896
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "939a346bdcde60a26f74e6a172bdd0f741d073ef5c2623f2b57decd09943d929",
+      "actual_context_tokens_cl100k": 540
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 519,
+      "latency_ms": {
+        "median": 6.479941999714356,
+        "min": 6.389542999386322,
+        "max": 6.88544700096827
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "871683471aa2ea91e9255c49582f7a9063c0b5b0e9a11f6f1903cb002c664605",
+      "actual_context_tokens_cl100k": 562
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 519,
+      "latency_ms": {
+        "median": 5.373029998736456,
+        "min": 4.930715000227792,
+        "max": 6.27064200307359
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "b64af11192a21f4b66d8f2b1c99ef32ae5e90097da3e61762e674c8aeba4f579",
+      "actual_context_tokens_cl100k": 562
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.5,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 500,
+      "latency_ms": {
+        "median": 7.618603001901647,
+        "min": 7.191356999101117,
+        "max": 9.460915000090608
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "939a346bdcde60a26f74e6a172bdd0f741d073ef5c2623f2b57decd09943d929",
+      "actual_context_tokens_cl100k": 540
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Article",
+        "Author"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 2.9774659997201525,
+        "min": 2.8079309995518997,
+        "max": 3.949687998101581
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "6b5e5b8cf25e6a80a08f85b31daad1256607e2b43a96c8adec2d4b10142ca2ef",
+      "actual_context_tokens_cl100k": 1125
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Subscriber",
+        "Author",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1158,
+      "latency_ms": {
+        "median": 1.5532539982814342,
+        "min": 1.528548000351293,
+        "max": 2.365085998462746
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "6c7c2fbfe117cd05367e8e4caa5d0769e8106a14891acd2af34509dd6d50b8d0",
+      "actual_context_tokens_cl100k": 1021
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "ReviewAssignment",
+        "Author",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1023,
+      "latency_ms": {
+        "median": 1.4419359977182467,
+        "min": 1.4153869997244328,
+        "max": 1.5964140002324712
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
+      "actual_context_tokens_cl100k": 942
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Publication",
+        "Article"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1189,
+      "latency_ms": {
+        "median": 1.5501179987040814,
+        "min": 1.4658510008302983,
+        "max": 1.6161109997483436
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "7164bbd495650c278bea00239838c3566af9d96663c481770c2731a9c416603d",
+      "actual_context_tokens_cl100k": 1114
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "ApplicationJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1201,
+      "latency_ms": {
+        "median": 0.99454299925128,
+        "min": 0.7610579996253364,
+        "max": 1.549747001263313
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "e81d80a45b4cf7902ec49f8939fdf9c3d6278c154f2b3772016266a51d3efcec",
+      "actual_context_tokens_cl100k": 1314
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1110,
+      "latency_ms": {
+        "median": 0.7951419975142926,
+        "min": 0.6905970003572293,
+        "max": 0.9335600007034373
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "6d5cb7db709719731949904c0d90c7d6854e5814123ea77b85a87c95251ceabc",
+      "actual_context_tokens_cl100k": 1201
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1083,
+      "latency_ms": {
+        "median": 0.7005650004430208,
+        "min": 0.6875010003568605,
+        "max": 0.7025390004855581
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "e881e3f5f9bd3c6c0e914b69f7856ebba192b49a9e49b386793ab93a62cb1bba",
+      "actual_context_tokens_cl100k": 1174
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob",
+        "ApplicationJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1201,
+      "latency_ms": {
+        "median": 0.8259989990619943,
+        "min": 0.6726230021740776,
+        "max": 1.4529170002788305
+      },
+      "condition": "semantic_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "27c411f2c42d6b8e588ef0f52c19179f13f1ffaffef027519f90b879b739e908",
+      "actual_context_tokens_cl100k": 1314
+    },
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 3.8052689997130074,
+        "min": 3.572726000129478,
+        "max": 4.6534289976989385
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Newsletter::Campaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1022,
+      "latency_ms": {
+        "median": 3.9858149975771084,
+        "min": 3.5419680025370326,
+        "max": 4.19238000176847
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 5,
+        "outcome": "matched",
+        "candidate_count": 5,
+        "returned_units": 3
+      },
+      "context_sha256": "f2964ed05cff8777640e8d2e69beaf68174450013e8d490437a0b128bc1aa6ec",
+      "actual_context_tokens_cl100k": 944
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Article"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1181,
+      "latency_ms": {
+        "median": 6.62868899962632,
+        "min": 5.042403998231748,
+        "max": 10.391659998276737
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "3e9bef8c0ac833847060e60316f23330f7fecf91a2fd704144b29cb920063f0c",
+      "actual_context_tokens_cl100k": 1016
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "keyword",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1163,
+      "latency_ms": {
+        "median": 4.364199998235563,
+        "min": 3.445608999754768,
+        "max": 5.094911000924185
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/support",
+        "app/jobs/support",
+        "app/models/support",
+        "app/use_cases/support"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/support",
+          "app/jobs/support",
+          "app/models/support",
+          "app/use_cases/support"
+        ],
+        "eligible_units": 4,
+        "outcome": "matched",
+        "candidate_count": 4,
+        "returned_units": 3
+      },
+      "context_sha256": "96e62564a8c02d86ace483dcd9cf2b88c2b7bd05f32f9ca9991ca8f17e6f1600",
+      "actual_context_tokens_cl100k": 1102
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 3.259541997977067,
+        "min": 3.0962389973865356,
+        "max": 3.402788999665063
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d8d13a2ee8969515c18731a7f3077a0beced84cadc607ae712c66841ecfde0f2",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Article",
+        "Comment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 3.1423440013895743,
+        "min": 3.1175179974525236,
+        "max": 3.3243630023207515
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "8fafde628a9f0bf38b11891e4efa84eac19353e4329fd49fa280f2c7829cf67f",
+      "actual_context_tokens_cl100k": 1090
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "AuthorMailer",
+        "Newsletter::SendCampaign",
+        "Subscriber",
+        "Publication"
+      ],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1107,
+      "latency_ms": {
+        "median": 3.202797000994906,
+        "min": 3.1243310004356317,
+        "max": 4.704424001829466
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "2394021c792c0fa86e49d79d3e7585d38434721ddeb03d1ed11b9f3e27129017",
+      "actual_context_tokens_cl100k": 1051
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "vector",
+      "retrieved": [
+        "Billing::Refund",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1050,
+      "latency_ms": {
+        "median": 3.1374249992950354,
+        "min": 3.0946350016165525,
+        "max": 3.3026429991878103
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "c64f3d01aeaa753ccd79365037e1f6b01d7c747d7d672aa26fe310005e33dbb4",
+      "actual_context_tokens_cl100k": 1012
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Billing::Invoice",
+        "Billing::Subscription"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1172,
+      "latency_ms": {
+        "median": 3.244965002522804,
+        "min": 3.1769989982421976,
+        "max": 4.350245002569864
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 15,
+        "outcome": "matched",
+        "candidate_count": 10,
+        "returned_units": 2
+      },
+      "context_sha256": "ba9fbe7a3afec21f080735e8a395604d3fcdeec83a8e4961d867400cf6a506e4",
+      "actual_context_tokens_cl100k": 1090
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1022,
+      "latency_ms": {
+        "median": 3.1742139981361106,
+        "min": 2.829160999681335,
+        "max": 4.215543001919286
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 5,
+        "outcome": "matched",
+        "candidate_count": 3,
+        "returned_units": 3
+      },
+      "context_sha256": "0f9a5e2c47f9a4e529ab900ef18e336334faf94fddc5609fbcc6fd0ffdd8c614",
+      "actual_context_tokens_cl100k": 944
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "ReviewAssignment",
+        "Author",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1023,
+      "latency_ms": {
+        "median": 0.24082899835775606,
+        "min": 0.2360299986321479,
+        "max": 0.2458079979987815
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
+      "actual_context_tokens_cl100k": 942
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1163,
+      "latency_ms": {
+        "median": 3.072323997912463,
+        "min": 2.9725070016866084,
+        "max": 3.1376159968203865
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/support",
+        "app/jobs/support",
+        "app/models/support",
+        "app/use_cases/support"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/support",
+          "app/jobs/support",
+          "app/models/support",
+          "app/use_cases/support"
+        ],
+        "eligible_units": 4,
+        "outcome": "matched",
+        "candidate_count": 3,
+        "returned_units": 3
+      },
+      "context_sha256": "96e62564a8c02d86ace483dcd9cf2b88c2b7bd05f32f9ca9991ca8f17e6f1600",
+      "actual_context_tokens_cl100k": 1102
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1173,
+      "latency_ms": {
+        "median": 6.271042999287602,
+        "min": 5.912123997404706,
+        "max": 6.719467997754691
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 15,
+        "outcome": "matched",
+        "candidate_count": 31,
+        "returned_units": 2
+      },
+      "context_sha256": "58ebb27ce361347a6cb91f15a469f9953e2a0731600ff12c95b316fc6800e1fd",
+      "actual_context_tokens_cl100k": 1114
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Newsletter::Campaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1022,
+      "latency_ms": {
+        "median": 4.18284199986374,
+        "min": 4.08272600179771,
+        "max": 5.075354998552939
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 5,
+        "outcome": "matched",
+        "candidate_count": 13,
+        "returned_units": 3
+      },
+      "context_sha256": "f2964ed05cff8777640e8d2e69beaf68174450013e8d490437a0b128bc1aa6ec",
+      "actual_context_tokens_cl100k": 944
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Article",
+        "EditorialWorkflow"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 10.683362997951917,
+        "min": 10.3659209999023,
+        "max": 11.49943299969891
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "18741978e79bf0b94fd6e1f40f132a40ee3f70a2c0003faee396508a2acd7230",
+      "actual_context_tokens_cl100k": 1134
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "hybrid",
+      "retrieved": [
+        "Support::Ticket",
+        "Support::TicketsController"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.3333333333333333,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1062,
+      "latency_ms": {
+        "median": 4.20654600020498,
+        "min": 3.783277999900747,
+        "max": 4.744849000417162
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/support",
+        "app/jobs/support",
+        "app/models/support",
+        "app/use_cases/support"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/support",
+          "app/jobs/support",
+          "app/models/support",
+          "app/use_cases/support"
+        ],
+        "eligible_units": 4,
+        "outcome": "matched",
+        "candidate_count": 11,
+        "returned_units": 2
+      },
+      "context_sha256": "f322ae2b9c4e69d63d23f27e422141e3f29527551dac5dc10a261972df9fb505",
+      "actual_context_tokens_cl100k": 1020
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 226,
+      "latency_ms": {
+        "median": 3.4570600000733975,
+        "min": 2.87692900019465,
+        "max": 4.193902997940313
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 1,
+        "outcome": "matched",
+        "candidate_count": 1,
+        "returned_units": 1
+      },
+      "context_sha256": "02c036bbffb2cdebfa620998e7f8a2cb20b7856920927b9571abd5db31ceda97",
+      "actual_context_tokens_cl100k": 248
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 259,
+      "latency_ms": {
+        "median": 3.409371001907857,
+        "min": 3.270592998887878,
+        "max": 4.872015997534618
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 1,
+        "outcome": "matched",
+        "candidate_count": 1,
+        "returned_units": 1
+      },
+      "context_sha256": "a59fd69542bec34803fd5d7b29a635e0e8a9640b552bc8dffa4ad90d7009eb8d",
+      "actual_context_tokens_cl100k": 272
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 519,
+      "latency_ms": {
+        "median": 5.253146999166347,
+        "min": 5.103708001115592,
+        "max": 6.0020809978595935
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "b64af11192a21f4b66d8f2b1c99ef32ae5e90097da3e61762e674c8aeba4f579",
+      "actual_context_tokens_cl100k": 562
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "direct",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 226,
+      "latency_ms": {
+        "median": 3.226861997973174,
+        "min": 2.7882239992322866,
+        "max": 3.975266001361888
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 1,
+        "outcome": "matched",
+        "candidate_count": 1,
+        "returned_units": 1
+      },
+      "context_sha256": "02c036bbffb2cdebfa620998e7f8a2cb20b7856920927b9571abd5db31ceda97",
+      "actual_context_tokens_cl100k": 248
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Article",
+        "Author"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.4,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1178,
+      "latency_ms": {
+        "median": 2.9110529976605903,
+        "min": 2.7889159973710775,
+        "max": 3.4628920002433006
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "6b5e5b8cf25e6a80a08f85b31daad1256607e2b43a96c8adec2d4b10142ca2ef",
+      "actual_context_tokens_cl100k": 1125
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Subscriber",
+        "Author",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 0.25,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1158,
+      "latency_ms": {
+        "median": 1.64862100064056,
+        "min": 1.541060999443289,
+        "max": 1.7845049987954553
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "6c7c2fbfe117cd05367e8e4caa5d0769e8106a14891acd2af34509dd6d50b8d0",
+      "actual_context_tokens_cl100k": 1021
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "ReviewAssignment",
+        "Author",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1023,
+      "latency_ms": {
+        "median": 1.60091300131171,
+        "min": 1.4351330028148368,
+        "max": 2.024050998443272
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d970d1f021aa6e3a5bec71c0ef3e0f42dd43d55435c0a62de1c93c8d20ac8160",
+      "actual_context_tokens_cl100k": 942
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "graph",
+      "retrieved": [
+        "Publication",
+        "Article"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1189,
+      "latency_ms": {
+        "median": 1.6413770026701968,
+        "min": 1.4709999995830003,
+        "max": 1.7040739985532127
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "7164bbd495650c278bea00239838c3566af9d96663c481770c2731a9c416603d",
+      "actual_context_tokens_cl100k": 1114
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "ApplicationJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1201,
+      "latency_ms": {
+        "median": 0.6757590017514303,
+        "min": 0.6648590024269652,
+        "max": 0.796874999650754
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "e81d80a45b4cf7902ec49f8939fdf9c3d6278c154f2b3772016266a51d3efcec",
+      "actual_context_tokens_cl100k": 1314
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1110,
+      "latency_ms": {
+        "median": 0.6899660002090968,
+        "min": 0.6742559999111108,
+        "max": 1.491288003308
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "6d5cb7db709719731949904c0d90c7d6854e5814123ea77b85a87c95251ceabc",
+      "actual_context_tokens_cl100k": 1201
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1083,
+      "latency_ms": {
+        "median": 0.7212429991341196,
+        "min": 0.7011960005911533,
+        "max": 1.1360159987816587
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "e881e3f5f9bd3c6c0e914b69f7856ebba192b49a9e49b386793ab93a62cb1bba",
+      "actual_context_tokens_cl100k": 1174
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "fallback",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "Newsletter::DeliverJob",
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob",
+        "ApplicationJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1201,
+      "latency_ms": {
+        "median": 0.7125070005713496,
+        "min": 0.679015000059735,
+        "max": 0.8411870003328659
+      },
+      "condition": "semantic_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "27c411f2c42d6b8e588ef0f52c19179f13f1ffaffef027519f90b879b739e908",
+      "actual_context_tokens_cl100k": 1314
+    },
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::RefundPayment",
+        "Billing::CollectPayment",
+        "Billing::Refund",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.5013740010326728,
+        "min": 0.46012700113351457,
+        "max": 0.8087770002020989
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d33e024ab9984b6029c1994111a359fd2b5523bc11c0cb9af7718c24247e3a90",
+      "actual_context_tokens_cl100k": 1191
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign",
+        "Newsletter::CampaignsController"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.42703599683591165,
+        "min": 0.4087009983777534,
+        "max": 0.6777830021746922
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "c7355fb04c9f89b720965e920a60cc259fa77d7769fe80a90a9048d74dc89e90",
+      "actual_context_tokens_cl100k": 1202
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "ReviewAssignment",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1168,
+      "latency_ms": {
+        "median": 0.5111120008223224,
+        "min": 0.45826299901818857,
+        "max": 1.0965629990096204
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "0e9cb5c936ca3d2f1c894417e9b503337b63a8fee5b9eab8404071523f3e5fc6",
+      "actual_context_tokens_cl100k": 1088
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4965549996995833,
+        "min": 0.48388100185547955,
+        "max": 0.6430479988921434
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice",
+        "WebhookDeliveryJob",
+        "WebhookDelivery"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1110,
+      "latency_ms": {
+        "median": 0.44157299998914823,
+        "min": 0.4297599989513401,
+        "max": 0.5645220007863827
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "83e03c19e4323c3725177574201ddb1bf7173b76c9556dcb1077a7b7a74afb53",
+      "actual_context_tokens_cl100k": 1154
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "EditorialWorkflow",
+        "ReviewAssignment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.43628300045384094,
+        "min": 0.4150630011281464,
+        "max": 0.4667190005420707
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "92729210f5ad35c60bd20d7ee17b840d2f7e2f832a20fdbc9d246707eb74f67f",
+      "actual_context_tokens_cl100k": 1107
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.4127390020585153,
+        "min": 0.3897759997926187,
+        "max": 0.5429819975688588
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice",
+        "Billing::Refund",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.3333333333333333,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.46081799882813357,
+        "min": 0.4303620007704012,
+        "max": 0.5862729994987603
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "83721ee94bfb69f58eb1c478c68f882b7d0d9666ea98da382ca24a0a75c397cd",
+      "actual_context_tokens_cl100k": 1199
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::IssueInvoice",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.621668001258513,
+        "min": 0.5141580004419666,
+        "max": 1.2349000026006252
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "251518ab24265a57685d3e47f2eec531229f169c13706b9f66d6ea7f8101c74c",
+      "actual_context_tokens_cl100k": 1207
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3981119989475701,
+        "min": 0.38696099727530964,
+        "max": 0.5537520009966101
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "9b3c70f651ee009aecbb9c94b99ce0a76974f3a7fff5d6d26e0dbf75be4c6e11",
+      "actual_context_tokens_cl100k": 1135
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.36460900082602166,
+        "min": 0.3604420016927179,
+        "max": 0.4733519999717828
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "df0d0af906dad3ea27fd4c00528e6a6dfda3ec0e14968a1d90de650b1a52e69d",
+      "actual_context_tokens_cl100k": 1112
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4069880014867522,
+        "min": 0.3829630004474893,
+        "max": 0.7365320016106125
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.40710899702389725,
+        "min": 0.40033600089373067,
+        "max": 0.5317610011843499
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "5d89871439852d14a9a94f12fabc68bd6b6e75efede4fd05abaa41e8ee42d880",
+      "actual_context_tokens_cl100k": 1178
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.48264900033245794,
+        "min": 0.4689330016844906,
+        "max": 0.5736490020353813
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "9b3c70f651ee009aecbb9c94b99ce0a76974f3a7fff5d6d26e0dbf75be4c6e11",
+      "actual_context_tokens_cl100k": 1135
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.42352899981779046,
+        "min": 0.4197019989078399,
+        "max": 0.7297789998119697
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "9c2afafabe8269965b986a8fdaca78cb9f18b7c79bbbd74d29f8a2accbd9de4a",
+      "actual_context_tokens_cl100k": 1152
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.48055599836516194,
+        "min": 0.47312199967564084,
+        "max": 0.6218390008143615
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "RenewSubscriptionsJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.15419799819937907,
+        "min": 0.14964900037739426,
+        "max": 0.1901239993458148
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "4352722a15a2a5e8ac43fbe0df727a668cfcaed32cc115e5eda1ea672fbba9b6",
+      "actual_context_tokens_cl100k": 1307
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::DeliverJob",
+        "RenewSubscriptionsJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.13286699686432257,
+        "min": 0.13047300308244303,
+        "max": 0.20615399989765137
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "75d96709936ae3578ac3939f1b2e8ec7a296454fcdf2e6d3c78e90eabe80c56b",
+      "actual_context_tokens_cl100k": 1298
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.12986100045964122,
+        "min": 0.12138600141042843,
+        "max": 0.21183500211918727
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "5ae64a8084a861d59c7eaebea7f9c6935189b26bcb9e4cb0715302bd96904555",
+      "actual_context_tokens_cl100k": 1321
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.2,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.15182300194283016,
+        "min": 0.14868699872749858,
+        "max": 0.16644999777781777
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "536bb3a60bf465fa0ad75a79c70588760f66c1e3679db86a371355ce7cb52b26",
+      "actual_context_tokens_cl100k": 1307
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "Tag"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.2,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.44494899702840485,
+        "min": 0.4354720003902912,
+        "max": 0.47177899978123605
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "f6e6563ab71603e2481cdd59a6eff8ca293ed472e724f3b95a2734cc5b85d2d7",
+      "actual_context_tokens_cl100k": 1190
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Subscriber",
+        "EngagementEvent",
+        "Newsletter::Delivery"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3490410017548129,
+        "min": 0.345954998920206,
+        "max": 0.5435629973362666
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "3d4251df364a8a8274eab87352acf00ae484afe24ad5376850b68f18c54e0b07",
+      "actual_context_tokens_cl100k": 1073
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.36538100175675936,
+        "min": 0.35611299972515553,
+        "max": 0.4504789976635948
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "df0d0af906dad3ea27fd4c00528e6a6dfda3ec0e14968a1d90de650b1a52e69d",
+      "actual_context_tokens_cl100k": 1112
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Publication",
+        "Billing::Plan",
+        "Collection",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.36607199945137836,
+        "min": 0.3550219989847392,
+        "max": 0.45577899800264277
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "dbe9f75e988cf416e4261e00579e3a7d38a4da007a07de3c631894c85bb1c781",
+      "actual_context_tokens_cl100k": 1097
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.12292899918975309,
+        "min": 0.11485399954835884,
+        "max": 0.1260050012206193
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "5ae64a8084a861d59c7eaebea7f9c6935189b26bcb9e4cb0715302bd96904555",
+      "actual_context_tokens_cl100k": 1321
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1184,
+      "latency_ms": {
+        "median": 0.1343609983450733,
+        "min": 0.13204599963501096,
+        "max": 0.13995000335853547
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "44222ac85b1b4cae4fd0d69ae50186406d79ee35458b47ad8d3b6988bb15b758",
+      "actual_context_tokens_cl100k": 1286
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.1194220021716319,
+        "min": 0.11132700092275627,
+        "max": 0.44757300202036276
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "785349cc2f0412b04fde58ee631db4971ce3416e7f8d34477c97563c1fa78455",
+      "actual_context_tokens_cl100k": 1320
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.127658000565134,
+        "min": 0.12590400001499802,
+        "max": 0.133068002469372
+      },
+      "condition": "lexical_unscoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "0639b679f3ecfa33e34e832edaf2e5b3842cc783cab4026bf397a68325b237d8",
+      "actual_context_tokens_cl100k": 1313
+    },
+    {
+      "id": "keyword-1",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::RefundPayment",
+        "Billing::CollectPayment",
+        "Billing::Refund",
+        "Billing::BankPayment"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.49351900088367984,
+        "min": 0.4856949999521021,
+        "max": 0.5023959965910763
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "d33e024ab9984b6029c1994111a359fd2b5523bc11c0cb9af7718c24247e3a90",
+      "actual_context_tokens_cl100k": 1191
+    },
+    {
+      "id": "keyword-2",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::SendCampaign",
+        "Newsletter::CampaignsController"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 2.769410002656514,
+        "min": 2.480652001395356,
+        "max": 3.334340999572305
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 5,
+        "outcome": "matched",
+        "candidate_count": 5,
+        "returned_units": 2
+      },
+      "context_sha256": "9057c64394c5def934342af75e0e7bb69c9c43b4e75d11b9b2c3d01c4c288591",
+      "actual_context_tokens_cl100k": 1213
+    },
+    {
+      "id": "keyword-3",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "ReviewAssignment",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1168,
+      "latency_ms": {
+        "median": 0.47866200111457147,
+        "min": 0.4434059992490802,
+        "max": 0.6270580015552696
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "0e9cb5c936ca3d2f1c894417e9b503337b63a8fee5b9eab8404071523f3e5fc6",
+      "actual_context_tokens_cl100k": 1088
+    },
+    {
+      "id": "keyword-4",
+      "strategy": "keyword",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketsController",
+        "Support::TicketMessage",
+        "Support::Ticket"
+      ],
+      "expected": [
+        "Support::Ticket"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 0.3333333333333333,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 2.240203000837937,
+        "min": 2.064726999378763,
+        "max": 2.691805002541514
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/support",
+        "app/jobs/support",
+        "app/models/support",
+        "app/use_cases/support"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/support",
+          "app/jobs/support",
+          "app/models/support",
+          "app/use_cases/support"
+        ],
+        "eligible_units": 4,
+        "outcome": "matched",
+        "candidate_count": 4,
+        "returned_units": 3
+      },
+      "context_sha256": "7316041f11045ae11b92a0fefc8380b2fefed502d8b08ee4a58e5edda2f43074",
+      "actual_context_tokens_cl100k": 1182
+    },
+    {
+      "id": "vector-1",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice",
+        "WebhookDeliveryJob",
+        "WebhookDelivery"
+      ],
+      "expected": [
+        "Billing::CollectPayment",
+        "Billing::Payment"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 1110,
+      "latency_ms": {
+        "median": 0.44032100049662404,
+        "min": 0.43289700261084363,
+        "max": 0.5084479998913594
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "83e03c19e4323c3725177574201ddb1bf7173b76c9556dcb1077a7b7a74afb53",
+      "actual_context_tokens_cl100k": 1154
+    },
+    {
+      "id": "vector-2",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewDecision",
+        "EditorialWorkflow",
+        "ReviewAssignment"
+      ],
+      "expected": [
+        "EditorialWorkflow"
+      ],
+      "precision_at5": 0.3333333333333333,
+      "recall": 1.0,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4154439993726555,
+        "min": 0.3973200000473298,
+        "max": 0.4696950018114876
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "92729210f5ad35c60bd20d7ee17b840d2f7e2f832a20fdbc9d246707eb74f67f",
+      "actual_context_tokens_cl100k": 1107
+    },
+    {
+      "id": "vector-3",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [],
+      "expected": [
+        "Newsletter::SendCampaign",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 23,
+      "latency_ms": {
+        "median": 0.4092419985681772,
+        "min": 0.40012500176089816,
+        "max": 0.46675999692524783
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "a81560ec5a10e257d8abe8798c9ce61e5e5517734142e2b30b23c1b18f86e563",
+      "actual_context_tokens_cl100k": 22
+    },
+    {
+      "id": "vector-4",
+      "strategy": "vector",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob",
+        "Billing::IssueInvoice",
+        "Billing::Refund",
+        "Billing::Payment"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "precision_at5": 0.25,
+      "recall": 0.5,
+      "mrr": 0.3333333333333333,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4568410004139878,
+        "min": 0.4332470016379375,
+        "max": 1.196629000332905
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "83721ee94bfb69f58eb1c478c68f882b7d0d9666ea98da382ca24a0a75c397cd",
+      "actual_context_tokens_cl100k": 1199
+    },
+    {
+      "id": "graph-1",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::IssueInvoice",
+        "Billing::Invoice"
+      ],
+      "expected": [
+        "Billing::Invoice",
+        "Billing::Payment",
+        "Billing::LineItem",
+        "Billing::Subscription"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.25,
+      "mrr": 0.5,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 6.09462400097982,
+        "min": 5.98396799978218,
+        "max": 6.650218998402124
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 15,
+        "outcome": "matched",
+        "candidate_count": 15,
+        "returned_units": 2
+      },
+      "context_sha256": "251518ab24265a57685d3e47f2eec531229f169c13706b9f66d6ea7f8101c74c",
+      "actual_context_tokens_cl100k": 1207
+    },
+    {
+      "id": "graph-2",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Delivery",
+        "Newsletter::Campaign",
+        "Subscriber",
+        "EngagementEvent"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 2.523241000744747,
+        "min": 2.466836001985939,
+        "max": 2.928945999883581
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 5,
+        "outcome": "matched",
+        "candidate_count": 5,
+        "returned_units": 3
+      },
+      "context_sha256": "9b3c70f651ee009aecbb9c94b99ce0a76974f3a7fff5d6d26e0dbf75be4c6e11",
+      "actual_context_tokens_cl100k": 1135
+    },
+    {
+      "id": "graph-3",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3745079993677791,
+        "min": 0.359910998668056,
+        "max": 0.7406199983961415
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "df0d0af906dad3ea27fd4c00528e6a6dfda3ec0e14968a1d90de650b1a52e69d",
+      "actual_context_tokens_cl100k": 1112
+    },
+    {
+      "id": "graph-4",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::TicketMessage",
+        "Subscriber",
+        "Author"
+      ],
+      "precision_at5": 0.6666666666666666,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 2.209776997915469,
+        "min": 2.0488770023803227,
+        "max": 2.2518550031236373
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/support",
+        "app/jobs/support",
+        "app/models/support",
+        "app/use_cases/support"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/support",
+          "app/jobs/support",
+          "app/models/support",
+          "app/use_cases/support"
+        ],
+        "eligible_units": 4,
+        "outcome": "matched",
+        "candidate_count": 4,
+        "returned_units": 3
+      },
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
+    },
+    {
+      "id": "hybrid-1",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::Payment",
+        "Billing::RefundPayment",
+        "Billing::Refund"
+      ],
+      "expected": [
+        "Billing::RefundPayment",
+        "Billing::Refund",
+        "Billing::Payment",
+        "Billing::Invoice"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 6.536126998980762,
+        "min": 6.124759998783702,
+        "max": 7.056926002405817
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 15,
+        "outcome": "matched",
+        "candidate_count": 10,
+        "returned_units": 3
+      },
+      "context_sha256": "5e353b7cc59231f3a71cca40b906f0071a993762604d49046d85832356437078",
+      "actual_context_tokens_cl100k": 1188
+    },
+    {
+      "id": "hybrid-2",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Newsletter::Campaign",
+        "Newsletter::SendCampaign",
+        "Newsletter::Delivery",
+        "Newsletter::DeliverJob",
+        "Subscriber"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 2.846281997335609,
+        "min": 2.57498700011638,
+        "max": 3.138147003483027
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 5,
+        "outcome": "matched",
+        "candidate_count": 5,
+        "returned_units": 3
+      },
+      "context_sha256": "9b3c70f651ee009aecbb9c94b99ce0a76974f3a7fff5d6d26e0dbf75be4c6e11",
+      "actual_context_tokens_cl100k": 1135
+    },
+    {
+      "id": "hybrid-3",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob"
+      ],
+      "expected": [
+        "EditorialWorkflow",
+        "PublishArticle",
+        "PublishDueArticlesJob",
+        "Article",
+        "ReviewAssignment"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.6,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4441380006028339,
+        "min": 0.4281680012354627,
+        "max": 0.5526599998120219
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "9c2afafabe8269965b986a8fdaca78cb9f18b7c79bbbd74d29f8a2accbd9de4a",
+      "actual_context_tokens_cl100k": 1152
+    },
+    {
+      "id": "hybrid-4",
+      "strategy": "hybrid",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Support::TicketMessage",
+        "Support::Ticket",
+        "Support::ResolveTicket"
+      ],
+      "expected": [
+        "Support::Ticket",
+        "Support::ResolveTicket",
+        "Support::TicketMessage"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 2.3026000017125625,
+        "min": 2.184038999985205,
+        "max": 2.722471999732079
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/support",
+        "app/jobs/support",
+        "app/models/support",
+        "app/use_cases/support"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/support",
+          "app/jobs/support",
+          "app/models/support",
+          "app/use_cases/support"
+        ],
+        "eligible_units": 4,
+        "outcome": "matched",
+        "candidate_count": 4,
+        "returned_units": 3
+      },
+      "context_sha256": "1ef14c412f87bd0073c5679a52cbe9edf144b639008141b5dc5b8d7f15ad2bb7",
+      "actual_context_tokens_cl100k": 1149
+    },
+    {
+      "id": "direct-1",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "Billing::ChargePaymentJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 294,
+      "latency_ms": {
+        "median": 0.9297319993493147,
+        "min": 0.9142130002146587,
+        "max": 1.2336079998931382
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 1,
+        "outcome": "matched",
+        "candidate_count": 1,
+        "returned_units": 1
+      },
+      "context_sha256": "8ac59d614e4778caa9638cead0e8cf703ba086366758b649351cc3cbb5056d22",
+      "actual_context_tokens_cl100k": 320
+    },
+    {
+      "id": "direct-2",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 1.0,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 310,
+      "latency_ms": {
+        "median": 0.9973679989343509,
+        "min": 0.9511419993941672,
+        "max": 1.506126001913799
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/newsletter",
+        "app/jobs/newsletter",
+        "app/models/newsletter",
+        "app/use_cases/newsletter"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/newsletter",
+          "app/jobs/newsletter",
+          "app/models/newsletter",
+          "app/use_cases/newsletter"
+        ],
+        "eligible_units": 1,
+        "outcome": "matched",
+        "candidate_count": 1,
+        "returned_units": 1
+      },
+      "context_sha256": "d0ed10f4dcb4feabe956bafe5178274db407a70a49c8f9d82429ca20233d9f60",
+      "actual_context_tokens_cl100k": 325
+    },
+    {
+      "id": "direct-3",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.12069500007783063,
+        "min": 0.11768900003517047,
+        "max": 0.5027669976698235
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "5ae64a8084a861d59c7eaebea7f9c6935189b26bcb9e4cb0715302bd96904555",
+      "actual_context_tokens_cl100k": 1321
+    },
+    {
+      "id": "direct-4",
+      "strategy": "direct",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Billing::ChargePaymentJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob"
+      ],
+      "precision_at5": 0.0,
+      "recall": 0.0,
+      "mrr": 0.0,
+      "estimated_context_tokens": 273,
+      "latency_ms": {
+        "median": 1.082737999240635,
+        "min": 0.902611998753855,
+        "max": 1.1872520008182619
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [
+        "app/controllers/billing",
+        "app/jobs/billing",
+        "app/models/billing",
+        "app/use_cases/billing"
+      ],
+      "applied_scope": {
+        "packages": [],
+        "source_paths": [
+          "app/controllers/billing",
+          "app/jobs/billing",
+          "app/models/billing",
+          "app/use_cases/billing"
+        ],
+        "eligible_units": 1,
+        "outcome": "matched",
+        "candidate_count": 1,
+        "returned_units": 1
+      },
+      "context_sha256": "7e16388fbc216387380ccfc1ac361c377fb1a6660ce4ee7d7cd887c14d60ba22",
+      "actual_context_tokens_cl100k": 301
+    },
+    {
+      "id": "graph-5",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Article",
+        "Tag"
+      ],
+      "expected": [
+        "Article",
+        "Author",
+        "Publication",
+        "ArticleRevision",
+        "Comment"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.2,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4462309989321511,
+        "min": 0.4283380003471393,
+        "max": 0.4484249984670896
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "f6e6563ab71603e2481cdd59a6eff8ca293ed472e724f3b95a2734cc5b85d2d7",
+      "actual_context_tokens_cl100k": 1190
+    },
+    {
+      "id": "graph-6",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Subscriber",
+        "EngagementEvent",
+        "Newsletter::Delivery"
+      ],
+      "expected": [
+        "Subscriber",
+        "Billing::Subscription",
+        "Newsletter::Delivery",
+        "EngagementEvent"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3685470001073554,
+        "min": 0.36176399953546934,
+        "max": 0.3854079986922443
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "3d4251df364a8a8274eab87352acf00ae484afe24ad5376850b68f18c54e0b07",
+      "actual_context_tokens_cl100k": 1073
+    },
+    {
+      "id": "graph-7",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision"
+      ],
+      "expected": [
+        "ReviewAssignment",
+        "ReviewDecision",
+        "ArticleRevision",
+        "Author"
+      ],
+      "precision_at5": 1.0,
+      "recall": 0.75,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.3799879996222444,
+        "min": 0.36878700120723806,
+        "max": 0.959768000029726
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "df0d0af906dad3ea27fd4c00528e6a6dfda3ec0e14968a1d90de650b1a52e69d",
+      "actual_context_tokens_cl100k": 1112
+    },
+    {
+      "id": "graph-8",
+      "strategy": "graph",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "Publication",
+        "Billing::Plan",
+        "Collection",
+        "Newsletter::Campaign"
+      ],
+      "expected": [
+        "Publication",
+        "Organization",
+        "Article",
+        "Newsletter::Campaign"
+      ],
+      "precision_at5": 0.5,
+      "recall": 0.5,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.4070979994139634,
+        "min": 0.3645090000645723,
+        "max": 0.8046489965636283
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "dbe9f75e988cf416e4261e00579e3a7d38a4da007a07de3c631894c85bb1c781",
+      "actual_context_tokens_cl100k": 1097
+    },
+    {
+      "id": "fallback-1",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.11536499732756056,
+        "min": 0.11380199794075452,
+        "max": 0.12475200128392316
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "5ae64a8084a861d59c7eaebea7f9c6935189b26bcb9e4cb0715302bd96904555",
+      "actual_context_tokens_cl100k": 1321
+    },
+    {
+      "id": "fallback-2",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1184,
+      "latency_ms": {
+        "median": 0.13310800204635598,
+        "min": 0.13056299940217286,
+        "max": 0.14148300033411942
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "44222ac85b1b4cae4fd0d69ae50186406d79ee35458b47ad8d3b6988bb15b758",
+      "actual_context_tokens_cl100k": 1286
+    },
+    {
+      "id": "fallback-3",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob",
+        "PublishDueArticlesJob",
+        "PublishArticleJob",
+        "Billing::ChargePaymentJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "RenewSubscriptionsJob",
+        "Newsletter::DeliverJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.11237999933655374,
+        "min": 0.11202799942111596,
+        "max": 0.12730700109386817
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "785349cc2f0412b04fde58ee631db4971ce3416e7f8d34477c97563c1fa78455",
+      "actual_context_tokens_cl100k": 1320
+    },
+    {
+      "id": "fallback-4",
+      "strategy": "fallback",
+      "actual_strategy": "lexical",
+      "retrieved": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob",
+        "RenewSubscriptionsJob",
+        "Billing::ChargePaymentJob",
+        "Newsletter::DeliverJob",
+        "WebhookDeliveryJob"
+      ],
+      "expected": [
+        "PublishArticleJob",
+        "PublishDueArticlesJob"
+      ],
+      "precision_at5": 0.4,
+      "recall": 1.0,
+      "mrr": 1.0,
+      "estimated_context_tokens": 1200,
+      "latency_ms": {
+        "median": 0.13547200069297105,
+        "min": 0.12404099834384397,
+        "max": 0.19873999917763285
+      },
+      "condition": "lexical_scoped",
+      "budget": 1200,
+      "requested_source_paths": [],
+      "applied_scope": null,
+      "context_sha256": "0639b679f3ecfa33e34e832edaf2e5b3842cc783cab4026bf397a68325b237d8",
+      "actual_context_tokens_cl100k": 1313
+    }
+  ],
+  "tokenizer": {
+    "name": "cl100k_base",
+    "package": "tiktoken",
+    "version": "0.11.0",
+    "vocabulary_url": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+    "vocabulary_sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7",
+    "pattern": "'(?i:[sdmt]|ll|ve|re)|[^\\r\\n\\p{L}\\p{N}]?+\\p{L}++|\\p{N}{1,3}+| ?[^\\s\\p{L}\\p{N}]++[\\r\\n]*+|\\s++$|\\s*[\\r\\n]|\\s+(?!\\S)|\\s",
+    "special_tokens": {
+      "<|endoftext|>": 100257,
+      "<|fim_prefix|>": 100258,
+      "<|fim_middle|>": 100259,
+      "<|fim_suffix|>": 100260,
+      "<|endofprompt|>": 100276
+    },
+    "scope": "returned context only; no prompt, generation, or agent tokens"
+  }
+}

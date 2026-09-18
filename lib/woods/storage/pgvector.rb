@@ -122,6 +122,9 @@ module Woods
           SQL
         end
 
+        # Native raw-ID eligibility is applied before ranking and the limit.
+        def supports_id_filter? = true
+
         # Search for similar vectors using cosine distance.
         #
         # The query vector is dimension-checked before SQL runs, mirroring the
@@ -136,19 +139,14 @@ module Woods
         # @raise [Woods::Error] if the query vector's length disagrees with the
         #   configured dimension
         # @see Interface#search
-        def search(query_vector, limit: 10, filters: {})
+        def search(query_vector, limit: 10, filters: {}, ids: nil)
           validate_vector!(query_vector)
           validate_dimensions!(query_vector) if @dimensions
           vector_literal = build_vector_literal(query_vector)
           where_clause = build_where(filters)
+          where_clause = append_id_filter(where_clause, ids) if ids
 
-          sql = <<~SQL
-            SELECT id, embedding <=> '#{vector_literal}' AS distance, metadata
-            FROM #{qualified_table}
-            #{where_clause}
-            ORDER BY distance ASC
-            LIMIT #{limit.to_i}
-          SQL
+          sql = search_sql(vector_literal, where_clause, limit, ids)
 
           rows = @connection.execute(sql)
           rows.map { |row| row_to_result(row) }
@@ -343,6 +341,29 @@ module Woods
             score: 1.0 - row['distance'].to_f,
             metadata: parsed_metadata
           )
+        end
+
+        def search_sql(vector_literal, where_clause, limit, ids)
+          source = ids ? 'eligible' : qualified_table
+          prefix = if ids
+                     'WITH eligible AS MATERIALIZED (SELECT id, embedding, metadata ' \
+                       "FROM #{qualified_table} #{where_clause})\n"
+                   else
+                     ''
+                   end
+          prefix + <<~SQL
+            SELECT id, embedding <=> '#{vector_literal}' AS distance, metadata
+            FROM #{source}
+            #{where_clause unless ids}
+            ORDER BY distance ASC#{', id ASC' if ids}
+            LIMIT #{limit.to_i}
+          SQL
+        end
+
+        # Raw IDs work with old vectors that have no identifier/package payload.
+        def append_id_filter(where_clause, ids)
+          condition = ids.empty? ? 'FALSE' : "id IN (#{ids.map { |id| @connection.quote(id.to_s) }.join(', ')})"
+          where_clause.empty? ? "WHERE #{condition}" : "#{where_clause} AND #{condition}"
         end
 
         # Build a WHERE clause from metadata filters.

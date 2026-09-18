@@ -9,6 +9,7 @@ require 'set'
 
 require_relative '../generation'
 require_relative 'search_results'
+require_relative '../retrieval/scope'
 
 module Woods
   module MCP
@@ -442,18 +443,21 @@ module Woods
       # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
       # @return [Hash] results, optional note/partial, and explicit completeness evidence
       # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
-      def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil)
+      def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil,
+                 packages: nil, source_paths: nil)
         # Keep summaries, typed deep reads and lookahead on one generation,
         # including when publication advances after the result page fills.
         with_pinned_generation do
           search_within_pin(query, types: types, fields: fields, limit: limit,
-                                   exact_prefix: exact_prefix, exact_suffix: exact_suffix)
+                                   exact_prefix: exact_prefix, exact_suffix: exact_suffix,
+                                   packages: packages, source_paths: source_paths)
         end
       end
 
       # @api private
       def search_within_pin(query = nil, types: nil, fields: %w[identifier], limit: 20,
-                            exact_prefix: nil, exact_suffix: nil)
+                            exact_prefix: nil, exact_suffix: nil, packages: nil, source_paths: nil)
+        scope = search_scope(packages, source_paths, types)
         prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
         suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
         if query.blank? && !prefix && !suffix
@@ -472,7 +476,7 @@ module Woods
         phase2_scanned = 0
 
         begin
-          dirs = types ? types.filter_map { |type| TYPE_TO_DIR[type] }.uniq : TYPE_DIRS
+          dirs = scope || !types ? TYPE_DIRS : types.filter_map { |type| TYPE_TO_DIR[type] }.uniq
           # Identifier matches retain priority. Deep candidates are interleaved
           # across types so an early large directory cannot consume their budget.
           phase2_queues = {}
@@ -480,6 +484,7 @@ module Woods
             dirs.each do |dir|
               type_name = DIR_TO_TYPE[dir]
               entries = search_index_entries(dir)
+              entries = scoped_search_entries(entries, dir, scope) if scope
               if entries.size > 1
                 matching_count = entries.count do |entry|
                   identifier_passes_filters?(entry['identifier'], pattern, prefix, suffix)
@@ -490,6 +495,7 @@ module Woods
               end
 
               entries.each do |entry|
+                type_name = entry.fetch('scope_type', DIR_TO_TYPE[dir])
                 id = entry['identifier']
                 next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
@@ -518,7 +524,7 @@ module Woods
                 type_name, id = queue.shift
                 progressed = true
                 phase2_scanned += 1
-                unit = load_search_unit(type_name, id)
+                unit = scope ? scope.metadata_store.find(StorageIdentity.key(id, type_name)) : load_search_unit(type_name, id)
                 field = if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
                           'source_code'
                         elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
@@ -539,8 +545,31 @@ module Woods
           results.stop('regex_timeout')
         end
 
-        results.finish.response(note: notes.join('; '))
+        response = results.finish.response(note: notes.join('; '))
+        response[:applied_scope] = scope.summary if scope
+        response
       end
+
+      # Scope preparation reads the complete pinned unit snapshot. Search's
+      # deep-field scan budget still governs matching work after this read.
+      def search_scope(packages, source_paths, types)
+        return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
+
+        metadata = Storage::MetadataStore::InMemory.new
+        each_unit { |unit| metadata.store(StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit) }
+        Retrieval::Scope.new(metadata_store: metadata, packages: packages, source_paths: source_paths, types: types)
+      end
+      private :search_scope
+
+      def scoped_search_entries(entries, dir, scope)
+        entries.flat_map do |entry|
+          UNIT_TYPES_BY_DIR.fetch(dir).filter_map do |type|
+            key = StorageIdentity.key(entry['identifier'], type)
+            entry.merge('scope_type' => type) if scope.include?(key)
+          end
+        end
+      end
+      private :scoped_search_entries
 
       # BFS traversal of forward dependencies.
       #

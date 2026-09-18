@@ -90,11 +90,16 @@ module Woods
         # @param limit [Integer] Maximum number of results to return
         # @param filters [Hash] Optional metadata filters — values may be
         #   scalars or Arrays
+        # @param ids [Array<String>, nil] Raw vector IDs eligible before ranking;
+        #   optional capability advertised by #supports_id_filter?. Empty matches none.
         # @return [Array<SearchResult>] Results sorted by descending similarity
         # @raise [NotImplementedError] if not implemented by adapter
-        def search(query_vector, limit: 10, filters: {})
+        def search(query_vector, limit: 10, filters: {}, ids: nil)
           raise NotImplementedError
         end
+
+        # Whether native raw-ID eligibility is supported before the result limit.
+        def supports_id_filter? = false
 
         # Delete a vector by ID.
         #
@@ -220,8 +225,10 @@ module Woods
           end
         end
 
+        def supports_id_filter? = true
+
         # @see Interface#search
-        def search(query_vector, limit: 10, filters: {})
+        def search(query_vector, limit: 10, filters: {}, ids: nil)
           return [] if @dim.nil?
 
           unless query_vector.length == @dim
@@ -229,8 +236,8 @@ module Woods
                   "Vector dimension mismatch (#{query_vector.length} vs #{@dim})"
           end
 
-          scored = gather_candidates(query_vector, filters)
-          scored.sort_by! { |r| -r.score }
+          scored = gather_candidates(query_vector, filters, ids)
+          scored.sort_by! { |r| ids ? [-r.score, r.id] : [-r.score] }
           scored.first(limit)
         end
 
@@ -300,15 +307,20 @@ module Woods
           @metadata[idx] = metadata
         end
 
+        def excluded_index?(idx, allowed_ids)
+          @tombstones.include?(idx) || (allowed_ids && !allowed_ids.include?(@ids[idx]))
+        end
+
         # Walk every non-tombstoned index, apply filters, score survivors.
         # Filter check runs BEFORE the cosine kernel — avoids computing
         # 12k dot products only to discard most of them.
-        def gather_candidates(query_vector, filters)
+        def gather_candidates(query_vector, filters, ids)
           scored = []
+          allowed_ids = ids&.to_set
           len = @ids.size
           idx = 0
           while idx < len
-            if @tombstones.include?(idx)
+            if excluded_index?(idx, allowed_ids)
               idx += 1
               next
             end

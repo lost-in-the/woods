@@ -93,7 +93,7 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     expect { retriever.retrieve('Post') }.to raise_error(Woods::Retriever::StoreError, /ENOENT/)
   end
 
-  def publish_payload(name, source)
+  def publish_payload(name, source, package: nil)
     relative = "payloads/#{name}"
     target = File.join(index_dir, relative)
     FileUtils.mkdir_p(target)
@@ -101,6 +101,7 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     post = Dir.glob(File.join(target, 'models', 'Post_*.json')).fetch(0)
     data = JSON.parse(File.read(post))
     data['source_code'] = source
+    data['metadata']['package'] = package if package
     File.write(post, JSON.generate(data))
     Woods::Generation.new(output_dir: index_dir).bump!(payload: relative)
   end
@@ -115,6 +116,18 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     second = retriever.retrieve('newword')
     expect(second.context).to include('newword')
     expect(second.sources.map { |source| source[:generation] }.uniq).to eq([2])
+  end
+
+  it 'pins package eligibility and source provenance to the same generation during publication' do
+    publish_payload('one', 'oldword', package: 'packs/billing')
+    retriever.warmup!
+    retriever.snapshot.last.pipeline_observer = ->(_) { publish_payload('two', 'newword', package: 'packs/other') }
+    first = retriever.retrieve('oldword', packages: ['packs/billing'])
+    expect(first.sources).to include(include(identifier: 'Post', generation: 1))
+    expect(first.applied_scope).to include(packages: ['packs/billing'], eligible_units: 1)
+    second = retriever.retrieve('newword', packages: ['packs/other'])
+    expect(second.sources).to include(include(identifier: 'Post', generation: 2))
+    expect(second.applied_scope).to include(packages: ['packs/other'], eligible_units: 1)
   end
 
   it 'does not reuse a snapshot when the generation number repeats with a different token' do
