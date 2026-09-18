@@ -204,6 +204,10 @@ command before diagnosing this plugin's queue. Read `<output>/hook.log` and
 `hook-pending/`; status 75 means an active daemon deferred work, not that it was
 consumed. Fix task availability, boot/publication failures or a stalled command,
 then retry with the same output and command prefix. Preserve pending events.
+For mkdir fallback locks, inspect the recorded owner PID before manual removal.
+The concurrent dead-owner recovery fix is unreleased after plugin 2.3.35.
+If competing hooks leave an empty lock without a drain, preserve the queued
+events and follow the canonical recovery guide below.
 A Docker timeout does not prove the application process stopped. Prefer a
 resident watcher for sustained edits and follow the
 [canonical retry guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions).

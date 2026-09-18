@@ -115,7 +115,9 @@ acquire() {
         # Never steal a live owner's lease solely because its mtime is old.
         case "$owner" in *[!0-9]*) return 1 ;; esac
         kill -0 "$owner" 2>/dev/null && return 1
-        rm -f "${owners[0]}"
+        # Only the reclaimer that removes this marker may replace the directory.
+        # Another reclaimer may already have created a new, still-empty lock.
+        rm "${owners[0]}" 2>/dev/null || return 1
         rmdir "$run_lock_dir" 2>/dev/null || return 1
       else
         # Compatibility recovery for an old empty mkdir lock after a crash.

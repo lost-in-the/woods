@@ -8,6 +8,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'time'
 require 'timeout'
+require 'shellwords'
 
 # Behavior specs for the two hook scripts (#280), not the JSON they are
 # wired through: hooks.json's shape is exercised indirectly here (a wiring
@@ -310,6 +311,52 @@ RSpec.describe 'plugin hooks (#280)' do
         end
         threads.each(&:join)
         8.times { |i| expect(File.read(log)).to include("app/services/pay_#{i}.rb") }
+        expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')]).to be_empty
+      end
+    end
+
+    it 'defers when another reclaimer replaced the directory before stale-owner removal' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        tmp_dir = make_app(dir)
+        lock = File.join(tmp_dir, 'hook.lock.d')
+        owner = File.join(lock, 'owner-999999999')
+        FileUtils.mkdir_p(lock)
+        File.write(owner, '')
+        rake, log, = recorder(dir)
+        bin = restricted_bin(dir, without: %w[flock rm])
+        real_rm = `which rm`.strip
+        replacement_rm = File.join(bin, 'rm')
+        # Schedule the other reclaimer between our owner snapshot and removal.
+        # Its replacement directory has not published its owner marker yet.
+        File.write(replacement_rm, <<~SH)
+          #!/bin/sh
+          for argument do
+            if [ "$argument" = #{owner.shellescape} ]; then
+              #{real_rm.shellescape} -f #{owner.shellescape}
+              rmdir #{lock.shellescape} || exit 9
+              mkdir #{lock.shellescape} || exit 9
+              exec #{real_rm.shellescape} "$@"
+            fi
+          done
+          exec #{real_rm.shellescape} "$@"
+        SH
+        FileUtils.chmod(0o755, replacement_rm)
+        env = base_env.merge('WOODS_HOOK_RAKE' => rake, 'PATH' => bin)
+
+        _out, err, status = run_hook(post_edit, edit_payload(dir, 'app/services/first.rb'), env)
+
+        expect(status).to be_success, err
+        expect(File).not_to exist(log)
+        expect(Dir).to exist(lock)
+        expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')].size).to eq(1)
+
+        # Once the successor publishes its owner and exits, a later edit recovers
+        # both events through the ordinary dead-owner path.
+        FileUtils.rm(replacement_rm)
+        FileUtils.ln_s(real_rm, replacement_rm)
+        File.write(owner, '')
+        run_hook(post_edit, edit_payload(dir, 'app/services/second.rb'), env)
+        expect(File.read(log)).to include('app/services/first.rb', 'app/services/second.rb')
         expect(Dir[File.join(tmp_dir, 'hook-pending/*.json')]).to be_empty
       end
     end

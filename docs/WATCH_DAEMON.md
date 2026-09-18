@@ -708,7 +708,9 @@ check the application process and extraction lock before retrying a timed-out
 container run. Async client hook timeouts are not a reliable worker deadline.
 With `flock`, kernel locks release after process exit. The mkdir fallback records
 an owner PID and reclaims dead owners; it never steals a live owner's lock based
-only on age. Legacy empty lock directories use `stat` and
+only on age. Only the invocation that removes the recorded dead-owner marker
+may replace its lock directory; competing reclaimers leave their events queued
+for the winning owner. Legacy empty lock directories use `stat` and
 `WOODS_HOOK_LOCK_STALE_SECONDS` (default 1800) for conservative recovery.
 A reused PID can delay recovery until that process exits; inspect the recorded
 owner before manually removing a lock. Hooks sharing this filesystem must run in
