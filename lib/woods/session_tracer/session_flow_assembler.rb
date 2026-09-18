@@ -63,7 +63,7 @@ module Woods
           next unless controller_id
 
           # Resolve controller unit
-          unit = @reader.find_unit(controller_id)
+          unit = @reader.find_unit(controller_id, type: 'controller')
           if unit && !seen_units.include?(controller_id)
             seen_units.add(controller_id)
             context_pool[controller_id] = unit_summary(unit)
@@ -113,7 +113,7 @@ module Woods
       def resolve_dependencies(unit_id, seen_units, context_pool,
                                side_effects, step, dependency_map, depth)
         graph = @reader.dependency_graph
-        dep_ids = graph.dependencies_of(unit_id)
+        dep_ids = graph.dependencies_of(unit_id, type: :controller)
         added = []
 
         dep_ids.each do |dep_id|

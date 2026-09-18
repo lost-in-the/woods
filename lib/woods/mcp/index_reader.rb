@@ -669,7 +669,7 @@ module Woods
           break if results.size >= limit
 
           id = entry['identifier']
-          unit = find_unit(id)
+          unit = load_search_unit('rails_source', id)
           next unless unit
 
           metadata_json = unit['metadata']&.to_json
@@ -718,7 +718,7 @@ module Woods
           entries = read_index(dir)
           entries.each do |entry|
             id = entry['identifier']
-            unit = find_unit(id)
+            unit = load_search_unit(DIR_TO_TYPE.fetch(dir), id)
             next unless unit
 
             last_modified = unit.dig('metadata', 'git', 'last_modified')
@@ -1199,7 +1199,7 @@ module Woods
         map
       end
 
-      # Search uses the queued type, never the identifier-only lookup map.
+      # Read the selected type bucket, never the identifier-only lookup map.
       # Keep the existing per-file signature checks and LRU cache for deep reads.
       def load_search_unit(type, identifier)
         data = load_unit(TYPE_TO_DIR.fetch(type), unit_filename(identifier))

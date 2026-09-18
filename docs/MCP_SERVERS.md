@@ -160,6 +160,15 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 | `reload` | Reload a newly published generation without restarting the client |
 | `codebase_retrieve` | Natural-language retrieval with embeddings or explicit lexical mode over extraction output |
 
+When an identifier appears in multiple extraction types, `framework` reads its
+framework-source bucket and `recent_changes` reads each selected type bucket.
+Their paths and metadata belong to that selected bucket. When session tracing
+is configured, controller lookup and root outgoing-edge selection preserve the
+controller type. Downstream references and the shared context pool still use
+bare identifiers: across steps, an earlier dependency can occupy a later
+controller’s same-name context key. These corrections are unreleased after
+`2.0.0.beta2`.
+
 The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
 
 Structural reads can use a read-only index mount. The `reload` tool is different:
