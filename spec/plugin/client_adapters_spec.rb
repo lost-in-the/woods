@@ -40,7 +40,7 @@ RSpec.describe 'explicit edit client adapters' do
   def ruby_only_path
     bin = File.join(@root, 'restricted-bin')
     FileUtils.mkdir_p(bin)
-    %w[cat mkdir rmdir tr ruby date sleep touch stat mv rm wc].each do |tool|
+    %w[cat head mktemp mkdir rmdir tr ruby date sleep touch stat mv rm wc].each do |tool|
       found = executable_on_path(tool)
       File.symlink(found, File.join(bin, tool)) if found
     end
@@ -217,6 +217,26 @@ RSpec.describe 'explicit edit client adapters' do
       expect(stdout).to eq('')
       expect(stderr).to eq("[Woods hooks] Unsupported or malformed edit event; no refresh queued.\n")
       expect(stderr).not_to include('PRIVATE FIXTURE', 'ParserError', 'backtrace')
+    end
+  end
+
+  it 'rejects raw NUL bytes without changing the path or leaving private input files' do
+    bin, bash = ruby_only_path
+    input_dir = File.join(@root, 'private-inputs')
+    FileUtils.mkdir_p(input_dir)
+    payload = JSON.generate(hook_event_name: 'PostToolUse', tool_name: 'Write', cwd: @root,
+                            tool_input: { file_path: "#{@root}/app/services/a\0b.rb" }).gsub('\\u0000', "\0")
+    [ENV.fetch('PATH'), bin].each do |path|
+      environment = { 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => @rake,
+                      'PATH' => path, 'TMPDIR' => input_dir }
+      stdout, stderr, status = Open3.capture3(environment, bash, File.join(hooks, 'woods-post-edit.sh'),
+                                              stdin_data: payload)
+      expect(status).to be_success
+      expect(stdout).to eq('')
+      expect(stderr).to eq("[Woods hooks] Unsupported or malformed edit event; no refresh queued.\n")
+      expect(File.exist?(@record)).to be(false)
+      expect(Dir[File.join(@output, 'hook-pending/*.json')]).to eq([])
+      expect(Dir.children(input_dir)).to eq([])
     end
   end
 
