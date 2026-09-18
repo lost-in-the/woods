@@ -116,6 +116,17 @@ fields: ["identifier", "source_code", "metadata"]
 
 Start with identifier search. Add source or metadata only when name discovery fails. Restrict types and keep result limits small enough to inspect.
 
+On supporting versions, read `completeness` before calling search exhaustive.
+`result_count` counts returned rows. `result_limit` proves one more match exists;
+`scan_budget` and `regex_timeout` leave that unknown. Only `exhausted` establishes
+an exact total within the requested index/query domain. Narrow types, literal
+prefix/suffix filters, or deep fields when `partial` is true. A detected artifact
+failure remains an error with unknown completeness, never proof of no matches.
+
+This metadata is unreleased after `2.0.0.beta2`; older servers may omit it.
+Do not infer completeness from a full page or missing metadata. See the
+[search response contract](MCP_SERVERS.md#search-completeness).
+
 ## Traverse deliberately
 
 `dependencies` means “what this unit uses.” `dependents` means “what uses this unit.” Both default to bounded breadth-first traversal and accept type or relationship filters.

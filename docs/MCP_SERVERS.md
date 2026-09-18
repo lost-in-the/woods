@@ -164,6 +164,43 @@ error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
 
+### Search completeness
+
+Search responses retain `query`, `result_count`, and `results`; `result_count`
+is the number returned, not an estimated total. The additive `completeness`
+object describes the requested types, literal filters, and fields in the pinned
+generation. This contract is unreleased after `2.0.0.beta2`.
+
+| `reason` | `status` | `has_more` | `total_matches` |
+|---|---|---|---|
+| `exhausted` | `complete` | `false` | Exact count |
+| `result_limit` | `partial` | `true` | `null` (unknown) |
+| `scan_budget` or `regex_timeout` | `partial` | `null` (unknown) | `null` (unknown) |
+
+`matched_lower_bound` counts distinct observed `(type, identifier)` matches,
+including at most one lookahead match beyond `limit`. A result-limit response
+therefore establishes another match; an exactly full page can instead be
+complete if the requested domain is exhausted. Deep lookahead shares
+`WOODS_SEARCH_MAX_SCAN` with the initial scan and retains round-robin scanning
+across types. Search does not count the entire omitted tail or offer pagination.
+The existing `types` filter and result labels name directory families:
+`rails_source` includes both Rails and gem source units. Deep reads accept those
+two stored types only in that shared directory; `lookup` and lexical retrieval
+retain the unit's actual `rails_source` or `gem_source` type.
+
+All partial responses retain `partial: true` and include a narrowing `hint`.
+JSON exposes these fields; Markdown, plain text, and Claude formats label the
+returned count, stopping reason, known/unknown remainder, and total explicitly.
+Narrow `types`, literal `exact_prefix`/`exact_suffix`, or deep `fields` before
+using discovery as exhaustive evidence. Completeness applies to this index and
+query domain, not to unindexed application code.
+
+Detected missing, unreadable, or corrupt artifacts remain `isError: true` with
+`_meta.error_code: "corrupt_artifact"`. Their `_meta.completeness` has
+`status: "unknown"`, `reason: "unreadable_or_corrupt_source"`, and `null` for
+`has_more`, `total_matches`, and `matched_lower_bound`; no successful empty
+result is substituted. Inspect `woods_status` and run `woods:validate`.
+
 ### Dependency traversal budgets
 
 `dependencies` and `dependents` walk breadth-first in stored graph order. The

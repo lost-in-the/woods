@@ -39,6 +39,19 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 The normal packaged Index Server registers 14 tools; conditional schemas register only when their wiring is configured — use the connected server's own tool list, never the source inventory. Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure. Never work around a block, validation error, or redaction.
 
+## Partial search answers
+
+Search completeness (#410) is unreleased after `2.0.0.beta2`. Verify the installed
+server version and response before relying on it; this plugin does not upgrade
+the gem. On supporting versions, `result_count` counts returned rows, while
+`completeness.reason: exhausted` establishes an exact total for the requested
+index/query domain. `result_limit` proves at least one additional match;
+`scan_budget` and `regex_timeout` leave more matches and totals unknown. Narrow
+types, literal prefix/suffix filters, or deep fields when `partial` is true.
+Artifact errors have unknown completeness. Missing metadata on older servers,
+a full page, and an empty partial result never establish exhaustive absence.
+See the [search contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#search-completeness).
+
 ## Partial dependency answers
 
 Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods

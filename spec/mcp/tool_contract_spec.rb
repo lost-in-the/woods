@@ -252,6 +252,10 @@ RSpec.describe 'Index MCP tool contracts' do
       'search' => contract(
         :always, { 'query' => 'Post' }, exact_data({
                                                      'query' => 'Post', 'result_count' => 3,
+                                                     'completeness' => {
+                                                       'status' => 'complete', 'reason' => 'exhausted', 'has_more' => false,
+                                                       'total_matches' => 3, 'matched_lower_bound' => 3
+                                                     },
                                                      'results' => [
                                                        { 'identifier' => 'Post', 'type' => 'model',
                                                          'match_field' => 'identifier' },
@@ -812,7 +816,17 @@ RSpec.describe 'Index MCP tool contracts' do
     results = expected.fetch('results').first(value)
     expected = expected.merge('results' => results)
     expected = expected.merge('result_count' => results.size) if expected.key?('result_count')
+    expected = expected.merge(limited_search_evidence) if name == 'search' && value < 3
     expect(data).to eq(expected)
+  end
+
+  def limited_search_evidence
+    {
+      'partial' => true,
+      'hint' => 'Narrow types, literal exact_prefix/exact_suffix filters, or the requested deep fields.',
+      'completeness' => { 'status' => 'partial', 'reason' => 'result_limit', 'has_more' => true,
+                          'total_matches' => nil, 'matched_lower_bound' => 2 }
+    }
   end
 
   def assert_rating_score(data, value, _name)
