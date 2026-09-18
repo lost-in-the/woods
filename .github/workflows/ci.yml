@@ -103,6 +103,9 @@ jobs:
       - name: Run booted-app extraction
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb
 
+      - name: Run session controller identity through real Rails requests
+        run: bundle exec rspec spec/integration/session_controller_identity_spec.rb
+
       - name: Run multi-database extraction and equivalence
         run: bundle exec rspec spec/integration/multi_database_extraction_spec.rb
 

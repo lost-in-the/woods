@@ -163,8 +163,10 @@ The Index Server defines 29 schemas across core and conditional capabilities. Th
 When an identifier appears in multiple extraction types, `framework` reads its
 framework-source bucket and `recent_changes` reads each selected type bucket.
 Their paths and metadata belong to that selected bucket. When session tracing
-is configured, controller lookup and root outgoing-edge selection preserve the
-controller type. Downstream references and the shared context pool still use
+is configured, newly recorded requests use the dispatched controller's runtime
+class name; the fallback for requests without an instance respects Rails acronym
+inflections. Existing trace records are unchanged. Controller lookup and root
+outgoing-edge selection preserve the controller type. Downstream references and the shared context pool still use
 bare identifiers. If a dependency encountered within the requested depth has
 multiple published types, `session_trace` returns an `ambiguous_identity` tool
 error naming the identifier and candidate types, with no partial context. This

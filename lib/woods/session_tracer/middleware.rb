@@ -1,13 +1,14 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'active_support/inflector'
 
 module Woods
   module SessionTracer
     # Rack middleware that captures request metadata for session tracing.
     #
     # Wraps `@app.call(env)`, records after response. Extracts controller/action
-    # from `env['action_dispatch.request.path_parameters']`. Session ID from
+    # from the dispatched controller instance and Rails path parameters. Session ID from
     # `X-Trace-Session` header first, falls back to `request.session.id`.
     #
     # Fire-and-forget writes — `rescue StandardError` on recording, never breaks the request.
@@ -98,8 +99,7 @@ module Woods
         action = path_params[:action]
         return unless controller
 
-        # Classify controller name (e.g., "orders" -> "OrdersController")
-        controller_class = classify_controller(controller)
+        controller_class = controller_identity(env['action_controller.instance'], controller)
 
         request_data = {
           'session_id' => session_id,
@@ -144,15 +144,13 @@ module Woods
         @exclude_paths.any? { |prefix| path.start_with?(prefix) }
       end
 
-      # Classify a Rails controller path segment into a controller class name.
-      #
-      # @param controller [String] e.g., "orders" or "admin/orders"
-      # @return [String] e.g., "OrdersController" or "Admin::OrdersController"
-      def classify_controller(controller)
-        parts = controller.to_s
-                          .split('/')
-                          .map { |segment| segment.split('_').map(&:capitalize).join }
-        "#{parts.join('::')}Controller"
+      # Runtime identity is authoritative. Rack adapters without a dispatched
+      # instance still use Rails' configured acronyms when classifying the route.
+      def controller_identity(instance, controller)
+        name = instance.class.name if instance
+        return name if name && !name.empty?
+
+        "#{ActiveSupport::Inflector.camelize(controller.to_s)}Controller"
       end
 
       # Extract response format from the Rack env.
