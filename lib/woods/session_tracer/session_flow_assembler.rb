@@ -4,6 +4,7 @@ require 'json'
 require 'set'
 require_relative '../token_utils'
 require_relative 'session_flow_document'
+require_relative 'unit_resolver'
 
 module Woods
   module SessionTracer
@@ -42,8 +43,14 @@ module Woods
       # @param budget [Integer] Maximum token budget (default: 8000)
       # @param depth [Integer] Expansion depth (0=metadata only, 1=direct deps, 2+=full flow)
       # @return [SessionFlowDocument] The assembled document
-      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength
       def assemble(session_id, budget: 8000, depth: 1)
+        @reader.with_pinned_generation { assemble_pinned(session_id, budget: budget, depth: depth) }
+      end
+
+      private
+
+      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength
+      def assemble_pinned(session_id, budget:, depth:)
         requests = @store.read(session_id)
         return empty_document(session_id) if requests.empty?
 
@@ -52,6 +59,7 @@ module Woods
         side_effects = []
         dependency_map = {}
         seen_units = Set.new
+        resolver = UnitResolver.new(@reader)
 
         requests.each_with_index do |req, idx|
           step = build_step(req, idx)
@@ -68,13 +76,12 @@ module Woods
             seen_units.add(controller_id)
             context_pool[controller_id] = unit_summary(unit)
           end
-          step[:unit_refs] = [controller_id].compact
-
-          # Expand dependencies
+          # Expand dependencies only for a resolved controller.
           next unless unit
 
+          step[:unit_refs] = [controller_id]
           deps = resolve_dependencies(controller_id, seen_units, context_pool,
-                                      side_effects, step, dependency_map, depth)
+                                      side_effects, step, dependency_map, depth, resolver)
           step[:unit_refs].concat(deps)
         end
 
@@ -84,8 +91,6 @@ module Woods
                   side_effects: side_effects, dependency_map: dependency_map }
         budgeted_document(parts, budget)
       end
-
-      private
 
       # Build a timeline step from a request record.
       #
@@ -111,13 +116,13 @@ module Woods
       # @return [Array<String>] Non-async dependency identifiers added
       # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/ParameterLists, Metrics/PerceivedComplexity
       def resolve_dependencies(unit_id, seen_units, context_pool,
-                               side_effects, step, dependency_map, depth)
+                               side_effects, step, dependency_map, depth, resolver)
         graph = @reader.dependency_graph
         dep_ids = graph.dependencies_of(unit_id, type: :controller)
         added = []
 
         dep_ids.each do |dep_id|
-          dep_unit = @reader.find_unit(dep_id)
+          dep_unit = resolver.find(dep_id)
           next unless dep_unit
 
           dep_type = dep_unit['type']&.to_s
@@ -137,13 +142,13 @@ module Woods
               added << dep_id
 
               # Depth 2+: expand transitive dependencies
-              expand_transitive(dep_id, seen_units, context_pool, dependency_map, depth - 1) if depth >= 2
+              expand_transitive(dep_id, seen_units, context_pool, dependency_map, depth - 1, resolver) if depth >= 2
             end
           end
         end
 
         # Record dependency map for this unit
-        all_deps = dep_ids.select { |id| @reader.find_unit(id) }
+        all_deps = dep_ids.select { |id| resolver.find(id) }
         dependency_map[unit_id] = all_deps if all_deps.any?
 
         added
@@ -156,15 +161,16 @@ module Woods
       # @param context_pool [Hash] Accumulator for unit data
       # @param dependency_map [Hash] Accumulator for dependency edges
       # @param remaining_depth [Integer] Remaining expansion depth
-      def expand_transitive(unit_id, seen_units, context_pool, dependency_map, remaining_depth)
+      # rubocop:disable-next Metrics/ParameterLists
+      def expand_transitive(unit_id, seen_units, context_pool, dependency_map, remaining_depth, resolver)
         return if remaining_depth <= 0
 
         graph = @reader.dependency_graph
-        dep_ids = graph.dependencies_of(unit_id)
+        dep_ids = graph.dependencies_of(unit_id, type: resolver.find(unit_id).fetch('type').to_sym)
         resolved_deps = []
 
         dep_ids.each do |dep_id|
-          dep_unit = @reader.find_unit(dep_id)
+          dep_unit = resolver.find(dep_id)
           next unless dep_unit
 
           resolved_deps << dep_id
@@ -173,7 +179,7 @@ module Woods
           seen_units.add(dep_id)
           context_pool[dep_id] = unit_summary(dep_unit)
 
-          expand_transitive(dep_id, seen_units, context_pool, dependency_map, remaining_depth - 1)
+          expand_transitive(dep_id, seen_units, context_pool, dependency_map, remaining_depth - 1, resolver)
         end
 
         dependency_map[unit_id] = resolved_deps if resolved_deps.any?

@@ -165,9 +165,20 @@ framework-source bucket and `recent_changes` reads each selected type bucket.
 Their paths and metadata belong to that selected bucket. When session tracing
 is configured, controller lookup and root outgoing-edge selection preserve the
 controller type. Downstream references and the shared context pool still use
-bare identifiers: across steps, an earlier dependency can occupy a later
-controller’s same-name context key. These corrections are unreleased after
-`2.0.0.beta2`.
+bare identifiers. If a dependency encountered within the requested depth has
+multiple published types, `session_trace` returns an `ambiguous_identity` tool
+error naming the identifier and candidate types, with no partial context. This
+also prevents an earlier dependency from occupying a later controller’s context
+key. Unrelated collisions do not block a trace, and a known controller root keeps
+its controller identity. A controller absent from the index remains in the
+timeline without a source reference, so another type cannot fill that reference.
+Candidate discovery and source reads use one pinned
+generation. Corrupt or missing listed artifacts retain the `internal_error`
+failure boundary; they do not prove uniqueness or become `ambiguous_identity` errors.
+Use `depth: 0` for the request timeline, or inspect candidates with typed `lookup`
+calls. Re-extraction does not remove a legitimate cross-type collision. Successful
+traces retain their existing identifiers and response shape; target identity has
+not been migrated globally. These corrections are unreleased after `2.0.0.beta2`.
 
 The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
 
