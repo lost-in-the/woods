@@ -9,7 +9,7 @@ Install a structural Index Server first. Embeddings and Console MCP are separate
 
 ## Managed configuration availability
 
-`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+`woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the
 installed version and test `bundle exec woods-agent-config --help` in the
 selected application bundle. When supported, use its saved setup/update/remove
 plan and explicit client/scope/root selection; apply the reviewed plan within
@@ -74,8 +74,8 @@ bin/rails woods:stats
 
 If extraction fails, reproduce Rails boot and eager loading first. Do not inspect internal payload files when Woods tasks provide the check.
 
-Writer-version provenance (#323) is unreleased; check the installed gem version's
-release notes before expecting `woods_status.index.woods_version`. When present,
+Writer-version provenance (#323) is available in Woods `2.0.0.beta3`; check the installed
+gem version's release notes before expecting `woods_status.index.woods_version`. When present,
 it names the last manifest publisher; `server.version` names the MCP reader.
 Missing/null means unknown. A matching version after an incremental run never
 replaces a required full upgrade extraction. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
@@ -112,7 +112,8 @@ Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for
 
 Offer to add `bundle exec rake woods:watch` to the existing development process manager. When authorized, it catches up missed changes and automatically maintains the structural index; the Index Server refreshes on its next call, so ordinary edits need no manual extraction or MCP restart. Use the standalone watch command; do not prepend the `environment` task. Check the installed version's watch guide before relying on automatic startup reconciliation. State that live boot-captured changes require supervisor restart, Docker may need `WOODS_WATCH_POLL=1`, and semantic vectors still need `woods:embed_incremental`.
 
-Foreign-host heartbeat trust (`WOODS_WATCH_TRUST_FOREIGN_HOST=1`, #321) is unreleased.
+Foreign-host heartbeat trust (`WOODS_WATCH_TRUST_FOREIGN_HOST=1`, #321) is available in
+Woods `2.0.0.beta3`.
 Check the installed gem version against its release notes before offering it;
 do not assume installing this plugin upgrades the gem. For a supporting version,
 follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness)
@@ -120,14 +121,14 @@ and set the opt-in in each task/MCP reader of a shared container index. Explain
 the 15-minute crash-detection delay and preserve one supervisor per daemon.
 
 For slow bind mounts, check whether the installed version documents
-`WOODS_WATCH_POLL_INTERVAL` before suggesting it; this setting is unreleased
-in Woods 2.0.0.beta2. Where supported, a positive value such as `2.5` reduces
+`WOODS_WATCH_POLL_INTERVAL` before suggesting it; this setting is available in Woods
+`2.0.0.beta3`. Where supported, a positive value such as `2.5` reduces
 polling frequency at the cost of detection latency. Use the installed preflight version to select tagged documentation; the
 [canonical watch guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md)
 tracks current source and may describe unreleased behavior.
 
 The plugin ships opt-in refresh and session-start hooks. The expanded refresh
-contract (#408) is unreleased after Woods 2.0.0.beta2: first verify the installed
+contract (#408) is available in Woods `2.0.0.beta3`: first verify the installed
 gem exposes `woods:hook_refresh` through the actual application command. Do not
 infer support from the plugin version. With support, edits to standard services,
 controllers, jobs, views, concerns, locales, supported tests/lib files, routes,
@@ -146,7 +147,7 @@ The refresh worker's deadline starts after the complete event input has been
 collected, validated, and queued; it does not bound input collection. It includes
 subsequent batches, but cancelling Docker exec does not prove its container
 process stopped. See the [hook deadline and retry contract](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
-Source freshness (#405) is unreleased after beta2: verify the installed command
+Source freshness (#405) is available in Woods `2.0.0.beta3`: verify the installed command
 exposes `woods:source_status` and `woods-extract` before using it. Supporting
 SessionStart hooks check source content and report missing/failed evidence as
 unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
@@ -175,7 +176,7 @@ remains the default; setting up embeddings is a separate choice.
 See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
 for the supported contract, checked against the installed gem version.
 
-## Explicit edit adapters (unreleased #409)
+## Explicit edit adapters (Woods 2.0.0.beta3; #409)
 
 Check the installed gem exposes `woods:hook_refresh` before enabling hooks.
 Claude's registered wrapper covers one documented edit path; OpenCode 1.18.27
@@ -190,7 +191,7 @@ user's setup request. Follow [client hooks](https://github.com/lost-in-the/woods
 ## Optional context hints
 
 Check installed `bundle exec woods-hook-context --help` before enabling
-`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is unreleased after beta2 and the
+`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is available in Woods `2.0.0.beta3` and the
 plugin does not upgrade the gem. Context and refresh opt-ins are independent;
 `WOODS_HOOKS_DISABLED=1` disables both. Native Claude context is synchronous and
 bounded, with served-generation and pre-refresh/unknown labels. Verify candidate

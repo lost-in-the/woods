@@ -9,7 +9,7 @@ Installing the gem gives one operator an index; this skill gives every future ag
 
 ## Managed configuration availability
 
-`woods-agent-config` (#407) is unreleased after `2.0.0.beta2`. First record the
+`woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the
 installed version and test `bundle exec woods-agent-config --help` in the
 selected application bundle. When supported, use its saved setup/update/remove
 plan and explicit client/scope/root selection; apply the reviewed plan within

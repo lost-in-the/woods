@@ -10,7 +10,7 @@ Woods is runtime evidence: resolved routes, schema, associations, callbacks, inl
 ## Preflight
 
 Supporting servers include concise MCP initialization/discovery guidance without
-this plugin. That feature (#402) is unreleased after `2.0.0.beta2`; check the
+this plugin. That feature (#402) is available in Woods `2.0.0.beta3`; check the
 installed server version, and do not require it from protocol `2024-11-05`.
 Follow the [agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
 when instructions are absent. A registered tool does not establish retrieval
@@ -41,7 +41,7 @@ The normal packaged Index Server registers 14 tools; conditional schemas registe
 
 ## Partial search answers
 
-Search completeness (#410) is unreleased after `2.0.0.beta2`. Verify the installed
+Search completeness (#410) is available in Woods `2.0.0.beta3`. Verify the installed
 server version and response before relying on it; this plugin does not upgrade
 the gem. On supporting versions, `result_count` counts returned rows, while
 `completeness.reason: exhausted` establishes an exact total for the requested
@@ -54,8 +54,8 @@ See the [search contract](https://github.com/lost-in-the/woods/blob/main/docs/MC
 
 ## Partial dependency answers
 
-Traversal budgets (`max_nodes`/`max_edges`, #311) are unreleased in Woods
-2.0.0.beta2. Check the installed gem version and connected tool schema before
+Traversal budgets (`max_nodes`/`max_edges`, #311) are available in Woods `2.0.0.beta3`.
+Check the installed gem version and connected tool schema before
 using them; installing this plugin does not upgrade the gem. On a supporting
 server, `partial`/`partial_reason` means the walk stopped early, independently
 of page truncation. Do not claim an exhaustive blast radius or treat empty
@@ -65,8 +65,8 @@ paging alone only visits the discovered prefix. See the
 
 ## Explain recorded relationships
 
-`explain: true` on `dependencies`/`dependents` (#414) is unreleased after
-2.0.0.beta2. Verify the installed gem and connected tool schema before using it;
+`explain: true` on `dependencies`/`dependents` (#414) is available in Woods `2.0.0.beta3`.
+Verify the installed gem and connected tool schema before using it;
 installing this plugin does not add server capabilities. Supporting servers
 preserve original source-to-target direction and labels in both traversal
 modes. Follow shared `parent`/`edge_id` witnesses, distinguish direct records
@@ -82,8 +82,8 @@ recorded reachability does not establish observed execution. See the
 Read `stats.volatile_dependency_count` before judging the top-20 array: it
 counts all qualifying edges. A frequently changed dependency can occupy most
 rows. Use the installed version's ratio tuning guidance; the optional
-`volatile_dependency_limit_per_target` setting (B-188) is unreleased after
-2.0.0.beta2, so verify gem support before recommending it. Supporting versions
+`volatile_dependency_limit_per_target` setting (B-188) is available in Woods
+`2.0.0.beta3`, so verify gem support before recommending it. Supporting versions
 can cap each typed target before selecting the global top 20 and expose the
 cap plus `volatile_dependency_reported_count` in stats. Re-extract after
 configuration changes. Treat the report as candidates for source review, never
@@ -135,7 +135,7 @@ Keep full-source access available. See the canonical
 ## Optional context hints
 
 Check installed `bundle exec woods-hook-context --help` before enabling
-`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is unreleased after beta2 and the
+`WOODS_HOOK_CONTEXT_ENABLED=1`; this capability is available in Woods `2.0.0.beta3` and the
 plugin does not upgrade the gem. Context and refresh opt-ins are independent;
 `WOODS_HOOKS_DISABLED=1` disables both. Native Claude context is synchronous and
 bounded, with served-generation and pre-refresh/unknown labels. Verify candidate
