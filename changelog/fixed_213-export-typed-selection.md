@@ -1,0 +1,1 @@
+- Keep Notion model/column/migration data and Unblocked full/partial documents tied to their exact extracted type. Refuse incomplete export reads before mutation, and preserve remote documents when same-name, same-file types cannot be represented safely by Unblocked's existing URI scheme.

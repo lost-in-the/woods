@@ -139,6 +139,20 @@ https://github.com/your-org/your-repo/blob/main/app/models/order.rb
 
 This means Unblocked citations link directly to the relevant source code.
 
+Different identifiers defined in one synced file retain the existing URI
+rule: the lexically first identifier keeps the bare URI; siblings use
+`?unit=<encoded identifier>`. Original identifiers and unambiguous URIs do
+not change when two extracted types share a name but have different files.
+
+Two **different types with the same identifier and source file** cannot be
+represented by this URI rule. Woods reports `ambiguous export URI` and skips
+all documents sharing that base URI. It also disables stale-document deletion
+for that run, including with `UNBLOCKED_FORCE_PURGE=1`. Existing remote
+documents remain untouched. This is a deliberate refusal pending an explicit
+remote URI migration; renaming public extraction identifiers is not required.
+Collision detection includes all published types, including excluded types
+and units outside a partial sync's top-N selection.
+
 ## Rate Limits
 
 The Unblocked API allows 1,000 calls per day (resets at midnight PST). A typical
@@ -235,6 +249,17 @@ state an unchanged codebase costs ~0 calls.
 
 Pair with `woods:incremental` to re-extract only changed files; the sync then
 pushes only the documents whose content actually changed.
+
+Before any API mutation, Woods reads and validates the complete published unit
+set under one generation pin. Full and partial selection use actual unit types;
+the GraphQL family includes its four published subtypes once. Standalone
+`sync_type` and `sync_type_partial` calls perform the same preflight. Missing,
+unreadable, or mismatched identities refuse before uploads, deletion, or
+manifest writes. Preserve the error, validate and regenerate the index, then
+retry. Force flags cannot bypass this check. Preflight reads all published
+unit bodies, so local read cost and temporary memory scale with the index even
+for a single-type sync. Custom readers must provide complete published
+enumeration or complete per-bucket listings plus strict typed lookup.
 
 ### Escape hatches
 
