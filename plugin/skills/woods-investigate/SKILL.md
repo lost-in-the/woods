@@ -52,6 +52,24 @@ Artifact errors have unknown completeness. Missing metadata on older servers,
 a full page, and an empty partial result never establish exhaustive absence.
 See the [search contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#search-completeness).
 
+## Graph coverage
+
+Dependency tools report published relationships, not exhaustive source-reference
+or call coverage. Selective method-body scanning can miss references to generic
+PORO and library targets. No dependents or test-only dependents do not establish
+absence of production callers; check source before making that claim.
+
+The response `graph_coverage` notice, `total_is_exact` field, and human label
+`witness types unambiguous` (#470/#471) are unreleased after Woods `2.0.0.beta3`.
+Verify the installed server version and actual response fields; this plugin does
+not add them. Apply these limits to older servers even without the notice.
+`total_is_exact: false` means a budget-limited prefix; a true value describes only
+the requested root, depth, filters and published generation. Pagination alone
+does not change exactness. On older responses inspect `partial` directly.
+Treat partial `nodes_total` as a root-inclusive lower bound, including on the
+last page, an empty page or an unpaged answer. See the
+[coverage contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-graph-coverage).
+
 ## Partial dependency answers
 
 Traversal budgets (`max_nodes`/`max_edges`, #311) are available in Woods `2.0.0.beta3`.
@@ -72,7 +90,9 @@ preserve original source-to-target direction and labels in both traversal
 modes. Follow shared `parent`/`edge_id` witnesses, distinguish direct records
 from transitive inferred impact, and treat `context: true` ancestors as page
 context. Null attributes and candidate type ambiguities remain unknown;
-`typed_path_complete: false` never establishes a uniquely typed path. Budget
+`typed_path_complete: false` never establishes a uniquely typed path; true means
+only that witness identities have unambiguous types, not complete source coverage.
+Budget
 cutoffs still apply. Verify important conclusions in source and tests, since
 recorded reachability does not establish observed execution. See the
 [explanation contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#traversal-explanations).

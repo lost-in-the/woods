@@ -34,6 +34,8 @@ RSpec.describe 'Index MCP tool contracts' do
                                       }),
       'dependencies' => contract(:always, { 'identifier' => 'Comment' }, exact_data({
                                                                                       'root' => 'Comment', 'found' => true,
+                                                                                      'graph_coverage' => expected_graph_coverage,
+                                                                                      'total_is_exact' => true,
                                                                                       'nodes' => {
                                                                                         'Comment' => {
                                                                                           'type' => 'model', 'depth' => 0, 'deps' => ['Post']
@@ -55,6 +57,8 @@ RSpec.describe 'Index MCP tool contracts' do
                                  }),
       'dependents' => contract(:always, { 'identifier' => 'Post' }, exact_data({
                                                                                  'root' => 'Post', 'found' => true,
+                                                                                 'graph_coverage' => expected_graph_coverage,
+                                                                                 'total_is_exact' => true,
                                                                                  'nodes' => {
                                                                                    'Post' => { 'type' => 'model', 'depth' => 0,
                                                                                                'deps' => %w[Comment PostsController] },
@@ -474,6 +478,15 @@ RSpec.describe 'Index MCP tool contracts' do
     { paths: paths, key_sets: key_sets, types: types }
   end
 
+  def expected_graph_coverage
+    {
+      'scope' => 'published_relationships',
+      'source_references' => 'not_exhaustive',
+      'notice' => 'Graph coverage: published relationships only. Arbitrary method-body constant references ' \
+                  'are not exhaustively captured; missing relationships do not prove no callers or dependencies.'
+    }
+  end
+
   def expected_counts
     {
       'models' => 2, 'controllers' => 1, 'graphql' => 0, 'components' => 0,
@@ -806,7 +819,7 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(data.dig('nodes', 'Post', 'deps')).to eq(value.zero? ? [] : %w[Comment PostsController])
   end
 
-  # `nodes_total` marks any partial answer; `nodes_truncated` marks one with
+  # `nodes_total` marks any paged answer; `nodes_truncated` marks one with
   # more behind it. A last page carries the first and not the second.
   def assert_traversal_limit(data, value, name)
     full = contract_oracle.fetch(name).dig(:result, :data)
@@ -963,6 +976,8 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(result.dig('structuredContent', 'data')).to eq(
       'root' => root,
       'found' => true,
+      'graph_coverage' => expected_graph_coverage,
+      'total_is_exact' => true,
       'nodes' => { root => { 'type' => type, 'depth' => 0, 'deps' => [] } }
     )
   end

@@ -417,6 +417,8 @@ module Woods
             return lines.join("\n").rstrip
           end
 
+          lines.concat(traversal_coverage_lines(data))
+
           nodes.each do |id, info|
             depth = fetch_key(info, :depth) || 0
             deps = fetch_key(info, :deps, [])
@@ -438,7 +440,11 @@ module Woods
           if fetch_key(data, :partial)
             lines << "Partial traversal (#{fetch_key(data, :partial_reason)}); narrow depth/types/via or increase max_nodes/max_edges."
           end
-          lines << '' << truncation_note(data, nodes.size) if fetch_key(data, :nodes_total)
+          if (note = traversal_lower_bound_note(data, nodes.size))
+            lines << '' << "_#{note}_"
+          elsif fetch_key(data, :nodes_total)
+            lines << '' << truncation_note(data, nodes.size)
+          end
 
           lines.join("\n").rstrip
         end

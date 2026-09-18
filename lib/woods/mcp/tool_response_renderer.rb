@@ -70,6 +70,22 @@ module Woods
 
       private
 
+      def traversal_coverage_lines(data)
+        coverage = fetch_key(data, :graph_coverage)
+        notice = fetch_key(coverage, :notice) if coverage.is_a?(Hash)
+        notice ? [notice] : []
+      end
+
+      def traversal_lower_bound_note(data, shown)
+        return unless fetch_key(data, :total_is_exact) == false
+
+        total = fetch_key(data, :nodes_total, shown)
+        offset = fetch_key(data, :nodes_offset, 0)
+        position = offset.positive? ? " from offset #{offset}" : ''
+        "Showing #{shown} of at least #{total}#{position} " \
+          "(total unknown: #{fetch_key(data, :partial_reason)})."
+      end
+
       def search_completeness_lines(data)
         evidence = fetch_key(data, :completeness)
         return [] unless evidence.is_a?(Hash)

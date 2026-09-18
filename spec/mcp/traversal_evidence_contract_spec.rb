@@ -74,15 +74,15 @@ RSpec.describe 'Traversal explanation contract' do
       expect(text).to include('Post (ambiguous; candidate types: model, service)',
                               'Outside (unresolved; candidate types: none)',
                               'via=has_many; through=subscriptions; through_db=reporting; disable_joins=false',
-                              'Outside: transitive; parent=Post;', 'typed path complete=no')
+                              'Outside: transitive; parent=Post;', 'witness types unambiguous=no')
     end
 
     it "renders the same directed edges, unknowns, witnesses and context in #{format}" do
       result = call_tool(format: format, identifier: 'Comment', explain: true, limit: 1, offset: 1)
       text = result.dig('structuredContent', 'text')
       expect(text).to include('Comment (model) -> Post (model)', 'via=unknown', 'disable_joins=unknown',
-                              'Post: direct; parent=Comment; edge=e0; typed path complete=yes; context only=no',
-                              'Comment: root; parent=none; edge=none; typed path complete=yes; context only=yes',
+                              'Post: direct; parent=Comment; edge=e0; witness types unambiguous=yes; context only=no',
+                              'Comment: root; parent=none; edge=none; witness types unambiguous=yes; context only=yes',
                               'transitive = inferred reachability, not observed execution')
     end
   end

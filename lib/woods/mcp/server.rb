@@ -27,6 +27,7 @@ require_relative 'tasks/request_capture'
 require_relative 'tasks/store'
 require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
+require_relative 'traversal_response'
 require_relative 'version_aware_tool_dispatch'
 
 module Woods
@@ -161,7 +162,8 @@ module Woods
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
                                              "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
-                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff. ' \
+                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff and total_is_exact is false. ' \
+                                             'Published relationships are not exhaustive source-reference coverage. ' \
                                              'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependencies,
                                 render_key: :dependencies)
@@ -171,7 +173,8 @@ module Woods
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
                                              "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
-                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff. ' \
+                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff and total_is_exact is false. ' \
+                                             'Published relationships are not exhaustive source-reference coverage. ' \
                                              'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependents,
                                 render_key: :dependents)
@@ -403,12 +406,11 @@ module Woods
         # Page a traversal result's `nodes` hash in place, in BFS order.
         #
         # Mirrors {#paginate_section}'s metadata keys (`nodes_total`,
-        # `nodes_truncated`, `nodes_offset`) so both renderers print the one
-        # truncation line they already had for `graph_analysis`. A page that
-        # holds every node adds no keys at all, so a small result renders
-        # exactly as it did before the bound existed (B-183).
+        # `nodes_truncated`, `nodes_offset`). A page that holds every admitted
+        # node adds no pagination keys (B-183). TraversalResponse separately
+        # annotates scope and total exactness before pagination.
         #
-        # `nodes_total` marks *any* partial answer, not only one with more
+        # `nodes_total` marks *any* paged answer, not only one with more
         # behind it. Keying it on `total > offset + limit` left the last page
         # of a walk indistinguishable from a complete one: 21 nodes of 121,
         # with nothing saying 100 were skipped. `nodes_truncated` still means
@@ -656,6 +658,7 @@ module Woods
               result[:message] =
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
+            TraversalResponse.annotate(result)
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
             respond.call(renderer.render(render_key, result))

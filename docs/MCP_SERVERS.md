@@ -229,6 +229,21 @@ Detected missing, unreadable, or corrupt artifacts remain `isError: true` with
 `has_more`, `total_matches`, and `matched_lower_bound`; no successful empty
 result is substituted. Inspect `woods_status` and run `woods:validate`.
 
+### Dependency graph coverage
+
+`dependencies` and `dependents` return relationships recorded in the published
+index, not an exhaustive call graph or source-reference index. Extraction combines
+runtime reflection with selective source scanning; arbitrary method-body constant
+references (including references to generic PORO and library classes) may have no
+edge. No dependents, a test-only dependent, or a completed traversal does not prove
+there are no production callers. Verify important absence claims in source.
+
+Successful responses carry `graph_coverage` with `scope: "published_relationships"`,
+`source_references: "not_exhaustive"`, and a human-readable `notice`. Text formats
+show the same notice, including compact, root-only and empty-page responses.
+This response metadata and the total exactness field below are unreleased after
+Woods `2.0.0.beta3`; older servers need the same conservative interpretation.
+
 ### Dependency traversal budgets
 
 `dependencies` and `dependents` walk breadth-first in stored graph order. The
@@ -251,7 +266,16 @@ Exact-budget walks that finish all requested work are complete and have no
 `limit` (default 50) and `offset` only page that discovered result; they never
 change the walk budget or depth. On a partial traversal, `nodes_total`, when
 present for pagination, counts the discovered prefix, **not the full reachable
-graph**. Paging beyond that prefix stays partial. To explore more, narrow
+graph**. Every successful response includes `total_is_exact`: false for a
+budget cutoff, true when the requested walk finishes, even when its page is
+truncated or empty. It is independent of `limit`/`offset` and is present for
+unpaged answers too. Partial text answers say `Showing N of at least M (total
+unknown: node_budget)` (or `edge_budget`), including when no pagination is needed.
+`M` includes the root and counts the admitted prefix; it is a lower bound for the
+requested root, depth, type/relationship filters and published generation, not a
+count of all application callers. Exactness describes that same recorded-graph
+scope and never implies exhaustive source coverage. Paging beyond that prefix
+stays partial. To explore more, narrow
 `depth`/`types`/`via`, choose another root, or increase the traversal budget within
 its maximum. Keep the root, filters, budgets, and published generation unchanged
 for stable pages. No wall-clock deadline is used, so cutoffs are deterministic.
@@ -289,6 +313,10 @@ A target name shared by several types has `type: null`,
 record target types, so the response cannot choose among candidates. A witness
 through an ambiguous or unresolved identity sets `typed_path_complete: false`;
 it describes identifier-level reachability, never a uniquely typed path.
+A true value means only that identities along this witness have unambiguous
+types. It does not establish source-reference coverage or observed execution.
+Text labels this `witness types unambiguous=yes/no`; the JSON key and its meaning
+remain unchanged. The text label change is unreleased after `2.0.0.beta3`.
 `types` filters retain the compact traversal's identifier-level semantics: any
 registered type can qualify a name, while edge evidence keeps its actual source
 owner. Multiple relationship kinds between the same endpoints remain separate.
