@@ -324,6 +324,51 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     expect(Woods::Generation.new(output_dir: baseline).current.number).to be >= 2
   end
 
+  it 'publishes owner-specific parent metadata through full, incremental, and MCP lookup (#474)' do
+    require 'woods/mcp/server'
+    source = <<~RUBY
+      class ParentMetadataOwner < Object
+        class PlanChange
+          class Error < StandardError
+          end
+        end
+      end
+    RUBY
+    model_path = write_file('app/models/parent_metadata_owner/plan_change.rb', source)
+    lib_source = source.sub('ParentMetadataOwner < Object', 'ParentMetadataLibrary')
+    lib_path = write_file('lib/parent_metadata_library.rb', lib_source)
+    load app_path(model_path)
+    load app_path(lib_path)
+    expect(ParentMetadataOwner::PlanChange.superclass).to eq(Object)
+    expect(ParentMetadataOwner::PlanChange::Error.superclass).to eq(StandardError)
+    index = full_extraction
+
+    changed = source.sub('class PlanChange', "class PlanChange\n    def changed; :updated; end")
+    write_file(model_path, changed)
+    write_file(lib_path, lib_source.sub('class ParentMetadataLibrary',
+                                        "class ParentMetadataLibrary\n  def changed; :updated; end"))
+    Woods::Extractor.new(output_dir: index).extract_changed([model_path, lib_path])
+    oracle = full_extraction
+    expect(differences(index, oracle)).to be_empty
+
+    [index, oracle].each do |directory|
+      server = Woods::MCP::Server.build(index_dir: directory, response_format: :json, warmup: false)
+      { 'ParentMetadataOwner::PlanChange' => 'poro', 'ParentMetadataLibrary' => 'lib' }.each do |identifier, type|
+        request = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                    params: { name: 'lookup', arguments: { identifier: identifier, type: type } } }
+        result = JSON.parse(server.handle_json(JSON.generate(request))).fetch('result')
+        expect(result['isError']).to be(false)
+        unit = result.fetch('structuredContent').fetch('data')
+        expect(unit.fetch('identifier')).to eq(identifier)
+        expect(unit.fetch('metadata').fetch('parent_class')).to be_nil
+        expect(unit.fetch('source_code')).to include('Parent: none', 'def changed; :updated; end')
+      end
+    end
+  ensure
+    Object.send(:remove_const, :ParentMetadataOwner) if Object.const_defined?(:ParentMetadataOwner)
+    Object.send(:remove_const, :ParentMetadataLibrary) if Object.const_defined?(:ParentMetadataLibrary)
+  end
+
   # Baseline the tree, then apply operations one at a time through
   # extract_changed, asserting equivalence at every quiescent point.
   def run_sequence(operations)

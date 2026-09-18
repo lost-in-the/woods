@@ -382,6 +382,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Scans `app/models` for files that don't define an `ActiveRecord::Base` descendant
 - Common examples: value objects, form objects placed in `app/models`, domain structs
 - Excludes concerns (those go to ConcernExtractor)
+- `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
 
 ---
 
@@ -677,6 +678,7 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 **Key details:**
 - Excludes `lib/tasks/` (covered by RakeTaskExtractor) and `lib/generators/`
 - File-based scanning; no assumption about class hierarchy
+- `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
 
 ---
 

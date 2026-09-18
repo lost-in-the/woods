@@ -82,9 +82,11 @@ module Woods
           file_path: file_path
         )
 
+        parent_class = extract_parent_class(source, class_name)
+
         unit.namespace    = extract_namespace(class_name)
-        unit.source_code  = annotate_source(source, class_name)
-        unit.metadata     = extract_metadata(source, class_name)
+        unit.source_code  = annotate_source(source, class_name, parent_class)
+        unit.metadata     = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
 
         unit
@@ -177,10 +179,10 @@ module Woods
       #
       # @param source [String] Ruby source code
       # @param class_name [String] The class name
+      # @param parent_class [String, nil] Selected explicit parent
       # @return [String] Annotated source
-      def annotate_source(source, class_name)
-        parent = extract_parent_class(source)
-        parent_label = parent || 'none'
+      def annotate_source(source, class_name, parent_class)
+        parent_label = parent_class || 'none'
 
         annotation = <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
@@ -200,14 +202,14 @@ module Woods
       # Build the metadata hash for a PORO unit.
       #
       # @param source [String] Ruby source code
-      # @param class_name [String] The class name
+      # @param parent_class [String, nil] Selected explicit parent
       # @return [Hash] PORO metadata
-      def extract_metadata(source, _class_name)
+      def extract_metadata(source, parent_class)
         {
           public_methods: extract_public_methods(source),
           class_methods: extract_class_methods(source),
           initialize_params: extract_initialize_params(source),
-          parent_class: extract_parent_class(source),
+          parent_class: parent_class,
           loc: count_loc(source),
           method_count: source.scan(/def\s+(?:self\.)?\w+/).size
         }

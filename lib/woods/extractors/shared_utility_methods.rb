@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'declared_parent'
+
 require_relative 'source_nesting'
 require_relative 'method_parameters'
 
@@ -125,10 +127,10 @@ module Woods
       # Extract the parent class name from a class definition.
       #
       # @param source [String] Ruby source code
-      # @return [String, nil] Parent class name or nil
-      def extract_parent_class(source)
-        match = source.match(/^\s*class\s+[\w:]+\s*<\s*([\w:]+)/)
-        match ? match[1] : nil
+      # @param class_name [String] Already selected extraction identity
+      # @return [String, nil] Explicit parent of that declaration, or nil
+      def extract_parent_class(source, class_name)
+        DeclaredParent.call(source, class_name)
       end
 
       # Count non-blank, non-comment lines of code.
