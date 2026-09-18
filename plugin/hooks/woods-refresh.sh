@@ -9,7 +9,8 @@ umask 077
 client="${1:-}"
 hook_dir="${BASH_SOURCE[0]%/*}"
 payload="$(cat)"
-[ "${#payload}" -le 1048576 ] || { printf '[Woods hooks] Oversized edit event; no refresh queued.\n' >&2; exit 0; }
+payload_bytes="$(printf '%s' "$payload" | wc -c)"
+[ "$payload_bytes" -le 1048576 ] || { printf '[Woods hooks] Oversized edit event; no refresh queued.\n' >&2; exit 0; }
 if command -v jq >/dev/null 2>&1; then
   payload="$(printf '%s' "$payload" | jq -c --arg client "$client" -f "$hook_dir/adapters/normalize.jq" 2>/dev/null)" || {
     printf '[Woods hooks] Unsupported or malformed edit event; no refresh queued.\n' >&2; exit 0;

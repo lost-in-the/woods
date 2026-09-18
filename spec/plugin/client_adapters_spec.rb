@@ -37,6 +37,19 @@ RSpec.describe 'explicit edit client adapters' do
                    'bash', File.join(hooks, 'woods-refresh.sh'), 'opencode', stdin_data: JSON.generate(events))
   end
 
+  def ruby_only_path
+    bin = File.join(@root, 'restricted-bin')
+    FileUtils.mkdir_p(bin)
+    %w[cat mkdir rmdir tr ruby date sleep touch stat mv rm wc].each do |tool|
+      found = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, tool) }
+                 .find { |path| File.executable?(path) && File.file?(path) }
+      File.symlink(found, File.join(bin, tool)) if found
+    end
+    bash = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, 'bash') }
+              .find { |path| File.executable?(path) && File.file?(path) }
+    [bin, bash]
+  end
+
   def run_plugin(raw, environment = {})
     File.write(File.join(@root, 'event.json'), JSON.generate(raw))
     script = <<~JS
@@ -177,6 +190,22 @@ RSpec.describe 'explicit edit client adapters' do
     end
   end
 
+  it 'rejects oversized UTF-8 input by bytes before either parser or queue runs' do
+    bin, bash = ruby_only_path
+    payload = JSON.generate(hook_event_name: 'PostToolUse', tool_name: 'Write', cwd: @root,
+                            tool_input: { file_path: "#{@root}/app/services/large.rb", content: '雪' * 400_000 })
+    expect(payload.bytesize).to be > 1_048_576
+    expect(payload.length).to be < 1_048_576
+    [ENV.fetch('PATH'), bin].each do |path|
+      environment = { 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => @rake, 'PATH' => path }
+      _, stderr, status = Open3.capture3(environment, bash, File.join(hooks, 'woods-post-edit.sh'), stdin_data: payload)
+      expect(status).to be_success
+      expect(stderr).to eq("[Woods hooks] Oversized edit event; no refresh queued.\n")
+      expect(File.exist?(@record)).to be(false)
+      expect(Dir[File.join(@output, 'hook-pending/*.json')]).to eq([])
+    end
+  end
+
   it 'sanitizes malformed and truncated JSON in the standalone Ruby adapter' do
     ['PRIVATE FIXTURE is not JSON', '{"tool_input":{"content":"PRIVATE FIXTURE'].each do |input|
       stdout, stderr, status = Open3.capture3(RbConfig.ruby, File.join(hooks, 'adapters/normalize.rb'), 'claude',
@@ -189,15 +218,7 @@ RSpec.describe 'explicit edit client adapters' do
   end
 
   it 'normalizes a trailing root slash before Ruby-only queue serialization without losing path bytes' do
-    bin = File.join(@root, 'restricted-bin')
-    FileUtils.mkdir_p(bin)
-    %w[cat mkdir rmdir tr ruby date sleep touch stat mv rm wc].each do |tool|
-      found = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, tool) }
-                 .find { |path| File.executable?(path) && File.file?(path) }
-      File.symlink(found, File.join(bin, tool)) if found
-    end
-    bash = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, 'bash') }
-              .find { |path| File.executable?(path) && File.file?(path) }
+    bin, bash = ruby_only_path
     relative = "app/services/with space,\n雪.rb"
     payload = envelope([{ path: "#{@root}/#{relative}", operation: 'add' }]).merge(root: "#{@root}/")
     environment = { 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => @rake, 'PATH' => bin }
