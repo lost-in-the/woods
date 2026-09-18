@@ -8,19 +8,26 @@ umask 077
 
 client="${1:-}"
 hook_dir="${BASH_SOURCE[0]%/*}"
-payload="$(cat)"
-payload_bytes="$(printf '%s' "$payload" | wc -c)"
+# Preserve raw bytes until JSON validation: Bash command substitution silently
+# removes NUL bytes and could turn a malformed path into a different valid one.
+input_file="$(mktemp "${TMPDIR:-/tmp}/woods-hook-input.XXXXXX")" || exit 0
+trap 'rm -f "$input_file"' EXIT
+trap 'exit 143' TERM INT
+head -c 1048577 >"$input_file" || exit 0
+payload_bytes="$(wc -c <"$input_file")"
 [ "$payload_bytes" -le 1048576 ] || { printf '[Woods hooks] Oversized edit event; no refresh queued.\n' >&2; exit 0; }
 if command -v jq >/dev/null 2>&1; then
-  payload="$(printf '%s' "$payload" | jq -c --arg client "$client" -f "$hook_dir/adapters/normalize.jq" 2>/dev/null)" || {
+  payload="$(jq -c --arg client "$client" -f "$hook_dir/adapters/normalize.jq" <"$input_file" 2>/dev/null)" || {
     printf '[Woods hooks] Unsupported or malformed edit event; no refresh queued.\n' >&2; exit 0;
   }
 elif command -v ruby >/dev/null 2>&1; then
-  payload="$(printf '%s' "$payload" | ruby "$hook_dir/adapters/normalize.rb" "$client")" || exit 0
+  payload="$(ruby "$hook_dir/adapters/normalize.rb" "$client" <"$input_file")" || exit 0
 else
   printf '[Woods hooks] jq or Ruby is required; no refresh queued.\n' >&2
   exit 0
 fi
+rm -f "$input_file"
+trap - EXIT TERM INT
 field() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$payload" | jq -ej '.root'

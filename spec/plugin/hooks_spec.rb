@@ -75,7 +75,7 @@ RSpec.describe 'plugin hooks (#280)' do
   def restricted_bin(dir, without:)
     bin = File.join(dir, 'restricted-bin')
     FileUtils.mkdir_p(bin)
-    %w[cat mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
+    %w[cat head mktemp mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
       next if without.include?(tool)
 
       real = `which #{tool}`.strip
