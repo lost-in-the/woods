@@ -143,6 +143,28 @@ bundle exec rake woods:extract
 bundle exec rake woods:embed
 ```
 
+### Input integrity and source-empty units
+
+Embedding validates a native published generation's manifest, type listings and
+unit payloads before changing vector storage, metadata or checkpoints. A missing,
+corrupt or mismatched listed unit raises `Embedding input incomplete`; repair the
+extraction (or run a full `woods:extract`) before retrying embedding.
+`WOODS_ALLOW_PURGE=1` permits intentional mass deletion; it does not bypass this
+integrity check. Corpus reads hold one generation pin while collecting the input.
+
+Legacy flat indexes retain arbitrary unit filenames and do not require a manifest
+or type listing. Malformed JSON now refuses embedding instead of silently dropping
+that file. Without an authoritative listing, a missing legacy file still denotes
+a deletion; regenerate extraction into the native publication layout for stronger
+completeness checks.
+
+When a current unit has no source text to embed, Woods retains its metadata and
+removes its superseded vectors, including old chunks. It records the current
+source hash without calling the provider; later incremental runs verify that the
+unit still prepares no text before accepting a matching no-vector checkpoint.
+Empty-vector reconciliation waits until all batches succeed, so a later provider
+failure does not retire those old vectors.
+
 ---
 
 ## Embedding-free lexical retrieval
