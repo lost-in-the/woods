@@ -3,6 +3,7 @@
 
 require 'json'
 require 'open3'
+require_relative 'release_profile'
 
 class ReleaseRunValidationError < StandardError; end
 
@@ -94,24 +95,6 @@ begin
                     "expected #{TRUSTED_CI_WORKFLOW_NAME.inspect}")
   end
 
-  run_jobs = github_api("/repos/#{repository}/actions/runs/#{run_id}/jobs").fetch('jobs', [])
-  REQUIRED_CI_JOBS.each do |job_id, name_prefix|
-    matches = run_jobs.select { |job| job['name'].to_s.start_with?(name_prefix) }
-    if matches.empty?
-      fail_validation(
-        "CI run #{run_id} has no job matching required CI contract job #{job_id.inspect} " \
-        "(expected a job name starting with #{name_prefix.inspect})"
-      )
-    end
-    failed = matches.reject { |job| job['conclusion'] == 'success' }
-    next if failed.empty?
-
-    fail_validation(
-      "CI run #{run_id} job #{failed.first['name'].inspect} concluded #{failed.first['conclusion']}, " \
-      "expected success for required CI contract job #{job_id.inspect}"
-    )
-  end
-
   unless run['conclusion'] == 'success'
     fail_validation("CI run #{run_id} conclusion is #{run['conclusion']}, expected success")
   end
@@ -130,6 +113,34 @@ begin
   run_repository = run.dig('repository', 'full_name')
   unless run_repository == repository
     fail_validation("CI run #{run_id} repository is #{run_repository}, expected #{repository}")
+  end
+
+  ReleaseProfile.validate_candidate!(tag, release_sha)
+  run_jobs = github_api("/repos/#{repository}/actions/runs/#{run_id}/jobs").fetch('jobs', [])
+  if ReleaseProfile.maintenance?(tag)
+    ReleaseProfile::MAINTENANCE_JOBS.each do |name|
+      matches = run_jobs.select { |job| job['name'] == name }
+      unless matches.one? && matches.first['conclusion'] == 'success'
+        fail_validation("CI run #{run_id} requires exactly one successful maintenance job #{name.inspect}")
+      end
+    end
+  else
+    REQUIRED_CI_JOBS.each do |job_id, name_prefix|
+      matches = run_jobs.select { |job| job['name'].to_s.start_with?(name_prefix) }
+      if matches.empty?
+        fail_validation(
+          "CI run #{run_id} has no job matching required CI contract job #{job_id.inspect} " \
+          "(expected a job name starting with #{name_prefix.inspect})"
+        )
+      end
+      failed = matches.reject { |job| job['conclusion'] == 'success' }
+      next if failed.empty?
+
+      fail_validation(
+        "CI run #{run_id} job #{failed.first['name'].inspect} concluded #{failed.first['conclusion']}, " \
+        "expected success for required CI contract job #{job_id.inspect}"
+      )
+    end
   end
 
   # Task 10: resolve one immutable artifact identity here, once, so every
@@ -186,6 +197,7 @@ begin
   end
 
   File.open(output_path, 'a') do |output|
+    output.puts "package-spec=#{ReleaseProfile.package_spec(tag)}"
     output.puts "release-sha=#{release_sha}"
     output.puts "ci-run-id=#{run_id}"
     output.puts "tag=#{tag}"
@@ -195,7 +207,7 @@ begin
   end
 
   puts "Validated CI run #{run_id} for #{tag} at #{release_sha}"
-rescue KeyError, ReleaseRunValidationError => e
+rescue KeyError, ReleaseProfile::Error, ReleaseRunValidationError => e
   warn "Release run validation failed: #{e.message}"
   exit 1
 end

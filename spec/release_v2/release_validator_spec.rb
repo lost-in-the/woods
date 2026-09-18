@@ -193,6 +193,7 @@ RSpec.describe 'release validation' do
       ]
     )
     expect(outputs.lines(chomp: true)).to contain_exactly(
+      'package-spec=spec/integration/packaged_gem_spec.rb',
       "release-sha=#{release_sha}",
       'ci-run-id=12345',
       'tag=v2.0.0',

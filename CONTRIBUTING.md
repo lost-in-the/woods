@@ -334,7 +334,7 @@ A release is pinned by its tag, never by a branch:
 
 | Step | Command | What guards it |
 |---|---|---|
-| Tag the merge commit | `git tag v<version> <merge-sha> && git push origin v<version>` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history, match `Woods::VERSION`, match the dated `CHANGELOG.md` heading, and not be an alpha |
+| Tag the merge commit | `git tag v<version> <merge-sha> && git push origin v<version>` (lightweight or annotated both work) | `script/validate-release` requires the tag to sit on `main` history (or the explicitly approved maintenance history below), match `Woods::VERSION`, match the dated `CHANGELOG.md` heading, and not be an alpha |
 | Trigger the release workflow | `gh api --method POST repos/lost-in-the/woods/dispatches -f event_type=release -F 'client_payload[tag]=v<version>' -F 'client_payload[ci_run_id]=<id>'` where `<id>` is the green CI run the tag push itself started, the one whose branch column reads `v<version>`; main's run on the same commit is refused with `tested ref is main` (requires Contents write) | `.github/workflows/release.yml` re-validates the named CI run through the API, verifies the artifact digest, and runs secret-free candidate package tests before publishing |
 | Verify publication | `gem info woods --remote` shows the new version; for a prerelease, `gem info woods --remote --prerelease`. The README gem badge updates on its own | just before pushing, the workflow re-runs `script/verify-release-tag` so a tag that moved since validation aborts the publish |
 
@@ -391,9 +391,64 @@ short body that links `CHANGELOG.md` at the tag itself (not at `main`) and
 anchors straight to that version's dated heading, so the note a reader lands
 on always matches the bytes RubyGems published.
 
+### One-off 1.6.2 security maintenance release
+
+The [security policy](SECURITY.md#supported-versions) supports 1.6.x security
+fixes until 2027-02-20. While main develops v2, the sole maintenance exception
+is `v1.6.2` from the short-lived `release/1.6.2` branch, descending from the
+immutable v1.6.1 commit `73423a42644176b09961be373e13648c94690933`.
+This is a stable patch, separate from the next v2 prerelease; it does not declare
+v2 final or establish a general-purpose maintenance publishing path.
+
+`script/release_profile.rb` on trusted main owns this exact tag/branch/base and
+its required CI jobs. `MAINTENANCE_APPROVED_SHA` starts as `nil`: publication
+fails closed until a **separate reviewed main PR** pins the exact prepared
+maintenance commit. Neither a dispatch parameter nor candidate code can choose
+another profile, branch, base, SHA or weaker CI requirements. The SHA binds the
+whole reviewed candidate, including its CI definition and installed-package
+tests; review those files as release controls, not just their job names.
+
+The preparation order is:
+
+1. Merge the main-side maintenance policy/tooling PR. Before creating the remote
+   target, confirm its effective branch rules require pull requests and prevent
+   force pushes and deletion; configure those rules before creating the target. The GitHub
+   rules API can check `release/1.6.2` before the branch exists.
+2. Create that target from the immutable v1.6.1 commit. Review the narrow security
+   backport and its legacy preparation adapter against that line. Disable the
+   inherited automatic tag-push publisher before any maintenance tag exists.
+3. Use the legacy adapter's `release:reopen[1.6.2.alpha]` and
+   `release:prepare[1.6.2]` transitions in clean, separately reviewed commits.
+   The adapter owns the legacy documentation profile; do not copy v2 fences or
+   surface claims into v1, and never hand-edit VERSION.
+4. Review and merge the prepared candidate into `release/1.6.2`. Require passing
+   unit, booted Rails, installed-package, lint, coverage, security and build
+   jobs. Review the complete CI and package-test implementation at that SHA.
+   Then pin that **exact final commit** in `MAINTENANCE_APPROVED_SHA` through the
+   separate main PR. No pin means no maintenance release.
+5. Only after the pin merges, the maintainer may tag that exact commit and wait
+   for its tag-push CI run. Dispatch uses the ordinary tag/run-ID payload.
+   Every exact maintenance matrix row in the trusted profile must succeed;
+   missing, duplicated, skipped or failed rows refuse publication.
+
+The validators require the approved SHA to remain reachable from the freshly
+fetched maintenance branch and to descend from the fixed legacy base. They retain
+exact tag/VERSION/changelog checks, the unpublished-version check, one immutable
+CI artifact ID/digest, and protected `release` environment approval. Both Ruby
+package-test rows install that same artifact and run the pinned v1-specific
+`maintenance_packaged_gem_spec.rb` outside the repository load path. Candidate
+code still executes only in secret-free, read-only jobs. After environment
+approval, maintenance history/publication checks run again before requesting
+RubyGems credentials; the remote tag is checked again immediately before push.
+
+A candidate fix or changed prepared SHA requires a new reviewed main pin and a
+fresh tag-push CI run. Updating main's tooling alone never authorizes different
+candidate bytes. Main's v2 release contract remains unchanged. Do not create or
+push tags, dispatch, publish, or claim 1.6.2 is available during preparation.
+
 ### Stable branches
 
-A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the only branch. There is no stable branch today.
+A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived `release/1.6.2` security exception above does not establish an `N-M-stable` branch.
 
 ### What coding agents may do
 
