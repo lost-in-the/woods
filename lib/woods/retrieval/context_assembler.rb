@@ -2,6 +2,7 @@
 
 require_relative 'search_executor'
 require_relative '../token_utils'
+require_relative 'source_evidence'
 
 module Woods
   module Retrieval
@@ -103,7 +104,18 @@ module Woods
       # @param structural_context [String, nil] Optional codebase overview text
       # @param budget [Integer, nil] Override token budget; falls back to @budget
       # @return [AssembledContext] Token-budgeted context with source attribution
-      def assemble(candidates:, classification:, structural_context: nil, budget: nil)
+      def assemble(**options)
+        # Pipeline assemblers are shared by concurrent Ruby/HTTP callers. Keep
+        # per-request metadata, query, mode and generation on a private worker.
+        dup.send(:assemble_request, **options)
+      end
+
+      def assemble_request(candidates:, classification:, structural_context: nil, budget: nil,
+                           evidence: 'full', query: nil, generation: nil)
+        SourceEvidence.validate_mode!(evidence)
+        @evidence_mode = evidence
+        @evidence_query = query
+        @evidence_generation = generation
         effective_budget = budget || @budget
         sections = []
         sources = []
@@ -131,6 +143,8 @@ module Woods
 
         build_result(sections, sources, effective_budget, @skipped_missing_metadata)
       end
+
+      private :assemble_request
 
       # Estimate token count. Prefers the injected {TokenCounter} — which
       # loads the provider's real tokenizer and returns exact counts — and
@@ -307,6 +321,10 @@ module Woods
           return tokens_used
         end
 
+        if @evidence_mode != 'full'
+          return append_compact_candidate(parts, sources, candidate, unit, budget, tokens_used)
+        end
+
         text = format_unit(unit, candidate)
         tokens = estimate_tokens(text)
         remaining = budget - tokens_used
@@ -320,6 +338,23 @@ module Woods
           sources << build_source_attribution(candidate, unit, truncated: true)
           nil
         end
+      end
+
+      def append_compact_candidate(parts, sources, candidate, unit, budget, tokens_used)
+        header = "## #{unit_field(unit, :identifier)} (#{unit_field(unit, :type)})\n" \
+                 "File: #{unit_field(unit, :file_path)}\n\n"
+        remaining = budget - tokens_used
+        return tokens_used unless remaining.positive?
+
+        evidence = SourceEvidence.new(unit: unit, query: @evidence_query, generation: @evidence_generation)
+                                 .render(mode: @evidence_mode, budget: remaining,
+                                         counter: ->(text) { estimate_tokens(header + text) })
+        return tokens_used if evidence.text.empty?
+
+        text = header + evidence.text
+        parts << text
+        sources << build_source_attribution(candidate, unit).merge(evidence: evidence.provenance)
+        tokens_used + estimate_tokens(text)
       end
 
       # Format a unit for inclusion in context.

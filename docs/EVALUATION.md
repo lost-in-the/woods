@@ -304,3 +304,102 @@ median query time was 2.30 ms versus 0.41 ms unscoped on these 11 replay questio
 preparing the full metadata snapshot is visible even on this small corpus.
 Exact token counts measure the returned context, not MCP metadata or agent prompts;
 Woods' 1200-token budget is an estimate and can differ from cl100k counts.
+
+## Compact evidence comparison (#403)
+
+`bench/evaluation/evidence_comparison.rb` replays the same #227 Canopy corpus,
+28 questions, expected unit labels, captured MiniLM vectors and per-question
+budgets with full, compact and outline evidence, separately for semantic and
+lexical retrieval. Only within-unit evidence formatting varies within each
+strategy. The checked capture binds all 168 returned contexts to exact
+`tiktoken 0.11.0` `cl100k_base` counts; full-mode hashes match the approved prior
+comparison. The original labels are unit-level labels, not method/span relevance
+or task-correctness labels.
+
+| Strategy / evidence | P@5 | Unit recall | MRR | Mean exact context tokens |
+|---|---:|---:|---:|---:|
+| Semantic / full | 0.5363 | 0.5798 | 0.8571 | 1000.68 |
+| Semantic / compact | 0.4786 | 0.6476 | 0.8571 | 1034.68 |
+| Semantic / outline | 0.4536 | 0.8304 | 0.8571 | 976.86 |
+| Lexical / full | 0.4917 | 0.6661 | 0.7798 | 1152.64 |
+| Lexical / compact | 0.4881 | 0.7077 | 0.7887 | 1063.79 |
+| Lexical / outline | 0.3857 | 0.7964 | 0.7887 | 1014.75 |
+
+These results do not justify a default change. Outlines can expose more unit names
+without their method bodies; 19 of 100 returned semantic compact units and 13 of
+103 lexical compact units have no selected source span (the response explicitly
+reports omissions and may contain runtime metadata). Per-unit selected/omitted
+span counts remain in the capture. Increased unit recall is not evidence that an
+agent saw the implementation it needed. Compact semantic context consumed more
+actual tokens on average. Structured provenance and MCP envelopes are additional
+output tokens, outside the context-only counts above.
+
+Median warm query time across questions was 3.24/11.80/11.44 ms for semantic
+full/compact/outline and 0.46/4.44/6.08 ms for lexical modes. This measures local
+replay and includes source parsing; semantic provider/network time is excluded.
+It does not establish live-host performance.
+
+A separate deterministic long-prefix regression fixes the target method before
+selection: 80 unrelated methods precede `refund(payment)`. Under the same small
+context allowance the compact selector includes its entire body and exact
+published byte/hash coordinates. This is a synthetic retention test, separate
+from the real-corpus unit metrics above. Unicode, shared-line declarations, nested
+blocks, commented inlined concern display, inherited metadata, unknown physical
+locations and unknown generation are covered by source-evidence contract tests.
+Installed stdio and HTTP checks exercise generation attribution and typed,
+SHA-guarded full lookup on a real Rails extraction.
+
+Reproduce the corpus comparison without changing labels:
+
+```bash
+bundle exec ruby -Ilib bench/evaluation/evidence_comparison.rb /tmp/woods-evidence-raw.json
+python bench/evaluation/capture_tokens.py /tmp/woods-evidence-raw.json evidence_comparison_capture.json
+```
+
+Use the same tokenizer version/vocabulary recorded by the capture. Raw contexts
+are an external artifact; the checked file retains hashes, exact counts, unit
+outcomes and source-span counts. Candidate ranking and ownership diversity are
+outside this experiment.
+
+### Public Writebook task attempts
+
+[`public_task_evidence_capture.json`](../bench/evaluation/public_task_evidence_capture.json)
+records twelve actual agent attempts on the Rails Foundation's public
+[`ai-evals`](https://github.com/rails/ai-evals) Writebook tasks at revision
+`5327efe54dd767d662ab89332f6a4285fef07bd8` (Writebook 1.2.1):
+`ar-announce-once`, `aj-enqueue-after-commit`, and `ar-archive-book-access`.
+Each task ran twice per condition with the same task prompt, client 2.1.267,
+resolved model `claude-sonnet-5`, 40-turn cap and Woods source revision
+`33abd6da8e072c7f510d052292aaff4260c30c7f`. Hidden verifiers remained outside the
+agent workspace until the attempt finished. Baseline failure/reference success
+prechecks and prompt/artifact hashes are retained in the capture.
+
+The intervention changed the default evidence mode at the MCP boundary. Full
+lookup kept its existing complete output; compact lookup used a 1200-estimated-token
+budget. Explicit evidence choices, metadata-only reads and full-source follow-ups
+remained available. This measures a default-mode change, not a forced mode on
+every call. All actual evidence calls used `lookup` (26 full-condition calls and
+20 compact-condition calls); there were no `codebase_retrieve` calls, query hints,
+or explicit full follow-ups. Consequently this does not establish retrieval
+ranking or query-guided compact evidence benefits.
+
+| Condition | Hidden task suites passed | Median MCP text tokens (cl100k) | Median agent wall time |
+|---|---:|---:|---:|
+| Full | 5/6 | 8661 | 180.3 s |
+| Compact | 4/6 | 2316 | 132.8 s |
+
+Both compact announcement attempts failed the go-live-then-return-to-draft edge;
+the second full attempt passed it. Both conditions passed both repetitions of the
+other tasks. Two compact `Accessable` lookups returned not-found errors; these are
+retained as valid tool errors, not discarded trials. The earlier 20-turn calibration
+pair hit the turn cap and failed the same announcement edge in both modes; the
+fixed 40-turn primary protocol and all failed/setup pilots are recorded separately.
+
+Compact delivered less MCP text in this small sample but passed one fewer task.
+That is a reason to keep it explicit and retain full-source verification, not to
+change the default. Two trials could overlap, so wall times are descriptive rather
+than isolated performance estimates. `cl100k_base` measures representation size,
+not the Claude tokenizer or billing. The capture separately records serialized MCP
+response counts, client-reported usage and list-price estimates; these must not be
+substituted for model-visible context or billed charges. It contains metrics,
+arguments and hashes, without shipping application source or agent transcripts.

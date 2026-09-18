@@ -411,3 +411,15 @@ as `current`, `drifted` or `unknown`; missing source/key and incomplete capture
 never count as current. No Rails initialization or provider call is needed.
 See [source freshness](SOURCE_FRESHNESS.md) for scope, private-key handling and
 fresh-process extraction. Existing HEAD/dirty fields remain separate diagnostics.
+
+### Explicit source evidence modes
+
+When advertised by the installed schema, `lookup` and `codebase_retrieve` accept
+`evidence: 'compact'` or `'outline'`; omitted/`'full'` preserves existing behavior.
+Retrieval uses its original query. Compact lookup accepts optional `query` and an
+estimated `budget` (default 2000); full lookup remains complete. `lookup` also
+accepts an actual `type` and a `source_sha256` guard for typed, byte-verified
+follow-up from an excerpt. Compact modes cannot be combined with metadata-only
+lookup controls. Structured provenance stays within the existing closed output
+schema's `data` field. Read the [evidence contract](RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines)
+before interpreting published line ranges as physical source locations.

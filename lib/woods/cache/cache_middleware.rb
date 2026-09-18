@@ -450,9 +450,12 @@ module Woods
       # @param types [Array<String, Symbol>, nil] Include-only filter
       # @param exclude_types [Array<String, Symbol>, nil] Additional exclusions
       # @return [Retriever::RetrievalResult]
-      def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/ParameterLists
+      def retrieve(query, budget: 8000, types: nil, exclude_types: nil, packages: nil, source_paths: nil,
+                   evidence: 'full') # rubocop:disable Metrics/ParameterLists
+        Retrieval::SourceEvidence.validate_mode!(evidence)
         scoped = Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
         scope_options = scoped ? { packages: packages, source_paths: source_paths } : {}
+        scope_options[:evidence] = evidence unless evidence == 'full'
         key = context_key(query, budget, types: types, exclude_types: exclude_types, **scope_options)
         cached = @cache_store.read(key)
         return rehydrate_cached(cached, budget) if cached
@@ -481,9 +484,10 @@ module Woods
       # @param types [Array<String, Symbol>, nil]
       # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
-      def context_key(query, budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil) # rubocop:disable Metrics/ParameterLists
+      def context_key(query, budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil, evidence: 'full') # rubocop:disable Metrics/ParameterLists
         parts = [query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
         parts << 'lexical' if mode == :lexical
+        parts << JSON.generate(evidence: evidence) unless evidence == 'full'
         if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
           parts << JSON.generate(packages: packages, source_paths: source_paths)
         end

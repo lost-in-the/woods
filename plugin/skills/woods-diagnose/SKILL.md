@@ -262,3 +262,14 @@ unproved boot/consumer coverage remain unknown. A fresh `bundle exec woods-extra
 inside the application environment establishes preboot evidence. Never publish
 `.source-inputs.key`, silently change its permissions, or delete queued edits to
 hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
+## Compact evidence capability check
+
+Inspect the connected server's installed tool schemas before using `evidence` on
+`lookup` or `codebase_retrieve`; older releases do not provide these controls.
+When available, explicit `compact` selects complete published source spans and
+`outline` lists declared APIs. Read omission/provenance fields and follow the
+returned typed, SHA-guarded `full_evidence` lookup for verification. Published-unit
+coordinates are not physical file offsets; unknown generation remains unknown.
+Keep full-source access available. See the canonical
+[evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).

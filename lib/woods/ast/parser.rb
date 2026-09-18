@@ -32,6 +32,21 @@ module Woods
         raise Woods::ExtractionError, "Failed to parse source: #{e.message}"
       end
 
+      # Validate a candidate excerpt without logging expected syntax failures
+      # (for example a heredoc body outside a method's syntactic AST range).
+      # The parser instance owns its diagnostics; no global stderr redirection.
+      def valid_fragment?(source)
+        return Prism.parse(source).success? if prism_available?
+
+        require 'parser/current' unless defined?(::Parser::CurrentRuby)
+        parser = ::Parser::CurrentRuby.default_parser
+        parser.diagnostics.consumer = nil
+        buffer = ::Parser::Source::Buffer.new('(fragment)', source: source)
+        !parser.parse(buffer).nil?
+      rescue StandardError
+        false
+      end
+
       # Check if Prism is available.
       #
       # @return [Boolean]
@@ -262,7 +277,9 @@ module Woods
           end_line: end_line_for_prism(prism_node),
           method_name: prism_node.name.to_s,
           receiver: receiver_text,
-          source: extract_prism_source_span(prism_node, source)
+          source: extract_prism_source_span(prism_node, source),
+          start_byte: prism_node.location.start_offset,
+          end_byte: prism_node.location.end_offset
         )
       end
 
@@ -524,12 +541,16 @@ module Woods
             line: parser_node.loc.line,
             end_line: parser_node.loc.expression.last_line,
             method_name: parser_node.children[0].to_s,
-            source: extract_parser_source_span(parser_node, source)
+            source: extract_parser_source_span(parser_node, source),
+            start_byte: original_byte_offset(source, parser_node.loc.expression.line,
+                                             parser_node.loc.expression.column),
+            end_byte: original_byte_offset(source, parser_node.loc.expression.last_line,
+                                           parser_node.loc.expression.last_column)
           )
         when :defs
           body = parser_node.children[3] ? convert_parser_node(parser_node.children[3], source) : nil
           body_children = parser_body_children(body)
-          receiver = parser_node.children[0].type == :self ? 'self' : parser_node.children[0].to_s
+          receiver = extract_parser_receiver_text(parser_node.children[0], source)
           Node.new(
             type: :defs,
             children: body_children,
@@ -537,7 +558,11 @@ module Woods
             end_line: parser_node.loc.expression.last_line,
             method_name: parser_node.children[1].to_s,
             receiver: receiver,
-            source: extract_parser_source_span(parser_node, source)
+            source: extract_parser_source_span(parser_node, source),
+            start_byte: original_byte_offset(source, parser_node.loc.expression.line,
+                                             parser_node.loc.expression.column),
+            end_byte: original_byte_offset(source, parser_node.loc.expression.last_line,
+                                           parser_node.loc.expression.last_column)
           )
         when :send
           receiver_text = parser_node.children[0] ? extract_parser_receiver_text(parser_node.children[0], source) : nil
@@ -611,8 +636,16 @@ module Woods
         end
       end
 
+      # parser gem normalizes CRLF in its source buffer. Its line/character
+      # columns still identify the original source, but absolute positions do
+      # not. Map through original lines to preserve both CRLF and Unicode bytes.
+      def original_byte_offset(source, line, column)
+        lines = source.lines
+        lines.take(line - 1).sum(&:bytesize) + lines.fetch(line - 1)[0, column].bytesize
+      end
+
       def parser_body_children(body_node)
-        body_node&.type == :begin ? body_node.children : [body_node].compact
+        body_node.is_a?(Node) && body_node.type == :begin ? body_node.children : [body_node].compact
       end
 
       def extract_parser_source_span(node, source)

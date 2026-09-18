@@ -367,7 +367,19 @@ module Woods
       #
       # @param identifier [String] Unit identifier (e.g. "Post", "Api::V1::HealthController")
       # @return [Hash, nil] Full unit data or nil if not found
-      def find_unit(identifier)
+      def find_unit(identifier, type: nil)
+        if type
+          return with_pinned_generation do
+            dir = UNIT_TYPES_BY_DIR.find { |_, types| types.include?(type) }&.first
+            next nil unless dir
+            raise IOError, "symlink unit directory: #{dir}" if current_payload_dir.join(dir).symlink?
+
+            next nil unless search_index_entries(dir).any? { |entry| entry['identifier'] == identifier }
+
+            unit = read_published_unit(dir, identifier)
+            unit if unit['type'] == type
+          end
+        end
         ensure_fresh!
         location = identifier_map[identifier]
         return nil unless location

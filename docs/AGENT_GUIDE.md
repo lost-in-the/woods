@@ -260,3 +260,14 @@ needs the reported limitation resolved, not repeated status polling. Use
 `bundle exec woods-extract full` to establish verified preboot source evidence.
 A named refresh does not certify unrelated consumers or external runtime state.
 Follow [source freshness](SOURCE_FRESHNESS.md) and keep ordinary query scopes narrow.
+
+### Recovering relevant code under a small context budget
+
+Check the installed schemas before requesting `evidence: 'compact'` on retrieval
+or lookup, or `evidence: 'outline'` for API orientation. These modes preserve
+complete selected spans and explicitly report omissions. An outline is not proof
+of implementation behavior. Follow the returned typed `full_evidence` call when
+you need full source; its SHA guard refuses changed source instead of validating
+a different publication accidentally. Published-unit line/byte ranges can include
+synthesized or commented concern source and are not physical file coordinates.
+See the [evidence contract](RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).

@@ -397,3 +397,70 @@ ordinary approximate search. Automatic package balancing is not enabled.
 
 See [scope evaluation](EVALUATION.md#explicit-scope-comparison) for the matched
 budget replay and its cross-boundary recall tradeoff.
+
+## Compact published evidence and API outlines
+
+`codebase_retrieve` and `Retriever#retrieve` accept an explicit `evidence` mode:
+
+- `full` (default) preserves existing source formatting and budget truncation.
+- `compact` chooses complete query-relevant methods and published concern display
+  blocks within each ranked unit, then relevant resolved runtime metadata.
+- `outline` returns declared method names, kinds, lexical owners and published
+  line ranges. It is an API orientation aid, not reconstructed Ruby signatures.
+
+```ruby
+retriever.retrieve('How are payments refunded?', budget: 1200, evidence: 'compact')
+# MCP:
+codebase_retrieve(query: 'How are payments refunded?', budget: 1200, evidence: 'compact')
+lookup(identifier: 'Billing::Invoice', type: 'model', evidence: 'outline', budget: 600)
+lookup(identifier: 'Billing::Invoice', type: 'model', evidence: 'compact', query: 'refund', budget: 800)
+```
+
+Ranking, candidate limits and explicit package/path scopes are unchanged. Selection
+uses the original query: method-name term matches weigh more than body matches;
+source order breaks ties. With no matching terms, or no lookup query, source order
+provides deterministic orientation. Nested blocks and definitions stay inside their
+complete containing method. A method that cannot fit is omitted whole; compact mode
+never substitutes a broken prefix. If a heredoc body lies outside its method's
+syntactic range, a `whole_source_fallback` span retains the complete published
+source or omits it whole when it cannot fit. Metadata fields are also included whole. More
+unit names fitting in an outline does not establish that their implementation was
+shown or that retrieval quality improved.
+
+The existing retrieval token counter also charges compact headers, notices and
+source spans. Compact lookup defaults to 2000 estimated tokens, using four
+characters per token. These are text-context budgets; MCP JSON envelopes and
+structured provenance add transport/output tokens. Very small budgets may return
+no evidence text. Check omission counts and increase the budget or request full
+source. `query` and `budget` apply only to compact/outline lookup; combining those
+modes with `include_source: false` or nonempty `sections` is an argument error.
+
+### Provenance and full-source verification
+
+MCP retrieval exposes evidence under `structuredContent.data.sources[].evidence`;
+compact lookup uses `structuredContent.data.evidence`. Ruby retrieval carries the
+same data in `result.sources`. Every record includes the typed unit owner, original
+published display path, source SHA256, generation status, selected span hashes,
+zero-based byte offsets (exclusive end), one-based line ranges and omitted spans.
+Span owners are **lexical declarations**, not inferred runtime dispatch owners.
+
+Coordinates are explicitly `published_unit`: they refer to the exact published
+`source_code` bytes. Physical source coordinates are unavailable. Model/controller
+units may contain synthesized headers or commented inlined concerns; the excerpt
+preserves those comments verbatim and labels concern display blocks. Inherited
+behavior may be described by runtime metadata without a corresponding source span.
+The server never opens host application source files to fill these gaps.
+
+Published lexical retrieval and lookup report the pinned generation when present.
+Legacy flat indexes and standalone semantic metadata stores do not establish a
+publication generation and report it unavailable. A current reader generation must
+not be substituted for an older semantic artifact's unknown generation.
+
+Each record supplies a `full_evidence` lookup call with the actual `type`,
+`identifier`, `evidence: 'full'` and `source_sha256`. Pass that hash back to verify
+the same source bytes; changed source produces a typed `stale_index` refusal.
+Ordinary full lookup remains available without the hash when deliberately
+inspecting the newest publication. Optional `type` disambiguates names shared by
+multiple unit types and preserves actual types within mixed storage directories.
+Full source is never disabled by compact mode. See [evaluation](EVALUATION.md#compact-evidence-comparison-403)
+for measured tradeoffs and the limits of returned-unit metrics.
