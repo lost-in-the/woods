@@ -6,7 +6,7 @@ require 'woods/export/typed_reader'
 RSpec.describe Woods::Export::TypedReader do
   it 'refuses an injected reader that ignores the requested type' do
     reader = Object.new
-    reader.define_singleton_method(:find_unit) { |identifier, type:| { 'identifier' => identifier, 'type' => 'poro' } }
+    reader.define_singleton_method(:find_unit) { |identifier, **_options| { 'identifier' => identifier, 'type' => 'poro' } }
     expect { described_class.new(reader).find('Report', 'model') }
       .to raise_error(Woods::ExtractionError, /model:Report/)
   end

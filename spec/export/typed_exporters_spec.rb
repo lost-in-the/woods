@@ -114,7 +114,7 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
     model = unit('model')
     notion(publish(model)).sync_all
     path = File.join(@index_dir, 'notion_sync_manifest.json')
-    File.write(path, JSON.generate(JSON.parse(File.read(path))) + "\n\n")
+    File.write(path, "#{JSON.generate(JSON.parse(File.read(path)))}\n\n")
     before = File.binread(path)
     pages.clear
     File.unlink(unit_path(model))
@@ -161,7 +161,7 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
     reader = publish(model, unit('poro'))
     manifest = existing_manifest
     path = File.join(@index_dir, 'unblocked_sync_manifest.json')
-    File.write(path, JSON.generate(JSON.parse(File.read(path))) + "\n\n")
+    File.write(path, "#{JSON.generate(JSON.parse(File.read(path)))}\n\n")
     before = File.binread(path)
     File.unlink(unit_path(model))
     expect do
