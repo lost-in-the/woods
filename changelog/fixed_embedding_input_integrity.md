@@ -1,1 +1,0 @@
-- Refuse incomplete native embedding input before changing stores or checkpoints, retaining legacy flat-index support while rejecting malformed JSON. A source-empty unit now retires superseded vectors and checkpoints its no-content state without calling the embedding provider (#442, #444).

@@ -1,1 +1,0 @@
-- Add explicit embedding-free lexical retrieval over published extraction units. Set `WOODS_RETRIEVAL_MODE=lexical` for Index MCP or `config.retrieval_mode = :lexical` for Ruby builders; field-aware ranked results preserve typed identity, generation consistency and budgeted matching evidence without provider or vector access. Semantic retrieval remains the default.

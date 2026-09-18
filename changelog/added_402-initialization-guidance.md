@@ -1,1 +1,0 @@
-- Supply concise, capability-aware Index MCP instructions through initialization and modern discovery, with status-first retrieval guidance, bounded traversal and source verification. Preserve the SDK's omission for protocol `2024-11-05`; tool registration and authorization remain unchanged. (#402)
