@@ -22,14 +22,19 @@ module Woods
         # Type eligibility comes from authoritative unit metadata, including for
         # legacy vectors without a type payload. Other payload filters stay native.
         filters = filters.reject { |key, _| key.to_s == 'type' }
-        results = ids.each_slice(BATCH_SIZE).flat_map do |batch|
-          @store.search(query_vector, limit: limit, filters: filters, ids: batch).each do |result|
+        best = []
+        ids.each_slice(BATCH_SIZE) do |batch|
+          # Fetch every bounded batch member before our raw-ID tie-break. A
+          # backend may order equal scores differently (or use SQL collation).
+          results = @store.search(query_vector, limit: batch.size, filters: filters, ids: batch)
+          results.each do |result|
             next if batch.include?(result.id)
 
             raise Scope::InvalidScopeError, 'vector adapter returned an ID outside the requested scope'
           end
+          best = (best + results).sort_by { |result| [-result.score, result.id] }.first(limit)
         end
-        results.sort_by { |result| [-result.score, result.id] }.first(limit)
+        best
       rescue NotImplementedError
         raise Scope::InvalidScopeError, 'vector adapter cannot enumerate IDs for complete scoped search'
       end

@@ -332,6 +332,9 @@ module Woods
           request(:put, "/collections/#{@collection}/points#{WAIT_FOR_WRITE}", body)
         end
 
+        # Native raw-ID eligibility is applied before ranking and the limit.
+        def supports_id_filter? = true
+
         # Search for similar vectors.
         #
         # The query vector is dimension-checked before the request, mirroring
@@ -348,8 +351,6 @@ module Woods
         # @raise [Woods::Error] if the query vector's length disagrees with the
         #   configured dimension
         # @see Interface#search
-        def supports_id_filter? = true
-
         def search(query_vector, limit: 10, filters: {}, ids: nil)
           return [] if ids == []
 

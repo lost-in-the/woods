@@ -122,6 +122,9 @@ module Woods
           SQL
         end
 
+        # Native raw-ID eligibility is applied before ranking and the limit.
+        def supports_id_filter? = true
+
         # Search for similar vectors using cosine distance.
         #
         # The query vector is dimension-checked before SQL runs, mirroring the
@@ -136,8 +139,6 @@ module Woods
         # @raise [Woods::Error] if the query vector's length disagrees with the
         #   configured dimension
         # @see Interface#search
-        def supports_id_filter? = true
-
         def search(query_vector, limit: 10, filters: {}, ids: nil)
           validate_vector!(query_vector)
           validate_dimensions!(query_vector) if @dimensions

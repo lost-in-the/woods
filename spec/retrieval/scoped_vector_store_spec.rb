@@ -33,6 +33,19 @@ RSpec.describe Woods::Retrieval::ScopedVectorStore do
     })).exactly(3).times
   end
 
+  it 'keeps the same result prefix across limits despite a backend with reversed score ties' do
+    keys = Array.new(205) { |index| add("Unit#{index}", [1.0, 0.0]) }
+    allow(vectors).to receive(:search) do |_query, limit:, ids:, **_options|
+      ids.reverse.first(limit).map do |id|
+        Woods::Storage::VectorStore::SearchResult.new(id: id, score: 1.0, metadata: {})
+      end
+    end
+    short = wrapper.search([1.0, 0.0], limit: 3).map(&:id)
+    long = wrapper.search([1.0, 0.0], limit: 205).first(3).map(&:id)
+    expect(short).to eq(keys.sort.first(3))
+    expect(short).to eq(long)
+  end
+
   it 'retains eligible chunks and typed identities with no metadata payload' do
     chunk = add('Shared', [1.0, 0.0], chunk: 1)
     add('Shared', [0.1, 1.0], type: 'service')
