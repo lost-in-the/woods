@@ -88,7 +88,7 @@ RSpec.describe OwnerOverlap do
   it 'does not promote a known owner across an unknown-origin candidate' do
     fixture = fixtures.fetch('crowded_overlap')
     units = fixture[:units].map.with_index do |unit, index|
-      index == 1 ? unit.merge(source_code: unit[:source_code] + "# synthesized display\n") : unit
+      index == 1 ? unit.merge(source_code: "#{unit[:source_code]}# synthesized display\n") : unit
     end
     modified = fixture.merge(units: units)
     candidate = OwnerOverlap::Cases.run(modified, policy: true)
