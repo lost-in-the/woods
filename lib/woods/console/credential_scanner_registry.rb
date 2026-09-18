@@ -13,14 +13,17 @@ module Woods
       def register
         @mutex.synchronize do
           scanner = yield
-          @scanners[scanner] = true
+          # Older Ruby WeakMap implementations validate the value's liveness
+          # when enumerating. Keep the scanner in both weak positions so an
+          # immortal sentinel cannot make an abandoned scanner look live.
+          @scanners[scanner] = scanner
           scanner
         end
       end
 
       def rebuild
         @mutex.synchronize do
-          scanners = @scanners.keys
+          scanners = @scanners.values
           return nil if scanners.empty?
 
           index = yield
