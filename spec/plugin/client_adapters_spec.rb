@@ -41,13 +41,16 @@ RSpec.describe 'explicit edit client adapters' do
     bin = File.join(@root, 'restricted-bin')
     FileUtils.mkdir_p(bin)
     %w[cat mkdir rmdir tr ruby date sleep touch stat mv rm wc].each do |tool|
-      found = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, tool) }
-                 .find { |path| File.executable?(path) && File.file?(path) }
+      found = executable_on_path(tool)
       File.symlink(found, File.join(bin, tool)) if found
     end
-    bash = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, 'bash') }
-              .find { |path| File.executable?(path) && File.file?(path) }
+    bash = executable_on_path('bash')
     [bin, bash]
+  end
+
+  def executable_on_path(tool)
+    ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |part| File.join(part, tool) }
+       .find { |path| File.executable?(path) && File.file?(path) }
   end
 
   def run_plugin(raw, environment = {})

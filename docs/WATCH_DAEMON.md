@@ -649,10 +649,10 @@ stay quiet. Normal edits use fresh-process incremental extraction; changes to
 initializers, boot configuration, dependencies, schema, or other restart inputs
 use fresh-process full extraction. The transport also preserves explicit
 `add`, `update`, `delete`, and `move` operations; a relevant deletion/move selects
-full extraction to remove runtime classes absent from the next boot. The Claude adapter receives one
-`tool_input.file_path`. The OpenCode adapter supplies every verified patch metadata
-path, including both rename sides. Neither infers paths from shell commands or
-parses patch text. Custom runtime roots outside the
+full extraction to remove runtime classes absent from the next boot. The Claude
+adapter receives one `tool_input.file_path`. The OpenCode adapter supplies every
+verified patch metadata path, including both rename sides. Neither infers paths
+from shell commands or parses patch text. Custom runtime roots outside the
 standard dispatcher rules require an explicit refresh; the portable predicate
 cannot discover application configuration without booting it.
 
@@ -669,9 +669,10 @@ absolute paths must be valid on both sides of a container bind mount.
 
 Each event remains under `<output>/hook-pending/` until the task succeeds.
 Successful no-op consumption is acknowledged too. Contending invocations enqueue
-and return while the owner drains bounded batches (up to 16 queue files / 1,000 paths / 48 KiB of
-JSON, without splitting a multi-file event). Commas, spaces, and newlines are preserved. An empty drain releases the
-lock before checking again, so a final arriving event can acquire ownership.
+and return while the owner drains bounded batches (up to 16 queue files /
+1,000 paths / 48 KiB of JSON, without splitting a multi-file event). Commas,
+spaces, and newlines are preserved. An empty drain releases the lock before
+checking again, so a final arriving event can acquire ownership.
 A failed command, killed worker, incompatible gem, or publication failure retains
 its batch for retry: delivery is **at least once**, so crash recovery can repeat
 already completed work. Pending events in the previous `hook-pending.txt` format
