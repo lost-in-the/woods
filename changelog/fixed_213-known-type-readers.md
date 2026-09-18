@@ -1,1 +1,0 @@
-Preserve the selected extraction type when framework search and recent changes read colliding identifiers. Session controller lookup and root outgoing-edge selection now retain the controller type. Public untyped lookup, downstream references and the bare-name multi-step context pool retain their existing contracts.

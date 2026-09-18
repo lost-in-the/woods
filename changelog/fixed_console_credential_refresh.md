@@ -1,1 +1,0 @@
-- Refresh Console credential indexes from a fresh encrypted-file and key snapshot, retain the last valid index when refresh fails, and update all live embedded servers without retaining abandoned servers. Each response scan uses one complete credential index.

@@ -1,1 +1,0 @@
-- Refuse Obsidian exports that would overwrite unmanaged notes, indexes, settings, or sidecars. Preflight all destinations, record generated asset digests separately from the public manifest, and suppress sweeps on conflicts or write failures. Legacy assets are adopted only when byte-identical; changed legacy sidecars require inspection and backup or a fresh export directory.

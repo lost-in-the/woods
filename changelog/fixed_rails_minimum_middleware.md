@@ -1,1 +1,0 @@
-- Accept Rails 6.0 positional middleware options on Ruby 3 while preserving explicit keyword precedence, required bearer tokens, and unknown-option refusal. Add an installed-gem CI contract for all advertised direct runtime dependency floors, with a constrained Rails 6.0.0 fixture and recorded transitive resolution.
