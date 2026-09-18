@@ -119,40 +119,14 @@ module Woods
 
       private
 
-      # Where this run's units are read from — the published generation's
-      # payload, or the output root for a flat index.
-      #
-      # Globbing the output root would walk `payloads/` and ingest every
-      # retained generation, so each unit would be embedded once per retained
-      # payload. It also picks up `dumps/`, which holds no unit JSON but is
-      # needlessly large to walk.
-      #
-      # @return [String]
-      def units_dir
-        Woods::Generation.new(output_dir: @output_dir).payload_dir.to_s
-      end
-
       def load_units
-        Dir.glob(File.join(units_dir, '**', '*.json')).filter_map do |path|
-          next if File.basename(path) == 'checkpoint.json'
+        require_relative 'corpus'
 
-          # AtomicFile.read, not File.read: a bare read tags the bytes with the
-          # process's default external encoding (US-ASCII under LANG=C), so a
-          # single multibyte character in one unit raised EncodingError out of
-          # JSON.parse and aborted the whole embed run.
-          data = JSON.parse(AtomicFile.read(path))
-          # Extraction output also contains index listings (_index.json arrays) and
-          # summary files (manifest.json, dependency_graph.json, graph_analysis.json)
-          # that live alongside per-unit JSON. Filter to the unit shape.
-          data if data.is_a?(Hash) && data.key?('type') && data.key?('identifier')
-        rescue JSON::ParserError, EncodingError => e
-          warn "[woods] skipping unreadable unit file #{path} (#{e.class}: #{e.message})"
-          nil
-        end
+        Corpus.new(@output_dir).load
       end
 
-      # The invariant: **checkpoint.json never advances over a unit whose
-      # vector was not durably stored.** Two things uphold it here.
+      # The invariant: **checkpoint.json advances only after the intended
+      # vector state (including an empty set) is durable.** Two things uphold it here.
       #
       # 1. Ordering. For a store whose only durable copy is the dump
       #    (+persistable?+), the checkpoint is written *after*
@@ -170,17 +144,19 @@ module Woods
       #
       # 2. Trust, verified. {#checkpoint_satisfied?} honours a checkpoint hit
       #    only when the durable artifact actually holds a vector for that
-      #    unit. A checkpoint that ran ahead of its dump — an older gem with
+      #    unit, or preparation verifies that it intentionally has no text.
+      #    A checkpoint that ran ahead of its dump — an older gem with
       #    this bug, an interrupted promote, a store swap — self-heals into a
       #    re-embed instead of stranding the unit forever.
       def process_units(units, incremental:)
         prepare_run(incremental: incremental)
-        units = assign_storage_identities(units)
         checkpoint = incremental ? load_checkpoint : {}
+        units = assign_storage_identities(units, checkpoint: checkpoint)
         stats = { processed: 0, skipped: 0, errors: 0 }
 
         embed_batches(units, checkpoint, stats, incremental: incremental)
 
+        reconcile_empty_units(checkpoint)
         retire_legacy_identities
         report_checkpoint_misses
         vanished = incremental && persistable? ? drop_vanished_units : 0
@@ -196,12 +172,12 @@ module Woods
       end
 
       # Unambiguous existing keys stay stable. A collision uses reversible typed keys.
-      def assign_storage_identities(units)
+      def assign_storage_identities(units, checkpoint:)
         counts = units.group_by { |unit| unit['identifier'] }.transform_values(&:size)
         units.map do |unit|
           id = unit['identifier']
           typed = StorageIdentity.key(id, unit['type'])
-          existing = known_storage_key?(typed)
+          existing = known_storage_key?(typed, checkpoint: checkpoint)
           next unit unless counts[id] > 1 || existing || id.start_with?(StorageIdentity::PREFIX)
 
           unit.merge('storage_id' => typed)
@@ -224,8 +200,8 @@ module Woods
         end
       end
 
-      def known_storage_key?(key)
-        (@persisted_ids || {}).key?(key) || (@durable_ids || {}).key?(key)
+      def known_storage_key?(key, checkpoint:)
+        (@persisted_ids || {}).key?(key) || (@durable_ids || {}).key?(key) || checkpoint.key?(key)
       end
 
       def retire_legacy_key(legacy)
@@ -243,11 +219,9 @@ module Woods
       # `woods:embed_incremental` runs evict every genuinely older dump in
       # favour of copies of the same state.
       #
-      # Safe because nothing else mutates the *vector* store on a zero-processed
-      # run: `prune_superseded_vectors` is reached only from `store_vectors`,
-      # which runs only for items that were actually embedded. A checkpoint
-      # self-heal counts as processed, so a run that re-embeds a stranded unit
-      # still dumps.
+      # A zero-text transition can retire vectors without a provider call;
+      # @vectors_changed captures that case. Checkpoint self-heals still count
+      # as processed, so a run re-embedding a stranded unit also dumps.
       #
       # But "nothing embedded" is not "nothing changed" (B-069). `persist_snapshot`
       # writes the vector dump, the *metadata* dump and the config into one
@@ -279,7 +253,7 @@ module Woods
       def snapshot_worth_writing?(stats, vanished, incremental:)
         return true unless incremental
 
-        stats[:processed].positive? || vanished.positive? || @metadata_changed
+        stats[:processed].positive? || vanished.positive? || @metadata_changed || @vectors_changed
       end
 
       # Fraction of the persisted units the vanished-unit sweep may remove
@@ -495,10 +469,33 @@ module Woods
         @durable_ids = nil
         @checkpoint_misses = 0
         @metadata_changed = false
+        @vectors_changed = false
+        @empty_units = {}
         @persisted_metadata = nil
-        hydrate_persisted_metadata if incremental && persistable?
-        hydrate_persisted_vectors if incremental && persistable?
+        prepare_snapshot_stores(incremental: incremental)
+        retain_metadata_identities
         load_durable_store_ids if reconcilable?
+      end
+
+      def prepare_snapshot_stores(incremental:)
+        return unless persistable?
+
+        if incremental
+          hydrate_persisted_metadata
+          hydrate_persisted_vectors
+        else
+          # A direct caller may reuse an in-memory adapter for a full run.
+          # Its old chunks still need replacement, including by an empty set.
+          entries = []
+          @vector_store.each_entry { |id, _vector, _metadata| entries << { id: id } }
+          @persisted_ids = index_ids_by_identifier(entries)
+        end
+      end
+
+      # Source-empty units retain metadata but intentionally have no vectors.
+      # Keep those identities in the same deletion and typed-key accounting.
+      def retain_metadata_identities
+        @persisted_metadata&.each_entry { |identifier, _unit| @persisted_ids[identifier] ||= [] }
       end
 
       # Read back what the durable store currently holds, as base identifiers.
@@ -626,7 +623,10 @@ module Woods
         # enumeration that failed) — fall back to trusting the checkpoint.
         return true if known_ids.nil?
 
-        return true if known_ids.key?(storage_id(unit_data))
+        return true if known_ids[storage_id(unit_data)]&.any?
+        # A source-empty unit intentionally has no vector. Verify that state
+        # again rather than treating a missing nonempty vector as a cache hit.
+        return true if prepare_texts(unit_data).empty?
 
         @checkpoint_misses += 1
         false
@@ -676,12 +676,33 @@ module Woods
       def collect_embed_items(unit_data, items)
         texts = prepare_texts(unit_data)
         identifier = storage_id(unit_data)
+        @empty_units[identifier] = unit_data['source_hash'] if texts.empty?
 
         texts.each_with_index do |text, idx|
           embed_id = texts.length > 1 ? "#{identifier}#chunk_#{idx}" : identifier
           items << { id: embed_id, text: text, unit_data: unit_data,
                      source_hash: unit_data['source_hash'], identifier: identifier }
         end
+      end
+
+      # Defer zero-text deletion until every batch has prepared/embedded
+      # successfully. A later provider failure must not retire earlier vectors.
+      # Checkpoints retain their source-hash format; a matching no-vector hash
+      # is trusted only after verifying the current input still prepares empty.
+      def reconcile_empty_units(checkpoint)
+        verify_empty_reconciliation!
+        @empty_units.each do |identifier, source_hash|
+          @vectors_changed ||= @persisted_ids[identifier]&.any?
+          prune_identifier(identifier, []) if implements_own?(@vector_store, :delete)
+          prune_durable_identifier(identifier, []) if @durable_ids && implements_own?(@vector_store, :delete)
+          checkpoint[identifier] = source_hash
+        end
+      end
+
+      def verify_empty_reconciliation!
+        return unless @empty_units.any? && reconcilable? && @durable_ids.nil?
+
+        raise Woods::Error, 'Cannot reconcile source-empty units: existing vector IDs could not be read'
       end
 
       def prepare_texts(unit_data) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity

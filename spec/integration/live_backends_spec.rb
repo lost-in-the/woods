@@ -108,6 +108,30 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
   end
 
   shared_examples 'typed embedding persistence' do
+    it 'retires zero-text vectors without calling the provider and checkpoints the empty state' do
+      Dir.mktmpdir do |dir|
+        provider = Woods::Embedding::Provider::Fake.new(dims: 3)
+        build = lambda do
+          Woods::Embedding::Indexer.new(provider: provider, text_preparer: Woods::Embedding::TextPreparer.new,
+                                        vector_store: store, output_dir: dir, chunker: nil)
+        end
+        path = File.join(dir, 'unit.json')
+        data = { type: 'model', identifier: 'Invoice', source_code: 'class Invoice; end', source_hash: 'nonempty',
+                 chunks: [{ content: 'first chunk' }, { content: 'second chunk' }] }
+        File.write(path, JSON.generate(data))
+        build.call.index_all
+        expect(store.each_id.to_a).to contain_exactly('Invoice#chunk_0', 'Invoice#chunk_1')
+        calls = provider.calls.size
+        data.merge!(source_code: '', source_hash: Digest::SHA256.hexdigest(''), chunks: [])
+        File.write(path, JSON.generate(data))
+        build.call.index_incremental
+        expect(store.each_id.to_a).to be_empty
+        expect(build.call.index_incremental).to eq(processed: 0, skipped: 1, errors: 0)
+        expect(provider.calls.size).to eq(calls)
+        expect(JSON.parse(File.read(File.join(dir, 'checkpoint.json')))).to include('Invoice' => data[:source_hash])
+      end
+    end
+
     it 'reconciles a name collision without losing either durable vector' do
       Dir.mktmpdir do |dir|
         metadata = Woods::Storage::MetadataStore::InMemory.new

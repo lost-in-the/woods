@@ -221,6 +221,14 @@ paging alone only visits the discovered prefix. See the
 
 ## 4. Check semantic retrieval
 
+Native embedding completeness checks (#442/#444) are unreleased after beta2;
+confirm the installed version first. If embedding reports `Embedding input
+incomplete`, repair the named published extraction artifact or rebuild extraction
+before retrying. Do not use `WOODS_ALLOW_PURGE=1` to bypass an integrity failure;
+it only permits intentional mass deletion. Source-empty units deliberately retain
+metadata without vectors. See the canonical
+[input-integrity guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#input-integrity-and-source-empty-units).
+
 Only diagnose this layer when structural tools work and `codebase_retrieve` fails. First check `woods_status.retriever.mode`. For lexical mode, validate the published extraction index and follow the capability check below. For semantic mode, check the configured provider/model/vector store, provider reachability, and whether `woods:embed` completed.
 
 - OpenAI: verify the key exists without printing it.
