@@ -58,7 +58,7 @@ module Woods
       exit 1
     end
 
-    def woods_with_extraction_lock(output_dir, wait: nil, &block)
+    def woods_with_extraction_lock(output_dir, wait: nil, raise_on_timeout: false, &block)
       # Requires first. The default wait reads a constant from the daemon, so
       # resolving it above these lines NameError'd every write task — the same
       # load-order bug as the missing require in `woods:watch`, reintroduced one
@@ -75,7 +75,7 @@ module Woods
         stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
       )
 
-      woods_abort_on_lock_timeout(wait) unless woods_acquire_within(lock, wait)
+      woods_abort_on_lock_timeout(wait, raise_error: raise_on_timeout) unless woods_acquire_within(lock, wait)
 
       begin
         Woods::Coordination::LockHeartbeat.run(lock, &block)
@@ -100,7 +100,12 @@ module Woods
       acquired
     end
 
-    def woods_abort_on_lock_timeout(wait)
+    def woods_abort_on_lock_timeout(wait, raise_error: false)
+      if raise_error
+        raise Coordination::LockError,
+              "Another writer holds the extraction lock after #{wait}s; set WOODS_LOCK_WAIT to wait longer"
+      end
+
       warn "ERROR: another writer has held the extraction lock for #{wait.round}s."
       warn 'Refusing to write: two concurrent writers rewrite the dependency graph from divergent'
       warn 'copies, and the loser\'s work is discarded under a generation that says "fresh".'

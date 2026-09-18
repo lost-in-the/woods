@@ -519,11 +519,8 @@ module Woods
     # @param output_dir [String] Override output directory
     # @return [Hash] Extraction results
     def extract!(output_dir: nil)
-      require_relative 'woods/extractor'
-
       dir = output_dir || configuration.output_dir
-      extractor = Extractor.new(output_dir: dir)
-      extractor.extract_all
+      with_extraction_writer(dir, &:extract_all)
     end
 
     # Perform incremental extraction
@@ -531,10 +528,23 @@ module Woods
     # @param changed_files [Array<String>] List of changed files
     # @return [Array<String>] Re-extracted unit identifiers
     def extract_changed!(changed_files)
-      require_relative 'woods/extractor'
+      with_extraction_writer(configuration.output_dir) { |extractor| extractor.extract_changed(changed_files) }
+    end
 
-      extractor = Extractor.new(output_dir: configuration.output_dir)
-      extractor.extract_changed(changed_files)
+    private
+
+    # One-shot public callers share the task/watch writer lock. Unlike a rake
+    # task, a library caller needs a typed timeout exception, not process exit.
+    def with_extraction_writer(output_dir)
+      require_relative 'woods/extractor'
+      require_relative 'woods/rake_helpers'
+
+      RakeHelpers.woods_with_extraction_lock(output_dir, raise_on_timeout: true) do
+        extractor = Extractor.new(output_dir: output_dir)
+        result = yield extractor
+        extractor.raise_on_publication_failure!
+        result
+      end
     end
   end
 
