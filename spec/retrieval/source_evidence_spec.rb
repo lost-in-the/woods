@@ -37,6 +37,34 @@ RSpec.describe Woods::Retrieval::SourceEvidence do
       expect(result.provenance[:physical_location]).to be_nil
     end
 
+    it "never presents an unfinished heredoc as a complete method with #{prism ? 'Prism' : 'parser'}" do
+      parser = Woods::Ast::Parser.new
+      allow(parser).to receive(:prism_available?).and_return(prism)
+      ["class Invoice\n  def refund = <<~SQL\n    SELECT 'refund'\n  SQL\nend\n",
+       "class Invoice\n  def refund; <<~SQL; end\n    SELECT 'refund'\n  SQL\nend\n"].each do |source|
+        result = render(unit(source), parser: parser, budget: 800)
+        expect(result.text).to include(source)
+        expect(result.provenance[:spans].map { |span| span[:kind] }).to eq(['whole_source_fallback'])
+        tiny = render(unit(source * 100), parser: parser, budget: 200)
+        expect(tiny.provenance[:spans]).to be_empty
+      end
+    end
+
+    it "resets singleton context inside a fresh class with #{prism ? 'Prism' : 'parser'}" do
+      parser = Woods::Ast::Parser.new
+      allow(parser).to receive(:prism_available?).and_return(prism)
+      source = 'class Invoice; class << self; class Nested; def refund; :ok; end; end; end; end'
+      result = render(unit(source), parser: parser)
+      expect(result.provenance[:spans].first[:kind]).to eq('instance_method')
+    end
+
+    it "retains a declared receiver without inferring runtime ownership with #{prism ? 'Prism' : 'parser'}" do
+      parser = Woods::Ast::Parser.new
+      allow(parser).to receive(:prism_available?).and_return(prism)
+      result = render(unit('class Invoice; def Other.refund; :ok; end; end'), parser: parser)
+      expect(result.provenance[:spans].first).to include(lexical_owner: 'Invoice', receiver: 'Other')
+    end
+
     it "preserves original CRLF bytes after Unicode with #{prism ? 'Prism' : 'parser'}" do
       parser = Woods::Ast::Parser.new
       allow(parser).to receive(:prism_available?).and_return(prism)

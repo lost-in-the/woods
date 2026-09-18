@@ -421,7 +421,9 @@ uses the original query: method-name term matches weigh more than body matches;
 source order breaks ties. With no matching terms, or no lookup query, source order
 provides deterministic orientation. Nested blocks and definitions stay inside their
 complete containing method. A method that cannot fit is omitted whole; compact mode
-never substitutes a broken prefix. Metadata fields are also included whole. More
+never substitutes a broken prefix. If a heredoc body lies outside its method's
+syntactic range, a `whole_source_fallback` span retains the complete published
+source or omits it whole when it cannot fit. Metadata fields are also included whole. More
 unit names fitting in an outline does not establish that their implementation was
 shown or that retrieval quality improved.
 

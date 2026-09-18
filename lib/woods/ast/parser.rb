@@ -32,6 +32,21 @@ module Woods
         raise Woods::ExtractionError, "Failed to parse source: #{e.message}"
       end
 
+      # Validate a candidate excerpt without logging expected syntax failures
+      # (for example a heredoc body outside a method's syntactic AST range).
+      # The parser instance owns its diagnostics; no global stderr redirection.
+      def valid_fragment?(source)
+        return Prism.parse(source).success? if prism_available?
+
+        require 'parser/current' unless defined?(::Parser::CurrentRuby)
+        parser = ::Parser::CurrentRuby.default_parser
+        parser.diagnostics.consumer = nil
+        buffer = ::Parser::Source::Buffer.new('(fragment)', source: source)
+        !parser.parse(buffer).nil?
+      rescue StandardError
+        false
+      end
+
       # Check if Prism is available.
       #
       # @return [Boolean]
@@ -535,7 +550,7 @@ module Woods
         when :defs
           body = parser_node.children[3] ? convert_parser_node(parser_node.children[3], source) : nil
           body_children = parser_body_children(body)
-          receiver = parser_node.children[0].type == :self ? 'self' : parser_node.children[0].to_s
+          receiver = extract_parser_receiver_text(parser_node.children[0], source)
           Node.new(
             type: :defs,
             children: body_children,

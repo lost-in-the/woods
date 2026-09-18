@@ -21,9 +21,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 4.386658998555504,
-        "min": 3.946636999899056,
-        "max": 8.998227000120096
+        "median": 3.9916809982969426,
+        "min": 3.835370000160765,
+        "max": 8.455171002424322
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -49,9 +49,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1027,
       "latency_ms": {
-        "median": 5.481762993440498,
-        "min": 5.204073997447267,
-        "max": 11.952982000366319
+        "median": 5.699335000826977,
+        "min": 5.625788006000221,
+        "max": 5.7972069989773445
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -77,9 +77,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1181,
       "latency_ms": {
-        "median": 5.863004997081589,
-        "min": 5.733762998715974,
-        "max": 6.044713998562656
+        "median": 6.055087003915105,
+        "min": 5.451090997667052,
+        "max": 10.128069996426348
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -104,9 +104,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1164,
       "latency_ms": {
-        "median": 9.302434002165683,
-        "min": 7.721343004959635,
-        "max": 11.4464569996926
+        "median": 7.069408995448612,
+        "min": 6.614769998122938,
+        "max": 12.371261000225786
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -131,9 +131,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 3.3010620027198456,
-        "min": 3.1422060055774637,
-        "max": 3.4666310020838864
+        "median": 3.2486860000062734,
+        "min": 3.201748004357796,
+        "max": 4.080286002135836
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -157,9 +157,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 3.6913709991495125,
-        "min": 3.1822609962546267,
-        "max": 4.2227119993185624
+        "median": 3.535329997248482,
+        "min": 3.0504559981636703,
+        "max": 4.229865000525024
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -186,9 +186,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1107,
       "latency_ms": {
-        "median": 3.4893940028268844,
-        "min": 3.317001996038016,
-        "max": 4.410011999425478
+        "median": 3.158637999149505,
+        "min": 3.1152669980656356,
+        "max": 3.6838279993389733
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -213,9 +213,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1050,
       "latency_ms": {
-        "median": 4.165334998106118,
-        "min": 3.34859100257745,
-        "max": 5.425987998023629
+        "median": 3.1805089965928346,
+        "min": 3.0942880039219745,
+        "max": 3.212408999388572
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -242,9 +242,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1181,
       "latency_ms": {
-        "median": 1.9264560032752343,
-        "min": 1.721722997899633,
-        "max": 2.724035002756864
+        "median": 1.7045269996742718,
+        "min": 1.591275999089703,
+        "max": 3.041390002181288
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -272,9 +272,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1177,
       "latency_ms": {
-        "median": 0.30042100115679204,
-        "min": 0.27513299573911354,
-        "max": 0.5939289985690266
+        "median": 0.2612879980006255,
+        "min": 0.24873299844330177,
+        "max": 0.3826630054390989
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -302,9 +302,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1023,
       "latency_ms": {
-        "median": 0.25092899886658415,
-        "min": 0.24260200007120147,
-        "max": 0.25775100220926106
+        "median": 0.2475319997756742,
+        "min": 0.2349980059079826,
+        "max": 0.3655719992821105
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -332,9 +332,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1166,
       "latency_ms": {
-        "median": 2.315862999239471,
-        "min": 1.5526689967373386,
-        "max": 2.5697270029922947
+        "median": 1.5120690004550852,
+        "min": 1.4751900016563013,
+        "max": 1.7080340039683506
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -361,9 +361,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 10.703760002797935,
-        "min": 9.77418500406202,
-        "max": 13.736150998738594
+        "median": 10.287046003213618,
+        "min": 9.750876997713931,
+        "max": 12.172720998933073
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -392,9 +392,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1027,
       "latency_ms": {
-        "median": 12.354701997537632,
-        "min": 11.332032998325303,
-        "max": 14.898440000251867
+        "median": 10.960191997583024,
+        "min": 10.682303000066895,
+        "max": 11.282682004093658
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -422,9 +422,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 11.686744997859932,
-        "min": 11.161795999214519,
-        "max": 12.333352002315223
+        "median": 11.169080993568059,
+        "min": 10.72633500007214,
+        "max": 11.779599000874441
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -450,9 +450,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1071,
       "latency_ms": {
-        "median": 13.258540006063413,
-        "min": 12.885093005024828,
-        "max": 13.488497999787796
+        "median": 11.660306998237502,
+        "min": 10.989825997967273,
+        "max": 12.783338999724947
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -476,9 +476,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 500,
       "latency_ms": {
-        "median": 8.78706200455781,
-        "min": 7.91846100037219,
-        "max": 10.65981900319457
+        "median": 6.764670004486106,
+        "min": 6.656457997451071,
+        "max": 8.823178002785426
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -502,9 +502,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 519,
       "latency_ms": {
-        "median": 7.312830995942932,
-        "min": 6.9004510005470365,
-        "max": 7.934089997434057
+        "median": 6.73295200249413,
+        "min": 6.552744998771232,
+        "max": 6.978177996643353
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -529,9 +529,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 519,
       "latency_ms": {
-        "median": 5.706001000362448,
-        "min": 4.9723010015441105,
-        "max": 6.703172999550588
+        "median": 5.4618520007352345,
+        "min": 4.9722289986675605,
+        "max": 6.724095001118258
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -555,9 +555,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 500,
       "latency_ms": {
-        "median": 6.9298250018619,
-        "min": 6.8067359970882535,
-        "max": 7.733065001957584
+        "median": 7.3744469991652295,
+        "min": 6.730607005010825,
+        "max": 9.068474995729048
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -585,9 +585,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 3.322823002235964,
-        "min": 2.9953109988127835,
-        "max": 4.867607000051066
+        "median": 3.2246110058622435,
+        "min": 2.862907000235282,
+        "max": 4.3156749961781316
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -615,9 +615,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1158,
       "latency_ms": {
-        "median": 1.9375869960640557,
-        "min": 1.5861409992794506,
-        "max": 2.159190997190308
+        "median": 1.8583040000521578,
+        "min": 1.5733530017314479,
+        "max": 2.5671549956314266
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -645,9 +645,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1023,
       "latency_ms": {
-        "median": 1.5590909970342182,
-        "min": 1.459113998862449,
-        "max": 2.88571699638851
+        "median": 1.5657389958505519,
+        "min": 1.462065993109718,
+        "max": 1.7925520005519502
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -674,9 +674,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1189,
       "latency_ms": {
-        "median": 1.5548220035270788,
-        "min": 1.5320399979827926,
-        "max": 1.5782759946887381
+        "median": 1.7165099998237565,
+        "min": 1.4937739979359321,
+        "max": 2.0679149965872057
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -705,9 +705,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1201,
       "latency_ms": {
-        "median": 0.7088740021572448,
-        "min": 0.6801800045650452,
-        "max": 0.7412240011035465
+        "median": 0.710655003786087,
+        "min": 0.6961679973755963,
+        "max": 0.7264439991558902
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -735,9 +735,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1110,
       "latency_ms": {
-        "median": 0.7361250027315691,
-        "min": 0.6910800002515316,
-        "max": 1.8346750002820045
+        "median": 0.6898460051161237,
+        "min": 0.6804789954912849,
+        "max": 0.739258000976406
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -765,9 +765,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1083,
       "latency_ms": {
-        "median": 0.7437379972543567,
-        "min": 0.6835160020273179,
-        "max": 0.8864050032570958
+        "median": 0.9612619978724979,
+        "min": 0.6831730061094277,
+        "max": 2.3350530027528293
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -796,9 +796,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1201,
       "latency_ms": {
-        "median": 0.8896399958757684,
-        "min": 0.7250030030263588,
-        "max": 1.2111309988540597
+        "median": 0.8766140017542057,
+        "min": 0.6714819974149577,
+        "max": 1.0974260003422387
       },
       "condition": "semantic_full",
       "budget": 1200,
@@ -824,9 +824,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1198,
       "latency_ms": {
-        "median": 27.060473003075458,
-        "min": 25.419789999432396,
-        "max": 28.00264200050151
+        "median": 28.38673700171057,
+        "min": 24.972091006929986,
+        "max": 31.72503999667242
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -875,9 +875,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1198,
       "latency_ms": {
-        "median": 25.830897997366264,
-        "min": 24.923764998675324,
-        "max": 29.066748000332154
+        "median": 26.04656400217209,
+        "min": 25.02413800539216,
+        "max": 27.47527700557839
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -932,9 +932,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1190,
       "latency_ms": {
-        "median": 30.09892500267597,
-        "min": 27.100507999421097,
-        "max": 31.826879996515345
+        "median": 29.41741800168529,
+        "min": 28.87018799810903,
+        "max": 32.58257799461717
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -988,9 +988,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1184,
       "latency_ms": {
-        "median": 33.181478996993974,
-        "min": 31.401366002683062,
-        "max": 33.521042998472694
+        "median": 31.041745001857635,
+        "min": 29.470766996382736,
+        "max": 32.0584709988907
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1038,9 +1038,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1164,
       "latency_ms": {
-        "median": 20.249148001312278,
-        "min": 19.6164079970913,
-        "max": 21.694106006179936
+        "median": 18.959952998557128,
+        "min": 17.803807997552212,
+        "max": 19.723496996448375
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1086,9 +1086,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1095,
       "latency_ms": {
-        "median": 23.75383099570172,
-        "min": 23.157146999437828,
-        "max": 24.801807005133014
+        "median": 21.59205000498332,
+        "min": 21.224655996775255,
+        "max": 22.21995100262575
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1130,9 +1130,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1142,
       "latency_ms": {
-        "median": 19.755506997171324,
-        "min": 19.10469200083753,
-        "max": 20.976406005502213
+        "median": 20.45521100080805,
+        "min": 19.3262760003563,
+        "max": 21.05577000475023
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1188,9 +1188,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1104,
       "latency_ms": {
-        "median": 20.60347000224283,
-        "min": 18.99031899665715,
-        "max": 21.544397000980098
+        "median": 19.821630005026236,
+        "min": 19.457431000773795,
+        "max": 20.837083000515122
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1249,9 +1249,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1177,
       "latency_ms": {
-        "median": 13.30738099932205,
-        "min": 12.54225199954817,
-        "max": 14.768647997698281
+        "median": 14.113449004071299,
+        "min": 12.358708001556806,
+        "max": 14.21977699646959
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1315,9 +1315,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1174,
       "latency_ms": {
-        "median": 3.9826949941925704,
-        "min": 3.4107769970432855,
-        "max": 4.797966001206078
+        "median": 3.650124002888333,
+        "min": 3.4694869973463938,
+        "max": 4.321054999309126
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1367,9 +1367,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1152,
       "latency_ms": {
-        "median": 3.098083005170338,
-        "min": 2.5669309980003163,
-        "max": 3.6056609969818965
+        "median": 3.6039080005139112,
+        "min": 2.774701999442186,
+        "max": 3.968447999795899
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1420,9 +1420,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1104,
       "latency_ms": {
-        "median": 9.173514001304284,
-        "min": 8.168517997546587,
-        "max": 10.050379998574499
+        "median": 9.172018006211147,
+        "min": 8.84148199838819,
+        "max": 10.037600994110107
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1479,9 +1479,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1092,
       "latency_ms": {
-        "median": 33.48628700041445,
-        "min": 30.088845000136644,
-        "max": 35.50159999576863
+        "median": 32.037672004662454,
+        "min": 31.52382400003262,
+        "max": 33.64484800113132
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1533,9 +1533,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1198,
       "latency_ms": {
-        "median": 30.42402099526953,
-        "min": 29.12764099892229,
-        "max": 33.69900500547374
+        "median": 30.412482003157493,
+        "min": 29.93590500409482,
+        "max": 30.582598999899346
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1593,9 +1593,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1175,
       "latency_ms": {
-        "median": 32.015561999287456,
-        "min": 31.21387599821901,
-        "max": 33.60275500017451
+        "median": 34.29494900046848,
+        "min": 33.76015299727442,
+        "max": 34.648718996322714
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1643,9 +1643,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1133,
       "latency_ms": {
-        "median": 33.853443004773,
-        "min": 31.37928400246892,
-        "max": 38.403255995945074
+        "median": 33.62012100114953,
+        "min": 32.550037001783494,
+        "max": 33.76141500484664
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1684,9 +1684,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 532,
       "latency_ms": {
-        "median": 7.959457005199511,
-        "min": 7.677982001041528,
-        "max": 8.436176998657174
+        "median": 8.499063005729113,
+        "min": 7.762288994854316,
+        "max": 9.73922499542823
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1725,9 +1725,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 546,
       "latency_ms": {
-        "median": 8.111842005746439,
-        "min": 7.527080000727437,
-        "max": 8.75871899916092
+        "median": 7.732344005489722,
+        "min": 7.518585000070743,
+        "max": 8.666125002491754
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1767,9 +1767,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 546,
       "latency_ms": {
-        "median": 6.453246001910884,
-        "min": 6.050474003131967,
-        "max": 8.196169997972902
+        "median": 6.619419997150544,
+        "min": 5.725251998228487,
+        "max": 7.936886002426036
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1808,9 +1808,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 532,
       "latency_ms": {
-        "median": 8.03964700025972,
-        "min": 7.852097005525138,
-        "max": 9.059661002538633
+        "median": 8.547022996935993,
+        "min": 7.755397004075348,
+        "max": 8.99911599844927
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1857,9 +1857,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1184,
       "latency_ms": {
-        "median": 18.601531999593135,
-        "min": 17.744493001373485,
-        "max": 18.73722600430483
+        "median": 19.909273003577255,
+        "min": 19.293255005322862,
+        "max": 20.81778700085124
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1932,9 +1932,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1138,
       "latency_ms": {
-        "median": 8.883281996531878,
-        "min": 8.4555029970943,
-        "max": 10.251555999275297
+        "median": 9.48418999905698,
+        "min": 8.331662000273354,
+        "max": 10.725151994847693
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -1998,9 +1998,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1152,
       "latency_ms": {
-        "median": 4.6507520019076765,
-        "min": 4.068104004545603,
-        "max": 5.104899006255437
+        "median": 3.8541449976037256,
+        "min": 3.7006690035923384,
+        "max": 4.430839006090537
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -2051,9 +2051,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1120,
       "latency_ms": {
-        "median": 5.433152000478003,
-        "min": 4.9935509960050695,
-        "max": 6.095438002375886
+        "median": 5.565995998040307,
+        "min": 5.067286001576576,
+        "max": 6.5919780026888475
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -2110,9 +2110,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1159,
       "latency_ms": {
-        "median": 3.179153995006345,
-        "min": 2.9956420039525256,
-        "max": 3.9434010031982325
+        "median": 3.291975997854024,
+        "min": 2.9921680034021847,
+        "max": 3.8767669975641184
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -2176,9 +2176,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1171,
       "latency_ms": {
-        "median": 3.5362709968467243,
-        "min": 2.9815759990015067,
-        "max": 4.127473999687936
+        "median": 3.5547559964470565,
+        "min": 3.232805996958632,
+        "max": 4.172627996013034
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -2242,9 +2242,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1159,
       "latency_ms": {
-        "median": 3.192379997926764,
-        "min": 2.9215339964139275,
-        "max": 3.8499160000355914
+        "median": 3.4397420022287406,
+        "min": 3.174386998580303,
+        "max": 3.8083390027168207
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -2308,9 +2308,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1159,
       "latency_ms": {
-        "median": 2.8639860029215924,
-        "min": 2.8386479971231893,
-        "max": 3.8572600024053827
+        "median": 3.439191001234576,
+        "min": 2.9947019938845187,
+        "max": 4.0420249933958985
       },
       "condition": "semantic_compact",
       "budget": 1200,
@@ -2375,9 +2375,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1106,
       "latency_ms": {
-        "median": 24.056424997979775,
-        "min": 23.82947200385388,
-        "max": 25.146980995486956
+        "median": 25.262933995691128,
+        "min": 24.841115999151953,
+        "max": 27.256239001872018
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2450,9 +2450,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1185,
       "latency_ms": {
-        "median": 26.946019002934918,
-        "min": 25.05153299716767,
-        "max": 27.426536005805247
+        "median": 25.71058800094761,
+        "min": 25.241652998374775,
+        "max": 29.377913997450378
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2531,9 +2531,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1186,
       "latency_ms": {
-        "median": 28.146880002168473,
-        "min": 26.096081994182896,
-        "max": 29.501227996661328
+        "median": 28.596096999535803,
+        "min": 27.791166001406964,
+        "max": 29.151401002309285
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2612,9 +2612,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1136,
       "latency_ms": {
-        "median": 32.14000399748329,
-        "min": 28.102707998186816,
-        "max": 32.648173000779934
+        "median": 29.546607998781838,
+        "min": 29.413110001769383,
+        "max": 30.57691900175996
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2694,9 +2694,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1100,
       "latency_ms": {
-        "median": 18.65740700304741,
-        "min": 17.44909100671066,
-        "max": 21.009707998018712
+        "median": 17.975419003050774,
+        "min": 17.75739200093085,
+        "max": 20.98776400089264
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2776,9 +2776,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1150,
       "latency_ms": {
-        "median": 20.892077998723835,
-        "min": 20.703105998109095,
-        "max": 23.583932998008095
+        "median": 21.387518994743004,
+        "min": 19.887561997165903,
+        "max": 21.66639899951406
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2866,9 +2866,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1176,
       "latency_ms": {
-        "median": 18.92704099736875,
-        "min": 18.195092998212203,
-        "max": 19.43007899535587
+        "median": 19.98350200301502,
+        "min": 19.54625700454926,
+        "max": 20.468615999561734
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -2955,9 +2955,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1178,
       "latency_ms": {
-        "median": 19.010857002285775,
-        "min": 17.71964599902276,
-        "max": 21.13449999887962
+        "median": 19.886891001078766,
+        "min": 19.619111997599248,
+        "max": 22.269993998634163
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3040,9 +3040,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1195,
       "latency_ms": {
-        "median": 13.01602699822979,
-        "min": 11.977688001934439,
-        "max": 13.852898999175522
+        "median": 13.25454799371073,
+        "min": 12.496153998654336,
+        "max": 15.672895999159664
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3129,9 +3129,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 752,
       "latency_ms": {
-        "median": 3.692523001518566,
-        "min": 3.387011995073408,
-        "max": 4.598743995302357
+        "median": 3.736394995939918,
+        "min": 3.453638004430104,
+        "max": 4.194660003122408
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3196,9 +3196,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 607,
       "latency_ms": {
-        "median": 2.5915080041158944,
-        "min": 2.4953780011855997,
-        "max": 3.2462700037285686
+        "median": 2.7647730021271855,
+        "min": 2.5728359978529625,
+        "max": 3.288660001999233
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3260,9 +3260,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1198,
       "latency_ms": {
-        "median": 8.692937000887468,
-        "min": 8.178766998753417,
-        "max": 10.73370599624468
+        "median": 9.091277002880815,
+        "min": 8.293229999253526,
+        "max": 9.454864004510455
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3352,9 +3352,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1197,
       "latency_ms": {
-        "median": 31.025873999169562,
-        "min": 30.553712997061666,
-        "max": 32.35660800419282
+        "median": 33.6556680049398,
+        "min": 32.82457799650729,
+        "max": 37.5907530033146
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3444,9 +3444,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1194,
       "latency_ms": {
-        "median": 32.47890600323444,
-        "min": 28.535555997223128,
-        "max": 36.34540400526021
+        "median": 31.89965399360517,
+        "min": 31.166437001957092,
+        "max": 32.556980004301295
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3528,9 +3528,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1094,
       "latency_ms": {
-        "median": 32.12980500393314,
-        "min": 32.072378002339974,
-        "max": 34.91678800492082
+        "median": 34.85322000051383,
+        "min": 33.73999500036007,
+        "max": 37.70326400263002
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3604,9 +3604,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1136,
       "latency_ms": {
-        "median": 32.058251003036276,
-        "min": 30.371813001693226,
-        "max": 33.74750500370283
+        "median": 33.51634899445344,
+        "min": 32.52692399837542,
+        "max": 34.821831999579445
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3680,9 +3680,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 399,
       "latency_ms": {
-        "median": 8.844319003401324,
-        "min": 7.883525999204721,
-        "max": 10.196975003054831
+        "median": 8.620618995337281,
+        "min": 8.202920995245222,
+        "max": 9.114219996263273
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3721,9 +3721,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 400,
       "latency_ms": {
-        "median": 7.612660003360361,
-        "min": 7.350189996941481,
-        "max": 8.474499001749791
+        "median": 8.475639006064739,
+        "min": 7.542610001110006,
+        "max": 9.381458003190346
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3763,9 +3763,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 400,
       "latency_ms": {
-        "median": 7.172428006015252,
-        "min": 6.591893994482234,
-        "max": 7.651102001545951
+        "median": 6.804623997595627,
+        "min": 6.471353000961244,
+        "max": 7.766868002363481
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3804,9 +3804,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 399,
       "latency_ms": {
-        "median": 8.226896999985911,
-        "min": 8.017947002372239,
-        "max": 10.840816001291387
+        "median": 8.848664998367894,
+        "min": 8.34126900008414,
+        "max": 9.899994998704642
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3855,9 +3855,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1134,
       "latency_ms": {
-        "median": 22.757730999728665,
-        "min": 20.606545003829524,
-        "max": 23.06381199741736
+        "median": 21.19187499920372,
+        "min": 19.750777995795943,
+        "max": 22.694856001180597
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -3947,9 +3947,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1163,
       "latency_ms": {
-        "median": 9.532474003208335,
-        "min": 8.500788004312199,
-        "max": 9.83080999867525
+        "median": 9.629900996515062,
+        "min": 8.294342005683575,
+        "max": 10.491606997675262
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4035,9 +4035,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 607,
       "latency_ms": {
-        "median": 4.070338000019547,
-        "min": 4.017198996734805,
-        "max": 4.708759995992295
+        "median": 3.941787996154744,
+        "min": 3.8115850038593635,
+        "max": 4.054397999425419
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4097,9 +4097,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 885,
       "latency_ms": {
-        "median": 5.301616001816001,
-        "min": 4.946434004523326,
-        "max": 5.525694999960251
+        "median": 5.561266996664926,
+        "min": 5.141363995790016,
+        "max": 6.571008998434991
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4172,9 +4172,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1103,
       "latency_ms": {
-        "median": 2.9775990042253397,
-        "min": 2.8916980008943938,
-        "max": 3.972555998188909
+        "median": 3.9357560017379,
+        "min": 3.3058019980671816,
+        "max": 4.379033998702653
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4254,9 +4254,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1103,
       "latency_ms": {
-        "median": 3.082323004491627,
-        "min": 2.8128909980296157,
-        "max": 4.688512002758216
+        "median": 3.4771120044752024,
+        "min": 3.0997490030131303,
+        "max": 3.8457689952338114
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4336,9 +4336,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1103,
       "latency_ms": {
-        "median": 3.1495389994233847,
-        "min": 2.9809839979861863,
-        "max": 3.379948997462634
+        "median": 3.147577997879125,
+        "min": 3.121387999271974,
+        "max": 3.5334960048203357
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4418,9 +4418,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1103,
       "latency_ms": {
-        "median": 2.9899620058131404,
-        "min": 2.8517629980342463,
-        "max": 3.6721649958053604
+        "median": 3.5257729978184216,
+        "min": 3.1721030027256347,
+        "max": 3.7413239988381974
       },
       "condition": "semantic_outline",
       "budget": 1200,
@@ -4497,9 +4497,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.48925400187727064,
-        "min": 0.4739950018119998,
-        "max": 0.6510149978566915
+        "median": 0.5213619951973669,
+        "min": 0.4951529990648851,
+        "max": 0.5944889999227598
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4525,9 +4525,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4477460024645552,
-        "min": 0.44122299732407555,
-        "max": 0.5482439955812879
+        "median": 0.4638350001187064,
+        "min": 0.4473129956750199,
+        "max": 0.49841000145534053
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4552,9 +4552,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1168,
       "latency_ms": {
-        "median": 0.4618420061888173,
-        "min": 0.4545980045804754,
-        "max": 0.9089169980143197
+        "median": 0.4778709990205243,
+        "min": 0.4450289998203516,
+        "max": 1.1538600010680966
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4579,9 +4579,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4987920037820004,
-        "min": 0.4848750031669624,
-        "max": 0.5124559975229204
+        "median": 0.5383540046750568,
+        "min": 0.4793129992322065,
+        "max": 0.8838880021357909
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4608,9 +4608,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 1110,
       "latency_ms": {
-        "median": 0.4548490032902919,
-        "min": 0.4435380033100955,
-        "max": 0.4773010005010292
+        "median": 0.47189000179059803,
+        "min": 0.4471929933060892,
+        "max": 0.5430520031950437
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4635,9 +4635,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4228690013405867,
-        "min": 0.414925001678057,
-        "max": 1.0589070006972179
+        "median": 0.46851299703121185,
+        "min": 0.4150539971305989,
+        "max": 0.504039999214001
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4659,9 +4659,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.40516599983675405,
-        "min": 0.39306399412453175,
-        "max": 0.628834000963252
+        "median": 0.6063999971956946,
+        "min": 0.5384030009736307,
+        "max": 1.797029995941557
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4688,9 +4688,9 @@
       "mrr": 0.3333333333333333,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4438390024006367,
-        "min": 0.4324869951233268,
-        "max": 0.547962001292035
+        "median": 0.966400999459438,
+        "min": 0.7780099986121058,
+        "max": 1.0821270043379627
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4717,9 +4717,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.463846001366619,
-        "min": 0.4515429973253049,
-        "max": 0.560285996471066
+        "median": 1.7721929980325513,
+        "min": 1.5041139995446429,
+        "max": 3.149911994114518
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4747,9 +4747,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4194729990558699,
-        "min": 0.3984039940405637,
-        "max": 0.6730669992975891
+        "median": 0.4123979961150326,
+        "min": 0.39245199877768755,
+        "max": 0.7072079970384948
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4777,9 +4777,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3755510042537935,
-        "min": 0.3677459972095676,
-        "max": 0.3840060016955249
+        "median": 0.46049900265643373,
+        "min": 0.3685870033223182,
+        "max": 0.8766639948589727
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4807,9 +4807,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4010379998362623,
-        "min": 0.396399998862762,
-        "max": 0.424723002652172
+        "median": 0.4693749942816794,
+        "min": 0.4029909978271462,
+        "max": 0.5343459997675382
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4836,9 +4836,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.43197599734412506,
-        "min": 0.40540700138080865,
-        "max": 0.9555139986332506
+        "median": 0.4625630026566796,
+        "min": 0.4325560003053397,
+        "max": 0.625485998170916
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4867,9 +4867,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4840929977945052,
-        "min": 0.4825899959541857,
-        "max": 0.6881750014144927
+        "median": 0.49126600060844794,
+        "min": 0.4820690010092221,
+        "max": 0.5003230035072193
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4898,9 +4898,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4337599966675043,
-        "min": 0.41842100472422317,
-        "max": 0.5252100017969497
+        "median": 0.4405210056575015,
+        "min": 0.43132500286446884,
+        "max": 0.4426649975357577
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4927,9 +4927,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4803769988939166,
-        "min": 0.47765099589014426,
-        "max": 0.5323840014170855
+        "median": 0.48871099716052413,
+        "min": 0.4728419953607954,
+        "max": 1.4128330003586598
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4957,9 +4957,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.15712300228187814,
-        "min": 0.15000999701442197,
-        "max": 0.18345299758948386
+        "median": 0.15729299775557593,
+        "min": 0.1516129996161908,
+        "max": 0.3616440008045174
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -4987,9 +4987,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.14131399802863598,
-        "min": 0.13269799819681793,
-        "max": 0.32881300285225734
+        "median": 0.1345710043096915,
+        "min": 0.1305030018556863,
+        "max": 0.15443799929926172
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5018,9 +5018,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.12791900371666998,
-        "min": 0.12142700143158436,
-        "max": 0.13970100553706288
+        "median": 0.12126599904149771,
+        "min": 0.11909200111404061,
+        "max": 0.2873560006264597
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5048,9 +5048,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.15165299555519596,
-        "min": 0.14909799938322976,
-        "max": 0.16180200327653438
+        "median": 0.1524539984529838,
+        "min": 0.1479659986216575,
+        "max": 0.1548590007587336
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5078,9 +5078,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.4500599970924668,
-        "min": 0.43258700316073373,
-        "max": 0.4657589961425401
+        "median": 0.4950930015183985,
+        "min": 0.4380569953355007,
+        "max": 0.5814739997731522
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5108,9 +5108,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3625070021371357,
-        "min": 0.35327899968251586,
-        "max": 0.4068990019732155
+        "median": 0.3720839958987199,
+        "min": 0.3562540005077608,
+        "max": 0.42077500256709754
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5138,9 +5138,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.3946169963455759,
-        "min": 0.3652520026662387,
-        "max": 0.9638489937060513
+        "median": 0.3745580033864826,
+        "min": 0.3614840024965815,
+        "max": 0.49339999532094225
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5169,9 +5169,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.36913900112267584,
-        "min": 0.36018199898535386,
-        "max": 0.5637719950755127
+        "median": 0.38602900167461485,
+        "min": 0.36500999704003334,
+        "max": 0.4644149958039634
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5200,9 +5200,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.1222990031237714,
-        "min": 0.11888200242538005,
-        "max": 0.1362939947284758
+        "median": 0.13643399870488793,
+        "min": 0.1256949981325306,
+        "max": 0.16498799959663302
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5230,9 +5230,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1184,
       "latency_ms": {
-        "median": 0.13943100202595815,
-        "min": 0.13718599802814424,
-        "max": 0.2836599960573949
+        "median": 0.13907000538893044,
+        "min": 0.13562199455918744,
+        "max": 0.16310399951180443
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5261,9 +5261,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.11657800496323034,
-        "min": 0.11166900367243215,
-        "max": 0.13994199980515987
+        "median": 0.118550997285638,
+        "min": 0.11631700181169435,
+        "max": 0.13041299825999886
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5292,9 +5292,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1200,
       "latency_ms": {
-        "median": 0.13594399933936074,
-        "min": 0.13089500134810805,
-        "max": 0.2509480036678724
+        "median": 0.13254700024845079,
+        "min": 0.12945100024808198,
+        "max": 0.1518440039944835
       },
       "condition": "lexical_full",
       "budget": 1200,
@@ -5320,9 +5320,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1197,
       "latency_ms": {
-        "median": 2.7301359950797632,
-        "min": 2.597358005004935,
-        "max": 2.831366000464186
+        "median": 3.5591740015661344,
+        "min": 2.7641829947242513,
+        "max": 3.8071069939178415
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5370,9 +5370,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1184,
       "latency_ms": {
-        "median": 3.4274079953320324,
-        "min": 3.3125839981948957,
-        "max": 4.003002002718858
+        "median": 3.915057997801341,
+        "min": 3.5847920007654466,
+        "max": 5.037559996708296
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5420,9 +5420,9 @@
       "mrr": 0.25,
       "estimated_context_tokens": 1158,
       "latency_ms": {
-        "median": 21.31671099778032,
-        "min": 19.425840997428168,
-        "max": 33.530619999510236
+        "median": 23.29257999372203,
+        "min": 22.56818000023486,
+        "max": 24.889125998015516
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5475,9 +5475,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1088,
       "latency_ms": {
-        "median": 19.079965000855736,
-        "min": 18.6569959987537,
-        "max": 21.243844996206462
+        "median": 24.612510998849757,
+        "min": 20.100279005418997,
+        "max": 33.007600002747495
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5519,9 +5519,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 899,
       "latency_ms": {
-        "median": 2.154251000320073,
-        "min": 2.1147869993001223,
-        "max": 2.7526680059963837
+        "median": 2.8853780022473074,
+        "min": 2.679043995158281,
+        "max": 3.150292999634985
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5574,9 +5574,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1194,
       "latency_ms": {
-        "median": 2.8187610005261377,
-        "min": 2.8017789954901673,
-        "max": 3.213478994439356
+        "median": 7.556586999271531,
+        "min": 3.3142679967568256,
+        "max": 9.21815300534945
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5613,9 +5613,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.40515599539503455,
-        "min": 0.4010780030512251,
-        "max": 0.5807740017189644
+        "median": 0.41023499943548813,
+        "min": 0.40982400241773576,
+        "max": 0.7087909980327822
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5642,9 +5642,9 @@
       "mrr": 0.3333333333333333,
       "estimated_context_tokens": 1139,
       "latency_ms": {
-        "median": 4.489950995775871,
-        "min": 4.0082319974317215,
-        "max": 5.208162001508754
+        "median": 4.432171997905243,
+        "min": 4.181033997156192,
+        "max": 4.621244996087626
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5702,9 +5702,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1085,
       "latency_ms": {
-        "median": 17.35560600354802,
-        "min": 15.56142699701013,
-        "max": 19.643125997390598
+        "median": 16.9342669978505,
+        "min": 16.292040003463626,
+        "max": 17.405095000867732
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5762,9 +5762,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1199,
       "latency_ms": {
-        "median": 4.935864002618473,
-        "min": 4.740518998005427,
-        "max": 6.214420005562715
+        "median": 5.489092000061646,
+        "min": 4.953925003064796,
+        "max": 6.652552001469303
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5822,9 +5822,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1192,
       "latency_ms": {
-        "median": 7.105584001692478,
-        "min": 4.162871002336033,
-        "max": 10.156858996197116
+        "median": 5.683033996319864,
+        "min": 4.307609997340478,
+        "max": 9.961138996004593
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5880,9 +5880,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1088,
       "latency_ms": {
-        "median": 17.048323003109545,
-        "min": 16.803756006993353,
-        "max": 18.418851999740582
+        "median": 17.80016200063983,
+        "min": 16.55454000137979,
+        "max": 19.69832999748178
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5927,9 +5927,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1182,
       "latency_ms": {
-        "median": 4.487206002522726,
-        "min": 4.363115003798157,
-        "max": 6.153606002044398
+        "median": 4.509035999944899,
+        "min": 4.332686003181152,
+        "max": 5.084587995952461
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -5995,9 +5995,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1199,
       "latency_ms": {
-        "median": 5.339467003068421,
-        "min": 5.121741000039037,
-        "max": 5.820494996441994
+        "median": 6.129635999968741,
+        "min": 5.137227002705913,
+        "max": 6.242135998036247
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6055,9 +6055,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1124,
       "latency_ms": {
-        "median": 10.859340996830724,
-        "min": 10.650800999428611,
-        "max": 22.158772000693716
+        "median": 11.614850998739712,
+        "min": 10.907682997640222,
+        "max": 11.938564995944034
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6105,9 +6105,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1088,
       "latency_ms": {
-        "median": 19.47093499620678,
-        "min": 18.485184999008197,
-        "max": 20.53735500521725
+        "median": 19.595296995248646,
+        "min": 19.143586003337987,
+        "max": 21.710321001592092
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6149,9 +6149,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1149,
       "latency_ms": {
-        "median": 2.5074099976336583,
-        "min": 2.2005680002621375,
-        "max": 3.2987770027830265
+        "median": 2.4462799992761575,
+        "min": 2.294197001901921,
+        "max": 2.624782995553687
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6214,9 +6214,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1122,
       "latency_ms": {
-        "median": 2.2972580045461655,
-        "min": 2.0271829998819157,
-        "max": 2.351339004235342
+        "median": 2.3292219993891194,
+        "min": 2.2040089970687404,
+        "max": 2.3951750044943765
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6280,9 +6280,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1111,
       "latency_ms": {
-        "median": 4.7648839972680435,
-        "min": 3.3162410036311485,
-        "max": 6.344002002151683
+        "median": 2.379556004598271,
+        "min": 2.284278001752682,
+        "max": 2.5503740034764633
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6345,9 +6345,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1146,
       "latency_ms": {
-        "median": 2.3124860017560422,
-        "min": 2.1894370001973584,
-        "max": 2.685022001969628
+        "median": 2.366371998505201,
+        "min": 2.265403003548272,
+        "max": 2.5083559958147816
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6412,9 +6412,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1168,
       "latency_ms": {
-        "median": 16.068273995188065,
-        "min": 15.211384001304395,
-        "max": 17.714015004457906
+        "median": 15.588067995849997,
+        "min": 14.50625100551406,
+        "max": 16.45834000373725
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6464,9 +6464,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1175,
       "latency_ms": {
-        "median": 4.384775005746633,
-        "min": 4.177388000243809,
-        "max": 5.708044998755213
+        "median": 4.452470006071962,
+        "min": 4.338136997830588,
+        "max": 5.283329002850223
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6517,9 +6517,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1192,
       "latency_ms": {
-        "median": 4.53012600337388,
-        "min": 4.152750996581744,
-        "max": 4.788108002685476
+        "median": 4.354536999017,
+        "min": 4.204869001114275,
+        "max": 5.571296002017334
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6576,9 +6576,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1147,
       "latency_ms": {
-        "median": 19.49285600130679,
-        "min": 19.17314899765188,
-        "max": 21.512084997084457
+        "median": 20.05632700456772,
+        "min": 19.22070999717107,
+        "max": 23.007529001915827
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6628,9 +6628,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1111,
       "latency_ms": {
-        "median": 2.652281000337098,
-        "min": 2.465392004523892,
-        "max": 3.04104699898744
+        "median": 2.317300000868272,
+        "min": 2.17762900138041,
+        "max": 2.9597270040540025
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6694,9 +6694,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1159,
       "latency_ms": {
-        "median": 2.245301002403721,
-        "min": 2.206949000537861,
-        "max": 3.4018799997284077
+        "median": 2.4689319980097935,
+        "min": 2.2036980008124374,
+        "max": 2.5016530053108
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6760,9 +6760,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1112,
       "latency_ms": {
-        "median": 2.2406620046240278,
-        "min": 2.056648998404853,
-        "max": 2.7397640005801804
+        "median": 2.3130519984988496,
+        "min": 2.2353770036716014,
+        "max": 3.0841999978292733
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6826,9 +6826,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1129,
       "latency_ms": {
-        "median": 2.20260200148914,
-        "min": 2.088989000185393,
-        "max": 2.9065749986330047
+        "median": 2.3697569995420054,
+        "min": 2.207985999120865,
+        "max": 2.648075998877175
       },
       "condition": "lexical_compact",
       "budget": 1200,
@@ -6894,9 +6894,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1196,
       "latency_ms": {
-        "median": 6.8025779983145185,
-        "min": 6.538114001159556,
-        "max": 8.431719004875049
+        "median": 7.434848994307686,
+        "min": 6.557374006661121,
+        "max": 7.751871002255939
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -6975,9 +6975,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1176,
       "latency_ms": {
-        "median": 8.631131000583991,
-        "min": 5.518760997802019,
-        "max": 14.41039899509633
+        "median": 6.332875003863592,
+        "min": 5.683553994458634,
+        "max": 6.806717996369116
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7048,9 +7048,9 @@
       "mrr": 0.25,
       "estimated_context_tokens": 1187,
       "latency_ms": {
-        "median": 9.447225005715154,
-        "min": 8.858565997797996,
-        "max": 10.277373999997508
+        "median": 9.106535995670129,
+        "min": 8.726617001229897,
+        "max": 9.859929996309802
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7121,9 +7121,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1124,
       "latency_ms": {
-        "median": 20.03910599887604,
-        "min": 19.16252900264226,
-        "max": 22.117305001302157
+        "median": 21.247186996333767,
+        "min": 19.805609998002183,
+        "max": 23.624098001164384
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7193,9 +7193,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 670,
       "latency_ms": {
-        "median": 2.253024998935871,
-        "min": 2.22431099973619,
-        "max": 2.593410994450096
+        "median": 2.3969180037966,
+        "min": 2.1631630006595515,
+        "max": 2.562818001024425
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7252,9 +7252,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1199,
       "latency_ms": {
-        "median": 8.587108997744508,
-        "min": 8.067198003118392,
-        "max": 8.71634999930393
+        "median": 9.357032999105286,
+        "min": 8.921861997805536,
+        "max": 11.702253999828827
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7319,9 +7319,9 @@
       "mrr": 0.0,
       "estimated_context_tokens": 23,
       "latency_ms": {
-        "median": 0.5452370023704134,
-        "min": 0.40934400021797046,
-        "max": 0.7865679945098236
+        "median": 0.40166899998439476,
+        "min": 0.3969000026700087,
+        "max": 0.49751700134947896
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7349,9 +7349,9 @@
       "mrr": 0.3333333333333333,
       "estimated_context_tokens": 822,
       "latency_ms": {
-        "median": 4.707366999355145,
-        "min": 4.1704640025272965,
-        "max": 5.197341997700278
+        "median": 4.519905000051949,
+        "min": 4.208403996017296,
+        "max": 6.938634003745392
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7418,9 +7418,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1195,
       "latency_ms": {
-        "median": 5.245841995929368,
-        "min": 4.689733999839518,
-        "max": 7.094972999766469
+        "median": 5.517133999092039,
+        "min": 4.821808994165622,
+        "max": 6.103707994043361
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7494,9 +7494,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1193,
       "latency_ms": {
-        "median": 5.322805998730473,
-        "min": 4.678612996940501,
-        "max": 6.718782002280932
+        "median": 6.266891999985091,
+        "min": 5.409764999058098,
+        "max": 12.07348599564284
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7569,9 +7569,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1114,
       "latency_ms": {
-        "median": 10.76465400547022,
-        "min": 10.39205800043419,
-        "max": 11.407883997890167
+        "median": 11.084844001743477,
+        "min": 10.378676997788716,
+        "max": 11.474990998976864
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7638,9 +7638,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1120,
       "latency_ms": {
-        "median": 16.900105998502113,
-        "min": 16.563909004617017,
-        "max": 28.237819999048952
+        "median": 17.85378200293053,
+        "min": 16.54917999985628,
+        "max": 20.340206996479537
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7715,9 +7715,9 @@
       "mrr": 0.5,
       "estimated_context_tokens": 1166,
       "latency_ms": {
-        "median": 9.91563899879111,
-        "min": 9.537572994304355,
-        "max": 11.598630000662524
+        "median": 10.386351001216099,
+        "min": 9.907849998853635,
+        "max": 11.290978000033647
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7799,9 +7799,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1193,
       "latency_ms": {
-        "median": 7.582293001178186,
-        "min": 5.142339003214147,
-        "max": 11.771712997870054
+        "median": 5.767571004980709,
+        "min": 5.3632080016541295,
+        "max": 6.7087360002915375
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7876,9 +7876,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1197,
       "latency_ms": {
-        "median": 8.260057998995762,
-        "min": 7.069956998748239,
-        "max": 9.538074002193753
+        "median": 8.027704003325198,
+        "min": 7.352196000283584,
+        "max": 9.007430999190547
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -7951,9 +7951,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1120,
       "latency_ms": {
-        "median": 18.98021900706226,
-        "min": 18.092380996677093,
-        "max": 19.642454994027503
+        "median": 20.365383999887854,
+        "min": 18.664392999198753,
+        "max": 24.69628700055182
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8024,9 +8024,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 966,
       "latency_ms": {
-        "median": 2.531584999815095,
-        "min": 2.0798320038011298,
-        "max": 3.224307998607401
+        "median": 2.8242440021131188,
+        "min": 2.651854003488552,
+        "max": 3.1128620030358434
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8097,9 +8097,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 940,
       "latency_ms": {
-        "median": 2.620541003125254,
-        "min": 2.0600659991032444,
-        "max": 3.0970410007284954
+        "median": 2.6122999988729134,
+        "min": 2.3819900015951134,
+        "max": 2.812532999087125
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8171,9 +8171,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 929,
       "latency_ms": {
-        "median": 4.291611003282014,
-        "min": 2.2787839989177883,
-        "max": 5.129393997776788
+        "median": 3.1071420016814955,
+        "min": 2.740148003795184,
+        "max": 3.4094660004484467
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8244,9 +8244,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 964,
       "latency_ms": {
-        "median": 2.189917999203317,
-        "min": 2.062850006041117,
-        "max": 2.5313650039606728
+        "median": 3.3385530041414313,
+        "min": 2.3239119982463308,
+        "max": 4.055469995364547
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8321,9 +8321,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1113,
       "latency_ms": {
-        "median": 20.965273994079325,
-        "min": 18.856507995224092,
-        "max": 21.285832997818943
+        "median": 21.055078999779653,
+        "min": 19.36961799947312,
+        "max": 21.512702005566098
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8398,9 +8398,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1084,
       "latency_ms": {
-        "median": 18.628592006280087,
-        "min": 17.26988600421464,
-        "max": 31.019470996398013
+        "median": 19.56259700091323,
+        "min": 18.13068799674511,
+        "max": 20.77219200145919
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8480,9 +8480,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1114,
       "latency_ms": {
-        "median": 11.00149499688996,
-        "min": 9.976182001992129,
-        "max": 11.129944999993313
+        "median": 11.390442996344063,
+        "min": 10.607413001707755,
+        "max": 11.963331002334598
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8550,9 +8550,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 1195,
       "latency_ms": {
-        "median": 6.035516002157237,
-        "min": 5.378790003305767,
-        "max": 7.822722000128124
+        "median": 5.882675999600906,
+        "min": 5.55017599981511,
+        "max": 6.368872003804427
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8631,9 +8631,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 929,
       "latency_ms": {
-        "median": 2.4177529994631186,
-        "min": 2.0002340024802834,
-        "max": 2.97278899961384
+        "median": 2.597131999209523,
+        "min": 2.2799400030635297,
+        "max": 3.0281650033430196
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8705,9 +8705,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 976,
       "latency_ms": {
-        "median": 2.145254999049939,
-        "min": 2.0251900059520267,
-        "max": 2.3874760008766316
+        "median": 2.375568001298234,
+        "min": 2.2918219983694144,
+        "max": 2.4457290055579506
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8779,9 +8779,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 929,
       "latency_ms": {
-        "median": 2.4315490009030327,
-        "min": 2.238979002868291,
-        "max": 2.752447995590046
+        "median": 2.335404002224095,
+        "min": 2.236849002656527,
+        "max": 3.3700420026434585
       },
       "condition": "lexical_outline",
       "budget": 1200,
@@ -8853,9 +8853,9 @@
       "mrr": 1.0,
       "estimated_context_tokens": 946,
       "latency_ms": {
-        "median": 2.12780199944973,
-        "min": 1.993231002415996,
-        "max": 4.050760995596647
+        "median": 2.3873399986769073,
+        "min": 2.356652999878861,
+        "max": 2.536888998292852
       },
       "condition": "lexical_outline",
       "budget": 1200,

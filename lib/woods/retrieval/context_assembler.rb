@@ -104,8 +104,14 @@ module Woods
       # @param structural_context [String, nil] Optional codebase overview text
       # @param budget [Integer, nil] Override token budget; falls back to @budget
       # @return [AssembledContext] Token-budgeted context with source attribution
-      def assemble(candidates:, classification:, structural_context: nil, budget: nil, evidence: 'full', query: nil,
-                   generation: nil)
+      def assemble(**options)
+        # Pipeline assemblers are shared by concurrent Ruby/HTTP callers. Keep
+        # per-request metadata, query, mode and generation on a private worker.
+        dup.send(:assemble_request, **options)
+      end
+
+      def assemble_request(candidates:, classification:, structural_context: nil, budget: nil,
+                           evidence: 'full', query: nil, generation: nil)
         SourceEvidence.validate_mode!(evidence)
         @evidence_mode = evidence
         @evidence_query = query
@@ -137,6 +143,8 @@ module Woods
 
         build_result(sections, sources, effective_budget, @skipped_missing_metadata)
       end
+
+      private :assemble_request
 
       # Estimate token count. Prefers the injected {TokenCounter} — which
       # loads the provider's real tokenizer and returns exact counts — and

@@ -334,8 +334,8 @@ agent saw the implementation it needed. Compact semantic context consumed more
 actual tokens on average. Structured provenance and MCP envelopes are additional
 output tokens, outside the context-only counts above.
 
-Median warm query time across questions was 3.59/11.24/11.27 ms for semantic
-full/compact/outline and 0.41/4.49/6.42 ms for lexical modes. This measures local
+Median warm query time across questions was 3.24/11.80/11.44 ms for semantic
+full/compact/outline and 0.46/4.44/6.08 ms for lexical modes. This measures local
 replay and includes source parsing; semantic provider/network time is excluded.
 It does not establish live-host performance.
 

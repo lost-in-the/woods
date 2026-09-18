@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'woods'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 require 'woods/mcp/server'
 require 'woods/mcp/published_lexical_retriever'
 require 'woods/filename_utils'
@@ -100,5 +101,35 @@ RSpec.describe 'Published compact evidence tools' do
     expect { reader.find_unit('Invoice', type: 'model') }.to raise_error(IOError, /symlink unit directory/)
   ensure
     FileUtils.remove_entry(outside) if outside && File.exist?(outside)
+  end
+  it 'holds the server pin through lookup read, SHA validation and compact generation attribution' do
+    File.write(File.join(index_dir, 'generation.json'), JSON.generate(number: 1))
+    server = Woods::MCP::Server.build(index_dir: index_dir, warmup: false, response_format: :json)
+    reader = server.instance_variable_get(:@woods_index_reader)
+    reloaded = Queue.new
+    original = reader.method(:find_unit)
+    marker_path = File.join(index_dir, 'generation.json')
+    reload_thread = nil
+    reader.define_singleton_method(:find_unit) do |identifier, **options|
+      result = original.call(identifier, **options)
+      File.write(marker_path, JSON.generate(number: 2))
+      reload_thread = Thread.new do
+        reader.with_exclusive_reload { reloaded << true }
+      end
+      Timeout.timeout(5) { Thread.pass until reader.instance_variable_get(:@exclusive_waiters).positive? }
+      raise 'reload completed inside lookup' unless reloaded.empty?
+
+      result
+    end
+    request = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call',
+                            params: { name: 'lookup', arguments: { identifier: 'Invoice', type: 'model',
+                                                                   evidence: 'compact', query: 'refund', budget: 500,
+                                                                   source_sha256: Digest::SHA256.hexdigest(source) } })
+    result = JSON.parse(server.handle_json(request))
+    expect(result.dig('result', 'structuredContent', 'data', 'evidence', 'generation')).to eq(1)
+    Timeout.timeout(5) { reload_thread.join }
+    expect(reader.loaded_generation).to eq(2)
+  ensure
+    reload_thread&.join(5)
   end
 end

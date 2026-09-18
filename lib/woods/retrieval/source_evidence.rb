@@ -72,22 +72,35 @@ module Woods
 
         spans = []
         walk(@parser.parse(@source), nil, spans)
+        return whole_source_span('whole_source_fallback') unless spans.all? { |span| complete_definition?(span) }
+
         spans.concat(concern_spans)
         return spans unless spans.empty?
 
-        [Span.new(kind: 'published_source', name: field(:identifier), lexical_owner: nil,
-                  start_byte: 0, end_byte: @source.bytesize, start_line: 1, end_line: @source.lines.size)]
+        whole_source_span('published_source')
       rescue Woods::ExtractionError
         # Non-Ruby or legacy synthesized source remains available as one whole
         # published span. An unavailable boundary is never guessed with regex.
-        [Span.new(kind: 'unparsed_source', name: field(:identifier), lexical_owner: nil,
+        whole_source_span('unparsed_source')
+      end
+
+      def whole_source_span(kind)
+        [Span.new(kind: kind, name: field(:identifier), lexical_owner: nil,
                   start_byte: 0, end_byte: @source.bytesize, start_line: 1, end_line: @source.lines.size)]
+      end
+
+      # A heredoc body may live outside a def node's syntactic range (notably
+      # endless defs and same-line `def ...; <<~DOC; end`). Refuse a broken
+      # isolated definition and fall back to the complete published source.
+      def complete_definition?(span)
+        @parser.valid_fragment?(span_text(span))
       end
 
       def walk(node, owner, spans, singleton_scope: false)
         return unless node.is_a?(Ast::Node)
 
         if %i[class module].include?(node.type)
+          singleton_scope = false
           name = node.method_name.to_s
           owner = name.start_with?('::') ? name.delete_prefix('::') : [owner, name].compact.join('::')
         elsif %i[def defs].include?(node.type)
