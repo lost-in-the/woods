@@ -23,12 +23,11 @@ class MockRedis
     list[start..stop] || []
   end
 
-  # rubocop:disable Naming/PredicateMethod
+  # rubocop:disable-next Naming/PredicateMethod
   def expire(_key, _seconds)
     # No-op for tests (TTL not simulated)
     true
   end
-  # rubocop:enable Naming/PredicateMethod
 
   def sadd(key, member)
     @data[key] ||= []

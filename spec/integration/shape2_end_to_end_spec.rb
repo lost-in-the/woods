@@ -53,9 +53,9 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
   let(:dim) { 4 }
 
   # Unit vectors so cosine scores are exact (dot product == cosine similarity).
-  let(:vec_foo)  { [1.0, 0.0, 0.0, 0.0] }
-  let(:vec_bar)  { [0.0, 1.0, 0.0, 0.0] }
-  let(:vec_baz)  { [0.0, 0.0, 1.0, 0.0] }
+  let(:vec_foo) { [1.0, 0.0, 0.0, 0.0] }
+  let(:vec_bar) { [0.0, 1.0, 0.0, 0.0] }
+  let(:vec_baz) { [0.0, 0.0, 1.0, 0.0] }
 
   let(:meta_foo) { { 'type' => 'model',   'namespace' => 'Admin' } }
   let(:meta_bar) { { 'type' => 'service', 'namespace' => 'Admin' } }

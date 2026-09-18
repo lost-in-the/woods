@@ -24,7 +24,7 @@ module Woods
     #   doc = assembler.assemble("abc123", budget: 8000, depth: 1)
     #   puts doc.to_context
     #
-    # rubocop:disable Metrics/ClassLength
+    # rubocop:disable-next Metrics/ClassLength
     class SessionFlowAssembler
       ASYNC_TYPES = %w[job mailer].to_set.freeze
 
@@ -41,7 +41,7 @@ module Woods
       # @param budget [Integer] Maximum token budget (default: 8000)
       # @param depth [Integer] Expansion depth (0=metadata only, 1=direct deps, 2+=full flow)
       # @return [SessionFlowDocument] The assembled document
-      # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength
+      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength
       def assemble(session_id, budget: 8000, depth: 1)
         requests = @store.read(session_id)
         return empty_document(session_id) if requests.empty?
@@ -89,7 +89,6 @@ module Woods
           token_count: token_count
         )
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength
 
       private
 
@@ -115,7 +114,7 @@ module Woods
       # Resolve dependencies for a unit, separating sync deps from async side effects.
       #
       # @return [Array<String>] Non-async dependency identifiers added
-      # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/ParameterLists, Metrics/PerceivedComplexity
+      # rubocop:disable-next Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/ParameterLists, Metrics/PerceivedComplexity
       def resolve_dependencies(unit_id, seen_units, context_pool,
                                side_effects, step, dependency_map, depth)
         graph = @reader.dependency_graph
@@ -154,7 +153,6 @@ module Woods
 
         added
       end
-      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/ParameterLists, Metrics/PerceivedComplexity
 
       # Expand transitive dependencies (depth 2+).
       #
@@ -249,6 +247,5 @@ module Woods
         SessionFlowDocument.new(session_id: session_id)
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

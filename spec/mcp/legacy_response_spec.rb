@@ -16,7 +16,7 @@ RSpec.describe 'Legacy MCP structured error compatibility' do
     expect(response).not_to have_key('error')
     expect(response.fetch('result')).to include('isError' => true)
     expect(response.dig('result', '_meta')).to include('error_code' => 'not_found',
-                                                    'identifier' => 'MissingLegacyUnit')
+                                                       'identifier' => 'MissingLegacyUnit')
     expect(response.dig('result', 'content', 0, 'text')).to include('MissingLegacyUnit')
   end
 end
