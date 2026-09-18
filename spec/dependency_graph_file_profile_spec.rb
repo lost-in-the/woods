@@ -72,4 +72,13 @@ RSpec.describe Woods::DependencyGraph, 'file profile identity' do
     expect(restored.to_h).to eq(graph.to_h)
     expect(restored.to_h.fetch(:nodes).fetch('config/example.rb')).to include(kind: 'file_profile')
   end
+
+  it 'keeps serialized node field order stable after late enrichment and JSON loading' do
+    register('app/cache.rb', :caching, 'app/cache.rb')
+    graph.annotate('app/cache.rb', type: :caching, commit_count: 4, change_frequency: 'high')
+    fresh = JSON.generate(graph.to_h)
+    restored = described_class.from_h(JSON.parse(fresh))
+
+    expect(JSON.generate(restored.to_h)).to eq(fresh)
+  end
 end

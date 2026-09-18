@@ -821,7 +821,12 @@ module Woods
 
     # @return [Hash{String => Hash}] identifier => primary node
     def primary_nodes
-      @nodes.transform_values { |nodes| primary_of(nodes) }
+      # Late enrichment and JSON loading can insert optional fields in a
+      # different order. Canonicalize like variant_records so a graph's JSON
+      # fingerprint is stable across full and incremental publication.
+      @nodes.transform_values do |nodes|
+        primary_of(nodes).slice(:type, :file_path, :namespace, *NODE_ATTRIBUTE_KEYS)
+      end
     end
     private :primary_nodes
 
