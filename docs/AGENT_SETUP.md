@@ -270,6 +270,8 @@ Never report a capability as enabled solely because its schema exists in source.
 
 ## Related guides
 
+- [Edit client adapters](CLIENT_HOOKS.md) for separately opt-in Claude/OpenCode edit hooks; MCP setup does not enable them.
+
 - [Getting started](GETTING_STARTED.md) for the human walkthrough.
 - [MCP servers](MCP_SERVERS.md) for client-specific configuration and server boundaries.
 - [Upgrade to Woods 2.0](UPGRADING_TO_2.md) for an existing 1.x installation.

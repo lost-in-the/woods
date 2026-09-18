@@ -1,0 +1,8 @@
+{
+  "client": "claude",
+  "version": "2.1.267",
+  "capture": "actual installed client/tool/hook callback, deterministic local HTTP model fixture",
+  "original_sha256": "0ee6460a9aa3068c02b2af1b6ecd24b8d304465419ae4708c52d10bd26b8d09a",
+  "sanitization": "worktree replaced with /fixture/worktree; session/transcript identifiers removed; tool input/output structure preserved",
+  "source": "https://code.claude.com/docs/en/hooks#posttooluse"
+}

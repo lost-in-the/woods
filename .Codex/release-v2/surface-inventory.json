@@ -1026,6 +1026,7 @@
     "docs/AGENT_GUIDE.md": [],
     "docs/AGENT_SETUP.md": [],
     "docs/BACKEND_MATRIX.md": [],
+    "docs/CLIENT_HOOKS.md": [],
     "docs/CONFIGURATION_REFERENCE.md": [
       {
         "surface": "extractor_registrations",

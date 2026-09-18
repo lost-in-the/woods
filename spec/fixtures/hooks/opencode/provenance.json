@@ -1,0 +1,8 @@
+{
+  "client": "opencode",
+  "version": "1.18.27",
+  "capture": "actual installed client/tool/hook callback, deterministic local HTTP model fixture",
+  "original_sha256": "d421cad5158b16ae957fec25f49d69031f6d957ffee8eaec515d40ad584f7c23",
+  "sanitization": "worktree replaced with /fixture/worktree; session/transcript identifiers removed; tool input/output structure preserved",
+  "source": "https://github.com/anomalyco/opencode/blob/v1.18.27/packages/opencode/src/tool/apply_patch.ts"
+}

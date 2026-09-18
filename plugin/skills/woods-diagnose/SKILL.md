@@ -273,3 +273,15 @@ returned typed, SHA-guarded `full_evidence` lookup for verification. Published-u
 coordinates are not physical file offsets; unknown generation remains unknown.
 Keep full-source access available. See the canonical
 [evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
+
+## Explicit edit adapters (unreleased #409)
+
+Check the installed gem exposes `woods:hook_refresh` before enabling hooks.
+Claude's registered wrapper covers one documented edit path; OpenCode 1.18.27
+has a separate native `.js` registration wrapper importing Woods' shipped
+adapter. Its verified patch metadata carries all added/updated/deleted/moved
+paths. Keep the complete plugin directory available, preserve opt-in/disable
+settings and pending events, and inspect the generation and hook log before
+claiming refresh. Unsupported tool shapes and symlink paths need watch or an
+explicit extraction. Do not install native client registration without the
+user's setup request. Follow [client hooks](https://github.com/lost-in-the/woods/blob/main/docs/CLIENT_HOOKS.md).

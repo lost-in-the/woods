@@ -1,0 +1,22 @@
+{
+  "cwd": "/fixture/worktree",
+  "permission_mode": "acceptEdits",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_input": {
+    "file_path": "/fixture/worktree/added.rb",
+    "content": "added\n"
+  },
+  "tool_response": {
+    "type": "create",
+    "filePath": "/fixture/worktree/added.rb",
+    "content": "added\n",
+    "structuredPatch": [],
+    "originalFile": null,
+    "userModified": false
+  },
+  "duration_ms": 2
+}
