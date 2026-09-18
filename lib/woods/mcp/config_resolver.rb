@@ -295,7 +295,8 @@ module Woods
         unless resolved.embedding_provider
           warn '[woods-mcp] no woods.json and no embedding provider — serving ' \
                'pattern/structural tools only. Run `rake woods:embed`, or set ' \
-               'OPENAI_API_KEY / run Ollama, to enable semantic search.'
+               'OPENAI_API_KEY / run Ollama, to enable semantic search. For ranked discovery with no embeddings, ' \
+               'set WOODS_RETRIEVAL_MODE=lexical in the MCP process environment and restart the server.'
         end
         [resolved, :autodetect]
       end

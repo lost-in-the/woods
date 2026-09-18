@@ -165,7 +165,7 @@ Canonical runbook: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/ma
 
 ## Lexical retrieval capability check
 
-This is a development capability. Before proposing it, verify the installed gem
+Lexical retrieval is available from `2.0.0.beta3`. Before proposing it, verify the installed gem
 exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
 `WOODS_RETRIEVAL_MODE`. Keep the installed-version preflight; do not infer support
 from the plugin version or an unreleased checkout.

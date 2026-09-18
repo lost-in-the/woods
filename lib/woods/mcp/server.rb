@@ -1072,6 +1072,8 @@ module Woods
                 'Semantic search is disabled — no embedding provider is configured. ' \
                 'To enable: set OPENAI_API_KEY, or run Ollama locally ' \
                 '(brew install ollama && ollama serve && ollama pull nomic-embed-text). ' \
+                'For ranked discovery with no embeddings, set WOODS_RETRIEVAL_MODE=lexical in the MCP process ' \
+                'environment and restart the server. See docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval. ' \
                 'Use the `search` tool for pattern-based matching in the meantime.',
                 code: :not_configured,
                 config_key: 'embedding_provider',

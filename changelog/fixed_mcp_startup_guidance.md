@@ -1,0 +1,2 @@
+- Accept `WOODS_OUTPUT` after the explicit path and `WOODS_DIR` in Index MCP startup, while preserving the launcher's no-path error. Missing-index diagnostics now name the examined directory, describe atomic and legacy layouts, and suggest pointing at an existing index before re-extracting.
+- Recommend explicit embedding-free lexical mode in no-provider startup and retrieval messages, including the required MCP environment change and restart; semantic defaults and typed errors are unchanged.

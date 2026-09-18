@@ -9,6 +9,13 @@ require 'woods/mcp/server'
 
 RSpec.describe Woods::MCP::Bootstrapper do
   describe '.resolve_index_dir' do
+    around do |example|
+      previous_output = ENV.delete('WOODS_OUTPUT')
+      example.run
+    ensure
+      ENV['WOODS_OUTPUT'] = previous_output if previous_output
+    end
+
     let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
 
     context 'when argv supplies a valid directory containing manifest.json' do

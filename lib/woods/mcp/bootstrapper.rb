@@ -28,16 +28,19 @@ module Woods
       # @param argv [Array<String>] Command-line arguments
       # @return [String] Validated index directory path
       def self.resolve_index_dir(argv)
-        dir = argv[0] || ENV['WOODS_DIR'] || Dir.pwd
+        dir = argv[0] || ENV['WOODS_DIR'] || ENV['WOODS_OUTPUT'] || Dir.pwd
+        examined = dir.empty? ? '(empty path)' : File.expand_path(dir)
 
         unless Dir.exist?(dir)
-          warn "Error: Index directory does not exist: #{dir}"
+          warn "Error: Index directory does not exist: #{examined}"
+          warn index_path_remedy
           exit 1
         end
 
         unless manifest_present?(dir)
-          warn "Error: No manifest.json found in: #{dir}"
-          warn 'Run `bundle exec rake woods:extract` in your Rails app first.'
+          warn "Error: No manifest.json found in: #{examined}"
+          warn 'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json.'
+          warn index_path_remedy
           exit 1
         end
 
@@ -61,8 +64,18 @@ module Woods
 
         generation = Woods::Generation.new(output_dir: dir)
         generation.payload_dir(generation.current).join('manifest.json').file?
+      rescue TypeError, NoMethodError
+        # A malformed marker must remain a startup failure, with the same
+        # selected-path guidance as a missing or unresolved payload.
+        false
       end
       private_class_method :manifest_present?
+
+      def self.index_path_remedy
+        'Point at the existing index with an explicit path, WOODS_DIR, or WOODS_OUTPUT. ' \
+          'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
+      end
+      private_class_method :index_path_remedy
 
       # Build a snapshot store for temporal tracking.
       #
