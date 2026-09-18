@@ -72,7 +72,7 @@ module Woods
       def export_all
         with_pinned_index do
           graph = @reader.raw_graph_data || {}
-          @nodes = graph['nodes'] || {}
+          prepare_graph(graph)
           @pagerank = graph['pagerank'] || {}
           analysis = safe_graph_analysis
           owned = vault_owned_at_start?
@@ -89,7 +89,7 @@ module Woods
           write_sidecar(emitted, mapper, graph, analysis, written)
           write_owned_assets(emitted) if owned
 
-          swept = owned && errors.empty? ? sweep(written) : 0
+          swept = owned && errors.empty? && skipped.zero? ? sweep(written) : 0
           warn_foreign unless owned
           { exported: exported, indexes: indexes, swept: swept, skipped: skipped, errors: cap_errors(errors) }
         end
@@ -119,19 +119,35 @@ module Woods
 
       # ── Selection / mapping ──────────────────────────────────────────
 
+      # Keep typed identity local to the exporter. Public identifiers and graph
+      # artifacts retain their original shape; variants have their own outgoing
+      # relationships, while persisted edge targets remain bare identifiers.
+      def prepare_graph(graph)
+        @primary = graph['nodes'] || {}
+        @nodes = @primary.to_h { |id, node| [[id, node['type']], node] }
+        @forward = @nodes.keys.to_h { |key| [key, Array(graph.dig('edges', key.first))] }
+        Array(graph['variants']).grep(Hash).each do |record|
+          key = [record['identifier'], record['type']]
+          next if key.any?(&:nil?) || @nodes.key?(key)
+
+          @nodes[key] = record
+          @forward[key] = Array(record['edges'])
+        end
+        @identifiers = @nodes.keys.to_h { |key| [key, key.first] }
+        @keys_by_identifier = @nodes.keys.group_by(&:first)
+        @ambiguous = @keys_by_identifier.select { |_, keys| keys.size > 1 }.keys.to_set
+      end
+
       # The emitted set = graph nodes of an exportable type that have a loadable
       # unit file. Confirming the file loads (not just that the index lists it)
       # guarantees every wikilink target is backed by a real note — a node listed
       # in the index but with no readable unit is dropped (counted as skipped).
       #
-      # @return [Array(Array<String>, Integer)] [sorted emitted ids, skipped count]
+      # @return [Array(Array<Array<String>>, Integer)] [sorted typed keys, skipped count]
       def partition_emitted
-        known = known_ids
         candidates = @nodes.keys.select do |id|
           type = @nodes[id]['type']
-          next false if !@include_framework && FRAMEWORK_TYPES.include?(type)
-
-          known.include?(id)
+          @include_framework || !FRAMEWORK_TYPES.include?(type)
         end.sort
 
         # Load each candidate once and keep it: confirms the unit is readable
@@ -151,18 +167,20 @@ module Woods
       # Load a unit, treating an unreadable/corrupt file as absent rather than
       # letting one bad JSON parse abort the whole export.
       def load_unit(id)
-        @reader.find_unit(id)
+        unit = if @ambiguous.include?(id.first)
+                 @reader.find_unit(id.first, type: id.last)
+               else
+                 @reader.find_unit(id.first)
+               end
+        unit if unit && unit['identifier'] == id.first && unit['type'] == id.last
       rescue StandardError => e
         log "  skipped #{id}: #{e.class}: #{e.message}"
         nil
       end
 
-      def known_ids
-        @known_ids ||= @reader.list_units.to_set { |entry| entry['identifier'] }
-      end
-
       def build_mapper(emitted)
-        NameMapper.new(emitted.to_h { |id| [id, dir_for(@nodes[id]['type'])] })
+        NameMapper.new(emitted.to_h { |id| [id, dir_for(@nodes[id]['type'])] },
+                       identifiers: @identifiers, ambiguous_identifiers: @ambiguous)
       end
 
       def dir_for(type)
@@ -182,25 +200,37 @@ module Woods
 
       def build_note_builder(mapper, analysis)
         NoteBuilder.new(name_mapper: mapper, nodes: @nodes, pagerank: @pagerank,
-                        analysis: analysis, include_source: @include_source, scanner: scanner)
+                        analysis: analysis, include_source: @include_source, scanner: scanner,
+                        identifiers: @identifiers, ambiguous_identifiers: @ambiguous)
       end
 
-      # The single edge source: per-id forward (depends_on) and reverse (used_by)
-      # edges from the graph, filtered to the emitted set, self-edges dropped.
-      def build_edge_map(emitted, graph)
-        edges = graph['edges'] || {}
-        reverse = graph['reverse'] || {}
-        emitted.each_with_object({}) do |id, map|
-          deps = Array(edges[id]).filter_map { |edge| forward_edge(edge, id, emitted) }
-                                 .uniq { |edge| [edge[:target], edge[:via]] }
-          used = Array(reverse[id]).select { |sid| sid != id && emitted.include?(sid) }.uniq
-          map[id] = { depends_on: deps, used_by: used }
+      # Reverse links must come from resolved forward edges: the legacy reverse
+      # index merges source types, and cannot assign them to a particular note.
+      # A bare target naming several graph types remains ambiguous even if only
+      # one sibling is exportable. Do not invent a typed relationship.
+      def build_edge_map(emitted, _graph)
+        @ambiguous_edges = Set.new
+        map = emitted.to_h { |id| [id, { depends_on: [], used_by: [] }] }
+        emitted.each do |id|
+          deps = @forward[id].filter_map { |edge| forward_edge(edge, id, emitted) }
+                             .uniq { |edge| [edge[:target], edge[:via]] }
+          map[id][:depends_on] = deps
+          deps.each { |edge| map[edge[:target]][:used_by] << id }
         end
+        map.each_value { |edges| edges[:used_by].uniq! }
+        log "  omitted #{@ambiguous_edges.size} ambiguous dependency relationships" unless @ambiguous_edges.empty?
+        map
       end
 
       def forward_edge(edge, source_id, emitted)
         edge = { 'target' => edge } unless edge.is_a?(Hash)
-        target = edge['target']
+        identifier = edge['target']
+        if @ambiguous.include?(identifier)
+          @ambiguous_edges << [source_id, identifier, edge['via']]
+          return nil
+        end
+
+        target = @keys_by_identifier[identifier]&.first
         return nil if target == source_id || !emitted.include?(target)
 
         { target: target, via: edge['via'] }
@@ -263,11 +293,22 @@ module Woods
       # ── Pass 3b: machine sidecar ─────────────────────────────────────
 
       def write_sidecar(emitted, mapper, graph, analysis, written)
-        notes = emitted.to_h do |id|
-          [id, { 'path' => mapper.path_for(id), 'type' => @nodes[id]['type'],
-                 'pagerank' => @pagerank[id]&.round(6) }.compact]
+        notes = {}
+        variants = []
+        emitted.each do |key|
+          id, type = key
+          info = { 'path' => mapper.path_for(key), 'type' => type }
+          info['pagerank'] = @pagerank[id].round(6) if @pagerank[id] && !@ambiguous.include?(id)
+          if @primary.dig(id, 'type') == type
+            notes[id] = info
+          else
+            variants << { 'identifier' => id }.merge(info)
+          end
         end
-        manifest = { 'schema_version' => 1, 'notes' => sort_hash(notes), 'paths' => sort_hash(mapper.paths_to_ids) }
+        paths = mapper.paths_to_ids.transform_values(&:first)
+        manifest = { 'schema_version' => @ambiguous.empty? ? 1 : 2,
+                     'notes' => sort_hash(notes), 'paths' => sort_hash(paths) }
+        manifest['variants'] = variants if manifest['schema_version'] == 2
         write_json(written, "#{SIDECAR_DIR}/manifest.json", manifest)
         write_json(written, "#{SIDECAR_DIR}/dependency_graph.json", graph)
         write_json(written, "#{SIDECAR_DIR}/graph_analysis.json", analysis) if analysis

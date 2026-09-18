@@ -42,7 +42,13 @@ module Woods
 
       # @param id_to_dir [Hash{String=>String}] map of unit identifier -> type
       #   folder name (e.g. "User" => "models")
-      def initialize(id_to_dir)
+      # @param options [Hash] optional internal-key display identifiers and the
+      #   complete graph's ambiguous identifier set. Positional hash support is
+      #   retained for existing NameMapper.new('User' => 'models') callers.
+      def initialize(id_to_dir, options = {})
+        @identifiers = options.fetch(:identifiers, {})
+        @ambiguous_identifiers = options.fetch(:ambiguous_identifiers, Set.new)
+        @reference_keys = id_to_dir.keys.to_h { |key| [@identifiers.fetch(key, key), key] }
         @map = {}
         @paths = {}
         build(id_to_dir)
@@ -63,6 +69,14 @@ module Woods
         "[[#{entry[:target]}|#{entry[:alias]}]]"
       end
 
+      # Resolve a human metadata reference only when its identifier is unambiguous
+      # in the complete graph, including units excluded from this export.
+      def wikilink_for_identifier(identifier)
+        return nil if @ambiguous_identifiers.include?(identifier)
+
+        wikilink(@reference_keys[identifier])
+      end
+
       # @return [Hash{String=>String}] inverse path -> id map (sorted)
       def paths_to_ids
         @paths
@@ -74,9 +88,11 @@ module Woods
         taken = Hash.new { |h, dir| h[dir] = Set.new(RESERVED_BASENAMES) }
         id_to_dir.keys.sort.each do |id|
           dir = id_to_dir[id]
-          basename = assign_basename(id, taken[dir])
+          identifier = @identifiers.fetch(id, id)
+          basename = assign_basename(identifier, taken[dir])
           path = "#{dir}/#{basename}#{EXTENSION}"
-          @map[id] = { dir: dir, basename: basename, path: path, target: "#{dir}/#{basename}", alias: alias_for(id) }
+          @map[id] =
+            { dir: dir, basename: basename, path: path, target: "#{dir}/#{basename}", alias: alias_for(identifier) }
           @paths[path] = id
         end
       end

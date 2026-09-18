@@ -8,7 +8,7 @@ ways at once:
   Obsidian [Bases](https://help.obsidian.md/bases) table, and drill into a single unit's note with its
   dependencies and dependents as clickable wikilinks.
 - **By agents**: load the entire dependency topology from a single `_woods/` sidecar (one read,
-  no per-note fan-out), with a stable `id → note path` manifest for navigation.
+  no per-note fan-out), with a stable typed-unit → note-path manifest for navigation.
 
 Unlike the Notion and Unblocked exporters, this one writes **local files only**: there is no API
 token, no network call, and no rate limit. An Obsidian vault is just a folder.
@@ -95,6 +95,33 @@ Wikilinks are path-qualified with an alias (`[[models/Account|Account]]`): the t
 sanitized vault path so the link always resolves, and the alias shows the original identifier. The
 note's `# H1` carries the clean identifier so the sanitized filename never shows as the title.
 
+## Sidecar identity and schema versions
+
+A unit keeps its original `id` and `type` in note frontmatter. Different types may
+share an identifier: a database view and a factory called `reports` export to
+`database_views/reports.md` and `factories/reports.md`. Existing unambiguous note
+paths and display aliases stay unchanged.
+
+Check `schema_version` before consuming `_woods/manifest.json`:
+
+- **Version 1:** the graph has no cross-type identifier collisions. The existing
+  `notes[id]` and `paths[path]` maps are unchanged.
+- **Version 2:** `notes[id]` retains the graph's primary type (when exported), and
+  `variants` lists each additional exported unit as
+  `{ "identifier": "reports", "type": "factory", "path": "factories/reports.md" }`.
+  Combine primary entries and variants using **`(identifier, type)`** as identity.
+  `paths[path]` still gives the original identifier, so several paths may return
+  the same value. Resolve a path against both collections; `notes[id]` alone is
+  incomplete. A consumer supporting only version 1 must refuse version 2.
+
+The exporter reads each variant's own outgoing graph edges and derives incoming
+links from them. Persisted targets are bare identifiers: if a target names several
+types, the exporter omits that relationship from note links and counts it in a
+progress diagnostic. It does this even when one sibling is excluded or unreadable.
+Human association links use the same ambiguity rule. Bare PageRank and graph-analysis
+annotations are omitted for ambiguous identifiers, rather than assigned to either
+type. The verbatim graph sidecar retains all original records for inspection.
+
 ## The three visualizer surfaces
 
 | Surface | Best for | Notes |
@@ -114,7 +141,7 @@ credential):
 | `WOODS_OUTPUT` | `config.output_dir` (`tmp/woods`) | extraction directory to read from |
 | `WOODS_OBSIDIAN_VAULT` | `<output>/obsidian_vault` | where to write the vault |
 | `WOODS_OBSIDIAN_INCLUDE_SOURCE` | off | embed each unit's source code (credential-scrubbed) in its note |
-| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK` | off | include `rails_source` units (large; off by default) |
+| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK` | off | include `rails_source` and readable `gem_source` units (large; off by default) |
 | `WOODS_OBSIDIAN_FORCE_PURGE` | off | bypass the 30% mass-deletion guard during the stale-note sweep |
 
 ```bash
@@ -150,8 +177,8 @@ your code propagate. Several guards make the sweep safe to point at a real vault
 - It refuses to delete more than 30% of managed notes at once (the signature of a partial extraction)
   unless `WOODS_OBSIDIAN_FORCE_PURGE=1` is set.
 - It resolves symlinks and confirms every deletion target is inside the vault root.
-- It is skipped entirely if any note failed to write that run (a stale note is harmless; a deleted
-  reviewed note is not).
+- It is skipped entirely if any candidate unit is unreadable or returns a mismatched identity,
+  or any note failed to write. `force_purge` does not bypass this incomplete-export guard.
 
 The same ownership check guards the `.obsidian/` config: Woods will **not** overwrite an existing,
 foreign `.obsidian/` folder, it leaves your Obsidian settings untouched and warns instead.
@@ -160,11 +187,9 @@ foreign `.obsidian/` folder, it leaves your Obsidian settings untouched and warn
 
 - **Bases needs Obsidian ≥ 1.9** (≥ 1.10 for card/list views). The `.base` file is harmless on older
   versions, it simply doesn't render.
-- **`gem_source` units are not exported.** They aren't reachable through the index reader; only
-  `rails_source` is covered by `include_framework`.
 - **Hand-edits diverge.** The vault is meant to be regenerated. Editing a note's properties in
   Obsidian rewrites its frontmatter, after which a re-export will overwrite your changes.
 - **Nested vaults ignore the shipped config.** Open the generated folder as its own vault for graph
   colors, Bases, and link-format settings to apply.
 
-See `docs/AGENT_GUIDE.md` for how an agent consumes the `_woods/` sidecar.
+For MCP-based exploration instead of local vault files, see [the agent guide](AGENT_GUIDE.md).
