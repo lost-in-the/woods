@@ -555,7 +555,11 @@ registered in a supported mode, so this setting does not enable eval.
 Woods::Console::Server.rebuild_credential_index(rails_app: Rails.application)
 ```
 
-This rebuilds the index from the current credentials and hot-swaps it into the active scanner. The swap is atomic on MRI, in-flight scans see either the old or the new index, never a partial one. The method is a no-op (returns `nil`) when no server has been built yet or when `console_credential_defense_enabled` is `false`.
+This reads a fresh encrypted-file and key snapshot, without changing Rails' cached application credentials, and replaces the index in every live embedded Console server in this process. Each response scan keeps one complete index; a rotation cannot change its index halfway through a response. Servers released by their transports are not retained by this registry. A later server construction also reads fresh credentials.
+
+A refresh failure (including missing files or keys, failed decryption, and invalid YAML) raises and leaves every existing index intact. Treat a failed rebuild as an operational failure: resolve the credentials deployment and retry, or restart after verification. A valid empty credential mapping intentionally clears the index. A successful rebuild replaces the old set rather than retaining removed secret values. Custom `rails_app:` collaborators that expose `credentials.config` remain supported; those collaborators own freshness of their returned config.
+
+The method is a no-op (returns `nil`) when no live scanner remains or when `console_credential_defense_enabled` is `false`. Normal server boot still permits unavailable credentials and falls back to the other configured defenses; this permissive boot behavior does not apply to an explicit rebuild.
 
 **Rotation warning.** At boot time, Woods checks whether any credentials file (`config/credentials.yml.enc`, `config/credentials/<env>.yml.enc`) was modified *after* the process started. When it detects this, it emits a `console.credential_index.stale` warn-level structured log line with the file path, mtime, and a hint to restart or call `rebuild_credential_index`. This check is on by default; disable it with:
 

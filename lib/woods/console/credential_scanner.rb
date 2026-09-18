@@ -155,17 +155,17 @@ module Woods
       #   for patterns that fired — callers should treat a missing key as zero.
       def scan(value)
         counts = {}
-        scanned = walk(value, counts)
+        scanned = walk(value, counts, @secret_index)
         [scanned, counts]
       end
 
       private
 
-      def walk(value, counts)
+      def walk(value, counts, index)
         case value
-        when String then scan_string(value, counts)
-        when Hash   then walk_hash(value, counts)
-        when Array  then value.map { |item| walk(item, counts) }
+        when String then scan_string(value, counts, index)
+        when Hash   then walk_hash(value, counts, index)
+        when Array  then value.map { |item| walk(item, counts, index) }
         else value
         end
       end
@@ -177,19 +177,19 @@ module Woods
       # credential-shaped string is emitted as a Symbol after redaction
       # (e.g. `:"[REDACTED]"`). String keys stay Strings. Non-String,
       # non-Symbol keys (Integer, etc.) pass through unchanged.
-      def walk_hash(hash, counts)
+      def walk_hash(hash, counts, index)
         hash.each_with_object({}) do |(key, val), out|
           scanned_key = case key
-                        when String then scan_string(key, counts)
-                        when Symbol then scan_string(key.to_s, counts).to_sym
+                        when String then scan_string(key, counts, index)
+                        when Symbol then scan_string(key.to_s, counts, index).to_sym
                         else             key
                         end
-          out[scanned_key] = walk(val, counts)
+          out[scanned_key] = walk(val, counts, index)
         end
       end
 
-      def scan_string(str, counts)
-        result = redact_indexed_secrets(str, counts)
+      def scan_string(str, counts, index)
+        result = redact_indexed_secrets(str, counts, index)
         result = scan_encoded_forms(result, counts)
         @active_patterns.inject(result) do |acc, (name, pattern)|
           acc.gsub(pattern) do
@@ -290,10 +290,10 @@ module Woods
         printable.to_f / str.length >= PRINTABLE_RATIO_THRESHOLD
       end
 
-      def redact_indexed_secrets(str, counts)
-        return str unless @secret_index&.match?(str)
+      def redact_indexed_secrets(str, counts, index)
+        return str unless index&.match?(str)
 
-        redacted = @secret_index.redact(str)
+        redacted = index.redact(str)
         counts[INDEX_HIT] = (counts[INDEX_HIT] || 0) + redacted.scan(CredentialIndex::REDACTED).size
         redacted
       end
