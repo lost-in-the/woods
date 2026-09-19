@@ -84,7 +84,7 @@ RSpec.describe 'MCP CLI integration' do
       request = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta } }
       output, errors, status = initialize_over_stdio(request, fixture_dir)
       expect(status.success?).to be(true), utf8(errors)
-      tools = JSON.parse(output).fetch('result').fetch('tools')
+      tools = JSON.parse(utf8(output)).fetch('result').fetch('tools')
       expect(tools.size).to eq(14)
       { 'dependencies' => 'Comment', 'dependents' => 'Post' }.each do |name, identifier|
         tool = tools.find { |entry| entry['name'] == name }
@@ -96,7 +96,7 @@ RSpec.describe 'MCP CLI integration' do
                       params: { name: name, arguments: arguments, _meta: meta } }
           output, errors, status = initialize_over_stdio(request, fixture_dir)
           expect(status.success?).to be(true), utf8(errors)
-          result = JSON.parse(output).fetch('result')
+          result = JSON.parse(utf8(output)).fetch('result')
           expect(result['isError']).to be(false)
           data = result.fetch('structuredContent').fetch('data')
           expect(data.fetch('total_is_exact')).to eq(max_nodes != 1)
