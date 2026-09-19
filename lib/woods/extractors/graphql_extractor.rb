@@ -441,11 +441,11 @@ module Woods
       # @param unit_type [Symbol]
       # @param runtime_class [Class, nil]
       # @return [Hash]
-      def build_metadata(source, _class_name, _unit_type, runtime_class)
+      def build_metadata(source, class_name, _unit_type, runtime_class)
         {
           # GraphQL classification
           graphql_kind: detect_graphql_kind(source, runtime_class),
-          parent_class: extract_parent_class(source),
+          parent_class: extract_parent_class(source, class_name),
 
           # Fields and arguments
           fields: extract_fields(source, runtime_class),
@@ -506,15 +506,6 @@ module Woods
         return :interface if source.match?(/include GraphQL::Schema::Interface/)
 
         :object
-      end
-
-      # Extract the parent class name from source
-      #
-      # @param source [String]
-      # @return [String, nil]
-      def extract_parent_class(source)
-        match = source.match(/class\s+\w+\s*<\s*([\w:]+)/)
-        match ? match[1] : nil
       end
 
       # Extract field definitions from source and/or runtime

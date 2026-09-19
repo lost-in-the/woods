@@ -1,0 +1,1 @@
+GraphQL parent metadata and summary chunks now read the selected declaration's superclass, rather than borrowing a nested or sibling class's parent. Compact qualified declarations preserve their explicit parent; implicit, dynamic, or unavailable parents remain unknown. Identifiers and dependency classification are unchanged.
