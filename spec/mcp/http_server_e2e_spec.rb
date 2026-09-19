@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'mcp'
 require 'fileutils'
 require 'json'
 require 'net/http'
@@ -224,6 +225,39 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
       expect(@wait.pid).not_to eq(first_pid)
       expect(response.code).to eq('200')
       expect(response['mcp-session-id']).to be_nil
+    end
+  end
+
+  it 'returns structured traversal data with the default HTTP renderer' do
+    listed = post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
+    expect(listed.code).to eq('200')
+    tools = JSON.parse(listed.body).fetch('result').fetch('tools')
+    expect(tools.size).to eq(14)
+    { 'dependencies' => 'Comment', 'dependents' => 'Post' }.each do |name, identifier|
+      tool = tools.find { |entry| entry['name'] == name }
+      expect(tool.fetch('inputSchema').fetch('properties')).not_to have_key('format')
+      schema = MCP::Tool::OutputSchema.new(tool.fetch('outputSchema'))
+      [1, 1000].each do |max_nodes|
+        arguments = { identifier: identifier, max_nodes: max_nodes, explain: true, limit: 1 }
+        response = post({ jsonrpc: '2.0', id: 2, method: 'tools/call',
+                          params: { name: name, arguments: arguments } },
+                        headers: { 'Mcp-Name' => name })
+        expect(response.code).to eq('200')
+        result = JSON.parse(response.body).fetch('result')
+        expect(result['isError']).to be(false)
+        data = result.fetch('structuredContent').fetch('data')
+        expect(data.fetch('total_is_exact')).to eq(max_nodes != 1)
+        expect(data.fetch('graph_coverage')).to include('scope' => 'published_relationships')
+        expect(data.fetch('nodes').keys).to eq([identifier])
+        if max_nodes == 1
+          expect(data).to include('partial' => true, 'partial_reason' => 'node_budget')
+        else
+          expect(data).to include('nodes_total' => name == 'dependencies' ? 2 : 3, 'nodes_truncated' => true)
+        end
+        expect(data).to have_key('explanation')
+        expect(result.dig('structuredContent', 'text')).to eq(result.dig('content', 0, 'text'))
+        expect { schema.validate_result(result.fetch('structuredContent')) }.not_to raise_error
+      end
     end
   end
 

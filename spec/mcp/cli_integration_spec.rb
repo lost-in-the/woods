@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'mcp'
 require 'fileutils'
 require 'open3'
 require 'tmpdir'
@@ -74,6 +75,45 @@ RSpec.describe 'MCP CLI integration' do
         end
       end
     end
+    it 'returns traversal data through the default packaged renderer without a format argument' do
+      meta = {
+        'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+        'io.modelcontextprotocol/clientInfo' => { name: 'traversal-data-cli', version: '1' },
+        'io.modelcontextprotocol/clientCapabilities' => {}
+      }
+      request = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta } }
+      output, errors, status = initialize_over_stdio(request, fixture_dir)
+      expect(status.success?).to be(true), utf8(errors)
+      tools = JSON.parse(output).fetch('result').fetch('tools')
+      expect(tools.size).to eq(14)
+      { 'dependencies' => 'Comment', 'dependents' => 'Post' }.each do |name, identifier|
+        tool = tools.find { |entry| entry['name'] == name }
+        expect(tool.fetch('inputSchema').fetch('properties')).not_to have_key('format')
+        schema = MCP::Tool::OutputSchema.new(tool.fetch('outputSchema'))
+        [1, 1000].each do |max_nodes|
+          arguments = { identifier: identifier, max_nodes: max_nodes, explain: true, limit: 1 }
+          request = { jsonrpc: '2.0', id: 2, method: 'tools/call',
+                      params: { name: name, arguments: arguments, _meta: meta } }
+          output, errors, status = initialize_over_stdio(request, fixture_dir)
+          expect(status.success?).to be(true), utf8(errors)
+          result = JSON.parse(output).fetch('result')
+          expect(result['isError']).to be(false)
+          data = result.fetch('structuredContent').fetch('data')
+          expect(data.fetch('total_is_exact')).to eq(max_nodes != 1)
+          expect(data.fetch('graph_coverage')).to include('scope' => 'published_relationships')
+          expect(data.fetch('nodes').keys).to eq([identifier])
+          if max_nodes == 1
+            expect(data).to include('partial' => true, 'partial_reason' => 'node_budget')
+          else
+            expect(data).to include('nodes_total' => name == 'dependencies' ? 2 : 3, 'nodes_truncated' => true)
+          end
+          expect(data).to have_key('explanation')
+          expect(result.dig('structuredContent', 'text')).to eq(result.dig('content', 0, 'text'))
+          expect { schema.validate_result(result.fetch('structuredContent')) }.not_to raise_error
+        end
+      end
+    end
+
     it 'returns traversal explanation evidence over the packaged stdio boundary' do
       meta = {
         'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
@@ -120,7 +160,7 @@ RSpec.describe 'MCP CLI integration' do
         _out, err, status = Open3.capture3(wrapper, empty_dir)
 
         expect(status.exitstatus).to eq(1)
-        expect(utf8(err)).to match(/No manifest\.json/)
+        expect(utf8(err)).to match(/Could not resolve a published Woods index/)
         expect(utf8(err)).to match(/bundle exec rake woods:extract/)
       end
     end
@@ -147,7 +187,7 @@ RSpec.describe 'MCP CLI integration' do
         stdout.close
         stderr.close
 
-        expect(error_output).not_to match(/No manifest\.json/)
+        expect(error_output).not_to match(/Could not resolve a published Woods index/)
       end
     end
 
@@ -159,7 +199,7 @@ RSpec.describe 'MCP CLI integration' do
         _out, err, status = Open3.capture3(wrapper, dir)
 
         expect(status.exitstatus).to eq(1)
-        expect(utf8(err)).to match(/No manifest\.json/)
+        expect(utf8(err)).to match(/Could not resolve a published Woods index/)
       end
     end
 
@@ -280,7 +320,7 @@ RSpec.describe 'MCP CLI integration' do
         _out, err, status = Open3.capture3(env, 'bundle', 'exec', 'ruby', ruby_bin, empty_dir)
 
         expect(status.exitstatus).to eq(1)
-        expect(utf8(err)).to match(/No manifest\.json/)
+        expect(utf8(err)).to match(/Could not resolve a published Woods index/)
       end
     end
 

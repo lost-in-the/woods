@@ -238,6 +238,16 @@ references (including references to generic PORO and library classes) may have n
 edge. No dependents, a test-only dependent, or a completed traversal does not prove
 there are no production callers. Verify important absence claims in source.
 
+Supporting servers expose the annotated, paginated traversal result in
+`structuredContent.data` for every renderer, including the default packaged
+stdio and HTTP servers. Read `data.total_is_exact`, `data.graph_coverage`, budget
+counters and optional explanation witnesses there; `content[0].text` and
+`structuredContent.text` keep the same human-readable rendering. No `format`
+tool argument is needed or accepted. This additive data payload is unreleased
+after `2.0.0.beta3`; verify the installed response before relying on it. Older
+human-renderer responses can carry only text. The structured nodes and witnesses
+cover the same page, not an additional traversal or an unpaginated graph.
+
 Successful responses carry `graph_coverage` with `scope: "published_relationships"`,
 `source_references: "not_exhaustive"`, and a human-readable `notice`. Text formats
 show the same notice, including compact, root-only and empty-page responses.

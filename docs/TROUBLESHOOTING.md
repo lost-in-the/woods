@@ -8,7 +8,7 @@ This guide covers the most common problems encountered when installing, extracti
 
 | Error message | Cause | Fix |
 |---------------|-------|-----|
-| `No manifest.json found` | Wrong index path or no published generation | Use the path visible to the server process; run `woods:validate` |
+| `Could not resolve a published Woods index` (older versions: `No manifest.json found`) | Wrong index path or unresolved published generation | Select the existing index using a path visible to the server process; see [startup diagnostics](#index-cannot-be-resolved-at-startup) |
 | `uninitialized constant Rails` | Not running inside Rails app | Run via `bundle exec rake` in Rails root |
 | `type "vector" does not exist` | pgvector not installed | `CREATE EXTENSION vector` in PostgreSQL |
 | `Connection refused (localhost:11434)` | Ollama not running | `ollama serve` |
@@ -390,13 +390,15 @@ relative and resolves outside the mount.
 
 ## MCP Server Problems
 
-### "No manifest.json" error when starting the Index Server
+<a id="no-manifestjson-error-when-starting-the-index-server"></a>
 
-**Symptom:** `woods-mcp-start` exits with an error like `No manifest.json found at /path/to/...` even though extraction completed.
+### Index cannot be resolved at startup
 
-**Cause:** The Index Server is using the container-internal path rather than the host-side path to the volume-mounted output. The server runs on the host and cannot access container filesystem paths.
+**Symptom:** An Index MCP executable exits with `Could not resolve a published Woods index in: /path/to/...` even though extraction completed. This headline is unreleased after `2.0.0.beta3`; older versions say `No manifest.json found`. Both mean the selected index could not resolve its manifest, not that an atomic index needs a root manifest.
 
-**Fix:** Use the host path in your `.mcp.json`:
+**Cause:** The selected directory is not the published index root, the published generation cannot be resolved, or the path is not visible to the MCP process. A container path is appropriate for a container process; a host process needs the host-visible path.
+
+**Fix:** Point at the existing index before extracting again. Check the examined directory in the error and the [MCP path precedence](CONFIGURATION_REFERENCE.md#environment-variables). For a host-side launch whose working directory contains `tmp/woods`, for example:
 
 ```json
 {
@@ -409,13 +411,7 @@ relative and resolves outside the mount.
 }
 ```
 
-Verify the output is accessible from the host:
-
-```bash
-ls ./tmp/woods/manifest.json
-```
-
-**Since Woods 2.0, a healthy index may not have `manifest.json` at the output root at all.** Extraction publishes each generation into an immutable `payloads/gen-<N>/` directory and points to it from `generation.json`. If the flat path is missing, check the payload path instead before assuming extraction failed:
+**Since Woods 2.0, a healthy index may not have `manifest.json` at the output root at all.** Extraction publishes each generation into an immutable `payloads/gen-<N>/` directory and points to it from `generation.json`. Inspect the marker and its payload in the MCP process's filesystem before assuming extraction failed (use the generation named by your marker):
 
 ```bash
 cat ./tmp/woods/generation.json                    # {"number": 42, "payload": "payloads/gen-42", ...}
@@ -427,7 +423,7 @@ Update their gate using the [filesystem layout contract](INDEX_LAYOUT.md), which
 includes Bash/jq and Python readers. An upload must pin and copy one complete
 payload before publishing its captured pointer; keep a failed copy unpublished.
 
-`woods-mcp-start` and `IndexReader` already resolve this automatically, this is only for manual inspection. If neither path has a manifest, your Docker volume mount is not configured correctly. See [DOCKER_SETUP.md](DOCKER_SETUP.md).
+`woods-mcp-start` and `IndexReader` resolve this automatically; these commands are for manual inspection. Legacy flat indexes use a root `manifest.json`. If neither layout resolves, check the selected path, pointer, payload and any volume mount. See [DOCKER_SETUP.md](DOCKER_SETUP.md) for container launches.
 
 ---
 

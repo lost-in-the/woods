@@ -55,7 +55,7 @@ rescue JSON::ParserError, SystemCallError, TypeError, NoMethodError
 end
 
 unless manifest_present?(index_dir)
-  warn "Error: No manifest.json found in: #{index_dir}"
+  warn "Error: Could not resolve a published Woods index in: #{index_dir}"
   warn 'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json.'
   warn path_remedy
   exit 1

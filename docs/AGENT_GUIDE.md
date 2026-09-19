@@ -146,6 +146,13 @@ say `Showing N of at least M (total unknown: <budget reason>)`. Narrow with `dep
 `offset`: narrowing answers the question, paging only splits the same answer
 across turns. In a multi-database app each row names the unit's database.
 
+On supporting servers, inspect `structuredContent.data` for traversal nodes,
+`graph_coverage`, exactness, budgets and optional explanation witnesses, regardless
+of the text renderer. This packaged stdio/HTTP payload is unreleased after
+`2.0.0.beta3`; check the actual response and use its text when structured data is
+absent. There is no traversal `format` argument. See the
+[response contract](MCP_SERVERS.md#dependency-graph-coverage).
+
 A traversal can also stop at its independent node or edge budget. Treat
 `partial`/`partial_reason` as incomplete graph evidence even on the final page;
 paging cannot recover nodes the walk never reached. Supporting responses include

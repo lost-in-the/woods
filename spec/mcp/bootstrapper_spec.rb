@@ -119,7 +119,7 @@ RSpec.describe Woods::MCP::Bootstrapper do
 
           expect do
             described_class.resolve_index_dir([dir])
-          end.to output(/No manifest\.json found in/).to_stderr
+          end.to output(/Could not resolve a published Woods index in/).to_stderr
              .and raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
         end
       end

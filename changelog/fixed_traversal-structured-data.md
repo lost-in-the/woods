@@ -1,0 +1,1 @@
+Expose the paginated dependencies/dependents payload in `structuredContent.data` with every renderer, including packaged stdio and HTTP defaults, while preserving rendered text and existing tool arguments (#481).
