@@ -8,6 +8,13 @@ class StableMailer < ActionMailer::Base
            end
   default from: sender, reply_to: 'literal-0xdeadbeef@example.test', cc: ['copy@example.test']
 
+  class ObjectCallback
+    def before(_mailer)
+      raise 'object callback must not execute during extraction'
+    end
+  end
+
+  before_action ObjectCallback.new
   before_action :prepare
   around_action(proc { raise 'callback must not execute during extraction' })
   after_action :finish

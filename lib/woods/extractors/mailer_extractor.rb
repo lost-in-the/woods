@@ -178,7 +178,7 @@ module Woods
 
           result = {
             type: :"#{cb.kind}_action",
-            filter: callback_filter(cb).to_s
+            filter: callback_filter_label(cb)
           }
           result[:only] = only if only.any?
           result[:except] = except if except.any?

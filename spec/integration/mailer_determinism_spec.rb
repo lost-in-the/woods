@@ -21,10 +21,11 @@ RSpec.describe 'Mailer extraction across independent Rails processes', :booted_a
     expect(first.dig('metadata', 'defaults', 'cc')).to eq(['copy@example.test'])
     expect(first.dig('metadata', 'defaults', 'reply_to')).to eq('literal-0xdeadbeef@example.test')
     expect(first.dig('metadata', 'callbacks').map { |callback| callback['type'] })
-      .to eq(%w[before_action around_action after_action])
+      .to eq(%w[before_action before_action around_action after_action])
     expect(first.fetch('chunks').map { |chunk| chunk['identifier'] })
       .to eq(%w[alpha beta delta epsilon gamma zeta].map { |action| "StableMailer##{action}" })
-    expect(JSON.generate(first)).not_to match(/#<Proc:0x/)
+    expect(first.dig('metadata', 'callbacks').first.fetch('filter')).to eq('#<StableMailer::ObjectCallback>')
+    expect(JSON.generate(first)).not_to match(/:0x[0-9a-f]+>/i)
   end
 
   it 'retains meaningful callable kind changes without invoking defaults or callbacks' do
