@@ -82,6 +82,14 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
         expect(output).to be_empty
       end
 
+      it 'uses a layout-neutral headline when the selected directory has no published index' do
+        output, errors, status = launch(executable, @cwd)
+        expect(status.exitstatus).to eq(1)
+        expect(output).to be_empty
+        expect(errors.lines.first).to eq("Error: Could not resolve a published Woods index in: #{@cwd}\n")
+        expect(errors).to include('generation.json', 'legacy flat manifest.json', 'existing index')
+      end
+
       ['{broken', '[]', '{"number":1,"payload":42}', '{"number":1,"payload":"../legacy"}'].each do |marker|
         it "rejects invalid generation #{marker.inspect} with the selected path and remedy" do
           File.write(File.join(@atomic, 'generation.json'), marker)
@@ -123,6 +131,7 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
     output, errors, status = launch('woods-mcp-http', env: { 'WOODS_OUTPUT' => selected })
     expect(status.exitstatus).to eq(1)
     expect(output).to be_empty
+    expect(errors.lines.first).to eq("Error: Could not resolve a published Woods index in: #{selected}\n")
     expect(errors).to include(selected, 'generation.json', 'manifest.json', 'existing index')
   end
 

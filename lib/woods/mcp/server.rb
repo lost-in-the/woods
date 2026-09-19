@@ -250,9 +250,9 @@ module Woods
           !token.nil? && ids && !ids.empty?
         end
 
-        def text_response(text)
+        def text_response(text, data: nil)
           structured = { text: text }
-          structured[:data] = JSON.parse(text)
+          structured[:data] = data.nil? ? JSON.parse(text) : data
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
             structured_content: structured
@@ -661,7 +661,7 @@ module Woods
             TraversalResponse.annotate(result)
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
-            respond.call(renderer.render(render_key, result))
+            respond.call(renderer.render(render_key, result), data: result)
           end
         end
 

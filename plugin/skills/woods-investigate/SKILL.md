@@ -63,6 +63,11 @@ The response `graph_coverage` notice, `total_is_exact` field, and human label
 `witness types unambiguous` (#470/#471) are unreleased after Woods `2.0.0.beta3`.
 Verify the installed server version and actual response fields; this plugin does
 not add them. Apply these limits to older servers even without the notice.
+Supporting stdio and HTTP servers expose the paginated traversal payload in
+`structuredContent.data` independently of the text renderer (#481, also
+unreleased after `2.0.0.beta3`). Check the installed response; older default
+responses may carry only text. Do not pass an unsupported `format` argument.
+
 `total_is_exact: false` means a budget-limited prefix; a true value describes only
 the requested root, depth, filters and published generation. Pagination alone
 does not change exactness. On older responses inspect `partial` directly.

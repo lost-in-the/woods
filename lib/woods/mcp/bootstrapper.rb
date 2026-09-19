@@ -38,7 +38,7 @@ module Woods
         end
 
         unless manifest_present?(dir)
-          warn "Error: No manifest.json found in: #{examined}"
+          warn "Error: Could not resolve a published Woods index in: #{examined}"
           warn 'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json.'
           warn index_path_remedy
           exit 1

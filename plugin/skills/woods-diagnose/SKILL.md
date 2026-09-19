@@ -186,8 +186,10 @@ Compare the client config with the exact command, absolute `cwd`, bundle, and in
 bundle exec woods-mcp-start ./tmp/woods
 ```
 
-If the error names a missing `manifest.json`, first check the selected index
-path: an atomic index uses `generation.json` to locate its payload manifest.
+If startup says `Could not resolve a published Woods index` (unreleased after
+`2.0.0.beta3`) or names a missing `manifest.json` on older versions, first check
+the selected index path: an atomic index uses `generation.json` to locate its
+payload manifest. The new headline does not change index validation or recovery.
 Point at an existing index before suggesting a new extraction. Prefer the
 explicit path above; `WOODS_DIR` is also supported. An unreleased change after
 `2.0.0.beta3` adds `WOODS_OUTPUT` after those two choices, so verify the installed
