@@ -255,6 +255,9 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata
 - Extracts `default from:`, `layout`, and per-action subject patterns
+- Action names are sorted consistently in metadata, the generated header, template discovery and action chunks. Callback chain order and duplicate registrations are preserved.
+- Direct Proc-valued defaults and Proc callback filters use source-location/kind labels without executing them; application paths are relative to `Rails.root`. Default containers, literal strings and non-Proc values retain their existing types. This does not serialize closure captures or recursively normalize arbitrary nested objects.
+- After upgrading, run a full extraction to refresh retained mailer units. Stabilized headers and callable labels can cause a one-time source-hash change; stored index schemas are unchanged.
 
 ---
 

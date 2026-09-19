@@ -536,4 +536,86 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(units.first.identifier).to eq('DirectMailer')
     end
   end
+
+  describe 'deterministic mailer serialization' do
+    before { create_file('app/mailers/stable_mailer.rb', 'class StableMailer < ApplicationMailer; end') }
+
+    it 'sorts action membership consistently in metadata, the first-five header, templates and chunks' do
+      actions = %w[zeta beta epsilon alpha gamma delta]
+      actions.each { |action| create_file("app/views/stable_mailer/#{action}.html.erb", action) }
+      extractor = described_class.new
+      allow(extractor).to receive(:extract_action_source) { |_mailer, action| "def #{action}; end" }
+      units = [actions, actions.reverse].map do |order|
+        extractor.extract_mailer(build_mailer(name: 'StableMailer', actions: order))
+      end
+      expect(units.map { |unit| unit.to_h.except(:extracted_at) }.uniq.size).to eq(1)
+      expect(units.first.metadata[:actions]).to eq(actions.sort)
+      expect(units.first.metadata[:templates].keys).to eq(actions.sort)
+      expect(units.first.chunks.map { |chunk| chunk[:metadata][:action] }).to eq(actions.sort)
+      expect(units.first.source_code).to include('Actions: alpha, beta, delta, epsilon, gamma')
+    end
+
+    it 'labels same-site Proc defaults without executing them and preserves container and literal values' do
+      factory = -> { -> { raise 'default must never execute during extraction' } }
+      containers = { reply_to: 'literal Proc:0xdeadbeef', cc: ['a@example.test'], bcc: { label: '0xbeef' } }
+      units = Array.new(2) do
+        defaults = containers.merge(from: factory.call)
+        unit = described_class.new.extract_mailer(build_mailer(name: 'StableMailer', defaults: defaults))
+        expect(defaults[:from]).to be_a(Proc)
+        expect(unit.metadata[:defaults].slice(*containers.keys)).to eq(containers)
+        expect(unit.metadata[:defaults][:cc]).to equal(containers[:cc])
+        expect(unit.metadata[:defaults][:bcc]).to equal(containers[:bcc])
+        unit
+      end
+      expect(units.map { |unit| JSON.generate(unit.to_h.except(:extracted_at)) }.uniq.size).to eq(1)
+      label = units.first.metadata[:defaults][:from]
+      expect(label).to start_with('#<lambda ')
+      expect(units.first.source_code).to include("Default From: #{label}")
+      expect(label).not_to match(/:0x[0-9a-f]+/)
+    end
+
+    it 'retains literal default types and custom display strings' do
+      custom = Object.new
+      custom.define_singleton_method(:to_s) { 'sender Proc:0xcafe' }
+      defaults = { from: custom, reply_to: :sender, cc: false, bcc: 12 }
+      unit = described_class.new.extract_mailer(build_mailer(name: 'StableMailer', defaults: defaults))
+      expect(unit.metadata[:defaults]).to eq(defaults)
+      expect(unit.source_code).to include('Default From: sender Proc:0xcafe')
+    end
+
+    it 'preserves callback order, duplicate registrations and conditions while labeling raw Rails 6 Proc filters' do
+      factory = -> { proc { raise 'callback must never execute during extraction' } }
+      units = Array.new(2) do
+        callable = factory.call
+        first = build_callback(kind: :before, filter: :prepare)
+        legacy = build_callback(kind: :around, filter: callable.object_id, if_conditions: [:enabled?])
+        legacy.define_singleton_method(:raw_filter) { callable }
+        last = build_callback(kind: :after, filter: :finish)
+        described_class.new.extract_mailer(build_mailer(name: 'StableMailer', callbacks: [last, legacy, first, legacy]))
+      end
+      expect(units.map { |unit| unit.metadata[:callbacks] }.uniq.size).to eq(1)
+      callbacks = units.first.metadata[:callbacks]
+      expect(callbacks.map do |callback|
+        callback[:type]
+      end).to eq(%i[after_action around_action before_action around_action])
+      expect(callbacks.map do |callback|
+        callback[:filter]
+      end).to match(['finish', start_with('#<Proc '), 'prepare', start_with('#<Proc ')])
+      expect(callbacks[1]).to include(if: ':enabled?')
+      expect(callbacks[3]).to eq(callbacks[1])
+    end
+
+    it 'keeps callable kind and source site distinguishable in defaults and callback labels' do
+      callables = [proc { raise 'not executed' }, -> { raise 'not executed' }]
+      units = callables.map do |callable|
+        callback = build_callback(kind: :before, filter: callable)
+        described_class.new.extract_mailer(build_mailer(name: 'StableMailer', defaults: { from: callable },
+                                                        callbacks: [callback]))
+      end
+      expect(units.first.metadata[:defaults][:from]).to start_with('#<Proc ')
+      expect(units.last.metadata[:defaults][:from]).to start_with('#<lambda ')
+      expect(units.first.to_h[:source_hash]).not_to eq(units.last.to_h[:source_hash])
+      expect(units.first.metadata[:callbacks]).not_to eq(units.last.metadata[:callbacks])
+    end
+  end
 end

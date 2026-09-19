@@ -101,7 +101,7 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Run booted-app extraction
-        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb
+        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb
 
       - name: Run encrypted Console credential rotation
         run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb

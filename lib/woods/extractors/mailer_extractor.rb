@@ -116,12 +116,8 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def annotate_source(source, mailer)
-        actions = mailer.action_methods.to_a
-        default_from = begin
-          mailer.default[:from]
-        rescue StandardError
-          nil
-        end
+        actions = mailer.action_methods.sort
+        default_from = extract_defaults(mailer)[:from]
 
         <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
@@ -139,7 +135,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_metadata(mailer, source)
-        actions = mailer.action_methods.to_a
+        actions = mailer.action_methods.sort
 
         {
           # Actions (mail methods)
@@ -171,7 +167,7 @@ module Woods
 
       def extract_defaults(mailer)
         mailer_defaults = mailer.default
-        mailer_defaults.slice(:from, :reply_to, :cc, :bcc).compact
+        mailer_defaults.slice(:from, :reply_to, :cc, :bcc).compact.transform_values { |value| stable_filter(value) }
       rescue StandardError
         {}
       end
@@ -182,7 +178,7 @@ module Woods
 
           result = {
             type: :"#{cb.kind}_action",
-            filter: cb.filter.to_s
+            filter: callback_filter(cb).to_s
           }
           result[:only] = only if only.any?
           result[:except] = except if except.any?
@@ -274,7 +270,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def build_action_chunks(mailer, _source)
-        mailer.action_methods.filter_map do |action|
+        mailer.action_methods.sort.filter_map do |action|
           action_source = extract_action_source(mailer, action)
           next if action_source.nil? || action_source.strip.empty?
 
