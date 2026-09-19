@@ -245,7 +245,22 @@ module Woods
                end
         "#<#{filter.lambda? ? 'lambda' : 'Proc'} #{site}>"
       end
-      private :callback_filter, :stable_filter
+
+      # Preserve application labels; strip addresses only from Ruby's actual
+      # default representation. Nested identities occur for anonymous classes.
+      # These are descriptive labels, not serialization of callback object state.
+      def callback_filter_label(callback)
+        filter = callback_filter(callback)
+        label = filter.to_s
+        return label unless label.start_with?('#<')
+
+        owner = filter.is_a?(Module) ? Module : Kernel
+        return label unless label == owner.instance_method(:to_s).bind(filter).call
+
+        label.gsub(/:0x[0-9a-f]+(?=>)/i, '')
+      end
+
+      private :callback_filter, :stable_filter, :callback_filter_label
 
       # Human-readable label for a non-ActionFilter condition.
       #

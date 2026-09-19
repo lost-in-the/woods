@@ -650,20 +650,6 @@ module Woods
         end.compact
       end
 
-      # Preserve application labels; strip addresses only from Ruby's actual
-      # default representation. Nested identities occur for anonymous classes.
-      # These are descriptive labels, not serialization of callback object state.
-      def callback_filter_label(callback)
-        filter = callback_filter(callback)
-        label = filter.to_s
-        return label unless label.start_with?('#<')
-
-        owner = filter.is_a?(Module) ? Module : Kernel
-        return label unless label == owner.instance_method(:to_s).bind(filter).call
-
-        label.gsub(/:0x[0-9a-f]+(?=>)/i, '')
-      end
-
       # Extract scopes with their source if available.
       # Parses the full source with the AST layer to get accurate scope
       # boundaries, falling back to regex line-scanning on parse failure.

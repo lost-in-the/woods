@@ -605,6 +605,45 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(callbacks[3]).to eq(callbacks[1])
     end
 
+    it 'normalizes default object labels without changing custom labels, order, duplicates or conditions' do
+      stub_const('MailerObjectCallback', Class.new)
+      object = MailerObjectCallback.new
+      anonymous = Class.new
+      custom = MailerObjectCallback.new
+      allow(custom).to receive(:to_s).once.and_return('#<MailerObjectCallback:0x1234>')
+      filters = [object, MailerObjectCallback, anonymous, anonymous.new, custom, :named_hook, 'literal 0xdeadbeef']
+      callbacks = filters.map { |filter| build_callback(kind: :before, filter: filter) }
+      legacy = build_callback(kind: :after, filter: object.object_id, if_conditions: [:enabled?],
+                              unless_conditions: [:disabled?])
+      legacy.define_singleton_method(:raw_filter) { object }
+      callbacks.push(legacy, legacy)
+      mailer = build_mailer(name: 'StableMailer', callbacks: callbacks)
+
+      result = described_class.new.send(:extract_callbacks, mailer)
+      expect(result.map { |callback| callback[:filter] }).to eq(
+        ['#<MailerObjectCallback>', 'MailerObjectCallback', '#<Class>', '#<#<Class>>',
+         '#<MailerObjectCallback:0x1234>', 'named_hook', 'literal 0xdeadbeef',
+         '#<MailerObjectCallback>', '#<MailerObjectCallback>']
+      )
+      expect(result.map { |callback| callback[:type] }).to eq(([:before_action] * 7) + ([:after_action] * 2))
+      expect(result[-2]).to include(if: ':enabled?', unless: ':disabled?')
+      expect(result.last).to eq(result[-2])
+    end
+
+    it 'normalizes anonymous namespace identities while retaining custom class and literal labels' do
+      namespace = Module.new
+      nested = namespace.const_set(:Nested, Class.new)
+      custom = Class.new
+      allow(custom).to receive(:to_s).once.and_return('#<Class:0x1234>')
+      filters = [namespace, nested, nested.new, custom, '#<Class:0x1234>']
+      callbacks = filters.map { |filter| build_callback(kind: :before, filter: filter) }
+      mailer = build_mailer(name: 'StableMailer', callbacks: callbacks)
+
+      expect(described_class.new.send(:extract_callbacks, mailer).map { |callback| callback[:filter] }).to eq(
+        ['#<Module>', '#<Module>::Nested', '#<#<Module>::Nested>', '#<Class:0x1234>', '#<Class:0x1234>']
+      )
+    end
+
     it 'keeps callable kind and source site distinguishable in defaults and callback labels' do
       callables = [proc { raise 'not executed' }, -> { raise 'not executed' }]
       units = callables.map do |callable|
