@@ -369,6 +369,37 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Object.send(:remove_const, :ParentMetadataLibrary) if Object.const_defined?(:ParentMetadataLibrary)
   end
 
+  it 'publishes GraphQL declaration parents and chunks consistently (#480)' do
+    require 'woods/mcp/server'
+    source = <<~RUBY
+      class ParentGraphql::Item < GraphQL::Schema::Object
+        field :id, String, null: false
+        class Wrapper < SimpleDelegator
+        end
+        # #{'padding ' * 1000}
+      end
+    RUBY
+    path = write_file('app/graphql/parent_graphql/item.rb', source)
+    index = full_extraction
+    write_file(path, source.sub('field :id', 'field :updated_id'))
+    Woods::Extractor.new(output_dir: index).extract_changed([path])
+    oracle = full_extraction
+    expect(differences(index, oracle)).to be_empty
+
+    [index, oracle].each do |directory|
+      server = Woods::MCP::Server.build(index_dir: directory, response_format: :json, warmup: false)
+      request = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                  params: { name: 'lookup', arguments: { identifier: 'ParentGraphql::Item', type: 'graphql_type' } } }
+      result = JSON.parse(server.handle_json(JSON.generate(request))).fetch('result')
+      expect(result['isError']).to be(false)
+      unit = result.fetch('structuredContent').fetch('data')
+      expect(unit.fetch('metadata').fetch('parent_class')).to eq('GraphQL::Schema::Object')
+      expect(unit.fetch('source_code')).to include('field :updated_id')
+      summary = unit.fetch('chunks').find { |chunk| chunk.fetch('chunk_type') == 'summary' }
+      expect(summary.fetch('content')).to include("Parent: GraphQL::Schema::Object\n")
+    end
+  end
+
   # Baseline the tree, then apply operations one at a time through
   # extract_changed, asserting equivalence at every quiescent point.
   def run_sequence(operations)

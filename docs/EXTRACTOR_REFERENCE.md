@@ -2,7 +2,7 @@
 
 Woods ships **35 extractor classes** producing **39 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 42 files: 35 extractor classes (each ending in `_extractor.rb`) plus 7 supporting utilities (`shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`). The 39 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 35 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 39 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -422,6 +422,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Produces unit types: `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`
 - Extracts field metadata (types, descriptions, complexity, arguments), authorization patterns (Pundit, CanCan, `authorized?`), and dependencies on models/services
 - Since all GraphQL units come from one extractor, incremental re-extraction handles them via `extract_graphql_file`
+- `parent_class` and summary chunks describe the selected declaration's explicit constant-path superclass, preserving its written qualification. Nested or sibling declarations and literal text cannot supply a parent. Implicit Object, module interfaces, dynamic superclass expressions, unavailable source, and invalid source have no declared parent (`null` metadata; `unknown` in summaries). This is source declaration metadata, not resolved runtime ancestry.
 
 **Example output (abbreviated):**
 
