@@ -116,7 +116,8 @@ module Woods
       def clear(session_id)
         with_store_lock do
           FileUtils.rm_f(session_path(session_id))
-          FileUtils.rm_f(legacy_session_path(session_id))
+          legacy = legacy_session_path(session_id)
+          FileUtils.rm_f(legacy) if legacy
         end
       end
 
@@ -158,6 +159,10 @@ module Woods
       def migrate_legacy_session!(session_id)
         target = session_path(session_id)
         legacy = legacy_session_path(session_id)
+        # Expire each half before a merge or append can refresh its mtime.
+        [target, legacy].compact.each do |path|
+          FileUtils.rm_f(path) if File.exist?(path) && expired?(path)
+        end
         return target unless legacy && File.exist?(legacy)
 
         if File.exist?(target)
