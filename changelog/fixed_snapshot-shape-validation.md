@@ -1,0 +1,1 @@
+Validate persisted JSON snapshot shapes before reading history or capturing the next snapshot. Unusable nested unit records and summary fields now warn and skip the entire snapshot, preserving valid legacy records, corrupt-file retention, and caller SHA validation (#492).
