@@ -22,7 +22,7 @@ module Woods
     #
     # Implements the same public interface as SnapshotStore so the MCP server
     # tools work identically.
-    # Malformed, non-object, or unreadable retained snapshots (including files
+    # Malformed, invalidly shaped, or unreadable retained snapshots (including files
     # removed during retention) are warned about and treated as absent:
     # +find+ returns nil, +diff+ returns an empty result, and history/list scans
     # omit the corrupt file.
@@ -280,7 +280,7 @@ module Woods
 
       def read_snapshot(path)
         data = JSON.parse(AtomicFile.read(path))
-        raise JSON::ParserError, 'expected a JSON object' unless data.is_a?(Hash)
+        validate_snapshot_shape!(data)
 
         data
       rescue JSON::ParserError => e
@@ -289,6 +289,34 @@ module Woods
       rescue SystemCallError => e
         warn "[Woods] Skipping unreadable snapshot #{File.basename(path)}: #{e.message}"
         nil
+      end
+
+      # Guard only shapes consumed by conversion, sorting, and the next capture.
+      # Legacy files can omit units/timestamps and optional per-unit hashes;
+      # bare unit keys still supply identifiers when the record does not.
+      def validate_snapshot_shape!(data)
+        raise JSON::ParserError, 'expected a JSON object' unless data.is_a?(Hash)
+
+        sha = data['git_sha']
+        unless sha.is_a?(String) && sha.match?(/\A[0-9a-f]+\z/i)
+          raise JSON::ParserError, 'expected git_sha to be a hexadecimal string'
+        end
+
+        timestamp = data['extracted_at']
+        unless timestamp.nil? || timestamp.is_a?(String)
+          raise JSON::ParserError, 'expected extracted_at to be a string or null'
+        end
+
+        validate_snapshot_units!(data['units'])
+      end
+
+      def validate_snapshot_units!(units)
+        return if units.nil?
+
+        raise JSON::ParserError, 'expected units to be an object or null' unless units.is_a?(Hash)
+        return if units.each_value.all?(Hash)
+
+        raise JSON::ParserError, 'expected every unit record to be an object'
       end
 
       # @param exclude_sha [String, nil] SHA to leave out of the result
