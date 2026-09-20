@@ -137,6 +137,28 @@ RSpec.describe Woods::SessionTracer::FileStore do
       expect(store.read('sess2').size).to eq(1)
     end
 
+    ['user:é', 'account/a?b', ''].each do |session_id|
+      it "clears #{session_id.inspect} repeatedly without affecting another session" do
+        store.record(session_id, request_data)
+        store.record('other', request_data)
+
+        expect { 2.times { store.clear(session_id) } }.not_to raise_error
+        expect(store.read(session_id)).to eq([])
+        expect(store.read('other')).to eq([request_data])
+      end
+    end
+
+    it 'removes both encoded and legacy files and remains idempotent' do
+      store.record('legacy_session', request_data)
+      legacy = File.join(base_dir, 'legacy_session.jsonl')
+      File.write(legacy, "#{JSON.generate(request_data)}\n")
+
+      2.times { store.clear('legacy_session') }
+
+      expect(Dir.glob(File.join(base_dir, '*.jsonl'))).to be_empty
+      expect(store.read('legacy_session')).to eq([])
+    end
+
     it 'does not raise for nonexistent session' do
       expect { store.clear('nonexistent') }.not_to raise_error
     end
@@ -193,6 +215,66 @@ RSpec.describe Woods::SessionTracer::FileStore do
 
       expect(expiring.read('sess1')).to eq([])
       expect(expiring.sessions).to eq([])
+    end
+
+    describe 'expiration before legacy migration or append' do
+      let(:now) { Time.now }
+      let(:expiring) { described_class.new(base_dir: base_dir, ttl: 60, clock: -> { now }) }
+
+      def write_history(format, age, action)
+        path = if format == :legacy
+                 File.join(base_dir, 'sess1.jsonl')
+               else
+                 store.send(:session_path, 'sess1')
+               end
+        File.write(path, "#{JSON.generate(request_data.merge('action' => action, 'path' => '/café'))}\n")
+        timestamp = now - age
+        File.utime(timestamp, timestamp, path)
+      end
+
+      cases = [
+        ['encoded expired', nil, 60, []],
+        ['legacy expired', 60, nil, []],
+        ['legacy expired and encoded live', 60, 59, ['encoded']],
+        ['legacy live and encoded expired', 59, 60, ['legacy']],
+        ['both expired', 60, 60, []],
+        ['both live', 59, 59, %w[legacy encoded]]
+      ]
+      cases.each do |description, legacy_age, encoded_age, surviving|
+        %i[record read sessions].each do |operation|
+          it "drops only expired history on #{operation} with #{description}" do
+            write_history(:legacy, legacy_age, 'legacy') if legacy_age
+            write_history(:encoded, encoded_age, 'encoded') if encoded_age
+
+            case operation
+            when :record then expiring.record('sess1', request_data.merge('action' => 'new'))
+            when :read then expect(expiring.read('sess1').map { |entry| entry['action'] }).to eq(surviving)
+            when :sessions
+              summaries = expiring.sessions
+              expect(summaries.map { |entry| entry['request_count'] }).to eq(surviving.empty? ? [] : [surviving.size])
+            end
+
+            expected = operation == :record ? surviving + ['new'] : surviving
+            expect(expiring.read('sess1').map { |entry| entry['action'] }).to eq(expected)
+            expect(File.exist?(File.join(base_dir, 'sess1.jsonl'))).to be(false)
+          end
+        end
+      end
+
+      it 'keeps history immediately before the TTL boundary' do
+        write_history(:encoded, 59.999, 'recent')
+        expiring.record('sess1', request_data.merge('action' => 'new'))
+
+        expect(expiring.read('sess1').map { |entry| entry['action'] }).to eq(%w[recent new])
+      end
+
+      it 'preserves old history from both formats when TTL is disabled' do
+        write_history(:legacy, 3_600, 'legacy')
+        write_history(:encoded, 3_600, 'encoded')
+        store.record('sess1', request_data.merge('action' => 'new'))
+
+        expect(store.read('sess1').map { |entry| entry['action'] }).to eq(%w[legacy encoded new])
+      end
     end
 
     it 'does not append a partial record when serialization fails' do

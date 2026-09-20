@@ -473,6 +473,18 @@ config.session_store = Woods::SessionTracer::FileStore.new(
 config.session_exclude_paths = ['/health', '/metrics', '/assets']
 ```
 
+### File session retention
+
+`FileStore` accepts `ttl:` in seconds (default `nil`, expiration disabled),
+`max_sessions:` (default `1000`), and `max_requests_per_session:` (default `1000`).
+TTL expires a file when the store clock reaches its modification time plus the
+TTL. Recording after expiry starts a fresh history; expired events are discarded
+before appending or migrating legacy filenames, under the same store lock.
+When legacy and encoded files coexist, each expires independently before any
+surviving histories are merged. Clearing a session is idempotent for supported
+IDs, including Unicode and punctuation, and removes both filename formats when
+applicable.
+
 ### Redis session index compatibility
 
 `RedisStore` lists and clears both legacy SET indexes and recency ZSET indexes.

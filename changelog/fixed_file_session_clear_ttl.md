@@ -1,0 +1,1 @@
+- Make file-backed session clearing idempotent for Unicode and punctuated IDs, and discard expired history before appending or merging legacy and encoded files. This prevents expired events from becoming visible again through record, read, or listing; live history, disabled TTL, and retention limits retain their existing behavior.
