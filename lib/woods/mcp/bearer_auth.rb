@@ -54,7 +54,8 @@ module Woods
 
         expected = resolve_token
         header = env['HTTP_AUTHORIZATION'].to_s
-        presented = header.start_with?('Bearer ') ? header.sub(/\ABearer /, '') : nil
+        # Only the ASCII scheme changes case; do not normalize or trim the token.
+        presented = header.match?(/\A[Bb][Ee][Aa][Rr][Ee][Rr] /) ? header[7..] : nil
 
         if expected && presented && Rack::Utils.secure_compare(expected, presented)
           @app.call(env)

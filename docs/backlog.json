@@ -1974,8 +1974,8 @@
     "files": [
       "lib/woods/mcp/bearer_auth.rb"
     ],
-    "description": "Prior-audit L7, deferred with reason \"deliberate, spec-pinned; decision on record\". bearer_auth.rb:64 uses `header.start_with?('Bearer ')` while RFC 6750 auth schemes are case-insensitive, so a client sending `bearer <token>` is refused. The comparison itself is secure_compare (constant-time), and bearer_auth_spec.rb:32 asserts the strict behavior, so this is contract rather than accident. Acceptance: either document the strict scheme in CONSOLE_MCP_SETUP.md as intended, or accept a case-insensitive scheme prefix with the constant-time token comparison unchanged and flip the pinning spec.",
-    "status": "open"
+    "description": "Resolved by #497: HTTP Bearer authentication accepts ASCII scheme case variants, preserving the exact token bytes, constant-time secure_compare, and existing single-space delimiter behavior. Unit and real HTTP executable regressions cover lowercase, uppercase and mixed-case schemes, with incorrect/case-altered tokens and malformed headers refused. Canonical Console setup guidance preserves capitalized Bearer for compatibility with older releases. The prior claim that bearer_auth_spec.rb:32 pinned lowercase rejection was inaccurate; that example rejects Basic authentication.",
+    "status": "resolved"
   },
   {
     "id": "B-142",
@@ -1998,8 +1998,8 @@
     "files": [
       "lib/woods/console/server.rb"
     ],
-    "description": "Prior-audit L13, deferred with reason \"single-server unaffected; track\". server.rb:63-73,251 holds the credential scanner in class-level state, so building two Console servers in one process overwrites the reference and a credential-index rotation hot-swaps into whichever server was built last. The swap itself is atomic as documented, and single-server hosts (every packaged mode) are unaffected. Acceptance: move the scanner reference to per-server state, with a spec that builds two servers and rotates the index on one without disturbing the other.",
-    "status": "open"
+    "description": "Resolved by the credential-rotation correction (438a9f60) and WeakMap liveness follow-up (e514b84e). Each server response context owns its scanner; CredentialScannerRegistry tracks live scanners under a mutex and rebuild_credential_index refreshes all live scanners for the shared Rails application after a successful index build. spec/integration/console_credential_rotation_spec.rb covers two live servers receiving the rotated index, later-server freshness and failed refresh preservation; spec/console/credential_scanner_registry_spec.rb covers build failure, garbage collection and scan snapshot consistency. This replaces the former last-build-wins state; per-one-server rotation is not the shared-application contract.",
+    "status": "resolved"
   },
   {
     "id": "B-144",
