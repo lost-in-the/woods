@@ -1,0 +1,1 @@
+- Use the same JSON snapshot validity checks for reads and retention: reject filename/content SHA mismatches before selecting a capture baseline, and prune corrupt files before valid legacy snapshots with missing or null timestamps. Timestamp-less snapshots remain eligible for ordinary oldest-first retention.
