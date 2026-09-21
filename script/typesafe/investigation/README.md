@@ -85,7 +85,9 @@ sufficiency. No maximum answer is treated as a whole-change probability.
 The static rule uses only changed source and menu names. The adaptive rule may
 read a card, stop, or report missing context. The second selection sees the first
 card's body. Code executes only an offered read; invalid routing stays visible
-without a hidden retry/fallback. Both arms then receive the same four judgment
+without a hidden retry/fallback. It stops further reads, then runs the focused
+questions on the source already observed; it does not automatically mark every
+focused answer unassessed. Both arms receive the same four judgment
 definitions: concrete contract violation, missing context, mechanism and source
 location. A location may only refer to already observed source or `none`.
 
@@ -95,12 +97,22 @@ the actual claimed mechanism to source and executable results. Controls establis
 only their specified contracts. A high answer on a control requires investigation.
 
 Actual usage counts shared scans once. A hypothetical standalone workflow would
-pay for its own initial scan; report that allocation explicitly instead of adding
+pay for its own initial scan if it includes that stage. Static selection and focus
+do not consume its hints, so a static-only workflow can omit it entirely. Report
+the chosen allocation explicitly instead of adding
 both hypothetical totals and calling it actual spending. Missing usage, unfinished
 jobs and invalid answers remain visible. Two repeats on eight curated candidates
 do not establish whole-app discovery, calibrated accuracy or downstream reviewer
 token savings. Subsequent experiments must preserve this version and avoid calling
 these exposed cases a new holdout.
+
+The [first results](../../../docs/design/plans/2026-09-21-typesafe-investigation-results.md)
+record the actual capture with the runner preserved at commit `6c06c6ca`.
+Post-capture summary format `2026-09-21.2` preserves interrupted attempts with
+unknown latency instead of failing. Time sums cover recorded values only; inspect
+`unknown_latency_attempts` alongside them. Future preparations also snapshot the
+runner and retained dependencies before hashing the inputs. These bookkeeping
+changes did not modify or rerun the original frozen capture.
 
 Only code and deliberately curated reports belong in Git. Local fixture databases,
 indexes, raw transcripts, private labels and credentials are not automatically

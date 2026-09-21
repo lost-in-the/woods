@@ -178,8 +178,12 @@ preservation, missing/oversized sections, changed source/request/response refusa
 path restrictions and missing-evidence accounting. The targeted watcher test and
 50 Console-contract/Index-registration examples passed at the pinned revision.
 The Console registration probe returned the documented nine default and eleven
-opt-in names. No full gem suite, Rails matrix or live application boot was repeated
-for this new Python/documentation tooling; it changes no packaged runtime behavior.
+opt-in names. The coordinator subsequently ran the full default gem suite on the
+research branch: 9,401 examples, zero failures and three optional-tokenizer pending
+checks; RuboCop inspected 915 files with no offenses. Those checks validate the
+combined tooling checkpoint, not all claims on the separately pinned main revision.
+No additional Rails matrix or live application boot was needed for the docs runner;
+it changes no packaged runtime behavior.
 
 The same coding agent selected source, wrote the adapter/tests and adjudicated
 results. The coordinator performed the single credential-backed capture and

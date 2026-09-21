@@ -342,6 +342,32 @@ class InvestigationTests(unittest.TestCase):
         self.assertEqual(summary["completed_jobs"], 0)
         self.assertEqual(summary["unfinished_jobs"], [{"case_id": "case-a", "repeat": i} for i in (0, 1)])
 
+    def test_persisted_started_attempt_has_unknown_latency_and_is_not_dropped(self):
+        self.prepare()
+        capture = runner.Capture(self.root, "offline-test-placeholder")
+        state = runner.initial_state(self.case, self.evidence)
+        request_path = self.root / "requests" / "interrupted-route.json"
+        runner.write(request_path, runner.routing_request(state, [], self.cards, []))
+        capture.run["attempts"].append({
+            "id": "interrupted-route", "case_id": "case-a", "repeat": 0,
+            "arm": "adaptive", "stage": "route", "status": "started",
+            "request": "requests/interrupted-route.json",
+            "request_sha256": runner.digest(request_path.read_bytes()),
+        })
+        runner.write(capture.path, capture.run)
+        with contextlib.redirect_stdout(io.StringIO()):
+            runner.summarize(self.root)
+        summary = runner.read(self.root / "summary.json")
+        self.assertEqual(summary["attempts"], 1)
+        self.assertEqual(summary["unknown_usage_attempts"], 1)
+        self.assertEqual(summary["unknown_latency_attempts"], 1)
+        self.assertEqual(summary["request_seconds_sum"], 0)
+        self.assertEqual(summary["by_arm_actual"]["adaptive"]["attempts"], 1)
+        self.assertEqual(summary["by_arm_actual"]["adaptive"]["unknown_latency_attempts"], 1)
+        self.assertEqual(summary["by_arm_actual"]["adaptive"]["request_seconds_sum"], 0)
+        self.assertEqual(summary["completed_jobs"], 0)
+        self.assertEqual(len(summary["unfinished_jobs"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

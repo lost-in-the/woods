@@ -255,6 +255,10 @@ def prepare(args):
     write(root / 'catalog.json', catalog)
     write(root / 'question-definitions.json', {'mechanisms': MECHANISMS, 'focused': focus_questions({'observed_source': []})})
     (root / 'protocol.md').write_bytes((HERE / 'protocol.md').read_bytes())
+    for name, source in (('runner-snapshot.py.txt', Path(__file__)),
+                         ('bank-runner-snapshot.py.txt', BANK_DIR / 'runner.py'),
+                         ('presentation-snapshot.py.txt', BANK_DIR / 'presentation.py')):
+        (root / name).write_bytes(source.read_bytes())
     write(root / 'preflight.json', {'version': VERSION, 'cases': len(cases), 'repeats': REPEATS,
           'maximum_calls': len(jobs) * 5, 'expected_scan_calls': len(jobs), 'details': summaries,
           'runner_sha256': digest(Path(__file__).read_bytes()), 'bank_runner_sha256': digest((BANK_DIR / 'runner.py').read_bytes()),
@@ -395,15 +399,20 @@ def summarize(root):
     for arm in ('shared', 'static', 'adaptive'):
         rows = [r for r in cap['attempts'] if r['arm'] == arm]
         arms[arm] = {'attempts': len(rows), 'usage': {k: sum(r.get('usage', {}).get(k, 0) for r in rows) for k in usage},
-                     'request_seconds_sum': sum(r['elapsed_seconds'] for r in rows),
+                     'request_seconds_sum': sum(r.get('elapsed_seconds', 0) for r in rows),
+                     'unknown_latency_attempts': sum('elapsed_seconds' not in r for r in rows),
                      'unknown_usage_attempts': sum('usage' not in r for r in rows)}
     planned = {(r['case_id'], r['repeat']) for r in read(root / 'schedule.json')}
     completed = {(r['case_id'], r['repeat']) for r in cap['jobs']}
-    summary = {'version': VERSION, 'finished': cap.get('finished', False), 'attempts': len(cap['attempts']),
+    summary = {'version': VERSION, 'summary_version': '2026-09-21.2',
+               'finished': cap.get('finished', False), 'attempts': len(cap['attempts']),
                'planned_jobs': len(planned), 'completed_jobs': len(completed),
                'unfinished_jobs': [{'case_id': cid, 'repeat': rep} for cid, rep in sorted(planned - completed)],
                'usage': usage, 'estimated_input_usd': usage['input_tokens'] * .042 / 1_000_000,
                'unknown_usage_attempts': sum('usage' not in r for r in cap['attempts']),
+               'request_seconds_sum': sum(r.get('elapsed_seconds', 0) for r in cap['attempts']),
+               'unknown_latency_attempts': sum('elapsed_seconds' not in r for r in cap['attempts']),
+               'latency_note': 'Sums include only recorded request times. Missing latency remains unknown, not a zero-duration request.',
                'by_arm_actual': arms, 'jobs': cap['jobs'],
                'cost_note': 'Actual total counts shared scans once. Standalone workflows would each add the shared scan allocation; never sum those as actual total.',
                'limits': 'Coordinator validation and private necessary-card coverage are separate from these model judgments; no downstream review token-savings claim.'}

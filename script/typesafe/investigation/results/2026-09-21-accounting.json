@@ -1,0 +1,2741 @@
+{
+  "schema_version": 1,
+  "protocol_version": "2026-09-21.1",
+  "experiment": "bounded-evidence-investigation",
+  "recorded_date": "2026-09-21",
+  "audit_scope": "Offline accounting, deterministic provider-state replay and integrity checks. No new inference and no semantic source adjudication.",
+  "capture_receipts": {
+    "input-freeze.json": "c5be5fe059cfe7fa4078b435c60a6e23ccdaa39aa27b75b653f924e858424c45",
+    "capture.json": "84b6b9b7823bb739bcc4d966274ab3fe8ea5a2460996d01b616651a2607227de",
+    "summary.json": "e84bb9b06f8c3d06b854213dafc8d1ebf7df1be51ba3c3b7d8381dd1b4702630",
+    "protocol.md": "ba05c85dfc8ebc585df5df6ab6636615d6f79441dcc79a95f3860235e69df616",
+    "preflight.json": "0ed0c652454847f41bf41adb4f4ffa034b50f0491ceb3fe82ac3129df5f9dfaa",
+    "schedule.json": "518d028c7b20042d3358f848fbf47b8e81a5b1abe2112311497c0bfc738fdda0",
+    "coordinator-cases.json": "22d5c3fa76c4ddc5713786b99db1f0d18d81152264e907ccb6e4320f565e3359"
+  },
+  "integrity": {
+    "frozen_input_files_verified": 54,
+    "request_hashes_verified": 80,
+    "response_hashes_verified": 80,
+    "response_validations_recomputed": 80,
+    "requests_exactly_reconstructed_from_allowed_state": 80,
+    "frozen_code_dependencies_match": {
+      "runner_sha256": true,
+      "bank_runner_sha256": true,
+      "presentation_sha256": true
+    },
+    "captured_cards_verified_against_source_and_hash": 40,
+    "private_oracle_receipts_verified": 8,
+    "paired_initial_state_checks": {
+      "investigation-01": {
+        "full_provider_initial_state_equal": true,
+        "menu_equal": true,
+        "runtime_premises_equal": true
+      },
+      "investigation-02": {
+        "full_provider_initial_state_equal": true,
+        "menu_equal": true,
+        "runtime_premises_equal": true
+      },
+      "investigation-03": {
+        "full_provider_initial_state_equal": false,
+        "menu_equal": true,
+        "runtime_premises_equal": true
+      },
+      "investigation-04": {
+        "full_provider_initial_state_equal": true,
+        "menu_equal": true,
+        "runtime_premises_equal": true
+      }
+    },
+    "private_field_key_occurrences_in_provider_state": [],
+    "privacy_check": "Initial states equal the explicit whitelist; routing/focus requests reconstruct exactly from initial state, validated shared-scan hints and actually inspected frozen cards. Unopened bodies and coordinator fields are excluded. Captured runtime timezone is omitted initially and may appear only as inspected source.",
+    "code_verification_basis": "Captured implementation and both imported dependencies matched frozen hashes at audit time. Those exact sources are preserved in commit 6c06c6ca; later reporting fixes do not change the capture.",
+    "captured_code_commit": "6c06c6ca"
+  },
+  "execution": {
+    "finished": true,
+    "cases": 8,
+    "pairs": 4,
+    "repeats_per_case": 2,
+    "planned_jobs": 16,
+    "completed_jobs": 16,
+    "attempts": 80,
+    "shared_scan_calls": 16,
+    "routing_calls": 32,
+    "focused_calls": 32,
+    "actual_status_counts": {
+      "valid": 79,
+      "partial_invalid": 1
+    },
+    "answer_components": 3424,
+    "valid_answer_components": 3423,
+    "invalid_answer_components": 1,
+    "rounding_warning_counts": {
+      "distribution_rounding": 7
+    },
+    "unknown_usage_attempts": 0,
+    "focus_pairs_with_identical_complete_request": 8,
+    "arm_first_counts": {
+      "static": 8,
+      "adaptive": 8
+    }
+  },
+  "actual_spending": {
+    "input_tokens": 282685,
+    "output_tokens": 79897,
+    "estimated_input_usd": 0.011872770000000001,
+    "request_seconds_sum": 37.00416971521918,
+    "pricing_assumption": {
+      "input_usd_per_million": 0.042,
+      "output_usd_per_million": 0
+    },
+    "by_component": {
+      "shared": {
+        "attempts": 16,
+        "input_tokens": 126038,
+        "output_tokens": 69030,
+        "estimated_input_usd": 0.005293596000000001,
+        "request_seconds_sum": 9.888598790043034,
+        "median_request_seconds": 0.596602324018022
+      },
+      "static": {
+        "attempts": 16,
+        "input_tokens": 40422,
+        "output_tokens": 3670,
+        "estimated_input_usd": 0.0016977240000000003,
+        "request_seconds_sum": 6.39055905508576,
+        "median_request_seconds": 0.3772711235214956
+      },
+      "adaptive": {
+        "attempts": 48,
+        "input_tokens": 116225,
+        "output_tokens": 7197,
+        "estimated_input_usd": 0.004881450000000001,
+        "request_seconds_sum": 20.725011870090384,
+        "median_request_seconds": 0.37539362552342936
+      }
+    }
+  },
+  "hypothetical_standalone_workflows_with_shared_scan": {
+    "static": {
+      "attempts": 32,
+      "input_tokens": 166460,
+      "output_tokens": 72700,
+      "estimated_input_usd": 0.0069913200000000005,
+      "request_seconds_sum": 16.279157845128793,
+      "median_case_repeat_request_seconds_sum": 0.9886707005207427
+    },
+    "adaptive": {
+      "attempts": 64,
+      "input_tokens": 242263,
+      "output_tokens": 76227,
+      "estimated_input_usd": 0.010175046000000002,
+      "request_seconds_sum": 30.613610660133418,
+      "median_case_repeat_request_seconds_sum": 1.8264227585168555
+    }
+  },
+  "static_without_unused_scan": {
+    "attempts": 16,
+    "input_tokens": 40422,
+    "output_tokens": 3670,
+    "estimated_input_usd": 0.0016977240000000003,
+    "request_seconds_sum": 6.39055905508576,
+    "median_request_seconds": 0.3772711235214956,
+    "scope": "The static heuristic and focused request do not consume scan signals; a static-only deployment can omit the bank scan entirely. This is an accounting subtraction, not another inference run."
+  },
+  "arm_comparison": {
+    "static": {
+      "planned_case_repeats": 16,
+      "fully_valid_focus_calls": 15,
+      "invalid_focus_calls": 1,
+      "necessary_card_coverage_complete": 8,
+      "unique_cases_with_complete_coverage_on_both_repeats": 4,
+      "designated_cards_observed": 12,
+      "designated_cards_available": 20,
+      "raw_high_leads": 2,
+      "valid_not_high_leads": 13,
+      "unassessed_composed_leads": 1,
+      "high_leads_lacking_designated_cards": 0,
+      "cards_inspected": 32,
+      "stop_or_need_context_count": 0,
+      "focus_observed_source_bytes_sum": 11236,
+      "focus_observed_source_bytes_median": 741.0,
+      "median_arm_request_seconds_per_case_repeat": 0.3772711235214956,
+      "planted_defect": {
+        "planned_case_repeats": 8,
+        "fully_valid_focus_calls": 8,
+        "raw_high_leads": 2,
+        "unassessed_composed_leads": 0
+      },
+      "control": {
+        "planned_case_repeats": 8,
+        "fully_valid_focus_calls": 7,
+        "raw_high_leads": 0,
+        "unassessed_composed_leads": 1
+      }
+    },
+    "adaptive": {
+      "planned_case_repeats": 16,
+      "fully_valid_focus_calls": 16,
+      "invalid_focus_calls": 0,
+      "necessary_card_coverage_complete": 12,
+      "unique_cases_with_complete_coverage_on_both_repeats": 6,
+      "designated_cards_observed": 16,
+      "designated_cards_available": 20,
+      "raw_high_leads": 1,
+      "valid_not_high_leads": 15,
+      "unassessed_composed_leads": 0,
+      "high_leads_lacking_designated_cards": 0,
+      "cards_inspected": 32,
+      "stop_or_need_context_count": 0,
+      "focus_observed_source_bytes_sum": 12195,
+      "focus_observed_source_bytes_median": 791.0,
+      "median_arm_request_seconds_per_case_repeat": 1.1934432429843582,
+      "planted_defect": {
+        "planned_case_repeats": 8,
+        "fully_valid_focus_calls": 8,
+        "raw_high_leads": 1,
+        "unassessed_composed_leads": 0
+      },
+      "control": {
+        "planned_case_repeats": 8,
+        "fully_valid_focus_calls": 8,
+        "raw_high_leads": 0,
+        "unassessed_composed_leads": 0
+      }
+    }
+  },
+  "case_comparison": [
+    {
+      "case_id": "7a9d5822d0",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": false,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.27,
+            0.32
+          ],
+          "contract_probability_median": 0.29500000000000004,
+          "missing_context_probabilities": [
+            0.52,
+            0.51
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.29,
+            0.32
+          ],
+          "contract_probability_median": 0.305,
+          "missing_context_probabilities": [
+            0.51,
+            0.51
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "97bf2156f1",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": true,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.8,
+            0.8
+          ],
+          "contract_probability_median": 0.8,
+          "missing_context_probabilities": [
+            0.6,
+            0.62
+          ],
+          "raw_high_leads": [
+            true,
+            true
+          ],
+          "mechanism_choices": [
+            "calculation",
+            "calculation"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "d3972d97b2",
+            "d3972d97b2"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.78,
+            0.8
+          ],
+          "contract_probability_median": 0.79,
+          "missing_context_probabilities": [
+            0.59,
+            0.58
+          ],
+          "raw_high_leads": [
+            false,
+            true
+          ],
+          "mechanism_choices": [
+            "calculation",
+            "calculation"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "d3972d97b2",
+            "d3972d97b2"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "92daced6e0",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": false,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.25,
+            0.27
+          ],
+          "contract_probability_median": 0.26,
+          "missing_context_probabilities": [
+            0.45,
+            0.42
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.24,
+            0.23
+          ],
+          "contract_probability_median": 0.235,
+          "missing_context_probabilities": [
+            0.44,
+            0.44
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": true,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.32,
+            0.41
+          ],
+          "contract_probability_median": 0.365,
+          "missing_context_probabilities": [
+            0.47,
+            0.46
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "input_contract",
+            "input_contract"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.32,
+            0.35
+          ],
+          "contract_probability_median": 0.33499999999999996,
+          "missing_context_probabilities": [
+            0.48,
+            0.46
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "input_contract",
+            "input_contract"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "49429b5c36",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": false,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.63,
+            0.65
+          ],
+          "contract_probability_median": 0.64,
+          "missing_context_probabilities": [
+            0.69,
+            0.68
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "time_semantics",
+            "time_semantics"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "changed0"
+          ],
+          "necessary_card_coverage": [
+            false,
+            false
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.2,
+            0.22
+          ],
+          "contract_probability_median": 0.21000000000000002,
+          "missing_context_probabilities": [
+            0.41,
+            0.42
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "cd13248951",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": true,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.63,
+            0.62
+          ],
+          "contract_probability_median": 0.625,
+          "missing_context_probabilities": [
+            0.68,
+            0.67
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "time_semantics",
+            "time_semantics"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "changed0",
+            "changed0"
+          ],
+          "necessary_card_coverage": [
+            false,
+            false
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.3,
+            0.34
+          ],
+          "contract_probability_median": 0.32,
+          "missing_context_probabilities": [
+            0.42,
+            0.45
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "none",
+            "none"
+          ],
+          "necessary_card_coverage": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "8f9892b56f",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": false,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.63,
+            0.64
+          ],
+          "contract_probability_median": 0.635,
+          "missing_context_probabilities": [
+            0.62,
+            0.61
+          ],
+          "raw_high_leads": [
+            null,
+            false
+          ],
+          "mechanism_choices": [
+            "transaction_boundary",
+            "transaction_boundary"
+          ],
+          "mechanism_validity": [
+            false,
+            true
+          ],
+          "evidence_choices": [
+            "changed0",
+            "changed0"
+          ],
+          "necessary_card_coverage": [
+            false,
+            false
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.63,
+            0.57
+          ],
+          "contract_probability_median": 0.6,
+          "missing_context_probabilities": [
+            0.61,
+            0.59
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "transaction_boundary",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "changed0",
+            "changed0"
+          ],
+          "necessary_card_coverage": [
+            false,
+            false
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "4ed13b9760",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": true,
+      "arms": {
+        "static": {
+          "contract_probabilities": [
+            0.62,
+            0.59
+          ],
+          "contract_probability_median": 0.605,
+          "missing_context_probabilities": [
+            0.61,
+            0.63
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "transaction_boundary",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "changed0",
+            "changed0"
+          ],
+          "necessary_card_coverage": [
+            false,
+            false
+          ]
+        },
+        "adaptive": {
+          "contract_probabilities": [
+            0.61,
+            0.61
+          ],
+          "contract_probability_median": 0.61,
+          "missing_context_probabilities": [
+            0.59,
+            0.61
+          ],
+          "raw_high_leads": [
+            false,
+            false
+          ],
+          "mechanism_choices": [
+            "none",
+            "none"
+          ],
+          "mechanism_validity": [
+            true,
+            true
+          ],
+          "evidence_choices": [
+            "changed0",
+            "changed0"
+          ],
+          "necessary_card_coverage": [
+            false,
+            false
+          ]
+        }
+      }
+    }
+  ],
+  "invalid_response_components": [
+    {
+      "request_id": "8f9892b56f-0-static-focus",
+      "case_id": "8f9892b56f",
+      "repeat": 0,
+      "arm": "static",
+      "raw_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "transaction_boundary",
+          "confidence": 0.32,
+          "probabilities": {
+            "none": 0.37,
+            "calculation": 0.06,
+            "other_supported": 0.02,
+            "query_behavior": 0.01,
+            "transaction_boundary": 0.36,
+            "persistence": 0.11,
+            "error_handling": 0.02,
+            "lifecycle": 0.01,
+            "test_gap": 0.0,
+            "output_contract": 0.01,
+            "input_contract": 0.01,
+            "time_semantics": 0.0,
+            "unknown": 0.02
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.74,
+          "probabilities": {
+            "none": 0.19,
+            "changed0": 0.81,
+            "961fe0a42e": 0.0,
+            "5e10c1617c": 0.0
+          }
+        }
+      },
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [
+            "choice_not_maximum"
+          ],
+          "warnings": [],
+          "valid": false
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "interpretation": "Mechanism choice violates the highest-probability rule. Preserve the exact answer; composed lead is unassessed, not a negative. Other three components remain valid."
+    }
+  ],
+  "case_repeat_receipts": [
+    {
+      "case_id": "7a9d5822d0",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.29,
+      "valid_missing_context_probability": 0.51,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 672,
+      "arm_request_seconds_sum": 1.0006949040689506,
+      "standalone_with_shared_scan_request_seconds_sum": 1.5223473741207272,
+      "request_receipt": "requests/7a9d5822d0-0-adaptive-focus.json",
+      "response_receipt": "responses/7a9d5822d0-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.27,
+      "valid_missing_context_probability": 0.52,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 672,
+      "arm_request_seconds_sum": 0.41895066504366696,
+      "standalone_with_shared_scan_request_seconds_sum": 0.9406031350954436,
+      "request_receipt": "requests/7a9d5822d0-0-static-focus.json",
+      "response_receipt": "responses/7a9d5822d0-0-static-focus.json"
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.32,
+      "valid_missing_context_probability": 0.51,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 672,
+      "arm_request_seconds_sum": 1.2300523830926977,
+      "standalone_with_shared_scan_request_seconds_sum": 1.7540693180635571,
+      "request_receipt": "requests/7a9d5822d0-1-adaptive-focus.json",
+      "response_receipt": "responses/7a9d5822d0-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.32,
+      "valid_missing_context_probability": 0.51,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 672,
+      "arm_request_seconds_sum": 0.336838393996004,
+      "standalone_with_shared_scan_request_seconds_sum": 0.8608553289668635,
+      "request_receipt": "requests/7a9d5822d0-1-static-focus.json",
+      "response_receipt": "responses/7a9d5822d0-1-static-focus.json"
+    },
+    {
+      "case_id": "97bf2156f1",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.78,
+      "valid_missing_context_probability": 0.59,
+      "mechanism_choice": "calculation",
+      "mechanism_component_valid": true,
+      "evidence_choice": "d3972d97b2",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 683,
+      "arm_request_seconds_sum": 1.1363677939516492,
+      "standalone_with_shared_scan_request_seconds_sum": 1.7017139829113148,
+      "request_receipt": "requests/97bf2156f1-0-adaptive-focus.json",
+      "response_receipt": "responses/97bf2156f1-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "97bf2156f1",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": true,
+      "valid_contract_probability": 0.8,
+      "valid_missing_context_probability": 0.6,
+      "mechanism_choice": "calculation",
+      "mechanism_component_valid": true,
+      "evidence_choice": "d3972d97b2",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 683,
+      "arm_request_seconds_sum": 0.6473190080141649,
+      "standalone_with_shared_scan_request_seconds_sum": 1.2126651969738305,
+      "request_receipt": "requests/97bf2156f1-0-static-focus.json",
+      "response_receipt": "responses/97bf2156f1-0-static-focus.json"
+    },
+    {
+      "case_id": "97bf2156f1",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": true,
+      "valid_contract_probability": 0.8,
+      "valid_missing_context_probability": 0.58,
+      "mechanism_choice": "calculation",
+      "mechanism_component_valid": true,
+      "evidence_choice": "d3972d97b2",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 683,
+      "arm_request_seconds_sum": 1.3238598050083965,
+      "standalone_with_shared_scan_request_seconds_sum": 1.9712632920127362,
+      "request_receipt": "requests/97bf2156f1-1-adaptive-focus.json",
+      "response_receipt": "responses/97bf2156f1-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "97bf2156f1",
+      "pair_id": "investigation-01",
+      "family": "invoice_rounding",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "d3972d97b2",
+        "011fb0e2d3"
+      ],
+      "selected_paths": [
+        "app/services/investigation_line_amounts.rb",
+        "spec/services/investigation_invoice_total_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "d3972d97b2"
+      ],
+      "necessary_cards_observed": [
+        "d3972d97b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": true,
+      "valid_contract_probability": 0.8,
+      "valid_missing_context_probability": 0.62,
+      "mechanism_choice": "calculation",
+      "mechanism_component_valid": true,
+      "evidence_choice": "d3972d97b2",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 683,
+      "arm_request_seconds_sum": 0.3839257310028188,
+      "standalone_with_shared_scan_request_seconds_sum": 1.0313292180071585,
+      "request_receipt": "requests/97bf2156f1-1-static-focus.json",
+      "response_receipt": "responses/97bf2156f1-1-static-focus.json"
+    },
+    {
+      "case_id": "92daced6e0",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.24,
+      "valid_missing_context_probability": 0.44,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 839,
+      "arm_request_seconds_sum": 1.1938279559835792,
+      "standalone_with_shared_scan_request_seconds_sum": 1.8888510770048015,
+      "request_receipt": "requests/92daced6e0-0-adaptive-focus.json",
+      "response_receipt": "responses/92daced6e0-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "92daced6e0",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.25,
+      "valid_missing_context_probability": 0.45,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 839,
+      "arm_request_seconds_sum": 0.42837230599252507,
+      "standalone_with_shared_scan_request_seconds_sum": 1.1233954270137474,
+      "request_receipt": "requests/92daced6e0-0-static-focus.json",
+      "response_receipt": "responses/92daced6e0-0-static-focus.json"
+    },
+    {
+      "case_id": "92daced6e0",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.23,
+      "valid_missing_context_probability": 0.44,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 839,
+      "arm_request_seconds_sum": 1.4282071770285256,
+      "standalone_with_shared_scan_request_seconds_sum": 1.9790718240546994,
+      "request_receipt": "requests/92daced6e0-1-adaptive-focus.json",
+      "response_receipt": "responses/92daced6e0-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "92daced6e0",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.27,
+      "valid_missing_context_probability": 0.42,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 839,
+      "arm_request_seconds_sum": 0.36337506701238453,
+      "standalone_with_shared_scan_request_seconds_sum": 0.9142397140385583,
+      "request_receipt": "requests/92daced6e0-1-static-focus.json",
+      "response_receipt": "responses/92daced6e0-1-static-focus.json"
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.32,
+      "valid_missing_context_probability": 0.48,
+      "mechanism_choice": "input_contract",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 818,
+      "arm_request_seconds_sum": 2.3920482679386623,
+      "standalone_with_shared_scan_request_seconds_sum": 3.1397324019344524,
+      "request_receipt": "requests/2fa1ca8b84-0-adaptive-focus.json",
+      "response_receipt": "responses/2fa1ca8b84-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.32,
+      "valid_missing_context_probability": 0.47,
+      "mechanism_choice": "input_contract",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 818,
+      "arm_request_seconds_sum": 0.3868182589649223,
+      "standalone_with_shared_scan_request_seconds_sum": 1.1345023929607123,
+      "request_receipt": "requests/2fa1ca8b84-0-static-focus.json",
+      "response_receipt": "responses/2fa1ca8b84-0-static-focus.json"
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.35,
+      "valid_missing_context_probability": 0.46,
+      "mechanism_choice": "input_contract",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 818,
+      "arm_request_seconds_sum": 1.2518869610503316,
+      "standalone_with_shared_scan_request_seconds_sum": 1.8237972540664487,
+      "request_receipt": "requests/2fa1ca8b84-1-adaptive-focus.json",
+      "response_receipt": "responses/2fa1ca8b84-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "pair_id": "investigation-02",
+      "family": "json_key_shape",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "2e14f66a9b",
+        "167e6b0606"
+      ],
+      "selected_paths": [
+        "app/services/investigation_digest_request.rb",
+        "spec/services/investigation_digest_options_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "2e14f66a9b"
+      ],
+      "necessary_cards_observed": [
+        "2e14f66a9b"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.41,
+      "valid_missing_context_probability": 0.46,
+      "mechanism_choice": "input_contract",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 818,
+      "arm_request_seconds_sum": 0.586188976012636,
+      "standalone_with_shared_scan_request_seconds_sum": 1.158099269028753,
+      "request_receipt": "requests/2fa1ca8b84-1-static-focus.json",
+      "response_receipt": "responses/2fa1ca8b84-1-static-focus.json"
+    },
+    {
+      "case_id": "49429b5c36",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "4b4617f2b2",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "config/initializers/investigation_calendar.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [
+        "4b4617f2b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.2,
+      "valid_missing_context_probability": 0.41,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 471,
+      "arm_request_seconds_sum": 1.7903066559811123,
+      "standalone_with_shared_scan_request_seconds_sum": 2.34385097498307,
+      "request_receipt": "requests/49429b5c36-0-adaptive-focus.json",
+      "response_receipt": "responses/49429b5c36-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "49429b5c36",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "76d34575d7",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "app/models/investigation_event.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.63,
+      "valid_missing_context_probability": 0.69,
+      "mechanism_choice": "time_semantics",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 494,
+      "arm_request_seconds_sum": 0.3131014519603923,
+      "standalone_with_shared_scan_request_seconds_sum": 0.8666457709623501,
+      "request_receipt": "requests/49429b5c36-0-static-focus.json",
+      "response_receipt": "responses/49429b5c36-0-static-focus.json"
+    },
+    {
+      "case_id": "49429b5c36",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "4b4617f2b2",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "config/initializers/investigation_calendar.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [
+        "4b4617f2b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.22,
+      "valid_missing_context_probability": 0.42,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 471,
+      "arm_request_seconds_sum": 1.1170443500159308,
+      "standalone_with_shared_scan_request_seconds_sum": 1.6865930579951964,
+      "request_receipt": "requests/49429b5c36-1-adaptive-focus.json",
+      "response_receipt": "responses/49429b5c36-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "49429b5c36",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "76d34575d7",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "app/models/investigation_event.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.65,
+      "valid_missing_context_probability": 0.68,
+      "mechanism_choice": "time_semantics",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 494,
+      "arm_request_seconds_sum": 0.37061651604017243,
+      "standalone_with_shared_scan_request_seconds_sum": 0.940165224019438,
+      "request_receipt": "requests/49429b5c36-1-static-focus.json",
+      "response_receipt": "responses/49429b5c36-1-static-focus.json"
+    },
+    {
+      "case_id": "cd13248951",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "4b4617f2b2",
+        "3490d3b85c"
+      ],
+      "selected_paths": [
+        "config/initializers/investigation_calendar.rb",
+        "spec/services/investigation_today_activity_spec.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [
+        "4b4617f2b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.3,
+      "valid_missing_context_probability": 0.42,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 764,
+      "arm_request_seconds_sum": 1.128565359977074,
+      "standalone_with_shared_scan_request_seconds_sum": 1.7528278849786147,
+      "request_receipt": "requests/cd13248951-0-adaptive-focus.json",
+      "response_receipt": "responses/cd13248951-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "cd13248951",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "76d34575d7",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "app/models/investigation_event.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.63,
+      "valid_missing_context_probability": 0.68,
+      "mechanism_choice": "time_semantics",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 494,
+      "arm_request_seconds_sum": 0.3217496580327861,
+      "standalone_with_shared_scan_request_seconds_sum": 0.9460121830343269,
+      "request_receipt": "requests/cd13248951-0-static-focus.json",
+      "response_receipt": "responses/cd13248951-0-static-focus.json"
+    },
+    {
+      "case_id": "cd13248951",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "4b4617f2b2",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "config/initializers/investigation_calendar.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [
+        "4b4617f2b2"
+      ],
+      "necessary_card_coverage_complete": true,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.34,
+      "valid_missing_context_probability": 0.45,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "none",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 497,
+      "arm_request_seconds_sum": 1.09742769098375,
+      "standalone_with_shared_scan_request_seconds_sum": 1.8662428749958053,
+      "request_receipt": "requests/cd13248951-1-adaptive-focus.json",
+      "response_receipt": "responses/cd13248951-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "cd13248951",
+      "pair_id": "investigation-04",
+      "family": "local_calendar_day",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "76d34575d7",
+        "f73677b054"
+      ],
+      "selected_paths": [
+        "app/models/investigation_event.rb",
+        "app/services/investigation_activity_export.rb"
+      ],
+      "necessary_card_ids": [
+        "4b4617f2b2"
+      ],
+      "necessary_cards_observed": [],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.62,
+      "valid_missing_context_probability": 0.67,
+      "mechanism_choice": "time_semantics",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 494,
+      "arm_request_seconds_sum": 0.3137455240357667,
+      "standalone_with_shared_scan_request_seconds_sum": 1.0825607080478221,
+      "request_receipt": "requests/cd13248951-1-static-focus.json",
+      "response_receipt": "responses/cd13248951-1-static-focus.json"
+    },
+    {
+      "case_id": "8f9892b56f",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "933db3b2fe",
+        "5e10c1617c"
+      ],
+      "selected_paths": [
+        "spec/services/investigation_reserve_seats_spec.rb",
+        "app/models/investigation_pool.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.63,
+      "valid_missing_context_probability": 0.61,
+      "mechanism_choice": "transaction_boundary",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 1002,
+      "arm_request_seconds_sum": 1.1981863630353473,
+      "standalone_with_shared_scan_request_seconds_sum": 1.9708167650387622,
+      "request_receipt": "requests/8f9892b56f-0-adaptive-focus.json",
+      "response_receipt": "responses/8f9892b56f-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "8f9892b56f",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": false,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "5e10c1617c",
+        "961fe0a42e"
+      ],
+      "selected_paths": [
+        "app/models/investigation_pool.rb",
+        "app/models/investigation_reservation.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": false,
+      "raw_high_lead": null,
+      "valid_contract_probability": 0.63,
+      "valid_missing_context_probability": 0.62,
+      "mechanism_choice": "transaction_boundary",
+      "mechanism_component_valid": false,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [
+            "choice_not_maximum"
+          ],
+          "warnings": [],
+          "valid": false
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 819,
+      "arm_request_seconds_sum": 0.46202251402428374,
+      "standalone_with_shared_scan_request_seconds_sum": 1.2346529160276987,
+      "request_receipt": "requests/8f9892b56f-0-static-focus.json",
+      "response_receipt": "responses/8f9892b56f-0-static-focus.json"
+    },
+    {
+      "case_id": "8f9892b56f",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "933db3b2fe",
+        "5e10c1617c"
+      ],
+      "selected_paths": [
+        "spec/services/investigation_reserve_seats_spec.rb",
+        "app/models/investigation_pool.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.57,
+      "valid_missing_context_probability": 0.59,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 1002,
+      "arm_request_seconds_sum": 1.1668316049617715,
+      "standalone_with_shared_scan_request_seconds_sum": 1.685443892958574,
+      "request_receipt": "requests/8f9892b56f-1-adaptive-focus.json",
+      "response_receipt": "responses/8f9892b56f-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "8f9892b56f",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": false,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "5e10c1617c",
+        "961fe0a42e"
+      ],
+      "selected_paths": [
+        "app/models/investigation_pool.rb",
+        "app/models/investigation_reservation.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.64,
+      "valid_missing_context_probability": 0.61,
+      "mechanism_choice": "transaction_boundary",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 819,
+      "arm_request_seconds_sum": 0.32143689098302275,
+      "standalone_with_shared_scan_request_seconds_sum": 0.8400491789798252,
+      "request_receipt": "requests/8f9892b56f-1-static-focus.json",
+      "response_receipt": "responses/8f9892b56f-1-static-focus.json"
+    },
+    {
+      "case_id": "4ed13b9760",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "933db3b2fe",
+        "5e10c1617c"
+      ],
+      "selected_paths": [
+        "spec/services/investigation_reserve_seats_spec.rb",
+        "app/models/investigation_pool.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.61,
+      "valid_missing_context_probability": 0.59,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 982,
+      "arm_request_seconds_sum": 1.0766460670274682,
+      "standalone_with_shared_scan_request_seconds_sum": 1.6979404220473953,
+      "request_receipt": "requests/4ed13b9760-0-adaptive-focus.json",
+      "response_receipt": "responses/4ed13b9760-0-adaptive-focus.json"
+    },
+    {
+      "case_id": "4ed13b9760",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": true,
+      "repeat": 0,
+      "arm": "static",
+      "selected_card_ids": [
+        "5e10c1617c",
+        "961fe0a42e"
+      ],
+      "selected_paths": [
+        "app/models/investigation_pool.rb",
+        "app/models/investigation_reservation.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.62,
+      "valid_missing_context_probability": 0.61,
+      "mechanism_choice": "transaction_boundary",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 799,
+      "arm_request_seconds_sum": 0.32341914798598737,
+      "standalone_with_shared_scan_request_seconds_sum": 0.9447135030059144,
+      "request_receipt": "requests/4ed13b9760-0-static-focus.json",
+      "response_receipt": "responses/4ed13b9760-0-static-focus.json"
+    },
+    {
+      "case_id": "4ed13b9760",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "adaptive",
+      "selected_card_ids": [
+        "933db3b2fe",
+        "5e10c1617c"
+      ],
+      "selected_paths": [
+        "spec/services/investigation_reserve_seats_spec.rb",
+        "app/models/investigation_pool.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.61,
+      "valid_missing_context_probability": 0.61,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 982,
+      "arm_request_seconds_sum": 1.1930585299851373,
+      "standalone_with_shared_scan_request_seconds_sum": 1.8290482629672624,
+      "request_receipt": "requests/4ed13b9760-1-adaptive-focus.json",
+      "response_receipt": "responses/4ed13b9760-1-adaptive-focus.json"
+    },
+    {
+      "case_id": "4ed13b9760",
+      "pair_id": "investigation-03",
+      "family": "nested_reservation",
+      "planted_defect": true,
+      "repeat": 1,
+      "arm": "static",
+      "selected_card_ids": [
+        "5e10c1617c",
+        "961fe0a42e"
+      ],
+      "selected_paths": [
+        "app/models/investigation_pool.rb",
+        "app/models/investigation_reservation.rb"
+      ],
+      "necessary_card_ids": [
+        "5e10c1617c",
+        "cf6f99e915"
+      ],
+      "necessary_cards_observed": [
+        "5e10c1617c"
+      ],
+      "necessary_card_coverage_complete": false,
+      "focus_all_components_valid": true,
+      "raw_high_lead": false,
+      "valid_contract_probability": 0.59,
+      "valid_missing_context_probability": 0.63,
+      "mechanism_choice": "none",
+      "mechanism_component_valid": true,
+      "evidence_choice": "changed0",
+      "evidence_component_valid": true,
+      "component_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "focus_observed_source_bytes": 799,
+      "arm_request_seconds_sum": 0.4126789459842257,
+      "standalone_with_shared_scan_request_seconds_sum": 1.0486686789663509,
+      "request_receipt": "requests/4ed13b9760-1-static-focus.json",
+      "response_receipt": "responses/4ed13b9760-1-static-focus.json"
+    }
+  ],
+  "limitations": [
+    "Four curated mechanism pairs and correlated repeats are descriptive, not independent samples or evidence of population-level accuracy.",
+    "The menus contain five curated source cards each; this tests selection among available cards, not autonomous filename or repository discovery.",
+    "Necessary-card coverage is an offline diagnostic, not proof of semantic sufficiency or a claim that other evidence cannot establish the concern. It never enters provider state.",
+    "Raw high leads follow the frozen >=0.8 contract plus valid mechanism/location rule. They are not confirmed findings; an invalid composed lead is null, not false.",
+    "One static control focus has an invalid mechanism choice; its .63 contract, .62 missing-context and changed0 evidence components remain valid and preserved.",
+    "No at-threshold control leads were produced among valid composed judgments; this does not certify the controls against every possible defect.",
+    "Actual totals count shared scans once. Standalone workflows each include that scan and must not be added to estimate actual spending.",
+    "The static policy does not consume the initial scan. Static-with-shared-scan is not the cheapest static implementation; static_without_unused_scan reports the removable cost.",
+    "No no-bank routing ablation was run; the adaptive coverage gain cannot be attributed specifically to the 204-question scan.",
+    "Source-byte counts include changed and inspected source once per focused packet, repeated across case/repeat observations. They are not total request bytes or token counts.",
+    "Latency is the sum of measured request durations, excluding local preparation, file writes and other orchestration. It is not total process wall-clock time or downstream reviewer time.",
+    "The .78/.80 adaptive rounding outputs and .80/.80 static outputs used identical focused inputs; the high-band difference does not demonstrate superior evidence selection.",
+    "No downstream reviewer, token-to-first-finding or production merge-decision outcome was measured."
+  ],
+  "post_capture_reporting_correction": {
+    "summary_version": "2026-09-21.2",
+    "description": "After capture, an offline regression reproduced a KeyError when summarizing a persisted started attempt without elapsed_seconds. The reporting fix sums known durations and counts unknown latency globally and per arm. Future preparation also freezes copies of the runner and two imported code dependencies.",
+    "original_captured_code_commit": "6c06c6ca",
+    "original_frozen_capture_summary_regenerated": false,
+    "effect_on_this_capture": "None. All 80 captured attempts already have valid durations; original inputs, requests, responses, capture and summary hashes remain unchanged.",
+    "regression_before_fix": "test_persisted_started_attempt_has_unknown_latency_and_is_not_dropped failed with KeyError: elapsed_seconds.",
+    "validation_after_fix": {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s script/typesafe/investigation -p 'test_*.py' -q",
+      "tests_passed": 19
+    },
+    "corrected_runner_sha256": "c39fc1f8bcf8b68785e6b88e51aa8c9b120ed3d17e86d75091bc64c78c6236e4"
+  }
+}
