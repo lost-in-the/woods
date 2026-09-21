@@ -64,7 +64,7 @@ The Index Server defines **29 schemas**: the packaged executable registers **14*
 | Snapshot (4) | 4 | Extraction with `enable_snapshots = true` normally creates `woods.sqlite3`, which packaged servers discover. If extraction used the JSON fallback, set `WOODS_SNAPSHOTS=true` on the standalone server. Custom embedded servers pass `snapshot_store:`. Internal SQLite migrations are automatic. Tools: `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
 | `notion_sync` | 1 | `notion_api_token` + `notion_database_ids` both set |
 
-`codebase_retrieve` is always registered (no `retrieve` alias exists), but only returns results once an embedding provider is configured and `rake woods:embed` has run.
+`codebase_retrieve` is always registered (no `retrieve` alias exists). Default semantic mode requires an embedding provider and a completed `woods:embed` run. Explicit `WOODS_RETRIEVAL_MODE=lexical` ranks published extraction units without a provider or embeddings; set it in the MCP process environment and restart the server. See [embedding-free lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval).
 
 If an agent reports a missing tool, compare its request with the connected server's registered list and [MCP server boundaries](MCP_SERVERS.md#conditional-index-capabilities). The normal packaged executable does not wire operator or feedback collaborators. **Console Server tools are not all unconditionally registered**: 31 tool schemas exist as an inventory, but only the 9 Tier 1 tools are executable by default, or 11 with `console_embedded_read_tools: true` (adds `console_sql`/`console_query`). Tier 2, Tier 3, and `console_eval` are schema-only in every supported mode; there is no bridge or confirmation flow that unlocks them. See [MCP servers](MCP_SERVERS.md#console-server) for the supported inventory.
 
@@ -551,7 +551,7 @@ Static tools miss all of these because they only exist after Rails processes the
 }
 ```
 
-**What you'll get:** Units with no dependents, nothing in the codebase references them. Good candidates for removal or investigation.
+**What you'll get:** Units with no recorded dependents in the published graph, excluding types treated as natural entry points. These are candidates for investigation, not proof of dead code. Method-body references and dynamic callers may be missing; verify source references, framework entry points, and runtime usage before removing anything. See [dependency graph coverage](MCP_SERVERS.md#dependency-graph-coverage).
 
 ---
 
@@ -811,7 +811,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 
 ### "Find code related to subscription billing"
 
-**Tool:** `codebase_retrieve` (Index Server, requires embedding provider)
+**Tool:** `codebase_retrieve` (Index Server, semantic or explicit lexical mode)
 
 ```json
 {
@@ -820,7 +820,7 @@ Keys without a recognised suffix fall through to ActiveRecord `where(hash)` equa
 }
 ```
 
-**What you'll get:** A token-budgeted context string of the most semantically relevant units, ranked by hybrid search (semantic + keyword + PageRank). Requires an embedding provider (`embedding_provider: :openai` or `:ollama`) to be configured.
+**What you'll get:** Ranked context within an estimated text-token budget. Default semantic mode uses configured embeddings and hybrid ranking; explicit lexical mode uses field-aware BM25 over published units, without a provider or `woods:embed`. The same query works in either configured mode, though rankings differ. Confirm the active mode with `woods_status.retriever.mode`; see the [retrieval guide](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) for setup and budget limits.
 
 ---
 

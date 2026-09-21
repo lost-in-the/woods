@@ -96,7 +96,7 @@ partial write:
 
 | Failure | What happens |
 |---|---|
-| Reload raises (`SyntaxError`, `NameError`) | Degraded status naming the reason; index intact at generation N; retried on the next event |
+| Reload raises (`SyntaxError`, `NameError`) | Degraded status naming the reason; index intact at generation N; pending paths retried on the next file event or heartbeat |
 | Extraction raises | Degraded status; generation not advanced |
 | Payload directory can't be opened, over a payload-born index | Degraded status; generation not advanced. An incremental run only writes the units it touched, so there is no complete flat index it could fall back to publishing, see [Payload publishing](#payload-publishing) |
 | Index written but the generation bump failed | Degraded status; paths carried forward. The extractor deliberately does not fail an otherwise-good extraction over an unwritable marker, but the marker *is* what readers refresh on, so the daemon cross-checks that the number moved rather than reporting `running` over an index nothing can see |
@@ -119,17 +119,23 @@ at a known generation, reason attached), `stopped` (nothing is maintaining this
 index). A stale answer is only dangerous when nothing says so.
 
 The file is written world-readable (0644) by design: host-side hooks read it
-through a bind mount. Every other artifact Woods writes stays at 0600.
+through a bind mount. Writes through `Woods::AtomicFile` default to owner-only
+0600 unless the caller supplies another mode. This is not a guarantee for every
+Woods artifact: the SQLite metadata store does not enforce 0600, and a newly
+created database uses 0644 under umask 022. Restrict access to the output
+directory according to the source and metadata it contains.
 
 Note that `SyntaxError` is a `ScriptError`, not a `StandardError`. Rescuing
 only the latter would let a half-typed file kill the daemon.
 
 A cycle that fails to land its work never loses its paths. Lock contention, a
 failed reload, and a raising extraction all carry the batch into `@pending`, and
-the next cycle folds it back in, the files really did change, and no later
-event will mention them again. The retry is not a tight loop: a degraded cycle
-ends the drain and waits for the next event, because the cause needs an edit to
-clear.
+the next cycle folds it back in even if no new event mentions those files.
+A degraded cycle ends the current drain to avoid a tight retry loop. Pending
+paths are retried on the next file event or [heartbeat](#the-heartbeat), so a
+finished contending writer does not require another edit to trigger recovery.
+Heartbeat retries use a separate worker so status updates and lock refresh
+continue while extraction runs.
 
 ### The heartbeat
 

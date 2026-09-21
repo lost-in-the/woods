@@ -180,7 +180,7 @@ failure boundary; they do not prove uniqueness or become `ambiguous_identity` er
 Use `depth: 0` for the request timeline, or inspect candidates with typed `lookup`
 calls. Re-extraction does not remove a legitimate cross-type collision. Successful
 traces retain their existing identifiers and response shape; target identity has
-not been migrated globally. These corrections are unreleased after `2.0.0.beta2`.
+not been migrated globally. These corrections are available in `2.0.0.beta3`.
 
 The server also exposes MCP resources and resource templates for indexed units. Tool descriptions returned by MCP are the parameter-level source of truth; [Agent guide](AGENT_GUIDE.md) explains selection strategy.
 

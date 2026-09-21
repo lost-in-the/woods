@@ -468,6 +468,6 @@ To register `console_sql` and `console_query`, enable
 
 ### Woods MCP tools not available in a git worktree
 
-When working in a git worktree, subagents may not find the woods MCP servers because `.mcp.json` discovery is path-based and the worktree has a different root directory. See [MCP_WORKTREE_SETUP.md](MCP_WORKTREE_SETUP.md) for the fix and verification steps.
+A separate Claude Code session launched in a worktree may have different project-scoped MCP registrations. Subagents inherit the parent session's MCP tools, subject to tool restrictions; changing their working directory does not select a different Woods index. Check registration, the Compose service's mounted checkout, and the served index using [MCP worktree setup](MCP_WORKTREE_SETUP.md).
 
 See [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) for detailed console server documentation.
