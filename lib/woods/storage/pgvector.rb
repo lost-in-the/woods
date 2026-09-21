@@ -26,6 +26,7 @@ module Woods
       class Pgvector # rubocop:disable Metrics/ClassLength
         include Interface
 
+        MAX_HNSW_DIMENSIONS = 2000
         TABLE = 'woods_vectors'
         TABLE_NAME_PATTERN = /\A[a-z_][a-z0-9_]*\z/
 
@@ -219,9 +220,12 @@ module Woods
         private
 
         def normalize_dimensions(value)
-          return value if value.is_a?(Integer) && value.positive?
+          raise ArgumentError, 'dimensions must be a positive Integer' unless value.is_a?(Integer) && value.positive?
+          return value if value <= MAX_HNSW_DIMENSIONS
 
-          raise ArgumentError, 'dimensions must be a positive Integer'
+          raise ArgumentError,
+                "pgvector HNSW vector dimensions must be at most #{MAX_HNSW_DIMENSIONS}, got #{value}. " \
+                'Request a supported provider output width or choose another vector backend.'
         end
 
         def validate_identifier!(name, value, original)

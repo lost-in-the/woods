@@ -368,6 +368,10 @@ bundle exec rake woods:embed
 | `text-embedding-3-small` (default) | 1536 |
 | `text-embedding-3-large` | 3072 |
 
+Woods' pgvector HNSW adapter supports at most 2,000 dimensions. For the large
+model, request a supported output width explicitly or choose another backend;
+see [pgvector configuration](CONFIGURATION_REFERENCE.md#pgvector-postgresql).
+
 **Ollama default model:** `nomic-embed-text`. Dimensions are detected dynamically on first embed.
 
 ---

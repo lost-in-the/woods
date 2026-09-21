@@ -73,7 +73,7 @@ RSpec.describe 'Pgvector generator template' do
   end
 
   it 'renders the vector column with the --dimensions option' do
-    expect(render(3072)).to include('vector(3072)')
+    expect(render(2000)).to include('vector(2000)')
   end
 end
 

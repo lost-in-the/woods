@@ -46,6 +46,19 @@ RSpec.describe Woods::Storage::VectorStore::Pgvector do
       end
     end
 
+    it 'accepts the HNSW vector boundary without changing the configured width' do
+      expect(described_class.new(connection: connection, dimensions: 2000).dimensions).to eq(2000)
+    end
+
+    [2001, 3072].each do |dimensions|
+      it "rejects unsupported HNSW width #{dimensions} before any database call" do
+        expect(connection).not_to receive(:execute)
+        expect(connection).not_to receive(:transaction)
+        expect { described_class.new(connection: connection, dimensions: dimensions) }
+          .to raise_error(ArgumentError, /pgvector.*2000.*#{dimensions}/)
+      end
+    end
+
     it 'rejects invalid dimensions and schema identifiers before executing SQL' do
       expect { described_class.new(connection: connection, dimensions: '0') }
         .to raise_error(ArgumentError, /dimensions must be a positive Integer/)

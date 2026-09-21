@@ -208,6 +208,25 @@ config.vector_store_options = {
 }
 ```
 
+Woods uses an HNSW index over pgvector's `vector` representation, which supports
+**1–2,000 dimensions** ([pgvector's HNSW limits](https://github.com/pgvector/pgvector#hnsw)).
+Unreleased after `2.0.0.beta3`: the adapter rejects wider dimensions before any
+SQL, and `woods:pgvector` rejects invalid widths before writing a migration.
+There is no automatic vector truncation or half-precision conversion.
+
+The default `text-embedding-3-large` output is 3,072 dimensions. With pgvector,
+explicitly request a supported provider output width, for example:
+
+```ruby
+config.embedding_model = 'text-embedding-3-large'
+config.embedding_options = { dimensions: 1536 }
+```
+
+Keep the provider, `vector_store_options[:dimensions]` (when set), and generated
+migration width equal. Changing a stored width requires a compatible new table
+or an intentional index rebuild; changing the setting does not resize old data.
+Use another backend if you need the full 3,072-dimensional output.
+
 Requires the pgvector extension. Run the generator to create migrations:
 
 ```bash

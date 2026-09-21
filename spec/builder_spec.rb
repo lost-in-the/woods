@@ -389,6 +389,19 @@ RSpec.describe Woods::Builder do
       allow(pg_store).to receive(:stored_dimensions).and_return(nil)
     end
 
+    [nil, 3072].each do |provider_dimensions|
+      it "refuses an unsupported width before SQL with provider dimensions #{provider_dimensions.inspect}" do
+        allow(Woods::Storage::VectorStore::Pgvector).to receive(:new).and_call_original
+        config.vector_store_options = { connection: fake_connection, dimensions: 3072 }
+        expect(fake_connection).not_to receive(:execute)
+        expect(fake_connection).not_to receive(:transaction)
+
+        expect { described_class.new(config).build_vector_store(dimensions: provider_dimensions) }
+          .to raise_error(ArgumentError, /pgvector.*2000.*3072/)
+        expect(config.vector_store_options[:dimensions]).to eq(3072)
+      end
+    end
+
     it 'calls ensure_schema! after construction so the woods_vectors table exists' do
       expect(pg_store).to receive(:ensure_schema!)
 
