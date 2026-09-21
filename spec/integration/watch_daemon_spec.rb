@@ -358,3 +358,75 @@ end
     end
   end
 end
+
+RSpec.describe 'Watch startup after a deleted initializer', :booted_app do
+  it 'publishes the same middleware facts as a fresh full extraction' do
+    require 'open3'
+    require 'timeout'
+    require 'woods/generation'
+
+    Dir.mktmpdir('woods_deleted_initializer') do |root|
+      repository = File.expand_path('../..', __dir__)
+      FileUtils.mkdir_p(File.join(root, 'config/initializers'))
+      File.write(File.join(root, 'config/database.yml'), "development:\n  adapter: sqlite3\n  database: ':memory:'\n")
+      File.write(File.join(root, 'Rakefile'), <<~RAKE)
+        require 'rake'
+        require 'logger'
+        require 'rails'
+        require 'active_record/railtie'
+        require 'action_controller/railtie'
+        require 'action_mailer/railtie'
+        require 'active_job/railtie'
+        require 'woods'
+        class DeletedInitializerApplication < Rails::Application
+          config.root = #{root.inspect}
+          config.eager_load = false
+          config.secret_key_base = 'woods-watch-fixture'
+          config.logger = Logger.new(IO::NULL)
+          config.active_record.database_selector = nil
+        end
+        Rails.application = DeletedInitializerApplication.instance
+        task :environment do
+          Rails.application.initialize!
+          ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
+          Woods.configuration.concurrent_extraction = false
+          Woods.configuration.include_framework_sources = false
+          present = Rails.application.middleware.any? { |entry| entry.klass.name == 'Rack::Runtime' }
+          puts "RUNTIME_PRESENT=\#{present}"
+        end
+        load #{File.join(repository, 'lib/tasks/woods.rake').inspect}
+      RAKE
+      initializer = File.join(root, 'config/initializers/remove_runtime.rb')
+      File.write(initializer, "Rails.application.config.middleware.delete Rack::Runtime\n")
+      output_dir = File.join(root, 'tmp/woods')
+      env = {
+        'BUNDLE_GEMFILE' => File.expand_path(ENV.fetch('BUNDLE_GEMFILE', 'Gemfile')),
+        'RAILS_ENV' => 'development', 'WOODS_OUTPUT' => output_dir,
+        'WOODS_WATCH_POLL' => '1', 'WOODS_WATCH_IDLE_TIMEOUT' => '0.15',
+        'WOODS_WATCH_DEBOUNCE' => '0'
+      }
+      run = lambda do |task|
+        stdout, stderr, status = Timeout.timeout(120) do
+          Open3.capture3(env, RbConfig.ruby, File.join(repository, 'bin/rake'),
+                         '--rakefile', File.join(root, 'Rakefile'), task, chdir: root)
+        end
+        expect(status.success?).to be(true), "#{stdout}\n#{stderr}"
+        stdout
+      end
+      middleware = lambda do
+        payload = Woods::Generation.new(output_dir: output_dir).payload_dir
+        path = Dir[payload.join('middleware/*.json')].find { |file| !file.end_with?('_index.json') }
+        JSON.parse(File.read(path)).fetch('source_code')
+      end
+
+      expect(run.call('woods:watch')).to include('RUNTIME_PRESENT=false')
+      expect(middleware.call).not_to include('Rack::Runtime')
+      File.unlink(initializer)
+      expect(run.call('woods:watch')).to include('RUNTIME_PRESENT=true')
+      watched = middleware.call
+      expect(watched).to include('Rack::Runtime')
+      run.call('woods:extract')
+      expect(middleware.call).to eq(watched)
+    end
+  end
+end

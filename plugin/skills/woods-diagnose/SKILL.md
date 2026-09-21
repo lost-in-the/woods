@@ -46,6 +46,19 @@ For versions documenting environment-boot snapshots, confirm that the command is
 `bundle exec rake woods:watch`, with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
+### Watch retains facts from an initializer deleted while stopped
+
+Record the installed revision. Unreleased after `2.0.0.beta3`, startup preserves
+registered deleted boot inputs as full-extraction obligations. On earlier builds,
+stop watch, run a successful full extraction in a fresh process, then restart
+standalone `woods:watch`. See the installed version's watch guide.
+
+### A cleaned index directory still exists
+
+Unreleased after `2.0.0.beta3`, `woods:clean` retains the output directory and
+hidden extraction guard for concurrent writer coordination. Verify published
+artifacts are gone; do not remove that guard while writers may be running.
+
 ### Watch misses edits under a shared directory alias
 
 Check the installed version: logical alias preservation (#445) is available in Woods `2.0.0.beta3`.

@@ -169,6 +169,9 @@ is alive, so *alive has to mean covered*.
 The standalone `woods:watch` task snapshots reload/restart inputs before invoking
 Rails' `environment` task. Inputs unchanged across that boundary, including
 carried paths that remain deleted, may be reconciled by a full extraction.
+Unreleased after `2.0.0.beta3`: registered restart inputs deleted while the
+daemon was stopped also trigger a full extraction after a fresh environment
+boot. Nominal framework paths still use the bounded deletion sweep.
 Changes during environment initialization still require restart. Lock contention,
 extraction failure, and publication failure retain the full-reconciliation
 obligation for retry; a successful publish clears it.
@@ -208,8 +211,9 @@ already tolerate the duplicate paths this produces against whatever catch-up
 finds on its own via the tree scan.
 
 Deletions need one extra step, because a deleted file leaves no mtime to scan:
-if any path the index attributes a unit to is gone from disk, the daemon runs
-one cycle with an *empty* change set, which reaches the ghost units through the
+registered restart inputs follow the full-reconciliation rule above. For other
+registered paths gone from disk, a deletion-only startup runs one cycle with an
+*empty* change set, which reaches the ghost units through the
 extractor's bounded deletion sweep. Deliberately empty, naming the paths would
 make the deletions authoritative for every unit type, and some registered paths
 are nominal (on Rails < 7.1, `ActiveRecord::SchemaMigration` registers a
