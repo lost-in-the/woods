@@ -31,7 +31,7 @@ end
 # whole library just to check one file is wasted work on every boot. A
 # payload-born index has no manifest.json at the root — it lives under the
 # directory generation.json's `payload` pointer names — so the pointer is
-# followed here too, with the same escape guard, before concluding the
+# followed here too, with the same realpath containment check, before concluding the
 # directory holds no index. woods-mcp re-checks this properly through
 # Bootstrapper regardless; this is just an early, friendlier exit.
 def manifest_present?(index_dir)
@@ -45,8 +45,8 @@ def manifest_present?(index_dir)
   payload_name = JSON.parse(Woods::AtomicFile.read(generation_path))['payload']
   return false unless payload_name.is_a?(String) && !payload_name.empty?
 
-  root = File.expand_path(index_dir)
-  candidate = File.expand_path(File.join(root, payload_name))
+  root = File.realpath(index_dir)
+  candidate = File.realpath(payload_name, root)
   return false unless candidate.start_with?("#{root}#{File::SEPARATOR}")
 
   File.file?(File.join(candidate, 'manifest.json'))
