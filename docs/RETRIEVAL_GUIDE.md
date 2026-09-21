@@ -63,7 +63,7 @@ Keyword results are scored by how many distinct fields matched (identifier, sour
 
 ## Configuring Retrieval
 
-Retrieval requires an embedding provider and a vector store. Set these in `config/initializers/woods.rb`.
+Semantic retrieval requires an embedding provider and a vector store. Configure these in `config/initializers/woods.rb` before embedding. For provider-free ranked retrieval over extraction output, use [explicit lexical mode](#embedding-free-lexical-retrieval) in the MCP process environment instead.
 
 ### Presets (recommended)
 
