@@ -55,6 +55,28 @@ RSpec.describe 'Published compact evidence tools' do
     expect(data[:generation_status]).to eq('unavailable')
   end
 
+  %w[full compact outline].each do |mode|
+    [false, true].each do |scoped|
+      it "reports budgeted lexical source counts in #{mode} published retrieval, scoped=#{scoped}" do
+        options = scoped ? { source_paths: ['app/models'] } : {}
+        [40, 450].each do |budget|
+          result = call_tool('codebase_retrieve', query: 'refund', evidence: mode, budget: budget, **options)
+          expect(result[:isError]).not_to be(true)
+          text = result[:content].first[:text]
+          included = text.scan(/^## Invoice \(model\)$/).size
+          expect(text).to include("sources included: #{included};", 'candidates considered: 1; candidate limit: 20;')
+          expect(text.length).to be <= budget * 4
+          expect(result[:structuredContent][:text]).to eq(text)
+          expect(result[:structuredContent][:data][:sources].size).to eq(included) if scoped || mode != 'full'
+          next unless scoped
+
+          expect(result[:structuredContent][:data][:applied_scope])
+            .to include(candidate_count: 1, returned_units: included, outcome: 'matched')
+        end
+      end
+    end
+  end
+
   it 'distinguishes typed collisions and follows a full-evidence SHA guard without changing full lookup' do
     publish('Invoice', 'service', 'class Invoice; def service_call; end; end')
     result = call_tool('lookup', identifier: 'Invoice', type: 'model', evidence: 'compact', query: 'refund',
