@@ -126,7 +126,7 @@ Summarize and link from secondary pages; do not copy full setup blocks into FAQ 
 
 ## Release flow
 
-`main` carries `X.Y.Z.alpha` between releases and never claims a released version. `.claude/skills/release-flow/SKILL.md` is the agent-facing contract; the release flow section of `CONTRIBUTING.md` is the runbook.
+`main` starts a version line at `X.Y.Z.alpha`, retains the last prepared beta/RC during prerelease development, and reopens to a later alpha only after a final release. A Git checkout may include unreleased changes with the same VERSION as the last tag: record its revision and loaded gem path when validating capabilities. `.claude/skills/release-flow/SKILL.md` is the agent-facing contract; the release flow section of `CONTRIBUTING.md` is the runbook.
 
 - Never edit `lib/woods/version.rb` or a `release-state` documentation fence by hand.
 - Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings, or in `changelog/<type>_<slug>.md` (format in CONTRIBUTING.md).

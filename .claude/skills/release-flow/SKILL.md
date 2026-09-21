@@ -5,9 +5,10 @@ description: Woods release flow: the version states `main` moves through, the on
 
 # Release Flow
 
-`main` is the development branch and never claims a released version. Between
-releases it carries the alpha development marker. Every release, including a
-beta or a release candidate, is an explicit commit plus a tag.
+`main` is the development branch. It starts a version line at alpha and
+retains the last prepared beta/RC version during prerelease iteration. After a
+final release, `release:reopen` moves it to a later alpha. A published release
+is the exact tagged commit, not every checkout reporting that version.
 
 `CONTRIBUTING.md` (the "Release flow" section) is the canonical user-facing
 document. This skill is the agent-facing version: the rules, the commands, and
@@ -27,7 +28,11 @@ RubyGems treats any letter in a version as a prerelease, so a `~> 1.6` or
 takes one explicitly: `gem "woods", "2.0.0.beta1"`.
 
 The state is derived from `Woods::VERSION` alone, by
-`Woods::Release::VersionState`. Nothing else records it.
+`Woods::Release::VersionState`. This is the declared version state, not proof
+that the checkout is the published tag. For a Git-sourced candidate, record the
+locked revision, loaded gem path, and working-tree changes as well as VERSION.
+Use that commit for unreleased capability checks and evidence links; generated
+release-state links still describe the prepared version.
 
 ## 2. Rules during ordinary feature work
 
@@ -54,7 +59,7 @@ or publishes.
 | Alpha to the first beta | `bin/rake "release:prepare[2.0.0.beta1]"` |
 | Beta to the next beta or a release candidate | `bin/rake "release:prepare[2.0.0.rc1]"` |
 | Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
-| After the release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
+| After a final release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
 
 `release:prepare` bumps VERSION, folds `## [Unreleased]` and optional entry files into
 `## [<version>] - <date>` with one block per `###` heading, leaves an empty
@@ -65,7 +70,10 @@ empty entries, headings, or symlinks refuse before any write. A prepared release
 has no entry files; the tag validator rejects any leftovers at the release SHA
 even if more inline Unreleased notes exist. Ordinary beta-cycle work can still
 collect new entries before the next prepare. `release:reopen` sets the next alpha and
-restores the alpha documentation state; it leaves the changelog alone.
+restores the alpha documentation state; it leaves the changelog alone. Reopen
+accepts only a final release and a strictly later alpha. It rejects beta/RC
+inputs; do not hand-edit VERSION or force a backwards transition to satisfy an
+alpha-only reading of the development policy.
 
 Every rewrite is computed before any of it is written, so a refusal leaves the
 working tree untouched. Never "finish" a refused prepare by hand.

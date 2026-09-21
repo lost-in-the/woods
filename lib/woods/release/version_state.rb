@@ -6,10 +6,11 @@ module Woods
   module Release
     # The release state of the tree, derived from `Woods::VERSION` alone.
     #
-    # `main` carries `X.Y.Z.alpha` between releases: a development marker that
-    # is never tagged and never published. A release commit sets
-    # `X.Y.Z.betaN`, `X.Y.Z.rcN`, or `X.Y.Z` and is tagged `v<VERSION>`. After a
-    # final release, `release:reopen` sets the next `.alpha`.
+    # A version line starts at `X.Y.Z.alpha`, never tagged or published.
+    # Preparation sets `X.Y.Z.betaN`, `X.Y.Z.rcN`, or `X.Y.Z` for a release
+    # commit. Beta/RC development retains that version until the next prepare;
+    # VERSION alone does not identify the tagged tree. After a final release,
+    # `release:reopen` sets a strictly later `.alpha`.
     class VersionState # rubocop:disable Metrics/ClassLength
       # Raised when a string is not one of the four version shapes above.
       class InvalidVersion < Error; end
@@ -134,8 +135,8 @@ module Woods
         base
       end
 
-      # The git ref that immutably identifies this tree. An alpha is never
-      # tagged, so its documentation and gemspec metadata point at the branch.
+      # Documentation ref for the declared version. Alpha links use main;
+      # prepared versions use their tag, even during later beta/RC development.
       def release_ref
         alpha? ? 'main' : tag
       end

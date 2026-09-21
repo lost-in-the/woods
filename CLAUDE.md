@@ -267,7 +267,7 @@ See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking it
 
 ## Release Flow
 
-`main` carries `X.Y.Z.alpha` between releases and never claims a released version. Never edit `lib/woods/version.rb` by hand, never hand-edit a `release-state` fence, and put changelog entries under `## [Unreleased]` or in `changelog/<type>_<slug>.md` (see CONTRIBUTING.md). One command per transition: `bin/rake "release:prepare[<version>]"` and `bin/rake "release:reopen[<next>.alpha]"`. Tagging and publication are maintainer steps; nothing is published from a laptop.
+`main` starts a version line at alpha, retains the last prepared beta/RC during prerelease iteration, and reopens to a later alpha after a final release. Identify Git-sourced candidates by revision and loaded gem path as well as VERSION; later commits with the same version are not the published tag. Never edit `lib/woods/version.rb` by hand, never hand-edit a `release-state` fence, and put changelog entries under `## [Unreleased]` or in `changelog/<type>_<slug>.md` (see CONTRIBUTING.md). One command per transition: `bin/rake "release:prepare[<version>]"` and `bin/rake "release:reopen[<next>.alpha]"`. Tagging and publication are maintainer steps; nothing is published from a laptop.
 
 See `.claude/skills/release-flow/SKILL.md` for the states, the refusals, and what to report, and the release flow section of `CONTRIBUTING.md` for the user-facing runbook.
 
