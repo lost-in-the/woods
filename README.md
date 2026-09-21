@@ -4,11 +4,46 @@
 
 # Woods
 
-**Give AI coding agents a runtime-accurate map of your Rails application.**
+**Give coding agents the Rails context that source files alone leave out.**
 
 [![Gem Version](https://img.shields.io/gem/v/woods)](https://rubygems.org/gems/woods)
 [![CI](https://github.com/lost-in-the/woods/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lost-in-the/woods/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
+
+Woods boots your Rails application, extracts its resolved structure, and publishes an index that coding agents can query through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). It brings together database schema, associations, callbacks, concerns, routes, and source code so an agent can inspect how Rails assembles your application.
+
+Requires **Ruby 3.0+ and Rails 6.0–8.x**, with an application that can boot and connect to its database. Structural queries need no embedding provider or vector database.
+
+[Get started](#five-minute-setup) · [Documentation](docs/README.md) · [Agent setup](docs/AGENT_SETUP.md) · [Upgrade from 1.x](docs/UPGRADING_TO_2.md)
+
+## What Woods adds
+
+Consider a model whose behavior is spread across Rails, the database, and a concern:
+
+```ruby
+class Order < ApplicationRecord
+  include Auditable
+  belongs_to :customer
+  after_commit :enqueue_receipt, on: :create
+end
+```
+
+Woods can give an agent one unit containing its columns and indexes, association metadata, resolved callbacks, and included concern source. Recorded relationships connect that unit to other parts of the application.
+
+An agent can then ask:
+
+> Find the Order model, inspect its callbacks and associations, and show its recorded dependents. Cite the indexed evidence and check source code for callers the graph may miss.
+
+Models are one part of the index: Woods also extracts controllers, routes, jobs, mailers, views, components, GraphQL types, service objects, tests, and more. See the [extractor reference](docs/EXTRACTOR_REFERENCE.md) for coverage and the [agent guide](docs/AGENT_GUIDE.md) for query examples.
+
+## Five-minute setup
+
+### 1. Install and configure
+
+Choose a **published version** from the release information below and confirm it on [RubyGems](https://rubygems.org/gems/woods/versions). Use that version's tag documentation when it differs from `main`. Existing installations should follow the [upgrade guide](docs/UPGRADING_TO_2.md).
+
+<details>
+<summary>Release information and Gemfile version constraints</summary>
 
 <!-- release-state:version-banner -->
 > **This tree documents version 2.0.0.** It is a major update from 1.x: read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating. The full history is in the [CHANGELOG](CHANGELOG.md).
@@ -26,61 +61,18 @@
 > RubyGems treats 2.0.0.beta3 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Install it explicitly with `gem "woods", "2.0.0.beta3"`. The released constraint stays `gem "woods", "~> 1.6"`.
 <!-- release-state:end -->
 
-Woods boots your Rails app, extracts the behavior Rails assembles at runtime, and serves it to AI tools through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). Agents can inspect resolved routes, schema, associations, callbacks, included concerns, dependencies, and execution flows instead of guessing from source files alone.
+</details>
 
-Woods 2.0 supports Ruby 3.0 or later and Rails 6.0 through 8.x. It connects AI coding tools and agents through MCP.
-
-## What Woods adds
-
-A Rails model rarely lives in one file. Its real behavior can include database schema, generated methods, framework defaults, and concerns loaded from elsewhere:
-
-```ruby
-# app/models/order.rb
-class Order < ApplicationRecord
-  include Auditable
-  belongs_to :customer
-  after_commit :enqueue_receipt, on: :create
-end
-```
-
-Woods turns that runtime class into one connected unit with:
-
-- column types, indexes, and foreign keys from the live database;
-- associations, validations, scopes, enums, and resolved callbacks;
-- source from included concerns, kept beside the owning class;
-- callback side effects such as jobs, mailers, and columns written;
-- forward dependencies and reverse dependents;
-- route, controller, view, job, and service relationships.
-
-The result is a codebase index an agent can query by exact name, pattern, dependency path, graph structure, or natural language.
-
-Still weighing it? [Why Woods](docs/WHY_WOODS.md) makes the case against grep, cloud indexers, and IDE language servers.
-
-## Five-minute setup
-
-The default setup provides structural code intelligence. It does not require an embedding provider, vector database, or access to live application records.
-
-### 1. Install Woods
-
-First [choose a version that is published on RubyGems](docs/GETTING_STARTED.md#1-install-the-gem).
-The example below requires a stable 2.x release; beta and release-candidate
-installations need an exact published prerelease pin from that guide.
-
-```ruby
-# Gemfile
-group :development do
-  gem "woods", "~> 2.0"
-end
-```
+Expand the release information above, then add its appropriate `gem "woods", …` declaration to your Gemfile's `:development` group and run:
 
 ```bash
 bundle install
 bin/rails generate woods:install
 ```
 
-**Do not run the generated migration for a new default installation.** The generator creates an annotated `config/initializers/woods.rb` plus a legacy application migration for `woods_units`, `woods_edges`, and `woods_embeddings`. Woods 2's shipped structural index and storage backends do not use those application tables. Remove the migration before continuing; keep and run it only when deliberately preserving an older/custom integration that uses them.
+**For a new default installation, remove the generated `db/migrate/*_create_woods_tables.rb` migration without running it.** Those legacy application tables are unused by the shipped index and storage backends. Keep the generated `config/initializers/woods.rb`; its defaults are sufficient. Only retain the migration for a deliberate older/custom integration. See [Getting started](docs/GETTING_STARTED.md#2-generate-and-review-configuration).
 
-### 2. Extract and verify the codebase
+### 2. Extract and validate
 
 ```bash
 bin/rails woods:extract
@@ -88,11 +80,11 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
-Extraction must run where Rails can boot. The default index lives at `tmp/woods/`.
+Run these where your Rails application can boot. The default output is `tmp/woods/`; keep this generated directory out of source control.
 
-### 3. Connect the Index Server
+### 3. Connect your MCP client
 
-Add this to your MCP client's project configuration. The configuration location varies by client:
+Add this server entry to your client's project configuration, adjusting the application path:
 
 ```json
 {
@@ -106,175 +98,89 @@ Add this to your MCP client's project configuration. The configuration location 
 }
 ```
 
-Restart or reconnect your MCP client, then ask it to call `woods_status`. A ready response with non-zero unit counts confirms the path from Rails extraction to the MCP client.
+Reconnect the client and ask it to call `woods_status`. Confirm the index path and non-zero unit counts. Then use `search` to discover a known class and `lookup` with its identifier **and type** to inspect it.
 
-The Index Server reads the published index from disk. It does not boot Rails or query application records.
+The Index Server reads the published index without booting Rails or querying application records. See [MCP servers](docs/MCP_SERVERS.md) for client-specific configuration and HTTP transport.
 
-> **Using Docker?** Run Rails commands inside the application container. If Woods is installed only there, launch the Index Server through that container too; a host-side server requires a host Ruby bundle and host-visible index. Follow [Docker setup](docs/DOCKER_SETUP.md).
+**Using Docker?** Run extraction inside the application container. If Woods is installed only there, launch MCP through that container too. Host-side launch needs a host bundle and a host-visible index. Follow [Docker setup](docs/DOCKER_SETUP.md).
 
-The complete walkthrough, including expected output and first questions to ask, is in [Getting started](docs/GETTING_STARTED.md).
+## Retrieval: with or without embeddings
 
-## Let an agent install it
+Exact lookup, pattern search, and graph queries work immediately after extraction. For ranked retrieval through `codebase_retrieve`, choose a mode:
 
-Woods is built to be agent-operated, and the fastest path is handing installation to the coding agent that will use it. Claude Code users can install the distributed skills once — they trigger on install, upgrade, configuration, investigation, and diagnosis on their own:
-
-```bash
-/plugin marketplace add lost-in-the/plugins
-/plugin install woods-plugin@lost-in-the-plugins
-```
-
-With any coding agent (no plugin needed), paste this into a session opened at your Rails app's root:
-
-```text
-Install or upgrade the woods gem in this Rails application by following
-https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md.
-Structural setup only: add the gem to the development group, run the
-installer, extract and validate the index, and register the Index MCP
-server for this app. Do not run the generated legacy migration, and do
-not add embedding providers, vector databases, Console/live-data access,
-or secrets without asking me first. If woods 1.x is already installed,
-follow the upgrade runbook in docs/UPGRADING_TO_2.md instead and plan a
-clean re-index. Finish by reporting the installed version, files
-changed, commands run, and one verified woods_status call through the
-registered MCP server.
-```
-
-The runbook holds the agent to the same guardrails the skills enforce: a version preflight, minimal diffs, and explicit approval before anything beyond the structural index. Prefer doing it by hand? The five-minute setup above is the same procedure as commands.
-
-## Choose your path
-
-| Goal | Start here |
-|---|---|
-| Install Woods yourself | [Getting started](docs/GETTING_STARTED.md) |
-| Ask a coding agent to install Woods safely | [Agent setup runbook](docs/AGENT_SETUP.md) |
-| Configure an MCP client, Docker, or HTTP | [MCP servers](docs/MCP_SERVERS.md) |
-| Teach an agent how to query Woods effectively | [Agent guide](docs/AGENT_GUIDE.md) |
-| Add semantic search with OpenAI or local Ollama | [Retrieval guide](docs/RETRIEVAL_GUIDE.md) |
-| Query live Rails data through the optional Console Server | [Console MCP setup and security](docs/CONSOLE_MCP_SETUP.md) |
-| Keep the index current automatically while coding | [Watch daemon](docs/WATCH_DAEMON.md) |
-| Upgrade an existing 1.x installation | [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md) |
-| Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
-
-## Upgrading from 1.x
-
-Woods 2.0 is a major release: identifiers, the on-disk layout, the MCP surface, and task failure posture all changed. [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md) holds the full what-changed table, the step-by-step runbook with backups and rollback, and an agent-operated upgrade prompt.
-
-## Optional Claude Code workflows
-
-Woods itself is MCP-client and model independent. The separately packaged Woods plugin (install commands under [Let an agent install it](#let-an-agent-install-it)) gives Claude Code five guided skills: setup and upgrade, MCP configuration, index-driven investigation, repository agent enablement, and diagnosis. Other MCP clients do not need it; follow the human or agent runbooks linked above and configure either stdio or Streamable HTTP directly.
-
-## Two servers, two trust boundaries
-
-Woods ships two MCP servers. Most users only need the Index Server.
-
-| | Index Server | Console Server |
+| Mode | Setup | What it searches |
 |---|---|---|
-| Purpose | Query pre-extracted code context | Query live Rails models and schema |
-| Data source | Files under `tmp/woods/` | A booted Rails process and its database |
-| Default tools | 14 | 9 |
-| Optional tools | Semantic retrieval activates after embedding; advanced Ruby embeddings can wire more collaborators | `console_sql` and `console_query` raise the total to 11 when explicitly enabled |
-| Default posture | Read-only index | Disabled; live-data access requires deliberate setup |
+| **Lexical** | Set `WOODS_RETRIEVAL_MODE=lexical` in the MCP process environment and restart the server | Published extraction units, ranked by field-aware keyword matching; no provider or embeddings |
+| **Semantic** (default mode) | Configure a local or hosted embedding provider, then run `bin/rails woods:embed` | Embedded code context, ranked by semantic similarity |
 
-The 14 Index tools cover health, exact lookup, search, dependency traversal, flow tracing, graph analysis, framework source, change recency, and optional semantic retrieval. The Console Server exposes nine supported model/schema tools by default. Nineteen Tier 2/3 Console schemas (9 Tier 2, 10 Tier 3) and `console_eval` exist as source inventory but do not register in any supported mode.
+For the stdio configuration above, add `"env": {"WOODS_RETRIEVAL_MODE": "lexical"}` inside the `woods` server entry to choose lexical mode. Confirm the active retriever with `woods_status`.
 
-See [MCP servers](docs/MCP_SERVERS.md) for the callable tool lists and client configuration.
-
-## Optional semantic search
-
-Exact search, lookup, graph traversal, and flow tools work after extraction alone. Natural-language retrieval through `codebase_retrieve` also needs embeddings:
-
-```ruby
-# config/initializers/woods.rb
-Woods.configure_with_preset(:local)
-```
-
-The `:local` preset uses SQLite metadata, in-memory vectors persisted under the index, and a local Ollama service. It needs the `sqlite3` gem in the application bundle plus an installed, running Ollama service, but no cloud API key. Pull the default model before the first embed:
-
-```bash
-ollama pull nomic-embed-text
-```
-
-MySQL/PostgreSQL applications that do not bundle `sqlite3` can use `:shared_filesystem` for local persisted stores instead. PostgreSQL/OpenAI, Qdrant/OpenAI, and shared-filesystem configurations are documented in the [backend matrix](docs/BACKEND_MATRIX.md) and [configuration reference](docs/CONFIGURATION_REFERENCE.md).
-
-For dense Ruby source, add `gem "tokenizers", "~> 0.5"` for exact WordPiece token counting. Without it, Woods uses a character estimate that can over-pack some Ollama chunks.
-
-```bash
-bin/rails woods:embed
-```
-
-Reconnect the Index Server after the first embed, then check `woods_status` before using `codebase_retrieve`.
+The [retrieval guide](docs/RETRIEVAL_GUIDE.md) covers both modes, providers, ranking, and response budgets. Lexical matching depends on shared vocabulary; semantic mode requires the configured provider and embedding artifacts.
 
 ## Keeping the index current
 
-Run a full extraction after installation or broad configuration changes:
-
-```bash
-bin/rails woods:extract
-```
-
-For automatic maintenance during development, run the watcher as a dedicated process:
+Run a watcher alongside your development processes:
 
 ```bash
 bin/rails woods:watch
 ```
 
-Add it to your development process manager so it starts beside Rails:
+It catches up on changes, publishes complete generations, and lets the Index Server refresh on later tool calls. Use a process supervisor for changes that require the watcher to restart. Without a watcher, run `bin/rails woods:incremental` after edits or `bin/rails woods:extract` for a full rebuild.
+
+Incremental cost depends on the affected code and relationships; broad changes can cost as much as a full extraction. Semantic embeddings have a separate update step. See [Watch daemon](docs/WATCH_DAEMON.md), [incremental extraction](docs/INCREMENTAL_EXTRACTION.md), and [source freshness](docs/SOURCE_FRESHNESS.md).
+
+## Two servers, two trust boundaries
+
+| | Index Server | Console Server |
+|---|---|---|
+| Purpose | Inspect extracted code context | Query live Rails models and schema |
+| Reads | Published index files | A booted application and its database |
+| Packaged tools | 14; retrieval usable when configured | 9; 11 with embedded read tools enabled |
+| Setup | The workflow above | Optional, disabled by default |
+
+Extraction itself boots and eager-loads your application, so its boot-time behavior still runs. Treat the generated index as confidential application source. Enabling hosted embeddings also sends the embedded content to that provider.
+
+The optional Console Server can access live data. Review its [setup and security model](docs/CONSOLE_MCP_SETUP.md) before enabling it. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+
+## What the index can and cannot establish
+
+- **It is a snapshot.** Check freshness against your working tree before relying on it for a change.
+- **Relationships are recorded evidence, not a complete call graph.** Arbitrary method-body constant references are not exhaustively indexed. No recorded dependents does not prove that a class has no callers or is safe to delete.
+- **A traced flow is not proof of execution.** Follow the tool's evidence and limits, and verify behavior in the application when it matters.
+
+Use Woods to locate and connect evidence, then confirm the relevant source and tests. The [agent guide](docs/AGENT_GUIDE.md) describes this workflow.
+
+## Let an agent install it
+
+Use the [agent setup runbook](docs/AGENT_SETUP.md) for a copyable installation prompt and verification checklist. Woods works with MCP-capable clients independently of a specific model or editor.
+
+Claude Code users can optionally install the companion workflows:
 
 ```text
-# Procfile.dev
-web:   bin/rails server
-woods: bundle exec rake woods:watch
+/plugin marketplace add lost-in-the/plugins
+/plugin install woods-plugin@lost-in-the-plugins
 ```
 
-The watcher catches up changes made while it was stopped, batches new file changes, reloads Rails code when safe, and publishes complete generations atomically. The Index Server notices a new generation on its next tool call and refreshes itself. **After the initial extraction, ordinary code changes need no manual re-extraction or MCP restart.**
-
-Changes to boot-captured state, including dependencies, initializers, database configuration, credentials, or schema, make the watcher exit with status 75 so a process supervisor can restart it cleanly. If semantic retrieval is enabled, the watcher keeps structural context current; run `bin/rails woods:embed_incremental` to update vectors.
-
-In CI on Rails 8.1, add one step to `config/ci.rb` so the index the gates read matches the commit under test:
-
-```ruby
-step "Woods: refresh", "bin/rails woods:incremental"
-```
-
-Claude Code users with the Woods plugin can opt into the same refresh from a `PostToolUse` hook, plus a `SessionStart` warning scoped to commit timestamps (it does not see uncommitted edits or an older checkout). Both ship disabled; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
-
-Without a resident watcher, run `bin/rails woods:incremental` after changes. See [Watch daemon](docs/WATCH_DAEMON.md) for Docker polling, failure behavior, and restart triggers.
-
-## What gets indexed
-
-Woods recognizes the Rails application as a connected system, including:
-
-- models, concerns, controllers, routes, middleware, and engines;
-- services, interactors, commands, jobs, mailers, and scheduled work;
-- ERB views, Phlex components, ViewComponents, and navigation edges;
-- GraphQL types, mutations, resolvers, and fields;
-- policies, serializers, decorators, validators, state machines, and events;
-- migrations, database views, factories, tests, configuration, and installed framework source.
-
-Read the [extractor reference](docs/EXTRACTOR_REFERENCE.md) for the complete per-type contract and [internals](docs/INTERNALS.md) for how extraction, storage, retrieval, and MCP fit together.
-
-## Security boundary
-
-Woods extraction reads application code, resolved Rails configuration, and database schema. Treat the generated index as source code: do not publish it unless the source itself may be published.
-
-The optional Console Server has a larger trust boundary because it can read live application data. It is disabled by default and adds table blocking, credential scanning, column redaction, SQL validation, and rolled-back transactions when enabled. Those controls reduce risk; they do not turn production data access into a harmless default. Review [Console MCP security](docs/CONSOLE_MCP_SETUP.md#safety-model) before enabling it.
-
-Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+The plugin guides installation, MCP configuration, investigation, repository agent setup, and diagnosis. It is distributed separately from the gem.
 
 ## Documentation
 
-Use the [documentation index](docs/README.md) to find guides by task or audience. Frequently used references include:
+| Task | Guide |
+|---|---|
+| Install and verify | [Getting started](docs/GETTING_STARTED.md) |
+| Configure clients, Docker, or HTTP | [MCP servers](docs/MCP_SERVERS.md) |
+| Query effectively | [Agent guide](docs/AGENT_GUIDE.md) and [tool cookbook](docs/MCP_TOOL_COOKBOOK.md) |
+| Configure Woods | [Configuration reference](docs/CONFIGURATION_REFERENCE.md) |
+| Choose retrieval and storage | [Retrieval guide](docs/RETRIEVAL_GUIDE.md) and [backend matrix](docs/BACKEND_MATRIX.md) |
+| Upgrade an existing installation | [Upgrade guide](docs/UPGRADING_TO_2.md) |
+| Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
 
-- [Configuration reference](docs/CONFIGURATION_REFERENCE.md)
-- [MCP tool cookbook](docs/MCP_TOOL_COOKBOOK.md)
-- [FAQ](docs/FAQ.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Upgrade to Woods 2.0](docs/UPGRADING_TO_2.md)
+See the [documentation index](docs/README.md) for all guides and canonical reference pages.
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. Coding agents working in the source repository should also read [AGENTS.md](https://github.com/lost-in-the/woods/blob/main/AGENTS.md).
+Use [GitHub issues](https://github.com/lost-in-the/woods/issues) for bugs and feature requests. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request; coding agents should also read [AGENTS.md](https://github.com/lost-in-the/woods/blob/main/AGENTS.md).
 
 ## License
 
-Woods is available under the [MIT License](LICENSE.txt).
+[MIT](LICENSE.txt).
