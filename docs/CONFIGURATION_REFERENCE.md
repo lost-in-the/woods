@@ -263,7 +263,12 @@ in the promoted dump; the index MCP server loads that snapshot at startup or
 reload. Incremental embedding publishes changes to paths, dependencies, and
 other unit metadata even when unchanged source needs no new embedding. A run
 with no content or metadata changes keeps the existing dump and retention
-window. This is a reasonable default for hosts that don't bundle `sqlite3`.
+window. Unreleased after `2.0.0.beta3`: a full `Indexer#index_all` run replaces
+the published corpus even when a custom caller reuses in-memory vector and
+metadata stores. Deleted units, including metadata-only records, are removed;
+an empty full rebuild publishes an empty dump. Failed embedding leaves the
+previous promoted dump and checkpoint intact. Incremental purge guards remain
+unchanged. This is a reasonable default for hosts that don't bundle `sqlite3`.
 
 ## Retrieval cache options
 
@@ -426,6 +431,9 @@ When present and non-null, `units` must be an object whose records are objects.
 A malformed record invalidates the entire snapshot, rather than exposing partial
 history. Legacy bare identifier keys, omitted/null unit collections, and optional per-unit hash
 fields remain supported; timestamp strings are not restricted to a new format.
+Unit history limits count matching unit records, not the most recent snapshots
+searched (JSON fallback correction unreleased after `2.0.0.beta3`). A unit
+missing from newer snapshots can still have retained history.
 Snapshot lists and unit history omit unusable files; direct lookup returns no
 snapshot, and a diff with an unavailable snapshot returns empty added, modified,
 and deleted lists. An empty diff in this case is not proof that nothing changed.

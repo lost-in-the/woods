@@ -1,0 +1,2 @@
+- Apply JSON temporal history limits after matching the requested unit, preserving access to retained records across gaps and deletions with SQLite parity (#521).
+- Reconcile reused in-memory vector and metadata stores during full embedding rebuilds, removing vanished units and publishing empty corpora without changing incremental purge guards. Failed embedding preserves the previous promoted dump and checkpoint (#522).
