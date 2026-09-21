@@ -1,0 +1,1 @@
+- Stabilize direct Proc/lambda model validation option values in extracted and published metadata using callable kind and source-location labels, without executing them. Preserve validation order, duplicates, conditions and non-Proc values; nested containers are not recursively normalized. Run a full extraction to refresh retained validation metadata; index schemas are unchanged.

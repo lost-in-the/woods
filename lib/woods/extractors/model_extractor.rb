@@ -619,7 +619,7 @@ module Woods
             entry = {
               attribute: attribute,
               type: v.class.name.demodulize.underscore.sub(/_validator$/, ''),
-              options: v.options.except(:if, :unless, :on),
+              options: v.options.except(:if, :unless, :on).transform_values { |value| stable_filter(value) },
               conditions: format_validation_conditions(v)
             }
             entry[:implicit_belongs_to] = true if implicit_belongs_to_validator?(model, v)
