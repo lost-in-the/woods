@@ -1,0 +1,1 @@
+- Coordinate agent configuration apply and recovery on shared managed targets across application roots, preventing concurrent user-scoped installations from overwriting each other. Keep application-specific receipts, refuse stale plans, and report/protect every coordination path in previews (#520).
