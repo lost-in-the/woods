@@ -288,6 +288,19 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
       expect(result.fetch('instructions').bytesize).to be <= 2048
     end
 
+    it 'accepts ASCII Bearer scheme variants while preserving token case over HTTP' do
+      request = { jsonrpc: '2.0', id: 6, method: 'tools/list', params: {} }
+      %w[bearer BEARER bEaReR].each do |scheme|
+        response = post(request, headers: { 'Authorization' => "#{scheme} #{token}" })
+        expect(response.code).to eq('200'), response.body
+        expect(JSON.parse(response.body).dig('result', 'tools').map { |tool| tool.fetch('name') })
+          .to include('lookup')
+
+        rejected = post(request, headers: { 'Authorization' => "#{scheme} #{token.upcase}" })
+        expect(rejected.code).to eq('401')
+      end
+    end
+
     it 'enforces bearer auth, Origin, Host, and modern CORS headers' do
       expect(post({ jsonrpc: '2.0', id: 5, method: 'tools/list', params: {} }).code).to eq('401')
 

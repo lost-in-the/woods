@@ -198,6 +198,12 @@ the Rails server environment. The middleware stack registers automatically via
 the gem's Railtie and requires `Authorization: Bearer <token>` on every Console
 request. Missing or incorrect tokens receive `401 Unauthorized`.
 
+The HTTP authentication scheme is ASCII case-insensitive (`Bearer`, `bearer`,
+or `BEARER`); the token remains case-sensitive and must match exactly after one
+space. This applies to both Console HTTP and `woods-mcp-http`. Case-insensitive
+scheme support is unreleased after `2.0.0.beta3`; use the canonical `Bearer`
+spelling in client configuration for compatibility with earlier releases.
+
 For non-loopback access, `console_mcp_allowed_origins` must include the public
 Rails/MCP host. If a browser-based client sends an `Origin` header from a
 different host, include that exact origin too. This allow-list controls both

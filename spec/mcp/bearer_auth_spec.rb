@@ -29,6 +29,24 @@ RSpec.describe Woods::MCP::BearerAuth do
     expect(headers['www-authenticate']).to match(/Bearer/)
   end
 
+  %w[bearer BEARER bEaReR].each do |scheme|
+    it "accepts the ASCII scheme #{scheme} without changing token bytes" do
+      expect(call("#{scheme} #{token}").first).to eq(200)
+      expect(call("#{scheme} #{token.upcase}").first).to eq(401)
+      expect(call("#{scheme} #{'w' * token.length}").first).to eq(401)
+    end
+  end
+
+  it 'preserves the exact delimiter and token boundary rules' do
+    [
+      "Basic #{token}", "Bearers #{token}", "Bearer#{token}", " Bearer #{token}",
+      "Bearer\t#{token}", "Bearer  #{token}", "Bearer #{token} ", 'Bearer ',
+      "\uFF22earer #{token}", "Be\u0430rer #{token}"
+    ].each do |header|
+      expect(call(header).first).to eq(401), header.inspect
+    end
+  end
+
   it 'returns 401 when the scheme is not Bearer' do
     status, = call("Basic #{token}")
     expect(status).to eq(401)
