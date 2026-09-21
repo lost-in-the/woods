@@ -21,10 +21,57 @@ RSpec.describe Woods::MCP::IndexReader do
         .to raise_error(ArgumentError, /does not exist/)
     end
 
-    it 'raises ArgumentError for directory without manifest.json' do
-      require 'tmpdir'
-      expect { described_class.new(Dir.tmpdir) }
-        .to raise_error(ArgumentError, /No manifest\.json/)
+    it 'raises an actionable ArgumentError when neither published layout resolves' do
+      Dir.mktmpdir('woods-reader-startup') do |dir|
+        expect { described_class.new(dir) }.to raise_error(ArgumentError) do |error|
+          expect(error.message).to include(
+            "Could not resolve a published Woods index in: #{dir}",
+            'generation.json pointing to a payload manifest.json',
+            'legacy flat manifest.json',
+            'Point IndexReader at an existing index root',
+            'bundle exec rake woods:extract'
+          )
+        end
+      end
+    end
+
+    [[], nil, true, 42, 'marker', { 'payload' => 42 }, { 'payload' => ['payloads/gen-1'] }].each do |marker|
+      it "reports malformed generation marker #{marker.inspect} as an actionable startup error" do
+        Dir.mktmpdir('woods-reader-startup') do |dir|
+          File.write(File.join(dir, 'generation.json'), JSON.generate(marker))
+
+          expect { described_class.new(dir) }.to raise_error(ArgumentError) do |error|
+            expect(error.message).to include(
+              "Could not resolve a published Woods index in: #{dir}",
+              'generation.json pointing to a payload manifest.json',
+              'legacy flat manifest.json',
+              'Point IndexReader at an existing index root'
+            )
+          end
+        end
+      end
+    end
+
+    it 'accepts and reads a payload index with no root manifest' do
+      Dir.mktmpdir('woods-reader-startup') do |dir|
+        payload = File.join(dir, 'payloads', 'gen-1')
+        FileUtils.mkdir_p(payload)
+        File.write(File.join(payload, 'manifest.json'), JSON.generate('total_units' => 17))
+        File.write(File.join(dir, 'generation.json'), JSON.generate('number' => 1, 'payload' => 'payloads/gen-1'))
+
+        expect(described_class.new(dir).manifest).to eq('total_units' => 17)
+      end
+    end
+
+    it 'does not translate errors from generation refresh after successful startup' do
+      Dir.mktmpdir('woods-reader-startup') do |dir|
+        File.write(File.join(dir, 'manifest.json'), JSON.generate('total_units' => 0))
+        index = described_class.new(dir)
+        expect(index.manifest).to eq('total_units' => 0)
+        File.write(File.join(dir, 'generation.json'), '[]')
+
+        expect { index.manifest }.to raise_error(TypeError)
+      end
     end
   end
 
