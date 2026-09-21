@@ -142,6 +142,10 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
+Unreleased after `2.0.0.beta3`: `woods:clean` removes index artifacts but keeps
+the output directory and its hidden extraction guard. This stable guard lets
+concurrent writers coordinate safely; its presence does not mean an index remains.
+
 The clean extract is required for corrected identifier shapes. Do not use an incremental run as the first v2 extraction: after `woods:clean` there is no baseline, and v2 `woods:incremental` refuses that state rather than publishing a near-empty index as the application's complete truth.
 
 An interrupted extraction leaves readers on the last complete generation because Woods publishes `generation.json` only after the payload is complete. Re-run the task; do not delete a partial directory speculatively. A run that completes its payload but cannot publish the marker now fails loudly instead of reporting success, so treat a non-zero exit as work to redo rather than as a partial success.
