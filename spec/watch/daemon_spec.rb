@@ -595,6 +595,25 @@ RSpec.describe Woods::Watch::Daemon do
       expect(extractor).to have_received(:extract_changed).with([])
     end
 
+    it 'fully reconciles an initializer deleted before the fresh boot snapshot' do
+      publish_generation('full')
+      write_graph_with_paths(['config/initializers/removed.rb', 'app/models/schema_migration.rb'])
+      snapshot = Woods::Watch::BootSnapshot.new(root: root)
+
+      expect(build(watcher: fake_watcher, catch_up: true, boot_snapshot: snapshot).run).to eq(:stopped)
+
+      expect(extractor).to have_received(:extract_all).once
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'requires restart for a vanished boot input without a boot snapshot' do
+      publish_generation('full')
+      write_graph_with_paths(['config/initializers/removed.rb'])
+
+      expect(build(watcher: fake_watcher, catch_up: true, boot_snapshot: nil).run).to eq(:restart_required)
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
     it 'ignores vanished paths outside the watched root' do
       # Framework units and indexes restored from CI artifacts register paths
       # under other roots; neither is a deletion in this worktree.
