@@ -242,6 +242,69 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  describe '#extract_validations' do
+    let(:validator_class) { stub_const('OptionValidator', Struct.new(:options)) }
+
+    before { stub_const('Rails', double(root: Pathname.new('/app'))) }
+
+    def validations_for(*options)
+      validators = options.map { |value| validator_class.new(value) }
+      extractor.send(:extract_validations, double(_validators: { status: validators }))
+    end
+
+    it 'labels direct Procs without executing them and preserves condition formats and options' do
+      callable = proc { raise 'validation option must not execute' }
+      lambda_option = -> { raise 'validation option must not execute' }
+      allow(callable).to receive(:source_location).and_return(['/app/app/models/item.rb', 3])
+      allow(lambda_option).to receive(:source_location).and_return(['/app/app/models/item.rb', 7])
+      options = { in: callable, message: lambda_option, if: [:ready?, callable], unless: lambda_option,
+                  on: %i[create custom] }.freeze
+
+      result = validations_for(options).first
+
+      expect(result[:options]).to eq(in: '#<Proc app/models/item.rb:3>', message: '#<lambda app/models/item.rb:7>')
+      expect(result[:conditions]).to eq(if: [':ready?', 'Proc'], unless: ['Proc'], on: %i[create custom])
+      expect(options[:in]).to equal(callable)
+      expect(options[:message]).to equal(lambda_option)
+      expect(options.keys).to eq(%i[in message if unless on])
+    end
+
+    it 'preserves literal types and nested containers without recursively normalizing callables' do
+      callable = proc { raise 'nested option must not execute' }
+      values = { in: [callable, '0xdeadbeef'], message: '#<Proc:0x1234>', nested: { value: callable },
+                 allow_nil: false, count: 3, symbolic: :custom, format: /0xabc/, range: 1..3 }
+      result = validations_for(values.freeze).first[:options]
+
+      expect(result).to eq(values)
+      values.each { |key, value| expect(result[key]).to equal(value) }
+    end
+
+    it 'retains validator order and duplicate registrations and distinguishes sites and callable kinds' do
+      factory = -> { proc { raise 'option must not execute' } }
+      callables = [factory.call, factory.call, -> { raise 'option must not execute' }, proc { raise 'not executed' }]
+      result = validations_for(*callables.map { |callable| { in: callable } })
+      labels = result.map { |entry| entry[:options][:in] }
+
+      expect(result.map { |entry| [entry[:attribute], entry[:type]] }).to eq([[:status, 'option']] * 4)
+      expect(labels[0]).to eq(labels[1])
+      expect(labels[0]).to start_with('#<Proc ')
+      expect(labels[2]).to start_with('#<lambda ')
+      expect(labels[3]).to start_with('#<Proc ')
+      expect(labels.uniq.size).to eq(3)
+    end
+
+    it 'retains native and external source labels using the existing callable formatter' do
+      native = proc { raise 'not executed' }
+      external = -> { raise 'not executed' }
+      allow(native).to receive(:source_location).and_return(nil)
+      allow(external).to receive(:source_location).and_return(['/vendor/options.rb', 19])
+
+      expect(validations_for(in: native, message: external).first[:options]).to eq(
+        in: '#<Proc native>', message: '#<lambda /vendor/options.rb:19>'
+      )
+    end
+  end
+
   # ── implicit_belongs_to_validator? ────────────────────────────────
 
   describe '#implicit_belongs_to_validator?' do
