@@ -95,7 +95,6 @@ module Woods
         snapshots = load_all_with_units
                     .sort_by { |s| s[:extracted_at] || '' }
                     .reverse
-                    .first(limit)
 
         entries = snapshots.flat_map do |snap|
           snap[:units].values.select { |unit| unit[:identifier] == identifier }.map do |unit|
