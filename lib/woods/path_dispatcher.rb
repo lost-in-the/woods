@@ -16,10 +16,9 @@ module Woods
   #
   # * {.file_rules} — file-based extractors, whose per-file method can be
   #   pointed straight at the new path.
-  # * {.whole_app_rules} — extractors with no per-file entry point (routes,
-  #   middleware, engines, scheduled jobs, state machines, factories,
-  #   events, framework sources). Their trigger paths map to a wholesale
-  #   re-run of that extractor, which is cheap in an already-booted process.
+  # * {.whole_app_rules} — extractors needing the complete runtime or source
+  #   set (routes, middleware, merged Rake tasks, scheduled jobs, etc.). Their
+  #   trigger paths map to a wholesale re-run of that extractor.
   #
   # Class-based extractors (models, controllers, mailers, components,
   # channels) are deliberately *absent* here. They are reconciled against
@@ -161,7 +160,6 @@ module Woods
           file_rule(:graphql, :extract_graphql_file,
                     [ex::GraphQLExtractor::GRAPHQL_DIRECTORY], extensions: %w[.rb]),
           file_rule(:i18n, :extract_i18n_file, ex::I18nExtractor::I18N_DIRECTORIES, extensions: %w[.yml]),
-          file_rule(:rake_tasks, :extract_rake_file, ex::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake]),
           file_rule(:view_templates, :extract_view_template_file,
                     ex::ViewTemplateExtractor::VIEW_DIRECTORIES, extensions: view_template_extensions),
           file_rule(:migrations, :extract_migration_file, %w[db/migrate], recursive: false),
@@ -188,6 +186,9 @@ module Woods
 
       def build_whole_app_rules
         [
+          # A task may combine definitions from several files; any change or
+          # deletion must reconcile the complete task set, not its primary file.
+          whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake]),
           whole_app_rule(:routes, %w[config/routes], exact_paths: %w[config/routes.rb]),
           whole_app_rule(:engines, %w[config/routes], exact_paths: %w[config/routes.rb Gemfile.lock]),
           whole_app_rule(:middleware, %w[config/initializers config/environments],

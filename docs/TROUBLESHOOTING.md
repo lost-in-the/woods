@@ -23,6 +23,7 @@ This guide covers the most common problems encountered when installing, extracti
 | `No such container` | Wrong container name | Check with `docker ps --format '{{.Names}}'` |
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
+| `Extraction failed for …; the previous generation remains active` | A consumer handled a source error during incremental extraction or refresh (unreleased after `2.0.0.beta3`) | Fix the logged source error and retry the [complete batch](INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry); watch keeps it pending |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 0` for complete history |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |

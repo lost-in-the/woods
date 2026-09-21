@@ -211,7 +211,6 @@ module Woods
       configuration: :extract_configuration_file,
       view_template: :extract_view_template_file,
       migration: :extract_migration_file,
-      rake_task: :extract_rake_file,
       decorator: :extract_decorator_file,
       database_view: :extract_view_file,
       caching: :extract_caching_file,
@@ -293,7 +292,7 @@ module Woods
                  method: :extract_from_runtime_type, reconcile_removals: false }
     }.freeze
 
-    # Extractors with no per-file entry point: they scan the whole app (or
+    # Extractors requiring a complete source set: they scan the whole app (or
     # introspect the whole runtime) in one pass, so an incremental run
     # replaces their output wholesale rather than per unit. Before #164
     # these types were simply skipped by incremental runs while
@@ -302,6 +301,7 @@ module Woods
     #
     # @return [Hash{Symbol => Symbol}] extractor key => unit type
     WHOLE_APP_EXTRACTORS = {
+      rake_tasks: :rake_task,
       routes: :route,
       middleware: :middleware,
       engines: :engine,
@@ -600,6 +600,7 @@ module Woods
                       ))
       end
 
+      raise_on_handled_extraction_failure!
       finalize_incremental_unit_json(affected_types)
 
       # Regenerate type indexes for affected types
@@ -662,6 +663,7 @@ module Woods
         acc.merge(replace_type_wholesale(key, affected_types))
       end
 
+      raise_on_handled_extraction_failure!
       finalize_incremental_unit_json(affected_types)
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
@@ -889,6 +891,7 @@ module Woods
     # Capture before eager loading or extraction; only an explicit fresh-launch
     # handoff can additionally establish the pre-Bundler/Rails boot boundary.
     def begin_source_inputs(operation)
+      @failed_consumers = Set.new
       @source_inputs = SourceInputs::Session.new(root: Rails.root, output_dir: @output_dir,
                                                  baseline_path: source_input_baseline_path,
                                                  operation: operation)
@@ -909,6 +912,28 @@ module Woods
       failed = consumer.nil? || SourceInputs::ConsumerErrors.failed?(consumer)
       @source_inputs&.unverified("extractor:#{key}") if failed
       failed
+    end
+
+    # A rescued consumer error is not a successful empty result. Reset the
+    # per-call flag because one extractor instance serves several paths, but
+    # retain the failed scope for the run so a later success cannot authorize
+    # publication. Watch then carries the complete batch forward for retry.
+    def checked_extraction(key, consumer)
+      (@failed_consumers ||= Set.new).add(key) if SourceInputs::ConsumerErrors.failed?(consumer)
+      SourceInputs::ConsumerErrors.reset(consumer)
+      result = yield
+      return result unless source_consumer_failed?(key, consumer)
+
+      (@failed_consumers ||= Set.new).add(key)
+      nil
+    end
+
+    def raise_on_handled_extraction_failure!
+      return if @failed_consumers.nil? || @failed_consumers.empty?
+
+      raise Woods::ExtractionError,
+            "Extraction failed for #{@failed_consumers.to_a.sort.join(', ')}; " \
+            'the previous generation remains active. Fix the logged source errors and retry the complete batch.'
     end
 
     def write_source_inputs
@@ -2760,10 +2785,11 @@ module Woods
     #
     # This is the fix for #164 gap 1 (a path the index has never seen routed
     # nowhere, so new files were silently ignored) and the per-path half of
-    # gap 3 (a file that defines several units — a `.rake` file with multiple
-    # tasks, an i18n YAML — could only ever resolve to one identifier).
-    # Reconciling the whole path at once means a task deleted from a
-    # multi-task file is removed rather than left behind.
+    # gap 3 (a file defining several units could only ever resolve to one
+    # identifier). Rake tasks need the wholesale path because definitions
+    # of one task can span several files.
+    # Reconciling the whole path removes definitions deleted from a surviving
+    # file rather than leaving them behind.
     #
     # Removal is scoped to the unit types the matching rules could have
     # produced, so a class-based unit sharing the path (the `User` model unit
@@ -2837,7 +2863,7 @@ module Woods
       end
       return [] unless extractor.respond_to?(rule.method_name)
 
-      result =
+      result = checked_extraction(rule.extractor_key, extractor) do
         if rule.extractor_key == :poros
           # PoroExtractor needs the AR name set to reject persisted models;
           # its default is an empty set, which would misfile every model
@@ -2846,6 +2872,8 @@ module Woods
         else
           extractor.public_send(rule.method_name, absolute_path)
         end
+      end
+      return nil if result.nil? && SourceInputs::ConsumerErrors.failed?(extractor)
 
       Array(result).compact
     rescue StandardError => e
@@ -3172,7 +3200,10 @@ module Woods
       return Set.new unless extractor.respond_to?(:extract_all)
 
       @wholesale_mutations = 0
-      units = Array(extractor.extract_all).compact.uniq(&:identifier)
+      result = checked_extraction(key, extractor) { extractor.extract_all }
+      return Set.new if SourceInputs::ConsumerErrors.failed?(extractor)
+
+      units = Array(result).compact.uniq(&:identifier)
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
       touched = register_and_write(key, units, affected_types)
@@ -3723,10 +3754,12 @@ module Woods
         return nil
       end
 
-      # File-based extractors can return several units from one file (a .rake
-      # file defining multiple tasks, etc.); class-based extractors return one.
-      units = Array(re_extracted_units(extractor, type, unit_id, file_path, extractor_key)).compact
-      source_consumer_failed?(extractor_key, extractor)
+      # File-based extractors can return several units from one file;
+      # class-based extractors return one.
+      result = checked_extraction(extractor_key, extractor) do
+        re_extracted_units(extractor, type, unit_id, file_path, extractor_key)
+      end
+      units = Array(result).compact
       return nil if units.empty?
 
       register_and_write(extractor_key, units, affected_types)
