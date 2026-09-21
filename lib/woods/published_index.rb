@@ -167,14 +167,14 @@ module Woods
     # @return [Array<Hash>]
     def units(type: nil)
       dirs = if type
-               dir = Woods::MCP::IndexReader::TYPE_TO_DIR[type.to_s]
+               dir = TypedUnitReader.directory_for(type.to_s)
                dir ? [dir] : []
              else
                Woods::MCP::IndexReader::TYPE_DIRS
              end
       dirs.flat_map do |dir|
         @reader.list_units(type: Woods::MCP::IndexReader::DIR_TO_TYPE[dir])
-               .map { |entry| entry.merge('type' => Woods::MCP::IndexReader::DIR_TO_TYPE[dir]) }
+               .filter_map { |entry| TypedUnitReader.entry(@payload_dir, entry, dir, type&.to_s) }
       end
     end
 

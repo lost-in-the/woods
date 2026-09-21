@@ -78,12 +78,12 @@ module Woods
         write_plan(path, plan, layout)
         PlanDiff.show(plan, @stderr) if options[:diff]
         plan.summary.merge('plan_file' => File.expand_path(path),
-                           'runtime_files' => ["#{layout.receipt_path}.lock", "#{layout.receipt_path}.pending"])
+                           'runtime_files' => layout.runtime_paths)
       end
 
       def write_plan(path, plan, layout)
         target = File.expand_path(path)
-        protected_paths = layout.allowed_paths + ["#{layout.receipt_path}.lock", "#{layout.receipt_path}.pending"]
+        protected_paths = layout.allowed_paths + layout.runtime_paths
         raise Conflict, 'Plan output must differ from every managed/runtime target' if protected_paths.include?(target)
 
         Document.validate_path!(target)

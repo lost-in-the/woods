@@ -50,8 +50,10 @@ module Woods
         "#{@layout.receipt_path}.pending"
       end
 
-      def with_lock
-        path = "#{@layout.receipt_path}.lock"
+      def with_lock(paths = @layout.lock_paths, &operation)
+        return operation.call if paths.empty?
+
+        path, *remaining = paths
         Document.validate_path!(path)
         FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
         File.open(path, File::RDWR | File::CREAT | File::NOFOLLOW | File::NONBLOCK, 0o600) do |lock|
@@ -61,7 +63,7 @@ module Woods
                   'Another Woods configuration operation is active; retry after it finishes'
           end
 
-          yield
+          with_lock(remaining, &operation)
         ensure
           lock&.flock(File::LOCK_UN)
         end

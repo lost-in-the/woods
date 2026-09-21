@@ -74,6 +74,7 @@ module Woods
       # controls that actually shrink the answer are `depth`, `types` and
       # `via`; `limit` and `offset` only page what those leave (B-183).
       DEFAULT_TRAVERSAL_LIMIT = 50
+      DEFAULT_GRAPH_ANALYSIS_LIMIT = 20
 
       class << self
         # Build a configured MCP::Server with all tools and resources.
@@ -396,7 +397,7 @@ module Woods
 
           sliced = offset.positive? ? original.drop(offset) : original
           container[key] = limit ? truncate_section(sliced, limit) : sliced
-          if original.size > offset + (limit || original.size)
+          if offset.positive? || container[key].size < original.size
             container["#{key}_total"] = original.size
             container["#{key}_truncated"] = true
           end
@@ -701,32 +702,20 @@ module Woods
                   enum: ToolResponseRenderer::GRAPH_ANALYSIS_SECTIONS + %w[all],
                   description: 'Which analysis to return. Default: all'
                 },
-                limit: { type: 'integer', description: 'Limit results per section (default: 20)' },
+                limit: { type: 'integer', description: "Limit results per section (default: #{DEFAULT_GRAPH_ANALYSIS_LIMIT})" },
                 offset: { type: 'integer', description: 'Skip this many results per section (default: 0)' }
               }
             }
           ) do |server_context:, analysis: nil, limit: nil, offset: nil|
-            limit = coerce_int.call(limit)
+            limit = coerce_int.call(limit) || DEFAULT_GRAPH_ANALYSIS_LIMIT
             offset = coerce_int.call(offset)
             data = reader.graph_analysis
             section = analysis || 'all'
             effective_offset = offset || 0
 
-            result = if section == 'all'
-                       if limit || effective_offset.positive?
-                         truncated = data.dup
-                         ToolResponseRenderer::GRAPH_ANALYSIS_SECTIONS.each do |key|
-                           paginate.call(truncated, key, limit, effective_offset)
-                         end
-                         truncated
-                       else
-                         data
-                       end
-                     else
-                       single = { section => data[section] || [], 'stats' => data['stats'] }
-                       paginate.call(single, section, limit, effective_offset) if limit || effective_offset.positive?
-                       single
-                     end
+            result = section == 'all' ? data.dup : { section => data[section] || [], 'stats' => data['stats'] }
+            sections = section == 'all' ? ToolResponseRenderer::GRAPH_ANALYSIS_SECTIONS : [section]
+            sections.each { |key| paginate.call(result, key, limit, effective_offset) }
 
             respond.call(renderer.render(:graph_analysis, result))
           end

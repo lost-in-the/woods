@@ -535,6 +535,27 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   end
 
   describe 'gap 3 — files defining several units' do
+    %w[primary secondary].each do |removed|
+      it "reconciles a task when its #{removed} definition disappears" do
+        write_file('lib/tasks/a_shared.rake', rake_source('shared', %w[run]))
+        write_file('lib/tasks/z_shared.rake', rake_source('shared', %w[run]))
+        baseline = full_extraction
+        path = removed == 'primary' ? 'lib/tasks/a_shared.rake' : 'lib/tasks/z_shared.rake'
+        delete_file(path)
+        Woods::Extractor.new(output_dir: baseline).extract_changed([path])
+        expect(differences(baseline, full_extraction)).to be_empty
+      end
+    end
+
+    it 'reconciles a shared task removed from a surviving secondary file' do
+      write_file('lib/tasks/a_shared.rake', rake_source('shared', %w[run]))
+      write_file('lib/tasks/z_shared.rake', rake_source('shared', %w[run other]))
+      baseline = full_extraction
+      path = write_file('lib/tasks/z_shared.rake', rake_source('shared', %w[other]))
+      Woods::Extractor.new(output_dir: baseline).extract_changed([path])
+      expect(differences(baseline, full_extraction)).to be_empty
+    end
+
     it 'drops only the task removed from a multi-task rake file' do
       write_file('lib/tasks/multi.rake', rake_source('multi', %w[one two three]))
 
@@ -592,6 +613,56 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     ensure
       Woods.configuration.volatile_dependency_limit_per_target = nil
       FileUtils.rm_rf(app_path('.git'))
+    end
+  end
+
+  describe 'handled source failures' do
+    it 'keeps malformed locale batches pending in watch until the repaired batch publishes' do
+      require 'woods/watch/daemon'
+      path = write_file('config/locales/watch_audit.yml', "en:\n  audit: before\n")
+      baseline = full_extraction
+      generation = Woods::Generation.new(output_dir: baseline)
+      token = generation.current.token
+      extractor = Woods::Extractor.new(output_dir: baseline)
+      reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true)
+      daemon = Woods::Watch::Daemon.new(output_dir: baseline, root: @app_root,
+                                        extractor_factory: -> { extractor }, reloader: reloader,
+                                        catch_up: false, debounce: 0)
+      write_file(path, "en: [unfinished\n")
+      expect(daemon.process([path])[:state]).to eq(:degraded)
+      expect(generation.current.token).to eq(token)
+      write_file(path, "en:\n  audit: repaired\n")
+      expect(daemon.process([])[:state]).to eq(:running)
+      expect(generation.current.token).not_to eq(token)
+      expect(differences(baseline, full_extraction)).to be_empty
+    end
+
+    %w[locale schedule].each do |kind|
+      it "preserves the published generation after malformed #{kind} YAML and retries cleanly" do
+        path = kind == 'locale' ? 'config/locales/audit.yml' : 'config/sidekiq_cron.yml'
+        valid = kind == 'locale' ? "en:\n  audit: before\n" : "audit:\n  cron: '* * * * *'\n  class: AuditJob\n"
+        write_file(path, valid)
+        baseline = full_extraction
+        generation = Woods::Generation.new(output_dir: baseline)
+        token = generation.current.token
+        published = File.binread(generation.payload_dir.join('dependency_graph.json'))
+        expect(JSON.parse(published).fetch('nodes')).to have_key(kind == 'locale' ? 'audit.yml' : 'scheduled:audit')
+        extractor = Woods::Extractor.new(output_dir: baseline)
+        good_path = write_file('config/locales/healthy.yml', "en:\n  healthy: changed\n")
+        write_file(path, "en: [unfinished\n")
+        expect { extractor.extract_changed([good_path, path]) }.to raise_error(Woods::ExtractionError)
+        expect(generation.current.token).to eq(token)
+        expect(File.binread(generation.payload_dir.join('dependency_graph.json'))).to eq(published)
+        expect { extractor.extract_changed([path, good_path]) }.to raise_error(Woods::ExtractionError)
+        expect(extractor.dependency_graph.node('healthy.yml')).not_to be_nil
+        expect(generation.current.token).to eq(token)
+        key = kind == 'locale' ? :i18n : :scheduled_jobs
+        expect { extractor.refresh(key) }.to raise_error(Woods::ExtractionError)
+        expect(generation.current.token).to eq(token)
+        write_file(path, valid.sub('before', 'after'))
+        extractor.extract_changed([good_path, path])
+        expect(differences(baseline, full_extraction)).to be_empty
+      end
     end
   end
 

@@ -841,7 +841,8 @@ RSpec.describe 'Index MCP tool contracts' do
     expected = if value.zero?
                  { 'orphans' => ['PostsController'], 'stats' => expected_graph_stats }
                else
-                 { 'orphans' => [], 'stats' => expected_graph_stats, 'orphans_offset' => value }
+                 { 'orphans' => [], 'stats' => expected_graph_stats, 'orphans_offset' => value,
+                   'orphans_total' => 1, 'orphans_truncated' => true }
                end
     expect(data).to eq(expected)
   end

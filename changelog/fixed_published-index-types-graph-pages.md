@@ -1,0 +1,2 @@
+- Preserve actual GraphQL and gem-source types in `Woods::PublishedIndex` typed lookup and enumeration while retaining the `graphql` and `rails_source` family aliases (#518).
+- Enforce `graph_analysis`'s advertised default of 20 rows per section and retain total/offset context on last and empty pages in every renderer. Correct the structure glossary: graph nodes include isolated units, and retriever entry counts depend on mode and store coverage (#519).

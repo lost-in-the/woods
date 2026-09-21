@@ -159,12 +159,11 @@ module Woods
         reconcile_empty_units(checkpoint)
         retire_legacy_identities
         report_checkpoint_misses
-        vanished = incremental && persistable? ? drop_vanished_units : 0
+        vanished = persistable? ? drop_vanished_units(incremental: incremental) : 0
         persist_snapshot if persistable? && snapshot_worth_writing?(stats, vanished, incremental: incremental)
         # Durable backends have no dump to rewrite, so staleness has to be
-        # removed from the store itself — on full runs too, since a full run
-        # against pgvector/Qdrant does not start from an empty store the way
-        # the in-memory path does (#211).
+        # removed from the store itself — on full runs too, since pgvector/
+        # Qdrant retain rows instead of replacing a published dump (#211).
         reconcile_durable_store if reconcilable?
         save_checkpoint(checkpoint)
 
@@ -275,20 +274,24 @@ module Woods
       # this costs no IO) and `@current_identifiers` is what this run saw.
       # Pruning with an empty fresh-id list removes every chunk of the unit.
       #
-      # Guarded by {#vanished_prune_permitted?} (B-079 / #191) — a refused
-      # prune returns 0, which reads as "nothing vanished" to
+      # Incremental runs use {#vanished_prune_permitted?} (B-079 / #191).
+      # A refused prune returns 0, which reads as "nothing vanished" to
       # {#snapshot_worth_writing?}, so a run that also embedded nothing writes
       # no dump and the retention window is not rotated over the good dumps.
       # The warn precedes the deletes: if the prune raises partway, the
       # operator still learns what it was doing.
       #
+      # Full rebuilds deliberately replace the complete corpus, including an
+      # empty corpus, even when callers reuse their in-memory stores.
+      #
+      # @param incremental [Boolean] whether to apply the incremental purge guard
       # @return [Integer] how many units were dropped
-      def drop_vanished_units
-        return 0 if @persisted_ids.nil? || @persisted_ids.empty?
+      def drop_vanished_units(incremental:)
+        return 0 if @persisted_ids.empty?
 
         vanished = @persisted_ids.keys.reject { |identifier| @current_identifiers.include?(identifier) }
         return 0 if vanished.empty?
-        return 0 unless vanished_prune_permitted?(vanished)
+        return 0 if incremental && !vanished_prune_permitted?(vanished)
 
         warn "[woods] dropping #{vanished.size} unit(s) from the vector index that the " \
              'extraction no longer holds; rewriting the dump.'
@@ -321,8 +324,8 @@ module Woods
       # Refusal never loses data: the stale vectors stay hydrated in the
       # store, so any dump this run does write (for freshly embedded work)
       # still carries them. Full runs never reach this guard —
-      # +drop_vanished_units+ runs only on the incremental path, and a full
-      # run's empty store is genuinely empty and must be dumped as such.
+      # a full run replaces the complete corpus and must publish even an empty
+      # result. Its vanished-unit reconciliation bypasses this guard.
       #
       # @param vanished [Array<String>] identifiers about to be pruned
       # @return [Boolean] true when the prune may proceed
@@ -357,9 +360,9 @@ module Woods
 
       # Delete vectors a durable store holds for units the index no longer has.
       #
-      # The dump-backed path gets staleness removal for free: the dump is
-      # rewritten from the live store each run, so a dropped unit simply stops
-      # being written. A durable backend has no such rewrite — rows in
+      # The dump-backed path removes vanished units from its hydrated or
+      # reused stores before publishing a replacement dump. A durable backend
+      # has no such rewrite — rows in
       # `woods_vectors` and points in Qdrant survive until something deletes
       # them, which nothing did. A unit deleted from the codebase therefore
       # stayed retrievable through `codebase_retrieve` indefinitely, *including
@@ -489,7 +492,14 @@ module Woods
           entries = []
           @vector_store.each_entry { |id, _vector, _metadata| entries << { id: id } }
           @persisted_ids = index_ids_by_identifier(entries)
+          retain_existing_metadata_identities
         end
+      end
+
+      def retain_existing_metadata_identities
+        return unless @metadata_store.respond_to?(:each_entry)
+
+        @metadata_store.each_entry { |identifier, _unit| @persisted_ids[identifier] ||= [] }
       end
 
       # Source-empty units retain metadata but intentionally have no vectors.
