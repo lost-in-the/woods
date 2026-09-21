@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "7d43a9f1",
+      "family": "cache_arity",
+      "expected": "regression",
+      "origin": {
+        "repository": "https://github.com/lost-in-the/woods",
+        "fix_revision": "b67198737cdc98219665ece514487027dc2b0168",
+        "before_revision": "ebba0e97ffcdefbdf59b7dc51fa273828d23965f",
+        "source_path": "lib/woods/cache/cache_store.rb",
+        "adaptation": "Minimized executable stdlib-only extraction; not a historical commit replay. The shared baseline is newly authored, and each candidate is an adapted change from it."
+      },
+      "sha256": {
+        "before.rb": "1db9a712362fd38abcb8a4656bc243b79909d46256b4f6e009f262c0ae0ab947",
+        "change.patch": "c763184334625c3c6654409061d1bfc63ba55a568abcd34dcfe9eee9533fb33e",
+        "context.md": "82516b375f223e8d71df35b1c06dc5350381d777bd67e97d59ce5cfa474b8e5d",
+        "source.rb": "fd7c978b500b3e111bf13e5afa26629cb8e5fd81730f682133b445764042badb",
+        "test.rb": "859f933d14697cfc7134b34eedd77b0c1e24af99118b862d93b0b5a885d34127"
+      }
+    },
+    {
+      "case_id": "9b0e27d4",
+      "family": "cache_arity",
+      "expected": "satisfied",
+      "origin": {
+        "repository": "https://github.com/lost-in-the/woods",
+        "fix_revision": "b67198737cdc98219665ece514487027dc2b0168",
+        "before_revision": "ebba0e97ffcdefbdf59b7dc51fa273828d23965f",
+        "source_path": "lib/woods/cache/cache_store.rb",
+        "adaptation": "Minimized executable stdlib-only extraction; not a historical commit replay. The shared baseline is newly authored, and each candidate is an adapted change from it."
+      },
+      "sha256": {
+        "before.rb": "1db9a712362fd38abcb8a4656bc243b79909d46256b4f6e009f262c0ae0ab947",
+        "change.patch": "073210393f8c4767ba29bf5e07e82ebbeec02145038574ef63c7fbf5d838e317",
+        "context.md": "82516b375f223e8d71df35b1c06dc5350381d777bd67e97d59ce5cfa474b8e5d",
+        "source.rb": "b1b6f718e52932b4d146dc15e7e28aebc9dfe79eafa14de2e8c0d6864127b13f",
+        "test.rb": "859f933d14697cfc7134b34eedd77b0c1e24af99118b862d93b0b5a885d34127"
+      }
+    },
+    {
+      "case_id": "c59a814e",
+      "family": "snapshot_retention",
+      "expected": "satisfied",
+      "origin": {
+        "repository": "https://github.com/lost-in-the/woods",
+        "fix_revision": "614b2613063f26d2ffa7629e8ace3ba9b98940e0",
+        "before_revision": "4074f736d933b964ded6d5fdddb7d742fd7c4bde",
+        "source_path": "lib/woods/temporal/json_snapshot_store.rb",
+        "adaptation": "Minimized executable stdlib-only extraction; not a historical commit replay. The shared baseline is newly authored, and each candidate is an adapted change from it."
+      },
+      "sha256": {
+        "before.rb": "addff67ccfb2362dea9623fc099e9be4771d72dcdf83cecb4df6055865c4f3c1",
+        "change.patch": "5fd9e115c5dd2af5b27603d1af9df3fc8c71922c44b1e9cfb62ccf4e9af78780",
+        "context.md": "474ae6fbeea228dac95052917d2c18da969aef3c9309ec1dd8d3979499d790ee",
+        "source.rb": "bcfe00906f4d89c32eb4733681444ab38ed620da8f088ca1f810218821487914",
+        "test.rb": "f282127ccf238efe355aeb0dae2b5f4d675aaa2abd4c34d64ec876fec4e888aa"
+      }
+    },
+    {
+      "case_id": "f108d3b6",
+      "family": "snapshot_retention",
+      "expected": "regression",
+      "origin": {
+        "repository": "https://github.com/lost-in-the/woods",
+        "fix_revision": "614b2613063f26d2ffa7629e8ace3ba9b98940e0",
+        "before_revision": "4074f736d933b964ded6d5fdddb7d742fd7c4bde",
+        "source_path": "lib/woods/temporal/json_snapshot_store.rb",
+        "adaptation": "Minimized executable stdlib-only extraction; not a historical commit replay. The shared baseline is newly authored, and each candidate is an adapted change from it."
+      },
+      "sha256": {
+        "before.rb": "addff67ccfb2362dea9623fc099e9be4771d72dcdf83cecb4df6055865c4f3c1",
+        "change.patch": "08a39dd9ba6b863d565c8bb20939e6d62de3a7af33cd7b37740c029b0542620f",
+        "context.md": "474ae6fbeea228dac95052917d2c18da969aef3c9309ec1dd8d3979499d790ee",
+        "source.rb": "d946a66cee26d4d2df8e4639435fe1016bbe8371aaaa2a6590efa1a2715faf23",
+        "test.rb": "f282127ccf238efe355aeb0dae2b5f4d675aaa2abd4c34d64ec876fec4e888aa"
+      }
+    },
+    {
+      "case_id": "2e614c8a",
+      "family": "route_precedence",
+      "expected": "regression",
+      "origin": {
+        "repository": "https://github.com/lost-in-the/woods",
+        "fix_revision": "cc3bd3eae5cbecb398cb208006037fe7492b432a",
+        "before_revision": "bf17dc5ffe350e221b944158e1cb2d563e0a081a",
+        "source_path": "lib/woods/extractors/route_helper_resolver.rb",
+        "adaptation": "Minimized executable stdlib-only extraction; not a historical commit replay. The shared baseline is newly authored, and each candidate is an adapted change from it."
+      },
+      "sha256": {
+        "before.rb": "bd1c3a3286e975af13a8394d3cf6fdb33706cfad427aa5d84ce14342bebc7e0b",
+        "change.patch": "dbc4fca9420d30c6ae42287ca59b71722a870874bcc85382c5c2167d2abd9760",
+        "context.md": "4eda2bdda1c2e82d9bad5ac437e2ae0f262f365204dcf46204cc3cc5057592a4",
+        "source.rb": "2ae1ad76e171573a7a2816c682e8f71172edd00442d0085336405ddc6cd3da43",
+        "test.rb": "2a93b3d0422aa3455369940bb1c3fa3f27c9485a7ce05acc1669512d5171f2b8"
+      }
+    },
+    {
+      "case_id": "a83f260d",
+      "family": "route_precedence",
+      "expected": "satisfied",
+      "origin": {
+        "repository": "https://github.com/lost-in-the/woods",
+        "fix_revision": "cc3bd3eae5cbecb398cb208006037fe7492b432a",
+        "before_revision": "bf17dc5ffe350e221b944158e1cb2d563e0a081a",
+        "source_path": "lib/woods/extractors/route_helper_resolver.rb",
+        "adaptation": "Minimized executable stdlib-only extraction; not a historical commit replay. The shared baseline is newly authored, and each candidate is an adapted change from it."
+      },
+      "sha256": {
+        "before.rb": "bd1c3a3286e975af13a8394d3cf6fdb33706cfad427aa5d84ce14342bebc7e0b",
+        "change.patch": "3206633bdec9ba7529437088909755c01984bfb0a887be377cc695ef167125da",
+        "context.md": "4eda2bdda1c2e82d9bad5ac437e2ae0f262f365204dcf46204cc3cc5057592a4",
+        "source.rb": "c22a2947b9ca359718441eac711fd0d95b089b3c9ab4a0c10e9176ab668e16cb",
+        "test.rb": "2a93b3d0422aa3455369940bb1c3fa3f27c9485a7ce05acc1669512d5171f2b8"
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "format": 1,
+  "synthetic": true,
+  "notice": "HAND-WRITTEN FAKE ANSWERS AND USAGE. Illustrates protocol/replay only; no quality, latency, billing or live-provider evidence.",
+  "provenance": {
+    "policy": "illustrative-noul-ranker-v1",
+    "manifest_sha256": "c1b382d2d1bbc766289233eba11477dc373571a2763c43cae77b3b3e87e39373",
+    "index_generation": "synthetic-generation-1",
+    "index_sha256": "a7fcc1a98515e09fe11ec39712099ab5f9c42aed5f2c076b6ce906d3d9fa5a86",
+    "rubric_version": "illustrative-evidence-v1",
+    "expected_returned_model": "jev-1.13.0",
+    "request_sha256": [
+      "b56c68d725839a2e2a4dbced4fe68d2d15ead64b7c3b57da4e5fdd8f14f10dcc"
+    ]
+  },
+  "receipts": [
+    {
+      "request_sha256": "b56c68d725839a2e2a4dbced4fe68d2d15ead64b7c3b57da4e5fdd8f14f10dcc",
+      "status": "validated",
+      "response": {
+        "model": "jev-1.13.0",
+        "answers": {
+          "C001": {
+            "type": "noul",
+            "noul": 0.95
+          },
+          "C002": {
+            "type": "noul",
+            "noul": 0.12
+          },
+          "C003": {
+            "type": "noul",
+            "noul": 0.02
+          }
+        },
+        "usage": {
+          "input_tokens": 600,
+          "output_tokens": 60
+        }
+      }
+    }
+  ]
+}

@@ -2788,5 +2788,18 @@
     ],
     "description": "Issue #356: SQLite JSON1 converts Boolean scalars to integers during field-scoped search. Search true/false text consistently with InMemory while keeping real numeric 1/0 distinct, null and missing fields unmatched, and structured JSON and whole-record semantics unchanged. Shared adapter regressions cover these controls.",
     "status": "resolved"
+  },
+  {
+    "id": "B-204",
+    "title": "Create a separate repository for an optional Woods-backed review and CI CLI",
+    "severity": "medium",
+    "category": "design-gap",
+    "layer": "agentic",
+    "files": [
+      "docs/design/plans/2026-09-19-woods-review-support-implementation-plan.md",
+      "script/typesafe/"
+    ],
+    "description": "Backlog scope approved 2026-09-19: build the reusable pre-push/CI review runner in a separate repository as an optional companion to Woods. Consume the stable PublishedIndex API or published filesystem contract; keep general extraction/provenance improvements in Woods. The CLI reviews the installed application and is invoked by an agent, developer, or CI, with no application UI, jobs, or tables. Own Jev request assembly, versioned question banks, evidence/revision/freshness ledgers, advisory reports, replay and usage accounting in the companion; keep application contracts and overrides in each application. Validate framework/database/Rails capabilities explicitly and measure confirmed findings, false leads, missed issues and total downstream effort. Start advisory-only; no default inference dependency or merge gate in the Woods gem. Existing experiments remain development evidence. Repository/package names, distribution and release compatibility policy remain to be decided. This entry authorizes backlog tracking, not repository creation or publication.",
+    "status": "open"
   }
 ]

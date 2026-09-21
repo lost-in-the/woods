@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "task": "Add an option to include unpublished items in the catalog while preserving the default published-only behavior.",
+  "request_model": "jev-1.13.0",
+  "expected_model": "jev-1.13.0",
+  "rubric_version": "illustrative-evidence-v1",
+  "index_generation": "synthetic-generation-1",
+  "index_file": "index.json",
+  "index_sha256": "a7fcc1a98515e09fe11ec39712099ab5f9c42aed5f2c076b6ce906d3d9fa5a86",
+  "candidates": [
+    {
+      "id": "C001",
+      "identifier": "visible_items",
+      "file_path": "source/catalog.py",
+      "start_byte": 82,
+      "end_byte": 176,
+      "file_sha256": "d43962706b715ecccf28b82621e09a02882941f89c4d11db85f35c6f66876429",
+      "source_sha256": "a4ee735781437022bc65da9d23071f61d04edf2439e1c67f0722b7a2a354a0a6"
+    },
+    {
+      "id": "C002",
+      "identifier": "display_title",
+      "file_path": "source/catalog.py",
+      "start_byte": 178,
+      "end_byte": 236,
+      "file_sha256": "d43962706b715ecccf28b82621e09a02882941f89c4d11db85f35c6f66876429",
+      "source_sha256": "ab39b294c75fea7862e027925915cc4d2eab0e963f39fa5ec3fdb4faa1cb416c"
+    },
+    {
+      "id": "C003",
+      "identifier": "retry_delay",
+      "file_path": "source/retries.py",
+      "start_byte": 83,
+      "end_byte": 142,
+      "file_sha256": "500d8cee33081700d543acaff2fb21bdaa297a9a974e8ffe198049faa8e34d74",
+      "source_sha256": "96a86f03c6ca93e5ce69f09b730011beb936189bbc9b610973bd049dc808a4db"
+    }
+  ]
+}

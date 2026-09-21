@@ -1,0 +1,77 @@
+{
+  "basis": "Research evidence and guide validation reviews exported after four-test completion; SHA values identify bytes, not authentication or external proof.",
+  "files": [
+    {
+      "file": "2026-09-16-typesafe-development-evaluation-review.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-16-typesafe-development-evaluation-review.md",
+      "original_sha256": "3564815d207b887fbf6e4ba1e3940cabf4a7780038a4a2f4da2ce9908b1cf2f1",
+      "export_sha256": "bfce244cd7347a8fea266b9906ca32c01a44f8585711566ba9e248dd707217d1"
+    },
+    {
+      "file": "2026-09-16-typesafe-development-evaluation.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-16-typesafe-development-evaluation.md",
+      "original_sha256": "93ce5059aed2686b6ab9c421cce60c708be482d22689144be118331888e265ec",
+      "export_sha256": "1fa18a464205b4f3977fec0db5205cc83ab7d57b29efefd078865ced05a31bce"
+    },
+    {
+      "file": "2026-09-16-typesafe-four-tests-evaluation.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-16-typesafe-four-tests-evaluation.md",
+      "original_sha256": "b132931ae6550fd0829bf84f7b4d1d59fa409bea5791b6331a97b246c6f18e32",
+      "export_sha256": "10bf2fb3375ad6ffdcdd832fbd4b53ca63584cf998f09450b1c08361071fb49e"
+    },
+    {
+      "file": "2026-09-16-typesafe-four-tests-plan.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-16-typesafe-four-tests-plan.md",
+      "original_sha256": "3202b8770d69ca1a826d0893b330205a8314b32fa6672e05c6344d8aa2ce04cf",
+      "export_sha256": "85855fb370b553f2e7f5a93c9f5101a6aa4f40e887a076433d669224fd8109cf"
+    },
+    {
+      "file": "2026-09-16-typesafe-retrieval-evaluation.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-16-typesafe-retrieval-evaluation.md",
+      "original_sha256": "856e95151bb703e7eb32e0a12418e6efd44a62db95b2f9ad78f81a326c81e23f",
+      "export_sha256": "785b77404f2d3bad1cee7027eafeb2a02e4bda44229fcb25fc573360c19a6650"
+    },
+    {
+      "file": "2026-09-16-typesafe-span-evaluation.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-16-typesafe-span-evaluation.md",
+      "original_sha256": "9dc2516beec4504e35d609fdb7d3482d8e6605558bd8f96201cfc4e7653270f3",
+      "export_sha256": "b74b7116f4e95cbb56173c6fa974536fe24ef01d2b0f509be0f10efd60e223ff"
+    },
+    {
+      "file": "typesafe-guide-history-audit.md",
+      "original_repository_relative_path": "tmp/typesafe-guide-history-audit.md",
+      "original_sha256": "28052737ce4d38cbf4560f856341e497d22b4864f80388419a78a40137138a81",
+      "export_sha256": "cbf602b9f26e610c2a40c27f7494eaac141400aecfd22d55bd996500c4b686c5"
+    },
+    {
+      "file": "four-tests-posthoc-review.md",
+      "original_repository_relative_path": "tmp/typesafe-next-four/posthoc-compatibility/review.md",
+      "original_sha256": "bb37ccb2c65ae1c1b86081dce44b913ff379a4adb84a25021ce87659773037dc",
+      "export_sha256": "1fd1b8faa66cd791a9b79ebb923bb7ce57ad63b0c429218348da735b955b0c1a"
+    },
+    {
+      "file": "source-tooling-readme.md",
+      "original_repository_relative_path": "script/typesafe/README.md",
+      "original_sha256": "3681fa9c35f7b7904074f290f5b4fe31fc000842c646b04891c60dc71e94bea5",
+      "export_sha256": "b7daf4f8da42e5ca4b666fba8eaf152d3e994fbf80bafc912b5a4a359bd742b8"
+    },
+    {
+      "file": "guide-validation-pass1.md",
+      "original_repository_relative_path": "tmp/typesafe-guide-pass1-review.md",
+      "original_sha256": "f6ac40c03e3b9e10007608aabd7f6667df50111142c3de99e341208068b580ae",
+      "export_sha256": "f6ac40c03e3b9e10007608aabd7f6667df50111142c3de99e341208068b580ae"
+    },
+    {
+      "file": "guide-validation-pass2.md",
+      "original_repository_relative_path": "tmp/typesafe-guide-pass2-review.md",
+      "original_sha256": "8a7ad36fa9f20a606df692853a6832ca37dab9ab36fb80e0639d79a0a5046df2",
+      "export_sha256": "8a7ad36fa9f20a606df692853a6832ca37dab9ab36fb80e0639d79a0a5046df2"
+    },
+    {
+      "file": "2026-09-21-typesafe-booted-review-results.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-21-typesafe-booted-review-results.md",
+      "original_sha256": "b43e359187f6848e044795aba0f805f26e8e85530d438ad73605b3366c96a5bb",
+      "export_sha256": "b43e359187f6848e044795aba0f805f26e8e85530d438ad73605b3366c96a5bb"
+    }
+  ]
+}

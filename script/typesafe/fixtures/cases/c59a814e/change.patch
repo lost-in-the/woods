@@ -1,0 +1,22 @@
+--- a/source.rb
++++ b/source.rb
+@@ -42,7 +42,7 @@
+     return unless overflow.positive?
+ 
+     summaries.reject { |summary| summary[:git_sha] == protect }
+-             .sort_by { |summary| [summary[:extracted_at], summary[:git_sha]] }
++             .sort_by { |summary| [summary[:corrupt] ? 0 : 1, summary[:extracted_at], summary[:git_sha]] }
+              .first(overflow)
+              .each { |summary| FileUtils.rm_f(snapshot_path(summary[:git_sha])) }
+   end
+@@ -51,7 +51,9 @@
+     snapshot_files.map do |path|
+       sha = File.basename(path, '.json')
+       data = read_snapshot(path) || {}
+-      { git_sha: sha, extracted_at: data.fetch('extracted_at', '') }
++      timestamp = data['extracted_at']
++      valid = data['git_sha'] == sha && timestamp.is_a?(String)
++      { git_sha: sha, extracted_at: valid ? timestamp : '', corrupt: !valid }
+     end
+   end
+ end
