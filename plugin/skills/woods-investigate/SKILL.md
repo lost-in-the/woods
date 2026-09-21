@@ -102,6 +102,17 @@ cutoffs still apply. Verify important conclusions in source and tests, since
 recorded reachability does not establish observed execution. See the
 [explanation contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#traversal-explanations).
 
+## Graph-analysis pages
+
+Pass explicit `limit` and `offset` when paging `graph_analysis`. Enforcing the
+advertised default of 20 rows per section and preserving total/offset on last
+and empty pages (#519) are unreleased after `2.0.0.beta3`; check the installed
+response rather than inferring support from the plugin version. On supporting
+servers, read `<section>_total` and `<section>_offset` in JSON, or the human
+pagination notice. An empty later page does not mean no findings. Totals count
+the published report array, which may already be bounded during extraction.
+See the [page contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#graph-analysis-pages).
+
 ## Volatile dependency reports
 
 Read `stats.volatile_dependency_count` before judging the top-20 array: it

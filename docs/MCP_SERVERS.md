@@ -192,6 +192,23 @@ error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
 
+### Graph-analysis pages
+
+Unreleased after `2.0.0.beta3`: `graph_analysis` enforces its advertised default
+of 20 rows per section. Pass `limit` and `offset` to page one selected `analysis`
+or each section of `analysis: "all"`. Explicit limits also bound nested hub
+`dependents` lists. Older servers may return every section row when `limit` is
+omitted; pass a limit explicitly when supporting both versions.
+
+JSON responses retain `<section>_total`, `<section>_offset` (when positive), and
+`<section>_truncated: true` whenever a page omits rows before or after it. Markdown,
+plain, and Claude responses show the same total and offset on last and empty
+pages. For example, offset 20 with limit 5 over 25 published orphans shows
+`5 of 25 from offset 20`; offset 100 shows `0 of 25 from offset 100`. An empty
+page does not mean the section has no findings. These totals describe the
+published report arrays, which can themselves be bounded during extraction;
+they do not establish complete source-reference coverage.
+
 ### Search completeness
 
 Search responses retain `query`, `result_count`, and `results`; `result_count`
