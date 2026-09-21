@@ -1,0 +1,450 @@
+# This file is auto-generated from the current state of the database. Instead
+# of editing this file, please use the migrations feature of Active Record to
+# incrementally modify your database, and then regenerate this schema definition.
+#
+# This file is the source Rails uses to define your schema when running `bin/rails
+# db:schema:load`. When creating a new database, `bin/rails db:schema:load` tends to
+# be faster and is potentially less error prone than running all of your
+# migrations from scratch. Old migrations may fail to apply correctly if those
+# migrations use external dependencies or application code.
+#
+# It's strongly recommended that you check this file into your version control system.
+
+ActiveRecord::Schema[8.0].define(version: 2026_09_21_000003) do
+  create_table "activity_events", force: :cascade do |t|
+    t.integer "organization_id", null: false
+    t.integer "actor_id"
+    t.string "subject_type", null: false
+    t.integer "subject_id", null: false
+    t.string "action", null: false
+    t.json "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["actor_id"], name: "index_activity_events_on_actor_id"
+    t.index ["organization_id"], name: "index_activity_events_on_organization_id"
+    t.index ["subject_type", "subject_id"], name: "index_activity_events_on_subject"
+  end
+
+  create_table "article_revisions", force: :cascade do |t|
+    t.integer "article_id", null: false
+    t.integer "author_id", null: false
+    t.integer "number", null: false
+    t.string "title", null: false
+    t.text "body"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_id", "number"], name: "index_article_revisions_on_article_id_and_number", unique: true
+    t.index ["article_id"], name: "index_article_revisions_on_article_id"
+    t.index ["author_id"], name: "index_article_revisions_on_author_id"
+  end
+
+  create_table "article_tags", force: :cascade do |t|
+    t.integer "article_id", null: false
+    t.integer "tag_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_id", "tag_id"], name: "index_article_tags_on_article_id_and_tag_id", unique: true
+    t.index ["article_id"], name: "index_article_tags_on_article_id"
+    t.index ["tag_id"], name: "index_article_tags_on_tag_id"
+  end
+
+  create_table "articles", force: :cascade do |t|
+    t.integer "author_id", null: false
+    t.string "title", null: false
+    t.string "slug", null: false
+    t.text "body"
+    t.datetime "published_at"
+    t.datetime "archived_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "publication_id", null: false
+    t.string "state", default: "draft", null: false
+    t.datetime "scheduled_at"
+    t.integer "lock_version", default: 0, null: false
+    t.integer "comments_count", default: 0, null: false
+    t.index ["author_id"], name: "index_articles_on_author_id"
+    t.index ["publication_id", "state", "scheduled_at"], name: "index_articles_on_publication_id_and_state_and_scheduled_at"
+    t.index ["publication_id"], name: "index_articles_on_publication_id"
+    t.index ["slug"], name: "index_articles_on_slug", unique: true
+    t.check_constraint "comments_count >= 0", name: "articles_comment_count_nonnegative"
+  end
+
+  create_table "authors", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "email", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_authors_on_email", unique: true
+  end
+
+  create_table "billing_invoices", force: :cascade do |t|
+    t.integer "author_id", null: false
+    t.string "reference", null: false
+    t.datetime "settled_at"
+    t.datetime "archived_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "subscriber_id"
+    t.integer "subscription_id"
+    t.datetime "due_at"
+    t.string "currency", default: "USD", null: false
+    t.index ["author_id"], name: "index_billing_invoices_on_author_id"
+    t.index ["reference"], name: "index_billing_invoices_on_reference", unique: true
+    t.index ["subscriber_id"], name: "index_billing_invoices_on_subscriber_id"
+    t.index ["subscription_id"], name: "index_billing_invoices_on_subscription_id"
+  end
+
+  create_table "billing_line_items", force: :cascade do |t|
+    t.integer "invoice_id", null: false
+    t.string "description", null: false
+    t.integer "amount_cents", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_id"], name: "index_billing_line_items_on_invoice_id"
+  end
+
+  create_table "billing_payments", force: :cascade do |t|
+    t.integer "invoice_id", null: false
+    t.string "type", null: false
+    t.string "state", default: "pending", null: false
+    t.integer "amount_cents", default: 0, null: false
+    t.string "last_four"
+    t.string "sort_code"
+    t.datetime "audited_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "idempotency_key"
+    t.index ["idempotency_key"], name: "index_billing_payments_on_idempotency_key", unique: true
+    t.index ["invoice_id"], name: "index_billing_payments_on_invoice_id"
+  end
+
+  create_table "billing_plans", force: :cascade do |t|
+    t.integer "publication_id", null: false
+    t.string "name", null: false
+    t.integer "amount_cents", null: false
+    t.string "currency", default: "USD", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["publication_id"], name: "index_billing_plans_on_publication_id"
+  end
+
+  create_table "billing_refunds", force: :cascade do |t|
+    t.integer "payment_id", null: false
+    t.integer "amount_cents", null: false
+    t.string "reason", null: false
+    t.string "idempotency_key", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["idempotency_key"], name: "index_billing_refunds_on_idempotency_key", unique: true
+    t.index ["payment_id"], name: "index_billing_refunds_on_payment_id"
+  end
+
+  create_table "billing_subscription_changes", force: :cascade do |t|
+    t.integer "subscription_id", null: false
+    t.string "event", null: false
+    t.json "details", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["subscription_id"], name: "index_billing_subscription_changes_on_subscription_id"
+  end
+
+  create_table "billing_subscriptions", force: :cascade do |t|
+    t.integer "subscriber_id", null: false
+    t.integer "plan_id", null: false
+    t.string "state", default: "active", null: false
+    t.datetime "renews_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["plan_id"], name: "index_billing_subscriptions_on_plan_id"
+    t.index ["subscriber_id", "plan_id"], name: "index_billing_subscriptions_on_subscriber_id_and_plan_id", unique: true
+    t.index ["subscriber_id"], name: "index_billing_subscriptions_on_subscriber_id"
+  end
+
+  create_table "collection_articles", force: :cascade do |t|
+    t.integer "collection_id", null: false
+    t.integer "article_id", null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_id"], name: "index_collection_articles_on_article_id"
+    t.index ["collection_id", "article_id"], name: "index_collection_articles_on_collection_id_and_article_id", unique: true
+    t.index ["collection_id"], name: "index_collection_articles_on_collection_id"
+  end
+
+  create_table "collections", force: :cascade do |t|
+    t.integer "publication_id", null: false
+    t.string "name", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["publication_id"], name: "index_collections_on_publication_id"
+  end
+
+  create_table "comments", force: :cascade do |t|
+    t.integer "article_id", null: false
+    t.integer "author_id"
+    t.text "body", null: false
+    t.datetime "archived_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "parent_id"
+    t.index ["article_id"], name: "index_comments_on_article_id"
+    t.index ["author_id"], name: "index_comments_on_author_id"
+    t.index ["parent_id"], name: "index_comments_on_parent_id"
+  end
+
+  create_table "engagement_events", force: :cascade do |t|
+    t.integer "subscriber_id", null: false
+    t.integer "article_id", null: false
+    t.integer "delivery_id"
+    t.string "kind", null: false
+    t.json "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_id"], name: "index_engagement_events_on_article_id"
+    t.index ["delivery_id"], name: "index_engagement_events_on_delivery_id"
+    t.index ["subscriber_id"], name: "index_engagement_events_on_subscriber_id"
+  end
+
+  create_table "gen_hubs", force: :cascade do |t|
+    t.string "name", null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "gen_records", force: :cascade do |t|
+    t.integer "hub_id"
+    t.string "name", null: false
+    t.datetime "archived_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["hub_id"], name: "index_gen_records_on_hub_id"
+  end
+
+  create_table "memberships", force: :cascade do |t|
+    t.integer "organization_id", null: false
+    t.integer "author_id", null: false
+    t.string "role", default: "author", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["author_id"], name: "index_memberships_on_author_id"
+    t.index ["organization_id", "author_id"], name: "index_memberships_on_organization_id_and_author_id", unique: true
+    t.index ["organization_id"], name: "index_memberships_on_organization_id"
+  end
+
+  create_table "newsletter_campaigns", force: :cascade do |t|
+    t.integer "publication_id", null: false
+    t.integer "article_id", null: false
+    t.string "subject", null: false
+    t.string "state", default: "draft", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_id"], name: "index_newsletter_campaigns_on_article_id"
+    t.index ["publication_id"], name: "index_newsletter_campaigns_on_publication_id"
+  end
+
+  create_table "newsletter_deliveries", force: :cascade do |t|
+    t.integer "campaign_id", null: false
+    t.integer "subscriber_id", null: false
+    t.string "state", default: "queued", null: false
+    t.datetime "delivered_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_id", "subscriber_id"], name: "index_newsletter_deliveries_on_campaign_id_and_subscriber_id", unique: true
+    t.index ["campaign_id"], name: "index_newsletter_deliveries_on_campaign_id"
+    t.index ["subscriber_id"], name: "index_newsletter_deliveries_on_subscriber_id"
+  end
+
+  create_table "organizations", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["slug"], name: "index_organizations_on_slug", unique: true
+  end
+
+  create_table "publications", force: :cascade do |t|
+    t.integer "organization_id", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["organization_id"], name: "index_publications_on_organization_id"
+    t.index ["slug"], name: "index_publications_on_slug", unique: true
+  end
+
+  create_table "review_assignments", force: :cascade do |t|
+    t.integer "article_revision_id", null: false
+    t.integer "reviewer_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["article_revision_id", "reviewer_id"], name: "idx_on_article_revision_id_reviewer_id_fecb738717", unique: true
+    t.index ["article_revision_id"], name: "index_review_assignments_on_article_revision_id"
+    t.index ["reviewer_id"], name: "index_review_assignments_on_reviewer_id"
+  end
+
+  create_table "review_decisions", force: :cascade do |t|
+    t.integer "review_assignment_id", null: false
+    t.string "outcome", null: false
+    t.text "notes"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["review_assignment_id"], name: "index_review_decisions_on_review_assignment_id", unique: true
+  end
+
+  create_table "review_deliveries", force: :cascade do |t|
+    t.string "payload"
+  end
+
+  create_table "review_documents", force: :cascade do |t|
+    t.string "title", null: false
+    t.boolean "archived", default: false, null: false
+    t.integer "reviewer_id", default: 1, null: false
+    t.integer "owner_id"
+    t.index ["owner_id"], name: "index_review_documents_on_owner_id"
+    t.index ["reviewer_id"], name: "index_review_documents_on_reviewer_id"
+  end
+
+  create_table "review_invitations", force: :cascade do |t|
+    t.string "token", null: false
+    t.index ["token"], name: "index_review_invitations_on_token", unique: true
+  end
+
+  create_table "review_items", force: :cascade do |t|
+    t.string "name"
+    t.string "normalized_name"
+  end
+
+  create_table "review_owners", force: :cascade do |t|
+    t.string "name", null: false
+  end
+
+  create_table "review_products", force: :cascade do |t|
+    t.integer "price_cents", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "review_registry_entries", force: :cascade do |t|
+    t.string "external_key", null: false
+  end
+
+  create_table "review_wallets", force: :cascade do |t|
+    t.integer "balance", default: 0, null: false
+    t.integer "limit", default: 1000, null: false
+  end
+
+  create_table "subscribers", force: :cascade do |t|
+    t.integer "organization_id", null: false
+    t.integer "author_id"
+    t.string "name", null: false
+    t.string "email", null: false
+    t.json "preferences", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["author_id"], name: "index_subscribers_on_author_id"
+    t.index ["organization_id", "email"], name: "index_subscribers_on_organization_id_and_email", unique: true
+    t.index ["organization_id"], name: "index_subscribers_on_organization_id"
+  end
+
+  create_table "support_ticket_messages", force: :cascade do |t|
+    t.integer "ticket_id", null: false
+    t.integer "author_id"
+    t.text "body", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["author_id"], name: "index_support_ticket_messages_on_author_id"
+    t.index ["ticket_id"], name: "index_support_ticket_messages_on_ticket_id"
+  end
+
+  create_table "support_tickets", force: :cascade do |t|
+    t.integer "subscriber_id", null: false
+    t.integer "assignee_id"
+    t.string "subject_type"
+    t.integer "subject_id"
+    t.string "title", null: false
+    t.string "state", default: "open", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["assignee_id"], name: "index_support_tickets_on_assignee_id"
+    t.index ["subject_type", "subject_id"], name: "index_support_tickets_on_subject"
+    t.index ["subscriber_id"], name: "index_support_tickets_on_subscriber_id"
+  end
+
+  create_table "tags", force: :cascade do |t|
+    t.string "name", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_tags_on_name", unique: true
+  end
+
+  create_table "webhook_deliveries", force: :cascade do |t|
+    t.integer "webhook_endpoint_id", null: false
+    t.integer "activity_event_id", null: false
+    t.string "state", default: "pending", null: false
+    t.integer "attempts", default: 0, null: false
+    t.json "payload", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["activity_event_id"], name: "index_webhook_deliveries_on_activity_event_id"
+    t.index ["webhook_endpoint_id", "activity_event_id"], name: "idx_on_webhook_endpoint_id_activity_event_id_d10c51c218", unique: true
+    t.index ["webhook_endpoint_id"], name: "index_webhook_deliveries_on_webhook_endpoint_id"
+  end
+
+  create_table "webhook_endpoints", force: :cascade do |t|
+    t.integer "organization_id", null: false
+    t.string "url", null: false
+    t.string "secret", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["organization_id"], name: "index_webhook_endpoints_on_organization_id"
+  end
+
+  add_foreign_key "activity_events", "authors", column: "actor_id"
+  add_foreign_key "activity_events", "organizations"
+  add_foreign_key "article_revisions", "articles"
+  add_foreign_key "article_revisions", "authors"
+  add_foreign_key "article_tags", "articles"
+  add_foreign_key "article_tags", "tags"
+  add_foreign_key "articles", "authors"
+  add_foreign_key "articles", "publications"
+  add_foreign_key "billing_invoices", "authors"
+  add_foreign_key "billing_invoices", "billing_subscriptions", column: "subscription_id"
+  add_foreign_key "billing_invoices", "subscribers"
+  add_foreign_key "billing_line_items", "billing_invoices", column: "invoice_id"
+  add_foreign_key "billing_payments", "billing_invoices", column: "invoice_id"
+  add_foreign_key "billing_plans", "publications"
+  add_foreign_key "billing_refunds", "billing_payments", column: "payment_id"
+  add_foreign_key "billing_subscription_changes", "billing_subscriptions", column: "subscription_id"
+  add_foreign_key "billing_subscriptions", "billing_plans", column: "plan_id"
+  add_foreign_key "billing_subscriptions", "subscribers"
+  add_foreign_key "collection_articles", "articles"
+  add_foreign_key "collection_articles", "collections"
+  add_foreign_key "collections", "publications"
+  add_foreign_key "comments", "articles"
+  add_foreign_key "comments", "authors"
+  add_foreign_key "comments", "comments", column: "parent_id"
+  add_foreign_key "engagement_events", "articles"
+  add_foreign_key "engagement_events", "newsletter_deliveries", column: "delivery_id"
+  add_foreign_key "engagement_events", "subscribers"
+  add_foreign_key "memberships", "authors"
+  add_foreign_key "memberships", "organizations"
+  add_foreign_key "newsletter_campaigns", "articles"
+  add_foreign_key "newsletter_campaigns", "publications"
+  add_foreign_key "newsletter_deliveries", "newsletter_campaigns", column: "campaign_id"
+  add_foreign_key "newsletter_deliveries", "subscribers"
+  add_foreign_key "publications", "organizations"
+  add_foreign_key "review_assignments", "article_revisions"
+  add_foreign_key "review_assignments", "authors", column: "reviewer_id"
+  add_foreign_key "review_decisions", "review_assignments"
+  add_foreign_key "review_documents", "review_owners", column: "owner_id", on_delete: :nullify
+  add_foreign_key "subscribers", "authors"
+  add_foreign_key "subscribers", "organizations"
+  add_foreign_key "support_ticket_messages", "authors"
+  add_foreign_key "support_ticket_messages", "support_tickets", column: "ticket_id"
+  add_foreign_key "support_tickets", "authors", column: "assignee_id"
+  add_foreign_key "support_tickets", "subscribers"
+  add_foreign_key "webhook_deliveries", "activity_events"
+  add_foreign_key "webhook_deliveries", "webhook_endpoints"
+  add_foreign_key "webhook_endpoints", "organizations"
+end

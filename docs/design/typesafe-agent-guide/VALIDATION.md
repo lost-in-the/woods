@@ -1,5 +1,37 @@
 # Guide validation record
 
+## September 21 full-bank follow-up
+
+The new chapter 11, full-bank source/catalog, exact N+1 sample pair, detailed
+metrics and posthoc transfer receipts extend the original guide without replacing
+its older experiments. The review records for this update are
+[pass 1](evidence/full-bank/validation-pass1.md) and
+[pass 2](evidence/full-bank/validation-pass2.md). Their findings and ownership
+overlap are disclosed; these are scoped validation passes, not a claim that the
+reviewers were independent of all underlying work.
+
+Validation covered frozen input/response hashes, the 144-request accounting,
+question/fixture mapping limits, applicability corrections, reviewer delivery,
+conditional extra-mechanism verification, exact selected exports, portability and
+privacy. Original versus delivery-corrected reviewer sessions remain separate.
+First-emission timestamps are distinct from the unavailable per-finding token
+metric. The screenshot and community examples in chapter 11 inform proposed
+follow-ups; they are not additional trial results.
+
+The new offline suite passes 45 tests and the retained portable examples pass 28.
+The full gem suite passed 9,401 examples with three optional-tokenizer pending
+checks; RuboCop inspected 913 files with no offenses. No production runtime files
+changed. After these reviews, all current guide files are covered by a regenerated
+`SHA256SUMS` (excluding that checksum file), and the archive is extracted and its
+hashes and offline examples checked separately.
+
+Every exported byte hash is checked against its manifest. Historical
+`original_sha256` values record the source at the time of earlier exports; they
+are not assertions that all original paths still have those bytes in today's
+checkout. In particular, the older development-evaluation report and tooling
+README have subsequently changed. Their historical source hashes remain intact.
+New full-bank normalization is explicit in its separate export manifest.
+
 ## September 21 addendum validation
 
 Chapter 10, its full report and its single synthetic request/response were added

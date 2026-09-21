@@ -141,3 +141,27 @@ The posthoc audit quantified unsupported Unicode-folding changes and additional 
 | Production TypeSafe dependency, CI gate, automatic patch acceptance | Not introduced |
 
 The evidence supports an optional low-cost context-selection experiment with real code authorship and ordinary validation. It supports neither dismissal because the selector does not always beat a larger context nor default adoption based on a small winning comparison. [Cost and adoption](07-cost-and-adoption.md) explains the next decision.
+
+
+## 10. Full Rails bank and downstream review (September 21)
+
+The later [full-bank chapter](11-full-bank-review-lessons.md) and
+[results report](evidence/2026-09-21-typesafe-full-bank-results.md) preserve the
+original six-question implementation while evaluating all 204 supplied questions
+on twelve defect/control pairs. There were 144 provider calls (three repeats per
+candidate/arm), 1,291,578 input and 323,571 free output tokens, estimated $0.054246276.
+One of 14,688 bank answers was invalid; all 432 baseline answers passed.
+
+Several mechanism questions separated their pairs strongly. Maximum-Noul priority
+also alarmed on 10/12 controls; those are unverified leads, not automatically false
+positives. Two designated question/fixture mappings were invalid. The initial six
+reviewer sessions had delivery limitations; a separate six-session recovery
+comparison is reported without pooling. A full-bank-assisted reviewer identified
+an additional conditional stale-transfer mechanism on the atomicity control,
+verified by execution without changing that control's original label.
+
+No general efficiency gain, cross-Rails/database compatibility or autonomous
+whole-app packet construction is established. Aggregate reviewer tokens cannot
+recover the intended tokens-to-first-finding metric. The full bank's low cost and
+specific useful leads justify improving its interpreter rather than dismissing
+its capability from an unsuccessful aggregate ordering.

@@ -1,0 +1,10 @@
+# frozen_string_literal: true
+
+class ReviewCreditTransfer
+  def self.call(source, destination, amount)
+    ReviewWallet.transaction do
+      source.update!(balance: source.balance - amount)
+      destination.update!(balance: destination.balance + amount)
+    end
+  end
+end

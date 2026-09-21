@@ -6,7 +6,7 @@ On the sending machine, list available Taildrop targets and copy the archive:
 
 ```bash
 tailscale file cp --targets
-tailscale file cp ./typesafe-agent-guide-2026-09-21.zip DESTINATION:
+tailscale file cp ./typesafe-agent-guide-2026-09-21-full-bank.zip DESTINATION:
 ```
 
 Replace `DESTINATION` with a target shown by the first command. Keep the trailing colon. The target must be eligible for Taildrop under your tailnet configuration. These commands were checked against the installed Tailscale CLI; this guide does not send a file automatically.

@@ -1,0 +1,457 @@
+{
+  "schema_version": 1,
+  "addendum_version": "2026-09-21.posthoc-stale-input.1",
+  "created_at": "2026-09-21T15:55:28.119460+00:00",
+  "preservation": {
+    "initial_adjudication_path": "tmp/typesafe-rails-bank-2026-09-21/reviewer-adjudication.json",
+    "initial_adjudication_sha256": "1ba91e6c8c1b1854cb560e06f4c8c47c0c11aafd63fa4e65c3eea12a51b8da1d",
+    "delivery_initial_adjudication_path": "tmp/typesafe-rails-bank-2026-09-21/reviewer-delivery-adjudication.json",
+    "delivery_initial_adjudication_sha256": "77c45579e1789d10eee31809d179c95b7bffbaa181d3a22046a15504cef54f64",
+    "prior_adjudications_unchanged": true,
+    "original_atomicity_oracle_label_unchanged": true
+  },
+  "posthoc_confirmation": {
+    "reviewer_run": "bank-1",
+    "case_id": "f9a470ec",
+    "classification": "conditionally_confirmed_additional_stale_input_mechanism",
+    "premise": "Separate transfers receive snapshots of an overlapping wallet read before the first transfer commits",
+    "method": "Deterministic admissible read/commit interleaving; not simultaneous-thread testing",
+    "runtime": {
+      "rails": "8.0.5.1",
+      "ruby": "3.3.1",
+      "adapter": "SQLite"
+    },
+    "candidate_sha": "65ef6c0a87a95990f2f41250d699de20240b14df",
+    "source_files": {
+      "app/services/review_credit_transfer.rb": "23586f679533faeddba36b03d1f0ea92d6ae8ce0ca1c9ecefade817ec5201c3b",
+      "app/models/review_wallet.rb": "c80fa4edb97bfeb8a29b18db3e90dcc9a674ac741a0006cd4f97123a27278557",
+      "db/schema.rb": "80ca1f6285f1beb53d7bf86fe2bd055825e8874aa7b8112fb8eeb7af53d05f10"
+    },
+    "source_files_match_recorded_candidate_commit": true,
+    "service_and_model_source_match_frozen_review_packet": true,
+    "optimistic_locking_disabled": true,
+    "scenario_results": {
+      "shared_destination": {
+        "stale": {
+          "loading": "both snapshots read before first transfer",
+          "before": {
+            "sender_a": 100,
+            "sender_b": 100,
+            "recipient": 0
+          },
+          "after": {
+            "sender_a": 90,
+            "sender_b": 90,
+            "recipient": 10
+          },
+          "expected": {
+            "sender_a": 90,
+            "sender_b": 90,
+            "recipient": 20
+          },
+          "total_before": 200,
+          "total_after": 190,
+          "expected_balances_hold": false
+        },
+        "fresh": {
+          "loading": "fresh find before each transfer",
+          "before": {
+            "sender_a": 100,
+            "sender_b": 100,
+            "recipient": 0
+          },
+          "after": {
+            "sender_a": 90,
+            "sender_b": 90,
+            "recipient": 20
+          },
+          "expected": {
+            "sender_a": 90,
+            "sender_b": 90,
+            "recipient": 20
+          },
+          "total_before": 200,
+          "total_after": 200,
+          "expected_balances_hold": true
+        }
+      },
+      "shared_source": {
+        "stale": {
+          "loading": "both snapshots read before first transfer",
+          "before": {
+            "sender": 100,
+            "recipient_a": 0,
+            "recipient_b": 0
+          },
+          "after": {
+            "sender": 90,
+            "recipient_a": 10,
+            "recipient_b": 10
+          },
+          "expected": {
+            "sender": 80,
+            "recipient_a": 10,
+            "recipient_b": 10
+          },
+          "total_before": 100,
+          "total_after": 110,
+          "expected_balances_hold": false
+        },
+        "fresh": {
+          "loading": "fresh find before each transfer",
+          "before": {
+            "sender": 100,
+            "recipient_a": 0,
+            "recipient_b": 0
+          },
+          "after": {
+            "sender": 80,
+            "recipient_a": 10,
+            "recipient_b": 10
+          },
+          "expected": {
+            "sender": 80,
+            "recipient_a": 10,
+            "recipient_b": 10
+          },
+          "total_before": 100,
+          "total_after": 100,
+          "expected_balances_hold": true
+        }
+      }
+    },
+    "probe_path": "script/typesafe/rails_bank/probe_stale_transfer.rb",
+    "probe_sha256": "7ca6518b2172ef81100dc4fe64b50c09a96331955b9a5d1100bddf2a16dabc85",
+    "stdout_path": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/stdout.json",
+    "stdout_sha256": "e895407816ad417cbe5721d30082a55c863614564f51d890bac433ef8ab855fa",
+    "run_receipt_path": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/run.json",
+    "run_receipt_sha256": "2bf3abca920dda76595e845d81f7b92cfe4f56dfb3f9970bb333110d65e2a102",
+    "probe_exit_code": 0,
+    "probe_execution_seconds": 2.017422007978894,
+    "original_candidate_worktree_clean": true,
+    "original_database_digest_unchanged": true,
+    "original_atomicity_oracle": {
+      "case_id": "f9a470ec",
+      "family": "atomic_writes",
+      "destination_validation_rejected": true,
+      "persisted_balances": [
+        100,
+        95
+      ],
+      "contract_holds": true,
+      "expected_contract_holds": true,
+      "oracle_matches_intended_case": true
+    },
+    "does_not_establish": [
+      "Simultaneous-thread or multi-process behavior was not tested.",
+      "Reachability through a live application caller, or the frequency of overlapping stale inputs, was not established.",
+      "Fresh finds before sequential transfers are a control condition, not a demonstrated fix for simultaneous writers.",
+      "Other database adapters, locking strategies and isolation modes were not tested.",
+      "No causal attribution to the bank, persona, question count or assistance is established by a single noticed additional lead."
+    ]
+  },
+  "corrected_session_telemetry": {
+    "time_basis": "elapsed_seconds recorded when the launcher received an item.completed agent_message; elapsed from launcher start, not from first source inspection. The mechanism was independently verified later.",
+    "usage_basis": "Reported turn.completed counters, one completed turn per session. Cached input is already included in input_tokens; do not add it again. Reasoning and cache-write counters are retained separately and are not added to the input-plus-output total.",
+    "tokens_at_first_finding": null,
+    "tokens_at_first_finding_limitation": "Only completed-turn aggregate usage is available; the event stream does not measure token consumption up to each finding.",
+    "reviewer_prices_and_billed_cost": null,
+    "price_limitation": "No model pricing, cache-discount billing or invoice inference is made here.",
+    "runs": [
+      {
+        "run": "bank-0",
+        "arm": "bank",
+        "repeat": 0,
+        "confirmed_planted_count": 5,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidates_inspected": 5,
+        "first_planted_emission": {
+          "item_id": "item_3",
+          "case_id": "dfecd0a7",
+          "elapsed_seconds_from_launcher_start": 15.356368338048924,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "first_emission_including_later_conditionally_confirmed_mechanism": {
+          "item_id": "item_3",
+          "case_id": "dfecd0a7",
+          "elapsed_seconds_from_launcher_start": 15.356368338048924,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "session_elapsed_seconds": 68.48876783601008,
+        "usage": {
+          "input_tokens": 278727,
+          "cached_input_tokens": 214144,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2627,
+          "reasoning_output_tokens": 42
+        },
+        "noncached_input_tokens": 64583,
+        "input_plus_output_tokens": 281354,
+        "events_path": "tmp/typesafe-rails-bank-2026-09-21/full-bank/reviewers-delivery/bank-0/events.jsonl",
+        "events_sha256": "5fcf4e51981ef9670221ed026a0a16d9e0024aaff53f1306803899515ee83c6e"
+      },
+      {
+        "run": "bank-1",
+        "arm": "bank",
+        "repeat": 1,
+        "confirmed_planted_count": 7,
+        "posthoc_conditionally_confirmed_additional_count": 1,
+        "distinct_candidates_inspected": 8,
+        "first_planted_emission": {
+          "item_id": "item_5",
+          "case_id": "6ae10e81",
+          "elapsed_seconds_from_launcher_start": 23.871639075980056,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "first_emission_including_later_conditionally_confirmed_mechanism": {
+          "item_id": "item_3",
+          "case_id": "f9a470ec",
+          "elapsed_seconds_from_launcher_start": 17.111395706015173,
+          "classification": "posthoc_conditional_stale_input_mechanism"
+        },
+        "session_elapsed_seconds": 99.60466055100551,
+        "usage": {
+          "input_tokens": 626558,
+          "cached_input_tokens": 525696,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3405,
+          "reasoning_output_tokens": 289
+        },
+        "noncached_input_tokens": 100862,
+        "input_plus_output_tokens": 629963,
+        "events_path": "tmp/typesafe-rails-bank-2026-09-21/full-bank/reviewers-delivery/bank-1/events.jsonl",
+        "events_sha256": "9e84576a7c1945e9ea7ef52bc845e7d6d260a6301cd3f3c93ad3900bee40b7d7"
+      },
+      {
+        "run": "baseline-0",
+        "arm": "baseline",
+        "repeat": 0,
+        "confirmed_planted_count": 8,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidates_inspected": 8,
+        "first_planted_emission": {
+          "item_id": "item_3",
+          "case_id": "89bb779b",
+          "elapsed_seconds_from_launcher_start": 16.172496896004304,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "first_emission_including_later_conditionally_confirmed_mechanism": {
+          "item_id": "item_3",
+          "case_id": "89bb779b",
+          "elapsed_seconds_from_launcher_start": 16.172496896004304,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "session_elapsed_seconds": 80.86610864300746,
+        "usage": {
+          "input_tokens": 374804,
+          "cached_input_tokens": 276224,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3160,
+          "reasoning_output_tokens": 37
+        },
+        "noncached_input_tokens": 98580,
+        "input_plus_output_tokens": 377964,
+        "events_path": "tmp/typesafe-rails-bank-2026-09-21/full-bank/reviewers-delivery/baseline-0/events.jsonl",
+        "events_sha256": "7da618ce39650f18e55c52aaf602944b27659b886fc4c48220ff94086cde0e99"
+      },
+      {
+        "run": "baseline-1",
+        "arm": "baseline",
+        "repeat": 1,
+        "confirmed_planted_count": 8,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidates_inspected": 8,
+        "first_planted_emission": {
+          "item_id": "item_3",
+          "case_id": "89bb779b",
+          "elapsed_seconds_from_launcher_start": 19.330406114982907,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "first_emission_including_later_conditionally_confirmed_mechanism": {
+          "item_id": "item_3",
+          "case_id": "89bb779b",
+          "elapsed_seconds_from_launcher_start": 19.330406114982907,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "session_elapsed_seconds": 91.77644224499818,
+        "usage": {
+          "input_tokens": 379836,
+          "cached_input_tokens": 317056,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3159,
+          "reasoning_output_tokens": 48
+        },
+        "noncached_input_tokens": 62780,
+        "input_plus_output_tokens": 382995,
+        "events_path": "tmp/typesafe-rails-bank-2026-09-21/full-bank/reviewers-delivery/baseline-1/events.jsonl",
+        "events_sha256": "8991329c4208ecbf776df0138db805d0fa4831cd17e967a390ecb1582effafa0"
+      },
+      {
+        "run": "ordinary-0",
+        "arm": "ordinary",
+        "repeat": 0,
+        "confirmed_planted_count": 8,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidates_inspected": 8,
+        "first_planted_emission": {
+          "item_id": "item_3",
+          "case_id": "e1e26df6",
+          "elapsed_seconds_from_launcher_start": 16.597758614982013,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "first_emission_including_later_conditionally_confirmed_mechanism": {
+          "item_id": "item_3",
+          "case_id": "e1e26df6",
+          "elapsed_seconds_from_launcher_start": 16.597758614982013,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "session_elapsed_seconds": 91.13978701399174,
+        "usage": {
+          "input_tokens": 425262,
+          "cached_input_tokens": 371712,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2855,
+          "reasoning_output_tokens": 101
+        },
+        "noncached_input_tokens": 53550,
+        "input_plus_output_tokens": 428117,
+        "events_path": "tmp/typesafe-rails-bank-2026-09-21/full-bank/reviewers-delivery/ordinary-0/events.jsonl",
+        "events_sha256": "7bc815d42360e9e5ad3463b1201749e5328871c6fcbfbeb9d8a7238ba12eb41d"
+      },
+      {
+        "run": "ordinary-1",
+        "arm": "ordinary",
+        "repeat": 1,
+        "confirmed_planted_count": 8,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidates_inspected": 8,
+        "first_planted_emission": {
+          "item_id": "item_3",
+          "case_id": "e1e26df6",
+          "elapsed_seconds_from_launcher_start": 17.79078013403341,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "first_emission_including_later_conditionally_confirmed_mechanism": {
+          "item_id": "item_3",
+          "case_id": "e1e26df6",
+          "elapsed_seconds_from_launcher_start": 17.79078013403341,
+          "classification": "confirmed_planted_mechanism"
+        },
+        "session_elapsed_seconds": 84.02852759603411,
+        "usage": {
+          "input_tokens": 424410,
+          "cached_input_tokens": 343936,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3054,
+          "reasoning_output_tokens": 106
+        },
+        "noncached_input_tokens": 80474,
+        "input_plus_output_tokens": 427464,
+        "events_path": "tmp/typesafe-rails-bank-2026-09-21/full-bank/reviewers-delivery/ordinary-1/events.jsonl",
+        "events_sha256": "139783d64963f2b737f2adc73648e08997b9cd4a1e201f5b8cd655a17c41e229"
+      }
+    ],
+    "by_arm": [
+      {
+        "arm": "ordinary",
+        "sessions": 2,
+        "confirmed_planted_count": 16,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidate_inspections": 16,
+        "usage": {
+          "input_tokens": 849672,
+          "cached_input_tokens": 715648,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 5909,
+          "reasoning_output_tokens": 207
+        },
+        "noncached_input_tokens": 134024,
+        "input_plus_output_tokens": 855581,
+        "sum_session_elapsed_seconds": 175.16831461002585,
+        "first_planted_seconds_by_repeat": [
+          16.597758614982013,
+          17.79078013403341
+        ],
+        "first_any_later_confirmed_seconds_by_repeat": [
+          16.597758614982013,
+          17.79078013403341
+        ]
+      },
+      {
+        "arm": "baseline",
+        "sessions": 2,
+        "confirmed_planted_count": 16,
+        "posthoc_conditionally_confirmed_additional_count": 0,
+        "distinct_candidate_inspections": 16,
+        "usage": {
+          "input_tokens": 754640,
+          "cached_input_tokens": 593280,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 6319,
+          "reasoning_output_tokens": 85
+        },
+        "noncached_input_tokens": 161360,
+        "input_plus_output_tokens": 760959,
+        "sum_session_elapsed_seconds": 172.64255088800564,
+        "first_planted_seconds_by_repeat": [
+          16.172496896004304,
+          19.330406114982907
+        ],
+        "first_any_later_confirmed_seconds_by_repeat": [
+          16.172496896004304,
+          19.330406114982907
+        ]
+      },
+      {
+        "arm": "bank",
+        "sessions": 2,
+        "confirmed_planted_count": 12,
+        "posthoc_conditionally_confirmed_additional_count": 1,
+        "distinct_candidate_inspections": 13,
+        "usage": {
+          "input_tokens": 905285,
+          "cached_input_tokens": 739840,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 6032,
+          "reasoning_output_tokens": 331
+        },
+        "noncached_input_tokens": 165445,
+        "input_plus_output_tokens": 911317,
+        "sum_session_elapsed_seconds": 168.0934283870156,
+        "first_planted_seconds_by_repeat": [
+          15.356368338048924,
+          23.871639075980056
+        ],
+        "first_any_later_confirmed_seconds_by_repeat": [
+          15.356368338048924,
+          17.111395706015173
+        ]
+      }
+    ],
+    "all_six_usage": {
+      "input_tokens": 2509597,
+      "cached_input_tokens": 2048768,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 18260,
+      "reasoning_output_tokens": 623
+    },
+    "all_six_input_plus_output_tokens": 2527857,
+    "elapsed_sum_is_not_wall_clock": "The arm totals sum individual session runtimes; concurrently running arms must not be summed as overall wall-clock duration."
+  },
+  "outcome_addendum": {
+    "delivery_correction_planted_finding_instances": 44,
+    "posthoc_conditionally_confirmed_additional_finding_instances": 1,
+    "bank_1_outcome": "Seven planted mechanisms plus one separately confirmed conditional stale-input mechanism; not eight planted defects.",
+    "bank_1_first_planted_seconds": 23.871639075980056,
+    "bank_1_first_any_later_confirmed_seconds": 17.111395706015173,
+    "change_to_prior_false_lead_labels": "None. Prior counts describe reviewer outcomes, not globally clean controls. Do not relabel the original atomicity target or recompute bank target hit rates as though this new oracle were preregistered."
+  },
+  "limits": [
+    "Posthoc adjudication follows a noticed reviewer lead and is a separate result, not a newly preregistered endpoint.",
+    "The bank still contains the original 204 questions as written. Existing post-capture applicability metadata version 2026-09-21.2 remains disclosed.",
+    "The two sets of six reviewer sessions remain separate; this telemetry covers only reviewers-delivery.",
+    "All 46 helper outputs are byte-exact in the delivery-correction event records, but bank-1 still reported model-visible truncation. This addendum does not certify complete client delivery.",
+    "Independent probe execution took the recorded seconds; total setup, investigation and adjudication labor/cost was not measured.",
+    "No additional inference was performed for the probe or this addendum. Frozen provider usage must not be charged again merely because reports were replayed."
+  ]
+}

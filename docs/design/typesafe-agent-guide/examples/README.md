@@ -83,3 +83,26 @@ The replay identity covers canonical manifest content, source hashes/spans, task
 Manifest/capture containers are checked explicitly. JSON parsing rejects nonfinite values from exponent overflow as well as explicit nonfinite literals. Replay checks every receipt's object shape, status, request identity, required response container and response JSON/UTF-8 serialization before consuming any recorded response. A failed receipt must be terminal; an early terminal failure may account for fewer receipts than planned requests because evaluation stops on its first failure. Malformed later receipts or impossible post-failure receipts stop upfront.
 
 Read [architecture and operations](../02-architecture-and-operations.md) for the application boundary, [evidence selection](../03-evidence-selection.md) for retrieval/packing, and [code authoring and evaluation](../04-code-authoring-and-evaluation.md) before connecting rankings to a coding agent.
+
+
+## Actual full-bank preloading pair
+
+The following four files contain exact first-repeat provider bytes from synthetic
+Rails candidate snapshots, not fabricated answers or the offline ranker fixture:
+
+- [Defect request](full-bank-nplus1-defect-request.json) and
+  [response](full-bank-nplus1-defect-response.json).
+- [Control request](full-bank-nplus1-control-request.json) and
+  [response](full-bank-nplus1-control-response.json).
+
+Each request includes all 204 questions and its complete selected state. Compare
+`perf_n_plus_one`, source preloading and the other high answers: the correct
+control can still attract unrelated pattern warnings. The reported 0.94/0.06
+separation is the median across all three repeats, not a promise that these single
+responses have those exact values. These files are inspection examples; do not
+pass them to `rank_evidence.py`, which has a different replay protocol. Sending
+them again would be a new paid provider run with potentially different answers.
+
+[Export hashes](../evidence/full-bank/export-manifest.json) bind these copies to
+their captures. [Chapter 11](../11-full-bank-review-lessons.md) explains the full
+runner, applicability correction, downstream trial and interpretation limits.

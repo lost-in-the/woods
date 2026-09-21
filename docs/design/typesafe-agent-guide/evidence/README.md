@@ -4,6 +4,8 @@ These are normalized copies of research reports and reviews, exported after the 
 
 | File | Use |
 | --- | --- |
+| [Full-bank comparison](2026-09-21-typesafe-full-bank-results.md) | Faithful 204-question import, twelve pairs, costs, specific useful checks, composition limits, separate reviewer comparisons and posthoc lost-update verification |
+| [Full-bank artifacts](full-bank/README.md) | Catalog/source, metrics, request examples, provenance and executable probe evidence |
 | [Booted review follow-up](2026-09-21-typesafe-booted-review-results.md) | Known-fix replay failures, eight booted app cases, index-assisted ranking, four downstream reviewer runs, actual usage and limits |
 | [Development design and early trials](2026-09-16-typesafe-development-evaluation.md) | Reviewed target architecture, assertion/claim/configuration experiments, failed large request, compact retry, and cost interpretation |
 | [Initial review record](2026-09-16-typesafe-development-evaluation-review.md) | How successive plan reviews corrected evidence, oracle, failure, and evaluation rules |

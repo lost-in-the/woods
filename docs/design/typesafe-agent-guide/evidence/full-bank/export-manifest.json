@@ -1,0 +1,138 @@
+{
+  "basis": "Selected September 21 full-bank artifacts; hashes identify bytes, not provider attestation. Original private coordinator artifacts remain local.",
+  "files": [
+    {
+      "source": "script/typesafe/rails_bank/catalog.json",
+      "file": "evidence/full-bank/catalog.json",
+      "source_sha256": "16df33192572659300e69b1ccef07477669099c7d4f48d97486298e3b2a259ff",
+      "export_sha256": "16df33192572659300e69b1ccef07477669099c7d4f48d97486298e3b2a259ff"
+    },
+    {
+      "source": "script/typesafe/rails_bank/source-question-bank.md",
+      "file": "evidence/full-bank/source-question-bank.md",
+      "source_sha256": "41f293131e2d088e9efd53dd635cbd1e22b6bf8f7210fb5d38cef05b213d5c9b",
+      "export_sha256": "41f293131e2d088e9efd53dd635cbd1e22b6bf8f7210fb5d38cef05b213d5c9b"
+    },
+    {
+      "source": "script/typesafe/rails_bank/bank-corrections.md",
+      "file": "evidence/full-bank/bank-corrections.md",
+      "source_sha256": "53b94106bb0fb7bce75d84c2c1c49f36aaad153d4adf303d28f6fe37784fead2",
+      "export_sha256": "53b94106bb0fb7bce75d84c2c1c49f36aaad153d4adf303d28f6fe37784fead2"
+    },
+    {
+      "source": "script/typesafe/rails_bank/protocol.md",
+      "file": "evidence/full-bank/protocol.md",
+      "source_sha256": "1a56d009437f2d5d06a74fda9e65221da3c9e08070f70094f261e9c4b28149d8",
+      "export_sha256": "1a56d009437f2d5d06a74fda9e65221da3c9e08070f70094f261e9c4b28149d8"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/metrics.json",
+      "file": "evidence/full-bank/metrics.json",
+      "source_sha256": "a53c7f221bbe233286765c5bc80c083fcf4c39c96acdb468b044989e980c0c45",
+      "export_sha256": "a53c7f221bbe233286765c5bc80c083fcf4c39c96acdb468b044989e980c0c45"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/metrics.md",
+      "file": "evidence/full-bank/metrics.md",
+      "source_sha256": "fb3f3f0fda95863faaed0140ee0a6a1fd4bfe0f346cc3b971905c3a4b4d13a4c",
+      "export_sha256": "fb3f3f0fda95863faaed0140ee0a6a1fd4bfe0f346cc3b971905c3a4b4d13a4c"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/presentation-audit.json",
+      "file": "evidence/full-bank/presentation-audit.json",
+      "source_sha256": "10c18125c0a453c62852e6fc4c5abde881bd569867888165244cd4946d326d5c",
+      "export_sha256": "10c18125c0a453c62852e6fc4c5abde881bd569867888165244cd4946d326d5c"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/requests/20b254d3-bank-0-0.json",
+      "file": "examples/full-bank-nplus1-defect-request.json",
+      "source_sha256": "12be4d875ef10c024ddcd9795fd6661ee01a9b3f01cdcbfd7fa0aaa814275f2a",
+      "export_sha256": "12be4d875ef10c024ddcd9795fd6661ee01a9b3f01cdcbfd7fa0aaa814275f2a"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/responses/20b254d3-bank-0-0.json",
+      "file": "examples/full-bank-nplus1-defect-response.json",
+      "source_sha256": "102294c53208ccc29f4fba94f6d9ac9fa890b90854d29aa8c51b905e852d1091",
+      "export_sha256": "102294c53208ccc29f4fba94f6d9ac9fa890b90854d29aa8c51b905e852d1091"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/requests/17ead375-bank-0-0.json",
+      "file": "examples/full-bank-nplus1-control-request.json",
+      "source_sha256": "030095f26ef2bef0b1e16a15fb506490ebd983192c79afb30ebbde862e1a6f98",
+      "export_sha256": "030095f26ef2bef0b1e16a15fb506490ebd983192c79afb30ebbde862e1a6f98"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/full-bank/responses/17ead375-bank-0-0.json",
+      "file": "examples/full-bank-nplus1-control-response.json",
+      "source_sha256": "fb5feca385a535515d8725eed9c21e6c582512569a1a94c2faa7b27c751eba10",
+      "export_sha256": "fb5feca385a535515d8725eed9c21e6c582512569a1a94c2faa7b27c751eba10"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/stdout.json",
+      "file": "evidence/full-bank/stale-transfer-stdout.json",
+      "source_sha256": "e895407816ad417cbe5721d30082a55c863614564f51d890bac433ef8ab855fa",
+      "export_sha256": "e895407816ad417cbe5721d30082a55c863614564f51d890bac433ef8ab855fa"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/result.md",
+      "file": "evidence/full-bank/stale-transfer-result.md",
+      "source_sha256": "945260eb48e8323935a3c4c6ea0dde515d2fcb7b241712ef024ce51de0875160",
+      "export_sha256": "945260eb48e8323935a3c4c6ea0dde515d2fcb7b241712ef024ce51de0875160"
+    },
+    {
+      "source": "script/typesafe/rails_bank/probe_stale_transfer.rb",
+      "file": "evidence/full-bank/probe_stale_transfer.rb.txt",
+      "source_sha256": "7ca6518b2172ef81100dc4fe64b50c09a96331955b9a5d1100bddf2a16dabc85",
+      "export_sha256": "7ca6518b2172ef81100dc4fe64b50c09a96331955b9a5d1100bddf2a16dabc85"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/app/app/services/review_credit_transfer.rb",
+      "file": "evidence/full-bank/stale-transfer-source/app/services/review_credit_transfer.rb.txt",
+      "source_sha256": "23586f679533faeddba36b03d1f0ea92d6ae8ce0ca1c9ecefade817ec5201c3b",
+      "export_sha256": "23586f679533faeddba36b03d1f0ea92d6ae8ce0ca1c9ecefade817ec5201c3b"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/app/app/models/review_wallet.rb",
+      "file": "evidence/full-bank/stale-transfer-source/app/models/review_wallet.rb.txt",
+      "source_sha256": "c80fa4edb97bfeb8a29b18db3e90dcc9a674ac741a0006cd4f97123a27278557",
+      "export_sha256": "c80fa4edb97bfeb8a29b18db3e90dcc9a674ac741a0006cd4f97123a27278557"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/app/db/schema.rb",
+      "file": "evidence/full-bank/stale-transfer-source/db/schema.rb.txt",
+      "source_sha256": "80ca1f6285f1beb53d7bf86fe2bd055825e8874aa7b8112fb8eeb7af53d05f10",
+      "export_sha256": "80ca1f6285f1beb53d7bf86fe2bd055825e8874aa7b8112fb8eeb7af53d05f10"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/incidental-transfer/run.json",
+      "file": "evidence/full-bank/stale-transfer-run.json",
+      "source_sha256": "2bf3abca920dda76595e845d81f7b92cfe4f56dfb3f9970bb333110d65e2a102",
+      "export_sha256": "f246570a27fc6e00b5bec45d7496ee4bc73b9e79f77df3683faf81d569f51b08",
+      "normalization": "Only the local checkout path in command arguments was replaced; runtime/source/database/probe hashes and results are unchanged."
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/reviewer-posthoc-addendum.json",
+      "file": "evidence/full-bank/reviewer-posthoc-addendum.json",
+      "source_sha256": "dc19c8209dbe5af8fa3881a86b2127d238ecbd2ed2dc023955954e1ed4d2230d",
+      "export_sha256": "dc19c8209dbe5af8fa3881a86b2127d238ecbd2ed2dc023955954e1ed4d2230d"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/reviewer-posthoc-addendum.md",
+      "file": "evidence/full-bank/reviewer-posthoc-addendum.md",
+      "source_sha256": "21103136268e5377bb55d49b1dc1198256c03dcfb9469f1b68676f1f27e9e771",
+      "export_sha256": "21103136268e5377bb55d49b1dc1198256c03dcfb9469f1b68676f1f27e9e771"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/validation-pass1.md",
+      "file": "evidence/full-bank/validation-pass1.md",
+      "source_sha256": "d0ff9e67ba58fa3287f735ccd3f5d6af25a355649f94bbb2b3850df3467ed907",
+      "export_sha256": "d0ff9e67ba58fa3287f735ccd3f5d6af25a355649f94bbb2b3850df3467ed907"
+    },
+    {
+      "source": "tmp/typesafe-rails-bank-2026-09-21/validation-pass2.md",
+      "file": "evidence/full-bank/validation-pass2.md",
+      "source_sha256": "996ba1c01c4174d227217fe817039d460b696bae84c370a05351bbb6849ce1bd",
+      "export_sha256": "996ba1c01c4174d227217fe817039d460b696bae84c370a05351bbb6849ce1bd"
+    }
+  ]
+}

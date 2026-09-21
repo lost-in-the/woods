@@ -72,6 +72,13 @@
       "original_repository_relative_path": "docs/design/plans/2026-09-21-typesafe-booted-review-results.md",
       "original_sha256": "b43e359187f6848e044795aba0f805f26e8e85530d438ad73605b3366c96a5bb",
       "export_sha256": "b43e359187f6848e044795aba0f805f26e8e85530d438ad73605b3366c96a5bb"
+    },
+    {
+      "file": "2026-09-21-typesafe-full-bank-results.md",
+      "original_repository_relative_path": "docs/design/plans/2026-09-21-typesafe-full-bank-results.md",
+      "original_sha256": "b4131aa7ed8370ae172562f5d3eeb11b68abc8175cb3d50b8feb1dd96eea8ad2",
+      "export_sha256": "959f29e44cea5c6ab8dabb8a9993266e8a5ccf1ecd8c24432361f8b7e59bcdd3",
+      "normalization": "Only relative source-tool and portable-guide links rewritten."
     }
   ]
 }
