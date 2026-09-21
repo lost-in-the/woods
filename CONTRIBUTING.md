@@ -263,7 +263,7 @@ By contributing, you agree that your contribution is licensed under the [MIT Lic
 
 ## Release flow
 
-`main` is the development branch and never claims a released version. Between releases it carries the alpha development marker. Every release, including a beta or a release candidate, is an explicit commit plus a tag, cut by one rake task and published only by the guarded workflow.
+`main` is the development branch. It carries an alpha marker before the first prerelease of a version line and after reopening development following a final release. During beta/RC iteration, it retains the last prepared prerelease version until the next `release:prepare`. Every published release is identified by its exact tagged commit; later commits on `main` are not that release even if `Woods::VERSION` is unchanged.
 
 | State | `Woods::VERSION` | Tagged | On RubyGems | Documentation links point at |
 |---|---|---|---|---|
@@ -274,7 +274,9 @@ By contributing, you agree that your contribution is licensed under the [MIT Lic
 
 RubyGems treats any letter in a version as a prerelease, so a `~> 1.6` or `~> 2.0` constraint never resolves a beta or a release candidate. Adopting one is explicit: `gem "woods", "2.0.0.beta1"`.
 
-`spec/release_v2/version_state_spec.rb` enforces this table on every commit. VERSION is either an alpha or the changelog carries its dated heading, and the four `release-state` documentation fences match the state VERSION declares.
+`spec/release_v2/version_state_spec.rb` verifies that VERSION is either an alpha or the changelog carries its dated heading, and that the four `release-state` documentation fences match the state VERSION declares. Those checks do not establish that a checkout is the published release.
+
+For Git-sourced candidates, record the locked Git revision, loaded gem path, and working-tree changes alongside `Woods::VERSION`. Version-only preflight establishes the declared version, not whether a particular post-tag fix is present. Match capability claims to the pinned commit or published tag. Generated release-state links continue to describe the prepared version; use the candidate commit when linking evidence about unreleased changes.
 
 ### During feature work
 
@@ -312,9 +314,11 @@ One command per transition. It never commits, tags, pushes, or publishes.
 | Alpha to the first beta | `bin/rake "release:prepare[2.0.0.beta1]"` |
 | Beta to the next beta or a release candidate | `bin/rake "release:prepare[2.0.0.rc1]"` |
 | Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
-| After the release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
+| After a final release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
 
 `release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` and optional entry files into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands. Every rewrite is computed before any of it is written, so a refusal leaves the working tree untouched.
+
+`release:reopen` accepts only a final release and a strictly later alpha. It does not reopen a beta/RC or move the same version line backwards to alpha. Continue prerelease development with Unreleased notes or changelog fragments, then use `release:prepare` for the next forward beta, RC, or final when authorized.
 
 A final release also absorbs every prerelease section of its own base version. Cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into `## [2.0.0] - <date>` and removes their headings, prerelease entries first and anything written after them second, so the notes a user reads for 2.0.0 are the whole story rather than three fragments. An empty `## [Unreleased]` is therefore legitimate for a final release cut straight from a release candidate. A beta or a release candidate has nothing to absorb, so an empty Unreleased section without entry files refuses: there is nothing new to publish.
 

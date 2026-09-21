@@ -34,9 +34,9 @@ RSpec.describe 'release version state' do
   it 'carries either the alpha development marker or a dated changelog heading' do
     dated_heading = /^## \[#{Regexp.escape(version)}\] - \d{4}-\d{2}-\d{2}$/
     explanation = "Woods::VERSION is #{version.inspect}, which is not an alpha development marker, and " \
-                  "CHANGELOG.md has no dated \"## [#{version}]\" heading. `main` must carry X.Y.Z.alpha " \
-                  'between releases; a released version only lands through release:prepare, which folds ' \
-                  'the changelog.'
+                  "CHANGELOG.md has no dated \"## [#{version}]\" heading. A non-alpha version must land through " \
+                  'release:prepare, which folds the changelog; beta/RC development can retain ' \
+                  'that prepared version until the next release.'
 
     expect(state.alpha? || changelog.match?(dated_heading)).to be(true), explanation
   end
