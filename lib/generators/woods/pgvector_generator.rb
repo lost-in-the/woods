@@ -2,6 +2,7 @@
 
 require 'rails/generators'
 require 'rails/generators/active_record'
+require 'woods/storage/pgvector'
 
 module Woods
   module Generators
@@ -15,7 +16,7 @@ module Woods
     #
     # Usage:
     #   rails generate woods:pgvector
-    #   rails generate woods:pgvector --dimensions 3072
+    #   rails generate woods:pgvector --dimensions 768
     #
     class PgvectorGenerator < Rails::Generators::Base
       include ActiveRecord::Generators::Migration
@@ -25,11 +26,16 @@ module Woods
       desc 'Creates the woods_vectors table (pgvector column + HNSW index) used by the Woods vector store'
 
       class_option :dimensions, type: :numeric, default: 1536,
-                                desc: 'Vector dimensions (1536 for text-embedding-3-small, 3072 for large)'
+                                desc: 'Vector dimensions (1-2000; default 1536 for text-embedding-3-small)'
 
       # @return [void]
       def create_migration_file
         @dimensions = options[:dimensions]
+        maximum = Woods::Storage::VectorStore::Pgvector::MAX_HNSW_DIMENSIONS
+        unless @dimensions.is_a?(Integer) && @dimensions.between?(1, maximum)
+          raise ArgumentError, "dimensions must be a positive Integer no greater than #{maximum} for pgvector HNSW"
+        end
+
         migration_template(
           'add_pgvector_to_woods.rb.erb',
           'db/migrate/add_pgvector_to_woods.rb'

@@ -96,6 +96,11 @@ CREATE INDEX IF NOT EXISTS idx_woods_vectors_embedding_hnsw
   ON woods_vectors USING hnsw (embedding vector_cosine_ops);
 ```
 
+**Dimension limit:** Woods uses `vector_cosine_ops` HNSW, limited to 2,000 dimensions.
+The default 3,072-dimensional `text-embedding-3-large` output needs an explicit
+smaller provider output width or another backend. See the
+[pgvector configuration contract](CONFIGURATION_REFERENCE.md#pgvector-postgresql).
+
 **Performance notes:**
 - HNSW: ~5ms search at 10K vectors, ~20ms at 100K. Memory: ~1.5x vector size.
 - For codebase indexing (~1000-5000 units, potentially 5000-20000 chunks), HNSW is appropriate.

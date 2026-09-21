@@ -664,3 +664,29 @@ RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
     expect(changed.fetch('chunks')).not_to eq(first.fetch('chunks'))
   end
 end
+
+RSpec.describe 'Pgvector generator dimension boundaries', :booted_app do
+  before do
+    require 'active_record'
+    require_relative '../../lib/generators/woods/pgvector_generator'
+  end
+
+  [0, -1, 1.5, 2001, 3072].each do |dimensions|
+    it "rejects #{dimensions} before writing a migration" do
+      Dir.mktmpdir('woods_pgvector_generator') do |root|
+        generator = Woods::Generators::PgvectorGenerator.new([], { dimensions: dimensions }, destination_root: root)
+        expect { generator.create_migration_file }.to raise_error(ArgumentError, /dimensions/)
+        expect(Dir.children(root)).to eq([])
+      end
+    end
+  end
+
+  it 'generates an unchanged 2000-dimensional HNSW migration at the supported boundary' do
+    Dir.mktmpdir('woods_pgvector_generator') do |root|
+      generator = Woods::Generators::PgvectorGenerator.new([], { dimensions: 2000 }, destination_root: root)
+      generator.create_migration_file
+      migration = Dir[File.join(root, 'db/migrate/*_add_pgvector_to_woods.rb')].fetch(0)
+      expect(File.read(migration)).to include('vector(2000)', 'USING hnsw', 'vector_cosine_ops')
+    end
+  end
+end

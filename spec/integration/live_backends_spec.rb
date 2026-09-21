@@ -187,6 +187,32 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       expect(store.count).to eq(0)
     end
 
+    it 'builds and queries an HNSW vector index at the 2000-dimensional boundary' do
+      boundary_table = "#{table}_boundary"
+      boundary = Woods::Storage::VectorStore::Pgvector.new(
+        connection: connection, dimensions: 2000, table: boundary_table
+      )
+      boundary.ensure_schema!
+      vector = [1.0] + Array.new(1999, 0.0)
+      boundary.store('Boundary', vector)
+      expect(boundary.stored_dimensions).to eq(2000)
+      expect(boundary.search(vector, limit: 1).map(&:id)).to eq(['Boundary'])
+    ensure
+      connection.execute("DROP TABLE IF EXISTS #{boundary_table}") if boundary_table
+    end
+
+    it 'refuses unsupported HNSW dimensions before creating a table' do
+      rejected_table = "#{table}_rejected"
+      expect do
+        Woods::Storage::VectorStore::Pgvector.new(
+          connection: connection, dimensions: 2001, table: rejected_table
+        ).ensure_schema!
+      end.to raise_error(ArgumentError, /pgvector.*2000.*2001/)
+      expect(connection.data_source_exists?(rejected_table)).to be(false)
+    ensure
+      connection.execute("DROP TABLE IF EXISTS #{rejected_table}") if rejected_table
+    end
+
     it 'round-trips a stored vector through search' do
       store.store('User', vec(1, 0, 0), { type: 'model', file_path: 'app/models/user.rb' })
 
