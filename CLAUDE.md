@@ -70,7 +70,7 @@ resolved callbacks, routes, Active Record reflections, eager-load outcomes, or
 Zeitwerk behavior. When those facts matter, use a booted host Rails app and the
 ordinary runtime extractor; never substitute the self-map for that validation.
 
-> **Docker:** Extraction runs inside the container (`docker compose exec app bundle exec rake ...`). The Index Server runs on the host reading volume-mounted output. See `docs/DOCKER_SETUP.md` for the full Docker guide.
+> **Docker:** Extraction runs inside the application container. Prefer launching the Index Server through that container as well. A host launch is optional when Ruby, the application bundle and the index are available on the host. See the [Docker guide](docs/DOCKER_SETUP.md) for commands and path requirements.
 
 ## Host app for integration testing: `woods-testbed`
 
