@@ -12,7 +12,7 @@
 
 Woods boots your Rails application, extracts its resolved structure, and publishes an index that coding agents can query through the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). It brings together database schema, associations, callbacks, concerns, routes, and source code so an agent can inspect how Rails assembles your application.
 
-Requires **Ruby 3.0+ and Rails 6.0–8.x**, with an application that can boot and connect to its database. Structural queries need no embedding provider or vector database.
+Supports **Ruby 3.0+ and Rails 6.0–8.x**, using a Ruby version supported by your Rails release. The application must boot and connect to its database. Structural queries need no embedding provider or vector database.
 
 [Get started](#five-minute-setup) · [Documentation](docs/README.md) · [Agent setup](docs/AGENT_SETUP.md) · [Upgrade from 1.x](docs/UPGRADING_TO_2.md)
 
@@ -38,9 +38,15 @@ Models are one part of the index: Woods also extracts controllers, routes, jobs,
 
 ## Five-minute setup
 
+For agent-led setup, use the [agent installation option](#let-an-agent-install-it) and its runbook. For a new manual installation, follow the steps below.
+
+**Already using Woods?** If you are upgrading from 1.x, follow the [upgrade guide](docs/UPGRADING_TO_2.md). For an existing 2.x installation, go directly to [retrieval modes](#retrieval-with-or-without-embeddings), [MCP configuration](docs/MCP_SERVERS.md), or the [configuration reference](docs/CONFIGURATION_REFERENCE.md). Preserve your initializer, index path, provider settings, and other client entries. Changing only the MCP launch configuration or retrieval mode does not require rerunning the installer or rebuilding the structural index.
+
+Run installation and extraction commands from your Rails application root in its normal development environment. **Using Docker?** Follow [Docker setup](docs/DOCKER_SETUP.md) first: run those commands inside the application container and use paths visible to the process that runs MCP.
+
 ### 1. Install and configure
 
-Choose a **published version** from the release information below and confirm it on [RubyGems](https://rubygems.org/gems/woods/versions). Use that version's tag documentation when it differs from `main`. Existing installations should follow the [upgrade guide](docs/UPGRADING_TO_2.md).
+These steps are for **Woods 2.x**. Choose a published 2.x version from the release information below and confirm it on [RubyGems](https://rubygems.org/gems/woods/versions). If only prereleases are available, use an exact prerelease pin; `~> 2.0` will not select one. Follow the chosen version's tag documentation rather than assuming every feature on `main` is published. If you choose 1.x, use its tag documentation instead of this quickstart.
 
 <details>
 <summary>Release information and Gemfile version constraints</summary>
@@ -67,6 +73,7 @@ Expand the release information above, then add its appropriate `gem "woods", …
 
 ```bash
 bundle install
+bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 bin/rails generate woods:install
 ```
 
@@ -84,7 +91,7 @@ Run these where your Rails application can boot. The default output is `tmp/wood
 
 ### 3. Connect your MCP client
 
-Add this server entry to your client's project configuration, adjusting the application path:
+Adapt this example to your MCP client's project configuration format, using your application path and preserving other server entries. See [client configuration locations](docs/MCP_SERVERS.md#client-configuration-locations) for guidance:
 
 ```json
 {
@@ -102,7 +109,7 @@ Reconnect the client and ask it to call `woods_status`. Confirm the index path a
 
 The Index Server reads the published index without booting Rails or querying application records. See [MCP servers](docs/MCP_SERVERS.md) for client-specific configuration and HTTP transport.
 
-**Using Docker?** Run extraction inside the application container. If Woods is installed only there, launch MCP through that container too. Host-side launch needs a host bundle and a host-visible index. Follow [Docker setup](docs/DOCKER_SETUP.md).
+If Woods is installed only inside Docker, launch MCP through that container too. Host-side launch needs a host bundle and a host-visible index; see the [Docker process and path rule](docs/MCP_SERVERS.md#docker-process-and-path-rule).
 
 ## Retrieval: with or without embeddings
 
@@ -115,7 +122,9 @@ Exact lookup, pattern search, and graph queries work immediately after extractio
 
 For the stdio configuration above, add `"env": {"WOODS_RETRIEVAL_MODE": "lexical"}` inside the `woods` server entry to choose lexical mode. Confirm the active retriever with `woods_status`.
 
-The [retrieval guide](docs/RETRIEVAL_GUIDE.md) covers both modes, providers, ranking, and response budgets. Lexical matching depends on shared vocabulary; semantic mode requires the configured provider and embedding artifacts.
+To switch back to semantic retrieval, remove the lexical environment override or set `WOODS_RETRIEVAL_MODE=semantic`, configure the provider and embedding artifacts, then restart the MCP server and verify `woods_status`. Switching to lexical does not delete existing vectors or provider configuration.
+
+The [lexical guide](docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) and [semantic setup](docs/RETRIEVAL_GUIDE.md#configuring-retrieval) cover configuration, ranking, and response budgets. Lexical matching depends on shared vocabulary; semantic mode requires the configured provider and embedding artifacts.
 
 ## Keeping the index current
 
@@ -138,7 +147,7 @@ Incremental cost depends on the affected code and relationships; broad changes c
 | Packaged tools | 14; retrieval usable when configured | 9; 11 with embedded read tools enabled |
 | Setup | The workflow above | Optional, disabled by default |
 
-Extraction itself boots and eager-loads your application, so its boot-time behavior still runs. Treat the generated index as confidential application source. Enabling hosted embeddings also sends the embedded content to that provider.
+Extraction itself boots and eager-loads your application, so its boot-time behavior still runs. Treat the generated index as confidential application source. Enabling hosted embeddings sends the embedded content to that provider. MCP responses also contain application source, which your client may send to its model provider even when Woods uses lexical retrieval or local embeddings.
 
 The optional Console Server can access live data. Review its [setup and security model](docs/CONSOLE_MCP_SETUP.md) before enabling it. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
@@ -172,7 +181,7 @@ The plugin guides installation, MCP configuration, investigation, repository age
 | Query effectively | [Agent guide](docs/AGENT_GUIDE.md) and [tool cookbook](docs/MCP_TOOL_COOKBOOK.md) |
 | Configure Woods | [Configuration reference](docs/CONFIGURATION_REFERENCE.md) |
 | Choose retrieval and storage | [Retrieval guide](docs/RETRIEVAL_GUIDE.md) and [backend matrix](docs/BACKEND_MATRIX.md) |
-| Upgrade an existing installation | [Upgrade guide](docs/UPGRADING_TO_2.md) |
+| Upgrade from 1.x | [Upgrade guide](docs/UPGRADING_TO_2.md) |
 | Diagnose a failure | [Troubleshooting](docs/TROUBLESHOOTING.md) |
 
 See the [documentation index](docs/README.md) for all guides and canonical reference pages.

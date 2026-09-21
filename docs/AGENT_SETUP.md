@@ -40,7 +40,9 @@ If the worktree contains unrelated changes, preserve them. Do not overwrite an e
 
 Use structural-only setup when the user wants code navigation, runtime Rails structure, dependencies, flows, or blast-radius analysis. Fourteen tools register in the normal packaged launch without an embedding provider.
 
-Discuss semantic retrieval only if the user needs natural-language `codebase_retrieve`. The choice depends on whether they prefer local Ollama or hosted OpenAI and which vector store fits their environment. See [Backend matrix](BACKEND_MATRIX.md).
+If the user wants ranked discovery through `codebase_retrieve`, offer [explicit lexical mode](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over the published index without a provider or embeddings. Check that the installed version supports it, set `WOODS_RETRIEVAL_MODE=lexical` in the MCP process environment, restart that server, and verify `woods_status.retriever.mode`. Keep structural-only setup as the default unless this mode is requested.
+
+For semantic matching, discuss local Ollama or hosted OpenAI and the appropriate vector store separately; adding a provider still requires authorization. See [Backend matrix](BACKEND_MATRIX.md).
 
 Do not infer permission to configure Console MCP from a request to “set up Woods” or “set up MCP.” The Index Server reads generated code context; the Console Server can read live data.
 
@@ -130,7 +132,7 @@ Reconnect the client and call `woods_status`. Confirm a current generation and n
 
 ### Managed Claude Code configuration
 
-The development command `woods-agent-config` is unreleased after 2.0.0.beta2.
+`woods-agent-config` is available from Woods `2.0.0.beta3`.
 Check `bundle exec woods-agent-config --help` in the selected application bundle;
 use the manual client configuration below when it is absent. The supported
 client format is Claude Code (tested with 2.1.267).
@@ -203,11 +205,11 @@ is changed; reduce the selected configuration before applying.
 
 Use a class known to exist in the application:
 
-1. Call `search` to obtain its exact identifier.
-2. Call `lookup` to confirm source and metadata are present.
+1. Call `search` to obtain its exact identifier and type.
+2. Call `lookup` with that identifier and type to confirm source and metadata are present.
 3. Call `dependents` with depth 1 or 2 to confirm graph edges are queryable.
 
-If `codebase_retrieve` reports that semantic search is disabled, that is expected for structural-only setup. Do not configure credentials merely to remove the message.
+If `codebase_retrieve` reports that semantic search is disabled, that is expected for structural-only setup. Do not configure credentials merely to remove the message. If lexical retrieval was requested, verify its mode with `woods_status` and make one `codebase_retrieve` call against the published index.
 
 ## 8. Offer automatic index maintenance
 
@@ -263,7 +265,7 @@ Verified capabilities:
 - Index Server connected: yes/no
 - woods_status current: yes/no
 - search/lookup/dependents checked: yes/no
-- semantic retrieval: disabled/enabled (provider)
+- retrieval: disabled/lexical/semantic (provider when semantic)
 - Console MCP: disabled/enabled (authorization)
 - automatic structural updates: disabled/enabled (process manager)
 
@@ -274,7 +276,7 @@ Never report a capability as enabled solely because its schema exists in source.
 
 ## Copyable prompt for an installation agent
 
-> Install Woods 2.x in this Rails repository using `docs/AGENT_SETUP.md`. Start with read-only preflight and preserve unrelated changes. Default to the structural Index Server; do not enable embeddings, Console MCP, HTTP transport, secrets, or purge overrides without asking me. Inspect generated files before migrating, run extraction and validation in the app's normal execution environment, configure a project-scoped MCP server in the same filesystem context as the application bundle and index, and verify `woods_status`, `search`, `lookup`, and `dependents`. Finish with the runbook's handoff report.
+> Install Woods 2.x in this Rails repository using https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md. Select a published version and follow that version's tag documentation and supported capabilities. Start with read-only preflight and preserve unrelated changes. Default to the structural Index Server; do not enable embeddings, Console MCP, HTTP transport, secrets, or purge overrides without asking me. Inspect generated files before migrating, run extraction and validation in the app's normal execution environment, configure a project-scoped MCP server in the same filesystem context as the application bundle and index, and verify `woods_status`, `search`, `lookup` with the discovered identifier and type, and `dependents`. Finish with the runbook's handoff report.
 
 ## Related guides
 
