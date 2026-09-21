@@ -13,6 +13,7 @@ module Woods
       RUNTIME_FIELDS = %w[callbacks associations validations scopes concerns included_modules
                           methods instance_methods class_methods actions routes columns table_name
                           description purpose dependencies].freeze
+      DEFAULT_LIMIT = 20
       K1 = 1.2
       B = 0.75
       Document = Struct.new(:key, :unit, :fields, keyword_init: true)
@@ -36,7 +37,7 @@ module Woods
         @frequencies.freeze
       end
 
-      def execute(query:, limit: 20, type_filter: nil, exclude_types: nil)
+      def execute(query:, limit: DEFAULT_LIMIT, type_filter: nil, exclude_types: nil)
         terms = tokenize(query).uniq
         candidates = @documents.filter_map do |doc|
           next unless eligible?(doc.unit, type_filter, exclude_types)

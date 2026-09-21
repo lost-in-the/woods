@@ -129,8 +129,11 @@ exposes `Woods::Configuration#retrieval_mode` and its matching guide documents
 from the plugin version or an unreleased checkout.
 
 When status reports lexical mode, use the matching fields/terms as discovery
-evidence and verify key units with `lookup`. The ranked top 20 is not exhaustive;
-no lexical match does not establish absence. Continue using `budget`, not `limit`.
+evidence and verify key units with `lookup`. At most 20 eligible matching
+candidates are considered; fewer source entries may fit the budget. This is not
+exhaustive, and no lexical match does not establish absence. When the installed
+server reports considered/included counts, compare them; older versions may
+only describe the shortlist limit. Continue using `budget`, not `limit`.
 See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
 for the supported contract, checked against the installed gem version.
 

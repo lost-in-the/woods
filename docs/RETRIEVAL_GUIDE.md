@@ -196,15 +196,25 @@ and validations). Exact full identifiers rank first, with ambiguous typed owners
 retained. Other ties are deterministic. Responses name the lexical mode and
 matching fields/terms; runtime-field hits include the selected published runtime
 values. Lexical Ruby results leave the semantic-only `type_rank_context` table
-`nil`; they do not report a global vector rank or vector fallback. The top 20 eligible positive matches are considered for the
-output budget; this is ranked discovery, not an exhaustive match listing. Explicit
+`nil`; they do not report a global vector rank or vector fallback. The top 20
+eligible positive matches form the candidate shortlist for the output budget.
+The lexical header reports `sources included`, `candidates considered`, and
+`candidate limit: 20`. Included sources count the actual returned entries;
+considered candidates count the shortlist after filtering and the limit, not
+all matches or all documents examined. This is ranked discovery, not an
+exhaustive match listing. Explicit
 `types` filters override default exclusions, as in semantic retrieval, and apply
 before that limit. A query with no lexical evidence returns no matches; unrelated
 graph hubs are never added. Query-seeded graph ranking is evaluation-only.
 
 The budget covers headers, matching explanations and truncation notices using a
 labelled character-based estimate, not an exact provider tokenizer. Full source
-remains available through `lookup`. Very small budgets can omit all sources. The
+remains available through `lookup`. Count text is charged before source selection;
+final counts do not trigger a second selection pass. Very small budgets can omit
+all sources or clip the header itself. Zero candidates means no lexical matches;
+positive candidates with zero included sources means no source entry fit the
+available budget. The same counts apply to full, compact, outline and scoped
+retrieval, agreeing with returned source attribution. The
 reader pins one published generation for building and querying its immutable
 lexical snapshot, rebuilding after publication. Corrupt units fail explicitly;
 they cannot quietly become a successful partial index. Older flat indexes rebuild
