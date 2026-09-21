@@ -1,127 +1,87 @@
 # MCP Registration in Git Worktrees
 
-> **Claude Code specific.** This page covers Claude Code's MCP registration model (`/mcp`, `~/.claude/plugins/`); other MCP clients manage per-directory registration their own way.
+> **Claude Code specific.** Other MCP clients manage registration and subagent tool access differently. Use the client's current documentation alongside the Woods [MCP setup guide](MCP_SERVERS.md).
 
-When you work in a git worktree, a separate directory checked out from the same repository, your MCP tools may not be available to subagents running in that directory. This page explains why, how to fix it, and how to confirm the registration took effect.
+A git worktree is a separate checkout. For Woods, verify both which servers a session can access and which checkout's index those servers serve.
 
-## Why Worktree Subagents May Not See Woods Tools
+## Separate sessions and inherited subagents
 
-MCP server registration in Claude Code is controlled by `.mcp.json` files. Claude Code discovers these files by walking up the directory tree from the working directory. It stops at the first `.mcp.json` it finds (or at `~/.claude/settings.json` for global registrations).
+A **new Claude Code session launched in a worktree** can have different MCP registrations from a session in the main checkout:
 
-A git worktree has its own root directory separate from the main repository checkout. When a subagent starts inside the worktree root, it walks up from that path, not from the main repository root. Unless a `.mcp.json` exists inside the worktree directory tree or in an ancestor shared with both checkouts, the subagent sees no MCP servers.
+| Registration scope | Location | Availability |
+|---|---|---|
+| Local | Project entry in `~/.claude.json` | The project where the server was registered |
+| Project | `.mcp.json` in the project root | That project, subject to client approval/settings |
+| User | `mcpServers` in `~/.claude.json` | Across the user's projects |
 
-Example directory layout:
+A tracked `.mcp.json` may already be present in another worktree; a local, untracked file will not be copied by Git. User-level registration can make a server available across checkouts, but its configured paths still determine which index it serves.
 
-```
-~/work/my-app/            ← main checkout, has .mcp.json here
-~/work/my-app-feature/    ← worktree, no .mcp.json, so MCP tools are missing
-```
+An **inherited subagent** receives the parent conversation's MCP tools, subject to tool restrictions. Changing the subagent's working directory does not by itself launch another Woods server or switch the served index. Distinguish this from starting an independent client process in that directory.
 
-A subagent spawned in `~/work/my-app-feature/` will not find the `.mcp.json` from `~/work/my-app/`.
+See Claude Code's [MCP installation scopes](https://code.claude.com/docs/en/mcp#mcp-installation-scopes) and [subagent tool access](https://code.claude.com/docs/en/sub-agents#available-tools). Do not diagnose registration by assuming the client searches ancestor directories for the nearest `.mcp.json`.
 
-## Fix: Add a `.mcp.json` to the Worktree Root
+## Configure a server for the intended checkout
 
-Create a `.mcp.json` in the worktree's root directory with the same woods server entries you use in the main checkout:
+First check `/mcp` in the session that needs Woods. If a suitable server is already connected, verify its index before adding a duplicate registration.
+
+For a host with the application's Ruby bundle installed, a project-root `.mcp.json` can select the bundle and index explicitly:
 
 ```json
 {
   "mcpServers": {
     "woods": {
-      "command": "woods-mcp-start",
-      "args": ["./tmp/woods"]
-    },
-    "woods-console": {
-      "command": "docker",
-      "args": [
-        "compose", "exec", "-T", "app",
-        "bundle", "exec", "rake", "woods:console"
-      ],
-      "cwd": "/absolute/host/path/to/worktree"
+      "command": "bundle",
+      "args": ["exec", "woods-mcp-start", "/absolute/path/to/worktree/tmp/woods"],
+      "env": {
+        "BUNDLE_GEMFILE": "/absolute/path/to/worktree/Gemfile"
+      }
     }
   }
 }
 ```
 
-Adjust the paths and arguments to match your project's setup. In particular:
+Replace both paths with the intended Rails worktree. Preserve other server entries. These absolute paths are machine-specific; do not commit them as shared team defaults. Follow the client's approval/reconnection steps, then verify the connection below.
 
-- `./tmp/woods` is a relative path, it resolves against the worktree root, which is correct if extraction output is written into each worktree separately.
-- If you share a single extraction output directory between checkouts, use the absolute path to the shared output: `"/absolute/path/to/main-checkout/tmp/woods"`.
-- For Docker projects, the `docker compose exec` command works the same from any host path.
+For Docker, use the [container-first setup](DOCKER_SETUP.md#default-run-it-through-the-application-container). Select the intended Compose project and service, and verify that its mounted application directory is the worktree you mean to index. `docker compose exec` targets an existing container; running the command from a different checkout does not change that container's mounts. The index path must be visible inside that container.
 
-## How Plugin Discovery Works
+Keep a separate output directory for each checkout when you need checkout-specific answers. If you intentionally point at another checkout's index, Woods serves that published content; registration alone does not make it describe the current worktree.
 
-Claude Code also discovers MCP servers registered in plugin manifests. A plugin at `~/.claude/plugins/<plugin-name>/admin-tools/.mcp.json` is loaded globally, its servers are available in any session regardless of working directory.
+## Plugin-provided servers
 
-If your team distributes the woods MCP registration through a shared plugin, the worktree problem does not apply. Check whether woods is already registered this way:
+An enabled plugin can supply MCP server definitions, but installing a plugin does not establish that a Woods server is connected to the intended checkout. Availability depends on the plugin's configuration, enabled scope, and the client's tool restrictions. Check `/mcp` rather than assuming a fixed path under `~/.claude/plugins/` or global availability.
 
-```bash
-ls ~/.claude/plugins/
-# look for a directory containing admin-tools/.mcp.json
-cat ~/.claude/plugins/<plugin-name>/admin-tools/.mcp.json
-```
+The Woods setup/configuration skills help configure a server; their presence alone is not verification that the Index Server is running. See [agent setup](AGENT_SETUP.md).
 
-If you find the woods servers registered there, subagents in any worktree will have access automatically, you do not need a per-worktree `.mcp.json`.
+## Verify registration and the served index
 
-## Verifying MCP Registration for a Subagent
+1. Open `/mcp` in the relevant Claude Code session and inspect the Woods connection and available tools.
+2. Call the Index Server's `woods_status`. Check `index_dir`, generation, and available freshness/provenance information against the intended extraction. A successful connection to the wrong index is still the wrong setup.
+3. Use `search` and typed `lookup` for a known unit from that checkout. When checking a subagent, verify that it can call the inherited tools and is using the same intended index.
 
-### Option 1: List tools from a claude session in the worktree
-
-Open a new Claude Code session with the worktree as the working directory and run:
-
-```
-/mcp
-```
-
-This lists all connected MCP servers and their tools. If `woods` and/or `woods-console` appear, registration is working.
-
-### Option 2: Check via the woods status tool
-
-Ask Claude to call the status tool:
-
-```
-Use woods-console console_status to check what models are available.
-```
-
-If the tool runs successfully, MCP is registered and the console server is reachable.
-
-### Option 3: Inspect the MCP config that Claude Code loaded
-
-From the worktree directory, run:
-
-```bash
-cat .mcp.json
-```
-
-If the file exists and contains the woods entries, Claude Code will use it. If the file is missing, check parent directories up to your home directory for any `.mcp.json` that would be discovered.
+The optional Console Server is a separate connection to a booted Rails application. If deliberately enabled, check it with `console_status` and verify its application/container separately. Console access is not required to verify the Index Server.
 
 ## Extraction Provenance in Worktrees (`git_branch` / `git_sha`)
 
-`manifest.json` records the `git_branch` and `git_sha` the extraction ran against. In a linked worktree, `.git` is a **file** containing a `gitdir:` pointer to the real git directory, frequently an absolute host path, rather than a `.git` directory.
+The published payload's `manifest.json` records the extraction's `git_branch` and `git_sha`. In a linked worktree, `.git` is a file containing a `gitdir:` pointer, often to an absolute host path. That private worktree directory also refers to the parent repository's shared Git data.
 
-Woods resolves provenance with worktree-aware git plumbing (`git -C <root> rev-parse`), so an ordinary worktree reports the correct branch and SHA. When a `.git` is present but the pointed-to git directory **cannot be resolved**: most commonly a worktree extracted inside a container where the host path isn't mounted. Woods records `git_branch: "unknown"` / `git_sha: "unknown"` rather than a stale, misleading value: a baked `GIT_BRANCH`/`GIT_SHA` build arg is **not** trusted here (it could be stale). The env vars are honored only when there is no `.git` at the root at all (a non-repo checkout, e.g. a Docker `COPY` that excludes `.git`) or git is unavailable.
+Woods uses worktree-aware Git commands. If a present `.git` cannot be resolved, provenance is `"unknown"`; stale `GIT_BRANCH`/`GIT_SHA` values are not substituted. Those environment variables are fallbacks only when the root has no `.git` or Git is unavailable. Temporal snapshots skip an unknown SHA.
 
-To get correct provenance from a containerized worktree, mount the directory the `gitdir:` pointer references (the parent repository's `.git`) into the container so git can resolve it. Temporal snapshots skip an `"unknown"` SHA, so misleading provenance never keys a snapshot.
+For extraction in a container, make the canonical Git directory and the worktree's pointer resolvable there. Mounting only the private worktree Git directory can leave its shared object store unreachable. Follow the [Git provenance troubleshooting guide](TROUBLESHOOTING.md) for mount and `WOODS_GIT_DIR` guidance, and the [published index layout](INDEX_LAYOUT.md) when locating the manifest.
 
 ## Troubleshooting
 
-**"Unknown tool" or "no MCP server named woods"**
+**Woods or an expected tool is absent**
 
-The woods MCP server is not registered for this session. Add a `.mcp.json` to the worktree root as shown above, then restart the session.
+Check `/mcp` for connection errors, enabled registration scopes, and project approvals. For a subagent, also check its tool restrictions. Compare the requested tool with the [supported tool surface](MCP_SERVERS.md#conditional-index-capabilities); some tools require optional collaborators and are not registered by the packaged server. Do not add duplicate registrations before establishing which case applies.
 
-**Console server starts but returns "unsupported: Not yet implemented in embedded mode" for console_sql / console_query**
+**The server connects but shows another checkout**
 
-The console server is registered and reachable, but `embedded_read_tools` is disabled (the default). To enable console_sql and console_query in embedded mode, see the [Console MCP Setup guide](CONSOLE_MCP_SETUP.md), specifically the `embedded_read_tools: true` option for the Rack middleware.
+Inspect its configured bundle, index path, Compose project/service, and container mounts. Re-extract from the intended Rails checkout into its own output directory, then reconnect to that index and repeat `woods_status`. See [Docker setup](DOCKER_SETUP.md).
 
-**Extraction output is empty or stale in the worktree**
+**Two registrations use the same server name**
 
-Extraction writes to `tmp/woods/` relative to the Rails application root (inside the container). If the worktree's volume mount points to a different host path than the main checkout, run extraction again from the worktree:
+Check the client's [scope precedence](https://code.claude.com/docs/en/mcp#scope-hierarchy-and-precedence) and the effective connection shown by `/mcp`. Do not assume the two definitions merge or that a project file overrides every other scope.
 
-```bash
-docker compose exec app bundle exec rake woods:extract
-```
+**Console SQL/query tools are absent or unsupported**
 
-See [DOCKER_SETUP.md](DOCKER_SETUP.md) for the full Docker workflow.
-
-**Worktree `.mcp.json` conflicts with main checkout `.mcp.json`**
-
-Each file is independent. Claude Code loads the one closest to the working directory. There is no inheritance or merging between them. Keep both files in sync manually, or move the shared configuration into a global plugin manifest.
+Console read-tool availability is configured separately from registration. Follow [Console MCP setup](CONSOLE_MCP_SETUP.md) for the supported 9-tool default and optional 11-tool mode.

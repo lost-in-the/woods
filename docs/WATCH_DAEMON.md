@@ -119,7 +119,11 @@ at a known generation, reason attached), `stopped` (nothing is maintaining this
 index). A stale answer is only dangerous when nothing says so.
 
 The file is written world-readable (0644) by design: host-side hooks read it
-through a bind mount. Every other artifact Woods writes stays at 0600.
+through a bind mount. Writes through `Woods::AtomicFile` default to owner-only
+0600 unless the caller supplies another mode. This is not a guarantee for every
+Woods artifact: the SQLite metadata store does not enforce 0600, and a newly
+created database uses 0644 under umask 022. Restrict access to the output
+directory according to the source and metadata it contains.
 
 Note that `SyntaxError` is a `ScriptError`, not a `StandardError`. Rescuing
 only the latter would let a half-typed file kill the daemon.
