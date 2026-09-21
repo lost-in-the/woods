@@ -41,6 +41,43 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  describe 'handled consumer failures' do
+    it 'does not let a later successful call clear the failed batch obligation' do
+      consumer = Object.new
+      expect(extractor.send(:checked_extraction, :i18n, consumer) do
+        Woods::SourceInputs::ConsumerErrors.record(consumer)
+        [:partial]
+      end).to be_nil
+      expect(extractor.send(:checked_extraction, :i18n, consumer) { [:healthy] }).to eq([:healthy])
+      expect(Woods::SourceInputs::ConsumerErrors.failed?(consumer)).to be(false)
+      expect { extractor.send(:raise_on_handled_extraction_failure!) }
+        .to raise_error(Woods::ExtractionError, /i18n.*previous generation/)
+    end
+
+    it 'retains a failure recorded while constructing a consumer' do
+      consumer = Object.new
+      Woods::SourceInputs::ConsumerErrors.record(consumer)
+      extractor.send(:checked_extraction, :i18n, consumer) { [] }
+      expect { extractor.send(:raise_on_handled_extraction_failure!) }
+        .to raise_error(Woods::ExtractionError, /i18n/)
+    end
+
+    it 'does not replace any units with partial wholesale output' do
+      previous = Woods::ExtractedUnit.new(type: :scheduled_job, identifier: 'scheduled:old', file_path: nil)
+      partial = Woods::ExtractedUnit.new(type: :scheduled_job, identifier: 'scheduled:new', file_path: nil)
+      consumer = double('ScheduledJobExtractor')
+      allow(consumer).to receive(:extract_all) do
+        Woods::SourceInputs::ConsumerErrors.record(consumer)
+        [partial]
+      end
+      extractor.instance_variable_set(:@incremental_extractors, { scheduled_jobs: consumer })
+      extractor.dependency_graph.register(previous)
+      expect(extractor.send(:replace_type_wholesale, :scheduled_jobs, Set.new)).to be_empty
+      expect(extractor.dependency_graph.node('scheduled:old')).not_to be_nil
+      expect(extractor.dependency_graph.node('scheduled:new')).to be_nil
+    end
+  end
+
   describe '#raise_on_publication_failure!' do
     let(:output_dir) { File.join(tmpdir, 'output') }
     let(:generation) { Woods::Generation.new(output_dir: output_dir) }
@@ -773,38 +810,38 @@ RSpec.describe Woods::Extractor do
     end
 
     it 'registers and writes every unit when a file-based extractor returns multiple units' do
-      # A single .rake file defines multiple tasks, so extract_rake_file returns
-      # an Array of units. re_extract_unit must fan out over them, not pass the
-      # Array straight to DependencyGraph#register.
+      # File extractors may return multiple units. The orchestrator must fan
+      # out over them, not pass an Array to DependencyGraph#register. Rake
+      # tasks now require wholesale reconciliation instead of this path.
       require 'woods' # defines Woods.configuration (json_serialize reads pretty_json)
       Woods.configuration ||= Woods::Configuration.new
 
-      rake_path = File.join(tmpdir, 'things.rake')
-      FileUtils.touch(rake_path)
+      source_path = File.join(tmpdir, 'things.rb')
+      FileUtils.touch(source_path)
       # The type dir exists in real usage (created by the initial full extraction).
-      rake_dir = File.join(tmpdir, 'output', 'rake_tasks')
-      FileUtils.mkdir_p(rake_dir)
+      type_dir = File.join(tmpdir, 'output', 'concerns')
+      FileUtils.mkdir_p(type_dir)
 
-      node = { type: :rake_task, file_path: rake_path }
+      node = { type: :concern, file_path: source_path }
       graph = extractor.instance_variable_get(:@dependency_graph)
-      allow(graph).to receive(:node_types).with('things:one').and_return([:rake_task])
-      allow(graph).to receive(:node).with('things:one', type: :rake_task).and_return(node)
+      allow(graph).to receive(:node_types).with('things:one').and_return([:concern])
+      allow(graph).to receive(:node).with('things:one', type: :concern).and_return(node)
       allow(graph).to receive(:register).and_call_original
 
-      unit_one = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:one', file_path: rake_path)
-      unit_two = Woods::ExtractedUnit.new(type: :rake_task, identifier: 'things:two', file_path: rake_path)
+      unit_one = Woods::ExtractedUnit.new(type: :concern, identifier: 'things:one', file_path: source_path)
+      unit_two = Woods::ExtractedUnit.new(type: :concern, identifier: 'things:two', file_path: source_path)
 
-      rake_extractor = instance_double(Woods::Extractors::RakeTaskExtractor)
-      allow(Woods::Extractors::RakeTaskExtractor).to receive(:new).and_return(rake_extractor)
-      allow(rake_extractor).to receive(:extract_rake_file).with(rake_path).and_return([unit_one, unit_two])
+      consumer = instance_double(Woods::Extractors::ConcernExtractor)
+      allow(Woods::Extractors::ConcernExtractor).to receive(:new).and_return(consumer)
+      allow(consumer).to receive(:extract_concern_file).with(source_path).and_return([unit_one, unit_two])
 
       expect { extractor.send(:re_extract_unit, 'things:one') }.not_to raise_error
 
       expect(graph).to have_received(:register).with(unit_one)
       expect(graph).to have_received(:register).with(unit_two)
 
-      expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:one')))).to be(true)
-      expect(File.exist?(File.join(rake_dir, extractor.send(:collision_safe_filename, 'things:two')))).to be(true)
+      expect(File.exist?(File.join(type_dir, extractor.send(:collision_safe_filename, 'things:one')))).to be(true)
+      expect(File.exist?(File.join(type_dir, extractor.send(:collision_safe_filename, 'things:two')))).to be(true)
     end
 
     it 're-extracts a class-discovered job by class when its file names a different constant' do

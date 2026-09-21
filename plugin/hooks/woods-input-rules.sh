@@ -75,10 +75,6 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
-    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
-    return
-  fi
   if { { { [[ "$path" == *.html.erb ]] || [[ "$path" == *.erb ]]; } && { [[ "$path" == app/views/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
@@ -112,6 +108,10 @@ woods_input_action() {
     return
   fi
   if { { { [[ "$path" == *.erb ]]; } && { [[ "$path" == app/views/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi

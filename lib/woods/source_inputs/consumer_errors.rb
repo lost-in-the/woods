@@ -14,6 +14,10 @@ module Woods
         consumer.instance_variable_set(FLAG, true)
       end
 
+      def reset(consumer)
+        consumer.instance_variable_set(FLAG, false)
+      end
+
       def failed?(consumer)
         consumer && consumer.instance_variable_get(FLAG) == true
       end

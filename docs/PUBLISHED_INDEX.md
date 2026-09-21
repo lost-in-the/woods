@@ -109,6 +109,23 @@ The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit 
 
 `Woods::MCP::IndexReader#find_unit` keys its identifier map on identifier alone. If two type directories both list the same identifier (a model and a service both named `Foo`, for example), whichever type sorts last in `Woods::MCP::IndexReader::TYPE_DIRS` silently wins, and `unit(identifier)` returns that one. Pass `type:` to read a specific type's unit file directly and skip the collision entirely; `#table_database_map` always does this internally (`type: 'model'`), so a same-named non-model unit can never shadow a model's `table_name`/`database`.
 
+### Actual unit types and directory families
+
+Unreleased after `2.0.0.beta3`: `unit` and `units` accept actual published
+`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`, and
+`gem_source` types. Enumeration preserves each unit's actual type rather than
+labeling every GraphQL member `graphql` or every gem source `rails_source`.
+Check the loaded Git revision when testing a development checkout.
+
+The existing `graphql` and `rails_source` filters remain directory-family
+aliases: `graphql` selects all four GraphQL types; `rails_source` selects both
+Rails and gem sources. Returned records keep their actual type. Use
+`units(type: 'gem_source')` for gem sources only; to select Rails sources only,
+filter `units(type: 'rails_source')` on each entry's `"type" == "rails_source"`.
+Unknown types return no records, and an explicit GraphQL subtype never matches
+another subtype. Enumeration continues to return index-entry fields, not full
+unit source bodies.
+
 ### `available_generations`: published means published
 
 A generation is listed only when both hold:

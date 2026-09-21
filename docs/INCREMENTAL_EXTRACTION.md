@@ -98,6 +98,23 @@ including inlined code and callback analysis. Multiple runtime mixins sharing a 
 file retain separate identities and refresh all their includers. Run a full extraction after upgrading
 to populate these previously missing source mappings.
 
+## Handled source errors and retry
+
+Unreleased after `2.0.0.beta3`: when an incremental extraction or named refresh
+records a handled consumer error (for example malformed locale or schedule
+YAML), it raises `Woods::ExtractionError` before publishing. Empty output from
+that failed consumer does not authorize replacing or deleting its last-good
+units. The published generation and source provenance remain unchanged,
+including when other files in the batch extracted successfully.
+
+Fix the source error named in the extraction log, then retry the **complete
+batch**, or the same named refresh. The watch daemon reports degraded and keeps
+the failed batch pending for retry. An error on one file does not mark a later
+successful file as failed, but the batch still cannot publish until all handled
+errors are resolved. This does not change full extraction's existing tolerance
+for handled consumer errors; its source-freshness report marks those scopes
+unverified.
+
 ## What a run does, in order
 
 `Extractor#extract_changed` is order-sensitive; each step exists because of the
@@ -109,8 +126,8 @@ step before it.
 2. **Reconcile changed paths.** Every changed path that still exists is handed
    to the file-based extractors that claim it (`PathDispatcher`), and units the
    path no longer produces are dropped. This is what indexes a file the index
-   has never seen, and what lets a task removed from a multi-task `.rake` file
-   actually go away.
+   has never seen, and what removes definitions deleted from a surviving
+   source file. Multi-file Rake tasks use wholesale reconciliation below.
 3. **Re-extract the rest of the blast radius**: units whose own file did not
    change but which depend on something that did.
 4. **Reconcile class-based types** against each extractor's
@@ -208,7 +225,6 @@ automatically.
 | `config/locales/**/*.yml` | i18n |
 | `config/initializers`, `config/environments` | configurations |
 | `db/migrate/*.rb` (top level only) | migrations |
-| `lib/tasks/**/*.rake` | rake_tasks |
 | `lib/**/*.rb` (outside `tasks/`, `generators/`) | libs |
 | `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings |
 
@@ -219,12 +235,13 @@ serializer and decorator extractors, and all matching rules run.
 ### Wholesale re-runs
 
 `PathDispatcher.whole_app_rules` → `Extractor::WHOLE_APP_EXTRACTORS`. These
-extractors have no per-file entry point: they introspect the runtime or scan a
-whole directory in one pass. In an already-booted process re-running them is
+extractors need a complete runtime or directory view, even when a low-level
+per-file reader exists. In an already-booted process re-running them is
 cheap, which is what makes wholesale replacement the right shape.
 
 | Trigger | Re-runs |
 |---|---|
+| `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task) |
 | `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware |
@@ -235,7 +252,14 @@ cheap, which is what makes wholesale replacement the right shape.
 | `db/views/**/*.sql` | database_views |
 | any `package.yml`, `packwerk.yml` | packages |
 
-Three of these deserve a note:
+Four of these deserve a note:
+
+- **Rake tasks merge definitions across files.** Any changed or deleted `.rake`
+  file reruns the task extractor over all task files. Removing the primary
+  definition preserves surviving definitions; removing a secondary definition
+  drops its source and dependencies from the shared unit. After upgrading from
+  the old per-file rules, run a full extraction to establish a source-freshness
+  baseline with the new rule fingerprint.
 
 - **Routes cascade.** `ROUTE_CONSUMER_EXTRACTORS` embed the route table, controllers write each action's routes into unit metadata and into the action
   chunks, and everything using `RouteHelperResolver` resolves navigation edges
