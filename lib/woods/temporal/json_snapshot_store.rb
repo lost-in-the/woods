@@ -150,10 +150,8 @@ module Woods
           sha = File.basename(path, '.json')
           next unless sha.match?(/\A[0-9a-f]+\z/i) && File.file?(path)
 
-          data = read_snapshot(path) || {}
-          timestamp = data['extracted_at']
-          valid = data['git_sha'] == sha && timestamp.is_a?(String)
-          { git_sha: sha, extracted_at: valid ? timestamp : '', corrupt: !valid }
+          data = read_snapshot(path)
+          { git_sha: sha, extracted_at: data&.[]('extracted_at') || '', corrupt: data.nil? }
         end
       end
 
@@ -281,6 +279,9 @@ module Woods
       def read_snapshot(path)
         data = JSON.parse(AtomicFile.read(path))
         validate_snapshot_shape!(data)
+        unless data['git_sha'] == File.basename(path, '.json')
+          raise JSON::ParserError, 'git_sha does not match the snapshot filename'
+        end
 
         data
       rescue JSON::ParserError => e

@@ -78,6 +78,20 @@ RSpec.describe 'Persisted JSON snapshot shapes' do
     end
   end
 
+  context 'with a valid content SHA that does not match the filename' do
+    before { write_bad('git_sha' => 'ddd444') }
+
+    include_examples 'an unusable retained snapshot'
+
+    it 'compares a later capture against the usable baseline instead of the missing content-SHA file' do
+      expect do
+        result = store.capture({ git_sha: 'ccc333', extracted_at: '2026-03-01' },
+                               [valid_unit.merge(source_hash: 'changed')])
+        expect(result).to include(units_added: 0, units_modified: 1, units_deleted: 0)
+      end.to output(/git_sha does not match the snapshot filename/).to_stderr
+    end
+  end
+
   it 'preserves legacy bare keys, optional hashes and metadata, and typed identity comparison' do
     write_bad('units' => { 'User' => { 'unit_type' => 'model', 'source_hash' => 'original' } },
               'unit_counts' => nil, 'rails_version' => nil, 'future_metadata' => { 'anything' => [] })
@@ -109,6 +123,27 @@ RSpec.describe 'Persisted JSON snapshot shapes' do
       .to output(/Skipping corrupt snapshot bbb222\.json/).to_stderr
     expect(Dir.children(File.join(directory, 'snapshots')).sort).to eq(%w[aaa111.json ccc333.json])
     expect(bounded.find('ccc333')).to include(git_sha: 'ccc333')
+  end
+
+  [{}, { 'extracted_at' => nil }].each do |timestamp|
+    it "prunes corrupt files before a legacy snapshot with timestamp fields #{timestamp.inspect}" do
+      legacy_path = File.join(directory, 'snapshots', 'aaa111.json')
+      legacy = JSON.parse(File.read(legacy_path)).except('extracted_at').merge(timestamp)
+      File.write(legacy_path, JSON.generate(legacy))
+      File.write(File.join(directory, 'snapshots', 'fff666.json'), '{broken')
+      bounded = Woods::Temporal::JsonSnapshotStore.new(dir: directory, retention: 2)
+
+      expect do
+        result = bounded.capture({ git_sha: 'ccc333', extracted_at: '2026-03-01' },
+                                 [valid_unit.merge(source_hash: 'changed')])
+        expect(result).to include(units_added: 0, units_modified: 1, units_deleted: 0)
+      end.to output(/Skipping corrupt snapshot fff666\.json/).to_stderr
+      expect(Dir.children(File.join(directory, 'snapshots')).sort).to eq(%w[aaa111.json ccc333.json])
+      expect(bounded.find('aaa111')).to include(extracted_at: nil)
+
+      bounded.capture({ git_sha: 'ddd444', extracted_at: '2026-04-01' }, [valid_unit])
+      expect(Dir.children(File.join(directory, 'snapshots')).sort).to eq(%w[ccc333.json ddd444.json])
+    end
   end
 
   it 'continues to reject invalid caller SHAs rather than treating them as missing persisted files' do

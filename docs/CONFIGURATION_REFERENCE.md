@@ -421,17 +421,19 @@ release or architecture gate.
 When the JSON snapshot fallback is in use, malformed JSON, invalid snapshot
 shapes, and files that cannot be read (including concurrent retention removals)
 are warned about and treated as absent. A snapshot needs a hexadecimal string
-`git_sha`; `extracted_at` may be a string, null, or omitted. When present and
-non-null, `units` must be an object whose records are objects. A malformed record
-invalidates the entire snapshot, rather than exposing partial history. Legacy
-bare identifier keys, omitted/null unit collections, and optional per-unit hash
+`git_sha` matching its filename; `extracted_at` may be a string, null, or omitted.
+When present and non-null, `units` must be an object whose records are objects.
+A malformed record invalidates the entire snapshot, rather than exposing partial
+history. Legacy bare identifier keys, omitted/null unit collections, and optional per-unit hash
 fields remain supported; timestamp strings are not restricted to a new format.
 Snapshot lists and unit history omit unusable files; direct lookup returns no
 snapshot, and a diff with an unavailable snapshot returns empty added, modified,
 and deleted lists. An empty diff in this case is not proof that nothing changed.
 New captures compare against the latest usable snapshot. Unusable SHA-named files
 still count toward retention and are pruned first when the limit is exceeded;
-reading alone does not delete them. Direct lookup and diff still reject invalid
+reading alone does not delete them. Valid legacy snapshots with null or omitted
+timestamps are retained ahead of corrupt files, then treated as oldest among
+usable snapshots. Direct lookup and diff still reject invalid
 caller-supplied SHA paths with an argument error.
 
 `incremental_blast_radius_depth` is unbounded by default because a unit two hops
