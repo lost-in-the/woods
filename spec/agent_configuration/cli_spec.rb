@@ -76,6 +76,17 @@ RSpec.describe Woods::AgentConfiguration::CLI do
     expect(File).not_to exist(File.join(directory, '.mcp.json'))
   end
 
+  it 'reports all coordination files and refuses each as a plan destination' do
+    layout = Woods::AgentConfiguration::Layout.new(root: directory, scope: 'project', config_dir: nil)
+    plan('setup', 'setup.json')
+    expect(JSON.parse(output.string).fetch('runtime_files')).to eq(layout.runtime_paths)
+    layout.runtime_paths.each do |path|
+      expect(run_command('setup', '--plan', path)).to eq(1)
+      expect(errors.string).to include('Plan output must differ')
+      expect(File).not_to exist(path)
+    end
+  end
+
   it 'does not boot or require the application bundle when removing owned configuration' do
     setup = plan('setup', 'setup.json')
     expect(run_command('apply', setup)).to eq(0)

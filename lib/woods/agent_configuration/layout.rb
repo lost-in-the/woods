@@ -50,6 +50,19 @@ module Woods
         end
       end
 
+      # Lock actual managed targets, since user-scoped paths can be shared
+      # by different applications. Keep the receipt lock name for existing
+      # same-application callers; receipts and recovery journals stay separate.
+      def lock_paths
+        allowed_paths.map do |path|
+          path == receipt_path ? "#{path}.lock" : "#{path}.woods.lock"
+        end.sort
+      end
+
+      def runtime_paths
+        lock_paths + ["#{receipt_path}.pending"]
+      end
+
       def identity
         { 'client' => 'claude', 'scope' => scope, 'root' => root, 'config_dir' => config_dir,
           'config_path' => config_path, 'receipt_path' => receipt_path }

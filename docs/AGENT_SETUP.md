@@ -190,8 +190,16 @@ receipt for future update/removal. Unrelated servers, hooks, settings,
 instruction text, permissions, and line-ending conventions are retained;
 changing JSON may reformat its whitespace.
 
+Unreleased after `2.0.0.beta3`: apply and recovery coordinate on the actual
+managed file paths, including user configuration and shared instruction files.
+Two application roots sharing those files cannot apply overlapping plans at the
+same time. A competing operation reports a conflict; after it finishes, create a
+fresh preview if the saved plan's snapshots changed. Both applications keep
+their own ownership receipts. Do not delete an active coordination lock.
+
 Writes use atomic replacement per file and a private recovery journal beside
-the receipt. The plan summary names the `.lock` and `.pending` runtime paths;
+the receipt. The plan summary names all adjacent `.woods.lock` files, the
+receipt `.lock`, and the `.pending` journal;
 a lock file may remain after completion. Multiple files are not one atomic
 transaction. An ordinary write failure restores original files when safe; an
 interruption or concurrent edit can retain the journal. Resolve reported

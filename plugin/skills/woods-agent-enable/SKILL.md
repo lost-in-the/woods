@@ -20,6 +20,12 @@ journals contain private configuration bytes. See the canonical
 for host/Compose preflight, actual Claude file locations, conflict recovery,
 and removal. Preserve manual setup for older installed versions.
 
+For concurrent configuration operations, wait for the active operation to
+finish and generate a fresh plan if the saved snapshots changed. Do not remove
+its lock or overwrite the other application's entry. Coordination across
+applications sharing user configuration is unreleased after `2.0.0.beta3`;
+check the installed revision before relying on it.
+
 ## Preflight
 
 Confirm Woods actually works before advertising it to every future session:
