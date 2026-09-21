@@ -583,7 +583,7 @@ module Woods
         return unless @catch_up
 
         carried = restore_pending
-        paths = (uncovered_paths + carried).uniq
+        paths = (uncovered_paths + carried + vanished_restart_paths).uniq
         boot_changes = @boot_snapshot ? @boot_snapshot.changed_paths : []
         enqueue(boot_changes) unless boot_changes.empty?
         prepare_startup_reconciliation(paths)
@@ -623,7 +623,8 @@ module Woods
       # graph knows every path it attributed a unit to; any of those gone from
       # disk means the extractor's sweep has reconciling to do.
       #
-      # The daemon only *detects*; it does not name the paths. Naming them
+      # Except for boot inputs handled by vanished_restart_paths, the daemon
+      # only detects; it does not name the paths. Naming them
       # would put them in the change set, whose deletions are authoritative for
       # any unit type — and some registered paths are nominal (on Rails < 7.1,
       # `ActiveRecord::SchemaMigration` registers a convention path no app
@@ -631,9 +632,22 @@ module Woods
       # still produces. An empty-change-set run reaches the same ghosts through
       # the sweep, which carries the bounds that make it safe.
       def stale_deletions?
-        root_prefix = "#{@root}/"
+        vanished_registered_paths.any?
+      end
 
-        persisted_registered_paths.any? do |path|
+      # Deleted boot inputs have no mtime and are absent from a fresh snapshot.
+      # Preserve their restart obligation so a boot that already omitted them
+      # performs a full extraction. Do not promote nominal model paths to
+      # authoritative deletions, even when application reloading is disabled.
+      def vanished_restart_paths
+        vanished_registered_paths.select do |path|
+          @policy.classify(path.delete_prefix("#{@root}/")) == :restart
+        end
+      end
+
+      def vanished_registered_paths
+        root_prefix = "#{@root}/"
+        persisted_registered_paths.select do |path|
           path.start_with?(root_prefix) && !File.exist?(path)
         end
       end

@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'json'
 require 'time'
+require 'timeout'
 
 # woods:clean used to be a bare rm_rf (#170): run mid-daemon-cycle it deleted
 # the extraction lock itself, evaporating the "writers serialize on
@@ -82,16 +83,14 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
       )
     end
 
-    it 'deletes the index under the lock and removes the emptied directory' do
+    it 'deletes index artifacts while retaining the stable coordination guard' do
       Dir.mktmpdir('woods_clean') do |parent|
         dir = File.join(parent, 'woods')
         FileUtils.mkdir_p(dir)
         populate(dir)
 
         expect(Woods::RakeHelpers.woods_clean_index(dir, wait: 0)).to eq(:cleaned)
-        expect(Dir.exist?(dir)).to be(false)
-        # The guard now lives inside the lock directory (no sibling artifact),
-        # so a full clean removes it with the directory.
+        expect(Dir.children(dir)).to eq([Woods::Coordination::PipelineLock.guard_filename('extraction')])
         expect(File.exist?("#{dir}.extraction.lock.guard")).to be(false)
       end
     end
@@ -134,10 +133,48 @@ RSpec.describe 'woods:clean and embed locking (#170)' do
         ENV['WOODS_IGNORE_WATCH'] = '1'
         begin
           expect(Woods::RakeHelpers.woods_clean_index(dir, wait: 0)).to eq(:cleaned)
-          expect(Dir.exist?(dir)).to be(false)
+          expect(Dir.children(dir)).to eq([Woods::Coordination::PipelineLock.guard_filename('extraction')])
         ensure
           original.nil? ? ENV.delete('WOODS_IGNORE_WATCH') : ENV['WOODS_IGNORE_WATCH'] = original
         end
+      end
+    end
+
+    it 'does not unlink the guard while a new writer is acquiring after cleanup releases' do
+      Dir.mktmpdir('woods_clean') do |dir|
+        populate(dir)
+        ready = Queue.new
+        resume = Queue.new
+        writer = Woods::Coordination::PipelineLock.new(lock_dir: dir, name: 'extraction')
+        guard_path = File.join(dir, Woods::Coordination::PipelineLock.guard_filename('extraction'))
+        thread = nil
+        guard_inode = nil
+        allow(writer).to receive(:with_path_guard).and_wrap_original do |original, &block|
+          original.call do
+            guard_inode = File.stat(guard_path).ino
+            ready << true
+            resume.pop
+            block.call
+          end
+        end
+        allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock)
+          .and_wrap_original do |original, *args, **kwargs, &block|
+          original.call(*args, **kwargs, &block)
+          thread = Thread.new { writer.acquire }
+          Timeout.timeout(5) { ready.pop }
+        end
+
+        expect(Woods::RakeHelpers.woods_clean_index(dir, wait: 0)).to eq(:cleaned)
+        expect(File.stat(guard_path).ino).to eq(guard_inode)
+        resume << true
+        expect(Timeout.timeout(5) { thread.value }).to be(true)
+        contender = Woods::Coordination::PipelineLock.new(lock_dir: dir, name: 'extraction')
+        expect(contender.acquire).to be(false)
+      ensure
+        resume << true
+        thread&.join(5)
+        allow(writer).to receive(:with_path_guard).and_call_original
+        writer&.release
       end
     end
 

@@ -183,11 +183,8 @@ module Woods
         woods_sweep_index_dir(output_dir, lock_name)
       end
 
-      # The lock was released (and its file removed) above; drop the guard so
-      # the directory can empty, then remove the now-empty directory. Another
-      # writer may legitimately have recreated content between release and here
-      # — a non-empty directory is left alone rather than forced.
-      woods_remove_if_empty(output_dir, lock_name)
+      # Retain the stable guard and directory: another writer may already hold
+      # the guard after release, before it has created its extraction.lock.
       :cleaned
     end
 
@@ -203,13 +200,6 @@ module Woods
       output_dir.children.each do |entry|
         FileUtils.rm_rf(entry) unless preserved.include?(entry)
       end
-    end
-
-    def woods_remove_if_empty(output_dir, lock_name)
-      FileUtils.rm_f(output_dir.join(Woods::Coordination::PipelineLock.guard_filename(lock_name)))
-      Dir.rmdir(output_dir)
-    rescue SystemCallError
-      nil
     end
 
     # The root containing the Rakefile that loaded this task file.

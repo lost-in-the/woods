@@ -1,0 +1,2 @@
+- Reconcile registered initializers deleted during watch downtime with a full extraction after a fresh environment boot, preserving whole-application runtime facts.
+- Keep the stable extraction guard and output directory after `woods:clean`, so a concurrent writer can finish acquiring its lock safely.

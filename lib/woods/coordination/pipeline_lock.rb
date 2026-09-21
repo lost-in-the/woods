@@ -30,8 +30,9 @@ module Woods
       # The transaction-guard filename for a lock of +name+, exposed so
       # cleanup code that empties a lock directory (woods:clean) can skip the
       # guard during its sweep — deleting a flock'd guard out from under a
-      # contender's critical section would split the flock across two inodes —
-      # and remove it only after the lock is released.
+      # contender's critical section would split the flock across two inodes.
+      # The guard stays after cleanup and lock release: a new contender may
+      # already be holding it before its lock file exists.
       #
       # @param name [String]
       # @return [String]
