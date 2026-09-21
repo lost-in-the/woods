@@ -23,7 +23,7 @@ require 'woods/extractor'
 # Unit types that have no single-file extraction path and must be skipped
 # during incremental re-extraction.
 INCREMENTAL_UNSUPPORTED_TYPES = %i[
-  route middleware engine scheduled_job state_machine factory event rails_source
+  route middleware engine scheduled_job state_machine factory event rails_source rake_task
 ].freeze
 
 RSpec.describe Woods::Extractor, '#re_extract_unit filtering' do

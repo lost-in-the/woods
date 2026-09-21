@@ -47,7 +47,8 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'routes .rake files only' do
-      expect(keys_for('lib/tasks/export.rake')).to include(:rake_tasks)
+      expect(dispatcher.whole_app_keys_for('lib/tasks/export.rake')).to include(:rake_tasks)
+      expect(keys_for('lib/tasks/export.rake')).not_to include(:rake_tasks)
       expect(keys_for('lib/tasks/export.rb')).not_to include(:rake_tasks)
     end
 

@@ -121,6 +121,12 @@ with `server.version`; missing/null is unknown, not a failure. A validator
 major-version warning calls for full extraction and upgrade review, while a match
 does not certify retained units were migrated. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
+Unreleased after `2.0.0.beta3`: incremental/refresh handled source errors keep
+the previous generation active and leave watch batches pending. Repair the
+logged source error and retry the complete batch; see
+[handled source errors](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry).
+Check the installed revision before relying on this behavior.
+
 If a one-shot extraction raises `Could not publish generation`, the candidate
 payload was written but never made visible; readers still serve the previous
 complete generation. Fix the named filesystem, permission, space, or mount
