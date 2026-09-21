@@ -60,11 +60,16 @@ module Woods
       # @param auto_refresh [Boolean] re-read the index when its published
       #   generation moves. On by default; specs that assert caching behaviour
       #   turn it off.
-      # @raise [ArgumentError] if directory doesn't exist or has no manifest.json
+      # @raise [ArgumentError] if directory doesn't exist or no published index resolves
       def initialize(index_dir, auto_refresh: true)
         @index_dir = Pathname.new(index_dir)
         raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
-        raise ArgumentError, "No manifest.json found in: #{index_dir}" unless manifest_present?
+        unless manifest_present?
+          raise ArgumentError, "Could not resolve a published Woods index in: #{@index_dir.expand_path}\n" \
+                               'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json. ' \
+                               'Point IndexReader at an existing index root. ' \
+                               'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
+        end
 
         @unit_cache = {}
         @unit_cache_signatures = {}
@@ -963,6 +968,10 @@ module Woods
 
         marker = Woods::Generation.new(output_dir: @index_dir).current
         resolve_payload_dir(marker).join('manifest.json').file?
+      rescue TypeError, NoMethodError
+        # Match Bootstrapper's startup preflight for malformed marker shapes.
+        # Keep this local: errors during later generation refresh still surface.
+        false
       end
 
       # The loaded generation's payload directory, without a freshness check.

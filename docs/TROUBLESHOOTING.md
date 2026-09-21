@@ -396,6 +396,8 @@ relative and resolves outside the mount.
 
 **Symptom:** An Index MCP executable exits with `Could not resolve a published Woods index in: /path/to/...` even though extraction completed. This headline is unreleased after `2.0.0.beta3`; older versions say `No manifest.json found`. Both mean the selected index could not resolve its manifest, not that an atomic index needs a root manifest.
 
+Embedded Index MCP startup through `IndexReader` also raises an `ArgumentError` with the selected directory and layout guidance when the marker cannot resolve a manifest, including malformed marker shapes such as `[]` or a numeric `payload` (unreleased after `2.0.0.beta3`). Earlier builds may expose a raw `TypeError` or `NoMethodError` for those shapes. Inspect the marker and preserve the failing index before attempting recovery.
+
 **Cause:** The selected directory is not the published index root, the published generation cannot be resolved, or the path is not visible to the MCP process. A container path is appropriate for a container process; a host process needs the host-visible path.
 
 **Fix:** Point at the existing index before extracting again. Check the examined directory in the error and the [MCP path precedence](CONFIGURATION_REFERENCE.md#environment-variables). For a host-side launch whose working directory contains `tmp/woods`, for example:
