@@ -21,10 +21,47 @@ module Woods
       # @return [Hash, nil] string-keyed unit, or nil when this type has no
       #   such identifier
       def self.call(payload_dir, reader, identifier, type)
-        dir = Woods::MCP::IndexReader::TYPE_TO_DIR[type]
+        dir = directory_for(type)
         return nil unless dir
-        return nil unless reader.list_units(type: type).any? { |entry| entry['identifier'] == identifier }
 
+        family = Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir)
+        return nil unless reader.list_units(type: family).any? { |entry| entry['identifier'] == identifier }
+
+        unit = read_unit(payload_dir, dir, identifier)
+        unit if unit && (unit['type'] == type || type == family)
+      end
+
+      # Resolve actual published types as well as historical directory-family aliases.
+      #
+      # @param type [String]
+      # @return [String, nil]
+      def self.directory_for(type)
+        Woods::MCP::IndexReader::TYPE_TO_DIR[type] ||
+          Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.find { |_, types| types.include?(type) }&.first
+      end
+
+      # Preserve subtype identity in an index entry from a shared type directory.
+      #
+      # @param payload_dir [Pathname]
+      # @param entry [Hash] published index entry
+      # @param dir [String] type directory
+      # @param requested_type [String, nil] actual type or family alias
+      # @return [Hash, nil] entry with actual type, or nil when filtered out
+      def self.entry(payload_dir, entry, dir, requested_type)
+        family = Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir)
+        actual_type = if Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.fetch(dir).size > 1
+                        read_unit(payload_dir, dir, entry['identifier'])&.fetch('type')
+                      else
+                        family
+                      end
+        return unless actual_type
+        return if requested_type && requested_type != family && requested_type != actual_type
+
+        entry.merge('type' => actual_type)
+      end
+
+      # Read a unit whose directory-index membership has already been established.
+      def self.read_unit(payload_dir, dir, identifier)
         path = payload_dir.join(dir, filename_for(identifier))
         return nil unless path.file?
 
@@ -42,7 +79,7 @@ module Woods
         "#{base}_#{digest}.json"
       end
 
-      private_class_method :filename_for
+      private_class_method :filename_for, :read_unit
     end
   end
 end

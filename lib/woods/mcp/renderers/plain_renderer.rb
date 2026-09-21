@@ -126,9 +126,9 @@ module Woods
           lines << 'Denominators:'
           lines << '  units_indexed     (manifest, structure): total ExtractedUnits written.'
           lines << '  graph_nodes       (pagerank, dependencies, dependents): units in the graph'
-          lines << '                    (excludes orphans with no incoming/outgoing edges).'
-          lines << '  searchable_entries (codebase_retrieve): retriever-store entries including'
-          lines << '                    per-chunk rows. Always >= units_indexed.'
+          lines << '                    (includes isolated units with no incoming/outgoing edges).'
+          lines << '  searchable_entries (codebase_retrieve): retriever-store entries; semantic mode may include'
+          lines << '                    per-chunk rows; lexical mode ranks published units. Store coverage varies.'
 
           lines.join("\n").rstrip
         end
@@ -146,7 +146,7 @@ module Woods
 
           GRAPH_ANALYSIS_SECTIONS.each do |section|
             items = fetch_key(data, section)
-            next unless items.is_a?(Array) && items.any?
+            next unless items.is_a?(Array) && (items.any? || fetch_key(data, "#{section}_total"))
 
             lines << "#{section.tr('_', ' ').upcase}:"
             items.each do |item|
@@ -161,9 +161,9 @@ module Woods
 
             total_key = "#{section}_total"
             offset = fetch_key(data, "#{section}_offset", 0)
-            if data[total_key]
+            if fetch_key(data, total_key)
               position = offset.positive? ? " from offset #{offset}" : ''
-              lines << "  (showing #{items.size} of #{data[total_key]}#{position}; truncated)"
+              lines << "  (showing #{items.size} of #{fetch_key(data, total_key)}#{position}; truncated)"
             end
             lines << ''
           end
