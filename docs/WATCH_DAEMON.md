@@ -67,10 +67,11 @@ bin/rails generate woods:watch --mode puma
 ```
 
 This adds an executable `bin/woods-watch` and an owned directive to
-`config/puma.rb`. The directive tolerates Woods being excluded from the
-production bundle; the adapter separately enforces Puma's finalized development
-environment. The guard does not make an older Woods gem supply the new plugin;
-remove the owned setup before downgrading. Starting a console, task, or production
+`config/puma.rb`. The directive loads the plugin only when the active Woods gem
+contains it. An absent gem or an older version without the plugin leaves Puma
+running without a watcher; this also works for Git/path bundles. The adapter
+separately enforces Puma's finalized development environment.
+Starting a console, task, or production
 Puma does not start a watcher. The watcher still uses another Rails process and its associated memory.
 Puma installation checks the application's installed Puma version (supported
 majors: 6, 7, and 8 on native Unix Ruby) and selects the normal `bin/rails server`
@@ -123,7 +124,17 @@ bin/rails generate woods:watch --operation remove --pretend
 
 Repeat without `--pretend` to apply. Stop an existing watcher through its current
 manager before changing owners; the generator does not stop running processes.
-Remove the new startup configuration before downgrading to a gem without it.
+Explicit updates refresh owned directives in place, preserving surrounding text
+and the block's newline style. Repeating setup preserves the existing directive.
+Earlier Git builds used a Puma guard that checked only whether Woods was loaded;
+use the update command above with a supporting bundle to install the capability
+guard ([#542](https://github.com/lost-in-the/woods/issues/542), unreleased after
+`2.0.0.beta4`). Do not hand-edit the owned block or receipt.
+
+For a permanent downgrade, remove the startup configuration while the supporting
+gem is still installed. The updated Puma guard lets a branch with an older gem
+boot without indexing; it does not make `bin/woods-watch` or a Foreman entry
+compatible with that gem.
 For Docker/Grove, see [automatic maintenance](AUTOMATIC_MAINTENANCE.md).
 
 An interrupted apply retains its local transaction journal. When Rails boots,

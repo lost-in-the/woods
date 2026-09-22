@@ -49,7 +49,8 @@ RSpec.describe 'Woods watcher Rails generator' do
     expect(status.success?).to be(true), stderr
     expect(stdout).to include('applied')
     config = File.join(@root, 'config/puma.rb')
-    expect(File.read(config)).to include('plugin :woods if Gem.loaded_specs.key?("woods")')
+    expect(File.read(config)).to include('plugin :woods if Gem.loaded_specs["woods"]&.full_require_paths&.any?')
+    expect(File.read(config)).to include('File.file?(File.join(path, "puma/plugin/woods.rb"))')
 
     stdout, stderr, status = generate(behavior: 'revoke')
     expect(status.success?).to be(true), stderr

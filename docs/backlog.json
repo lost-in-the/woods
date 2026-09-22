@@ -2816,5 +2816,18 @@
     ],
     "description": "Issue #540: the watcher installer drops environment-based BUNDLE_PATH and BUNDLE_APP_CONFIG, so task discovery cannot resolve gems in container bundle volumes. Preserve selected application bundle settings while clearing inherited activation, requesting frozen resolution, and retaining bounded read-only probes. Real off-path gem executable regressions cover both settings and excluded groups without writing application configuration or lockfiles. Independent focused review: 43 examples pass; full suite: 9,556 examples, zero failures.",
     "status": "resolved"
+  },
+  {
+    "id": "B-206",
+    "title": "Guard Puma startup by the active gem plugin capability",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "operations",
+    "files": [
+      "lib/woods/watch/installation/templates.rb",
+      "lib/woods/watch/installation/planner.rb"
+    ],
+    "description": "Issue #542: generated Puma startup now checks plugin files in the active gem, including Git/path bundles, so an older activated gem without the plugin can still boot the web server. Explicit owned-configuration updates refresh the directive in place; setup remains idempotent and surrounding text, newline style and removal ownership are preserved. Actual Puma and migration regressions pass (74 focused examples); two independent reviews approved. Full PR CI is required before merge.",
+    "status": "resolved"
   }
 ]

@@ -30,13 +30,24 @@ module Woods
         # @param mode [String] procfile or puma
         # @return [String] owned startup directive
         def directive(mode)
-          mode == 'puma' ? 'plugin :woods if Gem.loaded_specs.key?("woods")' : 'woods: bin/woods-watch'
+          return 'woods: bin/woods-watch' unless mode == 'puma'
+
+          'plugin :woods if Gem.loaded_specs["woods"]&.full_require_paths&.any? ' \
+            '{ |path| File.file?(File.join(path, "puma/plugin/woods.rb")) }'
         end
 
         # @param mode [String] selected startup mode
         # @param text [String] surrounding file contents
+        # @param previous [String, nil] existing receipt-owned block
+        # @param update [Boolean] refresh an existing block in place
         # @return [String] exact appended owned block including separator
-        def section(mode, text)
+        def section(mode, text, previous: nil, update: false)
+          if previous
+            return previous unless update
+
+            return previous.partition(START).first + section(mode, previous)
+          end
+
           newline = text.include?("\r\n") ? "\r\n" : "\n"
           separator = text.empty? || text.end_with?(newline) ? '' : newline
           separator + [START, directive(mode), FINISH, ''].join(newline)

@@ -45,6 +45,17 @@ application environment. Early Git builds of the watcher installer stripped
 reinstalling dependencies or writing a local bundle-path workaround. Follow the
 [watcher installation guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup).
 
+### Puma cannot load the Woods plugin after switching branches
+
+Early generated guards checked only whether Woods was activated. An older gem
+can satisfy that check without providing `puma/plugin/woods.rb`. The #542 fix is
+unreleased after `2.0.0.beta4`: verify the loaded revision, then use a supporting
+bundle to preview and apply `bin/rails generate woods:watch --operation update
+--mode puma`. The updated guard checks the active gem's require paths, so older
+gems boot without a watcher. Repeating setup does not upgrade the guard. Follow
+the [owned setup runbook](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#ownership-updates-and-removal);
+do not change the owned directive or receipt manually.
+
 ### Watch repeatedly exits 75
 
 First identify the lifecycle owner. The raw task deliberately exits 75; a bare

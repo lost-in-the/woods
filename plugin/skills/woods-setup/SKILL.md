@@ -121,6 +121,12 @@ existing authorization. Preserve `bin/dev`; never claim an unused Procfile is
 active. Keep the portable receipt with generated files and respect edit conflicts.
 Puma installation supports the normal default `config/puma.rb` route; an existing
 environment-specific file or custom `-C` route needs a different explicit owner.
+The unreleased #542 guard checks plugin files in the active gem, including Git/path
+bundles. Older gems without the plugin skip watcher startup. Existing generated
+Puma setups need an explicit `--operation update --mode puma` (preview first) to
+upgrade the owned guard in place; repeating setup preserves it. The wrapper and
+Foreman entry still require a supporting gem. Remove owned setup before a permanent
+downgrade; do not hand-edit the receipt or its managed block.
 Run setup in the normal application bundle environment. The unreleased #540 fix
 preserves `BUNDLE_PATH`, `BUNDLE_APP_CONFIG`, and group selection during preflight;
 older Git builds may falsely report missing gems. Check the loaded revision
