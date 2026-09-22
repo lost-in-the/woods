@@ -69,8 +69,9 @@ bin/rails generate woods:watch --mode puma
 This adds an executable `bin/woods-watch` and an owned directive to
 `config/puma.rb`. The directive tolerates Woods being excluded from the
 production bundle; the adapter separately enforces Puma's finalized development
-environment. Starting a console, task, or production Puma does not start a
-watcher. The watcher still uses another Rails process and its associated memory.
+environment. The guard does not make an older Woods gem supply the new plugin;
+remove the owned setup before downgrading. Starting a console, task, or production
+Puma does not start a watcher. The watcher still uses another Rails process and its associated memory.
 Puma installation checks the application's installed Puma version (supported
 majors: 6, 7, and 8 on native Unix Ruby) and selects the normal `bin/rails server`
 path using `config/puma.rb`. If `config/puma/development.rb` exists, setup refuses
@@ -89,6 +90,15 @@ availability with bounded commands; it does not start services. Installation
 preserves `bin/dev` and every unowned service. If `bin/dev` only runs Rails, it
 will still only run Rails: choose Puma mode or explicitly use the selected
 Foreman command. No process-manager gem is installed automatically.
+
+Run setup with the same application environment as normal startup. Preflight
+preserves environment-based Bundler configuration, including `BUNDLE_PATH`,
+`BUNDLE_APP_CONFIG`, and excluded groups, while resetting inherited activation
+state and requesting frozen resolution. Earlier Git builds of this unreleased
+installer dropped those settings ([#540](https://github.com/lost-in-the/woods/issues/540)).
+If normal task discovery works but installer preflight cannot find Rails or an
+installed dependency, check the loaded revision and bundle environment before
+reinstalling gems or adding a persistent `.bundle/config` workaround.
 
 Use `--child-command 'bundle exec rails woods:watch'` when that is the
 application's actual Rails entrypoint. Command strings become explicit argument

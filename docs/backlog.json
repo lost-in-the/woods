@@ -2803,5 +2803,18 @@
     ],
     "description": "Issue #538: own startup catch-up, updates and planned restarts through a shared foreground launcher; reversible Procfile, Puma or external integration with process-death cleanup, honest supervision diagnostics and portable worktree configuration. Preserve raw watch and MCP generation reload contracts. Implemented and independently reviewed. Default suite: 9,550 examples, zero failures; real Rails catch-up/change/restart integration, installed-package smoke, Foreman restart handling, and Puma 6/7/8 lifecycle tests pass. Public setup guides, plugin skills and generated surface evidence are synchronized.",
     "status": "resolved"
+  },
+  {
+    "id": "B-205",
+    "title": "Preserve application Bundler configuration during watcher installation preflight",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "operations",
+    "files": [
+      "lib/woods/watch/installation/probe.rb",
+      "lib/woods/watch/child_environment.rb"
+    ],
+    "description": "Issue #540: the watcher installer drops environment-based BUNDLE_PATH and BUNDLE_APP_CONFIG, so task discovery cannot resolve gems in container bundle volumes. Preserve selected application bundle settings while clearing inherited activation, requesting frozen resolution, and retaining bounded read-only probes. Real off-path gem executable regressions cover both settings and excluded groups without writing application configuration or lockfiles. Independent focused review: 43 examples pass; full suite: 9,556 examples, zero failures.",
+    "status": "resolved"
   }
 ]
