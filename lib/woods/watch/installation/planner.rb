@@ -95,14 +95,9 @@ module Woods
           path = @options.mode == 'puma' ? Layout::PUMA : @options.procfile
           text = content(path) || ''
           reject_unowned_section!(text)
-          block = Templates.section(@options.mode, text)
-          previous = @receipt.data&.dig('sections', path)
-          if previous
-            block = previous.fetch('owned_text')
-            @contents[path] = document(path).content
-          else
-            @contents[path] = text + block
-          end
+          previous = @receipt.data&.dig('sections', path, 'owned_text')
+          block = Templates.section(@options.mode, text, previous: previous, update: @options.operation == 'update')
+          @contents[path] = previous ? document(path).content.sub(previous, block) : text + block
           @modes[path] = document(path).content ? document(path).mode : 0o644
           @new_receipt.fetch('sections')[path] = { 'owned_text' => block, 'created_file' => content_created?(path) }
         end

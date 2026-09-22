@@ -7,6 +7,7 @@ require 'socket'
 require 'json'
 require 'timeout'
 require 'puma'
+require 'woods/watch/installation/templates'
 
 # Exercise Puma's actual master hooks, forks and exec restarts. The small wrapper
 # records process ownership; extraction and managed retry semantics have their
@@ -47,7 +48,7 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
       workers 0
       #{configuration}
       app ->(_env) { [200, { 'content-type' => 'text/plain' }, [Process.pid.to_s]] }
-      #{guarded ? 'plugin :woods if Gem.loaded_specs.key?("woods")' : 'plugin :woods'}
+      #{guarded ? Woods::Watch::Installation::Templates.directive('puma') : 'plugin :woods'}
     RUBY_CONFIG
     File.write(File.join(@root, 'puma.rb'), config)
     # Reuse the active test bundle so CI can select Puma 6, 7 or 8 without
@@ -56,7 +57,7 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
     process_env = Bundler.unbundled_env.merge('APP_ENV' => nil, 'RACK_ENV' => nil, 'RAILS_ENV' => nil,
                                               'BUNDLE_GEMFILE' => gemfile).merge(env)
     process_env['BUNDLE_LOCKFILE'] = "#{process_env.fetch('BUNDLE_GEMFILE')}.lock"
-    @server = Process.spawn(process_env, RbConfig.ruby, '-rbundler/setup', '-I', File.join(repo, 'lib'),
+    @server = Process.spawn(process_env, RbConfig.ruby, '-rbundler/setup',
                             puma_executable, '-C', File.join(@root, 'puma.rb'), *args,
                             chdir: @root, in: File::NULL, out: log_path, err: %i[child out], pgroup: true,
                             unsetenv_others: true)
@@ -122,7 +123,8 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
   end
 
   it 'runs one development child with normalized environment and reaps it on server shutdown' do
-    launch(configuration: "environment 'development'", env: { 'APP_ENV' => 'production', 'RAILS_ENV' => 'test' })
+    launch(configuration: "environment 'development'", env: { 'APP_ENV' => 'production', 'RAILS_ENV' => 'test' },
+           guarded: true)
     wait_until { launches.size == 1 }
     launch_info = launches.first
     expect(launch_info).to include('cwd' => @root, 'env' => %w[development development development])
@@ -182,6 +184,37 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
     stop_server
     expect(launches.size).to eq(1)
     expect(running?(launches.first.fetch('pid'))).to be(false)
+  end
+
+  it 'boots with an activated older Woods path gem that has no Puma plugin' do
+    legacy = File.join(@root, 'legacy-woods')
+    FileUtils.mkdir_p(File.join(legacy, 'lib'))
+    File.write(File.join(legacy, 'lib/woods.rb'), "module Woods; VERSION = '1.5.0'; end\n")
+    File.write(File.join(legacy, 'woods.gemspec'), <<~GEMSPEC)
+      Gem::Specification.new do |spec|
+        spec.name = 'woods'
+        spec.version = '1.5.0'
+        spec.authors = ['Woods tests']
+        spec.summary = 'Legacy plugin capability fixture'
+        spec.files = ['lib/woods.rb']
+      end
+    GEMSPEC
+    gemfile = File.join(@root, 'Gemfile.legacy')
+    File.write(gemfile, <<~GEMFILE)
+      source 'https://rubygems.org'
+      gem 'puma', '#{Puma::Const::PUMA_VERSION}'
+      gem 'woods', path: #{legacy.inspect}
+    GEMFILE
+    gem_paths = Gem.loaded_specs.values.map(&:base_dir).uniq.join(File::PATH_SEPARATOR)
+    launch(configuration: <<~CONFIG, env: { 'BUNDLE_GEMFILE' => gemfile, 'GEM_PATH' => gem_paths }, guarded: true)
+      environment 'development'
+      spec = Gem.loaded_specs.fetch('woods')
+      raise 'Wrong Woods fixture' unless spec.version.to_s == '1.5.0' && spec.full_gem_path == #{legacy.inspect}
+      raise 'Candidate load path leaked' if $LOAD_PATH.include?(#{File.join(repo, 'lib').inspect})
+    CONFIG
+
+    expect(request).to include('200 OK')
+    expect(launches).to be_empty
   end
 
   it 'keeps its launcher through a phased worker restart without duplicating it' do

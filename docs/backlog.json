@@ -1838,120 +1838,120 @@
     "description": "Driving extract_changed directly from a `rails runner` produced units whose source_code was current but whose loaded constants (and therefore metadata such as resolved actions) were stale, even when the boot postdated the edit: runner_command.rb wraps the script in Rails.application.executor.wrap, and prepare_incremental_run's safe_eager_load! behaves differently under it than under a rake boot. The documented CLI invocation (CHANGED_FILES + bin/rails woods:incremental) is correct; the gem's own flow_incremental_spec.rb works around the same hazard in-process by force-loading the edited file. Found while writing the testbed flows smoke. Disposition: document the CLI path as the supported incremental invocation, or make runner-driven incremental reload constants before extraction; investigation needed before choosing.",
     "status": "open"
   },
-{
-  "id": "B-131",
-  "title": "Factory units embed the full file source; an N-factory file is stored N times",
-  "severity": "low",
-  "category": "refactor",
-  "layer": "extraction",
-  "files": [
-    "lib/woods/extractors/factory_extractor.rb"
-  ],
-  "description": "Each factory unit's source_code embeds the entire factory file source (build_source_annotation), so a file defining N factories serializes that source N times in payloads. The audit flagged this as a storage item (v2-prerelease-audit P9b); PR-8 owned the item but deferred it because every available fix is a behavior or format change, and PR-8 was scoped to behavior-preserving refactors. The extractor already reads each file once and shares one String across the N units, so the remaining cost is on-disk duplication only. The decision needed: (a) slice per-factory source (parse_factories tracks open_depth; add end-line capture, scope source_code to the factory block) - changes unit source_code bytes, source_hash, search phase-2 matching, and forces a one-time re-embed of every factory unit; or (b) deduplicate identical source strings in the payload store (content-addressed segments) - an artifact-format change with reader compatibility and schema-version implications. Compatibility implications: option (a) changes generated artifact content and retrieval behavior (a query matching text in a sibling factory's block would no longer match that factory's unit); option (b) changes the payload layout and requires a version-gated reader path. Acceptance criteria: a chosen option documented here or in a superseding note; for (a), extracted-identifier AND source-hash before/after comparison attached for review plus one-time re-embed accounting; for (b), payload schema version bump, reader compatibility for old payloads, and round-trip validation; either way, factory_extractor specs updated to pin the new source_code contract and the audit's storage item closed.",
-  "status": "open"
-},
-{
-  "id": "B-132",
-  "title": "recent_changes loads every unit file in scope per call",
-  "severity": "low",
-  "category": "refactor",
-  "layer": "mcp",
-  "files": [
-    "lib/woods/mcp/index_reader.rb"
-  ],
-  "description": "The recent_changes tool resolves git modification dates by loading unit files per index entry, O(total units) file reads per tool call against a 50-entry LRU, on indexes with thousands of units (v2-prerelease-audit P3). PR-8 deferred it: a correct fix needs an artifact-format design first, not a refactor. Candidate designs: digest-based short-circuit keyed off data already in the per-type index entries (skip loading units whose index-level digest is unchanged), or a payload-store bulk read that materializes git metadata in one pass. Compatibility implications: any new index-side field (e.g. a per-entry git digest) is an artifact-format addition that older readers must ignore and older indexes must tolerate; the tool response shape must stay identical. Acceptance criteria: a chosen design documented in the payload/index format docs; the tool response shape unchanged; a latency bound demonstrated on a large index (thousands of units) before/after; functional index_reader specs plus a new perf bound pinning the no-regression; no mixed-generation reads introduced.",
-  "status": "open"
-},
-{
-  "id": "B-133",
-  "title": "MetadataStore::SQLite search with an empty fields list raises raw SQL error",
-  "severity": "low",
-  "category": "code-bug",
-  "layer": "storage",
-  "files": [
-    "lib/woods/storage/metadata_store.rb"
-  ],
-  "description": "MetadataStore::InMemory#search(query, fields: []) returns [], but SQLite joins the empty condition list into `WHERE ` and raises SQLite3::SQLException: incomplete input. Verified on current main during the v2 prerelease audit tail. Normalize an empty fields list to the adapter-independent empty result before touching either backing store, and add the case to the shared hardened-search contract so external adapters inherit an explicit semantic requirement.",
-  "status": "resolved"
-},
-{
-  "id": "B-134",
-  "title": "Snapshot dump writers can follow an in-root symlink outside dumps_root",
-  "severity": "low",
-  "category": "code-bug",
-  "layer": "storage",
-  "files": [
-    "lib/woods/storage/snapshotter/vector.rb",
-    "lib/woods/storage/snapshotter/metadata.rb",
-    "lib/woods/index_artifact.rb"
-  ],
-  "description": "IndexArtifact#promote resolves symlinks before enforcing that a dump is inside dumps_root, but both Snapshotter dump validators use expand_path only. A dump_dir symlink located under dumps_root can therefore target an external directory and the vector or metadata writer will place files there. Normal Woods-created dump directories are not symlinks, so this requires a tampered output tree or a custom caller. Reuse one realpath-and-boundary validator for promotion and both writers; regressions must cover a symlinked child and the existing macOS /tmp alias case.",
-  "status": "resolved"
-},
-{
-  "id": "B-135",
-  "title": "JsonSnapshotStore find raises on a corrupt snapshot that list skips",
-  "severity": "low",
-  "category": "code-bug",
-  "layer": "storage",
-  "files": [
-    "lib/woods/temporal/json_snapshot_store.rb"
-  ],
-  "description": "JsonSnapshotStore#list and history scans warn and skip malformed JSON files, while #find parses the same file without handling JSON::ParserError. A corrupt retained snapshot therefore changes from an omitted entry during discovery to a raw parser exception when requested directly. Choose and document one fail-closed public posture (typed corrupt-artifact error, or warn-and-return nil) and apply it consistently to find, diff, and scan paths with a deliberately truncated snapshot regression.",
-  "status": "resolved"
-},
-{
-  "id": "B-136",
-  "title": "Payload retention can remove a generation still pinned by a reader process",
-  "severity": "low",
-  "category": "design-gap",
-  "layer": "mcp",
-  "files": [
-    "lib/woods/payload_store.rb",
-    "lib/woods/mcp/index_reader.rb",
-    "lib/woods/generation.rb"
-  ],
-  "description": "IndexReader pins prevent in-process cache invalidation, but writer-side PayloadStore retention has no cross-process reader lease. A sufficiently long request pinned to generation N can outlive three later publishes; pruning then removes payloads/gen-N while the request still holds that path. Already-cached artifacts survive, but a later uncached unit or graph read sees ENOENT and may be rendered as corrupt_artifact. Decide between leases, open-file/materialization pinning, or a documented retention/request-duration bound; acceptance requires a writer/read-process test proving a pinned request stays readable while retention advances.",
-  "status": "resolved"
-},
-{
-  "id": "B-137",
-  "title": "Manual extraction tasks exit successfully when generation publication fails",
-  "severity": "low",
-  "category": "code-bug",
-  "layer": "extraction",
-  "files": [
-    "lib/woods/extractor.rb",
-    "lib/tasks/woods.rake",
-    "lib/woods/watch/daemon.rb"
-  ],
-  "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure. RESOLVED: Extractor records a typed publication error and exposes raise_on_publication_failure!; all one-shot extraction tasks call it before success output, while Watch::Daemon retains its unchanged-generation degraded recovery path. Task subprocess specs pin non-zero exits and the extractor regression pins prior-generation readability.",
-  "status": "resolved"
-},
-{
-  "id": "B-138",
-  "title": "woods:watch_status default output path depends on the caller's cwd",
-  "severity": "low",
-  "category": "code-bug",
-  "layer": "infrastructure",
-  "files": [
-    "lib/tasks/woods.rake"
-  ],
-  "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root. RESOLVED: the no-boot task derives its conventional tmp/woods path from Rake.application.rakefile, with original_dir only as the programmatic-load fallback. A subprocess invokes an absolute -f Rakefile from a different cwd and proves the live status is found without loading Rails.",
-  "status": "resolved"
-},
-{
-  "id": "B-139",
-  "title": "Official-client stdio examples intermittently timed out in full-suite runs",
-  "severity": "medium",
-  "category": "test-gap",
-  "layer": "mcp",
-  "files": [
-    "spec/integration/mcp_official_ruby_client_spec.rb"
-  ],
-  "description": "M7 monitoring item, mitigated and currently non-release-blocking. Two official-client stdio examples historically exceeded their 10s read timeout only in randomized full-suite runs. The failure has not reproduced across 30 targeted runs, 12 concurrent processes, the complete suite at seed 41729, or nine subsequent green CI runs, so no root cause is claimed. The timeout is now 30s and a timeout fails once with the child stderr appended; there is no retry that could hide the evidence. Acceptance: on the next captured timeout, record the full-suite seed, request method, captured child stderr, mcp gem and Ruby versions, and runner load; then identify the root cause and add a deterministic regression before changing production or transport code.",
-  "status": "open"
-},
+  {
+    "id": "B-131",
+    "title": "Factory units embed the full file source; an N-factory file is stored N times",
+    "severity": "low",
+    "category": "refactor",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/factory_extractor.rb"
+    ],
+    "description": "Each factory unit's source_code embeds the entire factory file source (build_source_annotation), so a file defining N factories serializes that source N times in payloads. The audit flagged this as a storage item (v2-prerelease-audit P9b); PR-8 owned the item but deferred it because every available fix is a behavior or format change, and PR-8 was scoped to behavior-preserving refactors. The extractor already reads each file once and shares one String across the N units, so the remaining cost is on-disk duplication only. The decision needed: (a) slice per-factory source (parse_factories tracks open_depth; add end-line capture, scope source_code to the factory block) - changes unit source_code bytes, source_hash, search phase-2 matching, and forces a one-time re-embed of every factory unit; or (b) deduplicate identical source strings in the payload store (content-addressed segments) - an artifact-format change with reader compatibility and schema-version implications. Compatibility implications: option (a) changes generated artifact content and retrieval behavior (a query matching text in a sibling factory's block would no longer match that factory's unit); option (b) changes the payload layout and requires a version-gated reader path. Acceptance criteria: a chosen option documented here or in a superseding note; for (a), extracted-identifier AND source-hash before/after comparison attached for review plus one-time re-embed accounting; for (b), payload schema version bump, reader compatibility for old payloads, and round-trip validation; either way, factory_extractor specs updated to pin the new source_code contract and the audit's storage item closed.",
+    "status": "open"
+  },
+  {
+    "id": "B-132",
+    "title": "recent_changes loads every unit file in scope per call",
+    "severity": "low",
+    "category": "refactor",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/index_reader.rb"
+    ],
+    "description": "The recent_changes tool resolves git modification dates by loading unit files per index entry, O(total units) file reads per tool call against a 50-entry LRU, on indexes with thousands of units (v2-prerelease-audit P3). PR-8 deferred it: a correct fix needs an artifact-format design first, not a refactor. Candidate designs: digest-based short-circuit keyed off data already in the per-type index entries (skip loading units whose index-level digest is unchanged), or a payload-store bulk read that materializes git metadata in one pass. Compatibility implications: any new index-side field (e.g. a per-entry git digest) is an artifact-format addition that older readers must ignore and older indexes must tolerate; the tool response shape must stay identical. Acceptance criteria: a chosen design documented in the payload/index format docs; the tool response shape unchanged; a latency bound demonstrated on a large index (thousands of units) before/after; functional index_reader specs plus a new perf bound pinning the no-regression; no mixed-generation reads introduced.",
+    "status": "open"
+  },
+  {
+    "id": "B-133",
+    "title": "MetadataStore::SQLite search with an empty fields list raises raw SQL error",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/metadata_store.rb"
+    ],
+    "description": "MetadataStore::InMemory#search(query, fields: []) returns [], but SQLite joins the empty condition list into `WHERE ` and raises SQLite3::SQLException: incomplete input. Verified on current main during the v2 prerelease audit tail. Normalize an empty fields list to the adapter-independent empty result before touching either backing store, and add the case to the shared hardened-search contract so external adapters inherit an explicit semantic requirement.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-134",
+    "title": "Snapshot dump writers can follow an in-root symlink outside dumps_root",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/storage/snapshotter/vector.rb",
+      "lib/woods/storage/snapshotter/metadata.rb",
+      "lib/woods/index_artifact.rb"
+    ],
+    "description": "IndexArtifact#promote resolves symlinks before enforcing that a dump is inside dumps_root, but both Snapshotter dump validators use expand_path only. A dump_dir symlink located under dumps_root can therefore target an external directory and the vector or metadata writer will place files there. Normal Woods-created dump directories are not symlinks, so this requires a tampered output tree or a custom caller. Reuse one realpath-and-boundary validator for promotion and both writers; regressions must cover a symlinked child and the existing macOS /tmp alias case.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-135",
+    "title": "JsonSnapshotStore find raises on a corrupt snapshot that list skips",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/temporal/json_snapshot_store.rb"
+    ],
+    "description": "JsonSnapshotStore#list and history scans warn and skip malformed JSON files, while #find parses the same file without handling JSON::ParserError. A corrupt retained snapshot therefore changes from an omitted entry during discovery to a raw parser exception when requested directly. Choose and document one fail-closed public posture (typed corrupt-artifact error, or warn-and-return nil) and apply it consistently to find, diff, and scan paths with a deliberately truncated snapshot regression.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-136",
+    "title": "Payload retention can remove a generation still pinned by a reader process",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/payload_store.rb",
+      "lib/woods/mcp/index_reader.rb",
+      "lib/woods/generation.rb"
+    ],
+    "description": "IndexReader pins prevent in-process cache invalidation, but writer-side PayloadStore retention has no cross-process reader lease. A sufficiently long request pinned to generation N can outlive three later publishes; pruning then removes payloads/gen-N while the request still holds that path. Already-cached artifacts survive, but a later uncached unit or graph read sees ENOENT and may be rendered as corrupt_artifact. Decide between leases, open-file/materialization pinning, or a documented retention/request-duration bound; acceptance requires a writer/read-process test proving a pinned request stays readable while retention advances.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-137",
+    "title": "Manual extraction tasks exit successfully when generation publication fails",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/tasks/woods.rake",
+      "lib/woods/watch/daemon.rb"
+    ],
+    "description": "Extractor#publish_generation rescues every bump failure and only logs, so woods:extract, woods:incremental, and woods:refresh print success and exit 0 after writing an unreachable payload while long-lived readers continue serving the previous generation. Watch::Daemon separately detects the missing generation movement and degrades, but one-shot rake callers do not. Preserve the daemon's recoverable posture while returning an explicit publication result or raising a typed error that makes manual/CI tasks non-zero; pin exact task exit behavior and previous-generation readability under an injected generation write failure. RESOLVED: Extractor records a typed publication error and exposes raise_on_publication_failure!; all one-shot extraction tasks call it before success output, while Watch::Daemon retains its unchanged-generation degraded recovery path. Task subprocess specs pin non-zero exits and the extractor regression pins prior-generation readability.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-138",
+    "title": "woods:watch_status default output path depends on the caller's cwd",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "infrastructure",
+    "files": [
+      "lib/tasks/woods.rake"
+    ],
+    "description": "woods:watch_status deliberately avoids the Rails environment for a cheap hook check, but its no-WOODS_OUTPUT fallback is File.join(Dir.pwd, 'tmp/woods'). Invoking the task from outside the application root (for example with rake -f or a worktree manager) reads a different status file and can start a redundant daemon. Keep the no-boot contract while deriving a stable application/task root, or require and document WOODS_OUTPUT outside the app root; add a subprocess regression whose cwd differs from the fixture Rails root. RESOLVED: the no-boot task derives its conventional tmp/woods path from Rake.application.rakefile, with original_dir only as the programmatic-load fallback. A subprocess invokes an absolute -f Rakefile from a different cwd and proves the live status is found without loading Rails.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-139",
+    "title": "Official-client stdio examples intermittently timed out in full-suite runs",
+    "severity": "medium",
+    "category": "test-gap",
+    "layer": "mcp",
+    "files": [
+      "spec/integration/mcp_official_ruby_client_spec.rb"
+    ],
+    "description": "M7 monitoring item, mitigated and currently non-release-blocking. Two official-client stdio examples historically exceeded their 10s read timeout only in randomized full-suite runs. The failure has not reproduced across 30 targeted runs, 12 concurrent processes, the complete suite at seed 41729, or nine subsequent green CI runs, so no root cause is claimed. The timeout is now 30s and a timeout fails once with the child stderr appended; there is no retry that could hide the evidence. Acceptance: on the next captured timeout, record the full-suite seed, request method, captured child stderr, mcp gem and Ruby versions, and runner load; then identify the root cause and add a deterministic regression before changing production or transport code.",
+    "status": "open"
+  },
   {
     "id": "B-140",
     "title": "AST parser-gem fallback loses chained-receiver call sites",
@@ -2254,8 +2254,8 @@
     "category": "code-bug",
     "layer": "self-map",
     "files": [
-    "lib/woods/ruby_analyzer/",
-    "lib/tasks/woods.rake"
+      "lib/woods/ruby_analyzer/",
+      "lib/tasks/woods.rake"
     ],
     "description": "Diagnosed 2026-09-02 on the merged 2.0 tree: the self-map records `include SourceNesting` edges with the verbatim short target (7 edges to 'SourceNesting', 1 to 'Extractors::SourceNesting') while the node id is 'Woods::Extractors::SourceNesting', so raw_graph reverse[] holds them under unresolved keys and traverse_dependents on the FQN correctly returns nothing. Same family as audit EXTA-2, reproduced in the self-map's static analyzer. Fix: a suffix-resolution pass over edge targets against known node ids (mirroring ModelNameCache.resolve_short_name; skip ambiguous). Acceptance: dependents of the SourceNesting FQN returns its 8 includers on a fresh self-map. Resolved by the lexical qualification pass in commit 3fee33f05 (#279); revalidated on 2026-09-17 at main 6a1af8a8 with a fresh woods:self_map and IndexReader#traverse_dependents returning all 8 direct includers. No additional implementation change required.",
     "status": "resolved"
@@ -2267,8 +2267,8 @@
     "category": "code-bug",
     "layer": "extraction",
     "files": [
-    "lib/woods/extractor.rb",
-    "lib/woods/extractors/job_extractor.rb"
+      "lib/woods/extractor.rb",
+      "lib/woods/extractors/job_extractor.rb"
     ],
     "description": "Post-#274: JobExtractor#discoverable_classes exists and gates re_extract_by_class, but jobs are not registered in CLASS_BASED_DISCOVERY, so a class-discovered job whose class disappears without its host file changing (gem removed, dynamic definition gone) survives incrementally until a full extraction. Same accepted posture as GraphQL runtime types. Acceptance: either add a jobs discovery entry (decide reconcile_removals semantics against the nested-job fixture and the audit EXTA-3 nil-path contract) or document the staleness bound in INCREMENTAL_EXTRACTION.md.",
     "status": "resolved"
@@ -2280,8 +2280,8 @@
     "category": "code-bug",
     "layer": "extraction",
     "files": [
-    "lib/woods/extractors/shared_utility_methods.rb",
-    "lib/woods/extractor.rb"
+      "lib/woods/extractors/shared_utility_methods.rb",
+      "lib/woods/extractor.rb"
     ],
     "description": "Post-#275: gem-owned classes carry their real absolute (or vendored-relative) definition site. Gem paths never enter the incremental blast radius (no change set names them), and after a bundle update the recorded paths dangle until a full extraction rebuilds them; woods:validate reports them as gem-owned without a remedy. Acceptance: either extend the Gemfile.lock whole-app trigger to refresh class-discovered gem-owned units, or document the full-extract-after-bundle-update requirement in INCREMENTAL_EXTRACTION.md and the validate warning.",
     "status": "resolved"
@@ -2293,7 +2293,7 @@
     "category": "code-bug",
     "layer": "extraction",
     "files": [
-    "lib/woods/extractors/controller_extractor.rb"
+      "lib/woods/extractors/controller_extractor.rb"
     ],
     "description": "build_filters_comment interpolates callback.filter into the Filter Chain header; for an inline proc filter that renders Proc#inspect, which embeds the object's memory address, so the annotation (and therefore source_code and source_hash) changes on every process. Found in the PR #276 downstream validation: 80 controller units differ between any two extractions, causing change-detection churn, needless re-embedding, and byte-identity oracle failures; invisible to CI because the fixture app has no anonymous proc filters. Acceptance: render a stable label for proc filters (e.g. inline proc at <Rails.root-relative path>:<line> from Proc#source_location, no address) in both the filter list and the if/unless condition strings, with a regression spec hashing two renders of the same controller.",
     "status": "resolved"
@@ -2815,6 +2815,19 @@
       "lib/woods/watch/child_environment.rb"
     ],
     "description": "Issue #540: the watcher installer drops environment-based BUNDLE_PATH and BUNDLE_APP_CONFIG, so task discovery cannot resolve gems in container bundle volumes. Preserve selected application bundle settings while clearing inherited activation, requesting frozen resolution, and retaining bounded read-only probes. Real off-path gem executable regressions cover both settings and excluded groups without writing application configuration or lockfiles. Independent focused review: 43 examples pass; full suite: 9,556 examples, zero failures.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-206",
+    "title": "Guard Puma startup by the active gem plugin capability",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "operations",
+    "files": [
+      "lib/woods/watch/installation/templates.rb",
+      "lib/woods/watch/installation/planner.rb"
+    ],
+    "description": "Issue #542: generated Puma startup now checks plugin files in the active gem, including Git/path bundles, so an older activated gem without the plugin can still boot the web server. Explicit owned-configuration updates refresh the directive in place; setup remains idempotent and surrounding text, newline style and removal ownership are preserved. Actual Puma and migration regressions pass (74 focused examples); two independent reviews approved. Full PR CI is required before merge.",
     "status": "resolved"
   }
 ]

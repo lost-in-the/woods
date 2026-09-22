@@ -39,6 +39,20 @@ RSpec.describe Woods::Watch::Installation do
        .to_h { |path| [path.delete_prefix("#{@root}/"), [File.binread(path), File.stat(path).mode & 0o777]] }
   end
 
+  def legacy_puma_setup(prefix: "threads 3, 3\n", suffix: '', newline: "\n")
+    path = File.join(@root, 'config/puma.rb')
+    prefix ? File.write(path, prefix) : File.unlink(path)
+    installer(mode: 'puma').apply
+    receipt = JSON.parse(read('.woods-watch.json'))
+    separator = prefix.to_s.empty? || prefix.end_with?(newline) ? '' : newline
+    block = separator + ['# woods:watch:managed:start', 'plugin :woods if Gem.loaded_specs.key?("woods")',
+                         '# woods:watch:managed:end', ''].join(newline)
+    receipt.fetch('sections').fetch('config/puma.rb')['owned_text'] = block
+    File.write(path, prefix.to_s + block + suffix)
+    File.write(File.join(@root, '.woods-watch.json'), "#{JSON.pretty_generate(receipt)}\n")
+    block
+  end
+
   it 'previews without changing any file or creating runtime locks' do
     before = tree
     plan = installer.plan
@@ -75,8 +89,77 @@ RSpec.describe Woods::Watch::Installation do
 
     installer(mode: 'puma', operation: 'update').apply
     expect(read('Procfile.dev')).to eq("web: bin/rails server\ncss: bin/css\n")
-    expect(read('config/puma.rb')).to include('plugin :woods if Gem.loaded_specs.key?("woods")')
+    expect(read('config/puma.rb')).to include('plugin :woods if Gem.loaded_specs["woods"]&.full_require_paths')
     expect(read('bin/dev')).to include('exec bin/rails server')
+  end
+
+  ["\n", "\r\n"].product([true, false]).each do |newline, trailing_newline|
+    it "updates an old Puma guard in place with newline=#{newline.inspect}, trailing_newline=#{trailing_newline}" do
+      prefix = "# application#{newline}threads 3, 3#{newline if trailing_newline}"
+      suffix = "\n# user appended this with LF\n"
+      old_block = legacy_puma_setup(prefix: prefix, suffix: suffix, newline: newline)
+      before = tree
+
+      expect(installer(mode: 'puma').apply).to eq('already_applied')
+      expect(tree).to eq(before)
+      installer(mode: 'puma', operation: 'update').apply
+
+      block = JSON.parse(read('.woods-watch.json')).fetch('sections').fetch('config/puma.rb').fetch('owned_text')
+      expect(block).not_to eq(old_block)
+      expect(block).to include('puma/plugin/woods.rb')
+      first_line = block.delete_prefix(trailing_newline ? '' : newline).lines.first
+      expect(first_line).to eq("# woods:watch:managed:start#{newline}")
+      expect(block.lines).to all(end_with(newline))
+      expect(read('config/puma.rb')).to eq(prefix + block + suffix)
+      expect(installer(mode: 'puma', operation: 'update').apply).to eq('already_applied')
+      installer(operation: 'remove').apply
+      expect(read('config/puma.rb')).to eq(prefix + suffix)
+    end
+  end
+
+  it 'upgrades and removes a legacy owned setup copied to a different worktree' do
+    legacy_puma_setup
+    Dir.mktmpdir('woods legacy clone ') do |clone|
+      files = Dir.glob(File.join(@root, '*'), File::FNM_DOTMATCH)
+                 .reject { |path| %w[. .. tmp].include?(File.basename(path)) }
+      FileUtils.cp_r(files, clone)
+      old_root = @root
+      @root = clone
+
+      installer(mode: 'puma', operation: 'update').apply
+      expect(read('config/puma.rb')).to include('puma/plugin/woods.rb')
+      expect(read('.woods-watch.json')).not_to include(old_root, clone)
+      installer(operation: 'remove').apply
+      expect(read('config/puma.rb')).to eq("threads 3, 3\n")
+    ensure
+      @root = old_root
+    end
+  end
+
+  it 'refuses an edited legacy guard without changing files during update' do
+    legacy_puma_setup
+    File.write(File.join(@root, 'config/puma.rb'), read('config/puma.rb').sub('plugin :woods', 'plugin :custom'))
+    before = tree
+
+    expect { installer(mode: 'puma', operation: 'update').apply }
+      .to raise_error(described_class::Conflict, /edited/)
+    expect(tree).to eq(before)
+  end
+
+  ['', "threads 5, 5\n"].each do |suffix|
+    it "retains created-file ownership after upgrading, with user suffix #{suffix.inspect}" do
+      legacy_puma_setup(prefix: nil, suffix: suffix)
+
+      installer(mode: 'puma', operation: 'update').apply
+      expect(read('config/puma.rb')).to include('puma/plugin/woods.rb')
+      installer(operation: 'remove').apply
+
+      if suffix.empty?
+        expect(File.exist?(File.join(@root, 'config/puma.rb'))).to be(false)
+      else
+        expect(read('config/puma.rb')).to eq(suffix)
+      end
+    end
   end
 
   it 'removes its setup without probing a now broken application or changing unrelated content' do
