@@ -439,6 +439,8 @@ RSpec.describe 'Console MCP Server Safety Stack', :integration do
       end
       allow(connection).to receive(:execute)
       allow(connection).to receive(:adapter_name).and_return('PostgreSQL')
+      allow(user_model).to receive(:all).and_return(user_model)
+      allow(user_model).to receive(:to_sql).and_return('SELECT * FROM users')
       stub_const('User', user_model)
     end
 

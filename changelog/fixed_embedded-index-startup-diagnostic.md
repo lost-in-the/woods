@@ -1,1 +1,0 @@
-- Report malformed generation marker shapes during embedded Index MCP startup as an actionable `ArgumentError` with the selected directory and published-layout guidance, matching executable preflight behavior. Preserve legacy flat and payload indexes and leave later generation-refresh error handling unchanged.

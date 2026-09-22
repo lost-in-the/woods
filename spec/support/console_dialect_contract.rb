@@ -13,6 +13,8 @@ module WoodsConsoleDialectContract
     mysql = connection.adapter_name.downcase.include?('mysql')
     queries = {
       'SELECT 1 AS harmless' => true,
+      'SELECT 1 FROM (SELECT 1) AS permitted, information_schema.tables AS blocked LIMIT 1' => false,
+      'SELECT 1 FROM (SELECT 1) AS a JOIN (SELECT 1) AS b ON (1=1), information_schema.tables c LIMIT 1' => false,
       'SELECT 1 FROM information_schema.tables LIMIT 1' => false,
       'SELECT 1 FROM information_schema . tables LIMIT 1' => false,
       'SELECT 1 FROM information_schema/**/./**/tables LIMIT 1' => false,

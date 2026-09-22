@@ -189,7 +189,7 @@ module Woods
       def version_table(state, previous)
         rows = ["> | Documented here | **#{state.documented_version}**, unreleased | this README and the " \
                 '[documentation index](docs/README.md) |']
-        rows << "> | Latest prerelease | **#{state}** | #{tag_link(state.tag)} |" if state.prerelease?
+        rows << "> | Declared prerelease | **#{state}** | #{tag_link(state.tag)} |" if state.prerelease?
         rows << "> | Latest published gem | **#{previous}** | #{tag_link("v#{previous}")} |" if previous
 
         ["> ### #{banner_heading(state)}", '>', '> | Line | Version | Documentation |', '> |---|---|---|', *rows]
@@ -198,7 +198,7 @@ module Woods
 
       def banner_heading(state)
         if state.prerelease?
-          "Version: #{state} is published as a prerelease; `main` documents #{state.documented_version}"
+          "Version: this tree declares prerelease #{state}; `main` documents #{state.documented_version}"
         else
           "Version: `main` documents #{state.documented_version}, which is not released yet"
         end
@@ -209,7 +209,7 @@ module Woods
 
         if state.prerelease?
           "RubyGems treats #{state} as a prerelease, so `gem \"woods\", \"#{state.approximate_constraint}\"` does " \
-            "not resolve it. Install it explicitly with `gem \"woods\", \"#{state}\"`.#{released}"
+            "not resolve it. Once published, install it explicitly with `gem \"woods\", \"#{state}\"`.#{released}"
         else
           "Everything below describes #{state.documented_version}. `gem \"woods\", " \
             "\"#{state.approximate_constraint}\"` does not resolve from RubyGems until " \
@@ -229,7 +229,7 @@ module Woods
 
         if state.prerelease?
           <<~MARKDOWN
-            > RubyGems lists #{state} as a prerelease. Pin it explicitly with
+            > This tree declares #{state} as a prerelease. After RubyGems lists it, pin it with
             > `gem "woods", "#{state}"`; `#{state.approximate_constraint}` resolves only once
             > #{target} is published.
           MARKDOWN

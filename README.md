@@ -56,15 +56,15 @@ These steps are for **Woods 2.x**. Choose a published 2.x version from the relea
 >
 > `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for a published version lives on its tag.
 >
-> ### Version: 2.0.0.beta3 is published as a prerelease; `main` documents 2.0.0
+> ### Version: this tree declares prerelease 2.0.0.beta4; `main` documents 2.0.0
 >
 > | Line | Version | Documentation |
 > |---|---|---|
 > | Documented here | **2.0.0**, unreleased | this README and the [documentation index](docs/README.md) |
-> | Latest prerelease | **2.0.0.beta3** | [the v2.0.0.beta3 tag](https://github.com/lost-in-the/woods/tree/v2.0.0.beta3) |
-> | Latest published gem | **1.6.1** | [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1) |
+> | Declared prerelease | **2.0.0.beta4** | [the v2.0.0.beta4 tag](https://github.com/lost-in-the/woods/tree/v2.0.0.beta4) |
+> | Latest published gem | **1.6.2** | [the v1.6.2 tag](https://github.com/lost-in-the/woods/tree/v1.6.2) |
 >
-> RubyGems treats 2.0.0.beta3 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Install it explicitly with `gem "woods", "2.0.0.beta3"`. The released constraint stays `gem "woods", "~> 1.6"`.
+> RubyGems treats 2.0.0.beta4 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Once published, install it explicitly with `gem "woods", "2.0.0.beta4"`. The released constraint stays `gem "woods", "~> 1.6"`.
 <!-- release-state:end -->
 
 </details>

@@ -103,7 +103,14 @@ module Woods
         response = @conn_mgr.send_request(request)
         return error_from_response(response, request) unless response['ok']
 
+        # Materialize the wire representation before policy checks. Otherwise
+        # Symbols and custom serializers can introduce unscanned strings later.
+        # Redact first so protected serializers never run; redact again after
+        # normalization to cover fields introduced by a custom serializer.
+        # Both renderers consume this same JSON-compatible data tree.
         result = @ctx.redact(response['result'])
+        result = JSON.parse(JSON.generate(result))
+        result = @ctx.redact(result)
         result = scan_for_credentials(result, request)
         text = @renderer ? @renderer.render_default(result) : JSON.pretty_generate(result)
         success_response(text)

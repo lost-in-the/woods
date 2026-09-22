@@ -1,1 +1,0 @@
-- Make `woods-mcp-start` resolve generation payload symlinks before checking their manifest, matching the library's index-root containment check. Preflight rejects escaping links and avoids manifest probes through broken links; contained links and symlinked index roots remain supported. The library already rejected escaping payloads before serving the index.

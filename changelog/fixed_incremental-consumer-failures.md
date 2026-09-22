@@ -1,1 +1,0 @@
-- Preserve the published generation when incremental extraction or named refresh encounters handled source errors. Failed consumers no longer replace last-good units with empty or partial output; watch retains the complete batch for retry.

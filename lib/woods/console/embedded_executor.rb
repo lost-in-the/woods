@@ -479,7 +479,7 @@ module Woods
       def handle_count(params)
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
-        { 'count' => scope.count }
+        { 'count' => checked_relation(scope).count }
       end
 
       def handle_sample(params)
@@ -488,7 +488,7 @@ module Woods
         limit = params.fetch('limit', 5)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
-        records = scope.order(random_function).limit(limit)
+        records = checked_relation(scope.order(random_function).limit(limit))
         { 'records' => serialize_records(records, params['columns']) }
       end
 
@@ -501,7 +501,8 @@ module Woods
         end
         validate_select_columns!(params)
         model = resolve_model(params['model'])
-        record = params['id'] ? model.find_by(id: params['id']) : model.find_by(params['by'])
+        scope = checked_relation(model)
+        record = params['id'] ? scope.find_by(id: params['id']) : scope.find_by(params['by'])
         { 'record' => record ? serialize_record(record, params['columns']) : nil }
       end
 
@@ -534,7 +535,7 @@ module Woods
         limit = params.fetch('limit', 100)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = scope.distinct if params['distinct']
-        values = scope.limit(limit).pluck(*columns.map(&:to_sym))
+        values = checked_relation(scope.limit(limit)).pluck(*columns.map(&:to_sym))
         { 'columns' => Array(columns), 'values' => values }
       end
 
@@ -554,6 +555,7 @@ module Woods
 
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
+        scope = checked_relation(scope)
 
         value = if function == 'count'
                   column ? scope.count(column.to_sym) : scope.count
@@ -566,6 +568,7 @@ module Woods
       def handle_association_count(params)
         model = resolve_model(params['model'])
         association_name = params['association']
+        requested_scope = params['scope']
         reflection = model.reflect_on_association(association_name.to_sym)
 
         raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}" unless reflection
@@ -581,13 +584,31 @@ module Woods
         # association's own model before any database I/O runs (not just
         # before the association is read): `model.find` below is itself a
         # query, and a request with a bad scope should never reach it.
-        validate_scope_columns!(params['scope'], reflection.klass.name) if params['scope']
+        validate_scope_columns!(requested_scope, reflection.klass.name) if requested_scope
 
-        record = model.find(params['id'])
+        record = checked_relation(model).find(params['id'])
         scope = record.public_send(association_name)
-        scope = apply_scope(scope, params['scope'], model_name: reflection.klass.name) if params['scope']
+        scope = apply_scope(scope, requested_scope, model_name: reflection.klass.name) if requested_scope
         gate_association_sql!(scope)
         { 'count' => scope.count }
+      end
+
+      # Materialize a model's default scope once, inspect the resolved SQL,
+      # and return that same relation for execution. Checking model.table_name
+      # alone misses default scopes that change FROM or introduce joins. Do
+      # not check model.all then issue a fresh query through the model: a
+      # dynamic default scope could differ between the check and execution.
+      # With no TableGate collaborator, retain the ungated executor contract.
+      #
+      # @param scope [Class, ActiveRecord::Relation] Pending model read
+      # @return [Class, ActiveRecord::Relation] Relation authorized for reading
+      # @raise [ValidationError] if its SQL references a blocked table
+      def checked_relation(scope)
+        return scope unless @table_gate
+
+        relation = scope.all
+        gate_sql!(relation.to_sql)
+        relation
       end
 
       # Defense-in-depth: gate_association! (called by
@@ -738,7 +759,7 @@ module Woods
 
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
-        records = scope.order(order_by => direction.to_sym).limit(limit)
+        records = checked_relation(scope.order(order_by => direction.to_sym).limit(limit))
         { 'records' => serialize_records(records, params['columns']) }
       end
 
@@ -798,13 +819,14 @@ module Woods
       # and PostgreSQL quote/comment grammars differ (`\'` escapes, `#`
       # comments); validating with the matching dialect accepts dialect-valid
       # literals and still rejects every known bypass form. Unknown adapters
-      # return nil and get the conservative both-dialect union.
+      # return nil and get the conservative union of supported dialects.
       #
       # @return [Symbol, nil]
       def sql_dialect
         adapter = active_connection.adapter_name.to_s.downcase
         return :mysql if adapter.include?('mysql')
         return :postgres if adapter.include?('postgre')
+        return :sqlite if adapter.include?('sqlite')
 
         nil
       end

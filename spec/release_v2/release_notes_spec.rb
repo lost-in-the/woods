@@ -35,17 +35,43 @@ RSpec.describe Woods::Release::Notes do
       described_class.apply!(root: root, version: '2.0.0.beta1')
 
       expect(banner(root)).to include(
-        '> ### Version: 2.0.0.beta1 is published as a prerelease; `main` documents 2.0.0',
-        '> | Latest prerelease | **2.0.0.beta1** | [the v2.0.0.beta1 tag]',
+        '> ### Version: this tree declares prerelease 2.0.0.beta1; `main` documents 2.0.0',
+        '> | Declared prerelease | **2.0.0.beta1** | [the v2.0.0.beta1 tag]',
         '> | Latest published gem | **1.6.1** |',
-        'Install it explicitly with `gem "woods", "2.0.0.beta1"`'
+        'Once published, install it explicitly with `gem "woods", "2.0.0.beta1"`'
       )
-      expect(upgrade_note(root)).to include('RubyGems lists 2.0.0.beta1 as a prerelease')
+      expect(upgrade_note(root)).to include('This tree declares 2.0.0.beta1 as a prerelease. After RubyGems lists it')
       expect(release_file(root, 'CONTRIBUTING.md')).to include(
         'https://github.com/lost-in-the/woods/blob/v2.0.0.beta1/AGENTS.md',
         'https://github.com/lost-in-the/woods/blob/v2.0.0.beta1/CLAUDE.md'
       )
       expect(described_class.mismatches(root: root, version: '2.0.0.beta1')).to be_empty
+    end
+  end
+
+  %w[2.0.0.beta4 2.0.0.rc1].each do |version|
+    it "does not claim #{version} was published merely because it was prepared" do
+      with_release_repository(version: '2.0.0.alpha', commit: false) do |root|
+        described_class.apply!(root: root, version: version)
+
+        expect(banner(root)).to include("this tree declares prerelease #{version}", 'Declared prerelease',
+                                        'Once published, install it explicitly')
+        expect(banner(root)).not_to include('is published as a prerelease', 'Latest prerelease')
+        expect(upgrade_note(root)).to include("This tree declares #{version}", 'After RubyGems lists it')
+      end
+    end
+  end
+
+  it 'retains the published 1.6.2 maintenance history when preparing the next prerelease' do
+    changelog = release_file(release_checkout_root, 'CHANGELOG.md')
+    expect(changelog).to include('## [1.6.2] - 2026-09-18')
+    expect(Gem::Version.new(Woods::Release::Changelog.latest_stable_version(changelog)))
+      .to be >= Gem::Version.new('1.6.2')
+
+    with_release_repository(version: '2.0.0.alpha', changelog: changelog, commit: false) do |root|
+      described_class.apply!(root: root, version: '2.0.0.beta4')
+      latest = Woods::Release::Changelog.latest_stable_version(changelog)
+      expect(banner(root)).to include("> | Latest published gem | **#{latest}** |")
     end
   end
 
@@ -116,7 +142,7 @@ RSpec.describe Woods::Release::Notes do
       if state.final?
         expect(banner(root)).to eq('')
       elsif state.prerelease?
-        expect(banner(root)).to include("#{state} is published as a prerelease")
+        expect(banner(root)).to include("this tree declares prerelease #{state}")
       else
         expect(banner(root)).to include("`main` documents #{state.base}, which is not released yet")
       end
@@ -181,7 +207,7 @@ RSpec.describe Woods::Release::Notes do
         expect(described_class.read_body(root, upgrade_fence)).to include('after RubyGems lists 2.0.0')
 
         described_class.apply!(root: root, version: '2.0.0.beta1')
-        expect(described_class.read_body(root, upgrade_fence)).to include('RubyGems lists 2.0.0.beta1')
+        expect(described_class.read_body(root, upgrade_fence)).to include('This tree declares 2.0.0.beta1')
       end
     end
 

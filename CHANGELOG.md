@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0.beta4] - 2026-09-22
+
+### Build
+
+- Allow the exact 1.6.3 maintenance tag and branch from the released 1.6.2 base while keeping publication disabled until a separately reviewed candidate SHA is pinned. Preserve all CI, immutable-artifact, package-test and protected-environment release gates.
+
+### Documentation
+
+- Correct watcher retry guidance to include heartbeat-driven recovery, identify
+  session identity corrections as available in 2.0.0.beta3, and align the
+  coding-agent Docker synopsis with the container-first setup guide.
+- Scope orphan results to recorded relationships, document the limits of artifact
+  permission defaults, correct Claude Code worktree registration guidance, and
+  expose embedding-free lexical retrieval in the MCP tool cookbook.
+Update the distributed agent guides to identify Woods 2.0.0.beta3 capabilities and plugin 2.3.36 hook recovery accurately, while preserving installed-version and schema checks.
+- Clarify that beta/RC development retains the last prepared version, source
+  candidates require Git revision evidence, and development reopening applies
+  only after a final release. Release transitions and version ordering are unchanged.
+
+### Fixed
+
+Accept ASCII case variants of the HTTP `Bearer` authentication scheme for Index and Console MCP. Token bytes, constant-time comparison, and existing delimiter rules remain unchanged. (#497)
+- Console SQL validation now distinguishes keyword grammar from identically named functions before applying the read-only function allowlist. SQLite application-defined keyword functions are rejected before execution; ordinary window, predicate, and numeric pagination syntax remains supported.
+- Report malformed generation marker shapes during embedded Index MCP startup as an actionable `ArgumentError` with the selected directory and published-layout guidance, matching executable preflight behavior. Preserve legacy flat and payload indexes and leave later generation-refresh error handling unchanged.
+- Make file-backed session clearing idempotent for Unicode and punctuated IDs, and discard expired history before appending or merging legacy and encoded files. This prevents expired events from becoming visible again through record, read, or listing; live history, disabled TTL, and retention limits retain their existing behavior.
+Dependency and dependent responses now disclose that published relationships are not exhaustive source-reference coverage, including compact and empty answers. Human witness labels say “witness types unambiguous” while preserving the JSON `typed_path_complete` contract. Successful traversal responses add `total_is_exact`; budget-limited text reports a root-inclusive lower bound and its cutoff reason, independently of pagination. (#470, #471)
+GraphQL parent metadata and summary chunks now read the selected declaration's superclass, rather than borrowing a nested or sibling class's parent. Compact qualified declarations preserve their explicit parent; implicit, dynamic, or unavailable parents remain unknown. Identifiers and dependency classification are unchanged.
+- Preserve the published generation when incremental extraction or named refresh encounters handled source errors. Failed consumers no longer replace last-good units with empty or partial output; watch retains the complete batch for retry.
+- Make missing-index startup headlines describe an unresolved published index instead of implying that atomic indexes require a root `manifest.json`; retain the examined path, layout explanation and existing-index-first remedy (#482).
+- Make `woods-mcp-start` resolve generation payload symlinks before checking their manifest, matching the library's index-root containment check. Preflight rejects escaping links and avoids manifest probes through broken links; contained links and symlinked index roots remain supported. The library already rejected escaping payloads before serving the index.
+- Clarify lexical retrieval responses with actual included-source and considered-candidate counts alongside the shortlist limit. Charge count text to the existing estimated context budget across full, compact, outline and scoped results, distinguishing no matches from matching candidates whose sources do not fit without changing ranking or MCP response structure.
+Stabilize mailer output across Rails processes by sorting action-name inventories consistently and labeling direct Proc defaults and callback filters by source location and callable kind. Preserve callback order, duplicate registrations and ordinary default value types without executing callables. Run a full extraction after upgrading to refresh retained mailer records; affected source hashes may change once. (#484)
+- Stabilize mailer object callback labels across boots by reusing the model extractor's guarded default-representation formatter. Preserve custom labels, literal hexadecimal text, callback order, duplicates and conditions; do not execute callbacks or change non-Proc defaults. Run a full extraction after upgrading to refresh retained mailer metadata; stored index schemas are unchanged.
+- Accept `WOODS_OUTPUT` after the explicit path and `WOODS_DIR` in Index MCP startup, while preserving the launcher's no-path error. Missing-index diagnostics now name the examined directory, describe atomic and legacy layouts, and suggest pointing at an existing index before re-extracting.
+- Recommend explicit embedding-free lexical mode in no-provider startup and retrieval messages, including the required MCP environment change and restart; semantic defaults and typed errors are unchanged.
+- Reconcile Rake tasks across all contributing files on incremental changes and deletions, retaining surviving definitions and removing obsolete source from shared tasks.
+Scope PORO and lib `parent_class` metadata and source annotations to the selected declaration. Nested or sibling error classes no longer supply an unrelated superclass; implicit parents remain nil and explicit constant-path parents retain their names (#474).
+- Reject pgvector HNSW `vector` widths above 2,000 before database writes, and reject invalid migration dimensions before creating files. Correct the 3,072-dimensional generator example and document explicit provider output sizing; no vector truncation or implicit conversion is performed (#524).
+- Describe prepared prereleases without claiming RubyGems publication from VERSION alone, and retain the published 1.6.2 maintenance changelog so generated stable-version guidance stays accurate.
+- Preserve actual GraphQL and gem-source types in `Woods::PublishedIndex` typed lookup and enumeration while retaining the `graphql` and `rails_source` family aliases (#518).
+- Enforce `graph_analysis`'s advertised default of 20 rows per section and retain total/offset context on last and empty pages in every renderer. Correct the structure glossary: graph nodes include isolated units, and retriever entry counts depend on mode and store coverage (#519).
+- Coordinate agent configuration apply and recovery on shared managed targets across application roots, preventing concurrent user-scoped installations from overwriting each other. Keep application-specific receipts, refuse stale plans, and report/protect every coordination path in previews (#520).
+- Apply JSON temporal history limits after matching the requested unit, preserving access to retained records across gaps and deletions with SQLite parity (#521).
+- Reconcile reused in-memory vector and metadata stores during full embedding rebuilds, removing vanished units and publishing empty corpora without changing incremental purge guards. Failed embedding preserves the previous promoted dump and checkpoint (#522).
+Validate persisted JSON snapshot shapes before reading history or capturing the next snapshot. Unusable nested unit records and summary fields now warn and skip the entire snapshot, preserving valid legacy records, corrupt-file retention, and caller SHA validation (#492).
+- Use the same JSON snapshot validity checks for reads and retention: reject filename/content SHA mismatches before selecting a capture baseline, and prune corrupt files before valid legacy snapshots with missing or null timestamps. Timestamp-less snapshots remain eligible for ordinary oldest-first retention.
+Expose the paginated dependencies/dependents payload in `structuredContent.data` with every renderer, including packaged stdio and HTTP defaults, while preserving rendered text and existing tool arguments (#481).
+- Stabilize direct Proc/lambda model validation option values in extracted and published metadata using callable kind and source-location labels, without executing them. Preserve validation order, duplicates, conditions and non-Proc values; nested containers are not recursively normalized. Run a full extraction to refresh retained validation metadata; index schemas are unchanged.
+- Reconcile registered initializers deleted during watch downtime with a full extraction after a fresh environment boot, preserving whole-application runtime facts.
+- Keep the stable extraction guard and output directory after `woods:clean`, so a concurrent writer can finish acquiring its lock safely.
+
+### Security
+
+- Redact protected Console fields before serialization, normalize the remaining values to their JSON-compatible representation, and redact and scan again before JSON or Markdown rendering. Symbol values and custom serializers cannot introduce unscanned credentials in the final response, and protected serializers remain uncalled. The direct credential scanner also scans Symbol values while preserving their type.
+- Check resolved relations against the Console blocked-table policy before default model tools fetch records or counts, including association parent lookups; reuse the checked relation so dynamic default scopes are evaluated once.
+- Refuse unsupported SQLite identifier and table-reference syntax before Console SQL execution, preserving blocked-table and function policies; ordinary bare and simple quoted identifiers remain supported.
+- Preserve blocked-table visibility after subqueries and parenthesized JOIN predicates, including quoted aliases, across supported SQL dialects.
+
 ## [2.0.0.beta3] - 2026-09-18
 
 ### Added
@@ -2302,6 +2360,25 @@ derive unit identifiers, which changes the index format's observable contract.
   before optional libraries can select conflicting dependency versions.
 - Update Inspector transitive dependencies `fast-uri` and `qs` to patched versions
   and audit the pinned Node dependency tree in CI.
+
+## [1.6.2] - 2026-09-18
+
+### Fixed
+
+- Refresh encrypted Rails credentials from disk when rebuilding the Console credential index, update every live scanner, and preserve the last valid index if refresh fails. Each response uses one consistent index snapshot.
+Keep credential scanner refresh snapshots limited to live weakly referenced
+scanners on older Ruby versions, avoiding unsafe receiver access after garbage
+collection while preserving updates to every live Console server.
+Keep JSON on `>= 2.19.9, < 3` so supported Rails encoders can serialize metadata after a fresh bundle resolution; JSON 3 removes their `quirks_mode` option. Bound MessagePack below 2 and Railties below 9, retaining their existing minimum versions and the strict package-build gate.
+- Preserve version-aware missing-tool guidance with MCP 0.23 by installing its dispatch override before the SDK captures request handlers.
+
+### Build
+
+- Add a no-publish, one-off 1.6.2 maintenance preparation flow and installed-package CI. Disable the legacy automatic publisher; publication requires the trusted main maintenance profile and its reviewed candidate SHA.
+
+### Security
+
+- Require MCP 0.23.0 or newer within the 0.x line for upstream transport security fixes; run `bundle update woods mcp` when upgrading. Ruby 3.0 remains supported. The newer SDK removes the old json-schema/addressable dependency chain. Existing Index and Console HTTP origin settings now reach the SDK Host/Origin guards; cross-origin browser access requires the actual configured port.
 
 ## [1.6.1] - 2026-07-22
 

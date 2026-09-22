@@ -1,1 +1,0 @@
-- Reconcile Rake tasks across all contributing files on incremental changes and deletions, retaining surviving definitions and removing obsolete source from shared tasks.

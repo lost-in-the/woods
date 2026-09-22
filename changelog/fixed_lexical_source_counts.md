@@ -1,1 +1,0 @@
-- Clarify lexical retrieval responses with actual included-source and considered-candidate counts alongside the shortlist limit. Charge count text to the existing estimated context budget across full, compact, outline and scoped results, distinguishing no matches from matching candidates whose sources do not fit without changing ranking or MCP response structure.

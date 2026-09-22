@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'woods/console/sql_noise_stripper'
+require 'woods/console/sqlite_read_guard'
 
 # @see Woods
 module Woods
@@ -28,11 +29,11 @@ module Woods
     # named constants), not imperative logic.
     class SqlValidator # rubocop:disable Metrics/ClassLength
       # SQL dialects whose normalization the lock-clause check can run over.
-      KNOWN_DIALECTS = %i[postgres mysql].freeze
+      KNOWN_DIALECTS = %i[postgres mysql sqlite].freeze
 
       # The dialect the statement will execute under, when the caller knows
       # it. `nil` (the default) keeps the conservative union: every check
-      # runs against both dialect normalizations, which can reject a
+      # runs against all supported dialect normalizations, which can reject a
       # statement that is valid under one dialect's quote grammar (a MySQL
       # `\'` escape hides prose that the PostgreSQL view reads as SQL). When
       # the execution boundary knows the adapter, passing the matching
@@ -206,9 +207,9 @@ module Woods
       # function calls.
       FUNCTION_SCAN_EXCLUDED_KEYWORDS = %w[
         IN EXISTS NOT AND OR VALUES WHERE HAVING ON IS BETWEEN CASE WHEN
-        THEN ELSE END FROM JOIN USING WITH SELECT DISTINCT ALL ANY SOME
-        UNION INTERSECT EXCEPT ORDER GROUP BY ASC DESC LIMIT OFFSET AS INTO
-        OVER PARTITION FILTER WITHIN RETURNING EXPLAIN
+        THEN ELSE FROM JOIN USING SELECT DISTINCT ALL ANY SOME
+        UNION INTERSECT EXCEPT ORDER GROUP BY LIMIT OFFSET AS INTO
+        OVER FILTER RETURNING EXPLAIN
       ].freeze
 
       # EXPLAIN is a statement leader, so `EXPLAIN (FORMAT JSON) SELECT` is an
@@ -318,6 +319,7 @@ module Woods
 
         return validate_dialect_variants!(sql) if unknown_grammar?
 
+        SqliteReadGuard.validate!(sql) if dialect == :sqlite
         normalized = sql.strip
 
         # Reject multiple statements (semicolons not inside string literals)
@@ -582,16 +584,54 @@ module Woods
           match = Regexp.last_match
           quoted = !(match[1] || match[2]).nil?
           identifier = match[1] || match[2] || match[3]
-          # A bare keyword before `(` is grammar (IN/EXISTS/…), not a call; a
-          # quoted name before `(` is always a call, so keyword exclusion
-          # applies only to the bare form.
-          next if !quoted && FUNCTION_SCAN_EXCLUDED_KEYWORDS.include?(identifier.upcase)
+          # Some engines also allow keyword spellings as function names.
+          # Only exempt those names in their supported grammar positions.
+          next if !quoted && function_keyword_grammar?(identifier.upcase, stripped[0...match.begin(0)])
           next if ALLOWED_FUNCTIONS.include?(identifier.downcase)
 
           raise SqlValidationError,
                 "Rejected: function '#{identifier}' is not on the read-only function allowlist. " \
                 "Allowed: #{ALLOWED_FUNCTIONS.join(', ')}."
         end
+      end
+
+      # Recognize keyword grammar without exempting identically named calls.
+      # The prefix is already stripped of comments and literal contents.
+      #
+      # @param keyword [String] Uppercase bare identifier before `(`.
+      # @param prefix [String] SQL preceding the identifier.
+      # @return [Boolean]
+      def function_keyword_grammar?(keyword, prefix)
+        return false unless FUNCTION_SCAN_EXCLUDED_KEYWORDS.include?(keyword)
+
+        case keyword
+        when 'EXPLAIN' then prefix.strip.empty?
+        when 'BY' then prefix.match?(/\b(?:ORDER|GROUP|PARTITION)\s*\z/i)
+        when 'OVER', 'FILTER' then prefix.match?(/\)\s*\z/)
+        when 'ANY', 'SOME' then comparison_quantifier?(prefix)
+        when 'OFFSET' then offset_grammar?(prefix)
+        else true
+        end
+      end
+
+      # SQLite has no quantified ANY/SOME comparison grammar; both spellings
+      # can instead invoke application-defined functions after an operator.
+      def comparison_quantifier?(prefix)
+        return true if dialect == :postgres # Reserved quantifiers, including LIKE ANY.
+
+        dialect != :sqlite && prefix.match?(/[=<>]\s*\z/)
+      end
+
+      # PostgreSQL reserves bare OFFSET (it cannot name a function), so its
+      # standalone OFFSET clause remains supported. Other dialects only accept
+      # parenthesized offsets after a completed LIMIT operand. Calls
+      # at an expression's start or after an operator are never offset syntax.
+      # Keep the supported operand boundary conservative: literals, bind
+      # numbers, parenthesized expressions, or PostgreSQL's LIMIT ALL.
+      def offset_grammar?(prefix)
+        return true if dialect == :postgres
+
+        prefix.match?(/(?:[0-9)'"`]|\bLIMIT\s+ALL)\s*\z/i)
       end
 
       # Check if the SQL contains a forbidden keyword at a statement-leader

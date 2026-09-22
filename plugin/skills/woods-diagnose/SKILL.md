@@ -298,6 +298,8 @@ Console failures are live Rails/config/security failures, not Index failures. Ve
 
 For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
 
+For SQLite SQL refusals on `2.0.0.beta4` or a reviewed revision containing its Console corrections, consult the installed Console guide for supported identifier and table-reference syntax. Simplify the query to supported syntax; never relax the blocked-table or function policy. These builds also check resolved default scopes and scan normalized response values. Confirm a patched gem is published before recommending it, and check the installed version’s canonical Console guide; do not infer release availability from this plugin.
+
 Nine tools are normal. Eleven appear only with `console_embedded_read_tools`. Do not chase Tier 2/3 or `console_eval`; they do not register in supported packaged modes. Never work around redaction, credential scanning, SQL validation, or a block.
 
 ## Report

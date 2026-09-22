@@ -32,7 +32,7 @@ RSpec.describe Woods::Release::Preparer do
 
         expect(read_release_version(root)).to eq('2.0.0.beta1')
         expect(release_file(root, 'CHANGELOG.md')).to include('## [2.0.0.beta1] - 2026-09-10')
-        expect(banner(root)).to include('2.0.0.beta1 is published as a prerelease')
+        expect(banner(root)).to include('this tree declares prerelease 2.0.0.beta1')
         expect(release_file(root, 'CONTRIBUTING.md'))
           .to include('https://github.com/lost-in-the/woods/blob/v2.0.0.beta1/AGENTS.md')
         expect(result.changed_paths).to include(
@@ -83,7 +83,7 @@ RSpec.describe Woods::Release::Preparer do
         expect(read_release_version(root)).to eq('2.0.0.beta2')
         expect(changelog_section(root, '2.0.0.beta2')).to eq("\n### Fixed\n\n- a fix found in beta1\n\n")
         expect(release_file(root, 'CHANGELOG.md')).to include('## [2.0.0.beta1] - 2026-09-10')
-        expect(banner(root)).to include('2.0.0.beta2 is published as a prerelease')
+        expect(banner(root)).to include('this tree declares prerelease 2.0.0.beta2')
       end
     end
   end

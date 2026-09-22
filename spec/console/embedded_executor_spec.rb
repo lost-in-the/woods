@@ -845,6 +845,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       before do
         stub_const('User', user_model)
         allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(double('reflection'))
+        allow(user_model).to receive(:all).and_return(user_model)
+        allow(user_model).to receive(:to_sql).and_return('SELECT users.* FROM users')
         allow(user_model).to receive(:find).with(1).and_return(record)
         allow(record).to receive(:posts).and_return(assoc_relation)
       end

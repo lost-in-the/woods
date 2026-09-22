@@ -766,12 +766,12 @@ Each transaction sets a statement timeout before any query runs. The default is 
 
 `SqlValidator` rejects non-read-only SQL at the string level, before any database interaction.
 
-Validation runs **once**, inside the executor, with the dialect of the live adapter. There is deliberately no earlier dialect-blind pre-check in the tool handler: a validator built without a dialect is the conservative MySQL+PostgreSQL union, and running it first meant a MySQL host rejected statements whose `\'`/backtick grammar produces a spuriously forbidden PostgreSQL view — the adapter-aware acceptance below could never be reached on a real transport. The executor raises `SqlValidationError` for anything it refuses, which the dispatch pipeline renders as a tool error, so nothing is ungated.
+Validation runs **once**, inside the executor, with the dialect of the live adapter. There is deliberately no earlier dialect-blind pre-check in the tool handler: a validator built without a dialect is the conservative union of supported dialects, and running it first meant a MySQL host rejected statements whose `\'`/backtick grammar produces a spuriously forbidden PostgreSQL view — the adapter-aware acceptance below could never be reached on a real transport. The executor raises `SqlValidationError` for anything it refuses, which the dispatch pipeline renders as a tool error, so nothing is ungated.
 
 
 - **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected, it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
 - **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`
-- **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`; row-lock clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `FOR UPDATE NOWAIT`/`SKIP LOCKED`, MySQL `LOCK IN SHARE MODE`) — these take live row locks even inside the rolled-back transaction. The lock check is adapter-aware: `console_sql` validates with the active adapter's dialect, including MySQL double-quoted strings/backtick identifiers and PostgreSQL quoted identifiers/E-strings. Unknown adapters conservatively scan both normalizations. Every view is scanned under both MySQL executable-comment (`/*!...*/`) semantics, so `#` comments and version-guarded comments cannot split a clause apart.
+- **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`; row-lock clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `FOR UPDATE NOWAIT`/`SKIP LOCKED`, MySQL `LOCK IN SHARE MODE`) — these take live row locks even inside the rolled-back transaction. The lock check is adapter-aware: `console_sql` validates with the active adapter's dialect, including MySQL double-quoted strings/backtick identifiers and PostgreSQL quoted identifiers/E-strings. Unknown adapters conservatively scan all supported normalizations. Every view is scanned under both MySQL executable-comment (`/*!...*/`) semantics, so `#` comments and version-guarded comments cannot split a clause apart.
 - **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS`, a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
 - **Rejected patterns:** multiple statements (semicolons), writable CTEs (every `AS (...)` body is checked, so a writable CTE in any WITH position is refused — `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`), a CTE list attached to top-level DML (`WITH a AS (SELECT 1) DELETE FROM users RETURNING *`), comment-hidden injections
 
@@ -859,7 +859,44 @@ quote and comment rules. MySQL also reads the executing session's `ANSI_QUOTES`
 and `NO_BACKSLASH_ESCAPES` settings for validation, protected-column scanning, and
 table gating; adjacent subtraction operators are not assumed to begin a comment.
 Direct scanner callers without session settings use conservative quote-mode scans.
+SQLite read SQL accepts simple ASCII bare, double-quoted, or backtick identifiers
+(letters, digits, and underscores, starting with a letter or underscore).
+Use whitespace after `FROM` and `JOIN`, and use `SELECT` subqueries rather than
+parenthesized table groups. Bracket-quoted and string-quoted names, quoted names
+containing punctuation, and unsupported table-reference syntax are refused before
+execution, because they cannot be reliably checked against the configured table
+policy. Ordinary string literals remain supported. This restriction is part of
+2.0.0.beta4; keep read tools disabled on older versions when this policy is
+needed. Confirm that the release is available before selecting it. The Rails-version
+integration lane checks these boundaries on real SQLite.
+
 The contributor live-backend lane exercises these boundaries
 through Console requests against PostgreSQL and MySQL. Keep read tools disabled
 unless live SQL access is needed, and retain the configured blocked-table and
 redaction policies when diagnosing a rejected request.
+
+## Console policy corrections in 2.0.0.beta4
+
+In `2.0.0.beta4`, the default model-reading tools check the resolved relation
+against `console_blocked_tables` before fetching records or counts. This includes
+application-defined default scopes and the parent lookup for association counts.
+The checked relation is reused for execution so a dynamic default scope is not
+resolved twice. These checks do not change which Console tools are enabled.
+
+Response handling redacts protected fields before invoking serializers, converts
+the remaining response to JSON-compatible values, then redacts and scans that
+normalized tree before either JSON or Markdown rendering. Symbol values and custom
+JSON serializers therefore receive the same credential checks as ordinary strings.
+Custom values in Markdown now use their JSON-compatible representation. Numbers,
+booleans, nulls, and ordinary record shapes retain their existing meanings.
+
+For SQLite SQL, keyword spellings receive function-policy exceptions only where
+supported query grammar requires them. PostgreSQL reserved-keyword grammar is
+preserved. Unsupported parenthesized offset expressions on other dialects may
+require a plain numeric offset. Keep the configured access and credential policies
+in place when adjusting a query.
+
+These corrections require `2.0.0.beta4` or a reviewed development revision that
+contains them. Confirm that a patched release is available before selecting it.
+On affected versions, disable Console where these policies are required; Index MCP
+can stay enabled because it reads the published code index separately.

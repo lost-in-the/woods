@@ -53,20 +53,21 @@ module Woods
       # single-quote scanner.
       #
       # @param sql [String] the SQL string to process
-      # @param dialect [Symbol] `:postgres` (default) or `:mysql`.
+      # @param dialect [Symbol] `:postgres` (default), `:mysql`, or `:sqlite`.
       #   - `:postgres` — single-quoted strings support `''` as an apostrophe
       #     escape. Backslash is treated literally and does not escape quotes.
       #     Dollar-quoted strings (`$$...$$`, `$tag$...$tag$`) are also stripped.
       #   - `:mysql` — single-quoted strings support both `\'` (backslash-escape)
       #     and `''` (doubled-quote) as apostrophe escapes. Dollar-quoted strings
       #     are not recognized by the combined MySQL security scanner.
+      #   - `:sqlite` — doubled apostrophes escape strings; backslashes and dollar signs are literal.
       # @return [String] a new string with all string literals replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
       DOLLAR_QUOTED = /\$(\w*)\$.*?\$\1\$/m
       SINGLE_QUOTED_POSTGRES = /'(?:''|[^'])*'/m
       SINGLE_QUOTED_MYSQL    = /'(?:\\.|''|[^'])*'/m
 
-      SUPPORTED_DIALECTS = %i[postgres mysql].freeze
+      SUPPORTED_DIALECTS = %i[postgres mysql sqlite].freeze
       private_constant :SUPPORTED_DIALECTS
 
       def self.strip_literals(sql, dialect: :postgres)
@@ -76,7 +77,7 @@ module Woods
 
         # Strip dollar-quoted strings first so stray apostrophes inside them
         # do not interfere with the single-quote scanner.
-        out = sql.gsub(DOLLAR_QUOTED, "''")
+        out = dialect == :sqlite ? sql : sql.gsub(DOLLAR_QUOTED, "''")
 
         pattern = dialect == :mysql ? SINGLE_QUOTED_MYSQL : SINGLE_QUOTED_POSTGRES
         out.gsub(pattern, "''")
@@ -112,7 +113,7 @@ module Woods
       # still reads as following a boundary once comments are gone.
       #
       # @param sql [String] the SQL string to process
-      # @param dialect [Symbol] `:postgres` (default) or `:mysql` — controls
+      # @param dialect [Symbol] `:postgres` (default), `:mysql`, or `:sqlite` — controls
       #   single-quote escape rules (see {.strip_literals}) and whether `#`
       #   opens a line comment. MySQL quote flags reflect session sql_mode.
       # @return [String] a new string with comments removed and every string
@@ -134,7 +135,8 @@ module Woods
           if ch == "'"
             close = single_quote_end(
               sql, i,
-              backslash_escapes: (mysql && !no_backslash_escapes) || (!mysql && postgres_escape_string?(sql, i))
+              backslash_escapes: (mysql && !no_backslash_escapes) ||
+                (dialect == :postgres && postgres_escape_string?(sql, i))
             )
             if close
               out << "''"
@@ -158,7 +160,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif mysql && ch == '`'
+          elsif (mysql || dialect == :sqlite) && ch == '`'
             close = quoted_span_end(sql, i, quote: '`', backslash_escapes: false)
             if close
               # Backticks delimit identifiers. Preserve the token for table
@@ -170,7 +172,7 @@ module Woods
               out << ch
               i += 1
             end
-          elsif !mysql && ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
+          elsif dialect == :postgres && ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
             close = sql.index(tag, i + tag.length)
             if close
               out << "''"

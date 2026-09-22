@@ -1,1 +1,0 @@
-- Make missing-index startup headlines describe an unresolved published index instead of implying that atomic indexes require a root `manifest.json`; retain the examined path, layout explanation and existing-index-first remedy (#482).

@@ -1,1 +1,0 @@
-Scope PORO and lib `parent_class` metadata and source annotations to the selected declaration. Nested or sibling error classes no longer supply an unrelated superclass; implicit parents remain nil and explicit constant-path parents retain their names (#474).

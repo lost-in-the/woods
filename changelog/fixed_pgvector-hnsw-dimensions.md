@@ -1,1 +1,0 @@
-- Reject pgvector HNSW `vector` widths above 2,000 before database writes, and reject invalid migration dimensions before creating files. Correct the 3,072-dimensional generator example and document explicit provider output sizing; no vector truncation or implicit conversion is performed (#524).

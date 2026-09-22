@@ -144,6 +144,12 @@ jobs:
       # the same reason as the two above — each boots its own Rails app.
       - name: Run watch daemon integration
         run: bundle exec rspec spec/integration/watch_daemon_spec.rb
+      - name: Console read and response policies
+        run: |
+          bundle exec rspec spec/integration/console_sqlite_policy_spec.rb
+          bundle exec rspec spec/integration/console_sqlite_keyword_functions_spec.rb
+          bundle exec rspec spec/integration/console_resolved_relation_policy_spec.rb
+          bundle exec rspec spec/integration/console_credential_serialization_spec.rb
 
       # Six worktrees, disjoint indexes, concurrent readers (#164 phase 4).
       - name: Run multi-worktree integration
