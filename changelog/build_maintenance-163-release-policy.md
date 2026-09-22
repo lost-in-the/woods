@@ -1,1 +1,0 @@
-- Allow the exact 1.6.3 maintenance tag and branch from the released 1.6.2 base while keeping publication disabled until a separately reviewed candidate SHA is pinned. Preserve all CI, immutable-artifact, package-test and protected-environment release gates.
