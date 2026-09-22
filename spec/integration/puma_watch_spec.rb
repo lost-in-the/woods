@@ -163,7 +163,11 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
   it 'boots the committed guarded plugin configuration when the bundle excludes Woods' do
     gemfile = File.join(@root, 'Gemfile.production')
     File.write(gemfile, "source 'https://rubygems.org'\ngem 'puma', '#{Puma::Const::PUMA_VERSION}'\n")
-    launch(configuration: <<~CONFIG, env: { 'BUNDLE_GEMFILE' => gemfile }, guarded: true)
+    # This separate Gemfile does not inherit the checkout's .bundle/config.
+    # Keep CI's privately installed Puma/dependencies visible without activating
+    # Woods or depending on a second, globally installed copy of Puma.
+    gem_paths = Gem.loaded_specs.values.map(&:base_dir).uniq.join(File::PATH_SEPARATOR)
+    launch(configuration: <<~CONFIG, env: { 'BUNDLE_GEMFILE' => gemfile, 'GEM_PATH' => gem_paths }, guarded: true)
       environment 'production'
       raise 'Woods unexpectedly activated' if Gem.loaded_specs.key?('woods')
     CONFIG
