@@ -13,7 +13,7 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
   let(:root) { File.expand_path('../..', __dir__) }
   let(:executable) { File.join(root, 'exe/woods-console-mcp') }
   let(:host) { File.join(root, 'spec/console/support/booted_mcp_host.rb') }
-  let(:rails_gemfile) { File.join(root, 'gemfiles/rails_8.1.gemfile') }
+  let(:rails_gemfile) { ENV.fetch('BUNDLE_GEMFILE', File.join(root, 'gemfiles/rails_8.1.gemfile')) }
 
   around do |example|
     Dir.mktmpdir('woods-console-stdio') do |tmpdir|
@@ -28,7 +28,7 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
     end
   end
 
-  def start_process(read_tools: true)
+  def start_process(read_tools: true, launcher: 'runner', stdout_logging: false)
     environment = {
       'PATH' => ENV.fetch('PATH'),
       'BUNDLE_GEMFILE' => rails_gemfile,
@@ -36,6 +36,8 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
       'WOODS_CONSOLE_CONFIG' => @config,
       'WOODS_DUMMY_DB' => @database,
       'WOODS_CONSOLE_READ_TOOLS' => read_tools ? '1' : '0',
+      'WOODS_TEST_CONSOLE_LAUNCHER' => launcher,
+      'WOODS_TEST_CONSOLE_STDOUT_LOGGING' => stdout_logging ? '1' : '0',
       'RAILS_ENV' => 'test'
     }
     environment['BUNDLE_PATH'] = ENV['BUNDLE_PATH'] if ENV['BUNDLE_PATH']
@@ -46,7 +48,9 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
     @request_id = @request_id.to_i + 1
     @stdin.puts(JSON.generate(jsonrpc: '2.0', id: @request_id, method: method, params: params))
     @stdin.flush
-    Timeout.timeout(30) { JSON.parse(@stdout.gets || raise("server closed:\n#{stderr_output}")) }
+    response = Timeout.timeout(30) { JSON.parse(@stdout.gets || raise("server closed:\n#{stderr_output}")) }
+    expect(response.values_at('jsonrpc', 'id')).to eq(['2.0', @request_id])
+    response
   end
 
   def initialize_session
@@ -145,5 +149,21 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
     status = Timeout.timeout(10) { @wait.value }
 
     expect(status.exitstatus).to eq(130)
+  end
+
+  %w[rake runner].each do |launcher|
+    it "isolates eager-load and runtime stdout logging from MCP through the #{launcher} entry point" do
+      start_process(launcher: launcher, stdout_logging: true)
+      expect(initialize_session.dig('result', 'serverInfo', 'name')).to eq('woods-console')
+      expect(call_tool('console_count', 'model' => 'Post')).to eq('**count:** 1')
+      expect(rpc('tools/list').dig('result', 'tools')).not_to be_empty
+
+      @stdin.close
+      expect(Timeout.timeout(10) { @wait.value }).to be_success
+      expect(@stdout.read).to be_empty
+      diagnostics = @stderr.read
+      expect(diagnostics).to include('woods-stdio-boot-log', 'SELECT COUNT',
+                                     'woods-stdio-runtime-puts', 'woods-stdio-runtime-fd')
+    end
   end
 end

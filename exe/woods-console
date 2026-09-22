@@ -21,14 +21,14 @@
 # Check if the rake task already captured stdout for us.
 protocol_out = $woods_protocol_out # rubocop:disable Style/GlobalVars
 
-unless protocol_out
-  # Running via rails runner — capture stdout ourselves.
-  protocol_out = $stdout.dup
-  $stdout.reopen($stderr)
-end
+# Running via rails runner — capture stdout ourselves.
+protocol_out ||= $stdout.dup
+# Keep application logs and writes on stderr for the entire server lifetime.
+$stdout.reopen($stderr)
 
 require 'woods'
 require 'woods/console/server'
+require 'woods/console/stdio_transport'
 
 unless Woods.configuration.console_mcp_enabled
   warn 'Woods Console MCP is disabled. Set ' \
@@ -132,9 +132,11 @@ server = Woods::Console::Server.build_embedded(
   model_reflections: model_reflections
 )
 
-# Restore the protocol output for MCP transport.
-$stdout.reopen(protocol_out)
-protocol_out.close unless protocol_out.closed?
-
-transport = MCP::Server::Transports::StdioTransport.new(server)
-transport.open
+# Only the transport writes to the saved pipe. Restoring process stdout here
+# would also redirect Rails loggers and runtime puts back into the protocol.
+transport = Woods::Console::StdioTransport.new(server, output: protocol_out)
+begin
+  transport.open
+ensure
+  protocol_out.close unless protocol_out.closed?
+end
