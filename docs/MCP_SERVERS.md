@@ -56,6 +56,12 @@ Prefer the application's bundle and a project-scoped configuration:
 
 `woods-mcp-start` checks that the directory and published manifest exist, then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
 
+The MCP client owns this reader process. Automatic index maintenance has its own
+[watcher startup](WATCH_DAEMON.md#managed-development-startup): configuring MCP
+does not enable it. A running reader sees new published generations on subsequent
+calls without reconnecting. Verify a real edit, not only a successful connection;
+see [automatic maintenance](AUTOMATIC_MAINTENANCE.md).
+
 `woods_status.index.woods_version` identifies the last publisher of the served
 manifest; `server.version` identifies the running MCP reader. Missing writer
 provenance is `null`. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance).

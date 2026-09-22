@@ -38,12 +38,23 @@ Use the application's normal Docker command and environment variables when appli
 
 ### Watch repeatedly exits 75
 
+First identify the lifecycle owner. The raw task deliberately exits 75; a bare
+Foreman entry then stops all services. Managed `woods-watch`/Puma setup (#538)
+is unreleased after `2.0.0.beta4`: verify installed executable/generator help and
+loaded revision before proposing it. Supporting launchers retry boot failures,
+reject idle TTL, and park ownership/protocol conflicts until owner restart.
+Inspect separate supervision state rather than treating its parent PID as a
+healthy daemon. Before the first resolved index path, use launcher logs.
+Do not remove claims or kill PIDs from status to force takeover. See
+[startup diagnosis](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#watcher-startup-or-planned-restart-fails).
+
 Check the installed version's watch guide. Older releases, including
 `2.0.0.beta2`, can rediscover the same restart-trigger paths on every boot. Stop
 the supervisor, run one successful full extraction, then restart the standalone
 watch task. Do not assume automatic startup reconciliation exists in that release.
 For versions documenting environment-boot snapshots, confirm that the command is
-`bundle exec rake woods:watch`, with no preceding `environment` task, and check
+the application's actual `rails woods:watch` or `rake woods:watch` entrypoint,
+with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
 ### Watch retains facts from an initializer deleted while stopped

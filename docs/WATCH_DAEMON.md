@@ -34,14 +34,133 @@ Ctrl-C to stop.
 | `WOODS_WATCH_CATCH_UP` | `1` | `0` skips the startup reconciliation |
 | `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset | `1` lets a reader trust a fresh foreign-host heartbeat without checking its pid locally; see [cross-host liveness](#cross-host-liveness) |
 
-Run it under a supervisor. When boot-captured configuration changes the daemon
-exits `75` (`EX_TEMPFAIL`) on purpose, see [Restart triggers](#restart-triggers).
+The raw task needs a supervisor that restarts it after exit `75` (`EX_TEMPFAIL`);
+see [Restart triggers](#restart-triggers). Docker restart policies can supply
+this. A bare task in Foreman cannot: Foreman shuts down its process group when a
+child exits. Use the managed launcher below for native Procfile development.
 
-```yaml
-# Procfile.dev
-web:   bin/rails server
-woods: bundle exec rake woods:watch
+### Managed development startup
+
+**Unreleased after `2.0.0.beta4` ([#538](https://github.com/lost-in-the/woods/issues/538)).**
+Record the installed gem path and Git revision as well as VERSION; a checkout
+can have new behavior with the last beta's version. Verify both commands before
+using the new setup:
+
+```bash
+bundle exec woods-watch --help
+bin/rails generate woods:watch --help
 ```
+
+Choose one lifecycle owner per application index:
+
+| Existing development workflow | Setup |
+|---|---|
+| Rails/Puma, including a `bin/dev` that just starts Rails | Opt-in `puma` mode; the development Puma master starts one separate extraction process, regardless of worker count. |
+| An existing Foreman workflow | `procfile` mode with the exact existing Procfile and selected normal Foreman command. |
+| Docker Compose, Grove, or another supervisor | `external` mode returns the raw task command; configure its lifecycle through the existing supervisor. |
+
+For Puma, preview before applying:
+
+```bash
+bin/rails generate woods:watch --mode puma --pretend
+bin/rails generate woods:watch --mode puma
+```
+
+This adds an executable `bin/woods-watch` and an owned directive to
+`config/puma.rb`. The directive tolerates Woods being excluded from the
+production bundle; the adapter separately enforces Puma's finalized development
+environment. Starting a console, task, or production Puma does not start a
+watcher. The watcher still uses another Rails process and its associated memory.
+Puma installation checks the application's installed Puma version (supported
+majors: 6, 7, and 8 on native Unix Ruby) and selects the normal `bin/rails server`
+path using `config/puma.rb`. If `config/puma/development.rb` exists, setup refuses
+because Puma would choose it first. Custom `-C` configurations need an explicit
+external/Foreman arrangement; this generator does not discover or rewrite them.
+
+For an existing Foreman arrangement, select the command you will actually use:
+
+```bash
+bin/rails generate woods:watch --mode procfile --procfile Procfile.dev \
+  --manager-command 'foreman start -f Procfile.dev' --pretend
+```
+
+Repeat without `--pretend` to apply. Preflight checks task discovery and Foreman
+availability with bounded commands; it does not start services. Installation
+preserves `bin/dev` and every unowned service. If `bin/dev` only runs Rails, it
+will still only run Rails: choose Puma mode or explicitly use the selected
+Foreman command. No process-manager gem is installed automatically.
+
+Use `--child-command 'bundle exec rails woods:watch'` when that is the
+application's actual Rails entrypoint. Command strings become explicit argument
+vectors; shell pipelines, variable expansion, and shell setup scripts are not
+supported. Do not prepend an `environment` task or an already booted Rails runner.
+
+### Ownership, updates, and removal
+
+The generator records relative owned paths and fingerprints in `.woods-watch.json`.
+Commit it with the generated configuration so a new clone/worktree can update or
+remove that setup. Runtime transaction state stays under `tmp/woods-watch-install/`;
+keep that directory ignored. Changes to owned content or executable permissions
+cause a conflict rather than an overwrite. Review the conflict and restore or
+adapt the owned setup explicitly; do not delete the receipt to force an overwrite.
+
+```bash
+# Change modes or update owned setup (include the selected mode's options).
+bin/rails generate woods:watch --operation update --mode puma --pretend
+# Remove owned startup fragments and wrapper; preserve application edits.
+bin/rails generate woods:watch --operation remove --pretend
+```
+
+Repeat without `--pretend` to apply. Stop an existing watcher through its current
+manager before changing owners; the generator does not stop running processes.
+Remove the new startup configuration before downgrading to a gem without it.
+For Docker/Grove, see [automatic maintenance](AUTOMATIC_MAINTENANCE.md).
+
+An interrupted apply retains its local transaction journal. When Rails boots,
+preview recovery with `bin/rails generate woods:watch --operation recover
+--pretend`, then repeat without `--pretend`. The Rails command boots the application
+before invoking the generator; its `--pretend` prevents installation writes,
+not application initialization.
+
+If an initializer prevents Rails boot, run the boot-free recovery helper directly
+from the application root using its bundle:
+
+```bash
+bundle exec ruby -rwoods/watch/installation -e \
+  'puts Woods::Watch::Installation.new(root: Dir.pwd).recover(pretend: true)'
+```
+
+Repeat with `pretend: false` to restore the recorded transaction. Recovery checks
+snapshots and changes only owned files; concurrent edits keep the journal for
+manual resolution. The helper does not load Rails or run task probes. Do not
+delete a pending journal to force setup.
+
+### Managed restart and failure behavior
+
+`woods-watch -- bin/rails woods:watch` stays outside Rails and starts a fresh child
+for each planned restart. It absorbs exit 75 so Foreman/Puma remain running.
+Managed launching requires POSIX process groups and `fork` (Linux/macOS Ruby).
+Other platforms should use the raw task with an external supervisor.
+Boot failures retry with bounded backoff; a failed extraction leaves the last
+good generation readable. `--boot-timeout SECONDS` defaults to 300 seconds and
+bounds boot/handshake, not a valid extraction or writer-lock wait.
+
+Managed mode requires `WOODS_WATCH_IDLE_TIMEOUT` to be unset: automatic maintenance
+needs a resident child. An unexpected clean stop, incompatible child, or another
+owner parks the launcher with a diagnostic until its normal owner restarts it.
+There is no automatic ownership takeover. Managed duplicate prevention is scoped
+to one host/process namespace; do not mix raw and managed writers across different
+containers sharing an index. Use one external owner for that arrangement.
+
+Daemon liveness, completed startup reconciliation, and source freshness remain
+different facts. Managed supervision records under `watch_supervisors/` expose
+starting/retrying/parked state separately in `woods_status`; an alive supervisor
+without a maintaining child does not provide daemon coverage. If the first Rails
+boot fails before resolving the configured index path, diagnostics are logs-only.
+
+Verify startup catch-up, an edit, and an initializer restart through the existing
+MCP connection before declaring automatic maintenance active. With worktree
+management, also verify source and index mounts switch together.
 
 ## One cycle
 
@@ -293,15 +412,15 @@ aliases in large watched trees. Ignored logical paths are still pruned.
 
 ## Placement
 
-The spike asked for three placements to be compared and one chosen. Every
-collaborator on `Woods::Watch::Daemon` is injected, so all three are reachable
-from the same class, but the default is **(b), a dedicated daemon per
-worktree**:
+Run one dedicated extraction process per active worktree/index. The managed
+Puma adapter and native launcher above retain that separation. Requiring Woods
+or loading its Railtie does not start indexing by itself. Custom integrations
+can use the injected daemon collaborators deliberately:
 
 | Option | Verdict |
 |---|---|
 | **(b) Dedicated daemon**: *recommended default* | One extra booted app per worktree. Isolated: a crash, a restart, or a storm affects only the index. Lifecycle is drivable from worktree hooks. |
-| **(a) Embedded in the dev server** via the Railtie | Marginal memory cost ~0 where a booted app already exists, but couples index freshness to the dev server running and puts extraction on its threads. `Daemon#process` is public precisely so a host can do this deliberately. |
+| **(a) Custom in-process integration** | A host can call public `Daemon#process` deliberately, but must own threading, reloading, and lifecycle. This is not an automatic Railtie feature or the managed Puma adapter. |
 | **(c) Host watcher + in-container session** | Solves bind-mount event unreliability, but with the most moving parts. Forcing the polling backend solves the same problem with none. |
 
 Measured on the fixture app (Ruby 3.3, Rails 8.0):
@@ -750,8 +869,10 @@ per-process language-server index does not.
 
 N resident daemons is N booted apps, and most slots are dormant most of the
 time. `idle_timeout` (off by default) stops a daemon after that many seconds
-without a file event, so a slot nobody is working in stops holding ~65 MB. A
-worktree hook or session start revives it.
+without a file event. Revival requires a separately configured supervisor or
+startup hook; the shipped SessionStart hook only checks freshness. Managed
+`woods-watch` rejects this setting because an idle child shutdown would leave
+automatic maintenance inactive until the owner restarts it.
 
 ```ruby
 Woods::Watch::Daemon.new(output_dir: …, idle_timeout: 900).run   # 15 minutes

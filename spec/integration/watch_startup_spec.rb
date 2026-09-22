@@ -17,6 +17,9 @@ RSpec.describe 'Watch startup across real Rails boots', :booted_app do
     Dir.mktmpdir('woods_watch_boot') do |root|
       @root = root
       FileUtils.mkdir_p(File.join(root, 'config', 'initializers'))
+      # ConfigurationExtractor records this conventional source. Without the
+      # file, every later startup correctly treats it as a deleted boot input.
+      File.write(File.join(root, 'config/application.rb'), "# Application is defined in the fixture Rakefile.\n")
       File.write(File.join(root, 'Rakefile'), rakefile)
       File.write(File.join(root, 'config', 'database.yml'),
                  "development:\n  adapter: sqlite3\n  database: ':memory:'\n")

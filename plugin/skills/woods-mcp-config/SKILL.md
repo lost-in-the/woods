@@ -55,6 +55,14 @@ when unavailable. See the
 
 Use this shape for any stdio-capable MCP client, adapted to the client's configuration location. `woods-mcp-start` validates and launches; it does not install or auto-restart.
 
+MCP registration does not start automatic indexing. Existing readers observe
+published generations without reconnecting; separately verify the watcher owner,
+startup catch-up, and a real edit. Native launcher/Puma installation (#538) is
+unreleased after `2.0.0.beta4`: check installed `woods-watch` and generator help
+before offering it. Preserve the existing external service in Docker/Grove and
+keep its source/index aligned across switches. See
+[automatic maintenance](https://github.com/lost-in-the/woods/blob/main/docs/AUTOMATIC_MAINTENANCE.md).
+
 Writer-version provenance (#323) is available in Woods `2.0.0.beta3`; check the installed
 gem version's release notes before expecting `index.woods_version` in `woods_status`. It reports
 the last manifest publisher, independently of `server.version`. Treat missing/null

@@ -30,6 +30,8 @@ group :development, :test do
   # The official MCP Ruby client's HTTP transport loads Faraday lazily. Keep it
   # test-only: Woods' HTTP server itself uses Rack and does not require Faraday.
   gem 'faraday', '~> 2.0'
+  # Native watcher acceptance uses a real Foreman owner, never a shell stub.
+  gem 'foreman', '~> 0.90'
   # activesupport for specs that don't need full Rails
   gem 'activesupport'
   gem 'rake', '~> 13.0'
@@ -43,7 +45,7 @@ group :development, :test do
   # is optional and users pick their own server, but the suite needs one to
   # exercise the binary. Opt in with
   # WOODS_RUN_HTTP_SERVER=1 (see spec/mcp/http_server_e2e_spec.rb).
-  gem 'puma', '>= 6.0'
+  gem 'puma', ENV.fetch('WOODS_PUMA_REQ', '>= 6.0')
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'

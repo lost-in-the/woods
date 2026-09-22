@@ -2788,5 +2788,20 @@
     ],
     "description": "Issue #356: SQLite JSON1 converts Boolean scalars to integers during field-scoped search. Search true/false text consistently with InMemory while keeping real numeric 1/0 distinct, null and missing fields unmatched, and structured JSON and whole-record semantics unchanged. Shared adapter regressions cover these controls.",
     "status": "resolved"
+  },
+  {
+    "id": "B-204",
+    "title": "Managed watcher startup for native Rails development",
+    "severity": "high",
+    "category": "config",
+    "layer": "operations",
+    "files": [
+      "lib/woods/watch/",
+      "lib/generators/woods/watch_generator.rb",
+      "lib/puma/plugin/woods.rb",
+      "exe/woods-watch"
+    ],
+    "description": "Issue #538: own startup catch-up, updates and planned restarts through a shared foreground launcher; reversible Procfile, Puma or external integration with process-death cleanup, honest supervision diagnostics and portable worktree configuration. Preserve raw watch and MCP generation reload contracts. Implemented and independently reviewed. Default suite: 9,550 examples, zero failures; real Rails catch-up/change/restart integration, installed-package smoke, Foreman restart handling, and Puma 6/7/8 lifecycle tests pass. Public setup guides, plugin skills and generated surface evidence are synchronized.",
+    "status": "resolved"
   }
 ]

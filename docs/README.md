@@ -10,7 +10,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 | Ask an agent to install or configure Woods | [Agent setup runbook](AGENT_SETUP.md) | A safe, reviewable install with an agent handoff report |
 | Configure an MCP client or Docker path | [MCP servers](MCP_SERVERS.md) | A working Index Server and, if authorized, an optional Console Server |
 | Use Woods tools as an agent | [Agent guide](AGENT_GUIDE.md) | A repeatable query workflow for code context, flows, and blast radius |
-| Keep the index current automatically | [Watch daemon](WATCH_DAEMON.md) | A resident development process that catches up changes and republishes the index |
+| Keep the index current automatically | [Automatic maintenance guide](AUTOMATIC_MAINTENANCE.md) | A setup with supervised indexing, automatic reader refresh, and clear hook ownership |
 | Upgrade from Woods 1.x | [Upgrade to Woods 2.0](UPGRADING_TO_2.md) | A backed-up, re-indexed, verified v2 installation |
 | Diagnose an error | [Troubleshooting](TROUBLESHOOTING.md) | Symptom-to-cause checks for extraction, MCP, embeddings, storage, and Docker |
 | Contribute to Woods | [Contributing](../CONTRIBUTING.md) | A tested change with synchronized docs and plugin guidance |
@@ -41,6 +41,7 @@ and stdio or Streamable HTTP endpoints directly.
 
 ## Index lifecycle
 
+- [Automatic maintenance guide](AUTOMATIC_MAINTENANCE.md): recommended development workflow and a section-by-section map of watcher, indexing, MCP, and hook documentation.
 - [Source freshness](SOURCE_FRESHNESS.md): verify dirty source against a served generation, establish a fresh-process baseline, and understand bounded unknown results.
 
 - [Retrieval guide](RETRIEVAL_GUIDE.md): configure embeddings and understand semantic retrieval, ranking, and token budgets.

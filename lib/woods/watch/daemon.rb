@@ -167,6 +167,8 @@ module Woods
       # @param force_polling [Boolean] never use the `listen` backend — the
       #   right choice across a container bind mount, where native FS events
       #   do not propagate
+      # @param lifecycle [#call, nil] private managed-child boundary reporter
+      # @param conservative_claims [Boolean] refuse unknown/foreign managed ownership
       # @param logger [#info, #warn, #error]
       # rubocop:disable-next Metrics/ParameterLists -- every collaborator is
       # injectable on purpose; that is what makes the daemon placement-agnostic
@@ -175,7 +177,8 @@ module Woods
                      policy: ReloadPolicy.new, debounce: DEFAULT_DEBOUNCE,
                      full_extraction_threshold: DEFAULT_FULL_EXTRACTION_THRESHOLD,
                      idle_timeout: nil, lock: nil, catch_up: true, force_polling: false,
-                     boot_snapshot: nil, poll_interval: Watcher::DEFAULT_POLL_INTERVAL, logger: nil)
+                     boot_snapshot: nil, poll_interval: Watcher::DEFAULT_POLL_INTERVAL, logger: nil,
+                     lifecycle: nil, conservative_claims: false)
         @poll_interval = validated_poll_interval(poll_interval)
         @output_dir = output_dir.to_s
         @root = (root || (defined?(Rails) ? Rails.root : Dir.pwd)).to_s
@@ -190,6 +193,8 @@ module Woods
         @boot_snapshot = boot_snapshot
         @force_polling = force_polling
         @logger = logger || default_logger
+        @lifecycle = lifecycle
+        @conservative_claims = conservative_claims
         @generation = Generation.new(output_dir: @output_dir)
         @status = Status.new(output_dir: @output_dir)
         @lock = lock || default_lock
@@ -307,9 +312,7 @@ module Woods
             enqueue(paths)
             drain
           end
-          await_watcher_ready
-          catch_up unless @stop_reason
-          drain_cycles
+          reconcile_startup
           @last_event_at = monotonic_now
         end
         watcher_thread.join
@@ -318,6 +321,15 @@ module Woods
         @stop_reason || :stopped
       ensure
         shut_down(heartbeat, watcher_thread)
+      end
+
+      def reconcile_startup
+        await_watcher_ready
+        @lifecycle&.call(:backend_ready)
+        catch_up unless @stop_reason
+        drain_cycles
+        @lifecycle_started = true
+        report_lifecycle
       end
 
       # @param heartbeat [Thread, nil]
@@ -499,6 +511,7 @@ module Woods
 
         begin
           drain_cycles
+          report_lifecycle if @lifecycle_started
         ensure
           # An extraction is work, not idleness. Stamping only on the event
           # would let a cycle longer than `idle_timeout` read as a quiet
@@ -530,6 +543,35 @@ module Woods
 
       def pending_empty?
         @pending_mutex.synchronize { @pending.empty? }
+      end
+
+      # Only a drained startup boundary (or a later recovery) can establish
+      # maintenance readiness. The early running heartbeat does not prove it.
+      def report_lifecycle
+        return unless @lifecycle
+        return if @stop_reason && @stop_reason != :restart_required
+
+        reason = lifecycle_reason
+        state = reason == 'reconciled' ? 'ready' : 'degraded'
+        return if @lifecycle_state == [state, reason]
+
+        @lifecycle.call(:startup, state: state, generation: @generation.current.number, reason: reason)
+        @lifecycle_state = [state, reason]
+      end
+
+      def lifecycle_reason
+        return 'restart_required' if @stop_reason == :restart_required
+        return 'startup_failed' if @degraded_reason
+        return 'pending_work' unless pending_empty?
+        return 'catch_up_disabled' unless @catch_up
+        return 'no_index' unless managed_index_published?
+
+        'reconciled'
+      end
+
+      def managed_index_published?
+        @generation.current.number.positive? && !dangling_payload_pointer? &&
+          @generation.payload_dir.join('manifest.json').file?
       end
 
       # Carry the pending set across a restart.
@@ -1108,7 +1150,7 @@ module Woods
       #
       # @return [Boolean]
       def another_daemon_alive?
-        return false if ENV['WOODS_IGNORE_WATCH'] == '1'
+        return false if ENV['WOODS_IGNORE_WATCH'] == '1' && !@conservative_claims
         return false unless @status.alive?
 
         record = @status.read
@@ -1144,7 +1186,7 @@ module Woods
       # @return [Boolean] true when this instance now holds the claim (or
       #   was told to skip claiming entirely)
       def claim_startup?
-        return true if ENV['WOODS_IGNORE_WATCH'] == '1'
+        return true if ENV['WOODS_IGNORE_WATCH'] == '1' && !@conservative_claims
 
         with_claim_lock do
           3.times do
@@ -1272,11 +1314,17 @@ module Woods
       #   live daemon's claim
       def stale_claim?
         record = JSON.parse(File.read(claim_path))
+        return false if @conservative_claims && !verifiable_managed_claim?(record)
         return true unless same_claim_host?(record['host'])
 
         !claim_pid_alive?(record['pid'])
       rescue JSON::ParserError, SystemCallError
-        true
+        !@conservative_claims
+      end
+
+      def verifiable_managed_claim?(record)
+        record.is_a?(Hash) && record['host'] == Status.host_identity &&
+          record['pid'].is_a?(Integer) && record['pid'].positive?
       end
 
       # Mirrors {Status#alive?}'s host check: a pid is only meaningful inside

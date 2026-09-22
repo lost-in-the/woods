@@ -771,6 +771,20 @@ existing index before deciding another extraction is needed.
 | `WOODS_WATCH_CATCH_UP` | `1` (enabled) | Set to `"0"` to skip generation-watermark catch-up on daemon start. |
 | `WOODS_WATCH_TRUST_FOREIGN_HOST` | unset (disabled) | Set to `"1"` in each task/MCP reader to trust a foreign daemon's heartbeat for up to 15 minutes, without a local pid check. See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for clock bounds, degraded coverage, and startup limitations. |
 
+### Managed watcher startup
+
+**Unreleased after `2.0.0.beta4`.** `woods-watch` wraps the raw task for native
+Foreman/Puma lifecycle management. `--root PATH` selects the application working
+directory; `--boot-timeout SECONDS` defaults to `300` and bounds boot/handshake,
+not extraction. Explicit child argv follows `--`. Output-directory precedence
+remains `WOODS_OUTPUT`, then `Woods.configuration.output_dir`.
+
+Managed mode requires `WOODS_WATCH_IDLE_TIMEOUT` to be unset, preserves one owner,
+and never takes over a conflicting daemon. The optional Puma adapter only starts
+in its finalized development environment. See [startup and installation](WATCH_DAEMON.md#managed-development-startup)
+for the generator's explicit modes, portable receipt, update/removal, and the
+separate supervision status. Raw task settings above remain compatible.
+
 ### Opt-in plugin refresh hooks
 
 These settings control the plugin shell worker. Check installed

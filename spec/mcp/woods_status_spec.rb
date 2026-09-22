@@ -20,6 +20,25 @@ RSpec.describe 'woods_status tool' do
       expect(status[:server]).to include(name: 'woods', version: Woods::VERSION, index_dir: fixture_dir.to_s)
     end
 
+    it 'keeps supervisor diagnostics separate from daemon liveness for old indexes' do
+      expect(status[:supervision]).to eq(records: [])
+      expect(status[:watch]).to eq(state: 'absent')
+    end
+
+    it 'surfaces a parked launcher without claiming an active watcher' do
+      Dir.mktmpdir('woods-status-supervision-') do |index|
+        token = 'a' * 32
+        Woods::Watch::SupervisionStatus.new(index: index, token: token).write(
+          state: 'parked', reason: 'already_running', attempt: 'b' * 32, child_pid: nil
+        )
+        result = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: index)
+        expect(result[:watch]).to eq(state: 'absent')
+        expect(result[:supervision][:records]).to include(
+          include('launcher' => token, 'state' => 'parked', 'child_pid' => nil)
+        )
+      end
+    end
+
     it 'reports the manifest writer version independently of this reader (#323)' do
       writer = "#{Gem::Version.new(Woods::VERSION).segments.first + 1}.0.0"
       allow(reader).to receive(:manifest).and_return({ 'woods_version' => writer, 'counts' => {} })

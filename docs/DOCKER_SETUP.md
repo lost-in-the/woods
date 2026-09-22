@@ -87,9 +87,24 @@ docker compose exec app bundle exec rake woods:extract_framework
 
 Run the watcher as its own development service or process-manager entry, not as a one-off terminal command. Docker Desktop bind mounts may not deliver reliable native filesystem events; set `WOODS_WATCH_POLL=1` for polling when needed. The watcher updates structural generations automatically, while semantic vectors still require `woods:embed_incremental`.
 
+Use the application's actual Rails task entrypoint. If its root `Rakefile` wraps
+Compose, the container may need `bundle exec rails woods:watch`. Keep the raw
+task under one external restart owner: `restart: unless-stopped` recovers after
+Docker restarts while respecting an intentional stop; `on-failure` covers failed
+process exits but not Docker restart. Leave idle TTL unset for continuous work.
+
+Validate `docker compose config`: explicit YAML anchor keys can replace inherited
+mounts/environment, and short `depends_on` does not establish database readiness.
+Preserve the existing source/bundle mounts and use the application's healthcheck
+convention. With Grove, include the watcher in the applicable shared or isolated
+services list and align source/index mounts to the selected worktree. Follow
+[Docker and Grove verification](AUTOMATIC_MAINTENANCE.md#docker-verify-the-resolved-service)
+instead of copying a generic service that loses required settings.
+
 When host-side tasks or one-off containers read the daemon's shared index,
 `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets those readers trust its recent heartbeat.
 Set it in each reader process; Docker does not forward host variables by default.
+Ordinary Index MCP reads do not need this trust or the extraction writer lock.
 See [cross-host liveness](WATCH_DAEMON.md#cross-host-liveness) for the 15-minute
 crash-detection bound and single-supervisor requirement.
 

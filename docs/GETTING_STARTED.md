@@ -148,21 +148,22 @@ Reconnect the MCP server and check `woods_status`. For OpenAI, pgvector, Qdrant,
 
 ### Keep the index current
 
-For automatic maintenance, keep a watcher running beside the Rails development process:
-
-```bash
-bin/rails woods:watch
-```
-
-```text
-# Procfile.dev
-web:   bin/rails server
-woods: bundle exec rake woods:watch
-```
+Enable one watcher through the application's normal development startup. The
+[managed startup guide](WATCH_DAEMON.md#managed-development-startup) covers
+opt-in Puma integration for a simple Rails application, an owned Foreman entry
+for existing Procfile workflows, and external supervision for Docker/Grove.
+The managed launcher and generator are **unreleased after `2.0.0.beta4`**;
+check the installed commands before using them. Older packages can run the raw
+`bin/rails woods:watch` task under an external restart-capable supervisor.
 
 On startup it reconciles changes made since the last successful generation. While running it batches file events, reloads Rails code when safe, extracts affected units, and publishes atomically. The Index Server detects the new generation on its next call and reloads automatically. After the initial extraction, ordinary code edits need no manual extraction or MCP restart.
 
-When dependencies, initializers, database configuration, credentials, or schema change, Rails cannot safely reload all captured state. The watcher records a degraded reason and exits with status 75 so the process manager can restart it. Docker bind mounts may require polling; follow [Watch daemon](WATCH_DAEMON.md).
+When dependencies, initializers, database configuration, credentials, or schema
+change, the raw task exits 75 to request a fresh Rails boot. The managed launcher
+handles that restart internally; an external supervisor must handle it for the
+raw task. Do not add the bare task to Foreman. Docker bind mounts may require
+polling. See the [low-interaction workflow](AUTOMATIC_MAINTENANCE.md) for ownership,
+hooks, and the checks that establish automatic maintenance is active.
 
 The watcher maintains the structural index. If semantic retrieval is enabled, also run `bin/rails woods:embed_incremental` to update vectors. Without a resident watcher, run `bin/rails woods:incremental` after changes. Use a full `woods:extract` after major upgrades or when validation reports drift. CI and shared-artifact patterns are covered in [Incremental extraction](INCREMENTAL_EXTRACTION.md).
 
