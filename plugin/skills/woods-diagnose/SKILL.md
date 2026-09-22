@@ -296,6 +296,14 @@ endpoint to silence this warning.
 
 Console failures are live Rails/config/security failures, not Index failures. Verify authorized environment, Rails boot, `WOODS_CONSOLE_CONFIG` or direct `cwd`, blocked-table policy, credentials, and stderr.
 
+For stdio parse errors or response mismatches during tool calls, check for Rails
+logs on stdout. Through Woods `2.0.0.beta4`, stdout is restored after boot;
+configure the Console process's logger to use stderr or a file. Runtime stdout
+isolation is unreleased after that version: verify a patched installed revision
+before relying on it. Prefer `bundle exec rake woods:console`; direct Rails
+runner invocation cannot capture output already emitted during Rails boot.
+See the [Console logging diagnosis](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#rails-logs-break-mcp-protocol).
+
 For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
 
 For SQLite SQL refusals on `2.0.0.beta4` or a reviewed revision containing its Console corrections, consult the installed Console guide for supported identifier and table-reference syntax. Simplify the query to supported syntax; never relax the blocked-table or function policy. These builds also check resolved default scopes and scan normalized response values. Confirm a patched gem is published before recommending it, and check the installed version’s canonical Console guide; do not infer release availability from this plugin.

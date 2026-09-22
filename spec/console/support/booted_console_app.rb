@@ -47,3 +47,23 @@ end
 
 Rails.application.eager_load!
 Post.create!(title: 'Console contract row', status: 1)
+
+if ENV['WOODS_TEST_CONSOLE_STDOUT_LOGGING'] == '1'
+  # Install before the executable, as a host initializer would. The rake
+  # entry point has already redirected stdout; runner has not done so yet.
+  Rails.logger = Logger.new($stdout)
+  ActiveRecord::Base.logger = Rails.logger
+  ActiveSupport::Notifications.subscribe('sql.active_record') do |*, event|
+    next unless event[:sql].include?('SELECT COUNT')
+
+    puts 'woods-stdio-runtime-puts'
+    IO.for_fd(1, autoclose: false).syswrite("woods-stdio-runtime-fd\n")
+  end
+  # Eager loading is also performed by the executable after capture.
+  Rails.application.singleton_class.prepend(Module.new do
+    def eager_load!
+      Rails.logger.info('woods-stdio-boot-log')
+      super
+    end
+  end)
+end

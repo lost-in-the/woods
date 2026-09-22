@@ -122,7 +122,7 @@ jobs:
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
       # Each example boots its own subprocess with the matrix appraisal.
       - name: Run Console transport boot contracts
-        run: bin/rspec spec/console/transport_boot_spec.rb
+        run: bin/rspec spec/console/transport_boot_spec.rb spec/console/stdio_e2e_spec.rb
 
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full

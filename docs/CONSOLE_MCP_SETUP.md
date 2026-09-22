@@ -48,7 +48,7 @@ its token, allowed origins and TLS as described in [Option C](#option-c-http-rac
 
 The rake task does two things before starting the MCP server:
 
-1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC, they break the protocol. The rake task redirects stdout → stderr immediately, saves the real stdout fd, and restores it after boot completes.
+1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC. The rake task saves the protocol output and redirects application stdout to stderr. In the runtime isolation fix (unreleased after `2.0.0.beta4`), that redirection remains active throughout the server's lifetime; only the MCP transport writes to the saved protocol pipe. Rails loggers, `puts`, and writes to standard output during queries stay on stderr.
 2. **Calls `Rails.application.eager_load!`** to load all application models. Without eager loading, only the models that happen to be autoloaded before the first query appear in the registry.
 
 ### MCP client configuration
@@ -83,7 +83,7 @@ rake woods:console
   │    ├─ Rails.application.eager_load!
   │    ├─ build model registry from ActiveRecord::Base.descendants
   │    ├─ Server.build_embedded(model_validator:, safe_context:, ...)
-  │    └─ MCP::Server::Transports::StdioTransport.new(server).open
+  │    └─ Woods::Console::StdioTransport.new(server, output: protocol_out).open
   │
   └─ MCP server responds to tool calls via stdin/stdout
 ```
@@ -799,13 +799,15 @@ to enforce their narrower parameterized scope grammar.
 - **HTTP:** Check that the Rails server is running and listening on the expected port. An unauthenticated `curl http://localhost:3000/mcp/console` should return `401` when the enabled middleware and bearer-auth guard are mounted. A request with the configured bearer token proceeds to MCP protocol handling.
 - **All modes:** Run `bundle exec rake woods:console` directly in a terminal. It should hang (waiting for MCP protocol input) rather than exit immediately. If it exits, check the error output.
 
-### Rails boot noise breaks MCP protocol
+<a id="rails-boot-noise-breaks-mcp-protocol"></a>
 
-The rake task redirects stdout to stderr before Rails boots specifically to prevent this. If you see JSON parse errors from the MCP client, check:
+### Rails logs break MCP protocol
 
-1. You are using `bundle exec rake woods:console`, not `rails runner exe/woods-console` directly (the runner path handles this too, but via a different mechanism).
-2. No `puts` or `print` calls run at boot in your initializers before the task can capture stdout.
-3. Try running `bundle exec rake woods:console 2>/dev/null` to isolate, the MCP protocol output goes to stdout, Rails noise goes to stderr.
+Prefer `bundle exec rake woods:console`: it captures output before the Rails environment boots. Direct `rails runner` invocation can redirect output only after Rails has booted; it cannot recover an already contaminated protocol stream.
+
+The runtime isolation fix is unreleased after `2.0.0.beta4`. Earlier builds restore stdout after boot, so a logger that writes there can interleave SQL or application logs with MCP responses. On those builds, configure the Console process's application logger to write to stderr or a file. Discarding stderr does not fix logs written to stdout.
+
+With a build containing the fix, application output remains on stderr during tool calls. If protocol contamination persists, inspect wrapper scripts and output emitted before the rake task starts; reserve stdout for MCP and retain stderr for diagnosis. Do not disable Console redaction or credential scanning to troubleshoot transport logging.
 
 ### Models not visible to `console_status`
 

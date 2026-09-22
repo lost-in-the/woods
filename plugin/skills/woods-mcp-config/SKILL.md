@@ -116,6 +116,12 @@ Then add a direct Console process:
 
 For Docker/SSH, configure `~/.woods/console.yml` or `WOODS_CONSOLE_CONFIG`; the launcher owns process replacement. Direct Docker stdio uses `docker exec -i`, or `docker compose exec -T` to disable Compose's pseudo-TTY while retaining stdin.
 
+Reserve stdout for MCP. Through Woods `2.0.0.beta4`, configure the Console
+process's Rails logger to use stderr or a file, including logs during queries.
+Runtime stdout isolation is unreleased after that version; verify the installed
+revision before relying on it. Use the rake entry point to capture Rails boot
+output as well.
+
 Console registers nine default tools. `config.console_embedded_read_tools = true` explicitly adds `console_sql` and `console_query` for eleven total. Tier 2, Tier 3, and `console_eval` are inventory-only in supported packaged modes.
 
 ## Shape 3: Authenticated Console HTTP
