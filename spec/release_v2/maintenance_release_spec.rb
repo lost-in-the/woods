@@ -76,11 +76,11 @@ RSpec.describe 'trusted maintenance release profile' do
     expect(ReleaseProfile::MAINTENANCE_APPROVED_SHA).to be_nil.or match(/\A[0-9a-f]{40}\z/)
   end
 
-  it 'allowlists only the 1.6.3 target and immutable 1.6.2 base with publication disabled' do
+  it 'allowlists only the 1.6.3 target, immutable 1.6.2 base and reviewed candidate' do
     expect(ReleaseProfile::MAINTENANCE_TAG).to eq('v1.6.3')
     expect(ReleaseProfile::MAINTENANCE_BRANCH).to eq('release/1.6.3')
     expect(ReleaseProfile::MAINTENANCE_BASE).to eq('4b40e17fd68122a70ccf00d9d2ffb8af42171d3d')
-    expect(ReleaseProfile::MAINTENANCE_APPROVED_SHA).to be_nil
+    expect(ReleaseProfile::MAINTENANCE_APPROVED_SHA).to eq('60d6b7c4a3ddc421073f1fb57a7249eccb77826e')
   end
 
   it 'is disabled until a reviewed main commit pins the complete candidate SHA' do
