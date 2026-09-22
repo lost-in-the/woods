@@ -145,7 +145,7 @@ module Woods
 
       # Scan a value (String, Hash, Array, or any other object) for credentials.
       #
-      # Strings are gsub'd against every active pattern. Hash values and Array
+      # Strings and Symbols are scanned against every active pattern. Hash values and Array
       # elements are walked recursively; keys and non-string scalars
       # (Integer, Float, true/false, nil) pass through untouched.
       #
@@ -164,6 +164,7 @@ module Woods
       def walk(value, counts, index)
         case value
         when String then scan_string(value, counts, index)
+        when Symbol then scan_string(value.to_s, counts, index).to_sym
         when Hash   then walk_hash(value, counts, index)
         when Array  then value.map { |item| walk(item, counts, index) }
         else value

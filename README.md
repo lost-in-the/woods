@@ -5,7 +5,7 @@
 # Woods
 
 <!-- release-state:maintenance-banner -->
-> **Woods 1.6.2: prepared maintenance candidate.** This tree remains on the 1.6 maintenance line.
+> **Woods 1.6.3: prepared maintenance candidate.** This tree remains on the 1.6 maintenance line.
 > Preparation does not establish publication. Check [RubyGems versions](https://rubygems.org/gems/woods/versions)
 > before selecting an install version. See [maintenance release policy](CONTRIBUTING.md#maintenance-release).
 <!-- release-state:end -->

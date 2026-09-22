@@ -2,9 +2,13 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | Yes       |
+| Version | Supported | Until |
+|---------|-----------|-------|
+| 1.6.x | Security fixes only | 2027-02-20 |
+| < 1.6 | No | n/a |
+
+Only the newest patch of this maintenance line receives security fixes.
+The current repository security policy on `main` defines support for newer lines.
 
 ## Reporting a Vulnerability
 

@@ -23,22 +23,22 @@ RSpec.describe Woods::Console::SqlNoiseStripper do
 
     it 'strips a single-line block comment' do
       expect(described_class.strip_comments('SELECT /* inline */ 1'))
-        .to eq('SELECT  1')
+        .to eq('SELECT   1')
     end
 
     it 'strips a multi-line block comment' do
       sql = "SELECT /*\n  multi\n  line\n*/ 1"
-      expect(described_class.strip_comments(sql)).to eq('SELECT  1')
+      expect(described_class.strip_comments(sql)).to eq('SELECT   1')
     end
 
     it 'strips multiple block comments' do
       sql = 'SELECT /* a */ 1 /* b */ FROM t'
-      expect(described_class.strip_comments(sql)).to eq('SELECT  1  FROM t')
+      expect(described_class.strip_comments(sql)).to eq('SELECT   1   FROM t')
     end
 
     it 'strips both line and block comments in the same input' do
       sql = "SELECT /* block */ 1 -- line\nFROM t"
-      expect(described_class.strip_comments(sql)).to eq("SELECT  1 \nFROM t")
+      expect(described_class.strip_comments(sql)).to eq("SELECT   1 \nFROM t")
     end
 
     it 'returns the input unchanged when there are no comments' do

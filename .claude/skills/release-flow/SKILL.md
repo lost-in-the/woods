@@ -1,16 +1,16 @@
 ---
 name: release-flow
-description: Prepare the one-off Woods 1.6.2 maintenance release without publishing.
+description: Prepare the one-off Woods 1.6.3 maintenance release without publishing.
 ---
 
 # Legacy maintenance release flow
 
 Read `CONTRIBUTING.md#maintenance-release`. This adapter is limited to
-`1.6.1 -> 1.6.2.alpha -> 1.6.2`, with task-owned VERSION, changelog and README
+`1.6.2 -> 1.6.3.alpha -> 1.6.3`, with task-owned VERSION, changelog and README
 maintenance banner. Do not copy v2 surface claims into this tree.
 
-Run `bin/rake "release:reopen[1.6.2.alpha]"` and, after review/commit,
-`bin/rake "release:prepare[1.6.2]"` only when authorized. Both require a clean
+Run `bin/rake "release:reopen[1.6.3.alpha]"` and, after review/commit,
+`bin/rake "release:prepare[1.6.3]"` only when authorized. Both require a clean
 checkout. Never edit VERSION or release-state fences by hand, and never finish
 a refused transition manually. Ordinary release notes go under a classified
 Unreleased heading or in `changelog/<type>_<slug>.md`.

@@ -128,28 +128,33 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ## Maintenance release
 
-This tree has a one-off, no-publish preparation adapter for the reviewed 1.6.2
+This tree has a one-off, no-publish preparation adapter for the reviewed 1.6.3
 security patch while `main` carries the newer 2.0 prerelease line. It does not
 establish a permanent stable branch or authorize another maintenance version.
-The approved target is `release/1.6.2`, based on immutable `v1.6.1`. Create that
+The approved target is `release/1.6.3`, based on immutable `v1.6.2`. Create that
 remote target only after the trusted main maintenance policy is reviewed.
 
 From a clean checkout, the only supported transitions are:
 
 ```sh
-bin/rake "release:reopen[1.6.2.alpha]"
+bin/rake "release:reopen[1.6.3.alpha]"
 # Review and commit the generated development-state diff.
-bin/rake "release:prepare[1.6.2]"
+bin/rake "release:prepare[1.6.3]"
 ```
 
 The tasks never commit, tag, push, dispatch or publish. Never edit VERSION or the
-README maintenance `release-state` banner manually. The first reopen creates that
-banner; prepare updates it and folds classified Unreleased notes and optional
-`changelog/<type>_<slug>.md` entries into a dated release heading. Entry files are
+README maintenance `release-state` banner manually. The existing maintenance
+banner must be present; both tasks update it. Prepare also folds classified
+Unreleased notes and optional `changelog/<type>_<slug>.md` entries into a dated
+release heading. Entry files are
 nonempty Markdown without headings; supported types include `fixed`, `security`,
 `build`, and `documentation`. Invalid transitions, dirty trees, malformed notes,
 and missing/duplicate/unknown fences refuse before writes. This legacy profile
 has no v2 migration guide or v2 surface inventory requirement.
+
+CI also runs on pushes to the exact `release/1.6.3` branch, so a private-advisory
+merge receives upstream validation before the trusted-main SHA pin. Publication
+still requires a separate green tag-push run.
 
 Validate the full suite, lint, booted extraction, real Console credential rotation,
 and installed maintenance package tests. CI builds one gem plus its SHA-256
@@ -165,12 +170,12 @@ ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' -- \
   --options /dev/null spec/integration/maintenance_packaged_gem_spec.rb
 ```
 
-Preparation is not publication; check RubyGems before describing 1.6.2 as released.
+Preparation is not publication; check RubyGems before describing 1.6.3 as released.
 The legacy automatic tag publisher is disabled, and Bundler's `release`,
 `release:rubygem_push`, and `release:source_control_push` tasks abort. Only a
 maintainer may later tag the reviewed merge commit and dispatch the trusted
 **main** workflow. That workflow must explicitly allow the exact tag, protected
-maintenance branch, immutable 1.6.1 base, reviewed final candidate SHA, required
+maintenance branch, immutable 1.6.2 base, reviewed final candidate SHA, required
 CI jobs, and immutable artifact. An unpinned candidate remains blocked. First merge a reviewed trusted-main profile update pinning `approved_sha` to that
 exact maintenance merge SHA; only then may the maintainer tag it. The
 workflow publishes the already tested gem bytes; never rebuild or publish locally.

@@ -4,14 +4,14 @@ require_relative '../woods/release/preparer'
 require_relative '../woods/release/rake_support'
 
 namespace :release do
-  desc 'Prepare the reviewed one-off 1.6.2 maintenance candidate without publishing'
+  desc 'Prepare the reviewed one-off 1.6.3 maintenance candidate without publishing'
   task :prepare, [:version] do |_task, args|
     Woods::Release::RakeSupport.run('release:prepare', args[:version]) do |root, version|
       Woods::Release::Preparer.prepare(root: root, version: version)
     end
   end
 
-  desc 'Reopen 1.6.1 as 1.6.2.alpha without committing or tagging'
+  desc 'Reopen 1.6.2 as 1.6.3.alpha without committing or tagging'
   task :reopen, [:version] do |_task, args|
     Woods::Release::RakeSupport.run('release:reopen', args[:version]) do |root, version|
       Woods::Release::Preparer.reopen(root: root, version: version)

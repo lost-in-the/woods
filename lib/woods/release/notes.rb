@@ -18,7 +18,7 @@ module Woods
         state = VersionState.parse(version)
         original = File.read(File.join(root, 'README.md'), encoding: Encoding::UTF_8)
         validate_registered_fences!(root)
-        updated = replace_or_bootstrap(root, original, state)
+        updated = replace_banner(original, state)
         original == updated ? {} : { 'README.md' => updated }
       end
 
@@ -33,17 +33,10 @@ module Woods
         [e.message]
       end
 
-      def replace_or_bootstrap(root, source, state)
+      def replace_banner(source, state)
         return source.sub(FENCE, banner(state)) if source.match?(FENCE)
-        raise MissingFence, 'README.md: malformed maintenance banner' if source.include?('<!-- release-state:')
 
-        current = File.read(File.join(root, 'lib/woods/version.rb'))
-        bootstrap = current.match?(/^\s*VERSION = '1\.6\.1'$/) && state.to_s == '1.6.2.alpha'
-        unless bootstrap && source.scan(/^# Woods$/).size == 1
-          raise MissingFence, 'README.md: missing maintenance banner; only the first reopen may create it'
-        end
-
-        source.sub("# Woods\n", "# Woods\n\n#{banner(state)}")
+        raise MissingFence, 'README.md: missing or malformed maintenance banner'
       end
 
       def validate_registered_fences!(root)

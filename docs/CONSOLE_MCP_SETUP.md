@@ -438,6 +438,16 @@ Keep the flag off in environments where the Console isn't needed (production web
 
 ### `console_blocked_tables` (Layer 1 — table gate)
 
+The unreleased maintenance security patch checks the resolved SQL relation before
+model-tool reads, including default scopes and association reads. A model's nominal
+table being allowed does not authorize a scope that reads a blocked table.
+SQLite SQL uses a conservative table-reference grammar: use simple bare,
+double-quoted, or backtick identifiers and SELECT subqueries. Unsupported table
+factors are refused before execution. This maintenance line retains its existing
+dangerous-function denylist; it does not adopt the v2 function allowlist. Quoted
+spellings of already denied function names are denied too.
+
+
 Entries are lowercased table names. A tool call is rejected at dispatch time when:
 
 - `:model` argument resolves to a model whose `table_name` is blocked
@@ -447,6 +457,8 @@ Entries are lowercased table names. A tool call is rejected at dispatch time whe
 Use this to wall off tables that shouldn't appear in agent context regardless of redaction posture — EAV credential stores (`authorizations`, `settings` with secrets), audit logs with full request bodies, or PII stores with legal access restrictions. Rejection is observable via the `console.table_gate.rejected` structured log line.
 
 ### `console_disabled_scanner_patterns` (Layer 2 — content scanner)
+
+The unreleased maintenance patch redacts protected fields before custom JSON serializers run, materializes the response, and redacts again before credential scanning. This covers Symbol values and fields introduced during serialization. Both response renderers consume this same checked representation.
 
 The scanner runs after Layer 3 redaction, so it catches credential shapes that column and EAV patterns miss — e.g. a Stripe key pasted into a free-text `note` field, a JWT returned from a custom SQL query, or an access token logged by a callback. See `lib/woods/console/credential_scanner.rb` for the full rule list.
 

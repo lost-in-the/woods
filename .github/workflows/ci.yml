@@ -2,9 +2,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, 'release/1.6.2']
+    branches: [main, 'release/1.6.3']
   push:
-    tags: ['v1.6.2']
+    branches: ['release/1.6.3']
+    tags: ['v1.6.3']
 
 # Least-privilege default: CI only needs to read the checkout.
 # Per-job blocks can opt into stronger scopes if they ever need to.
@@ -72,6 +73,12 @@ jobs:
 
       - name: Run encrypted Console credential rotation
         run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb
+
+      - name: Run Console SQL and resolved relation policy
+        run: bundle exec rspec spec/integration/console_sqlite_policy_spec.rb spec/integration/console_resolved_relation_policy_spec.rb
+
+      - name: Run Console serialized credential policy
+        run: bundle exec rspec spec/integration/console_credential_serialization_spec.rb
 
       - name: Run Console HTTP origin integration
         run: bundle exec rspec spec/integration/console_http_origins_spec.rb

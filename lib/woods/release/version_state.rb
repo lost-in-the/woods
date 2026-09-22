@@ -137,7 +137,7 @@ module Woods
       # The git ref that immutably identifies this tree. An alpha is never
       # tagged, so its documentation and gemspec metadata point at the branch.
       def release_ref
-        alpha? ? 'release/1.6.2' : tag
+        alpha? ? 'release/1.6.3' : tag
       end
 
       # @raise [InvalidTransition] an alpha is never tagged

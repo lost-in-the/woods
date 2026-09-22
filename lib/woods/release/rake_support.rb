@@ -14,7 +14,7 @@ module Woods
       # Runs one transition and prints its report, turning any release refusal
       # into a clean abort rather than a backtrace.
       def run(task_name, version)
-        abort %(usage: bin/rake "#{task_name}[1.6.2]") if version.nil? || version.to_s.strip.empty?
+        abort %(usage: bin/rake "#{task_name}[1.6.3]") if version.nil? || version.to_s.strip.empty?
 
         puts yield(ROOT, version.to_s.strip).report
       rescue Woods::Release::Error => e

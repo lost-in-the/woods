@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'woods/console/sql_noise_stripper'
+require 'woods/console/sqlite_read_guard'
 
 # @see Woods
 module Woods
@@ -95,17 +96,17 @@ module Woods
         [kw, /\b#{kw}\b/i]
       end.freeze
 
-      # Frozen map of dangerous function name => regex matching a call to that function.
-      # Used by {#check_dangerous_functions!}.
-      DANGEROUS_FUNCTION_REGEXES = DANGEROUS_FUNCTIONS.to_h do |func|
-        [func, /\b#{func}\s*\(/i]
-      end.freeze
+      # @param dialect [Symbol, nil] Known connection dialect, when available
+      def initialize(dialect: nil)
+        @dialect = dialect
+      end
 
       # @raise [SqlValidationError] if the SQL is not a safe read-only statement
       def validate!(sql)
         raise SqlValidationError, 'SQL is empty' if sql.nil? || sql.strip.empty?
 
         normalized = sql.strip
+        SqliteReadGuard.validate!(normalized) if @dialect == :sqlite
 
         # Reject multiple statements (semicolons not inside string literals)
         if contains_multiple_statements?(normalized)
@@ -152,7 +153,7 @@ module Woods
       # @param sql [String]
       # @return [Boolean]
       def contains_multiple_statements?(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql)
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: @dialect || :postgres)
         stripped.include?(';')
       end
 
@@ -191,8 +192,12 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a dangerous function is found
       def check_dangerous_functions!(sql)
-        DANGEROUS_FUNCTION_REGEXES.each do |func, pattern|
-          raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed" if sql.match?(pattern)
+        view = SqlNoiseStripper.strip_noise(sql, dialect: @dialect || :postgres)
+        view.scan(/(?:"([^"\n]+)"|`([^`]+)`|\b([a-z_][a-z0-9_]*))\s*\(/i) do |quoted, backtick, bare|
+          func = (quoted || backtick || bare).downcase
+          next unless DANGEROUS_FUNCTIONS.include?(func)
+
+          raise SqlValidationError, "Rejected: dangerous function #{func} is not allowed"
         end
       end
 

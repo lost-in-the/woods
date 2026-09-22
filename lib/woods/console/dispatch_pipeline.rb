@@ -77,13 +77,31 @@ module Woods
         response = @conn_mgr.send_request(request)
         return error_from_response(response, request) unless response['ok']
 
-        result = @ctx.redact(response['result'])
-        result = scan_for_credentials(result, request)
-        text = @renderer ? @renderer.render_default(result) : JSON.pretty_generate(result)
-        success_response(text)
+        render_response(response['result'], request)
       rescue ConnectionError => e
         scanned = scan_for_credentials("Connection error: #{e.message}", request)
         error_response(scanned)
+      end
+
+      def render_response(result, request)
+        # Remove protected values before custom serializers run, then scan
+        # the materialized representation consumed by both response renderers.
+        result = @ctx.redact(result)
+        result = JSON.parse(JSON.generate(result))
+        result = @ctx.redact(result)
+        result = scan_for_credentials(result, request)
+        text = @renderer ? @renderer.render_default(result) : JSON.pretty_generate(result)
+        success_response(text)
+      rescue StandardError
+        # SDK 0.x includes uncaught exception messages in its tool errors.
+        # Serializer/parser/renderer messages may contain unscanned values.
+        rendering_error_response(request)
+      end
+
+      def rendering_error_response(request)
+        error_response(scan_for_credentials('Console response could not be serialized safely.', request))
+      rescue StandardError
+        error_response('[REDACTION_FAILED]')
       end
 
       def error_from_response(response, request)

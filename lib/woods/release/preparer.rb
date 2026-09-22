@@ -100,7 +100,7 @@ module Woods
         private
 
         def assert_maintenance_transition!(previous, target, operation)
-          expected = operation == :reopen ? %w[1.6.1 1.6.2.alpha] : %w[1.6.2.alpha 1.6.2]
+          expected = operation == :reopen ? %w[1.6.2 1.6.3.alpha] : %w[1.6.3.alpha 1.6.3]
           return if [previous.to_s, target.to_s] == expected
 
           raise VersionState::InvalidTransition,
@@ -147,7 +147,7 @@ module Woods
 
             Nothing has been committed, tagged, pushed, or published.
             Review the diff, run bin/rspec spec/release_legacy and the full CI/package checks,
-            then open a pull request into the approved release/1.6.2 target.
+            then open a pull request into the approved release/1.6.3 target.
             First land a reviewed trusted-main profile update pinning approved_sha to
             that exact maintenance merge SHA. The unpinned profile refuses publication.
             Only after the pin is reviewed and merged may the maintainer tag that SHA

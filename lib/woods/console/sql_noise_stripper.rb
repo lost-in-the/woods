@@ -24,7 +24,7 @@ module Woods
     #   SqlNoiseStripper.strip_literals("SELECT 'it\\'s ok' FROM t", dialect: :mysql)
     #   # => "SELECT '' FROM t"
     #
-    module SqlNoiseStripper
+    module SqlNoiseStripper # rubocop:disable Metrics/ModuleLength
       # Strips SQL line comments (`-- ...`) and block comments (`/* ... */`).
       # Line comments are stripped to (but not including) the newline so that
       # newline-separated statement structure is preserved for callers that
@@ -40,7 +40,7 @@ module Woods
 
       def self.strip_comments(sql)
         out = sql.gsub(LINE_COMMENT, '')
-        out.gsub(BLOCK_COMMENT, '')
+        out.gsub(BLOCK_COMMENT, ' ')
       end
 
       # Strips single-quoted string literals and (for the `:postgres` dialect)
@@ -53,7 +53,7 @@ module Woods
       # single-quote scanner.
       #
       # @param sql [String] the SQL string to process
-      # @param dialect [Symbol] `:postgres` (default) or `:mysql`.
+      # @param dialect [Symbol] `:postgres` (default), `:mysql`, or `:sqlite`.
       #   - `:postgres` — single-quoted strings support `''` as an apostrophe
       #     escape. Backslash is treated literally and does not escape quotes.
       #     Dollar-quoted strings (`$$...$$`, `$tag$...$tag$`) are also stripped.
@@ -61,13 +61,14 @@ module Woods
       #     and `''` (doubled-quote) as apostrophe escapes. Dollar-quoted strings
       #     are also stripped (MySQL does not use them, but stripping them is
       #     harmless and keeps the two dialects consistent).
+      #   - `:sqlite` — doubled apostrophes escape strings; dollar signs stay literal.
       # @return [String] a new string with all string literals replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
       DOLLAR_QUOTED = /\$(\w*)\$.*?\$\1\$/m
       SINGLE_QUOTED_POSTGRES = /'(?:''|[^'])*'/m
       SINGLE_QUOTED_MYSQL    = /'(?:\\.|''|[^'])*'/m
 
-      SUPPORTED_DIALECTS = %i[postgres mysql].freeze
+      SUPPORTED_DIALECTS = %i[postgres mysql sqlite].freeze
       private_constant :SUPPORTED_DIALECTS
 
       def self.strip_literals(sql, dialect: :postgres)
@@ -77,7 +78,7 @@ module Woods
 
         # Strip dollar-quoted strings first so stray apostrophes inside them
         # do not interfere with the single-quote scanner.
-        out = sql.gsub(DOLLAR_QUOTED, "''")
+        out = dialect == :sqlite ? sql : sql.gsub(DOLLAR_QUOTED, "''")
 
         pattern = dialect == :mysql ? SINGLE_QUOTED_MYSQL : SINGLE_QUOTED_POSTGRES
         out.gsub(pattern, "''")
@@ -98,7 +99,7 @@ module Woods
       # character rather than swallowing the rest of the statement.
       #
       # @param sql [String] the SQL string to process
-      # @param dialect [Symbol] `:postgres` (default) or `:mysql` — controls
+      # @param dialect [Symbol] `:postgres` (default), `:mysql`, or `:sqlite` — controls
       #   single-quote escape rules (see {.strip_literals}).
       # @return [String] a new string with comments removed and every string
       #   literal replaced by `''`
@@ -126,7 +127,16 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ch == '$' && (tag = dollar_tag_at(sql, i))
+          elsif ['"', '`'].include?(ch)
+            close = quoted_identifier_end(sql, i, ch)
+            if close
+              out << sql[i...close]
+              i = close
+            else
+              out << ch
+              i += 1
+            end
+          elsif dialect != :sqlite && ch == '$' && (tag = dollar_tag_at(sql, i))
             close = sql.index(tag, i + tag.length)
             if close
               out << "''"
@@ -141,6 +151,7 @@ module Woods
           elsif ch == '/' && sql[i + 1] == '*'
             close = sql.index('*/', i + 2)
             if close
+              out << ' '
               i = close + 2
             else
               # Unterminated block comment: never under-detect. Leave it in
@@ -157,6 +168,23 @@ module Woods
 
         out
       end
+
+      # Preserve quoted identifiers while shielding their comment markers.
+      # @api private
+      def self.quoted_identifier_end(sql, start, quote)
+        i = start + 1
+        while i < sql.length
+          if sql[i] == quote
+            return i + 1 unless sql[i + 1] == quote
+
+            i += 2
+          else
+            i += 1
+          end
+        end
+        nil
+      end
+      private_class_method :quoted_identifier_end
 
       # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
       # `$tag$`) at the start of the given slice.

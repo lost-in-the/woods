@@ -10,6 +10,7 @@ require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'scope_predicate_parser'
 require_relative 'sql_noise_stripper'
+require_relative 'sql_validator'
 require_relative 'table_gate'
 
 module Woods
@@ -425,8 +426,9 @@ module Woods
         return unless @table_gate
 
         begin
-          @table_gate.check_sql!(sql)
-        rescue TableGateError => e
+          SqliteReadGuard.validate!(sql) if sql_dialect == :sqlite
+          @table_gate.check_sql!(sql, dialect: sql_dialect == :sqlite ? :sqlite : nil)
+        rescue TableGateError, SqlValidationError => e
           raise ValidationError, e.message
         end
       end
@@ -454,7 +456,7 @@ module Woods
       def handle_count(params)
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
-        { 'count' => scope.count }
+        { 'count' => checked_relation(scope).count }
       end
 
       def handle_sample(params)
@@ -463,16 +465,17 @@ module Woods
         limit = [params.fetch('limit', 5).to_i, 25].min
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
-        records = scope.order(random_function).limit(limit)
+        records = checked_relation(scope.order(random_function).limit(limit))
         { 'records' => serialize_records(records, params['columns']) }
       end
 
       def handle_find(params)
         model = resolve_model(params['model'])
+        scope = checked_relation(model)
         record = if params['id']
-                   model.find_by(id: params['id'])
+                   scope.find_by(id: params['id'])
                  elsif params['by']
-                   model.find_by(params['by'])
+                   scope.find_by(params['by'])
                  end
         { 'record' => record ? serialize_record(record, params['columns']) : nil }
       end
@@ -484,7 +487,7 @@ module Woods
         limit = [params.fetch('limit', 100).to_i, 1000].min
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = scope.distinct if params['distinct']
-        values = scope.limit(limit).pluck(*columns.map(&:to_sym))
+        values = checked_relation(scope.limit(limit)).pluck(*columns.map(&:to_sym))
         { 'columns' => Array(columns), 'values' => values }
       end
 
@@ -501,6 +504,7 @@ module Woods
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
 
+        scope = checked_relation(scope)
         value = if function == 'count'
                   column ? scope.count(column.to_sym) : scope.count
                 else
@@ -511,7 +515,7 @@ module Woods
 
       def handle_association_count(params)
         model = resolve_model(params['model'])
-        record = model.find(params['id'])
+        record = checked_relation(model).find(params['id'])
         association_name = params['association']
 
         unless model.reflect_on_association(association_name.to_sym)
@@ -527,7 +531,26 @@ module Woods
 
         scope = record.public_send(association_name)
         scope = apply_scope(scope, params['scope'])
-        { 'count' => scope.count }
+        { 'count' => checked_relation(scope).count }
+      end
+
+      # Resolve the default scope once and execute the same checked relation.
+      # @param scope [Class, ActiveRecord::Relation] Pending model read
+      # @return [Class, ActiveRecord::Relation] Authorized relation
+      def checked_relation(scope)
+        return scope unless @table_gate
+
+        relation = scope.all
+        gate_sql!(relation.to_sql)
+        relation
+      end
+
+      def sql_dialect
+        name = active_connection.adapter_name.to_s.downcase
+        return :sqlite if name.include?('sqlite')
+        return :mysql if name.include?('mysql')
+
+        :postgres
       end
 
       def gate_association!(model_name, association)
@@ -575,7 +598,7 @@ module Woods
 
         scope = apply_scope(model, params['scope'], model_name: params['model'])
         scope = apply_columns(scope, params['columns'])
-        records = scope.order(order_by => direction.to_sym).limit(limit)
+        records = checked_relation(scope.order(order_by => direction.to_sym).limit(limit))
         { 'records' => serialize_records(records, params['columns']) }
       end
 
@@ -599,7 +622,7 @@ module Woods
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
         require_relative 'sql_validator'
-        SqlValidator.new.validate!(sql)
+        SqlValidator.new(dialect: sql_dialect).validate!(sql)
         # Post-validation, pre-execution TableGate — blocks every configured
         # table even if the sql is otherwise well-formed.
         gate_sql!(sql)

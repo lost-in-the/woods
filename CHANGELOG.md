@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-09-22
+
+### Build
+
+- Add the explicit, no-publish preparation cycle for the 1.6.3 security maintenance release; keep version writes task-owned and publication dependent on a reviewed trusted-main SHA pin.
+
+### Security
+
+- Apply blocked-table policy to resolved model relations and SQLite table syntax before reads, retain table boundaries across comments, and reject quoted spellings of existing denied SQL functions.
+- Scan the serialized Console response after protected-field redaction so Symbol values and custom JSON output cannot bypass credential scanning.
+
 ## [1.6.2] - 2026-09-18
 
 ### Fixed

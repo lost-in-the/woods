@@ -98,6 +98,10 @@ RSpec.describe 'Woods::Console::Server.build_embedded' do
         stub_const('Arel', Module.new.tap { |m| m.define_singleton_method(:sql) { |raw_sql| raw_sql } })
       end
       Arel.define_singleton_method(:sql) { |raw_sql| raw_sql } unless Arel.respond_to?(:sql)
+      allow(user_model).to receive(:all).and_return(user_model)
+      allow(user_model).to receive(:to_sql).and_return('SELECT * FROM users')
+      allow(limited).to receive(:all).and_return(limited)
+      allow(limited).to receive(:to_sql).and_return('SELECT * FROM users LIMIT 3')
       allow(user_model).to receive(:order).and_return(ordered)
       allow(ordered).to receive(:limit).and_return(limited)
       allow(limited).to receive(:map).and_yield(record).and_return([record.attributes])

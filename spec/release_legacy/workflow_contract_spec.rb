@@ -9,8 +9,9 @@ RSpec.describe 'Maintenance CI publication boundary' do
 
   it 'tests maintenance PRs and only the allowlisted maintenance tag' do
     triggers = ci.fetch('on') { ci.fetch(true) }
-    expect(triggers.dig('pull_request', 'branches')).to include('release/1.6.2')
-    expect(triggers.dig('push', 'tags')).to eq(['v1.6.2'])
+    expect(triggers.dig('pull_request', 'branches')).to include('release/1.6.3')
+    expect(triggers.dig('push', 'branches')).to eq(['release/1.6.3'])
+    expect(triggers.dig('push', 'tags')).to eq(['v1.6.3'])
   end
 
   it 'retains the real credential rotation gate in every booted Rails row' do

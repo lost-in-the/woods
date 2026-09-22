@@ -120,17 +120,60 @@ module Woods
       #
       # @param sql [String, nil] the SQL string to scan
       # @return [Array<String>] identifiers in first-encounter order, deduplicated
-      def self.identifiers_in(sql)
+      def self.identifiers_in(sql, dialect: nil)
         return [] if sql.nil? || sql.empty?
 
         results = []
-        %i[postgres mysql].each do |dialect|
+        (dialect ? [dialect] : %i[postgres mysql]).each do |dialect|
           stripped = strip_noise(sql, dialect: dialect)
           collect_join_identifiers(stripped, results)
           collect_from_identifiers(stripped, results)
         end
         results.uniq
       end
+
+      # Table-factor prefixes, retaining commas after balanced subqueries and
+      # JOIN predicates. Each nested FROM/JOIN is also scanned independently.
+      # @param sql [String] noise-stripped SQL
+      # @return [Array<String>]
+      def self.relation_factors(sql)
+        sql.to_enum(:scan, /\b(?:FROM|JOIN)\s+/i).flat_map do
+          suffix = sql[Regexp.last_match.end(0)..]
+          split_top_level_commas(relation_clause(suffix))
+        end
+      end
+
+      # Quoted tokens shield punctuation and clause words; a closing parenthesis
+      # at depth zero ends this query's clause, not a nested table expression.
+      def self.relation_clause(suffix)
+        depth = 0
+        tokens = /
+          "(?:[^"]|"")*"|`(?:[^`]|``)*`|''|[()]|
+          \b(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|WINDOW)\b
+        /ix
+        suffix.to_enum(:scan, tokens).each do
+          token = Regexp.last_match[0]
+          start = Regexp.last_match.begin(0)
+          finish = Regexp.last_match.end(0)
+          boundary = token == ')' || relation_keyword_boundary?(suffix[0...start], suffix[finish..], token)
+          return suffix[0...start] if depth.zero? && boundary
+
+          depth += 1 if token == '('
+          depth -= 1 if token == ')'
+        end
+        suffix
+      end
+      private_class_method :relation_clause
+
+      def self.relation_keyword_boundary?(prefix, rest, token)
+        return false unless token.match?(/\A[A-Za-z]/)
+        return false if prefix.strip.empty? || prefix.match?(/(?:,|\bAS)\s*\z/i) || rest.lstrip.start_with?(',')
+        return rest.match?(/\A\s+BY\b/i) if %w[GROUP ORDER].include?(token.upcase)
+        return rest.match?(/\A\s+\w+\s+AS\b/i) if token.casecmp?('WINDOW')
+
+        true
+      end
+      private_class_method :relation_keyword_boundary?
 
       # @api private
       # Comments and literals must be stripped in a single combined pass —
@@ -153,12 +196,9 @@ module Woods
 
       # @api private
       def self.collect_from_identifiers(sql, results)
-        sql.scan(FROM_CLAUSE) do
-          clause = Regexp.last_match[:clause]
-          split_top_level_commas(clause).each do |chunk|
-            ident = lead_identifier(chunk)
-            results << ident if ident
-          end
+        relation_factors(sql).each do |chunk|
+          ident = lead_identifier(chunk)
+          results << ident if ident
         end
       end
       private_class_method :collect_from_identifiers
@@ -169,7 +209,7 @@ module Woods
         depth = 0
         buf = +''
         parts = []
-        clause.each_char do |ch|
+        clause.scan(/"(?:[^"]|"")*"|`(?:[^`]|``)*`|''|./m).each do |ch|
           case ch
           when '('
             depth += 1
