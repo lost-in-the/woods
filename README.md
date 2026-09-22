@@ -128,13 +128,16 @@ The [lexical guide](docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) an
 
 ## Keeping the index current
 
-Run a watcher alongside your development processes:
+Run one watcher through your normal development startup. It catches up on
+changes, publishes complete generations, and lets the Index Server refresh on
+later tool calls. The [startup guide](docs/WATCH_DAEMON.md#managed-development-startup)
+covers Puma, existing Foreman workflows, and Docker/Grove supervision. Managed
+startup is **unreleased; check installed capabilities**. Older packages run the raw
+`bin/rails woods:watch` task under an external restart-capable supervisor.
 
-```bash
-bin/rails woods:watch
-```
-
-It catches up on changes, publishes complete generations, and lets the Index Server refresh on later tool calls. Use a process supervisor for changes that require the watcher to restart. Without a watcher, run `bin/rails woods:incremental` after edits or `bin/rails woods:extract` for a full rebuild.
+Without a watcher, run `bin/rails woods:incremental` after edits or
+`bin/rails woods:extract` for a full rebuild. MCP registration alone does not
+enable automatic maintenance.
 
 Incremental cost depends on the affected code and relationships; broad changes can cost as much as a full extraction. Semantic embeddings have a separate update step. See [Watch daemon](docs/WATCH_DAEMON.md), [incremental extraction](docs/INCREMENTAL_EXTRACTION.md), and [source freshness](docs/SOURCE_FRESHNESS.md).
 

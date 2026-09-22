@@ -66,7 +66,7 @@ Gem::Specification.new do |spec|
     Dir['lib/woods/release', 'lib/woods/release/**/*']
   )
   spec.bindir = 'exe'
-  spec.executables = %w[woods-mcp woods-mcp-start woods-console-mcp woods-console
+  spec.executables = %w[woods-watch woods-mcp woods-mcp-start woods-console-mcp woods-console
                         woods-mcp-http woods-agent-config woods-extract woods-hook-context]
   spec.require_paths = ['lib']
 

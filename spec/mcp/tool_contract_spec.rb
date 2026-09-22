@@ -355,7 +355,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                                 [%w[retriever configured], true],
                                                 [%w[features notion_configured], true],
                                                 key_sets: {
-                                                  [] => %w[ready server index watch retriever bootstrap features]
+                                                  [] => %w[ready server index watch supervision retriever bootstrap features]
                                                 }
                                               ), properties: {
                                                 'source_check' => enum_contract(%w[quick deep], nil, 10_000)

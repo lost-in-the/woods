@@ -110,7 +110,30 @@ When Woods is installed only in Docker, launch it through the application servic
 
 Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
 
-Offer to add `bundle exec rake woods:watch` to the existing development process manager. When authorized, it catches up missed changes and automatically maintains the structural index; the Index Server refreshes on its next call, so ordinary edits need no manual extraction or MCP restart. Use the standalone watch command; do not prepend the `environment` task. Check the installed version's watch guide before relying on automatic startup reconciliation. State that live boot-captured changes require supervisor restart, Docker may need `WOODS_WATCH_POLL=1`, and semantic vectors still need `woods:embed_incremental`.
+Offer one automatic-maintenance owner within the setup scope. The managed launcher,
+watcher generator, and Puma adapter (#538) are **unreleased after `2.0.0.beta4`**.
+Record the loaded gem path and revision, then verify `bundle exec woods-watch
+--help` and `bin/rails generate woods:watch --help` before using them. Follow the
+[managed startup runbook](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup):
+Puma for simple Rails startup, an explicit verified Foreman command/Procfile, or
+the existing external Docker/Grove supervisor. Preview before applying within
+existing authorization. Preserve `bin/dev`; never claim an unused Procfile is
+active. Keep the portable receipt with generated files and respect edit conflicts.
+Puma installation supports the normal default `config/puma.rb` route; an existing
+environment-specific file or custom `-C` route needs a different explicit owner.
+For an interrupted install, use the generator's `--operation recover --pretend`
+before applying recovery; preserve journals when concurrent edits block it. The
+Rails generator command boots the app first: use the runbook's direct bundled
+Ruby recovery helper when an initializer prevents boot.
+
+On older gems, use the raw task only with a restart-capable external supervisor;
+do not place it bare in Foreman, where exit 75 stops the whole stack. Use the
+application's real Rails task entrypoint without a preceding `environment` task.
+Managed mode rejects idle TTL and does not take over conflicting owners. Verify
+startup catch-up, an edit, and a planned restart through the existing MCP reader;
+for Grove, also verify worktree/source/index alignment. Docker may need polling.
+Semantic vectors still need `woods:embed_incremental`; hooks and MCP registration
+do not install watcher startup.
 
 Foreign-host heartbeat trust (`WOODS_WATCH_TRUST_FOREIGN_HOST=1`, #321) is available in
 Woods `2.0.0.beta3`.
@@ -161,7 +184,12 @@ Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets,
 
 ## Handoff
 
-Report the Woods version, branch, files changed, commands/results, index path, MCP calls verified, semantic retrieval status, Console status, and unresolved risks. Never infer availability from source schemas alone.
+Report the Woods version/revision, branch, files changed, commands/results, index
+path, MCP calls verified, semantic retrieval and Console status, and unresolved
+risks. For automatic maintenance record the owner, actual startup command,
+completed catch-up, observed edit/restart, and worktree verification. Report
+refresh hooks, session checks, and context hints separately. Never infer
+availability from source schemas or a live process alone.
 
 Canonical runbook: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md).
 

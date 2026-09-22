@@ -17,7 +17,7 @@ module PackagedGemSpec
   ROOT = File.expand_path('../..', __dir__)
   EXECUTABLES = %w[
     woods-mcp woods-mcp-start woods-console-mcp woods-console woods-mcp-http woods-agent-config woods-extract
-    woods-hook-context
+    woods-hook-context woods-watch
   ].freeze
   COMMUNITY_FILES = %w[
     LICENSE.txt
@@ -242,6 +242,14 @@ RSpec.describe 'packaged gem' do
 
       expect(status).to be_success, "require 'woods' failed outside the checkout:\n#{stderr}"
       expect(stdout).to eq("ok\n")
+    end
+
+    it 'loads the installed watcher launcher without Rails or a repository load path' do
+      executable = File.join(@smoke_gem_home, 'bin', 'woods-watch')
+      stdout, stderr, status = Open3.capture3(smoke_env, executable, '--help', chdir: @package_tmp)
+      expect(status).to be_success, stderr
+      expect(stdout).to eq('')
+      expect(stderr).to include('Usage: woods-watch', '--root', '--boot-timeout')
     end
 
     it 'loads the installed configuration lifecycle command without Rails or a repository load path' do
@@ -765,7 +773,8 @@ RSpec.describe 'packaged gem' do
         'woods-console-mcp' => [],
         'woods-console' => [],
         'woods-mcp-http' => ['/definitely/missing/woods-index'],
-        'woods-agent-config' => ['unsupported-command']
+        'woods-agent-config' => ['unsupported-command'],
+        'woods-watch' => ['--', '/definitely/missing/woods-task']
       }
 
       cases.each do |name, arguments|

@@ -123,6 +123,9 @@ namespace :woods do
 
   desc 'Watch the app and keep the index current (resident daemon)'
   task :watch do
+    require 'woods/watch/managed_child'
+    managed_child = Woods::Watch::ManagedChild.from_env
+    managed_child&.call(:task_loaded, woods_version: Woods::VERSION)
     # Observe inputs before Rails initializes. A snapshot taken in Daemon.new
     # would silently bless edits made while initializers were running.
     require 'woods/watch/boot_snapshot'
@@ -130,6 +133,11 @@ namespace :woods do
     fresh_environment = !environment.already_invoked && !Rails.application.initialized?
     boot_snapshot = Woods::Watch::BootSnapshot.new(root: Rails.root) if fresh_environment
     environment.invoke
+    if managed_child && !Rails.env.development?
+      managed_child.call(:terminal, reason: 'unsupported_environment')
+      warn 'Managed Woods watching requires the finalized Rails development environment.'
+      next
+    end
     # Both, and the extractor is not optional. The daemon's default
     # extractor_factory names Woods::Extractor lazily, so omitting this require
     # loaded and started cleanly and then NameError'd on the first real cycle —
@@ -140,6 +148,7 @@ namespace :woods do
     require 'woods/watch/daemon'
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+    managed_child&.call(:identity, root: File.expand_path(Rails.root.to_s), index: File.expand_path(output_dir.to_s))
 
     poll_interval = begin
       Float(ENV.fetch('WOODS_WATCH_POLL_INTERVAL', Woods::Watch::Watcher::DEFAULT_POLL_INTERVAL))
@@ -162,6 +171,8 @@ namespace :woods do
       idle_timeout: ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT', nil) && Float(ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT')),
       catch_up: ENV['WOODS_WATCH_CATCH_UP'] != '0',
       boot_snapshot: boot_snapshot,
+      lifecycle: managed_child,
+      conservative_claims: !managed_child.nil?,
       logger: Rails.logger
     )
 
@@ -182,6 +193,7 @@ namespace :woods do
     puts
 
     reason = daemon.run
+    managed_child&.call(:terminal, reason: reason.to_s)
 
     if reason == :restart_required
       # Boot-captured state changed; Rails cannot reload it. Exit non-zero so
@@ -192,6 +204,8 @@ namespace :woods do
     end
 
     puts 'Watcher stopped.'
+  ensure
+    managed_child&.close
   end
 
   desc 'Keep watch over the woods — resident index daemon (alias for watch)'

@@ -53,6 +53,37 @@ version. See [manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-pro
 
 If a tool call fails with **"Tool not found: … not available in the installed Woods v…"**, the client is asking for a tool a newer gem provides. Run `bundle update woods` and reconnect the MCP server, then retry.
 
+### Watcher startup or planned restart fails
+
+Managed `woods-watch` startup is **unreleased after `2.0.0.beta4`**; record the
+loaded version/path and revision, then verify executable and generator help.
+If changing an initializer stops every Foreman process, replace a bare
+`woods:watch` entry with the [managed setup](WATCH_DAEMON.md#managed-development-startup).
+
+Read launcher logs and `woods_status` supervision records separately from daemon
+liveness and index freshness. `retrying` means the last generation remains usable
+while boot is retried. A parked ownership/protocol conflict requires correcting
+the selected owner or installed command and restarting that owner; do not delete
+claim files or kill PIDs taken from status. No index-visible record exists before
+the first boot resolves the application's output directory.
+
+Unset `WOODS_WATCH_IDLE_TIMEOUT` in managed modes. If the boot deadline is reached,
+diagnose Bundler/initializer startup before increasing `--boot-timeout`; a valid
+long extraction has a separate readiness state and is not bounded by that clock.
+If setup created a Procfile but normal `bin/dev` still only launches Rails, choose
+Puma or explicitly run the selected Foreman command. The generator never rewrites
+`bin/dev` or starts services during preview.
+
+If installation reports a pending transaction, use `woods:watch --operation
+recover` through the Rails generator, initially with `--pretend`; see
+[owned setup recovery](WATCH_DAEMON.md#ownership-updates-and-removal). That Rails
+command boots the application first. For broken initializers use the documented
+direct bundled Ruby helper, which does not boot Rails or require task discovery.
+Both refuse to overwrite intervening edits. A Puma setup refusal for
+`config/puma/development.rb` means the default
+configuration would bypass the generated plugin; select an external/Foreman
+arrangement instead of installing an inactive directive.
+
 ### Semantic graph validation errors
 
 In development versions containing #413, `woods:validate` rejects graphs that

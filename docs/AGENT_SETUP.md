@@ -221,18 +221,21 @@ If `codebase_retrieve` reports that semantic search is disabled, that is expecte
 
 ## 8. Offer automatic index maintenance
 
-Ask whether the owner wants Woods added to the development process manager. If authorized, use the repository's existing Procfile or equivalent convention:
-
-```text
-web:   bin/rails server
-woods: bundle exec rake woods:watch
-```
+Within the owner's setup authorization, select one development startup owner.
+Follow [managed startup](WATCH_DAEMON.md#managed-development-startup): Puma for
+simple Rails startup, a verified existing Foreman command/Procfile, or the existing
+external Docker/Grove supervisor. The launcher/generator are **unreleased after
+`2.0.0.beta4`**; check installed `woods-watch --help` and generator help first.
+Preserve `bin/dev`; a file that only starts Rails does not consume a Procfile.
+For older gems use their raw task with a restart-capable external supervisor,
+not a bare Foreman entry.
 
 The watcher catches up missed changes, maintains the structural index as files change, and publishes generations the Index MCP server detects automatically. Ordinary edits then need no manual re-extraction or MCP restart. It should run in development, not production.
 
 Report these boundaries in the handoff:
 
-- boot-captured changes make the watcher exit 75 and require supervisor restart;
+- raw tasks exit 75 for boot-captured changes; managed launchers absorb that restart;
+- managed mode rejects idle TTL and parks ownership conflicts without taking over;
 - container bind mounts may require `WOODS_WATCH_POLL=1`;
 - semantic vectors still require `woods:embed_incremental`;
 - without a resident watcher, the fallback is `woods:incremental` after changes.
@@ -275,7 +278,11 @@ Verified capabilities:
 - search/lookup/dependents checked: yes/no
 - retrieval: disabled/lexical/semantic (provider when semantic)
 - Console MCP: disabled/enabled (authorization)
-- automatic structural updates: disabled/enabled (process manager)
+- automatic structural updates: disabled/enabled (owner and actual startup command)
+- served root/index and completed startup catch-up:
+- edit and planned restart observed through existing MCP connection:
+- worktree/Grove switching verified (if applicable):
+- post-edit hooks / session freshness checks / context hints: separate enablement
 
 Follow-up or unresolved risk:
 ```

@@ -12,6 +12,7 @@ require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../tasks'
 require_relative '../watch/status'
+require_relative '../watch/supervision_status'
 require_relative '../filename_utils'
 require_relative '../update_check'
 require_relative '../retrieval/source_evidence'
@@ -2139,6 +2140,7 @@ module Woods
             },
             index: index_section(manifest, extracted_at, staleness, index_dir, reader, source_check),
             watch: watch_section(index_dir),
+            supervision: index_dir ? Woods::Watch::SupervisionStatus.read(index_dir.to_s) : { records: [] },
             retriever: {
               configured: !retriever.nil?,
               class: retriever&.class&.name,
