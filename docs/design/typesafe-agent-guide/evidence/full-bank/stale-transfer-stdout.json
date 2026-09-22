@@ -1,0 +1,316 @@
+{
+  "classification": "Conditional additional mechanism; original atomicity label is unchanged",
+  "premise": "Separate transfers receive snapshots of an overlapping wallet read before the first transfer commits",
+  "method": "Deterministic admissible read/commit interleaving; not simultaneous-thread testing",
+  "runtime": {
+    "rails": "8.0.5.1",
+    "ruby": "3.3.1",
+    "adapter": "SQLite"
+  },
+  "candidate_sha": "65ef6c0a87a95990f2f41250d699de20240b14df",
+  "working_tree": [],
+  "model_columns": [
+    "id",
+    "balance",
+    "limit"
+  ],
+  "optimistic_locking_disabled": true,
+  "configured_locking_column": "lock_version",
+  "source_files": {
+    "app/services/review_credit_transfer.rb": "23586f679533faeddba36b03d1f0ea92d6ae8ce0ca1c9ecefade817ec5201c3b",
+    "app/models/review_wallet.rb": "c80fa4edb97bfeb8a29b18db3e90dcc9a674ac741a0006cd4f97123a27278557",
+    "db/schema.rb": "80ca1f6285f1beb53d7bf86fe2bd055825e8874aa7b8112fb8eeb7af53d05f10"
+  },
+  "scenarios": {
+    "shared_destination": {
+      "stale": {
+        "loading": "both snapshots read before first transfer",
+        "before": {
+          "sender_a": 100,
+          "sender_b": 100,
+          "recipient": 0
+        },
+        "steps": [
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender_a": 90,
+              "sender_b": 100,
+              "recipient": 10
+            }
+          },
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender_a": 90,
+              "sender_b": 90,
+              "recipient": 10
+            }
+          }
+        ],
+        "after": {
+          "sender_a": 90,
+          "sender_b": 90,
+          "recipient": 10
+        },
+        "expected": {
+          "sender_a": 90,
+          "sender_b": 90,
+          "recipient": 20
+        },
+        "total_before": 200,
+        "total_after": 190,
+        "expected_balances_hold": false
+      },
+      "fresh": {
+        "loading": "fresh find before each transfer",
+        "before": {
+          "sender_a": 100,
+          "sender_b": 100,
+          "recipient": 0
+        },
+        "steps": [
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender_a": 90,
+              "sender_b": 100,
+              "recipient": 10
+            }
+          },
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 10
+            },
+            "persisted_after": {
+              "sender_a": 90,
+              "sender_b": 90,
+              "recipient": 20
+            }
+          }
+        ],
+        "after": {
+          "sender_a": 90,
+          "sender_b": 90,
+          "recipient": 20
+        },
+        "expected": {
+          "sender_a": 90,
+          "sender_b": 90,
+          "recipient": 20
+        },
+        "total_before": 200,
+        "total_after": 200,
+        "expected_balances_hold": true
+      }
+    },
+    "shared_source": {
+      "stale": {
+        "loading": "both snapshots read before first transfer",
+        "before": {
+          "sender": 100,
+          "recipient_a": 0,
+          "recipient_b": 0
+        },
+        "steps": [
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender": 90,
+              "recipient_a": 10,
+              "recipient_b": 0
+            }
+          },
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender": 90,
+              "recipient_a": 10,
+              "recipient_b": 10
+            }
+          }
+        ],
+        "after": {
+          "sender": 90,
+          "recipient_a": 10,
+          "recipient_b": 10
+        },
+        "expected": {
+          "sender": 80,
+          "recipient_a": 10,
+          "recipient_b": 10
+        },
+        "total_before": 100,
+        "total_after": 110,
+        "expected_balances_hold": false
+      },
+      "fresh": {
+        "loading": "fresh find before each transfer",
+        "before": {
+          "sender": 100,
+          "recipient_a": 0,
+          "recipient_b": 0
+        },
+        "steps": [
+          {
+            "loaded_before": {
+              "source": 100,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender": 90,
+              "recipient_a": 10,
+              "recipient_b": 0
+            }
+          },
+          {
+            "loaded_before": {
+              "source": 90,
+              "destination": 0
+            },
+            "persisted_after": {
+              "sender": 80,
+              "recipient_a": 10,
+              "recipient_b": 10
+            }
+          }
+        ],
+        "after": {
+          "sender": 80,
+          "recipient_a": 10,
+          "recipient_b": 10
+        },
+        "expected": {
+          "sender": 80,
+          "recipient_a": 10,
+          "recipient_b": 10
+        },
+        "total_before": 100,
+        "total_after": 100,
+        "expected_balances_hold": true
+      }
+    }
+  },
+  "observed_sql": [
+    "PRAGMA table_xinfo(\"review_wallets\")",
+    "SELECT sql FROM\n  (SELECT * FROM sqlite_master UNION ALL\n   SELECT * FROM sqlite_temp_master)\nWHERE type = 'table' AND name = 'review_wallets'\n",
+    "PRAGMA table_xinfo(\"review_wallets\")",
+    "SELECT sql FROM\n  (SELECT * FROM sqlite_master UNION ALL\n   SELECT * FROM sqlite_temp_master)\nWHERE type = 'table' AND name = 'review_wallets'\n",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "INSERT INTO \"review_wallets\" (\"balance\", \"limit\") VALUES (?, ?) RETURNING \"id\"",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "UPDATE \"review_wallets\" SET \"balance\" = ? WHERE \"review_wallets\".\"id\" = ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?",
+    "SELECT \"review_wallets\".* FROM \"review_wallets\" WHERE \"review_wallets\".\"id\" = ? LIMIT ?"
+  ]
+}

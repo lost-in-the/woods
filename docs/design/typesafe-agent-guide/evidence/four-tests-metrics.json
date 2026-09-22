@@ -1,0 +1,914 @@
+{
+  "interpretation": "Four task blocks with paired conditions; repeated tests/budgets are not independent tasks. Usage unknown remains null. Primary labels unchanged.",
+  "overall": {
+    "intended": 28,
+    "accepted": 26,
+    "statuses": {
+      "accepted": 26,
+      "abstention": 2
+    },
+    "context_tokens": 71954,
+    "usage": {
+      "input_tokens": 332359,
+      "cached_input_tokens": 119680,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 12411,
+      "reasoning_output_tokens": 3905
+    },
+    "author_seconds_sum": 378.35238013998605
+  },
+  "arms": {
+    "bm25_1000_r1": {
+      "intended": 4,
+      "accepted": 3,
+      "statuses": {
+        "accepted": 3,
+        "abstention": 1
+      },
+      "context_tokens": 4000,
+      "usage": {
+        "input_tokens": 41175,
+        "cached_input_tokens": 7040,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1303,
+        "reasoning_output_tokens": 478
+      },
+      "author_seconds_sum": 44.870861592004076
+    },
+    "bm25_1000_r2": {
+      "intended": 4,
+      "accepted": 3,
+      "statuses": {
+        "abstention": 1,
+        "accepted": 3
+      },
+      "context_tokens": 4000,
+      "usage": {
+        "input_tokens": 41169,
+        "cached_input_tokens": 14080,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1575,
+        "reasoning_output_tokens": 744
+      },
+      "author_seconds_sum": 52.42721141199581
+    },
+    "bm25_3000_r1": {
+      "intended": 4,
+      "accepted": 4,
+      "statuses": {
+        "accepted": 4
+      },
+      "context_tokens": 11999,
+      "usage": {
+        "input_tokens": 49215,
+        "cached_input_tokens": 21120,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1864,
+        "reasoning_output_tokens": 446
+      },
+      "author_seconds_sum": 54.42905979405623
+    },
+    "bm25_8000_r1": {
+      "intended": 4,
+      "accepted": 4,
+      "statuses": {
+        "accepted": 4
+      },
+      "context_tokens": 31999,
+      "usage": {
+        "input_tokens": 69295,
+        "cached_input_tokens": 21120,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1874,
+        "reasoning_output_tokens": 646
+      },
+      "author_seconds_sum": 58.65606833004858
+    },
+    "typesafe_1000_r1": {
+      "intended": 4,
+      "accepted": 4,
+      "statuses": {
+        "accepted": 4
+      },
+      "context_tokens": 3990,
+      "usage": {
+        "input_tokens": 41167,
+        "cached_input_tokens": 21120,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2076,
+        "reasoning_output_tokens": 499
+      },
+      "author_seconds_sum": 58.00823378900532
+    },
+    "typesafe_1000_r2": {
+      "intended": 4,
+      "accepted": 4,
+      "statuses": {
+        "accepted": 4
+      },
+      "context_tokens": 3990,
+      "usage": {
+        "input_tokens": 41165,
+        "cached_input_tokens": 21120,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1940,
+        "reasoning_output_tokens": 559
+      },
+      "author_seconds_sum": 55.86533913388848
+    },
+    "typesafe_3000_r1": {
+      "intended": 4,
+      "accepted": 4,
+      "statuses": {
+        "accepted": 4
+      },
+      "context_tokens": 11976,
+      "usage": {
+        "input_tokens": 49173,
+        "cached_input_tokens": 14080,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1779,
+        "reasoning_output_tokens": 533
+      },
+      "author_seconds_sum": 54.09560608898755
+    }
+  },
+  "tasks": {
+    "testbed_newsletter_scope": {
+      "intended": 7,
+      "accepted": 7,
+      "statuses": {
+        "accepted": 7
+      },
+      "context_tokens": 17982,
+      "usage": {
+        "input_tokens": 83054,
+        "cached_input_tokens": 21120,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1416,
+        "reasoning_output_tokens": 391
+      },
+      "author_seconds_sum": 56.22944266803097
+    },
+    "testbed_refundable_balance": {
+      "intended": 7,
+      "accepted": 7,
+      "statuses": {
+        "accepted": 7
+      },
+      "context_tokens": 17973,
+      "usage": {
+        "input_tokens": 83148,
+        "cached_input_tokens": 28160,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2481,
+        "reasoning_output_tokens": 1222
+      },
+      "author_seconds_sum": 95.37262525293045
+    },
+    "woods_excluded_tags": {
+      "intended": 7,
+      "accepted": 7,
+      "statuses": {
+        "accepted": 7
+      },
+      "context_tokens": 17999,
+      "usage": {
+        "input_tokens": 83198,
+        "cached_input_tokens": 35200,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3484,
+        "reasoning_output_tokens": 448
+      },
+      "author_seconds_sum": 89.63216883514542
+    },
+    "woods_literal_search": {
+      "intended": 7,
+      "accepted": 5,
+      "statuses": {
+        "accepted": 5,
+        "abstention": 2
+      },
+      "context_tokens": 18000,
+      "usage": {
+        "input_tokens": 82959,
+        "cached_input_tokens": 35200,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 5030,
+        "reasoning_output_tokens": 1844
+      },
+      "author_seconds_sum": 137.11814338387921
+    }
+  },
+  "author_repeat_agreement": [
+    {
+      "task": "T001",
+      "policy": "bm25",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": true
+    },
+    {
+      "task": "T002",
+      "policy": "bm25",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": false
+    },
+    {
+      "task": "T003",
+      "policy": "bm25",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": false
+    },
+    {
+      "task": "T004",
+      "policy": "bm25",
+      "first_status": "abstention",
+      "repeat_status": "abstention",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": true
+    },
+    {
+      "task": "T001",
+      "policy": "typesafe",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": true,
+      "replacement_arrays_identical": true
+    },
+    {
+      "task": "T002",
+      "policy": "typesafe",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": false
+    },
+    {
+      "task": "T003",
+      "policy": "typesafe",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": false
+    },
+    {
+      "task": "T004",
+      "policy": "typesafe",
+      "first_status": "accepted",
+      "repeat_status": "accepted",
+      "acceptance_agrees": true,
+      "submission_json_identical": false,
+      "replacement_arrays_identical": false
+    }
+  ],
+  "executed_rspec_counts": [
+    {
+      "cell_id": "T001_typesafe_1000_r2",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_typesafe_1000_r2",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T004_bm25_3000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 91,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T004_typesafe_1000_r2",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 91,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_typesafe_1000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_typesafe_1000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_typesafe_1000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_1000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_1000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T004_typesafe_1000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 91,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_3000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_3000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_bm25_8000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_1000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_1000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_1000_r2",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_1000_r2",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_bm25_3000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_bm25_1000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T004_typesafe_3000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 91,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_typesafe_3000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_typesafe_3000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_typesafe_3000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_1000_r2",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_1000_r2",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_typesafe_3000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_typesafe_3000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_typesafe_1000_r2",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_8000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_8000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_typesafe_1000_r2",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_typesafe_1000_r2",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T004_bm25_8000_r1",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 91,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_typesafe_1000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_typesafe_1000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T003_bm25_1000_r2",
+      "kind": "focused_specs",
+      "exit": 0,
+      "examples": 29,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_8000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T001_bm25_8000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 3,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_3000_r1",
+      "kind": "existing_suite",
+      "exit": 0,
+      "examples": 32,
+      "failures": 0,
+      "pending": 0
+    },
+    {
+      "cell_id": "T002_bm25_3000_r1",
+      "kind": "hidden_acceptance",
+      "exit": 0,
+      "examples": 6,
+      "failures": 0,
+      "pending": 0
+    }
+  ],
+  "rspec_totals": {
+    "examples": 1169,
+    "failures": 0,
+    "pending": 0
+  },
+  "table": [
+    {
+      "cell_id": "T001_bm25_1000_r1",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "bm25_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T001_bm25_1000_r2",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "bm25_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T001_bm25_3000_r1",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "bm25_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T001_bm25_8000_r1",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "bm25_8000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T001_typesafe_1000_r1",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "typesafe_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T001_typesafe_1000_r2",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "typesafe_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T001_typesafe_3000_r1",
+      "task_id": "testbed_newsletter_scope",
+      "arm": "typesafe_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_bm25_1000_r1",
+      "task_id": "testbed_refundable_balance",
+      "arm": "bm25_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_bm25_1000_r2",
+      "task_id": "testbed_refundable_balance",
+      "arm": "bm25_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_bm25_3000_r1",
+      "task_id": "testbed_refundable_balance",
+      "arm": "bm25_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_bm25_8000_r1",
+      "task_id": "testbed_refundable_balance",
+      "arm": "bm25_8000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_typesafe_1000_r1",
+      "task_id": "testbed_refundable_balance",
+      "arm": "typesafe_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_typesafe_1000_r2",
+      "task_id": "testbed_refundable_balance",
+      "arm": "typesafe_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T002_typesafe_3000_r1",
+      "task_id": "testbed_refundable_balance",
+      "arm": "typesafe_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_bm25_1000_r1",
+      "task_id": "woods_excluded_tags",
+      "arm": "bm25_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_bm25_1000_r2",
+      "task_id": "woods_excluded_tags",
+      "arm": "bm25_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_bm25_3000_r1",
+      "task_id": "woods_excluded_tags",
+      "arm": "bm25_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_bm25_8000_r1",
+      "task_id": "woods_excluded_tags",
+      "arm": "bm25_8000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_typesafe_1000_r1",
+      "task_id": "woods_excluded_tags",
+      "arm": "typesafe_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_typesafe_1000_r2",
+      "task_id": "woods_excluded_tags",
+      "arm": "typesafe_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T003_typesafe_3000_r1",
+      "task_id": "woods_excluded_tags",
+      "arm": "typesafe_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T004_bm25_1000_r1",
+      "task_id": "woods_literal_search",
+      "arm": "bm25_1000_r1",
+      "status": "abstention",
+      "accepted": false,
+      "patch_valid": false,
+      "syntax_passed": null,
+      "acceptance_passed": null,
+      "focused_specs_passed": null
+    },
+    {
+      "cell_id": "T004_bm25_1000_r2",
+      "task_id": "woods_literal_search",
+      "arm": "bm25_1000_r2",
+      "status": "abstention",
+      "accepted": false,
+      "patch_valid": false,
+      "syntax_passed": null,
+      "acceptance_passed": null,
+      "focused_specs_passed": null
+    },
+    {
+      "cell_id": "T004_bm25_3000_r1",
+      "task_id": "woods_literal_search",
+      "arm": "bm25_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T004_bm25_8000_r1",
+      "task_id": "woods_literal_search",
+      "arm": "bm25_8000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T004_typesafe_1000_r1",
+      "task_id": "woods_literal_search",
+      "arm": "typesafe_1000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T004_typesafe_1000_r2",
+      "task_id": "woods_literal_search",
+      "arm": "typesafe_1000_r2",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    },
+    {
+      "cell_id": "T004_typesafe_3000_r1",
+      "task_id": "woods_literal_search",
+      "arm": "typesafe_3000_r1",
+      "status": "accepted",
+      "accepted": true,
+      "patch_valid": true,
+      "syntax_passed": true,
+      "acceptance_passed": true,
+      "focused_specs_passed": true
+    }
+  ]
+}

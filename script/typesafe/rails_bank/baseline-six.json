@@ -1,0 +1,57 @@
+{
+  "correctness": {
+    "type": "noul",
+    "instructions": "Does the proposed implementation shown here have a concrete correctness defect for a supported input or execution path? Follow `review_policy` and inspect `regions`.",
+    "criteria": {
+      "true": "The supplied evidence supports this condition; a generic possibility without a mechanism is insufficient.",
+      "false": "This specific condition is prevented, not applicable, or unsupported by the supplied evidence."
+    }
+  },
+  "integrity": {
+    "type": "noul",
+    "instructions": "Can the proposed code shown here silently lose, corrupt, misattribute or inconsistently publish application/index data? Follow `review_policy` and inspect `regions`.",
+    "criteria": {
+      "true": "The supplied evidence supports this condition; a generic possibility without a mechanism is insufficient.",
+      "false": "This specific condition is prevented, not applicable, or unsupported by the supplied evidence."
+    }
+  },
+  "security": {
+    "type": "noul",
+    "instructions": "Does the proposed code shown here create a concrete unauthorized-access, injection or secret-disclosure path? Follow `review_policy` and inspect `regions`.",
+    "criteria": {
+      "true": "The supplied evidence supports this condition; a generic possibility without a mechanism is insufficient.",
+      "false": "This specific condition is prevented, not applicable, or unsupported by the supplied evidence."
+    }
+  },
+  "resources": {
+    "type": "noul",
+    "instructions": "Does the proposed code shown here contain a concrete unbounded-work, avoidable repeated-work or resource-lifetime problem likely to matter at application scale? Follow `review_policy` and inspect `regions`.",
+    "criteria": {
+      "true": "The supplied evidence supports this condition; a generic possibility without a mechanism is insufficient.",
+      "false": "This specific condition is prevented, not applicable, or unsupported by the supplied evidence."
+    }
+  },
+  "context_gap": {
+    "type": "noul",
+    "instructions": "Is essential surrounding implementation missing such that a meaningful suspected defect cannot be assessed from this packet alone? Follow `review_policy` and inspect `regions`.",
+    "criteria": {
+      "true": "The supplied evidence supports this condition; a generic possibility without a mechanism is insufficient.",
+      "false": "This specific condition is prevented, not applicable, or unsupported by the supplied evidence."
+    }
+  },
+  "locate": {
+    "type": "choice",
+    "instructions": "Which supplied region should a reviewer inspect first for an actionable defect in the proposed implementation? Select none if no concrete concern is supported. Follow `review_policy`.",
+    "criteria": {
+      "change": "app/services/review_rename.rb",
+      "file0": "app/services/review_rename.rb",
+      "file1": "app/models/review_item.rb",
+      "file2": "app/models/concerns/normalizes_review_name.rb",
+      "unit0": "ReviewItem",
+      "unit1": "ReviewRename",
+      "unit2": "NormalizesReviewName",
+      "unit3": "BehavioralProfile",
+      "none": "No concrete concern supported in the supplied regions."
+    }
+  }
+}

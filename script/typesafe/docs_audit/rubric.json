@@ -1,0 +1,54 @@
+{
+  "version": "2026-09-21.1",
+  "questions": {
+    "readability": {
+      "type": "score",
+      "instructions": "For the audience and page purpose in state, how easy is the supplied doc section to understand and act on? Judge organization, terminology, scanability and local explanation. Do not judge factual truth or penalize technical detail the audience needs. Ancestor headings supply context; omitted neighboring sections are not automatically missing documentation.",
+      "criteria": [
+        "The section obstructs understanding: readers cannot determine its main action or meaning without substantial rewriting.",
+        "The section is understandable only with avoidable rereading because dense wording, unclear terms or poor order obscures the action.",
+        "The section is usable and its main action is clear, with a small localized clarity improvement possible.",
+        "The section is clear, well organized and appropriately concise for its stated technical audience and purpose."
+      ]
+    },
+    "relevance": {
+      "type": "score",
+      "instructions": "How directly does the supplied doc section serve the stated page purpose and audience? Judge task fit, not readability, factual accuracy or whether every user needs this specialized page. Necessary qualifications and boundaries are relevant.",
+      "criteria": [
+        "The section largely serves another purpose and distracts this page audience.",
+        "Substantial material is peripheral to this page purpose and should move to a more relevant reference.",
+        "The section mostly serves its page purpose with a small tangential portion.",
+        "The section directly serves the page purpose, including necessary prerequisites, examples and limits."
+      ]
+    },
+    "accuracy_status": {
+      "type": "choice",
+      "instructions": "How do the supplied implementation_evidence source/spec spans relate to the checkable Woods behavior claims in doc.blocks at the pinned repository_revision? Use only the supplied evidence, not recollection. Choose contradicted if at least one concrete claim conflicts with implementation or test behavior. Otherwise choose missing_evidence if at least one material implementation claim cannot be established from these spans; absence from a partial span is not contradiction. Only choose supported if all material checkable claims in this sampled section are supported. Do not treat a hypothetical future 2.0 release as already published.",
+      "criteria": {
+        "supported": "All material checkable implementation claims in the sampled section are supported by the supplied source/spec evidence.",
+        "contradicted": "At least one specific checkable implementation claim conflicts with the supplied source/spec evidence.",
+        "missing_evidence": "The supplied spans do not establish at least one material checkable claim, but do not establish a concrete contradiction. More evidence is needed.",
+        "no_checkable_claim": "The section contains no material implementation claim to verify, for example only navigation or general advice."
+      }
+    },
+    "accuracy_contradiction": {
+      "type": "noul",
+      "instructions": "Does the supplied implementation_evidence establish at least one concrete contradiction of a behavior claim in doc.blocks at the pinned repository_revision? A missing prerequisite in unsupplied documentation, missing source context, distribution confidence, subjective wording preference, or future-release speculation is not an established contradiction."
+    },
+    "readability_target": {
+      "type": "choice",
+      "instructions": "Select the single doc.blocks block most worth a concrete readability revision for this audience, if any. Select none when the supplied section is already clear or the supposed problem depends on omitted neighboring sections. This selects a source location, not generated replacement prose.",
+      "criteria": {}
+    },
+    "relevance_target": {
+      "type": "choice",
+      "instructions": "Select the single doc.blocks block most worth moving or trimming because it does not serve this page purpose, if any. Select none when the material serves the audience, including necessary specialist detail and qualifications.",
+      "criteria": {}
+    },
+    "accuracy_target": {
+      "type": "choice",
+      "instructions": "Select the single doc.blocks block whose concrete factual claim is most clearly contradicted by supplied implementation_evidence, if any. Select none when no contradiction is established or when only evidence is missing. Use the exact bounded location; no unsupported suspicion.",
+      "criteria": {}
+    }
+  }
+}

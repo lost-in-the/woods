@@ -1,0 +1,18 @@
+--- a/source.rb
++++ b/source.rb
+@@ -48,10 +48,11 @@
+   end
+ 
+   def retention_summaries
+-    snapshot_files.map do |path|
+-      sha = File.basename(path, '.json')
+-      data = read_snapshot(path) || {}
+-      { git_sha: sha, extracted_at: data.fetch('extracted_at', '') }
++    snapshot_files.filter_map do |path|
++      data = read_snapshot(path)
++      next unless data
++
++      { git_sha: data['git_sha'], extracted_at: data.fetch('extracted_at', '') }
+     end
+   end
+ end

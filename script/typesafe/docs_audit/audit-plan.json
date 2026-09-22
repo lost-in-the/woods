@@ -1,0 +1,470 @@
+{
+  "version": "2026-09-21.1",
+  "revision": "c6f875ace375ee0263cc50762b054c9fc47296a1",
+  "selection": "Two manually selected coherent heading-content sections per page, fixed before inference; covers entry, canonical ownership and agent guidance. Not random or representative.",
+  "pages": [
+    {
+      "path": "README.md",
+      "sections": [
+        "1. Install and configure",
+        "Two servers, two trust boundaries"
+      ],
+      "audience": "Rails developer deciding whether and how to install Woods",
+      "purpose": "Explain Woods and a first successful installation",
+      "evidence": [
+        {
+          "path": "lib/generators/woods/install_generator.rb",
+          "start": 1
+        },
+        {
+          "path": "woods.gemspec",
+          "start": 1
+        },
+        {
+          "path": "spec/generators/install_generator_spec.rb",
+          "start": 1,
+          "end": 115
+        },
+        {
+          "path": "lib/woods/console/server.rb",
+          "start": 124,
+          "end": 175
+        },
+        {
+          "path": "lib/woods/console/tool_specs.rb",
+          "start": 730,
+          "end": 774
+        }
+      ]
+    },
+    {
+      "path": "docs/README.md",
+      "sections": [
+        "What are you trying to do?",
+        "Canonical owners"
+      ],
+      "audience": "First-time user or agent seeking the correct guide",
+      "purpose": "Navigate to authoritative task guides",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/server.rb",
+          "start": 94,
+          "end": 217
+        },
+        {
+          "path": "spec/mcp/server_spec.rb",
+          "start": 43,
+          "end": 104
+        }
+      ]
+    },
+    {
+      "path": "docs/GETTING_STARTED.md",
+      "sections": [
+        "2. Generate and review configuration",
+        "5. Connect the Index Server"
+      ],
+      "audience": "Rails developer performing a first installation",
+      "purpose": "Produce a validated index and working client",
+      "evidence": [
+        {
+          "path": "lib/generators/woods/install_generator.rb",
+          "start": 1
+        },
+        {
+          "path": "woods.gemspec",
+          "start": 1
+        },
+        {
+          "path": "spec/generators/install_generator_spec.rb",
+          "start": 1,
+          "end": 115
+        },
+        {
+          "path": "lib/woods/mcp/bootstrapper.rb",
+          "start": 121,
+          "end": 285
+        },
+        {
+          "path": "exe/woods-mcp-start",
+          "start": 1
+        }
+      ]
+    },
+    {
+      "path": "docs/AGENT_SETUP.md",
+      "sections": [
+        "4. Generate and inspect",
+        "7. Verify useful behavior"
+      ],
+      "audience": "Coding agent operating with user authorization",
+      "purpose": "Install and verify Woods with a concrete handoff",
+      "evidence": [
+        {
+          "path": "lib/generators/woods/install_generator.rb",
+          "start": 1
+        },
+        {
+          "path": "woods.gemspec",
+          "start": 1
+        },
+        {
+          "path": "spec/generators/install_generator_spec.rb",
+          "start": 1,
+          "end": 115
+        },
+        {
+          "path": "lib/woods/mcp/server.rb",
+          "start": 94,
+          "end": 217
+        },
+        {
+          "path": "spec/mcp/server_spec.rb",
+          "start": 43,
+          "end": 104
+        }
+      ]
+    },
+    {
+      "path": "docs/CONFIGURATION_REFERENCE.md",
+      "sections": [
+        "Core options",
+        "Console MCP options"
+      ],
+      "audience": "Developer looking up exact options and defaults",
+      "purpose": "State supported configuration options and defaults",
+      "evidence": [
+        {
+          "path": "lib/woods.rb",
+          "start": 126,
+          "end": 266
+        }
+      ]
+    },
+    {
+      "path": "docs/MCP_SERVERS.md",
+      "sections": [
+        "Tools (29 \u2014 14 registered in the packaged default)",
+        "Tool inventory (31 schemas; 9 registered by default)"
+      ],
+      "audience": "Agent configuring and checking callable MCP capabilities",
+      "purpose": "Distinguish server setup and registered tools from schema inventory",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/server.rb",
+          "start": 94,
+          "end": 217
+        },
+        {
+          "path": "spec/mcp/server_spec.rb",
+          "start": 43,
+          "end": 104
+        },
+        {
+          "path": "lib/woods/console/server.rb",
+          "start": 124,
+          "end": 175
+        },
+        {
+          "path": "lib/woods/console/tool_specs.rb",
+          "start": 730,
+          "end": 774
+        }
+      ]
+    },
+    {
+      "path": "docs/AGENT_GUIDE.md",
+      "sections": [
+        "Start every session with status",
+        "Index Server boundaries"
+      ],
+      "audience": "Agent using an installed Woods Index Server",
+      "purpose": "Choose tools and qualify evidence from a published index",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/server.rb",
+          "start": 94,
+          "end": 217
+        },
+        {
+          "path": "spec/mcp/server_spec.rb",
+          "start": 43,
+          "end": 104
+        },
+        {
+          "path": "lib/woods/mcp/initialization_guidance.rb",
+          "start": 1
+        }
+      ]
+    },
+    {
+      "path": "docs/CONSOLE_MCP_SETUP.md",
+      "sections": [
+        "Tool support by mode",
+        "Current-connection rollback"
+      ],
+      "audience": "Developer explicitly enabling live Rails Console access",
+      "purpose": "Describe supported modes and actual safety limits",
+      "evidence": [
+        {
+          "path": "lib/woods/console/server.rb",
+          "start": 124,
+          "end": 175
+        },
+        {
+          "path": "lib/woods/console/tool_specs.rb",
+          "start": 730,
+          "end": 774
+        },
+        {
+          "path": "lib/woods/console/safe_context.rb",
+          "start": 1,
+          "end": 175
+        }
+      ]
+    },
+    {
+      "path": "docs/UPGRADING_TO_2.md",
+      "sections": [
+        "What changes",
+        "Verify before rollout"
+      ],
+      "audience": "Maintainer upgrading an existing Woods 1.x installation",
+      "purpose": "Plan a reversible and verified v2 migration",
+      "evidence": [
+        {
+          "path": "lib/woods/generation.rb",
+          "start": 1
+        },
+        {
+          "path": "lib/woods/published_index.rb",
+          "start": 40,
+          "end": 148
+        },
+        {
+          "path": "lib/woods/console/server.rb",
+          "start": 124,
+          "end": 175
+        },
+        {
+          "path": "lib/woods/console/tool_specs.rb",
+          "start": 730,
+          "end": 774
+        }
+      ]
+    },
+    {
+      "path": "docs/TROUBLESHOOTING.md",
+      "sections": [
+        "Index Server exits with `MissingArtifact`",
+        "No tools appear in the MCP client"
+      ],
+      "audience": "User diagnosing startup or tool availability",
+      "purpose": "Connect concrete symptoms to bounded diagnosis and fixes",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/bootstrapper.rb",
+          "start": 121,
+          "end": 285
+        },
+        {
+          "path": "exe/woods-mcp-start",
+          "start": 1
+        },
+        {
+          "path": "lib/woods/mcp/server.rb",
+          "start": 94,
+          "end": 217
+        },
+        {
+          "path": "spec/mcp/server_spec.rb",
+          "start": 43,
+          "end": 104
+        }
+      ]
+    },
+    {
+      "path": "docs/DOCKER_SETUP.md",
+      "sections": [
+        "Architecture Overview",
+        "Default: run it through the application container"
+      ],
+      "audience": "Developer running the Rails application in Docker",
+      "purpose": "Place extraction and MCP processes where dependencies and index paths are visible",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/bootstrapper.rb",
+          "start": 121,
+          "end": 285
+        },
+        {
+          "path": "exe/woods-mcp-start",
+          "start": 1
+        }
+      ]
+    },
+    {
+      "path": "docs/SOURCE_FRESHNESS.md",
+      "sections": [
+        "Read the result",
+        "Scope and partial extraction"
+      ],
+      "audience": "Agent deciding whether indexed source is current",
+      "purpose": "Interpret freshness evidence without assuming completeness",
+      "evidence": [
+        {
+          "path": "lib/woods/source_inputs/status.rb"
+        },
+        {
+          "path": "lib/woods/source_inputs/verifier.rb"
+        },
+        {
+          "path": "lib/woods/source_inputs/scopes.rb"
+        },
+        {
+          "path": "lib/woods/mcp/index_reader.rb",
+          "start": 317,
+          "end": 327
+        }
+      ]
+    },
+    {
+      "path": "docs/INDEX_LAYOUT.md",
+      "sections": [
+        "Atomic publication is not indefinite retention",
+        "Shipping a structural snapshot"
+      ],
+      "audience": "External reader consuming published files",
+      "purpose": "Read a coherent retained generation and transfer a usable snapshot",
+      "evidence": [
+        {
+          "path": "lib/woods/generation.rb",
+          "start": 1
+        },
+        {
+          "path": "lib/woods/published_index.rb",
+          "start": 40,
+          "end": 148
+        }
+      ]
+    },
+    {
+      "path": "docs/RETRIEVAL_GUIDE.md",
+      "sections": [
+        "Embedding-free lexical retrieval",
+        "Degradation Tiers"
+      ],
+      "audience": "Developer selecting retrieval mode and diagnosing readiness",
+      "purpose": "Describe retrieval requirements and failure behavior",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/bootstrapper.rb",
+          "start": 121,
+          "end": 285
+        },
+        {
+          "path": "exe/woods-mcp-start",
+          "start": 1
+        },
+        {
+          "path": "lib/woods/mcp/published_lexical_retriever.rb",
+          "start": 1
+        }
+      ]
+    },
+    {
+      "path": "docs/WATCH_DAEMON.md",
+      "sections": [
+        "Running it",
+        "Failure posture"
+      ],
+      "audience": "Developer maintaining a current index in a development app",
+      "purpose": "Run the watcher and recover from bounded failures",
+      "evidence": [
+        {
+          "path": "lib/woods/watch/daemon.rb",
+          "start": 92,
+          "end": 132
+        },
+        {
+          "path": "lib/woods/watch/daemon.rb",
+          "start": 770,
+          "end": 802
+        },
+        {
+          "path": "lib/woods/watch/daemon.rb",
+          "start": 865,
+          "end": 1049
+        },
+        {
+          "path": "lib/tasks/woods.rake",
+          "start": 124,
+          "end": 198
+        },
+        {
+          "path": "lib/woods/watch/status.rb",
+          "start": 1,
+          "end": 95
+        }
+      ]
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sections": [
+        "Development setup",
+        "Validate in proportion to the change"
+      ],
+      "audience": "Contributor preparing a focused patch",
+      "purpose": "Set up and test source changes without altering release state",
+      "evidence": [
+        {
+          "path": "woods.gemspec",
+          "start": 1
+        },
+        {
+          "path": "Rakefile",
+          "start": 1
+        },
+        {
+          "path": ".rspec",
+          "start": 1
+        }
+      ]
+    },
+    {
+      "path": "CLAUDE.md",
+      "sections": [
+        "Woods",
+        "Source-checkout orientation: static Woods self-map"
+      ],
+      "audience": "Coding agent investigating the Woods gem source",
+      "purpose": "Orient on architecture and source versus runtime boundaries",
+      "evidence": [
+        {
+          "path": "lib/woods/mcp/server.rb",
+          "start": 94,
+          "end": 217
+        },
+        {
+          "path": "spec/mcp/server_spec.rb",
+          "start": 43,
+          "end": 104
+        },
+        {
+          "path": "lib/woods/console/server.rb",
+          "start": 124,
+          "end": 175
+        },
+        {
+          "path": "lib/woods/console/tool_specs.rb",
+          "start": 730,
+          "end": 774
+        },
+        {
+          "path": "exe/woods-mcp-start",
+          "start": 1
+        }
+      ]
+    }
+  ]
+}

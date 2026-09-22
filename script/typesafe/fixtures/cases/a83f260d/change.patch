@@ -1,0 +1,11 @@
+--- a/source.rb
++++ b/source.rb
+@@ -6,7 +6,7 @@
+   end
+ 
+   def resolve_route_helper(helper_name)
+-    base = helper_name.delete_suffix('_path').delete_suffix('_url')
++    base = helper_name.sub(/_(path|url)\z/, '')
+     @route_helper_map[base]
+   end
+ end

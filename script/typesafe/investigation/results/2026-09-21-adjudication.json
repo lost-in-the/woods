@@ -1,0 +1,4124 @@
+{
+  "version": "2026-09-21.1",
+  "kind": "post_capture_source_oracle_adjudication",
+  "author_disclosure": "The adjudicator authored these fixtures, their collector and their executable oracles. This is unblinded source/oracle verification, not an independent or blinded reasoning-review comparison.",
+  "artifact_path_convention": "All capture references are relative to the retained investigation capture root. Application paths are physical source paths within disposable fixtures. Local absolute paths and credentials are omitted.",
+  "capture_provenance": {
+    "summary_sha256": "e84bb9b06f8c3d06b854213dafc8d1ebf7df1be51ba3c3b7d8381dd1b4702630",
+    "capture_sha256": "84b6b9b7823bb739bcc4d966274ab3fe8ea5a2460996d01b616651a2607227de",
+    "coordinator_cases_sha256": "22d5c3fa76c4ddc5713786b99db1f0d18d81152264e907ccb6e4320f565e3359",
+    "attempts": 80,
+    "jobs": 16
+  },
+  "method": [
+    "Read all 32 focused requests/responses and per-answer validity, plus the frozen source and private oracle for every case.",
+    "Verified each focused observed_source body and hash against its frozen coordinator evidence receipt.",
+    "Read all 48 physical changed/support files from the eight disposable applications and matched their hashes to captured evidence; copied oracle receipts differ from the original fixture execution only by an appended trailing newline.",
+    "Reused recorded executable oracle results; no new inference, no modified frozen input, and no post-capture oracle rerun.",
+    "Preserved the predeclared 0.8/category/location lead rule. Broad category matches, source-selected evidence, verified behavior and threshold leads are separate judgments.",
+    "Adjudication concerns the declared planted mechanism and permitted inputs. A control label does not assert global application correctness.",
+    "Necessary-card coverage is a diagnostic checklist, not proof that no other evidence is sufficient; reservation intent already permits caller-owned transactions."
+  ],
+  "aggregate": {
+    "static": {
+      "focused_responses": 16,
+      "valid_focused_responses": 15,
+      "raw_defect_leads": 2,
+      "raw_control_leads": 0,
+      "coordinator_verified_high_lead_responses": 2,
+      "distinct_verified_high_lead_cases": [
+        "97bf2156f1"
+      ],
+      "declared_necessary_cards_all_selected_jobs": 8,
+      "valid_specific_control_categories_not_supported_by_tested_mechanism": 3,
+      "none_mechanism_with_specific_evidence": 1,
+      "specific_mechanism_with_none_evidence": 3
+    },
+    "adaptive": {
+      "focused_responses": 16,
+      "valid_focused_responses": 16,
+      "raw_defect_leads": 1,
+      "raw_control_leads": 0,
+      "coordinator_verified_high_lead_responses": 1,
+      "distinct_verified_high_lead_cases": [
+        "97bf2156f1"
+      ],
+      "declared_necessary_cards_all_selected_jobs": 12,
+      "valid_specific_control_categories_not_supported_by_tested_mechanism": 1,
+      "none_mechanism_with_specific_evidence": 3,
+      "specific_mechanism_with_none_evidence": 2
+    }
+  },
+  "conclusion": "Adaptive selection improved retrieval of the calendar premise and suppressed unsupported calendar-control judgments, but did not add a verified defect lead. Both arms produced leads only for the same rounding defect. Correct retrieval did not prevent misses on JSON key shape and the non-UTC calendar case.",
+  "interpretation_limits": [
+    "Four curated pairs and two correlated repeats do not establish general retrieval or review superiority.",
+    "The focused model emits categories and source IDs, not a narrative mechanism explanation; source/oracle verification does not prove it reasoned through the exact sequence.",
+    "The only invalid focused response remains unassessed; its raw independently valid Nouls and evidence Choice are retained rather than silently repaired.",
+    "No downstream reasoning-reviewer or token-savings comparison was executed.",
+    "Eight static/adaptive focused request pairs are byte-identical (rounding and JSON). Their probability differences cannot be credited to different source retrieval; in particular 0.80 versus 0.78 on rounding repeat 0 uses identical evidence and questions."
+  ],
+  "cases": [
+    {
+      "case_id": "7a9d5822d0",
+      "family": "invoice_rounding",
+      "private_fixture_label": "control",
+      "expected_broad_mechanism_if_defective": "calculation",
+      "source_and_oracle_verdict": "The helper retains exact BigDecimal extended amounts; the changed total rounds only after summing. The executable positive, negative-credit and exact-cent examples satisfy the declared rounding contract.",
+      "source_receipt": {
+        "path": "coordinator-evidence/7a9d5822d0.json",
+        "sha256": "f1cc8c377ac5e13976316560e3eea346bb16cb7be0e52db591ba693eed984ad5"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/7a9d5822d0.json",
+        "sha256": "f714531aafc49375220ab8c01393c1559f025f60dd563b534c4bfc6533a3cbca"
+      },
+      "oracle_observations": {
+        "case_id": "7a9d5822d0",
+        "family": "invoice_rounding",
+        "samples": [
+          {
+            "unit_price": "0.335",
+            "quantity": 1,
+            "lines": 3,
+            "expected": "1.01",
+            "actual": "1.01",
+            "currency": "USD",
+            "matches": true
+          },
+          {
+            "unit_price": "-0.335",
+            "quantity": 1,
+            "lines": 3,
+            "expected": "-1.01",
+            "actual": "-1.01",
+            "currency": "USD",
+            "matches": true
+          },
+          {
+            "unit_price": "2.675",
+            "quantity": 2,
+            "lines": 2,
+            "expected": "10.70",
+            "actual": "10.7",
+            "currency": "USD",
+            "matches": true
+          }
+        ],
+        "contract_holds": true,
+        "expected_contract_holds": true,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "97bf2156f1",
+      "family": "invoice_rounding",
+      "private_fixture_label": "defect",
+      "expected_broad_mechanism_if_defective": "calculation",
+      "source_and_oracle_verdict": "The helper rounds every extended line amount before the total sums them. Three 0.335 amounts become 1.02 rather than 1.01; negative credits likewise become -1.02 rather than -1.01. The helper is the direct distinguishing source.",
+      "source_receipt": {
+        "path": "coordinator-evidence/97bf2156f1.json",
+        "sha256": "9a8f3dac016a6b7d2cfbe315ef1eddc11d6225fb1257792ddb5748a52d4b8544"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/97bf2156f1.json",
+        "sha256": "e7309765a85e84d7d4c8d538b1419bf5ab15c9b368e158c05e2085c418e65ac3"
+      },
+      "oracle_observations": {
+        "case_id": "97bf2156f1",
+        "family": "invoice_rounding",
+        "samples": [
+          {
+            "unit_price": "0.335",
+            "quantity": 1,
+            "lines": 3,
+            "expected": "1.01",
+            "actual": "1.02",
+            "currency": "USD",
+            "matches": false
+          },
+          {
+            "unit_price": "-0.335",
+            "quantity": 1,
+            "lines": 3,
+            "expected": "-1.01",
+            "actual": "-1.02",
+            "currency": "USD",
+            "matches": false
+          },
+          {
+            "unit_price": "2.675",
+            "quantity": 2,
+            "lines": 2,
+            "expected": "10.70",
+            "actual": "10.7",
+            "currency": "USD",
+            "matches": true
+          }
+        ],
+        "contract_holds": false,
+        "expected_contract_holds": false,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "family": "json_key_shape",
+      "private_fixture_label": "defect",
+      "expected_broad_mechanism_if_defective": "input_contract",
+      "source_and_oracle_verdict": "JSON.parse produces string keys and the caller retains string-keyed heading/window_days; the changed consumer fetches symbols and silently returns defaults. The recorded public request persists Daily activity/7 instead of Monthly field notes/30.",
+      "source_receipt": {
+        "path": "coordinator-evidence/2fa1ca8b84.json",
+        "sha256": "c0741ef8d32f4d18380621f36c67fc019f1336ed747aaa6cbe17777c9c9ddfab"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/2fa1ca8b84.json",
+        "sha256": "f3468787eb7a539c2c80064c656f0f088ad519665e370d76861f28478b9bb008"
+      },
+      "oracle_observations": {
+        "case_id": "2fa1ca8b84",
+        "family": "json_key_shape",
+        "persisted_records": [
+          {
+            "heading": "Daily activity",
+            "window_days": 7
+          },
+          {
+            "heading": "Daily activity",
+            "window_days": 7
+          }
+        ],
+        "expected_records": [
+          {
+            "heading": "Monthly field notes",
+            "window_days": 30
+          },
+          {
+            "heading": "Daily activity",
+            "window_days": 7
+          }
+        ],
+        "contract_holds": false,
+        "expected_contract_holds": false,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "92daced6e0",
+      "family": "json_key_shape",
+      "private_fixture_label": "control",
+      "expected_broad_mechanism_if_defective": "input_contract",
+      "source_and_oracle_verdict": "The JSON caller uses symbolize_names: true and slices symbol keys, matching the changed consumer. Explicit heading/window values and defaults persist correctly.",
+      "source_receipt": {
+        "path": "coordinator-evidence/92daced6e0.json",
+        "sha256": "85e67e9010f05e0ae037768b1435d218957fca8c6ca956bf77f75719d70d22c7"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/92daced6e0.json",
+        "sha256": "db92ed9a3df91c611b22ebb1c9a94c4ccd21ee927491e6f48ba28f54dc6c53ba"
+      },
+      "oracle_observations": {
+        "case_id": "92daced6e0",
+        "family": "json_key_shape",
+        "persisted_records": [
+          {
+            "heading": "Monthly field notes",
+            "window_days": 30
+          },
+          {
+            "heading": "Daily activity",
+            "window_days": 7
+          }
+        ],
+        "expected_records": [
+          {
+            "heading": "Monthly field notes",
+            "window_days": 30
+          },
+          {
+            "heading": "Daily activity",
+            "window_days": 7
+          }
+        ],
+        "contract_holds": true,
+        "expected_contract_holds": true,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "49429b5c36",
+      "family": "local_calendar_day",
+      "private_fixture_label": "control",
+      "expected_broad_mechanism_if_defective": "time_semantics",
+      "source_and_oracle_verdict": "The application and operating-system calendar are both UTC. Date.today selects the configured current date, and the recorded winter/summer examples satisfy the declared period contract.",
+      "source_receipt": {
+        "path": "coordinator-evidence/49429b5c36.json",
+        "sha256": "7a95e045530ab73128ccd8bbc22febb173a2323793acb5e9bc9acf5b22650c18"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/49429b5c36.json",
+        "sha256": "5f2def3f2637e899a043a780d0ecde6af61b02c9a76d9420440b3ed52fd93e2f"
+      },
+      "oracle_observations": {
+        "case_id": "49429b5c36",
+        "family": "local_calendar_day",
+        "time_zone": "UTC",
+        "samples": [
+          {
+            "instant": "2026-01-01T02:30:00Z",
+            "local_date": "2026-01-01",
+            "operating_system_date": "2026-01-01",
+            "expected": [
+              "Before clock",
+              "After clock"
+            ],
+            "actual": [
+              "Before clock",
+              "After clock"
+            ],
+            "matches": true
+          },
+          {
+            "instant": "2026-07-01T02:30:00Z",
+            "local_date": "2026-07-01",
+            "operating_system_date": "2026-07-01",
+            "expected": [
+              "Before clock",
+              "After clock"
+            ],
+            "actual": [
+              "Before clock",
+              "After clock"
+            ],
+            "matches": true
+          }
+        ],
+        "contract_holds": true,
+        "expected_contract_holds": true,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "cd13248951",
+      "family": "local_calendar_day",
+      "private_fixture_label": "defect",
+      "expected_broad_mechanism_if_defective": "time_semantics",
+      "source_and_oracle_verdict": "The process calendar is UTC but configuration sets America/New_York. Around UTC midnight, Date.today chooses the following local calendar date; winter and summer probes return After clock instead of Before clock.",
+      "source_receipt": {
+        "path": "coordinator-evidence/cd13248951.json",
+        "sha256": "60bfd4378c73b10bd4a4c335aea2d7e550c88eb2fdbd14c9de02df1e79c24e83"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/cd13248951.json",
+        "sha256": "19135e9a7c3346a732c2f003298153c05e9ad320309b43b62a26573d1eff3e25"
+      },
+      "oracle_observations": {
+        "case_id": "cd13248951",
+        "family": "local_calendar_day",
+        "time_zone": "America/New_York",
+        "samples": [
+          {
+            "instant": "2026-01-01T02:30:00Z",
+            "local_date": "2025-12-31",
+            "operating_system_date": "2026-01-01",
+            "expected": [
+              "Before clock"
+            ],
+            "actual": [
+              "After clock"
+            ],
+            "matches": false
+          },
+          {
+            "instant": "2026-07-01T02:30:00Z",
+            "local_date": "2026-06-30",
+            "operating_system_date": "2026-07-01",
+            "expected": [
+              "Before clock"
+            ],
+            "actual": [
+              "After clock"
+            ],
+            "matches": false
+          }
+        ],
+        "contract_holds": false,
+        "expected_contract_holds": false,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "4ed13b9760",
+      "family": "nested_reservation",
+      "private_fixture_label": "defect",
+      "expected_broad_mechanism_if_defective": "transaction_boundary",
+      "source_and_oracle_verdict": "The nested transaction joins its caller. ActiveRecord::Rollback is swallowed at the inner boundary, so the caller commits the rejected decrement: persisted availability is -2 instead of 3 while the attempt remains. The allowed caller-owned transaction is already explicit in change_intent; its concrete implementation was not selected by either arm.",
+      "source_receipt": {
+        "path": "coordinator-evidence/4ed13b9760.json",
+        "sha256": "83c3028d9c9cf6e473bb0f6fe720dcbc07cd99a58d3f99269f3e654aaaf0dd7a"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/4ed13b9760.json",
+        "sha256": "3ab6ff896af2e1a6feae394672f3449eb87edbd2219092ffff4fb309174f77da"
+      },
+      "oracle_observations": {
+        "case_id": "4ed13b9760",
+        "family": "nested_reservation",
+        "outcomes": [
+          "unavailable",
+          "reserved"
+        ],
+        "available_seats": [
+          -2,
+          5
+        ],
+        "reservations": [
+          [],
+          [
+            4
+          ]
+        ],
+        "attempts": [
+          "unavailable",
+          "reserved"
+        ],
+        "transaction_sql": [
+          "BEGIN immediate TRANSACTION",
+          "COMMIT TRANSACTION",
+          "BEGIN immediate TRANSACTION",
+          "COMMIT TRANSACTION"
+        ],
+        "contract_holds": false,
+        "expected_contract_holds": false,
+        "oracle_matches_intended_case": true
+      }
+    },
+    {
+      "case_id": "8f9892b56f",
+      "family": "nested_reservation",
+      "private_fixture_label": "control",
+      "expected_broad_mechanism_if_defective": "transaction_boundary",
+      "source_and_oracle_verdict": "requires_new: true isolates the rejected reservation. The recorded SAVEPOINT and ROLLBACK TO SAVEPOINT preserve three available seats and the outer attempt record; a separate accepted request leaves five seats and one reservation.",
+      "source_receipt": {
+        "path": "coordinator-evidence/8f9892b56f.json",
+        "sha256": "a9864d1b729e72ee427e4ec4e13fc14f515943dcafcd78bdac7e8d196113ee69"
+      },
+      "oracle_receipt": {
+        "path": "coordinator-oracles/8f9892b56f.json",
+        "sha256": "b5ccfa14f7e073eaacf69803a0a1cbb2432884c5778998a0940d9ebe269e21ed"
+      },
+      "oracle_observations": {
+        "case_id": "8f9892b56f",
+        "family": "nested_reservation",
+        "outcomes": [
+          "unavailable",
+          "reserved"
+        ],
+        "available_seats": [
+          3,
+          5
+        ],
+        "reservations": [
+          [],
+          [
+            4
+          ]
+        ],
+        "attempts": [
+          "unavailable",
+          "reserved"
+        ],
+        "transaction_sql": [
+          "BEGIN immediate TRANSACTION",
+          "SAVEPOINT active_record_1",
+          "ROLLBACK TO SAVEPOINT active_record_1",
+          "COMMIT TRANSACTION",
+          "BEGIN immediate TRANSACTION",
+          "SAVEPOINT active_record_1",
+          "RELEASE SAVEPOINT active_record_1",
+          "COMMIT TRANSACTION"
+        ],
+        "contract_holds": true,
+        "expected_contract_holds": true,
+        "oracle_matches_intended_case": true
+      }
+    }
+  ],
+  "focused_adjudications": [
+    {
+      "case_id": "7a9d5822d0",
+      "family": "invoice_rounding",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "7a9d5822d0-0-static-focus",
+      "request": {
+        "path": "requests/7a9d5822d0-0-static-focus.json",
+        "sha256": "d8803d372e1240aa6029dd036b186f9c112706c50b966d81dfad66b36b17e19a"
+      },
+      "response": {
+        "path": "responses/7a9d5822d0-0-static-focus.json",
+        "sha256": "c1a2f93ad89bc8b6c4399d3fddcd94da044e3c0fa945c73b22d12ff445e2d506"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "b9d22c55c686378f95c387e8f7ca94f520b441ae127ec8f10eb88df7c24f3020"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.27
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.52
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.33,
+          "probabilities": {
+            "error_handling": 0.0,
+            "lifecycle": 0.0,
+            "query_behavior": 0.01,
+            "none": 0.39,
+            "persistence": 0.01,
+            "output_contract": 0.02,
+            "other_supported": 0.09,
+            "test_gap": 0.06,
+            "time_semantics": 0.0,
+            "transaction_boundary": 0.0,
+            "input_contract": 0.05,
+            "calculation": 0.2,
+            "unknown": 0.17
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.51,
+          "probabilities": {
+            "011fb0e2d3": 0.01,
+            "changed0": 0.06,
+            "d3972d97b2": 0.29,
+            "none": 0.64
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper retains exact BigDecimal extended amounts; the changed total rounds only after summing. The executable positive, negative-credit and exact-cent examples satisfy the declared rounding contract."
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "family": "invoice_rounding",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "7a9d5822d0-0-adaptive-focus",
+      "request": {
+        "path": "requests/7a9d5822d0-0-adaptive-focus.json",
+        "sha256": "d8803d372e1240aa6029dd036b186f9c112706c50b966d81dfad66b36b17e19a"
+      },
+      "response": {
+        "path": "responses/7a9d5822d0-0-adaptive-focus.json",
+        "sha256": "6a4d9e4076504c5938f49ea16b78e4a4734ec1c940e9afc1e42c631cb1fbac6f"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "b9d22c55c686378f95c387e8f7ca94f520b441ae127ec8f10eb88df7c24f3020"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.29
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.51
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.36,
+          "probabilities": {
+            "none": 0.41,
+            "persistence": 0.01,
+            "other_supported": 0.09,
+            "query_behavior": 0.01,
+            "transaction_boundary": 0.0,
+            "calculation": 0.22,
+            "error_handling": 0.0,
+            "lifecycle": 0.0,
+            "test_gap": 0.05,
+            "output_contract": 0.01,
+            "input_contract": 0.06,
+            "time_semantics": 0.0,
+            "unknown": 0.14
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.51,
+          "probabilities": {
+            "none": 0.64,
+            "changed0": 0.1,
+            "d3972d97b2": 0.25,
+            "011fb0e2d3": 0.01
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper retains exact BigDecimal extended amounts; the changed total rounds only after summing. The executable positive, negative-credit and exact-cent examples satisfy the declared rounding contract."
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "family": "invoice_rounding",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "7a9d5822d0-1-static-focus",
+      "request": {
+        "path": "requests/7a9d5822d0-1-static-focus.json",
+        "sha256": "d8803d372e1240aa6029dd036b186f9c112706c50b966d81dfad66b36b17e19a"
+      },
+      "response": {
+        "path": "responses/7a9d5822d0-1-static-focus.json",
+        "sha256": "c78d324c83d0e1117a627fccada5e5f411a1482de5069f798d583bd4fd9efbf9"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "b9d22c55c686378f95c387e8f7ca94f520b441ae127ec8f10eb88df7c24f3020"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.32
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.51
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.31,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "test_gap": 0.05,
+            "transaction_boundary": 0.0,
+            "query_behavior": 0.01,
+            "calculation": 0.24,
+            "time_semantics": 0.0,
+            "error_handling": 0.0,
+            "other_supported": 0.09,
+            "input_contract": 0.06,
+            "none": 0.37,
+            "persistence": 0.01,
+            "unknown": 0.16,
+            "output_contract": 0.01
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.52,
+          "probabilities": {
+            "d3972d97b2": 0.28,
+            "changed0": 0.07,
+            "none": 0.63,
+            "011fb0e2d3": 0.02
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper retains exact BigDecimal extended amounts; the changed total rounds only after summing. The executable positive, negative-credit and exact-cent examples satisfy the declared rounding contract."
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "family": "invoice_rounding",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "7a9d5822d0-1-adaptive-focus",
+      "request": {
+        "path": "requests/7a9d5822d0-1-adaptive-focus.json",
+        "sha256": "d8803d372e1240aa6029dd036b186f9c112706c50b966d81dfad66b36b17e19a"
+      },
+      "response": {
+        "path": "responses/7a9d5822d0-1-adaptive-focus.json",
+        "sha256": "64f5d1eab7398ed167043c5017dfb5998f6b8e6e912adce039c95a013b5df3e2"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "b9d22c55c686378f95c387e8f7ca94f520b441ae127ec8f10eb88df7c24f3020"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.32
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.51
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.3,
+          "probabilities": {
+            "calculation": 0.22,
+            "other_supported": 0.11,
+            "input_contract": 0.05,
+            "test_gap": 0.06,
+            "transaction_boundary": 0.0,
+            "none": 0.36,
+            "persistence": 0.02,
+            "query_behavior": 0.01,
+            "error_handling": 0.0,
+            "unknown": 0.16,
+            "lifecycle": 0.0,
+            "output_contract": 0.01,
+            "time_semantics": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.53,
+          "probabilities": {
+            "011fb0e2d3": 0.02,
+            "d3972d97b2": 0.26,
+            "changed0": 0.08,
+            "none": 0.64
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper retains exact BigDecimal extended amounts; the changed total rounds only after summing. The executable positive, negative-credit and exact-cent examples satisfy the declared rounding contract."
+    },
+    {
+      "case_id": "97bf2156f1",
+      "family": "invoice_rounding",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "97bf2156f1-0-static-focus",
+      "request": {
+        "path": "requests/97bf2156f1-0-static-focus.json",
+        "sha256": "58fbeaf7b8100ff995d2d6f60ec44c228a902001fbda2675ea495c3a6b4230f4"
+      },
+      "response": {
+        "path": "responses/97bf2156f1-0-static-focus.json",
+        "sha256": "df82e838172c4797afdee36a43ad638615f2cd4125ea0e149db422b4305624bb"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "abaf40971dac196f072fe3879d320b6540bfdcda6d9031fbb666201b5222d4f3"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.8
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.6
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "calculation",
+          "confidence": 0.89,
+          "probabilities": {
+            "transaction_boundary": 0.0,
+            "test_gap": 0.01,
+            "other_supported": 0.01,
+            "lifecycle": 0.0,
+            "calculation": 0.91,
+            "output_contract": 0.0,
+            "unknown": 0.02,
+            "query_behavior": 0.0,
+            "persistence": 0.0,
+            "error_handling": 0.0,
+            "time_semantics": 0.0,
+            "input_contract": 0.0,
+            "none": 0.05
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "d3972d97b2",
+          "confidence": 0.91,
+          "probabilities": {
+            "changed0": 0.01,
+            "011fb0e2d3": 0.0,
+            "d3972d97b2": 0.93,
+            "none": 0.06
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": true,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "direct_source_for_verified_mechanism",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": true,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper rounds every extended line amount before the total sums them. Three 0.335 amounts become 1.02 rather than 1.01; negative credits likewise become -1.02 rather than -1.01. The helper is the direct distinguishing source."
+    },
+    {
+      "case_id": "97bf2156f1",
+      "family": "invoice_rounding",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "97bf2156f1-0-adaptive-focus",
+      "request": {
+        "path": "requests/97bf2156f1-0-adaptive-focus.json",
+        "sha256": "58fbeaf7b8100ff995d2d6f60ec44c228a902001fbda2675ea495c3a6b4230f4"
+      },
+      "response": {
+        "path": "responses/97bf2156f1-0-adaptive-focus.json",
+        "sha256": "410dab0fd8e69529f31c396beaf060fdcd38df739a456dd58821636e824cf937"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "abaf40971dac196f072fe3879d320b6540bfdcda6d9031fbb666201b5222d4f3"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.78
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.59
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "calculation",
+          "confidence": 0.88,
+          "probabilities": {
+            "other_supported": 0.01,
+            "persistence": 0.0,
+            "error_handling": 0.0,
+            "unknown": 0.03,
+            "query_behavior": 0.0,
+            "output_contract": 0.0,
+            "test_gap": 0.01,
+            "calculation": 0.89,
+            "time_semantics": 0.0,
+            "input_contract": 0.01,
+            "transaction_boundary": 0.0,
+            "lifecycle": 0.0,
+            "none": 0.05
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "d3972d97b2",
+          "confidence": 0.91,
+          "probabilities": {
+            "d3972d97b2": 0.93,
+            "011fb0e2d3": 0.0,
+            "changed0": 0.01,
+            "none": 0.06
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "direct_source_for_verified_mechanism",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper rounds every extended line amount before the total sums them. Three 0.335 amounts become 1.02 rather than 1.01; negative credits likewise become -1.02 rather than -1.01. The helper is the direct distinguishing source. The correct category and helper survive; only the frozen 0.8 lead cutoff is missed at 0.78."
+    },
+    {
+      "case_id": "97bf2156f1",
+      "family": "invoice_rounding",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "97bf2156f1-1-static-focus",
+      "request": {
+        "path": "requests/97bf2156f1-1-static-focus.json",
+        "sha256": "58fbeaf7b8100ff995d2d6f60ec44c228a902001fbda2675ea495c3a6b4230f4"
+      },
+      "response": {
+        "path": "responses/97bf2156f1-1-static-focus.json",
+        "sha256": "1df0f1185abc6df5f7d3b1b79972e126008dd32cae093e9dd649f8fc645f8216"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "abaf40971dac196f072fe3879d320b6540bfdcda6d9031fbb666201b5222d4f3"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.8
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "calculation",
+          "confidence": 0.91,
+          "probabilities": {
+            "persistence": 0.0,
+            "none": 0.03,
+            "other_supported": 0.01,
+            "test_gap": 0.01,
+            "time_semantics": 0.0,
+            "input_contract": 0.0,
+            "query_behavior": 0.0,
+            "lifecycle": 0.0,
+            "output_contract": 0.0,
+            "unknown": 0.02,
+            "calculation": 0.93,
+            "transaction_boundary": 0.0,
+            "error_handling": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "d3972d97b2",
+          "confidence": 0.92,
+          "probabilities": {
+            "changed0": 0.01,
+            "none": 0.05,
+            "d3972d97b2": 0.94,
+            "011fb0e2d3": 0.0
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": true,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "direct_source_for_verified_mechanism",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": true,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper rounds every extended line amount before the total sums them. Three 0.335 amounts become 1.02 rather than 1.01; negative credits likewise become -1.02 rather than -1.01. The helper is the direct distinguishing source."
+    },
+    {
+      "case_id": "97bf2156f1",
+      "family": "invoice_rounding",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "97bf2156f1-1-adaptive-focus",
+      "request": {
+        "path": "requests/97bf2156f1-1-adaptive-focus.json",
+        "sha256": "58fbeaf7b8100ff995d2d6f60ec44c228a902001fbda2675ea495c3a6b4230f4"
+      },
+      "response": {
+        "path": "responses/97bf2156f1-1-adaptive-focus.json",
+        "sha256": "812e8385eaf883e2625f2a10f70d130c96feec13a49255c6be0f4e32d0110472"
+      },
+      "selected_cards": [
+        {
+          "id": "d3972d97b2",
+          "path": "app/services/investigation_line_amounts.rb",
+          "sha256": "abaf40971dac196f072fe3879d320b6540bfdcda6d9031fbb666201b5222d4f3"
+        },
+        {
+          "id": "011fb0e2d3",
+          "path": "spec/services/investigation_invoice_total_spec.rb",
+          "sha256": "1df96a4aef398f0df79f9386c98a423c9eecedfa4a3e81b7b91121d33163333d"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_invoice_total.rb",
+        "sha256": "70f82638a31292708911be321d9aade519d6c29429f849c0f9f7e8cb90876d2c"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "d3972d97b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.8
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.58
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "calculation",
+          "confidence": 0.9,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "calculation": 0.91,
+            "output_contract": 0.0,
+            "error_handling": 0.0,
+            "test_gap": 0.01,
+            "other_supported": 0.01,
+            "transaction_boundary": 0.0,
+            "persistence": 0.0,
+            "unknown": 0.02,
+            "input_contract": 0.0,
+            "time_semantics": 0.0,
+            "none": 0.05,
+            "query_behavior": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "d3972d97b2",
+          "confidence": 0.91,
+          "probabilities": {
+            "changed0": 0.01,
+            "d3972d97b2": 0.93,
+            "011fb0e2d3": 0.0,
+            "none": 0.06
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": true,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "direct_source_for_verified_mechanism",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": true,
+      "adjudication": "Both arms read the distinguishing helper and the same ordinary test. The helper rounds every extended line amount before the total sums them. Three 0.335 amounts become 1.02 rather than 1.01; negative credits likewise become -1.02 rather than -1.01. The helper is the direct distinguishing source."
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "family": "json_key_shape",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "2fa1ca8b84-0-static-focus",
+      "request": {
+        "path": "requests/2fa1ca8b84-0-static-focus.json",
+        "sha256": "a364e700d26f5f403abacd1d78ba2f3fad3848068118415831afe02e076523fc"
+      },
+      "response": {
+        "path": "responses/2fa1ca8b84-0-static-focus.json",
+        "sha256": "9ce555ac48835586bd7d59816f0e76ea1b8788c0b2955eebb4942bdeb4432a32"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "7b531b9c1bc2bfa78a4424a8afc17acb35dba4e62c78f0b4311f9a8a028a87e8"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.32
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.47
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "input_contract",
+          "confidence": 0.39,
+          "probabilities": {
+            "other_supported": 0.01,
+            "time_semantics": 0.0,
+            "transaction_boundary": 0.0,
+            "query_behavior": 0.0,
+            "output_contract": 0.0,
+            "persistence": 0.02,
+            "lifecycle": 0.0,
+            "calculation": 0.0,
+            "test_gap": 0.07,
+            "unknown": 0.03,
+            "none": 0.43,
+            "error_handling": 0.01,
+            "input_contract": 0.43
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.35,
+          "probabilities": {
+            "167e6b0606": 0.03,
+            "none": 0.51,
+            "changed0": 0.25,
+            "2e14f66a9b": 0.21
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "missed_supporting_source_present_in_packet",
+      "answer_consistency_flags": [
+        "specific_mechanism_with_none_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. JSON.parse produces string keys and the caller retains string-keyed heading/window_days; the changed consumer fetches symbols and silently returns defaults. The recorded public request persists Daily activity/7 instead of Monthly field notes/30. input_contract is the correct broad category, but evidence=none and the low contract Noul fail to surface the visible mismatch."
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "family": "json_key_shape",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "2fa1ca8b84-0-adaptive-focus",
+      "request": {
+        "path": "requests/2fa1ca8b84-0-adaptive-focus.json",
+        "sha256": "a364e700d26f5f403abacd1d78ba2f3fad3848068118415831afe02e076523fc"
+      },
+      "response": {
+        "path": "responses/2fa1ca8b84-0-adaptive-focus.json",
+        "sha256": "7d3914be1054e7499f79f2e9f83e769a387da29296620079785784bb652e0f12"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "7b531b9c1bc2bfa78a4424a8afc17acb35dba4e62c78f0b4311f9a8a028a87e8"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.32
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.48
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "input_contract",
+          "confidence": 0.39,
+          "probabilities": {
+            "output_contract": 0.0,
+            "none": 0.41000000000000003,
+            "test_gap": 0.07,
+            "input_contract": 0.45,
+            "transaction_boundary": 0.0,
+            "lifecycle": 0.0,
+            "other_supported": 0.01,
+            "error_handling": 0.01,
+            "calculation": 0.0,
+            "time_semantics": 0.0,
+            "persistence": 0.02,
+            "unknown": 0.03,
+            "query_behavior": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.23,
+          "probabilities": {
+            "none": 0.43,
+            "167e6b0606": 0.03,
+            "changed0": 0.27,
+            "2e14f66a9b": 0.27
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "missed_supporting_source_present_in_packet",
+      "answer_consistency_flags": [
+        "specific_mechanism_with_none_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. JSON.parse produces string keys and the caller retains string-keyed heading/window_days; the changed consumer fetches symbols and silently returns defaults. The recorded public request persists Daily activity/7 instead of Monthly field notes/30. input_contract is the correct broad category, but evidence=none and the low contract Noul fail to surface the visible mismatch."
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "family": "json_key_shape",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "2fa1ca8b84-1-static-focus",
+      "request": {
+        "path": "requests/2fa1ca8b84-1-static-focus.json",
+        "sha256": "a364e700d26f5f403abacd1d78ba2f3fad3848068118415831afe02e076523fc"
+      },
+      "response": {
+        "path": "responses/2fa1ca8b84-1-static-focus.json",
+        "sha256": "9914eb2710207b4bdbff62cad280c14349e42cbcedf8ee052c09ce83c47858ca"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "7b531b9c1bc2bfa78a4424a8afc17acb35dba4e62c78f0b4311f9a8a028a87e8"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.41
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.46
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "input_contract",
+          "confidence": 0.38,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "error_handling": 0.01,
+            "none": 0.39,
+            "transaction_boundary": 0.0,
+            "output_contract": 0.01,
+            "input_contract": 0.43,
+            "query_behavior": 0.0,
+            "test_gap": 0.09,
+            "other_supported": 0.01,
+            "time_semantics": 0.0,
+            "calculation": 0.0,
+            "unknown": 0.04,
+            "persistence": 0.02
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.23,
+          "probabilities": {
+            "167e6b0606": 0.02,
+            "2e14f66a9b": 0.28,
+            "none": 0.42,
+            "changed0": 0.28
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "missed_supporting_source_present_in_packet",
+      "answer_consistency_flags": [
+        "specific_mechanism_with_none_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. JSON.parse produces string keys and the caller retains string-keyed heading/window_days; the changed consumer fetches symbols and silently returns defaults. The recorded public request persists Daily activity/7 instead of Monthly field notes/30. input_contract is the correct broad category, but evidence=none and the low contract Noul fail to surface the visible mismatch."
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "family": "json_key_shape",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "2fa1ca8b84-1-adaptive-focus",
+      "request": {
+        "path": "requests/2fa1ca8b84-1-adaptive-focus.json",
+        "sha256": "a364e700d26f5f403abacd1d78ba2f3fad3848068118415831afe02e076523fc"
+      },
+      "response": {
+        "path": "responses/2fa1ca8b84-1-adaptive-focus.json",
+        "sha256": "0eb2f5a233c810ce1e0194bcb31a65a32fbf3db9a04ad16ce65ce2c0faeb7239"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "7b531b9c1bc2bfa78a4424a8afc17acb35dba4e62c78f0b4311f9a8a028a87e8"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.35
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.46
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "input_contract",
+          "confidence": 0.43,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "time_semantics": 0.0,
+            "persistence": 0.02,
+            "input_contract": 0.47,
+            "other_supported": 0.01,
+            "test_gap": 0.08,
+            "error_handling": 0.01,
+            "output_contract": 0.01,
+            "transaction_boundary": 0.0,
+            "none": 0.37,
+            "query_behavior": 0.0,
+            "unknown": 0.03,
+            "calculation": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.18,
+          "probabilities": {
+            "changed0": 0.33,
+            "none": 0.39,
+            "167e6b0606": 0.02,
+            "2e14f66a9b": 0.26
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "category_matches_source_and_oracle",
+      "evidence_answer_assessment": "missed_supporting_source_present_in_packet",
+      "answer_consistency_flags": [
+        "specific_mechanism_with_none_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. JSON.parse produces string keys and the caller retains string-keyed heading/window_days; the changed consumer fetches symbols and silently returns defaults. The recorded public request persists Daily activity/7 instead of Monthly field notes/30. input_contract is the correct broad category, but evidence=none and the low contract Noul fail to surface the visible mismatch."
+    },
+    {
+      "case_id": "92daced6e0",
+      "family": "json_key_shape",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "92daced6e0-0-static-focus",
+      "request": {
+        "path": "requests/92daced6e0-0-static-focus.json",
+        "sha256": "2a70ec8845979d7aeed7bec1e58ebc47460642cbdbae1dd537acc0dd3f322f73"
+      },
+      "response": {
+        "path": "responses/92daced6e0-0-static-focus.json",
+        "sha256": "25b7b03bfe06fd52f9cd7ec3859435e136a404c9dca09b7894f47eba17d3dbf5"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "62382e8ec133eb3939989e0e4c9082c6b4ff735647cb765d92f36460d5808bca"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.25
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.45
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.57,
+          "probabilities": {
+            "persistence": 0.02,
+            "input_contract": 0.19,
+            "none": 0.61,
+            "lifecycle": 0.0,
+            "other_supported": 0.01,
+            "time_semantics": 0.0,
+            "unknown": 0.04,
+            "output_contract": 0.0,
+            "calculation": 0.0,
+            "transaction_boundary": 0.0,
+            "error_handling": 0.01,
+            "test_gap": 0.12,
+            "query_behavior": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.52,
+          "probabilities": {
+            "none": 0.63,
+            "changed0": 0.18,
+            "2e14f66a9b": 0.16,
+            "167e6b0606": 0.03
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. The JSON caller uses symbolize_names: true and slices symbol keys, matching the changed consumer. Explicit heading/window values and defaults persist correctly."
+    },
+    {
+      "case_id": "92daced6e0",
+      "family": "json_key_shape",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "92daced6e0-0-adaptive-focus",
+      "request": {
+        "path": "requests/92daced6e0-0-adaptive-focus.json",
+        "sha256": "2a70ec8845979d7aeed7bec1e58ebc47460642cbdbae1dd537acc0dd3f322f73"
+      },
+      "response": {
+        "path": "responses/92daced6e0-0-adaptive-focus.json",
+        "sha256": "b4b5273cd5f2a6577a1f97471e013c6de8c4a50ac9650b0ed570747b3c814a75"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "62382e8ec133eb3939989e0e4c9082c6b4ff735647cb765d92f36460d5808bca"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.24
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.44
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.58,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "test_gap": 0.15,
+            "error_handling": 0.01,
+            "calculation": 0.0,
+            "output_contract": 0.0,
+            "other_supported": 0.01,
+            "transaction_boundary": 0.0,
+            "persistence": 0.01,
+            "unknown": 0.03,
+            "input_contract": 0.18,
+            "time_semantics": 0.0,
+            "none": 0.61,
+            "query_behavior": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.56,
+          "probabilities": {
+            "changed0": 0.19,
+            "167e6b0606": 0.03,
+            "none": 0.67,
+            "2e14f66a9b": 0.11
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. The JSON caller uses symbolize_names: true and slices symbol keys, matching the changed consumer. Explicit heading/window values and defaults persist correctly."
+    },
+    {
+      "case_id": "92daced6e0",
+      "family": "json_key_shape",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "92daced6e0-1-static-focus",
+      "request": {
+        "path": "requests/92daced6e0-1-static-focus.json",
+        "sha256": "2a70ec8845979d7aeed7bec1e58ebc47460642cbdbae1dd537acc0dd3f322f73"
+      },
+      "response": {
+        "path": "responses/92daced6e0-1-static-focus.json",
+        "sha256": "6a30a4db56e1e2187b64199ba8a1eab40e4943e3959267766b51de74f5ecb445"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "62382e8ec133eb3939989e0e4c9082c6b4ff735647cb765d92f36460d5808bca"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.27
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.42
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.53,
+          "probabilities": {
+            "input_contract": 0.25,
+            "transaction_boundary": 0.0,
+            "unknown": 0.04,
+            "calculation": 0.0,
+            "lifecycle": 0.0,
+            "none": 0.56,
+            "output_contract": 0.0,
+            "other_supported": 0.01,
+            "query_behavior": 0.0,
+            "test_gap": 0.1,
+            "error_handling": 0.01,
+            "persistence": 0.02,
+            "time_semantics": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.54,
+          "probabilities": {
+            "changed0": 0.15,
+            "2e14f66a9b": 0.17,
+            "167e6b0606": 0.02,
+            "none": 0.66
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. The JSON caller uses symbolize_names: true and slices symbol keys, matching the changed consumer. Explicit heading/window values and defaults persist correctly."
+    },
+    {
+      "case_id": "92daced6e0",
+      "family": "json_key_shape",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "92daced6e0-1-adaptive-focus",
+      "request": {
+        "path": "requests/92daced6e0-1-adaptive-focus.json",
+        "sha256": "2a70ec8845979d7aeed7bec1e58ebc47460642cbdbae1dd537acc0dd3f322f73"
+      },
+      "response": {
+        "path": "responses/92daced6e0-1-adaptive-focus.json",
+        "sha256": "57172cd4458cb6c5a6c21a07da23e3056dd2ea283d8c91e51eaa2db7d55f1346"
+      },
+      "selected_cards": [
+        {
+          "id": "2e14f66a9b",
+          "path": "app/services/investigation_digest_request.rb",
+          "sha256": "62382e8ec133eb3939989e0e4c9082c6b4ff735647cb765d92f36460d5808bca"
+        },
+        {
+          "id": "167e6b0606",
+          "path": "spec/services/investigation_digest_options_spec.rb",
+          "sha256": "dbdda8f503bdb42a79e1bb7d5a74489e6da06e83784bfaba7d927aabfea73aa6"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_digest_options.rb",
+        "sha256": "1c864d88474353ec1e7b548ce498dc9461a628ea6db0430c8aca40cf7346a656"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "2e14f66a9b"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.23
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.44
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.52,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "test_gap": 0.1,
+            "error_handling": 0.01,
+            "output_contract": 0.0,
+            "calculation": 0.0,
+            "other_supported": 0.0,
+            "transaction_boundary": 0.0,
+            "persistence": 0.02,
+            "unknown": 0.05,
+            "input_contract": 0.25,
+            "none": 0.56,
+            "time_semantics": 0.0,
+            "query_behavior": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.6,
+          "probabilities": {
+            "changed0": 0.15,
+            "167e6b0606": 0.02,
+            "none": 0.69,
+            "2e14f66a9b": 0.14
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "Both arms read the same caller and ordinary test. The JSON caller uses symbolize_names: true and slices symbol keys, matching the changed consumer. Explicit heading/window values and defaults persist correctly."
+    },
+    {
+      "case_id": "49429b5c36",
+      "family": "local_calendar_day",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "49429b5c36-0-static-focus",
+      "request": {
+        "path": "requests/49429b5c36-0-static-focus.json",
+        "sha256": "2d26cfc2ee67613cc93ce10f6c00f5569929224f5fdd95fdf63a3fa997ebee88"
+      },
+      "response": {
+        "path": "responses/49429b5c36-0-static-focus.json",
+        "sha256": "0dd094e8638a61ac35bae535b36c65563f4c01f5d8b34ef1503f8ca78c817ab4"
+      },
+      "selected_cards": [
+        {
+          "id": "76d34575d7",
+          "path": "app/models/investigation_event.rb",
+          "sha256": "8e0c202ebbc918b356928bea47f4f601b36bb1b5b9c629a7f8f5598171f58403"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.69
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "time_semantics",
+          "confidence": 0.83,
+          "probabilities": {
+            "other_supported": 0.0,
+            "persistence": 0.0,
+            "input_contract": 0.0,
+            "unknown": 0.04,
+            "error_handling": 0.0,
+            "test_gap": 0.0,
+            "calculation": 0.0,
+            "output_contract": 0.0,
+            "transaction_boundary": 0.0,
+            "lifecycle": 0.0,
+            "none": 0.11,
+            "query_behavior": 0.0,
+            "time_semantics": 0.85
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.34,
+          "probabilities": {
+            "f73677b054": 0.0,
+            "changed0": 0.49,
+            "none": 0.5,
+            "76d34575d7": 0.01
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "configuration_missing_cannot_distinguish_pair",
+      "mechanism_answer_assessment": "unsupported_specific_mechanism_for_tested_control",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [
+        "specific_mechanism_with_none_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The application and operating-system calendar are both UTC. Date.today selects the configured current date, and the recorded winter/summer examples satisfy the declared period contract. Static omitted the configuration. Its category is a possible risk category, not an established violation from its observed packet; unknown would preserve the unresolved premise."
+    },
+    {
+      "case_id": "49429b5c36",
+      "family": "local_calendar_day",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "49429b5c36-0-adaptive-focus",
+      "request": {
+        "path": "requests/49429b5c36-0-adaptive-focus.json",
+        "sha256": "7a2cb4a4991beda8010e205f7d4e70d47c74d705c81451ca1cf4fbb99330a15d"
+      },
+      "response": {
+        "path": "responses/49429b5c36-0-adaptive-focus.json",
+        "sha256": "a0f155c7d07e648dec1d40a229112ca6e46f3d6cd28859d507569ea1273b34da"
+      },
+      "selected_cards": [
+        {
+          "id": "4b4617f2b2",
+          "path": "config/initializers/investigation_calendar.rb",
+          "sha256": "626362aefcb68055177a7012c8a0033fe1ef84c53c6779dc8ee8a39babe57a4d"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.2
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.41
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.69,
+          "probabilities": {
+            "persistence": 0.0,
+            "other_supported": 0.0,
+            "calculation": 0.0,
+            "lifecycle": 0.0,
+            "none": 0.72,
+            "input_contract": 0.0,
+            "error_handling": 0.0,
+            "query_behavior": 0.01,
+            "output_contract": 0.0,
+            "time_semantics": 0.26,
+            "unknown": 0.01,
+            "transaction_boundary": 0.0,
+            "test_gap": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.48,
+          "probabilities": {
+            "4b4617f2b2": 0.16,
+            "f73677b054": 0.0,
+            "changed0": 0.22,
+            "none": 0.62
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The application and operating-system calendar are both UTC. Date.today selects the configured current date, and the recorded winter/summer examples satisfy the declared period contract. Adaptive selected UTC configuration and correctly returned none/none for this contract."
+    },
+    {
+      "case_id": "49429b5c36",
+      "family": "local_calendar_day",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "49429b5c36-1-static-focus",
+      "request": {
+        "path": "requests/49429b5c36-1-static-focus.json",
+        "sha256": "2d26cfc2ee67613cc93ce10f6c00f5569929224f5fdd95fdf63a3fa997ebee88"
+      },
+      "response": {
+        "path": "responses/49429b5c36-1-static-focus.json",
+        "sha256": "fab742ed7997e34b4d0ecf8d776304d9acd82dae8316e3cc7ebafd8dff9b412d"
+      },
+      "selected_cards": [
+        {
+          "id": "76d34575d7",
+          "path": "app/models/investigation_event.rb",
+          "sha256": "8e0c202ebbc918b356928bea47f4f601b36bb1b5b9c629a7f8f5598171f58403"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.65
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.68
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "time_semantics",
+          "confidence": 0.81,
+          "probabilities": {
+            "persistence": 0.0,
+            "other_supported": 0.0,
+            "error_handling": 0.0,
+            "unknown": 0.04,
+            "test_gap": 0.0,
+            "output_contract": 0.0,
+            "query_behavior": 0.0,
+            "time_semantics": 0.83,
+            "calculation": 0.0,
+            "input_contract": 0.0,
+            "transaction_boundary": 0.0,
+            "lifecycle": 0.0,
+            "none": 0.13
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.41,
+          "probabilities": {
+            "76d34575d7": 0.01,
+            "f73677b054": 0.0,
+            "changed0": 0.56,
+            "none": 0.43
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "configuration_missing_cannot_distinguish_pair",
+      "mechanism_answer_assessment": "unsupported_specific_mechanism_for_tested_control",
+      "evidence_answer_assessment": "location_does_not_establish_tested_control_violation",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The application and operating-system calendar are both UTC. Date.today selects the configured current date, and the recorded winter/summer examples satisfy the declared period contract. Static omitted the configuration. Its category is a possible risk category, not an established violation from its observed packet; unknown would preserve the unresolved premise."
+    },
+    {
+      "case_id": "49429b5c36",
+      "family": "local_calendar_day",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "49429b5c36-1-adaptive-focus",
+      "request": {
+        "path": "requests/49429b5c36-1-adaptive-focus.json",
+        "sha256": "7a2cb4a4991beda8010e205f7d4e70d47c74d705c81451ca1cf4fbb99330a15d"
+      },
+      "response": {
+        "path": "responses/49429b5c36-1-adaptive-focus.json",
+        "sha256": "8c3e24a1488b1ed2423cb79b39270f47200fd1505fcf5752166c5616521ec17e"
+      },
+      "selected_cards": [
+        {
+          "id": "4b4617f2b2",
+          "path": "config/initializers/investigation_calendar.rb",
+          "sha256": "626362aefcb68055177a7012c8a0033fe1ef84c53c6779dc8ee8a39babe57a4d"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.22
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.42
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.66,
+          "probabilities": {
+            "test_gap": 0.0,
+            "time_semantics": 0.29,
+            "input_contract": 0.0,
+            "lifecycle": 0.0,
+            "other_supported": 0.0,
+            "error_handling": 0.0,
+            "output_contract": 0.0,
+            "transaction_boundary": 0.0,
+            "none": 0.69,
+            "calculation": 0.0,
+            "persistence": 0.0,
+            "unknown": 0.01,
+            "query_behavior": 0.01
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.46,
+          "probabilities": {
+            "changed0": 0.23,
+            "4b4617f2b2": 0.18,
+            "f73677b054": 0.0,
+            "none": 0.59
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "consistent_none_for_tested_control",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The application and operating-system calendar are both UTC. Date.today selects the configured current date, and the recorded winter/summer examples satisfy the declared period contract. Adaptive selected UTC configuration and correctly returned none/none for this contract."
+    },
+    {
+      "case_id": "cd13248951",
+      "family": "local_calendar_day",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "cd13248951-0-static-focus",
+      "request": {
+        "path": "requests/cd13248951-0-static-focus.json",
+        "sha256": "2d26cfc2ee67613cc93ce10f6c00f5569929224f5fdd95fdf63a3fa997ebee88"
+      },
+      "response": {
+        "path": "responses/cd13248951-0-static-focus.json",
+        "sha256": "b0a72e44b1d5a53365d7e129f512f3f601ce9862a59b376c138727a855a7591b"
+      },
+      "selected_cards": [
+        {
+          "id": "76d34575d7",
+          "path": "app/models/investigation_event.rb",
+          "sha256": "8e0c202ebbc918b356928bea47f4f601b36bb1b5b9c629a7f8f5598171f58403"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.68
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "time_semantics",
+          "confidence": 0.79,
+          "probabilities": {
+            "test_gap": 0.0,
+            "output_contract": 0.0,
+            "transaction_boundary": 0.0,
+            "other_supported": 0.0,
+            "input_contract": 0.0,
+            "time_semantics": 0.81,
+            "query_behavior": 0.0,
+            "lifecycle": 0.0,
+            "error_handling": 0.0,
+            "calculation": 0.0,
+            "persistence": 0.0,
+            "unknown": 0.04,
+            "none": 0.14
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.42,
+          "probabilities": {
+            "changed0": 0.5700000000000001,
+            "f73677b054": 0.0,
+            "76d34575d7": 0.01,
+            "none": 0.42
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "configuration_missing_cannot_distinguish_pair",
+      "mechanism_answer_assessment": "matches_oracle_category_but_distinguishing_configuration_unobserved",
+      "evidence_answer_assessment": "changed_line_identifies_risk_but_configuration_needed_to_establish_case",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The process calendar is UTC but configuration sets America/New_York. Around UTC midnight, Date.today chooses the following local calendar date; winter and summer probes return After clock instead of Before clock. Static omitted the configuration. Its category is a possible risk category, not an established violation from its observed packet; unknown would preserve the unresolved premise."
+    },
+    {
+      "case_id": "cd13248951",
+      "family": "local_calendar_day",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "cd13248951-0-adaptive-focus",
+      "request": {
+        "path": "requests/cd13248951-0-adaptive-focus.json",
+        "sha256": "365890eb04b251171b0bd11d1c533924035c9736a54832e547c2f11476f773b6"
+      },
+      "response": {
+        "path": "responses/cd13248951-0-adaptive-focus.json",
+        "sha256": "69a3aebebb449b9d01e1e0c36fc01f6bd3dd1c1188e79f63d3e9800144813723"
+      },
+      "selected_cards": [
+        {
+          "id": "4b4617f2b2",
+          "path": "config/initializers/investigation_calendar.rb",
+          "sha256": "c97530fd0903452a41c038a1683db10d677059f8d77c8e42be672463807bd7c1"
+        },
+        {
+          "id": "3490d3b85c",
+          "path": "spec/services/investigation_today_activity_spec.rb",
+          "sha256": "bef8eef6b806c3bcd67f6d6408eb7dde1e193e6ea00c4f55acd128ca307a5c15"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.3
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.42
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.6,
+          "probabilities": {
+            "lifecycle": 0.0,
+            "output_contract": 0.0,
+            "transaction_boundary": 0.0,
+            "query_behavior": 0.01,
+            "calculation": 0.0,
+            "time_semantics": 0.17,
+            "error_handling": 0.0,
+            "other_supported": 0.0,
+            "input_contract": 0.0,
+            "none": 0.64,
+            "persistence": 0.0,
+            "unknown": 0.02,
+            "test_gap": 0.16
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.44,
+          "probabilities": {
+            "3490d3b85c": 0.23,
+            "changed0": 0.17,
+            "none": 0.58,
+            "4b4617f2b2": 0.02
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "missed_source_and_oracle_supported_mechanism",
+      "evidence_answer_assessment": "missed_supporting_source_present_in_packet",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The process calendar is UTC but configuration sets America/New_York. Around UTC midnight, Date.today chooses the following local calendar date; winter and summer probes return After clock instead of Before clock. Adaptive selected the distinguishing configuration but still returned none/none; this is an interpretation miss after successful retrieval."
+    },
+    {
+      "case_id": "cd13248951",
+      "family": "local_calendar_day",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "cd13248951-1-static-focus",
+      "request": {
+        "path": "requests/cd13248951-1-static-focus.json",
+        "sha256": "2d26cfc2ee67613cc93ce10f6c00f5569929224f5fdd95fdf63a3fa997ebee88"
+      },
+      "response": {
+        "path": "responses/cd13248951-1-static-focus.json",
+        "sha256": "742dd7b5de99d20b6298015f3091266136a0a50b7fa2d3335484a4fdfd38f548"
+      },
+      "selected_cards": [
+        {
+          "id": "76d34575d7",
+          "path": "app/models/investigation_event.rb",
+          "sha256": "8e0c202ebbc918b356928bea47f4f601b36bb1b5b9c629a7f8f5598171f58403"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.67
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "time_semantics",
+          "confidence": 0.83,
+          "probabilities": {
+            "calculation": 0.0,
+            "test_gap": 0.0,
+            "input_contract": 0.0,
+            "other_supported": 0.0,
+            "transaction_boundary": 0.0,
+            "none": 0.11,
+            "lifecycle": 0.0,
+            "query_behavior": 0.0,
+            "persistence": 0.0,
+            "unknown": 0.04,
+            "error_handling": 0.0,
+            "output_contract": 0.0,
+            "time_semantics": 0.85
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.41,
+          "probabilities": {
+            "76d34575d7": 0.01,
+            "f73677b054": 0.0,
+            "changed0": 0.56,
+            "none": 0.43
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "configuration_missing_cannot_distinguish_pair",
+      "mechanism_answer_assessment": "matches_oracle_category_but_distinguishing_configuration_unobserved",
+      "evidence_answer_assessment": "changed_line_identifies_risk_but_configuration_needed_to_establish_case",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The process calendar is UTC but configuration sets America/New_York. Around UTC midnight, Date.today chooses the following local calendar date; winter and summer probes return After clock instead of Before clock. Static omitted the configuration. Its category is a possible risk category, not an established violation from its observed packet; unknown would preserve the unresolved premise."
+    },
+    {
+      "case_id": "cd13248951",
+      "family": "local_calendar_day",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "cd13248951-1-adaptive-focus",
+      "request": {
+        "path": "requests/cd13248951-1-adaptive-focus.json",
+        "sha256": "0fcebe4d2ff386fee27257f16be83e2b50d9789dc875f114106f79a076ffd7f7"
+      },
+      "response": {
+        "path": "responses/cd13248951-1-adaptive-focus.json",
+        "sha256": "0c3a457752381c256c35605534deab22aa0a8f1333b9ba1eb9abc4d6ec801040"
+      },
+      "selected_cards": [
+        {
+          "id": "4b4617f2b2",
+          "path": "config/initializers/investigation_calendar.rb",
+          "sha256": "c97530fd0903452a41c038a1683db10d677059f8d77c8e42be672463807bd7c1"
+        },
+        {
+          "id": "f73677b054",
+          "path": "app/services/investigation_activity_export.rb",
+          "sha256": "c8435a27b96c90e8d68d171892307d0116ecb8817012b21ee85f9f53760a8d13"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_today_activity.rb",
+        "sha256": "07621f310f17552224387e7696a29fa0b1d3eff908a46d6e4ee87a0fb066190f"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "4b4617f2b2"
+        ],
+        "all_selected": true
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.34
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.45
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.65,
+          "probabilities": {
+            "test_gap": 0.0,
+            "persistence": 0.0,
+            "error_handling": 0.0,
+            "calculation": 0.0,
+            "transaction_boundary": 0.0,
+            "none": 0.68,
+            "input_contract": 0.0,
+            "query_behavior": 0.02,
+            "unknown": 0.03,
+            "output_contract": 0.0,
+            "lifecycle": 0.0,
+            "time_semantics": 0.26,
+            "other_supported": 0.0
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.59,
+          "probabilities": {
+            "none": 0.69,
+            "f73677b054": 0.0,
+            "changed0": 0.28,
+            "4b4617f2b2": 0.03
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [
+            "distribution_rounding"
+          ],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "sufficient_for_declared_mechanism",
+      "mechanism_answer_assessment": "missed_source_and_oracle_supported_mechanism",
+      "evidence_answer_assessment": "missed_supporting_source_present_in_packet",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The process calendar is UTC but configuration sets America/New_York. Around UTC midnight, Date.today chooses the following local calendar date; winter and summer probes return After clock instead of Before clock. Adaptive selected the distinguishing configuration but still returned none/none; this is an interpretation miss after successful retrieval."
+    },
+    {
+      "case_id": "4ed13b9760",
+      "family": "nested_reservation",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "4ed13b9760-0-static-focus",
+      "request": {
+        "path": "requests/4ed13b9760-0-static-focus.json",
+        "sha256": "0453f12ac298b430b1fd96faf7f1b7239909f954215260744012d656294e9a3e"
+      },
+      "response": {
+        "path": "responses/4ed13b9760-0-static-focus.json",
+        "sha256": "373c23d26e983b492ee963bdccb14cf804b4e8f9fb4cf82d5edc22c8a292e6a9"
+      },
+      "selected_cards": [
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        },
+        {
+          "id": "961fe0a42e",
+          "path": "app/models/investigation_reservation.rb",
+          "sha256": "514683260361072ab8b24a54acbd8f13f11000f2096806c66e74c1ba50002acb"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "d1179d4c3fab8d3f2d90ade349f9891cec797f5b7a07bfdce9d8e39c3860b913"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.61
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "transaction_boundary",
+          "confidence": 0.32,
+          "probabilities": {
+            "error_handling": 0.02,
+            "output_contract": 0.01,
+            "transaction_boundary": 0.38,
+            "time_semantics": 0.0,
+            "persistence": 0.13,
+            "none": 0.31,
+            "calculation": 0.07,
+            "input_contract": 0.01,
+            "lifecycle": 0.01,
+            "query_behavior": 0.01,
+            "test_gap": 0.0,
+            "unknown": 0.03,
+            "other_supported": 0.02
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.81,
+          "probabilities": {
+            "961fe0a42e": 0.0,
+            "changed0": 0.86,
+            "5e10c1617c": 0.0,
+            "none": 0.14
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "category_matches_verified_boundary_under_explicit_intent",
+      "evidence_answer_assessment": "relevant_changed_boundary_for_lifecycle_allowed_by_intent",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The nested transaction joins its caller. ActiveRecord::Rollback is swallowed at the inner boundary, so the caller commits the rejected decrement: persisted availability is -2 instead of 3 while the attempt remains. The allowed caller-owned transaction is already explicit in change_intent; its concrete implementation was not selected by either arm. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern."
+    },
+    {
+      "case_id": "4ed13b9760",
+      "family": "nested_reservation",
+      "private_fixture_label": "defect",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "4ed13b9760-0-adaptive-focus",
+      "request": {
+        "path": "requests/4ed13b9760-0-adaptive-focus.json",
+        "sha256": "6359311002d740b1ce8d7bf5f605f28c56bc805725c1a35fff67b15d99a2cfa9"
+      },
+      "response": {
+        "path": "responses/4ed13b9760-0-adaptive-focus.json",
+        "sha256": "4b6857ceb93b212cf1e5875342359a55e4644b064acb90563b9d2b72fa0bc88f"
+      },
+      "selected_cards": [
+        {
+          "id": "933db3b2fe",
+          "path": "spec/services/investigation_reserve_seats_spec.rb",
+          "sha256": "8e2b34298bef88fb6ffa1ef1b1401f62a1efb16d5bd230cdef9426b8afca01fc"
+        },
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "d1179d4c3fab8d3f2d90ade349f9891cec797f5b7a07bfdce9d8e39c3860b913"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.61
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.59
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.36,
+          "probabilities": {
+            "test_gap": 0.05,
+            "unknown": 0.05,
+            "lifecycle": 0.0,
+            "output_contract": 0.0,
+            "query_behavior": 0.01,
+            "calculation": 0.03,
+            "time_semantics": 0.0,
+            "persistence": 0.07,
+            "input_contract": 0.0,
+            "error_handling": 0.02,
+            "none": 0.41,
+            "other_supported": 0.02,
+            "transaction_boundary": 0.34
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.66,
+          "probabilities": {
+            "changed0": 0.74,
+            "5e10c1617c": 0.0,
+            "933db3b2fe": 0.01,
+            "none": 0.25
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "missed_source_and_oracle_supported_mechanism",
+      "evidence_answer_assessment": "relevant_changed_boundary_for_lifecycle_allowed_by_intent",
+      "answer_consistency_flags": [
+        "none_mechanism_with_specific_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The nested transaction joins its caller. ActiveRecord::Rollback is swallowed at the inner boundary, so the caller commits the rejected decrement: persisted availability is -2 instead of 3 while the attempt remains. The allowed caller-owned transaction is already explicit in change_intent; its concrete implementation was not selected by either arm. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The none category conflicts with identifying changed0 as supporting a concrete violation."
+    },
+    {
+      "case_id": "4ed13b9760",
+      "family": "nested_reservation",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "4ed13b9760-1-static-focus",
+      "request": {
+        "path": "requests/4ed13b9760-1-static-focus.json",
+        "sha256": "0453f12ac298b430b1fd96faf7f1b7239909f954215260744012d656294e9a3e"
+      },
+      "response": {
+        "path": "responses/4ed13b9760-1-static-focus.json",
+        "sha256": "cd39c53234bbcdcdfa41e886f8ce82709c920d07d5bfcd5d14e468b6ecd3dd54"
+      },
+      "selected_cards": [
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        },
+        {
+          "id": "961fe0a42e",
+          "path": "app/models/investigation_reservation.rb",
+          "sha256": "514683260361072ab8b24a54acbd8f13f11000f2096806c66e74c1ba50002acb"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "d1179d4c3fab8d3f2d90ade349f9891cec797f5b7a07bfdce9d8e39c3860b913"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.59
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.32,
+          "probabilities": {
+            "other_supported": 0.03,
+            "input_contract": 0.01,
+            "test_gap": 0.0,
+            "transaction_boundary": 0.3,
+            "lifecycle": 0.01,
+            "time_semantics": 0.0,
+            "query_behavior": 0.01,
+            "output_contract": 0.01,
+            "unknown": 0.04,
+            "error_handling": 0.03,
+            "calculation": 0.06,
+            "persistence": 0.13,
+            "none": 0.37
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.68,
+          "probabilities": {
+            "none": 0.23,
+            "changed0": 0.77,
+            "5e10c1617c": 0.0,
+            "961fe0a42e": 0.0
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "missed_source_and_oracle_supported_mechanism",
+      "evidence_answer_assessment": "relevant_changed_boundary_for_lifecycle_allowed_by_intent",
+      "answer_consistency_flags": [
+        "none_mechanism_with_specific_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The nested transaction joins its caller. ActiveRecord::Rollback is swallowed at the inner boundary, so the caller commits the rejected decrement: persisted availability is -2 instead of 3 while the attempt remains. The allowed caller-owned transaction is already explicit in change_intent; its concrete implementation was not selected by either arm. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The none category conflicts with identifying changed0 as supporting a concrete violation."
+    },
+    {
+      "case_id": "4ed13b9760",
+      "family": "nested_reservation",
+      "private_fixture_label": "defect",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "4ed13b9760-1-adaptive-focus",
+      "request": {
+        "path": "requests/4ed13b9760-1-adaptive-focus.json",
+        "sha256": "6359311002d740b1ce8d7bf5f605f28c56bc805725c1a35fff67b15d99a2cfa9"
+      },
+      "response": {
+        "path": "responses/4ed13b9760-1-adaptive-focus.json",
+        "sha256": "5f43185ac9aeff0031d855b7a6f4b017385969fbbca2a94d74b9a7b54c4edcbd"
+      },
+      "selected_cards": [
+        {
+          "id": "933db3b2fe",
+          "path": "spec/services/investigation_reserve_seats_spec.rb",
+          "sha256": "8e2b34298bef88fb6ffa1ef1b1401f62a1efb16d5bd230cdef9426b8afca01fc"
+        },
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "d1179d4c3fab8d3f2d90ade349f9891cec797f5b7a07bfdce9d8e39c3860b913"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.61
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.61
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.35,
+          "probabilities": {
+            "none": 0.39,
+            "unknown": 0.05,
+            "persistence": 0.07,
+            "other_supported": 0.02,
+            "transaction_boundary": 0.32,
+            "calculation": 0.03,
+            "input_contract": 0.0,
+            "error_handling": 0.03,
+            "time_semantics": 0.0,
+            "test_gap": 0.06,
+            "query_behavior": 0.01,
+            "lifecycle": 0.01,
+            "output_contract": 0.01
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.66,
+          "probabilities": {
+            "none": 0.24,
+            "changed0": 0.75,
+            "933db3b2fe": 0.01,
+            "5e10c1617c": 0.0
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "missed_source_and_oracle_supported_mechanism",
+      "evidence_answer_assessment": "relevant_changed_boundary_for_lifecycle_allowed_by_intent",
+      "answer_consistency_flags": [
+        "none_mechanism_with_specific_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "The nested transaction joins its caller. ActiveRecord::Rollback is swallowed at the inner boundary, so the caller commits the rejected decrement: persisted availability is -2 instead of 3 while the attempt remains. The allowed caller-owned transaction is already explicit in change_intent; its concrete implementation was not selected by either arm. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The none category conflicts with identifying changed0 as supporting a concrete violation."
+    },
+    {
+      "case_id": "8f9892b56f",
+      "family": "nested_reservation",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "static",
+      "focus_id": "8f9892b56f-0-static-focus",
+      "request": {
+        "path": "requests/8f9892b56f-0-static-focus.json",
+        "sha256": "d4b52eb48d2d81727eac98e58cb1fba73691883ad604b171d54bb2b5dfb4ffc2"
+      },
+      "response": {
+        "path": "responses/8f9892b56f-0-static-focus.json",
+        "sha256": "9bff02c59d92ec3c91acd469c9d292a21a8de9050f2c24da6be1a48a446aefe1"
+      },
+      "selected_cards": [
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        },
+        {
+          "id": "961fe0a42e",
+          "path": "app/models/investigation_reservation.rb",
+          "sha256": "514683260361072ab8b24a54acbd8f13f11000f2096806c66e74c1ba50002acb"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "331376fb3a54a9ad7574d1dce65f309a1409477c2bb586ab28e2d9345725cd55"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.62
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "transaction_boundary",
+          "confidence": 0.32,
+          "probabilities": {
+            "none": 0.37,
+            "calculation": 0.06,
+            "other_supported": 0.02,
+            "query_behavior": 0.01,
+            "transaction_boundary": 0.36,
+            "persistence": 0.11,
+            "error_handling": 0.02,
+            "lifecycle": 0.01,
+            "test_gap": 0.0,
+            "output_contract": 0.01,
+            "input_contract": 0.01,
+            "time_semantics": 0.0,
+            "unknown": 0.02
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.74,
+          "probabilities": {
+            "none": 0.19,
+            "changed0": 0.81,
+            "961fe0a42e": 0.0,
+            "5e10c1617c": 0.0
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [
+            "choice_not_maximum"
+          ],
+          "warnings": [],
+          "valid": false
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": false,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "invalid_choice_not_maximum_not_a_valid_mechanism_finding",
+      "evidence_answer_assessment": "location_does_not_establish_tested_control_violation",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "requires_new: true isolates the rejected reservation. The recorded SAVEPOINT and ROLLBACK TO SAVEPOINT preserve three available seats and the outer attempt record; a separate accepted request leaves five seats and one reservation. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The proposed savepoint already protects the tested persistence boundary; this specific transaction accusation is unsupported."
+    },
+    {
+      "case_id": "8f9892b56f",
+      "family": "nested_reservation",
+      "private_fixture_label": "control",
+      "repeat": 0,
+      "arm": "adaptive",
+      "focus_id": "8f9892b56f-0-adaptive-focus",
+      "request": {
+        "path": "requests/8f9892b56f-0-adaptive-focus.json",
+        "sha256": "bab7532de3e78f4814b8df1946f1256b94b3b594c8fba1eebc549313b978d61c"
+      },
+      "response": {
+        "path": "responses/8f9892b56f-0-adaptive-focus.json",
+        "sha256": "c8c53ae09d0afc978d13d8d62f9356a506b978ddd80483f1ed54a593d62679ad"
+      },
+      "selected_cards": [
+        {
+          "id": "933db3b2fe",
+          "path": "spec/services/investigation_reserve_seats_spec.rb",
+          "sha256": "8e2b34298bef88fb6ffa1ef1b1401f62a1efb16d5bd230cdef9426b8afca01fc"
+        },
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "331376fb3a54a9ad7574d1dce65f309a1409477c2bb586ab28e2d9345725cd55"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.63
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.61
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "transaction_boundary",
+          "confidence": 0.34,
+          "probabilities": {
+            "none": 0.37,
+            "calculation": 0.02,
+            "other_supported": 0.02,
+            "query_behavior": 0.01,
+            "transaction_boundary": 0.4,
+            "error_handling": 0.02,
+            "persistence": 0.05,
+            "test_gap": 0.06,
+            "lifecycle": 0.0,
+            "input_contract": 0.0,
+            "output_contract": 0.0,
+            "time_semantics": 0.0,
+            "unknown": 0.05
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.7,
+          "probabilities": {
+            "none": 0.22,
+            "changed0": 0.77,
+            "933db3b2fe": 0.01,
+            "5e10c1617c": 0.0
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "unsupported_specific_mechanism_for_tested_control",
+      "evidence_answer_assessment": "location_does_not_establish_tested_control_violation",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "requires_new: true isolates the rejected reservation. The recorded SAVEPOINT and ROLLBACK TO SAVEPOINT preserve three available seats and the outer attempt record; a separate accepted request leaves five seats and one reservation. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The proposed savepoint already protects the tested persistence boundary; this specific transaction accusation is unsupported."
+    },
+    {
+      "case_id": "8f9892b56f",
+      "family": "nested_reservation",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "static",
+      "focus_id": "8f9892b56f-1-static-focus",
+      "request": {
+        "path": "requests/8f9892b56f-1-static-focus.json",
+        "sha256": "d4b52eb48d2d81727eac98e58cb1fba73691883ad604b171d54bb2b5dfb4ffc2"
+      },
+      "response": {
+        "path": "responses/8f9892b56f-1-static-focus.json",
+        "sha256": "972114c9631f8fddeb5e9b2674aba04111464a2e17ff9a9c4d86561c77c03974"
+      },
+      "selected_cards": [
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        },
+        {
+          "id": "961fe0a42e",
+          "path": "app/models/investigation_reservation.rb",
+          "sha256": "514683260361072ab8b24a54acbd8f13f11000f2096806c66e74c1ba50002acb"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "331376fb3a54a9ad7574d1dce65f309a1409477c2bb586ab28e2d9345725cd55"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.64
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.61
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "transaction_boundary",
+          "confidence": 0.31,
+          "probabilities": {
+            "input_contract": 0.01,
+            "time_semantics": 0.0,
+            "transaction_boundary": 0.36,
+            "persistence": 0.11,
+            "output_contract": 0.01,
+            "test_gap": 0.0,
+            "query_behavior": 0.01,
+            "unknown": 0.03,
+            "calculation": 0.06,
+            "lifecycle": 0.01,
+            "none": 0.36,
+            "error_handling": 0.02,
+            "other_supported": 0.02
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.79,
+          "probabilities": {
+            "none": 0.15,
+            "5e10c1617c": 0.0,
+            "changed0": 0.85,
+            "961fe0a42e": 0.0
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "unsupported_specific_mechanism_for_tested_control",
+      "evidence_answer_assessment": "location_does_not_establish_tested_control_violation",
+      "answer_consistency_flags": [],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "requires_new: true isolates the rejected reservation. The recorded SAVEPOINT and ROLLBACK TO SAVEPOINT preserve three available seats and the outer attempt record; a separate accepted request leaves five seats and one reservation. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The proposed savepoint already protects the tested persistence boundary; this specific transaction accusation is unsupported."
+    },
+    {
+      "case_id": "8f9892b56f",
+      "family": "nested_reservation",
+      "private_fixture_label": "control",
+      "repeat": 1,
+      "arm": "adaptive",
+      "focus_id": "8f9892b56f-1-adaptive-focus",
+      "request": {
+        "path": "requests/8f9892b56f-1-adaptive-focus.json",
+        "sha256": "bab7532de3e78f4814b8df1946f1256b94b3b594c8fba1eebc549313b978d61c"
+      },
+      "response": {
+        "path": "responses/8f9892b56f-1-adaptive-focus.json",
+        "sha256": "2c85f67111062d839697a36327a9e6d889315a2ae23daca6a180c1fba2b92533"
+      },
+      "selected_cards": [
+        {
+          "id": "933db3b2fe",
+          "path": "spec/services/investigation_reserve_seats_spec.rb",
+          "sha256": "8e2b34298bef88fb6ffa1ef1b1401f62a1efb16d5bd230cdef9426b8afca01fc"
+        },
+        {
+          "id": "5e10c1617c",
+          "path": "app/models/investigation_pool.rb",
+          "sha256": "f83def524a232886f344857b27ed7876207b10bbcc10716d574dbbec24466898"
+        }
+      ],
+      "changed_source": {
+        "id": "changed0",
+        "path": "app/services/investigation_reserve_seats.rb",
+        "sha256": "331376fb3a54a9ad7574d1dce65f309a1409477c2bb586ab28e2d9345725cd55"
+      },
+      "all_observed_source_matches_frozen_evidence": true,
+      "private_coverage_diagnostic": {
+        "declared_necessary_card_ids": [
+          "cf6f99e915",
+          "5e10c1617c"
+        ],
+        "all_selected": false
+      },
+      "focused_answers": {
+        "contract_violation": {
+          "type": "noul",
+          "noul": 0.57
+        },
+        "context_missing": {
+          "type": "noul",
+          "noul": 0.59
+        },
+        "mechanism": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.36,
+          "probabilities": {
+            "output_contract": 0.0,
+            "test_gap": 0.07,
+            "other_supported": 0.01,
+            "transaction_boundary": 0.34,
+            "input_contract": 0.0,
+            "time_semantics": 0.0,
+            "query_behavior": 0.01,
+            "lifecycle": 0.0,
+            "error_handling": 0.02,
+            "calculation": 0.03,
+            "persistence": 0.06,
+            "unknown": 0.04,
+            "none": 0.42
+          }
+        },
+        "evidence": {
+          "type": "choice",
+          "choice": "changed0",
+          "confidence": 0.67,
+          "probabilities": {
+            "changed0": 0.76,
+            "5e10c1617c": 0.0,
+            "933db3b2fe": 0.0,
+            "none": 0.24
+          }
+        }
+      },
+      "answer_validation": {
+        "contract_violation": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "context_missing": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "mechanism": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        },
+        "evidence": {
+          "errors": [],
+          "warnings": [],
+          "valid": true
+        }
+      },
+      "raw_high_lead": false,
+      "valid_focused_response": true,
+      "observed_evidence_assessment": "conditional_boundary_supported_by_explicit_intent_and_changed_source_actual_caller_unread",
+      "mechanism_answer_assessment": "consistent_no_violation_for_tested_contract",
+      "evidence_answer_assessment": "location_does_not_establish_tested_control_violation",
+      "answer_consistency_flags": [
+        "none_mechanism_with_specific_evidence"
+      ],
+      "coordinator_verified_high_lead": false,
+      "adjudication": "requires_new: true isolates the rejected reservation. The recorded SAVEPOINT and ROLLBACK TO SAVEPOINT preserve three available seats and the outer attempt record; a separate accepted request leaves five seats and one reservation. Both arms inspected the pool model but not the batch caller; static also read the reservation model, adaptive the success-path spec. The necessary-card checklist is incomplete, but explicit change_intent already permits the nested lifecycle, so this is not automatically an unassessable concern. The none category conflicts with identifying changed0 as supporting a concrete violation."
+    }
+  ],
+  "physical_fixture_verification": {
+    "source_files_checked": 48,
+    "all_match_captured_source_hashes": true,
+    "oracle_copy_normalization": "All eight original oracle receipts are identical except that capture preparation appends one trailing newline. Parsed observations are unchanged.",
+    "fixture_apps_modified": false
+  },
+  "paired_focused_request_comparison": [
+    {
+      "case_id": "2fa1ca8b84",
+      "repeat": 0,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "2fa1ca8b84",
+      "repeat": 1,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "49429b5c36",
+      "repeat": 0,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "49429b5c36",
+      "repeat": 1,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "4ed13b9760",
+      "repeat": 0,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "4ed13b9760",
+      "repeat": 1,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "repeat": 0,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "7a9d5822d0",
+      "repeat": 1,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "8f9892b56f",
+      "repeat": 0,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "8f9892b56f",
+      "repeat": 1,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "92daced6e0",
+      "repeat": 0,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "92daced6e0",
+      "repeat": 1,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "97bf2156f1",
+      "repeat": 0,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "97bf2156f1",
+      "repeat": 1,
+      "focused_request_bytes_equal": true
+    },
+    {
+      "case_id": "cd13248951",
+      "repeat": 0,
+      "focused_request_bytes_equal": false
+    },
+    {
+      "case_id": "cd13248951",
+      "repeat": 1,
+      "focused_request_bytes_equal": false
+    }
+  ]
+}
