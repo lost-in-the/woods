@@ -115,7 +115,7 @@ jobs:
           GEM_NAME: ${{ needs.release-context.outputs.gem-name }}
         run: cd dist && sha256sum --check "${GEM_NAME}.sha256"
       - name: Install the maintenance SDK floor
-        if: needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0'
+        if: needs.release-context.outputs.tag == 'v1.6.3' && matrix.ruby == '3.0'
         run: gem install --no-document mcp -v '0.23.0'
       - name: Install package-test dependencies
         run: |
@@ -134,7 +134,7 @@ jobs:
           WOODS_GEM_PATH: ${{ github.workspace }}/dist/${{ needs.release-context.outputs.gem-name }}
           WOODS_RUN_PACKAGE_SMOKE: '1'
           PACKAGE_SPEC: ${{ needs.release-context.outputs.package-spec }}
-          WOODS_EXPECT_MCP_VERSION: ${{ needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0' && '0.23.0' || '' }}
+          WOODS_EXPECT_MCP_VERSION: ${{ needs.release-context.outputs.tag == 'v1.6.3' && matrix.ruby == '3.0' && '0.23.0' || '' }}
         run: |
           case "$PACKAGE_SPEC" in
             spec/integration/maintenance_packaged_gem_spec.rb)
@@ -192,7 +192,7 @@ jobs:
       # The maintenance profile pins the entire reviewed candidate tree in
       # trusted main. Repeat publication/history checks after environment approval.
       - name: Revalidate maintenance release after approval
-        if: needs.release-context.outputs.tag == 'v1.6.2'
+        if: needs.release-context.outputs.tag == 'v1.6.3'
         env:
           RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
           RELEASE_TAG: ${{ needs.release-context.outputs.tag }}
