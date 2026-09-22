@@ -34,13 +34,13 @@ RSpec.describe 'trusted maintenance release profile' do
       git(repository, 'init', '-b', 'main')
       git(repository, 'config', 'user.name', 'Maintenance tests')
       git(repository, 'config', 'user.email', 'maintenance@example.invalid')
-      base = write_candidate(repository, '1.6.1')
-      git(repository, 'checkout', '-b', 'release/1.6.2')
-      candidate = write_candidate(repository, '1.6.2')
-      git(repository, 'tag', 'v1.6.2')
+      base = write_candidate(repository, '1.6.2')
+      git(repository, 'checkout', '-b', 'release/1.6.3')
+      candidate = write_candidate(repository, '1.6.3')
+      git(repository, 'tag', 'v1.6.3')
       git(repository, 'init', '--bare', remote)
       git(repository, 'remote', 'add', 'origin', remote)
-      git(repository, 'push', 'origin', 'main', 'release/1.6.2', 'refs/tags/v1.6.2')
+      git(repository, 'push', 'origin', 'main', 'release/1.6.3', 'refs/tags/v1.6.3')
       git(repository, 'checkout', 'main')
       install_trusted_scripts(repository, candidate, base)
       yield repository, remote, candidate, base
@@ -64,7 +64,7 @@ RSpec.describe 'trusted maintenance release profile' do
 
   def validate(repository, candidate, script: 'validate-release', extra: {}, trusted: true)
     env = {
-      'RELEASE_TAG' => 'v1.6.2', 'RELEASE_SHA' => candidate,
+      'RELEASE_TAG' => 'v1.6.3', 'RELEASE_SHA' => candidate,
       'RELEASE_TRUSTED_SHA' => git(repository, 'rev-parse', 'HEAD'),
       'RUBYGEMS_VERSIONS_JSON' => '[]'
     }.merge(extra)
@@ -76,19 +76,26 @@ RSpec.describe 'trusted maintenance release profile' do
     expect(ReleaseProfile::MAINTENANCE_APPROVED_SHA).to be_nil.or match(/\A[0-9a-f]{40}\z/)
   end
 
+  it 'allowlists only the 1.6.3 target and immutable 1.6.2 base with publication disabled' do
+    expect(ReleaseProfile::MAINTENANCE_TAG).to eq('v1.6.3')
+    expect(ReleaseProfile::MAINTENANCE_BRANCH).to eq('release/1.6.3')
+    expect(ReleaseProfile::MAINTENANCE_BASE).to eq('4b40e17fd68122a70ccf00d9d2ffb8af42171d3d')
+    expect(ReleaseProfile::MAINTENANCE_APPROVED_SHA).to be_nil
+  end
+
   it 'is disabled until a reviewed main commit pins the complete candidate SHA' do
     stub_const('ReleaseProfile::MAINTENANCE_APPROVED_SHA', nil)
-    expect { ReleaseProfile.validate_candidate!('v1.6.2', 'a' * 40) }
+    expect { ReleaseProfile.validate_candidate!('v1.6.3', 'a' * 40) }
       .to raise_error(ReleaseProfile::Error, /disabled until/)
   end
 
   it 'does not select maintenance requirements for any other tag or caller environment' do
-    %w[v1.6.1 v1.6.3 v2.0.0.beta3].each do |tag|
+    %w[v1.6.2 v1.6.4 v2.0.0.beta3].each do |tag|
       expect(ReleaseProfile.maintenance?(tag)).to be(false)
       expect(ReleaseProfile.branch(tag)).to eq('main')
       expect(ReleaseProfile.package_spec(tag)).to eq('spec/integration/packaged_gem_spec.rb')
     end
-    expect(ReleaseProfile.package_spec('v1.6.2')).to eq('spec/integration/maintenance_packaged_gem_spec.rb')
+    expect(ReleaseProfile.package_spec('v1.6.3')).to eq('spec/integration/maintenance_packaged_gem_spec.rb')
   end
 
   it 'accepts a pinned maintenance candidate outside main and verifies its live remote tag' do
@@ -122,7 +129,7 @@ RSpec.describe 'trusted maintenance release profile' do
 
   it 'refuses a target branch that no longer contains the approved candidate' do
     fixture do |repository, remote, candidate, base|
-      git(remote, 'update-ref', 'refs/heads/release/1.6.2', base)
+      git(remote, 'update-ref', 'refs/heads/release/1.6.3', base)
       _stdout, stderr, status = validate(repository, candidate)
       expect(status).not_to be_success
       expect(stderr).to include('not reachable')
@@ -132,16 +139,16 @@ RSpec.describe 'trusted maintenance release profile' do
   it 'does not let a caller substitute main for the fixed maintenance branch' do
     fixture do |repository, remote, candidate, _base|
       git(remote, 'update-ref', 'refs/heads/main', candidate)
-      git(remote, 'update-ref', '-d', 'refs/heads/release/1.6.2')
+      git(remote, 'update-ref', '-d', 'refs/heads/release/1.6.3')
       _stdout, stderr, status = validate(repository, candidate, extra: { 'RELEASE_MAIN_REF' => 'refs/heads/main' })
       expect(status).not_to be_success
-      expect(stderr).to include('refs/heads/release/1.6.2')
+      expect(stderr).to include('refs/heads/release/1.6.3')
     end
   end
 
   it 'refuses a moved remote tag both during validation and immediately before publication' do
     fixture do |repository, remote, candidate, base|
-      git(remote, 'update-ref', 'refs/tags/v1.6.2', base)
+      git(remote, 'update-ref', 'refs/tags/v1.6.3', base)
       %w[validate-release verify-release-tag].each do |script|
         _stdout, stderr, status = validate(repository, candidate, script: script)
         expect(status).not_to be_success
@@ -160,14 +167,14 @@ RSpec.describe 'trusted maintenance release profile' do
       git(repository, 'commit', '-m', 'invalid base fixture')
       _stdout, stderr, status = validate(repository, candidate)
       expect(status).not_to be_success
-      expect(stderr).to include('does not descend from approved v1.6.1 base')
+      expect(stderr).to include('does not descend from approved v1.6.2 base')
     end
   end
 
   it 'retains the already-published refusal for maintenance' do
     fixture do |repository, _remote, candidate, _base|
       _stdout, stderr, status = validate(
-        repository, candidate, extra: { 'RUBYGEMS_VERSIONS_JSON' => '[{"number":"1.6.2"}]' }
+        repository, candidate, extra: { 'RUBYGEMS_VERSIONS_JSON' => '[{"number":"1.6.3"}]' }
       )
       expect(status).not_to be_success
       expect(stderr).to include('already published')
@@ -176,7 +183,7 @@ RSpec.describe 'trusted maintenance release profile' do
   def maintenance_run(sha)
     {
       'id' => 123, 'workflow_id' => 678, 'path' => '.github/workflows/ci.yml',
-      'conclusion' => 'success', 'event' => 'push', 'head_branch' => 'v1.6.2', 'head_sha' => sha,
+      'conclusion' => 'success', 'event' => 'push', 'head_branch' => 'v1.6.3', 'head_sha' => sha,
       'repository' => { 'full_name' => 'lost-in-the/woods' },
       'head_repository' => { 'full_name' => 'lost-in-the/woods' }
     }
@@ -222,7 +229,7 @@ RSpec.describe 'trusted maintenance release profile' do
     env = {
       'PATH' => "#{fake_bin}:#{ENV.fetch('PATH')}", 'CI_RUN_ID' => '123',
       'GITHUB_REPOSITORY' => 'lost-in-the/woods', 'GITHUB_OUTPUT' => output,
-      'RELEASE_TAG' => 'v1.6.2', 'RESPONSES' => JSON.generate(responses)
+      'RELEASE_TAG' => 'v1.6.3', 'RESPONSES' => JSON.generate(responses)
     }
     stdout, stderr, status = Open3.capture3(env, 'ruby', File.join(repository, 'script/validate-release-run'))
     [stdout, stderr, status, File.exist?(output) ? File.read(output) : '']

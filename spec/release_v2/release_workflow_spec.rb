@@ -220,11 +220,11 @@ RSpec.describe 'release workflow contract' do
     smoke = package_steps.find do |step|
       step['name'] == 'Test the installed artifact outside the repository load path'
     end
-    expect(floor.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0'")
+    expect(floor.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.3' && matrix.ruby == '3.0'")
     expect(floor.fetch('run')).to eq("gem install --no-document mcp -v '0.23.0'")
     expect(package_steps.index(floor)).to be < package_steps.index(installation)
     expect(smoke.dig('env', 'WOODS_EXPECT_MCP_VERSION')).to eq(
-      "${{ needs.release-context.outputs.tag == 'v1.6.2' && matrix.ruby == '3.0' && '0.23.0' || '' }}"
+      "${{ needs.release-context.outputs.tag == 'v1.6.3' && matrix.ruby == '3.0' && '0.23.0' || '' }}"
     )
   end
 
@@ -232,7 +232,7 @@ RSpec.describe 'release workflow contract' do
     publish_steps = steps(release.fetch('jobs').fetch('publish'))
     revalidation = publish_steps.find { |step| step['name'] == 'Revalidate maintenance release after approval' }
     credentials = publish_steps.find { |step| step['name'] == 'Configure RubyGems credentials' }
-    expect(revalidation.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.2'")
+    expect(revalidation.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.3'")
     expect(revalidation.fetch('run')).to eq('script/validate-release --trusted-checkout')
     expect(revalidation.fetch('env')).to include(
       'RELEASE_SHA' => '${{ needs.release-context.outputs.release-sha }}',

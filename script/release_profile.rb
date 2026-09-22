@@ -6,12 +6,12 @@
 module ReleaseProfile
   class Error < StandardError; end
 
-  MAINTENANCE_TAG = 'v1.6.2'
-  MAINTENANCE_BRANCH = 'release/1.6.2'
-  MAINTENANCE_BASE = '73423a42644176b09961be373e13648c94690933'
-  # Prepared and reviewed in maintenance PR #464; pin the protected branch's
-  # exact merge commit, never a moving branch tip or caller-supplied revision.
-  MAINTENANCE_APPROVED_SHA = '4b40e17fd68122a70ccf00d9d2ffb8af42171d3d'
+  MAINTENANCE_TAG = 'v1.6.3'
+  MAINTENANCE_BRANCH = 'release/1.6.3'
+  MAINTENANCE_BASE = '4b40e17fd68122a70ccf00d9d2ffb8af42171d3d'
+  # Disabled until the prepared 1.6.3 candidate and its upstream CI are reviewed.
+  # Pin the protected branch's exact merge SHA in a separate trusted-main PR.
+  MAINTENANCE_APPROVED_SHA = nil
   MAINTENANCE_JOBS = [
     'Unit specs (Ruby 3.0)',
     'Unit specs (Ruby 3.1)',

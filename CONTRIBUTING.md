@@ -395,12 +395,12 @@ short body that links `CHANGELOG.md` at the tag itself (not at `main`) and
 anchors straight to that version's dated heading, so the note a reader lands
 on always matches the bytes RubyGems published.
 
-### One-off 1.6.2 security maintenance release
+### One-off 1.6.3 security maintenance release
 
 The [security policy](SECURITY.md#supported-versions) supports 1.6.x security
 fixes until 2027-02-20. While main develops v2, the sole maintenance exception
-is `v1.6.2` from the short-lived `release/1.6.2` branch, descending from the
-immutable v1.6.1 commit `73423a42644176b09961be373e13648c94690933`.
+is `v1.6.3` from the short-lived `release/1.6.3` branch, descending from the
+immutable v1.6.2 commit `4b40e17fd68122a70ccf00d9d2ffb8af42171d3d`.
 This is a stable patch, separate from the next v2 prerelease; it does not declare
 v2 final or establish a general-purpose maintenance publishing path.
 
@@ -417,15 +417,15 @@ The preparation order is:
 1. Merge the main-side maintenance policy/tooling PR. Before creating the remote
    target, confirm its effective branch rules require pull requests and prevent
    force pushes and deletion; configure those rules before creating the target. The GitHub
-   rules API can check `release/1.6.2` before the branch exists.
-2. Create that target from the immutable v1.6.1 commit. Review the narrow security
-   backport and its legacy preparation adapter against that line. Disable the
-   inherited automatic tag-push publisher before any maintenance tag exists.
-3. Use the legacy adapter's `release:reopen[1.6.2.alpha]` and
-   `release:prepare[1.6.2]` transitions in clean, separately reviewed commits.
+   rules API can check `release/1.6.3` before the branch exists.
+2. Create that target from the immutable v1.6.2 commit. Review the narrow security
+   backport and its legacy preparation adapter against that line. Confirm the
+   inherited automatic tag-push publisher remains disabled before any maintenance tag exists.
+3. Use the legacy adapter's `release:reopen[1.6.3.alpha]` and
+   `release:prepare[1.6.3]` transitions in clean, separately reviewed commits.
    The adapter owns the legacy documentation profile; do not copy v2 fences or
    surface claims into v1, and never hand-edit VERSION.
-4. Review and merge the prepared candidate into `release/1.6.2`. Require passing
+4. Review and merge the prepared candidate into `release/1.6.3`. Require passing
    unit, booted Rails, installed-package, lint, coverage, security and build
    jobs. Review the complete CI and package-test implementation at that SHA.
    Then pin that **exact final commit** in `MAINTENANCE_APPROVED_SHA` through the
@@ -434,6 +434,14 @@ The preparation order is:
    for its tag-push CI run. Dispatch uses the ordinary tag/run-ID payload.
    Every exact maintenance matrix row in the trusted profile must succeed;
    missing, duplicated, skipped or failed rows refuse publication.
+
+[Temporary security-advisory forks](https://docs.github.com/en/code-security/tutorials/fix-reported-vulnerabilities/collaborate-in-a-fork)
+do not run CI or enforce destination branch protections when the advisory is
+merged. Review and test those patches privately, then require the upstream CI
+matrix triggered by the push to `release/1.6.3` before pinning its prepared SHA.
+A private test report cannot replace the upstream tag-push run and immutable
+artifact required for publication. Keep the advisory unpublished until the fixed
+gems are available.
 
 The validators require the approved SHA to remain reachable from the freshly
 fetched maintenance branch and to descend from the fixed legacy base. They retain
@@ -450,11 +458,11 @@ RubyGems credentials; the remote tag is checked again immediately before push.
 A candidate fix or changed prepared SHA requires a new reviewed main pin and a
 fresh tag-push CI run. Updating main's tooling alone never authorizes different
 candidate bytes. Main's v2 release contract remains unchanged. Do not create or
-push tags, dispatch, publish, or claim 1.6.2 is available during preparation.
+push tags, dispatch, publish, or claim 1.6.3 is available during preparation.
 
 ### Stable branches
 
-A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived `release/1.6.2` security exception above does not establish an `N-M-stable` branch.
+A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived `release/1.6.3` security exception above does not establish an `N-M-stable` branch.
 
 ### What coding agents may do
 

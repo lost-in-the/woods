@@ -193,7 +193,7 @@ begin
   if ReleaseProfile.maintenance?(tag) &&
      !system('git', 'merge-base', '--is-ancestor', ReleaseProfile::MAINTENANCE_BASE, release_sha,
              out: File::NULL, err: File::NULL)
-    fail_release("maintenance release SHA #{release_sha} does not descend from approved v1.6.1 base")
+    fail_release("maintenance release SHA #{release_sha} does not descend from approved v1.6.2 base")
   end
 
   entry_paths = git('ls-tree', '-r', '--name-only', '-z', release_sha, '--', 'changelog').split("\0")
