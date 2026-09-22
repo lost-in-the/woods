@@ -121,6 +121,10 @@ existing authorization. Preserve `bin/dev`; never claim an unused Procfile is
 active. Keep the portable receipt with generated files and respect edit conflicts.
 Puma installation supports the normal default `config/puma.rb` route; an existing
 environment-specific file or custom `-C` route needs a different explicit owner.
+Run setup in the normal application bundle environment. The unreleased #540 fix
+preserves `BUNDLE_PATH`, `BUNDLE_APP_CONFIG`, and group selection during preflight;
+older Git builds may falsely report missing gems. Check the loaded revision
+before changing persistent Bundler settings to work around that error.
 For an interrupted install, use the generator's `--operation recover --pretend`
 before applying recovery; preserve journals when concurrent edits block it. The
 Rails generator command boots the app first: use the runbook's direct bundled

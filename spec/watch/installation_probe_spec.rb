@@ -41,6 +41,46 @@ RSpec.describe Woods::Watch::Installation::Probe do
       .to raise_error(Woods::Watch::Installation::Conflict, /does not expose woods:watch/)
   end
 
+  it 'uses the selected application environment for both task and manager probes without inherited activation' do
+    captured = File.join(@root, 'environments.jsonl')
+    source = "require 'json'; File.open(#{captured.inspect}, 'a') { |f| f.puts JSON.generate(ENV.to_h) }; " \
+             "puts 'rails woods:watch'"
+    task = executable('rails', source)
+    manager = executable('foreman', source)
+    settings = { 'RAILS_ENV' => 'development', 'APP_SETTING' => 'retained', 'BUNDLE_WITHOUT' => 'production',
+                 'BUNDLE_APP_CONFIG' => '/selected/configuration', 'BUNDLE_PATH' => '/selected/gems',
+                 'BUNDLE_BIN_PATH' => '/stale/bundler', 'RUBYOPT' => '-r/missing/setup',
+                 'BUNDLER_ORIG_RUBYOPT' => Woods::Watch::ChildEnvironment::NIL_VALUE }
+
+    described_class.new(environment: settings).call(root: @root, child_command: [task, 'woods:watch'],
+                                                    manager_command: [manager, 'start', '-f', 'Procfile.dev'])
+    environments = File.readlines(captured).map { |line| JSON.parse(line) }
+    expect(environments.size).to eq(2)
+    environments.each do |environment|
+      expect(environment).to include(settings.slice('RAILS_ENV', 'APP_SETTING', 'BUNDLE_WITHOUT',
+                                                    'BUNDLE_APP_CONFIG', 'BUNDLE_PATH'))
+      expect(environment.keys.grep(/\ABUNDLER_ORIG_|\ABUNDLE_BIN_PATH\z|\ARUBYOPT\z/)).to be_empty
+    end
+  end
+
+  [
+    { selected: '/activated.lock', original: '/requested.lock', expected: '/requested.lock' },
+    { selected: '/activated.lock', original: Woods::Watch::ChildEnvironment::NIL_VALUE, expected: nil },
+    { selected: '/explicit.lock', expected: '/explicit.lock' }
+  ].each do |selection|
+    it "uses the selected lockfile without leaking parent activation: #{selection.inspect}" do
+      captured = File.join(@root, 'lockfile')
+      task = executable('rails',
+                        "File.write(#{captured.inspect}, ENV.fetch('BUNDLE_LOCKFILE')); puts 'rails woods:watch'")
+      environment = { 'BUNDLE_GEMFILE' => 'Gemfile', 'BUNDLE_LOCKFILE' => selection.fetch(:selected) }
+      environment['BUNDLER_ORIG_BUNDLE_LOCKFILE'] = selection[:original] if selection.key?(:original)
+
+      described_class.new(environment: environment).call(root: @root, child_command: [task, 'woods:watch'])
+
+      expect(File.read(captured)).to eq(selection[:expected] || File.join(@root, 'Gemfile.lock'))
+    end
+  end
+
   it 'rejects an unavailable manager command' do
     task = executable('rails', "puts 'rails woods:watch # watch'")
 

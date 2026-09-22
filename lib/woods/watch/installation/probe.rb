@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-require 'bundler'
 require 'open3'
 require 'timeout'
+require_relative '../child_environment'
 
 module Woods
   module Watch
@@ -44,17 +44,25 @@ module Woods
         private
 
         def run(root, command)
-          environment = Bundler.unbundled_env.merge('BUNDLE_FROZEN' => 'true')
-          environment['BUNDLE_GEMFILE'] = @environment.fetch('BUNDLE_GEMFILE', File.join(root, 'Gemfile'))
-          environment['BUNDLE_LOCKFILE'] =
-            @environment.fetch('BUNDLE_LOCKFILE', "#{environment['BUNDLE_GEMFILE']}.lock")
-          Open3.popen3(environment, *command, chdir: root, pgroup: true,
-                                              unsetenv_others: true) do |input, output, error, child|
+          Open3.popen3(probe_environment(root), *command, chdir: root, pgroup: true,
+                                                          unsetenv_others: true) do |input, output, error, child|
             input.close
             collect(output, error, child)
           end
         rescue SystemCallError => e
           raise Conflict, "Startup preflight could not run: #{e.message}"
+        end
+
+        def probe_environment(root)
+          environment = ChildEnvironment.build(@environment.to_h, root: root)
+          environment['BUNDLE_GEMFILE'] ||= File.join(root, 'Gemfile')
+          # A caller-selected lockfile without Bundler's activation markers is
+          # explicit configuration too; otherwise prefer the restored original.
+          unless @environment.key?('BUNDLER_ORIG_BUNDLE_LOCKFILE')
+            environment['BUNDLE_LOCKFILE'] ||= @environment['BUNDLE_LOCKFILE']
+          end
+          environment['BUNDLE_LOCKFILE'] ||= "#{environment['BUNDLE_GEMFILE']}.lock"
+          environment.merge('BUNDLE_FROZEN' => 'true')
         end
 
         def collect(output, error, child)

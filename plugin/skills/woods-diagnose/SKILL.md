@@ -36,6 +36,15 @@ bundle exec rails runner 'Rails.application.eager_load!; puts "eager load ok"'
 
 Use the application's normal Docker command and environment variables when applicable. Fix boot/eager-load failures before Woods.
 
+### Watcher setup cannot find already installed Rails or dependencies
+
+Compare normal task discovery with installer preflight in the same container and
+application environment. Early Git builds of the watcher installer stripped
+`BUNDLE_PATH` and `BUNDLE_APP_CONFIG`; #540 fixes this, unreleased after
+`2.0.0.beta4`. Record the loaded revision and bundle configuration source before
+reinstalling dependencies or writing a local bundle-path workaround. Follow the
+[watcher installation guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup).
+
 ### Watch repeatedly exits 75
 
 First identify the lifecycle owner. The raw task deliberately exits 75; a bare
