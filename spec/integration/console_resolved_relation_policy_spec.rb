@@ -103,7 +103,11 @@ RSpec.describe 'Console resolved relation table policy', :booted_app do
 
   it 'retains the final association target scope check' do
     @scope_table = 'scope_allowed'
-    ScopeChild.class_eval { default_scope { from('scope_blocked AS scope_children') } }
+    # A late default-scope change on a reused fixture constant is cached on Rails 6.
+    # Declare the association scope explicitly and verify the SQL before testing the gate.
+    ScopeAllowed.has_many :children, -> { from('scope_blocked AS scope_children') },
+                          class_name: 'ScopeChild', foreign_key: :parent_id
+    expect(ScopeAllowed.new(id: 1).children.all.to_sql).to include('FROM scope_blocked AS scope_children')
     result = request('console_association_count', id: 1, association: 'children')
     expect(result.fetch('isError')).to be(true)
     expect(@statements.grep(/\b(?:FROM|JOIN)\s+scope_blocked/i)).to be_empty
