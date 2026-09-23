@@ -2103,8 +2103,26 @@ module Woods
       end
 
       @git_available = complete_git_history?
+    rescue Errno::ENOENT
+      warn_missing_git_executable
+      @git_available = false
     rescue StandardError
       @git_available = false
+    end
+
+    # An explicit Git directory still requests history when .git is not mounted
+    # at Rails.root. Ordinary source archives remain a supported, quiet path.
+    #
+    # @return [void]
+    def warn_missing_git_executable
+      configured = [GitCommand::OVERRIDE_KEY, 'GIT_DIR'].any? { |key| !ENV[key].to_s.empty? }
+      return unless configured || File.exist?(File.join(Rails.root.to_s, '.git'))
+
+      Rails.logger.warn(
+        '[Woods] Git history unavailable: git executable was not found in PATH. ' \
+        'Extraction continues without per-unit Git metadata. Install Git in the extraction environment ' \
+        'and run a full extraction to refresh Git metadata.'
+      )
     end
 
     # A shallow HEAD resolves but represents an incomplete ancestry. Do not

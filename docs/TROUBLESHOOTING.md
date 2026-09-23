@@ -292,6 +292,27 @@ clone), then run full extraction to replace retained metadata:
 Two commits can suffice for an incremental diff, but do not establish the full
 ancestry needed for churn metadata.
 
+### Git executable is missing from the extraction environment
+
+**Symptom:** Extraction logs `Git history unavailable: git executable was not
+found in PATH`, and newly extracted units have no `metadata.git`. Older builds
+can omit this enrichment silently when the executable is missing.
+
+**Fix:** Run `git --version` in the same container and environment that runs
+extraction. Install Git 2.31 or newer there, ensure its executable is on `PATH`,
+then run full `woods:extract` to refresh every unit's history. A working Git
+installation on the host does not provide Git inside an application container.
+
+Extraction continues without inventing zero-commit history. The warning appears
+once per extractor instance when the application has a `.git` entry or an
+explicit `WOODS_GIT_DIR`/`GIT_DIR` setting. A source archive with neither remains
+supported and quiet. `GIT_BRANCH`/`GIT_SHA` provenance fallback is unchanged;
+those values identify a build but cannot supply per-file history.
+
+This diagnostic is emitted during extraction. `woods_status.ready` and a
+manifest Git SHA do not establish that per-unit history was available, and
+`recent_changes` returning no results does not prove no files changed.
+
 ---
 
 ### Git enrichment warns that history could not be read completely
