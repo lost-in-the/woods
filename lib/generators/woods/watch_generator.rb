@@ -17,6 +17,12 @@ module Woods
       class_option :child_command, type: :string, default: 'bin/rails woods:watch',
                                    desc: 'Application task command, parsed as argv (no shell evaluation)'
 
+      # Rails generators otherwise print Thor errors and return a successful status.
+      # @return [Boolean] whether a refused installation fails the CLI command
+      def self.exit_on_failure?
+        true
+      end
+
       # @return [void]
       def configure_watcher
         operation = behavior == :revoke ? 'remove' : options[:operation]

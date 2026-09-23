@@ -170,10 +170,11 @@ RSpec.describe Woods::Watch::PumaChild do
   it 'normalizes the child environment, preserves app cwd, and reserves no debugger stdin' do
     write_wrapper(<<~RUBY)
       require 'json'
-      File.write('started.json', JSON.generate({
+      File.write('started.json.tmp', JSON.generate({
         env: ENV.values_at('APP_ENV', 'RACK_ENV', 'RAILS_ENV'),
         cwd: Dir.pwd, stdin: $stdin.read
       }))
+      File.rename('started.json.tmp', 'started.json')
       sleep
     RUBY
     pid = start_child
@@ -203,7 +204,11 @@ RSpec.describe Woods::Watch::PumaChild do
   end
 
   it 'cleans up its launcher before reporting unexpected guardian death' do
-    write_wrapper("File.write('launcher.pid', Process.pid); sleep")
+    write_wrapper(<<~RUBY)
+      File.write('launcher.pid.tmp', Process.pid)
+      File.rename('launcher.pid.tmp', 'launcher.pid')
+      sleep
+    RUBY
     guardian = start_child
     wait_until { File.exist?(File.join(@root, 'launcher.pid')) }
     launcher_pid = Integer(File.read(File.join(@root, 'launcher.pid')))

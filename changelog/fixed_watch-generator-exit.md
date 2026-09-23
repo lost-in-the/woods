@@ -1,0 +1,1 @@
+- Watcher startup generator refusals now exit nonzero, so unsupported Puma versions and installation conflicts cannot appear successful to automation. The existing diagnostics and file-preservation behavior remain intact (#544).
