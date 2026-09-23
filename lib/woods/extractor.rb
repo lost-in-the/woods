@@ -60,6 +60,7 @@ require_relative 'generation'
 require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
+require_relative 'module_reconciliation'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -80,6 +81,7 @@ module Woods
     include FilenameUtils
     include Extractors::SourceNesting
     include SourceReferences::Extraction
+    include ModuleReconciliation
 
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
@@ -219,7 +221,7 @@ module Woods
       database_view: :extract_view_file,
       caching: :extract_caching_file,
       test_mapping: :extract_test_file,
-      poro: :extract_poro_file,
+      poro: :extract_poro_units,
       lib: :extract_lib_file
     }.freeze
 
@@ -671,6 +673,7 @@ module Woods
         acc.merge(replace_type_wholesale(key, affected_types))
       end
 
+      touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       finalize_incremental_unit_json(affected_types)
@@ -2938,6 +2941,7 @@ module Woods
       @dependency_graph.units_for_path(absolute_path).each do |identifier, node_type|
         next if produced.include?([identifier, node_type])
         next unless covered_keys.include?(TYPE_TO_EXTRACTOR_KEY[node_type])
+        next if retain_partial_module?(identifier, node_type)
 
         removed.add(identifier) if remove_unit(identifier, affected_types, type: node_type)
       end
@@ -2978,34 +2982,6 @@ module Woods
         touched.merge(remove_stale_classes(spec, discovered, known, affected_types))
       end
 
-      touched
-    end
-
-    # Runtime-only model mixins can enter or leave discovery when their
-    # includer changes, even if the mixin file itself is untouched.
-    # @param affected_types [Set<Symbol>]
-    # @return [Set<String>] Added or removed concern identifiers
-    def reconcile_model_mixins(affected_types)
-      extractor = extractor_for(:concerns)
-      return Set.new unless extractor.respond_to?(:runtime_model_mixins)
-
-      live = extractor.runtime_model_mixins
-      known = @dependency_graph.units_of_type(:concern).to_set
-      added = live.flat_map do |path, modules|
-        next [] if modules.all? { |mod| known.include?(mod.name) }
-
-        Array(extractor.extract_model_mixin_file(path)).reject { |unit| known.include?(unit.identifier) }
-      end
-      touched = register_and_write(:concerns, added, affected_types)
-      return touched unless @eager_load_complete
-
-      live_names = live.values.flatten.to_set(&:name)
-      known.each do |identifier|
-        path = @dependency_graph.node(identifier, type: :concern)[:file_path]
-        next if extractor.conventional_concern_path?(path) || live_names.include?(identifier)
-
-        touched.add(identifier) if remove_unit(identifier, affected_types, type: :concern)
-      end
       touched
     end
 
@@ -3236,12 +3212,12 @@ module Woods
       result = checked_extraction(key, extractor) { extractor.extract_all }
       return Set.new if SourceInputs::ConsumerErrors.failed?(extractor)
 
-      units = deduplicate_type_units(key, Array(result).compact)
+      units = authoritative_module_units(deduplicate_type_units(key, Array(result).compact))
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
       touched = with_replacement_ownership(key) { register_and_write(key, units, affected_types) }
       touched.merge(remove_replaced_units(key, units, affected_types))
-      @source_inputs&.consume_extractor(key, units) unless source_consumer_failed?(key, extractor)
+      consume_module_aware_refresh(key, units) unless source_consumer_failed?(key, extractor)
       touched
     rescue IdentityCollisionError
       raise
@@ -3343,6 +3319,8 @@ module Woods
       EXTRACTOR_KEY_TO_TYPES.fetch(key, []).each_with_object(Set.new) do |unit_type, removed|
         fresh = units.select { |u| u.type == unit_type }.to_set(&:identifier)
         (@dependency_graph.units_of_type(unit_type) - fresh.to_a).each do |stale|
+          next if retain_partial_module?(stale, unit_type)
+
           removed.add(stale) if remove_unit(stale, affected_types, type: unit_type)
         end
       end
@@ -3497,7 +3475,7 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers written
     def register_and_write(extractor_key, units, affected_types)
-      units = deduplicate_type_units(extractor_key, Array(units).compact)
+      units = authoritative_module_units(deduplicate_type_units(extractor_key, Array(units).compact))
       return Set.new if units.empty?
 
       verify_identity_claims!(units)
@@ -3810,6 +3788,8 @@ module Woods
       if (method = CLASS_BASED[type])
         klass = constant_for_identifier(unit_id)
         klass && extractor.public_send(method, klass)
+      elsif runtime_model_mixin_file?(extractor, type, file_path)
+        extractor.extract_model_mixin_file(file_path)
       elsif (method = FILE_BASED[type])
         units = Array(extract_file_based_unit(extractor, method, file_path, extractor_key)).compact
         return units unless CLASS_DISCOVERED_FALLBACK.key?(type)

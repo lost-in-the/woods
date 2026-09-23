@@ -32,13 +32,13 @@ Extractors discover code one of two ways:
 
 Some extractors combine both (e.g., `JobExtractor` scans directories first, then supplements with `ApplicationJob.descendants`).
 
-Discovery is not exhaustive. A standalone module under `app/models` that is
-called through singleton methods is not discovered by the model/PORO paths;
-conventional concerns and app modules included by live models have separate
-concern discovery. This gap is tracked in [#552](https://github.com/lost-in-the/woods/issues/552).
-Separately, dependency scanning does not capture every method-body constant
-reference ([#475](https://github.com/lost-in-the/woods/issues/475)). A missing unit
-or edge is not proof of unused code; cross-check the application source.
+Discovery is not exhaustive. Woods 2.0.0 does not discover callable standalone
+modules under `app/models` through its model/PORO paths. The unreleased
+[standalone-module support](#poroextractor) addresses that case; conventional
+concerns and app modules included by live models retain concern ownership.
+Dependency scanning also remains partial, including with the source-reference
+pass below. A missing unit or edge is not proof of unused code; cross-check the
+application source.
 
 ### Constant source references
 
@@ -416,13 +416,32 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### PoroExtractor
 
-**What it captures:** Plain Ruby objects in `app/models` that are not ActiveRecord (non-AR classes, excluding concerns).
+**What it captures:** Plain Ruby objects in `app/models` that are not ActiveRecord (non-AR classes, excluding concerns). Supporting unreleased writers also discover callable standalone modules as described below.
 
 **Key details:**
 - Scans `app/models` for files that don't define an `ActiveRecord::Base` descendant
 - Common examples: value objects, form objects placed in `app/models`, domain structs
 - Excludes concerns (those go to ConcernExtractor)
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
+
+**Standalone modules — unreleased after Woods 2.0.0; planned for 2.1.** A named,
+loaded module whose canonical declaration and own methods are defined under
+`app/models` can produce a `poro` unit with `metadata.ruby_kind: "module"` and
+`parent_class: null`. This includes `def self.method`, `module_function`,
+`class << self` methods and plain instance-method mixins. Discovery uses runtime
+ownership and source locations without calling those methods.
+
+Namespace-only wrappers, aliases, unloaded constants, gem-owned modules and
+methods supplied only by another file do not establish standalone ownership.
+An app module included by a live model belongs to `ConcernExtractor`; a library
+module remains owned by `LibExtractor`. Separate callable modules sharing a
+source file retain their own identities. Class PORO identifiers stay unchanged.
+
+Module discovery and reference resolution are separate: a module with
+`class << self` methods can be indexed even though references inside that scope
+remain unresolved by the [constant-reference pass](#constant-source-references).
+Run a full extraction when upgrading to establish the new units and their
+reference cache; updating only the reader does not add them.
 
 ---
 

@@ -504,6 +504,239 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'standalone application modules (#552)' do
+    def write_module_bundle
+      path = write_file('app/models/ownership_bundle.rb', <<~RUBY)
+        class OwnershipBundle
+          def value; 'class sibling'; end
+        end
+        module OwnershipFeature
+          def feature_value; OwnershipSibling.value; end
+        end
+        module OwnershipSibling
+          def self.value; raise 'must never execute'; end
+        end
+      RUBY
+      load app_path(path)
+      path
+    end
+
+    def write_module_includer(include_feature:)
+      if Object.const_defined?(:OwnershipRecord, false)
+        OwnershipRecord.abstract_class = true
+        Object.send(:remove_const, :OwnershipRecord)
+      end
+      path = write_file('app/models/ownership_record.rb', <<~RUBY)
+        class OwnershipRecord < ApplicationRecord
+          self.table_name = 'posts'
+          #{'include OwnershipFeature' if include_feature}
+          def value; OwnershipSibling.value; end
+        end
+      RUBY
+      load app_path(path)
+      path
+    end
+
+    def expect_module_owner(index, type)
+      graph = read_json(index, 'dependency_graph.json')
+      types = graph.fetch('type_index')
+      expect(types.fetch(type.to_s)).to include('OwnershipFeature')
+      other = type == :poro ? 'concern' : 'poro'
+      expect(types.fetch(other, [])).not_to include('OwnershipFeature')
+      expect(types.fetch('poro')).to include('OwnershipSibling', 'OwnershipBundle')
+      expect(graph.dig('reverse', 'OwnershipSibling')).to include('OwnershipFeature', 'OwnershipRecord')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    after do
+      %i[OwnershipRecord OwnershipBundle OwnershipFeature OwnershipSibling OwnershipSecondFeature OwnershipDependency
+         ModuleShapes ModuleCaller].each do |name|
+        next unless Object.const_defined?(name, false)
+
+        Object.const_get(name).abstract_class = true if name == :OwnershipRecord
+        Object.send(:remove_const, name)
+      end
+    end
+
+    it 'publishes callable module shapes and their typed forward and reverse references' do
+      path = write_file('app/models/module_shapes.rb', <<~RUBY)
+        module ModuleShapes
+          module Singleton
+            def self.value; raise 'must never execute'; end
+          end
+          module Functions
+            module_function
+            def value; Singleton.value; end
+          end
+          module Eigenclass
+            class << self
+              def value; raise 'must never execute'; end
+            end
+          end
+        end
+      RUBY
+      load app_path(path)
+      caller_path = write_file('app/models/module_caller.rb', <<~RUBY)
+        class ModuleCaller
+          def value
+            ModuleShapes::Singleton.value
+            ModuleShapes::Functions.value
+            ModuleShapes::Eigenclass.value
+          end
+        end
+      RUBY
+      load app_path(caller_path)
+      index = full_extraction
+      snapshot = unit_snapshot(index)
+      %w[Singleton Functions Eigenclass].each do |kind|
+        identity = "ModuleShapes::#{kind}"
+        unit = snapshot.values.find { |value| value['identifier'] == identity }
+        expect(unit.fetch('metadata')).to include('ruby_kind' => 'module', 'class_methods' => ['value'])
+      end
+      graph = read_json(index, 'dependency_graph.json')
+      caller = snapshot.values.find { |value| value['identifier'] == 'ModuleCaller' }
+      expect(graph.fetch('type_index').fetch('poro')).not_to include('ModuleShapes')
+      %w[Singleton Functions Eigenclass].each do |kind|
+        identity = "ModuleShapes::#{kind}"
+        expect(caller.fetch('dependencies')).to include(
+          'type' => 'poro', 'target' => identity, 'via' => 'code_reference'
+        )
+        expect(graph.fetch('reverse').fetch(identity)).to include('ModuleCaller')
+      end
+      expect(graph.fetch('reverse').fetch('ModuleShapes::Singleton')).to include('ModuleShapes::Functions')
+    end
+
+    it 'migrates ownership on includer-only edits without dropping shared-file siblings' do
+      write_module_bundle
+      model_path = write_module_includer(include_feature: false)
+      index = full_extraction
+      expect_module_owner(index, :poro)
+      [true, false].each do |included|
+        write_module_includer(include_feature: included)
+        Woods::Extractor.new(output_dir: index).extract_changed([model_path])
+        expect_module_owner(index, included ? :concern : :poro)
+      end
+    end
+
+    it 'reconciles standalone ownership when only models are refreshed' do
+      write_module_bundle
+      write_module_includer(include_feature: false)
+      index = full_extraction
+      [true, false].each do |included|
+        write_module_includer(include_feature: included)
+        Woods::Extractor.new(output_dir: index).refresh(:models)
+        expect_module_owner(index, included ? :concern : :poro)
+      end
+    end
+
+    it 're-extracts every shared-file owner through transitive source references' do
+      dependency_path = write_file('lib/ownership_dependency.rb', 'class OwnershipDependency; end')
+      load app_path(dependency_path)
+      bundle_path = write_module_bundle
+      source = File.read(app_path(bundle_path)).sub('OwnershipSibling.value', 'OwnershipDependency.new')
+                   .sub("raise 'must never execute'", 'OwnershipDependency.new')
+      source += <<~RUBY
+        module OwnershipSecondFeature
+          def other_value; OwnershipDependency.new; end
+        end
+      RUBY
+      write_file(bundle_path, source)
+      load app_path(bundle_path)
+      model_path = write_module_includer(include_feature: true)
+      File.open(app_path(model_path), 'a') { |file| file.puts('OwnershipRecord.include(OwnershipSecondFeature)') }
+      OwnershipRecord.include(OwnershipSecondFeature)
+      index = full_extraction
+      write_file(dependency_path, 'class OwnershipDependency; def changed; end; end')
+      load app_path(dependency_path)
+      # Re-extraction follows both runtime concerns and the standalone sibling
+      # back to this shared file, even when the triggering path is elsewhere.
+      write_file(bundle_path, "#{source}\n# refreshed through dependency\n")
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([dependency_path])
+      expect(touched).to include('OwnershipFeature', 'OwnershipSecondFeature', 'OwnershipSibling')
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('type_index').fetch('concern')).to contain_exactly('OwnershipFeature',
+                                                                            'OwnershipSecondFeature')
+      expect(graph.fetch('type_index').fetch('poro')).to include('OwnershipBundle', 'OwnershipSibling')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'refuses a transitive shared-file refresh when a partial boot retains an unrefreshed module' do
+      dependency_path = write_file('lib/ownership_dependency.rb', 'class OwnershipDependency; end')
+      load app_path(dependency_path)
+      bundle_path = write_module_bundle
+      source = File.read(app_path(bundle_path)).sub('OwnershipSibling.value', 'OwnershipDependency.new')
+                   .sub("raise 'must never execute'", 'OwnershipDependency.new')
+      write_file(bundle_path, source)
+      load app_path(bundle_path)
+      index = full_extraction
+      generation = Woods::Generation.new(output_dir: index)
+      token = generation.current.token
+      previous = unit_snapshot(index)
+      Object.send(:remove_const, :OwnershipFeature)
+      write_file(bundle_path, source.sub('def feature_value;', 'def changed_feature_value;'))
+      write_file(dependency_path, 'class OwnershipDependency; def changed; end; end')
+      load app_path(dependency_path)
+      partial = Woods::Extractor.new(output_dir: index)
+      allow(partial).to receive(:safe_eager_load!) { partial.instance_variable_set(:@eager_load_complete, false) }
+
+      # The surviving sibling is genuinely re-extracted through the dependency,
+      # while the requested Feature identity remains absent from runtime. A
+      # path-level consumption update cannot certify its retained old metadata.
+      expect { partial.extract_changed([dependency_path]) }
+        .to raise_error(Woods::ExtractionError, /unverified source|retained/)
+      expect(generation.current.token).to eq(token)
+      expect(unit_snapshot(index)).to eq(previous)
+    end
+
+    it 'retains undiscovered modules on partial refresh without certifying changed shared source' do
+      bundle_path = write_module_bundle
+      write_module_includer(include_feature: false)
+      index = full_extraction
+      Object.send(:remove_const, :OwnershipFeature)
+      partial = Woods::Extractor.new(output_dir: index)
+      allow(partial).to receive(:safe_eager_load!) { partial.instance_variable_set(:@eager_load_complete, false) }
+      partial.refresh(:poros)
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('type_index').fetch('poro')).to include('OwnershipFeature', 'OwnershipSibling')
+
+      # A newly serialized sibling cannot certify the retained module's old
+      # source identity when that same file changes during a partial boot.
+      generation = Woods::Generation.new(output_dir: index)
+      token = generation.current.token
+      write_file(bundle_path, "#{File.read(app_path(bundle_path))}\n# changed sibling source\n")
+      retrying = Woods::Extractor.new(output_dir: index)
+      allow(retrying).to receive(:safe_eager_load!) { retrying.instance_variable_set(:@eager_load_complete, false) }
+      expect { retrying.extract_changed([bundle_path]) }
+        .to raise_error(Woods::SourceReferences::RebuildRequired, /incomplete eager loading/)
+      expect(generation.current.token).to eq(token)
+      expect(read_json(index, 'dependency_graph.json').fetch('type_index').fetch('poro'))
+        .to include('OwnershipFeature', 'OwnershipSibling')
+    end
+
+    it 'prunes one deleted module from shared source and then the deleted file' do
+      bundle_path = write_module_bundle
+      write_module_includer(include_feature: false)
+      index = full_extraction
+      source = File.read(app_path(bundle_path)).sub(/module OwnershipFeature\n.*?^end\n/m, '')
+      write_file(bundle_path, source)
+      Object.send(:remove_const, :OwnershipFeature)
+      load app_path(bundle_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([bundle_path])
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('type_index').fetch('poro')).to include('OwnershipBundle', 'OwnershipSibling')
+      expect(graph.fetch('type_index').fetch('poro')).not_to include('OwnershipFeature')
+      expect(differences(index, full_extraction)).to be_empty
+
+      delete_file(bundle_path)
+      %i[OwnershipBundle OwnershipSibling].each { |name| Object.send(:remove_const, name) }
+      Woods::Extractor.new(output_dir: index).extract_changed([bundle_path])
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('type_index').fetch('poro', [])).not_to include('OwnershipBundle', 'OwnershipSibling')
+      expect(graph.fetch('reverse').fetch('OwnershipSibling', [])).not_to include('OwnershipRecord')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   # ── Harness driver ───────────────────────────────────────────────────────
 
   # Run a cold full extraction of the current tree into a throwaway directory.

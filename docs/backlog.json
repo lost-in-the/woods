@@ -2908,8 +2908,8 @@
       "lib/woods/extractors/poro_extractor.rb",
       "lib/woods/extractors/concern_extractor.rb"
     ],
-    "description": "Issue #552: Post-2.0 follow-up: define stable discovery and type ownership for standalone modules invoked through singleton methods outside concern paths. Require booted Rails full/incremental/delete and collision coverage. Related #475 covers references to known targets, not missing module discovery.",
-    "status": "ready"
+    "description": "Issue #552: Approved post-2.0 work discovers source-verified callable standalone modules under app/models as poro units with ruby_kind: module, preserving concern/lib ownership and existing class identities. Component discovery and independent review pass. Pipeline reconciliation, booted full/incremental/refresh/delete coverage, and testbed acceptance remain before closing. Related #475 adds references to verified targets. Planned for 2.1.",
+    "status": "in-progress"
   },
   {
     "id": "B-213",
