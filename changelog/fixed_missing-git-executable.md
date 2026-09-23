@@ -1,1 +1,0 @@
-- Warn when Git cannot execute during extraction in an expected repository. Extraction remains usable without per-file history; intentional source archives and build-provenance fallback remain supported.

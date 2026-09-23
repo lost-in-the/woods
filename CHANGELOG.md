@@ -455,6 +455,7 @@ guidance with installed-version checks for [#538](https://github.com/lost-in-the
   estimation claims so the guides describe the implemented contracts. Preserve
   typed identity in lookup examples and explain provider-free lexical retrieval
   in the FAQ.
+- Clarify that `trace_flow` addresses an exact indexed unit, optionally followed by `#method`. Bare names can select factories, and receiverless local calls may remain unexpanded; flow output does not prove runtime execution or complete call coverage.
 
 ### Upgrade Notes
 
@@ -2292,7 +2293,9 @@ Expose the paginated dependencies/dependents payload in `structuredContent.data`
 - Reconcile registered initializers deleted during watch downtime with a full extraction after a fresh environment boot, preserving whole-application runtime facts.
 - Keep the stable extraction guard and output directory after `woods:clean`, so a concurrent writer can finish acquiring its lock safely.
 Keep Console MCP application stdout redirected to stderr throughout stdio operation, with a dedicated pipe for protocol responses and notifications. Rails SQL/application loggers and runtime writes to standard output no longer corrupt JSON-RPC after boot. Preserve SDK framing, negotiation, errors, EOF and interrupt handling; use the rake launcher to capture Rails environment boot output too. (#536)
+- Warn when Git cannot execute during extraction in an expected repository. Extraction remains usable without per-file history; intentional source archives and build-provenance fallback remain supported.
 Guard generated Puma startup using plugin files in the active Woods gem, including Git/path bundles. Branches with an older Woods gem that lacks the plugin can boot Puma without a watcher. Explicit watcher installation updates now refresh an existing owned directive in place, preserving surrounding text, newline style, and removal ownership; repeating setup leaves it unchanged. Existing generated Puma setups should preview and apply `bin/rails generate woods:watch --operation update --mode puma` with a supporting bundle. (#542)
+- Distinguish semantic retrieval corpus counts from structural index readiness. Known-empty in-memory stores now produce actionable embedding or explicit lexical-mode guidance; status reports local vector and metadata record counts by type without treating unavailable counts as zero. Preserve useful metadata-only retrieval and report counts from the currently served stores.
 - Watcher startup generator refusals now exit nonzero, so unsupported Puma versions and installation conflicts cannot appear successful to automation. The existing diagnostics and file-preservation behavior remain intact (#544).
 - Preserve application Bundler path, external configuration, group selection, and
   application environment during managed watcher installation preflight. Reset
