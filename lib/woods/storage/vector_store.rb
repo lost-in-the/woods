@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'local_corpus_stats'
 
 module Woods
   module Storage
@@ -261,6 +262,15 @@ module Woods
         # @see Interface#count
         def count
           @ids.size - @tombstones.size
+        end
+
+        # Local diagnostic capability; does not load or copy vector values.
+        # @return [Hash] vector entry counts, including chunk entries
+        def local_corpus_stats(include_types: true)
+          return { count: count, by_type: nil, untyped_count: nil } unless include_types
+
+          types = @id_to_index.values.map { |idx| metadata_value(@metadata[idx], :type) }
+          LocalCorpusStats.from_types(types)
         end
 
         private

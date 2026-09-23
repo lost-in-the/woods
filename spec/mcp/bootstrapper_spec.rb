@@ -610,6 +610,9 @@ RSpec.describe Woods::MCP::Bootstrapper do
           retriever, state = described_class.build_retriever(index_dir: dir)
         end
 
+        # Give the successful retrieval below a real record; a deliberately
+        # empty corpus now has its own diagnosis, separate from hydration.
+        retriever.metadata_store.store('Café', type: 'model', source_code: 'class Café; end')
         clean_result = Woods::Retriever::RetrievalResult.new(
           context: '## Café (model)', sources: [{ identifier: 'Café', type: :model }],
           classification: nil, strategy: :vector, tokens_used: 10, budget: 8000,
