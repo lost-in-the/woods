@@ -2855,7 +2855,7 @@
       "spec/tasks/woods_rake_incremental_git_diff_spec.rb",
       "docs/TROUBLESHOOTING.md"
     ],
-    "description": "Issue #546: the documented shared-root WOODS_GIT_DIR override selects the primary checkout HEAD. Correct the warning and guidance to preserve a same-path complete layout or select the actual worktree admin directory within a relocated complete layout. Real divergent-worktree regressions assert exact feature branch/SHA, feature-only history and changed paths while preserving explicit override semantics and unavailable-Git behavior. Document commit-only watcher freshness limits. Focused regressions pass; final suite validation is part of the 2.0.0 release preparation.",
-    "status": "in-progress"
+    "description": "Issue #546: the documented shared-root WOODS_GIT_DIR override selects the primary checkout HEAD. Correct the warning and guidance to preserve a same-path complete layout or select the actual worktree admin directory within a relocated complete layout. Real divergent-worktree regressions assert exact feature branch/SHA, feature-only history and changed paths while preserving explicit override semantics and unavailable-Git behavior. Document commit-only watcher freshness limits. Validated by 48 focused Git examples, the full 9567-example suite (zero failures; three optional tokenizer checks pending), and full RuboCop. Independent review confirmed explicit override compatibility and the documented watcher limitation.",
+    "status": "resolved"
   }
 ]

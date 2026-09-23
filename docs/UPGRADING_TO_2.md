@@ -93,7 +93,11 @@ Also back up managed Obsidian/Unblocked destinations before allowing a mass stal
 
 ### 3. Choose a rollback point
 
-Keep the v1 Gemfile/lockfile commit and all durable-store backups until v2 extraction, MCP calls, retrieval, and exports are verified. Downgrading the gem does not translate v2 identifiers back to v1.
+Record and test a Gemfile/lockfile selecting the latest published 1.6.x security
+patch as the rollback bundle. If the current installation is older, verify that
+patched v1 bundle before beginning the v2 migration. Keep its commit and all
+durable-store backups until v2 extraction, MCP calls, retrieval, and exports are
+verified. Downgrading the gem does not translate v2 identifiers back to v1.
 
 ## Upgrade the application
 
@@ -329,7 +333,7 @@ Complete every applicable check:
 If verification fails:
 
 1. stop v2 MCP, watcher, embedding, and exporter processes;
-2. restore the v1 Gemfile and lockfile or deploy the recorded v1 commit;
+2. restore the tested, patched v1 Gemfile and lockfile or deploy its recorded commit;
 3. run the v1 `woods:clean` before restoring anything under the configured output directory;
 4. either restore the complete pre-upgrade v1 output-directory backup, or run a fresh v1 extraction and then restore its v1 `dumps/` and configuration artifacts;
 5. restore external vector-store and managed export backups when v2 modified them;
