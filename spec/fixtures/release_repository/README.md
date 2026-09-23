@@ -18,7 +18,7 @@ they run in is an alpha, a prerelease, or a final release.
 > | Documented here | **2.0.0**, unreleased | this README and the [documentation index](docs/README.md) |
 > | Latest published gem | **1.6.1** | [the v1.6.1 tag](https://github.com/lost-in-the/woods/tree/v1.6.1) |
 >
-> Everything below describes 2.0.0. `gem "woods", "~> 2.0"` does not resolve from RubyGems until 2.0.0 is published. The released constraint stays `gem "woods", "~> 1.6"`.
+> Everything below describes unreleased 2.0.0. It is not available from RubyGems yet. The released constraint stays `gem "woods", "~> 1.6"`.
 <!-- release-state:end -->
 
 Woods boots a Rails app, extracts the behavior Rails assembles at runtime, and
