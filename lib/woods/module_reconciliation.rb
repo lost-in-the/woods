@@ -3,7 +3,7 @@
 module Woods
   # Keeps callable app/models modules under one extractor owner as model
   # inclusions change. Partial runtime discovery cannot establish removals.
-  module ModuleReconciliation
+  module ModuleReconciliation # rubocop:disable Metrics/ModuleLength -- one ownership/provenance policy across writers
     private
 
     # @param affected_types [Set<Symbol>] extractor keys requiring index updates
@@ -138,6 +138,14 @@ module Woods
       else
         @source_inputs&.consume_extractor(key, units)
       end
+    end
+
+    # These formerly file-only families now retain runtime-discovered modules
+    # on a partial boot, so their replacement authority follows the same gate.
+    def replacement_discovery_complete?(key)
+      return @eager_load_complete if %i[poros concerns].include?(key)
+
+      super
     end
   end
 end

@@ -437,6 +437,13 @@ An app module included by a live model belongs to `ConcernExtractor`; a library
 module remains owned by `LibExtractor`. Separate callable modules sharing a
 source file retain their own identities. Class PORO identifiers stay unchanged.
 
+Incremental extraction and model/PORO/concern refreshes reconcile ownership when
+an includer changes even if the module's file does not. Incomplete eager loading
+cannot prove that a former concern became standalone or that an undiscovered
+module disappeared. Those units remain retained unless positive ownership
+evidence supersedes them; changed source for a retained unit refuses publication
+until a complete run can re-extract it.
+
 Module discovery and reference resolution are separate: a module with
 `class << self` methods can be indexed even though references inside that scope
 remain unresolved by the [constant-reference pass](#constant-source-references).

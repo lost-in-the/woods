@@ -61,7 +61,7 @@ module Woods
     # Partial runtime discovery keeps old nodes and cannot grant that authority.
     def with_replacement_ownership(key)
       previous = @authoritative_replacement_types
-      @authoritative_replacement_types = if !self.class::CLASS_BASED_DISCOVERY.key?(key) || @eager_load_complete
+      @authoritative_replacement_types = if replacement_discovery_complete?(key)
                                            self.class::EXTRACTOR_KEY_TO_TYPES.fetch(key, [])
                                          else
                                            []
@@ -69,6 +69,10 @@ module Woods
       yield
     ensure
       @authoritative_replacement_types = previous
+    end
+
+    def replacement_discovery_complete?(key)
+      !self.class::CLASS_BASED_DISCOVERY.key?(key) || @eager_load_complete
     end
   end
 end

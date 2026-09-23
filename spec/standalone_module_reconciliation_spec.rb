@@ -51,6 +51,20 @@ RSpec.describe Woods::Extractor, 'standalone module reconciliation' do
     expect(extractor.dependency_graph.node_types('Shared')).to eq([:poro])
   end
 
+  %i[poro concern].each do |type|
+    it "does not relocate a retained #{type} owner during partial wholesale discovery" do
+      extractor.dependency_graph.register(unit(type: type))
+      replacement = unit(type: type)
+      replacement.file_path = root.join('app/models/replacement.rb').to_s
+      File.write(replacement.file_path, 'module Shared; def value; end; end')
+      key, consumer = type == :poro ? [:poros, poros] : [:concerns, concerns]
+      allow(consumer).to receive(:extract_all).and_return([replacement])
+      expect { extractor.send(:replace_type_wholesale, key, Set.new) }
+        .to raise_error(Woods::IdentityCollisionError, /collision/)
+      expect(extractor.dependency_graph.node('Shared', type: type)[:file_path]).to eq(path)
+    end
+  end
+
   it 'removes a standalone module when positive concern ownership is discovered on a partial boot' do
     persist(unit)
     persist(unit('Sibling'))
