@@ -416,7 +416,13 @@ When you run `rake woods:embed`, Woods generates embedding vectors for each extr
 
 ### What is the `codebase_retrieve` tool for?
 
-`codebase_retrieve` is the primary semantic search tool on the Index Server. It accepts a natural-language description of what you're looking for ("find where user email validation happens", "which services send Stripe API calls") and returns the most relevant extracted units as formatted context. It requires embedding configuration, without an embedding provider the tool responds with an error (`isError`, code `:not_configured`) and a remediation hint covering provider setup and the `search` tool for pattern-based matching in the meantime. Token budget is controlled by `config.max_context_tokens` (default: 8000).
+`codebase_retrieve` ranks extracted units for a natural-language query, such as
+"find where user email validation happens". Default semantic mode requires an
+embedding provider and vector store. Explicit lexical mode ranks published
+extraction text without either: set `WOODS_RETRIEVAL_MODE=lexical` in the MCP
+process environment and restart it. There is no automatic fallback between
+modes. See the [retrieval guide](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for setup, ranking evidence, and the estimated text-budget contract.
 
 ---
 

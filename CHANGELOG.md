@@ -452,7 +452,9 @@ guidance with installed-version checks for [#538](https://github.com/lost-in-the
 - Prepare the installation guides and plugin capability notes for the final
   2.0 release while retaining installed-version and publication checks. Correct
   backend pairing, incremental scope and timing, execution-coverage, and token
-  estimation claims so the guides describe the implemented contracts.
+  estimation claims so the guides describe the implemented contracts. Preserve
+  typed identity in lookup examples and explain provider-free lexical retrieval
+  in the FAQ.
 
 ### Upgrade Notes
 

@@ -35,7 +35,9 @@ Use this four-step loop for most codebase questions:
 3. **Traverse** from that identifier with `dependencies`, `dependents`, or `trace_flow`.
 4. **Verify** important claims against the returned source paths and current repository files.
 
-Identifiers are namespaced and typed. Never invent one from a filename when `search` can return the exact value.
+Identifiers are namespaced and typed. Never invent one from a filename when
+`search` can return the exact value. Carry both the returned `identifier` and
+`type` into `lookup`; the same identifier can belong to more than one unit type.
 
 ## Pick the smallest useful tool
 
@@ -64,7 +66,7 @@ Do not start with a broad graph or semantic query when an exact search will answ
 ### Understand a model
 
 1. `search(query: "^Order$", types: ["model"])`
-2. `lookup(identifier: <returned identifier>)`
+2. `lookup(identifier: <returned identifier>, type: <returned type>)`
 3. Read resolved schema, associations, validations, scopes, enums, callbacks, and included concerns.
 4. `dependencies(identifier: ..., depth: 1)` for collaborators.
 5. `dependents(identifier: ..., depth: 1)` for callers and affected features.
