@@ -5,6 +5,8 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative '../source_references/collector'
+require_relative 'standalone_module_discovery'
 
 module Woods
   module Extractors
@@ -16,7 +18,8 @@ module Woods
     # wrappers, and any other non-AR class living alongside AR models.
     #
     # Files under app/models/concerns/ are excluded — those are handled by
-    # ConcernExtractor. Module-only files are also excluded.
+    # ConcernExtractor. Callable standalone modules use the existing poro type,
+    # with explicit module metadata and verified runtime/source ownership.
     #
     # @example
     #   extractor = PoroExtractor.new
@@ -51,76 +54,121 @@ module Woods
 
         ar_names = ActiveRecord::Base.descendants.filter_map(&:name).to_set
 
-        Dir[Rails.root.join(MODELS_GLOB)].filter_map do |file|
-          next if file.include?(CONCERNS_SEGMENT)
+        @module_discovery = StandaloneModuleDiscovery.new
+        Dir[Rails.root.join(MODELS_GLOB)].flat_map do |file|
+          next [] if file.include?(CONCERNS_SEGMENT)
 
-          extract_poro_file(file, ar_names: ar_names)
+          extract_poro_units(file, ar_names: ar_names)
         end
       end
 
-      # Extract a single PORO file.
+      # Preserve the historical single-unit return contract. A class remains
+      # primary when a file also declares callable standalone modules.
       #
-      # Returns nil if the file is not a PORO (e.g., module-only, no class
-      # or PORO pattern found, or the inferred class is an AR descendant).
-      #
-      # @param file_path [String] Absolute path to the Ruby file
-      # @param ar_names [Set<String>] Set of AR descendant names to skip
-      # @return [ExtractedUnit, nil] The extracted unit or nil
+      # @param file_path [String] original Ruby file
+      # @param ar_names [Set<String>] Active Record identities to exclude
+      # @return [ExtractedUnit, nil] primary class or first standalone module
       def extract_poro_file(file_path, ar_names: Set.new)
-        source = File.read(file_path)
+        extract_poro_units(file_path, ar_names: ar_names).first
+      end
 
-        return nil unless poro_file?(source)
-        return nil if module_only?(source)
+      # Extract every owned unit from one file; incremental dispatch uses this
+      # form so a concern and a standalone sibling can share source safely.
+      #
+      # @param file_path [String] original Ruby file
+      # @param ar_names [Set<String>] Active Record identities to exclude
+      # @return [Array<ExtractedUnit>] legacy class followed by standalone modules
+      def extract_poro_units(file_path, ar_names: Set.new)
+        source = File.read(file_path)
+        analysis = SourceReferences::Collector.new.call(source)
+        primary = extract_class_unit(file_path, source, ar_names, analysis)
+        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        modules = discovery.call(file_path, analysis: analysis).map { |record| module_unit(file_path, source, record) }
+        [primary, *modules].compact
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
+        []
+      end
+
+      # Recompute unclaimed module identities for includer-only reconciliation.
+      # The root pipeline owns cross-family migration and source-consumption.
+      #
+      # @return [Hash<String, Array<ExtractedUnit>>] absolute paths and module units
+      def standalone_modules
+        @module_discovery = StandaloneModuleDiscovery.new
+        return {} unless @models_dir.directory?
+
+        Dir[Rails.root.join(MODELS_GLOB)].each_with_object({}) do |file, result|
+          next if file.include?(CONCERNS_SEGMENT)
+
+          units = extract_standalone_module_file(file)
+          result[file] = units unless units.empty?
+        end
+      end
+
+      private
+
+      def extract_standalone_module_file(file)
+        source = File.read(file)
+        analysis = SourceReferences::Collector.new.call(source)
+        @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract standalone module #{file}: #{e.message}")
+        []
+      end
+
+      def extract_class_unit(file_path, source, ar_names, analysis)
+        return nil unless class_source?(source, analysis)
 
         class_name = infer_class_name(file_path, source)
         return nil unless class_name
         return nil if ar_names.include?(class_name)
+        return nil if analysis.fetch('declarations').any? do |declaration|
+          declaration['owner'] == class_name && declaration['kind'] == 'module'
+        end
 
-        unit = ExtractedUnit.new(
-          type: :poro,
-          identifier: class_name,
-          file_path: file_path
-        )
-
+        unit = ExtractedUnit.new(type: :poro, identifier: class_name, file_path: file_path)
         parent_class = extract_parent_class(source, class_name)
-
-        unit.namespace    = extract_namespace(class_name)
-        unit.source_code  = annotate_source(source, class_name, parent_class)
-        unit.metadata     = extract_metadata(source, parent_class)
+        unit.namespace = extract_namespace(class_name)
+        unit.source_code = annotate_source(source, class_name, parent_class)
+        unit.metadata = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
-
         unit
-      rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
-        nil
       end
 
-      private
+      def module_unit(file_path, source, record)
+        identifier = record.fetch(:identifier)
+        unit = ExtractedUnit.new(type: :poro, identifier: identifier, file_path: file_path)
+        unit.namespace = extract_namespace(identifier)
+        unit.source_code = annotate_source(source, identifier, nil)
+        unit.metadata = record.except(:identifier).merge(ruby_kind: 'module', parent_class: nil,
+                                                         initialize_params: [], loc: count_loc(source))
+        # Shared-file regex scans cannot attribute a sibling's references safely.
+        # The source-reference pass owns method/body references for these units.
+        unit.dependencies = []
+        unit
+      end
 
       # ──────────────────────────────────────────────────────────────────────
       # File Classification
       # ──────────────────────────────────────────────────────────────────────
 
-      # Determine whether a file is worth examining as a PORO.
-      #
-      # A file qualifies if it contains a class definition OR uses one of the
-      # common PORO-without-class patterns (Struct.new, Data.define).
-      # Plain constant assignments and module-only files are excluded upstream.
-      #
-      # @param source [String] Ruby source code
-      # @return [Boolean]
-      def poro_file?(source)
-        source.match?(/^\s*class\s+/) ||
-          source.match?(/\bStruct\.new\b/) ||
-          source.match?(/\bData\.define\b/)
-      end
+      # Singleton-class syntax does not establish a class-owned unit. Keep
+      # legacy Struct/Data handling while requiring an actual class declaration.
+      def class_source?(source, analysis)
+        # Preserve the legacy single-class excerpt behavior on invalid fragments;
+        # no runtime module ownership is inferred from an unsuccessful parse.
+        has_class = if analysis['parse_error']
+                      source.match?(/^\s*class\s+/)
+                    else
+                      analysis.fetch('declarations').any? do |declaration|
+                        declaration['kind'] == 'class' && declaration.fetch('singleton_depth', 0).zero?
+                      end
+                    end
+        return true if has_class
+        return false if source.match?(/^\s*module\s+\w+/)
 
-      # Return true when the file defines only modules, no class keyword.
-      #
-      # @param source [String] Ruby source code
-      # @return [Boolean]
-      def module_only?(source)
-        source.match?(/^\s*module\s+\w+/) && !source.match?(/^\s*class\s+/)
+        source.match?(/\bStruct\.new\b/) || source.match?(/\bData\.define\b/)
       end
 
       # ──────────────────────────────────────────────────────────────────────

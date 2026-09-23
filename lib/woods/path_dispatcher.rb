@@ -165,7 +165,7 @@ module Woods
           file_rule(:migrations, :extract_migration_file, %w[db/migrate], recursive: false),
           # POROs are app/models classes that are *not* ActiveRecord models;
           # the extractor makes that call itself given ar_names.
-          file_rule(:poros, :extract_poro_file, %w[app/models], exclude: %w[/concerns/]),
+          file_rule(:poros, :extract_poro_units, %w[app/models], exclude: %w[/concerns/]),
           file_rule(:libs, :extract_lib_file, %w[lib], exclude: ex::LibExtractor::EXCLUDED_SEGMENTS),
           file_rule(:test_mappings, :extract_test_file, %w[spec], extensions: %w[_spec.rb]),
           file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb])
