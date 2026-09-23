@@ -150,6 +150,21 @@ RSpec.describe Woods::Release::Notes do
   end
 
   describe 'the version claims the banner owns' do
+    it 'keeps the published constraint available when reopening patch development' do
+      changelog = "# Changelog\n\n## [Unreleased]\n\n## [2.0.0] - 2026-09-23\n"
+
+      with_release_repository(version: '2.0.0', changelog: changelog, commit: false) do |root|
+        described_class.apply!(root: root, version: '2.0.1.alpha')
+
+        expect(banner(root)).to include(
+          '> | Latest published gem | **2.0.0** | [the v2.0.0 tag]',
+          'Everything below describes unreleased 2.0.1. It is not available from RubyGems yet.',
+          'The released constraint stays `gem "woods", "~> 2.0"`.'
+        )
+        expect(banner(root)).not_to include('does not resolve from RubyGems until')
+      end
+    end
+
     it 'carries the tree-documents and development-branch paragraphs in every unreleased state' do
       with_release_repository(version: '2.0.0.alpha', commit: false) do |root|
         expect(banner(root)).to include(

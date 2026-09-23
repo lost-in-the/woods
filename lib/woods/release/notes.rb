@@ -211,9 +211,8 @@ module Woods
           "RubyGems treats #{state} as a prerelease, so `gem \"woods\", \"#{state.approximate_constraint}\"` does " \
             "not resolve it. Once published, install it explicitly with `gem \"woods\", \"#{state}\"`.#{released}"
         else
-          "Everything below describes #{state.documented_version}. `gem \"woods\", " \
-            "\"#{state.approximate_constraint}\"` does not resolve from RubyGems until " \
-            "#{state.documented_version} is published.#{released}"
+          "Everything below describes unreleased #{state.documented_version}. " \
+            "It is not available from RubyGems yet.#{released}"
         end
       end
 

@@ -2910,5 +2910,19 @@
     ],
     "description": "Issue #552: Post-2.0 follow-up: define stable discovery and type ownership for standalone modules invoked through singleton methods outside concern paths. Require booted Rails full/incremental/delete and collision coverage. Related #475 covers references to known targets, not missing module discovery.",
     "status": "ready"
+  },
+  {
+    "id": "B-213",
+    "title": "Correct published-gem guidance when reopening patch development",
+    "severity": "low",
+    "category": "docs",
+    "layer": "release",
+    "files": [
+      "lib/woods/release/notes.rb",
+      "spec/release_v2/release_notes_spec.rb",
+      "README.md"
+    ],
+    "description": "Issue #555: After 2.0.0 publication, reopening 2.0.1.alpha incorrectly claimed that the released ~> 2.0 constraint could not resolve until 2.0.1 shipped. Describe the documented version as unreleased while retaining accurate stable-install guidance. Generate the fence through release:reopen and cover the patch transition with a regression. Release contracts pass (231 examples); independent review approved. Full PR CI is required before merge.",
+    "status": "resolved"
   }
 ]
