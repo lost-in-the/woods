@@ -929,6 +929,7 @@ module Woods
           coerce = method(:coerce_array)
           stale_check = method(:stale_index_result?)
           degraded_response = method(:degraded_retrieval_response)
+          corpus_status = method(:retriever_corpus_status)
           retrieval_mode = retriever.respond_to?(:mode) ? retriever.mode : :semantic
           server.define_tool(
             name: 'codebase_retrieve',
@@ -955,13 +956,13 @@ module Woods
                                'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
                                'Lexical mode and explicit package/path scopes filter before limits and omit the global rank table. ' \
                                'In semantic mode, when the unfiltered top-K has no requested type, the retriever ' \
-                               'falls back to rank-within-type so the response is populated whenever units of ' \
-                               'the requested type exist in the index. The response appends a "Type rank ' \
+                               'falls back to rank-within-type over the available vectors. The response appends a "Type rank ' \
                                'context" table with per-type: source, rank in unfiltered top-K, global_k, ' \
-                               'total_of_type. Read source to tell the cases apart: in_top_k (strong match), ' \
+                               'total_of_type (retrieval metadata records, not structural or embedded units). ' \
+                               'Read source to tell the cases apart: in_top_k (strong match), ' \
                                'within_type_fallback (weak match surfaced by the fallback), outside_top_k ' \
-                               '(index has this type but other requested types filled the result), absent ' \
-                               '(zero units of this type in the index).'
+                               '(retrieval metadata has this type but other requested types filled the result), absent ' \
+                               '(zero retrieval metadata records of this type; structural units may still exist).'
                 },
                 packages: { type: 'array', items: { type: 'string' },
                             description: 'Exact published nearest package owners. OR within the list; AND with paths and type eligibility.' },
@@ -1016,6 +1017,16 @@ module Woods
               )
             end
             if retriever
+              corpus = corpus_status.call(retriever, include_types: false)
+              if corpus && corpus[:state] == 'empty'
+                next respond_err.call(
+                  'Semantic retrieval has no vectors or retrieval metadata. The structural index may still be ready. ' \
+                  'Run `woods:embed` in the application environment and reload the index, or use ' \
+                  'explicit `WOODS_RETRIEVAL_MODE=lexical` and restart for retrieval without embeddings. ' \
+                  'Use `search` and `lookup` for structural discovery.',
+                  code: :empty_index, tool: 'codebase_retrieve', corpus: corpus
+                )
+              end
               begin
                 scope_options = if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
                                   { packages: packages, source_paths: source_paths }
@@ -1139,12 +1150,15 @@ module Woods
 
           server.define_tool(
             name: 'trace_flow',
-            description: 'Trace execution flow from an entry point through the codebase',
+            description: 'Trace a source-derived flow from an exact indexed unit, optionally scoped by #method. ' \
+                         'Receiverless local calls may remain unexpanded; this is not proof of runtime execution.',
             input_schema: {
               properties: {
                 entry_point: {
                   type: 'string',
-                  description: 'Entry point (e.g., UsersController#create)'
+                  description: 'Exact UnitIdentifier, optionally followed by #method (e.g., UsersController#create ' \
+                               'or CheckoutService#order). Bare names identify units, including factories; ' \
+                               'a bare method name does not locate its owning class. Use search and lookup first.'
                 },
                 depth: {
                   type: 'integer',
@@ -2076,7 +2090,10 @@ module Woods
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
-                         'bootstrap state (hydrated / degraded / failed + reason), feature flags, and a ready flag. ' \
+                         'bootstrap state (hydrated / degraded / failed + reason), and feature flags. ' \
+                         'Top-level `ready` describes structural index availability. ' \
+                         'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
+                         'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \
                          'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
                          'Incomplete evidence is unknown. Call this first on cold connect.',
             input_schema: { type: 'object', properties: {
@@ -2144,7 +2161,7 @@ module Woods
             retriever: {
               configured: !retriever.nil?,
               class: retriever&.class&.name,
-              **(retriever.respond_to?(:mode) && retriever.mode == :lexical ? { mode: 'lexical' } : {})
+              **retriever_status_fields(retriever)
             },
             bootstrap: bootstrap_state&.to_h,
             features: retrieval_features(config, resolved, retriever)
@@ -2152,6 +2169,19 @@ module Woods
         end
 
         private
+
+        def retriever_status_fields(retriever)
+          return { mode: 'lexical' } if retriever.respond_to?(:mode) && retriever.mode == :lexical
+
+          corpus = retriever_corpus_status(retriever)
+          corpus ? { corpus: corpus } : {}
+        end
+
+        def retriever_corpus_status(retriever, include_types: true)
+          return if retriever.respond_to?(:mode) && retriever.mode == :lexical
+
+          retriever.corpus_status(include_types: include_types) if retriever.respond_to?(:corpus_status)
+        end
 
         # Assemble the +index+ sub-hash of woods_status, including a staleness
         # gate that compares +manifest.git_sha+ against the current HEAD. The

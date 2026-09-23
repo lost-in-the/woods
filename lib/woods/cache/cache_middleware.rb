@@ -421,6 +421,12 @@ module Woods
       def mode = @retriever.respond_to?(:mode) ? @retriever.mode : :semantic
       def default_budget = @retriever.respond_to?(:default_budget) ? @retriever.default_budget : 8000
 
+      # Read the live corpus rather than caching diagnostics across reloads.
+      # @return [Hash, nil] local semantic corpus statistics, when supported
+      def corpus_status(include_types: true)
+        @retriever.corpus_status(include_types: include_types) if @retriever.respond_to?(:corpus_status)
+      end
+
       # Invalidate every cached context result. Called from the MCP +reload+
       # tool after the retriever's stores have been re-hydrated from a fresh
       # embed — otherwise cached results from the old embedding run would

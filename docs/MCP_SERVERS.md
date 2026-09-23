@@ -145,6 +145,17 @@ legacy clients, and clients that do not show server instructions can use the
 agent guide or investigation skill. Leave protocol negotiation enabled rather
 than pinning a newer version solely to obtain guidance.
 
+### Structural and semantic readiness
+
+`ready` describes the published structural index. A reachable embedding provider
+and bootstrap state `hydrated` do not establish that semantic stores contain
+data. Supporting readers also report `retriever.corpus`: locally known vector
+and metadata entry counts, counts by type, and whether those stores are empty,
+populated, or unknown. These are stored records (including chunks), not a count
+of extracted units with verified embedding coverage. Positive counts do not
+prove complete coverage or working provider access. See
+[semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
+
 ### Tools (29 — 14 registered in the packaged default)
 
 The Index Server defines 29 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.

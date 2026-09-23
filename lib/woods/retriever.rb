@@ -13,6 +13,7 @@ require_relative 'retrieval/lexical_assembler'
 require_relative 'retrieval/scope'
 require_relative 'retrieval/scoped_vector_store'
 require_relative 'retrieval/scoped_graph_store'
+require_relative 'retrieval/corpus_status'
 require_relative 'embedding/token_counter'
 require_relative 'token_utils'
 
@@ -85,7 +86,7 @@ module Woods
     #       source: :in_top_k,            # see enum below
     #       top_of_type_global_rank: 3,   # 1-based rank in unfiltered ranked, or nil
     #       global_k: 20,                 # size of the unfiltered ranked list
-    #       total_of_type: 183            # total units of that type in the index
+    #       total_of_type: 183            # retrieval metadata records of that type
     #     }
     #   }
     #
@@ -97,10 +98,11 @@ module Woods
     #                            the fallback vector search returned
     #                            candidates of this type. Weak match.
     #   :outside_top_k         — type NOT in the unfiltered ranked list, has
-    #                            units in the index, but the fallback did
+    #                            retrieval metadata, but the fallback did
     #                            not run (other requested types filled the
     #                            result). No results of this type.
-    #   :absent                — type has zero units in the index.
+    #   :absent                — type has zero retrieval metadata records;
+    #                            structural extraction may still contain it.
     #
     # Nil for unfiltered queries.
     RetrievalResult = Struct.new(:context, :sources, :classification, :strategy, :tokens_used, :budget, :trace,
@@ -198,6 +200,16 @@ module Woods
     #
     # @return [Pipeline]
     attr_reader :pipeline, :mode, :default_budget
+
+    # Diagnose the currently served semantic stores without provider or remote
+    # store requests. Capture one pipeline so a reload cannot mix store counts.
+    # @return [Hash, nil] local corpus statistics, or nil for lexical retrieval
+    def corpus_status(include_types: true)
+      return unless mode == :semantic
+
+      current = @pipeline
+      Retrieval::CorpusStatus.build(current.vector_store, current.metadata_store, include_types: include_types)
+    end
 
     # Optional callback invoked with the pipeline struct the moment
     # {#retrieve} resolves it, before any pipeline work runs. Nil in
@@ -642,9 +654,9 @@ module Woods
     #
     # +top_of_type_global_rank+ is the 1-based position of the first
     # candidate of that type in the ranked list, or nil when no candidate
-    # of that type survived ranking. +total_of_type+ is the canonical
-    # count from the metadata store — answers "does this type exist in the
-    # index at all?" independent of query match. +source+ labels the bucket
+    # of that type survived ranking. +total_of_type+ counts retrieval metadata
+    # records, including chunk records and units without vectors. It does not
+    # measure structural unit coverage or embedded units. +source+ labels the bucket
     # the type landed in so the caller doesn't infer it from a nil rank;
     # see the RetrievalResult docstring for the four-value enum.
     #
@@ -727,7 +739,7 @@ module Woods
       return context if type_rank_context.empty?
 
       lines = ['', '### Type rank context', '',
-               '| Type | Source | Rank in unfiltered top-K | Global K | Total in index |',
+               '| Type | Source | Rank in unfiltered top-K | Global K | Retrieval metadata records |',
                '|------|--------|--------------------------|----------|----------------|']
       type_rank_context.each do |type, info|
         rank = info[:top_of_type_global_rank] || '—'

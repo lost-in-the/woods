@@ -176,7 +176,9 @@ module Woods
         retriever = build_retriever_from_config(config, resolved, artifact, state)
         probe_and_mark_state(config, state)
         derive_state_from_store_health(state)
-        warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})"
+        corpus = retriever.corpus_status(include_types: false) if retriever.respond_to?(:corpus_status)
+        corpus_note = corpus ? "; corpus: #{corpus[:state]}" : ''
+        warn "[woods-mcp] semantic search: #{state.status} (#{config.embedding_provider})#{corpus_note}"
 
         [retriever, state]
       end

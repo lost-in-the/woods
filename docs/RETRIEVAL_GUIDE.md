@@ -291,16 +291,65 @@ result    = retriever.retrieve("what validations does Order have?")
 
 ---
 
+## Semantic corpus diagnostics
+
+Extraction and embedding publish different data. `woods_status.ready` describes
+the structural index; neither that flag nor bootstrap `hydrated` proves that
+semantic retrieval has indexed records. Provider detection alone can succeed
+before the first embedding run.
+
+Supporting readers report `woods_status.retriever.corpus`:
+
+- `state`: `empty`, `metadata_only`, `vectors_only`, `nonempty`, or `unknown`.
+- `vectors` and `metadata`: each has `count`, `by_type`, and `untyped_count`.
+  Counts describe stored entries, including chunks; they are not distinct
+  extracted-unit counts or a completeness certificate. Missing type labels are
+  reported separately rather than assigned to a guessed type.
+- Unknown counts are `null`. Diagnostics use an explicit local-store capability;
+  they do not query remote stores to discover their counts. A missing capability
+  does not mean the backend is empty or broken.
+
+When both semantic stores are known empty, `codebase_retrieve` reports
+`empty_index` with recovery guidance instead of presenting an empty match as
+evidence that application code is absent. Run `woods:embed` in the application
+with the intended provider and storage configuration, then reload or restart
+the reader. Restart after changing provider or store configuration; reload
+refreshes the stores of the existing retriever. Alternatively, explicitly select `WOODS_RETRIEVAL_MODE=lexical`
+in the MCP process and restart for ranked retrieval over the published units.
+Woods does not change retrieval mode automatically.
+
+Metadata-only stores can still answer some keyword, direct, and graph queries;
+they are not blocked by this diagnostic. Source-empty units deliberately retain
+metadata without vectors, so the two counts need not match. Nonempty stores can
+still have missing types, stale vectors, or provider failures. Inspect the
+query result and embedding evidence before claiming coverage. The type-rank
+table's metadata count describes the retrieval metadata store, not all units
+in the structural index.
+
+Older readers may omit `retriever.corpus`; record the reader revision separately
+from the index writer version and verify the embedding artifacts directly.
+Explicit lexical mode does not use or report semantic corpus counts.
+
 ## Degradation Tiers
 
-Retrieval degrades gracefully when components are unavailable. The Retriever itself does not implement explicit fallback tiers, degradation happens naturally through how each component handles errors:
+The MCP boundary distinguishes missing configuration, empty stores, and failed
+stores. A failure is not evidence that no application code matches:
 
-- **Embedding provider unavailable**: `codebase_retrieve` returns a structured configuration error. Check `woods_status` for retrieval readiness.
-- **Vector store unavailable**: vector and hybrid strategies fail at query time. Keyword and graph strategies remain available for direct calls to `SearchExecutor`.
-- **Metadata store error**: the structural context overview (unit counts by type) is silently omitted; `Retriever#build_structural_context` rescues `StandardError` and returns `nil`. The retrieval result is still returned without the overview.
-- **Graph store unavailable**: graph expansion in hybrid strategy produces no graph candidates; vector and keyword candidates are still ranked and returned.
+- **No embedding provider configured:** `codebase_retrieve` reports a configuration
+  error with embedding and explicit lexical-mode options.
+- **Both semantic stores known empty:** the tool reports `empty_index`; see the
+  [corpus diagnostics](#semantic-corpus-diagnostics) above.
+- **Failed dump hydration:** the tool reports `degraded_index` rather than serving
+  a clean empty result. Repair or regenerate the named embedding artifact.
+- **Query-time storage failures:** vector, metadata, and graph adapter exceptions
+  are translated into store errors and reported as `degraded_index` by MCP.
+  This includes failures building the metadata overview; that failure is not
+  silently omitted. Direct Ruby callers should handle `Woods::Retriever::StoreError`.
 
-In all cases, errors in individual components produce empty candidate sets for that source rather than raising through the `Retriever`. Configure circuit breakers via `Woods::Resilience::CircuitBreaker` on external providers (Qdrant, OpenAI) for production deployments.
+Provider failures and missing metadata for returned candidates have their own
+error paths. Preserve their diagnostics; do not silently switch modes or treat
+an exception as an empty match. Positive corpus counts do not override these
+checks.
 
 ---
 

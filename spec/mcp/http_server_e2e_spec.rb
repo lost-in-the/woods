@@ -284,7 +284,7 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
       result = JSON.parse(response.body).fetch('result')
       expect(result['protocolVersion']).to eq('2025-06-18')
       expect(result.fetch('instructions')).to start_with('Start with woods_status')
-      expect(result.fetch('instructions')).to include('only when woods_status reports retrieval enabled')
+      expect(result.fetch('instructions')).to include('structural readiness alone is insufficient')
       expect(result.fetch('instructions').bytesize).to be <= 2048
     end
 

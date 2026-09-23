@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'local_corpus_stats'
+
 require 'json'
 require 'fileutils'
 require 'time'
@@ -265,6 +267,14 @@ module Woods
           @data.size
         end
 
+        # Local diagnostic capability; counts records, not embedded units.
+        # @return [Hash] metadata entry counts, including source-empty records
+        def local_corpus_stats(include_types: true)
+          return { count: count, by_type: nil, untyped_count: nil } unless include_types
+
+          LocalCorpusStats.from_types(@data.values.map { |record| record['type'] })
+        end
+
         # Iterate over every stored entry, yielding +(id, metadata)+ pairs.
         #
         # Persistence seam for {Snapshotter::Metadata}. Yields the raw internal
@@ -463,6 +473,16 @@ module Woods
         # @see Interface#count
         def count
           @db.get_first_value('SELECT COUNT(*) FROM units')
+        end
+
+        # Reads only grouped type counts from the local SQLite database.
+        # @return [Hash] metadata entry counts, independent of vector coverage
+        def local_corpus_stats(include_types: true)
+          return { count: count, by_type: nil, untyped_count: nil } unless include_types
+
+          counts = @db.execute('SELECT type, COUNT(*) AS entry_count FROM units GROUP BY type')
+                      .to_h { |row| [row['type'], row['entry_count']] }
+          LocalCorpusStats.from_counts(counts)
         end
 
         private

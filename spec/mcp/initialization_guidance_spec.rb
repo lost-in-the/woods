@@ -40,7 +40,7 @@ RSpec.describe 'Index MCP initialization guidance' do
     wired = initialize_result(build(retriever: retriever)).fetch('instructions')
 
     expect(wired).to eq(lean)
-    expect(wired).to include('codebase_retrieve only when woods_status reports retrieval enabled')
+    expect(wired).to include('check retrieval mode and data in woods_status before codebase_retrieve')
     expect(wired).to include('Otherwise use search and lookup')
   end
 
@@ -50,7 +50,7 @@ RSpec.describe 'Index MCP initialization guidance' do
 
     text = initialize_result(build(bootstrap_state: state)).fetch('instructions')
 
-    expect(text).to include('only when woods_status reports retrieval enabled')
+    expect(text).to include('structural readiness alone is insufficient')
     expect(text).not_to include('provider unavailable')
   end
 

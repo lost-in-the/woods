@@ -116,6 +116,13 @@ override; the shared root selects the primary checkout's HEAD. Follow the
 
 Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
 
+Structural readiness alone does not verify semantic retrieval. If that mode is
+requested, confirm an embedding run and a useful retrieval result. Readers with
+#549 expose `retriever.corpus` counts; check the installed capability before
+expecting them. Unknown counts are not zero, and positive counts do not certify
+complete embedding coverage. See
+[corpus diagnostics](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
+
 Offer one automatic-maintenance owner within the setup scope. The managed launcher,
 watcher generator, and Puma adapter (#538) are **included in Woods `2.0.0`**.
 Record the loaded gem path and revision, then verify `bundle exec woods-watch

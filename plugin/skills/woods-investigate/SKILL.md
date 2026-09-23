@@ -16,7 +16,7 @@ Follow the [agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGE
 when instructions are absent. A registered tool does not establish retrieval
 readiness or authorize maintenance or live Console access.
 
-Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; use `codebase_retrieve` only when status reports retrieval enabled. If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist.
+Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; verify the retrieval mode and its data before using `codebase_retrieve` (see Conceptual questions below). If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist.
 
 ## The default loop
 
@@ -31,9 +31,9 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 - **Code review / change impact**: `lookup` the changed unit, then `dependents` at depth 1 before going deeper. Group results by relationship type and layer; report direct dependents separately from inferred downstream impact. A graph edge is not test coverage — select tests from mappings and repository search.
 - **Audit / architecture assessment**: `graph_analysis` for orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, and undeclared package edges; `domain_clusters` for architectural domains; `pagerank` for high-impact units worth reading first.
-- **Investigating behavior / debugging**: `trace_flow` from the user-visible entry point (route, controller action, job, mailer, service), `lookup` at ambiguous steps, and verify anything conditional or dynamically dispatched in source and tests — do not infer call order from a dependency edge.
+- **Investigating behavior / debugging**: find the exact indexed unit with `search` and `lookup`, then use `trace_flow` with `UnitIdentifier` or `UnitIdentifier#method` (for example, `CheckoutService#order`). Bare `order` names a unit, potentially a factory, rather than locating an application method. Receiverless local calls may remain unexpanded; inspect their source or trace the owning unit's method explicitly. Flow output is not proof of runtime execution or exhaustive call coverage. See the [flow workflow](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md#trace-a-feature-flow).
 - **Onboarding**: `structure` for the codebase overview, `lookup` and `dependencies`/`dependents` for a unit's neighborhood, and `domain_clusters` for the domain map, then the default loop on the units that matter.
-- **Conceptual questions**: `codebase_retrieve` when status says ready; govern with `budget` (never `limit`), then verify key units with `lookup`.
+- **Conceptual questions**: check retrieval mode and data before `codebase_retrieve`; structural `ready` alone does not establish semantic availability. On readers supporting #549, inspect `retriever.corpus`; missing or unknown counts require checking embedding artifacts. Govern with `budget` (never `limit`), then verify key units with `lookup`.
 
 ## Boundaries
 

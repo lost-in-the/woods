@@ -3,7 +3,7 @@
   "corpus_sha256": "f2eac704dd0b773059e7268ed40046d862f47a1049223d89fcb45c8e645b5d20",
   "vectors_sha256": "311204a33db66587269346a7d54bcef842a08176e56c0d1816cd9e1275c4c89d",
   "profiles_sha256": "b88bfc8562a5c1639141063a58329d7185d6726daf4ecfad2fe0c5cf5e53d747",
-  "capture_report_sha256": "77f2f826d5fb796d140d0b408c3dfc76d294fad466aa542582df7916369d7bff",
+  "capture_report_sha256": "51191432d77a489f3c107eb90afbf66f4427995a23382fe24d5d371f42df9560",
   "notes": "Frozen Canopy runtime corpus + real MiniLM vectors. Original per-runtime quality floors retained unchanged. B-190 resolves graph seeds; B-191 orders equal PageRank scores lexically by identifier; B-192 orders hybrid candidate ties before truncation and RRF. All six measured Ruby lines share context bytes and exact cl100k_base counts, not agent usage.",
   "thresholds": {
     "keyword": {

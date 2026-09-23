@@ -139,6 +139,45 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     expect(extractor.send(:git_available?)).to be(false)
   end
 
+  it 'warns once when the git executable is missing and omits full and incremental history' do
+    allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
+    expect(Rails.logger).to receive(:warn)
+      .with(/Git history unavailable: git executable.*PATH.*Install Git.*full extraction/).once
+    expect(Woods::GitHistory).not_to receive(:new)
+    unit = Woods::ExtractedUnit.new(type: :service, identifier: 'Sample', file_path: path)
+    extractor.instance_variable_set(:@results, { services: [unit] })
+    extractor.dependency_graph.register(unit)
+
+    extractor.send(:enrich_with_git_data)
+    extractor.send(:annotate_graph_with_git_data)
+
+    expect(unit.metadata).not_to have_key(:git)
+    expect(extractor.dependency_graph.to_h[:nodes]['Sample']).not_to have_key(:commit_count)
+    expect(extractor.send(:incremental_git_data, ['Sample'])).to eq({})
+  end
+
+  %w[WOODS_GIT_DIR GIT_DIR].each do |variable|
+    it "warns for a missing git executable when #{variable} selects a repository without a root .git" do
+      FileUtils.rm_rf(root.join('.git'))
+      stub_const('ENV', ENV.to_h.merge(variable => root.join('external-git').to_s))
+      allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
+      expect(Rails.logger).to receive(:warn).once.with(/Git history unavailable: git executable/)
+
+      2.times { expect(extractor.send(:git_available?)).to be(false) }
+    end
+  end
+
+  it 'keeps no-git source archives quiet and preserves their supplied provenance' do
+    FileUtils.rm_rf(root.join('.git'))
+    stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => '', 'GIT_DIR' => ''))
+    allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
+    expect(Rails.logger).not_to receive(:warn)
+
+    expect(extractor.send(:git_available?)).to be(false)
+    provenance = Woods::GitProvenance.new(root: root, env: { 'GIT_BRANCH' => 'archive', 'GIT_SHA' => 'abc123' })
+    expect(provenance.to_h).to eq(git_branch: 'archive', git_sha: 'abc123')
+  end
+
   it 'includes side-branch changes after they are merged into HEAD' do
     git('merge', '--no-ff', '-qm', 'merge side', 'unmerged')
 

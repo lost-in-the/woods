@@ -208,6 +208,14 @@ access with its `WOODS_GIT_DIR` setting. A failed history stream is discarded;
 repair git access and run full extraction to refresh retained metadata. See the
 [history contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#git-enrichment-history).
 
+If per-unit Git metadata is absent, check `git --version` inside the extraction
+process/container as well as repository access. Builds with #551 warn when Git
+cannot execute and a repository is expected; older versions may be silent.
+Source archives without a Git directory remain supported. `GIT_SHA` and
+structural `ready` do not certify history availability. After repairing Git,
+run full extraction; see the
+[missing-executable diagnostic](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-executable-is-missing-from-the-extraction-environment).
+
 For linked-worktree provenance/history mismatches, check the installed version's
 `WOODS_GIT_DIR` support and compare the selected branch and exact SHA inside the
 extraction environment. Mount the complete shared `.git` at its original path
@@ -293,6 +301,18 @@ paging alone only visits the discovered prefix. See the
 [budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
 
 ## 4. Check semantic retrieval
+
+Do not treat structural `ready: true` or bootstrap `hydrated` as proof that
+embeddings exist. Check the installed reader's capabilities: builds with #549
+expose `woods_status.retriever.corpus`, including locally known vector and
+metadata record counts by type. Missing fields or `null` counts mean unknown,
+not zero. Counts include chunks and do not certify complete unit coverage.
+When both stores are known empty, supporting readers return `empty_index` with
+embed or explicit lexical-mode guidance. Follow the
+[corpus diagnostic contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
+Older readers need direct embedding-artifact checks; installing this plugin
+does not update the serving gem. Keep reader revision and index writer version
+separate when comparing results.
 
 Configured retrieval defaults (#446) are available in Woods `2.0.0.beta3`. For an installed
 version that supports them, an omitted tool budget uses the serving retriever's

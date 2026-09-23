@@ -16,7 +16,7 @@ Call `woods_status` before relying on the index. Check:
 
 - the index is ready and has a current generation;
 - unit counts are non-zero for relevant types;
-- retrieval is enabled before choosing `codebase_retrieve`;
+- the retrieval mode and its data are usable before choosing `codebase_retrieve`;
 - warnings do not indicate a stale or partial index.
 
 If status is unhealthy, report the evidence and ask the owner to extract or refresh. Do not fill gaps by asserting that Woods found nothing.
@@ -56,7 +56,7 @@ Identifiers are namespaced and typed. Never invent one from a filename when
 | Find dependencies that change faster than their dependents | `graph_analysis` with `analysis: "volatile_dependencies"` | `recent_changes` |
 | See a Packwerk boundary before calling across it | `graph_analysis` with `analysis: "undeclared_package_edges"` | `lookup` on the package unit |
 | Find central or high-impact units | `pagerank` | `dependents` |
-| Ask a conceptual question | `codebase_retrieve` if status says ready | `lookup` and graph tools |
+| Ask a conceptual question | `codebase_retrieve` after checking its retrieval mode and data | `lookup` and graph tools |
 | Refresh after a published extraction | `reload` | `woods_status` |
 
 Do not start with a broad graph or semantic query when an exact search will answer the question with less noise.
@@ -76,10 +76,20 @@ Woods may inline concern behavior beside the owning model. Distinguish the resol
 ### Trace a feature flow
 
 1. Search for the route, controller action, job, mailer, or service at the user-visible entry point.
-2. Call `trace_flow` on the exact identifier.
+2. Call `trace_flow(entry_point: "UnitIdentifier#method")` for a method on that exact indexed unit, or use `UnitIdentifier` for the whole unit. For example, use `CheckoutService#order` for its `order` method.
 3. Inspect important or ambiguous nodes with `lookup`.
 4. Follow missing branches with `dependencies` and a narrow `via` filter when useful.
 5. Verify behavior that depends on conditions, dynamic dispatch, or runtime data in source and tests.
+
+Bare names identify units, not methods across the application. For example,
+`trace_flow(entry_point: "order")` selects the indexed `order` unit, which may
+be a FactoryBot factory in `spec/factories/`. Find the owning class with
+`search` and `lookup`, then pass its identifier with `#order`.
+
+Flow assembly derives operations from source. A receiverless local call such
+as `order` inside `CheckoutService#call` may remain visible without expanding
+the local method body. Follow it in source or trace `CheckoutService#order`
+explicitly. A flow is not proof of runtime execution or exhaustive call coverage.
 
 ### Assess change impact
 
@@ -182,6 +192,13 @@ order from a dependency edge alone.
 ## Use ranked retrieval only when ready
 
 `codebase_retrieve` answers natural-language questions with token-budgeted context. Use it when `woods_status` reports explicit lexical mode over a current published index, or a configured embedding provider and current vector data in semantic mode. Lexical mode explains matching terms/fields and does not infer synonyms absent from the text; a no-match response is not proof of missing behavior.
+
+Top-level `ready` describes the structural index. Bootstrap `hydrated` does not
+prove that semantic stores contain data. When supported, inspect
+`retriever.corpus`; missing or unknown counts require checking embedding
+artifacts. Known-empty stores need embedding or an explicit switch to lexical
+mode. Positive record counts do not prove complete application coverage. See
+[semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
 Important parameters:
 
