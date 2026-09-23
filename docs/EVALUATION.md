@@ -90,8 +90,8 @@ bundle exec ruby -Ilib bench/evaluation/runner.rb
   strategy selection also fail. The baseline format is developer-only and is
   **not** the `EVAL_BASELINE_FILE` aggregate-threshold format.
 
-B-190/B-191 recapture on Ruby 4.0.6 (five warmed pipeline repetitions per query; Ruby 3.3.1
-and 3.4.10 replay the same answers):
+B-190/B-191 baseline, with the #549 output-label refresh captured on Ruby 4.0.6
+(five warmed pipeline repetitions per query):
 
 | Strategy | Queries | Precision@5 | Recall | MRR | Mean actual context tokens |
 |---|---:|---:|---:|---:|---:|
@@ -99,8 +99,14 @@ and 3.4.10 replay the same answers):
 | Vector | 4 | 0.313 | 0.375 | 0.625 | 1,041.2 |
 | Graph | 8 | 0.813 | 0.519 | 1.000 | 1,041.1 |
 | Hybrid | 4 | 0.750 | 0.396 | 1.000 | 1,058.8 |
-| Direct with type filtering | 4 | 0.375 | 0.750 | 0.625 | 551.0 |
-| Within-type vector fallback | 4 | 0.400 | 1.000 | 1.000 | 1,250.8 |
+| Direct with type filtering | 4 | 0.375 | 0.750 | 0.625 | 552.0 |
+| Within-type vector fallback | 4 | 0.400 | 1.000 | 1.000 | 1,251.8 |
+
+The clearer `Retrieval metadata records` heading adds one exact `cl100k_base`
+token to each of the eight direct/fallback contexts. The other 20 contexts,
+retrieved identifiers and order, annotations, and quality metrics are unchanged.
+The refresh reuses captured vectors and the pinned `tiktoken 0.11.0` tokenizer;
+it performs no new model inference.
 
 Precision@5 divides relevant hits by the actual returned slice size (up to five),
 not always by five. Recall divides retrieved relevant units by all annotated

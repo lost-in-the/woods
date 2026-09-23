@@ -1,0 +1,1 @@
+- Distinguish semantic retrieval corpus counts from structural index readiness. Known-empty in-memory stores now produce actionable embedding or explicit lexical-mode guidance; status reports local vector and metadata record counts by type without treating unavailable counts as zero. Preserve useful metadata-only retrieval and report counts from the currently served stores.

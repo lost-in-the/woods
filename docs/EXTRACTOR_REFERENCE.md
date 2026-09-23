@@ -32,6 +32,14 @@ Extractors discover code one of two ways:
 
 Some extractors combine both (e.g., `JobExtractor` scans directories first, then supplements with `ApplicationJob.descendants`).
 
+Discovery is not exhaustive. A standalone module under `app/models` that is
+called through singleton methods is not discovered by the model/PORO paths;
+conventional concerns and app modules included by live models have separate
+concern discovery. This gap is tracked in [#552](https://github.com/lost-in-the/woods/issues/552).
+Separately, dependency scanning does not capture every method-body constant
+reference ([#475](https://github.com/lost-in-the/woods/issues/475)). A missing unit
+or edge is not proof of unused code; cross-check the application source.
+
 ### Identifier naming (source-derived units)
 
 File-based extractors derive an identifier in three steps, first match wins:

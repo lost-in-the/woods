@@ -68,6 +68,13 @@ gem version's release notes before expecting `index.woods_version` in `woods_sta
 the last manifest publisher, independently of `server.version`. Treat missing/null
 as unknown and see [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
+Verify semantic retrieval separately from structural `ready`. A reachable
+provider and bootstrap `hydrated` can coexist with empty stores. If the recorded
+reader supports #549, inspect `retriever.corpus` for local record counts and
+known-empty diagnostics; absent or unknown counts require checking embedding
+artifacts. These fields do not certify embedding coverage. See the
+[readiness distinction](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
+
 When Woods is installed only in Docker, prefer running the server through the application container:
 
 ```json

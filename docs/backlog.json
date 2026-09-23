@@ -2857,5 +2857,58 @@
     ],
     "description": "Issue #546: the documented shared-root WOODS_GIT_DIR override selects the primary checkout HEAD. Correct the warning and guidance to preserve a same-path complete layout or select the actual worktree admin directory within a relocated complete layout. Real divergent-worktree regressions assert exact feature branch/SHA, feature-only history and changed paths while preserving explicit override semantics and unavailable-Git behavior. Document commit-only watcher freshness limits. Validated by 48 focused Git examples, the full 9567-example suite (zero failures; three optional tokenizer checks pending), and full RuboCop. Independent review confirmed explicit override compatibility and the documented watcher limitation.",
     "status": "resolved"
+  },
+  {
+    "id": "B-209",
+    "title": "Distinguish semantic corpus availability from structural readiness",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/mcp/server.rb",
+      "lib/woods/retriever.rb",
+      "lib/woods/storage/"
+    ],
+    "description": "Issue #549: Expose trustworthy local-store counts and explicitly unknown coverage without remote diagnostic queries. Explain known-empty retrieval without weakening structural readiness, hiding failures, or blocking useful metadata-only retrieval. Synchronize diagnostics, canonical guidance and regression coverage.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-210",
+    "title": "Clarify exact unit and method addressing for trace_flow",
+    "severity": "low",
+    "category": "docs",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/server.rb",
+      "docs/AGENT_GUIDE.md"
+    ],
+    "description": "Issue #550: Document exact unit identifiers and UnitIdentifier#method, factory-name ambiguity and unexpanded receiverless calls. Preserve existing resolution semantics rather than guessing a global method owner.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-211",
+    "title": "Warn when Git cannot execute during extraction provenance resolution",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "docs/TROUBLESHOOTING.md"
+    ],
+    "description": "Issue #551: Add an actionable unavailable-executable diagnostic while preserving intentional source archives, explicit Git directory selection, GIT_SHA fallback and successful extraction without history.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-212",
+    "title": "Discover standalone application modules outside concerns",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/poro_extractor.rb",
+      "lib/woods/extractors/concern_extractor.rb"
+    ],
+    "description": "Issue #552: Post-2.0 follow-up: define stable discovery and type ownership for standalone modules invoked through singleton methods outside concern paths. Require booted Rails full/incremental/delete and collision coverage. Related #475 covers references to known targets, not missing module discovery.",
+    "status": "ready"
   }
 ]

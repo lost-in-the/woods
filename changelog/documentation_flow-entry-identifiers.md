@@ -1,0 +1,1 @@
+- Clarify that `trace_flow` addresses an exact indexed unit, optionally followed by `#method`. Bare names can select factories, and receiverless local calls may remain unexpanded; flow output does not prove runtime execution or complete call coverage.
