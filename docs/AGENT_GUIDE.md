@@ -76,10 +76,20 @@ Woods may inline concern behavior beside the owning model. Distinguish the resol
 ### Trace a feature flow
 
 1. Search for the route, controller action, job, mailer, or service at the user-visible entry point.
-2. Call `trace_flow` on the exact identifier.
+2. Call `trace_flow(entry_point: "UnitIdentifier#method")` for a method on that exact indexed unit, or use `UnitIdentifier` for the whole unit. For example, use `CheckoutService#order` for its `order` method.
 3. Inspect important or ambiguous nodes with `lookup`.
 4. Follow missing branches with `dependencies` and a narrow `via` filter when useful.
 5. Verify behavior that depends on conditions, dynamic dispatch, or runtime data in source and tests.
+
+Bare names identify units, not methods across the application. For example,
+`trace_flow(entry_point: "order")` selects the indexed `order` unit, which may
+be a FactoryBot factory in `spec/factories/`. Find the owning class with
+`search` and `lookup`, then pass its identifier with `#order`.
+
+Flow assembly derives operations from source. A receiverless local call such
+as `order` inside `CheckoutService#call` may remain visible without expanding
+the local method body. Follow it in source or trace `CheckoutService#order`
+explicitly. A flow is not proof of runtime execution or exhaustive call coverage.
 
 ### Assess change impact
 

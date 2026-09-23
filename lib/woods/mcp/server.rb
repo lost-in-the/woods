@@ -1139,12 +1139,15 @@ module Woods
 
           server.define_tool(
             name: 'trace_flow',
-            description: 'Trace execution flow from an entry point through the codebase',
+            description: 'Trace a source-derived flow from an exact indexed unit, optionally scoped by #method. ' \
+                         'Receiverless local calls may remain unexpanded; this is not proof of runtime execution.',
             input_schema: {
               properties: {
                 entry_point: {
                   type: 'string',
-                  description: 'Entry point (e.g., UsersController#create)'
+                  description: 'Exact UnitIdentifier, optionally followed by #method (e.g., UsersController#create ' \
+                               'or CheckoutService#order). Bare names identify units, including factories; ' \
+                               'a bare method name does not locate its owning class. Use search and lookup first.'
                 },
                 depth: {
                   type: 'integer',
