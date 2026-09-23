@@ -103,6 +103,16 @@ RSpec.describe Woods::SourceReferences::Pass do
     )
   end
 
+  it 'does not let a refreshed sibling certify changed source for a retained typed caller' do
+    initial = run_pass
+    units.first['dependencies'] = [edge]
+    sources['app/models/ref_caller.rb'] += "\n# changed since this unit was extracted\n"
+    # A sibling unit can acknowledge the same path in the per-extractor ledger.
+    allow(session).to receive(:consumed_source?).and_return(true)
+    expect { run_pass(baseline: initial.cache, refreshed: [%w[poro RefTarget]], full: false) }
+      .to raise_error(Woods::SourceReferences::RebuildRequired, /unverified source/)
+  end
+
   it 'requires a rebuild when a retained caller loses its ownership record' do
     initial = run_pass
     units.first['dependencies'] = [edge]

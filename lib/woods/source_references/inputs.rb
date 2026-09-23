@@ -95,7 +95,8 @@ module Woods
         return if fresh.call(unit)
 
         consumer = extractor_keys[unit['type'].to_sym]
-        return if consumer && @session.consumed_source?(consumer, path)
+        unchanged = @baseline&.dig('files', path, 'identity') == @session.source_identity(path)
+        return if unchanged && consumer && @session.consumed_source?(consumer, path)
 
         raise RebuildRequired, "Source-reference baseline needs a full extraction: unverified source #{path}. " \
                                'Run bin/rails woods:extract; the previous published generation remains active.'
