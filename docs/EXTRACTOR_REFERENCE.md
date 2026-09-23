@@ -746,11 +746,15 @@ History is limited to commits reachable from `HEAD` in the past 365 days,
 including merged branch history. Unmerged branches, remote refs, and tool
 checkpoint refs do not contribute. Commands run against the application root;
 when `WOODS_GIT_DIR` is set, `HEAD` belongs to that explicitly selected git
-directory, which may differ from a linked worktree's HEAD.
+directory. For a linked worktree, select its `worktrees/<id>` directory within
+the complete shared Git layout; selecting the shared root instead uses the
+primary checkout's HEAD. See the [worktree mount guide](TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
 After upgrading from a version that included all refs, run a full
 `woods:extract` to replace previously published git metadata. Incremental
-extraction refreshes only the units it rewrites.
+extraction refreshes only the units it rewrites. A commit alone does not
+necessarily trigger the source-file watcher; run full extraction when current
+Git history is required.
 
 | Field | Description |
 |-------|-------------|

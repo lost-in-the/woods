@@ -142,7 +142,7 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
-Unreleased after `2.0.0.beta3`: `woods:clean` removes index artifacts but keeps
+Included in Woods `2.0.0`: `woods:clean` removes index artifacts but keeps
 the output directory and its hidden extraction guard. This stable guard lets
 concurrent writers coordinate safely; its presence does not mean an index remains.
 

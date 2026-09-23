@@ -35,14 +35,20 @@ The shape determines the capability matrix:
 
 ### Database compatibility
 
-The vector store you can use depends on the primary database your Rails app uses. MySQL stacks **must** pair with an external vector backend; PostgreSQL stacks have the option of running pgvector inside the same database.
+Vector storage is independent of the application's primary database. Structural
+MCP tools and explicit lexical retrieval need no vector backend. For semantic
+retrieval, any supported application database can use `:in_memory`, Qdrant, or
+pgvector through a live PostgreSQL connection.
 
-| Primary database | Supported vector stores | Required? |
+| Primary database | Supported vector stores | PostgreSQL connection for pgvector |
 |---|---|---|
-| **MySQL / Percona / MariaDB / Aurora MySQL** | `:qdrant` (external); `:in_memory` (local dev only) | Yes. MySQL has no native vector extension |
-| **PostgreSQL / Aurora PostgreSQL** | `:pgvector` (in-database), `:qdrant`; `:in_memory` (local dev only) | No, `:pgvector` runs inside the same database |
+| **MySQL / Percona / MariaDB / Aurora MySQL** | `:pgvector`, `:qdrant`, `:in_memory` | Separate PostgreSQL database |
+| **PostgreSQL / Aurora PostgreSQL** | `:pgvector`, `:qdrant`, `:in_memory` | Application connection or a separate PostgreSQL database |
 
-**Why MySQL needs an external backend.** MySQL ships no equivalent of the `pgvector` extension. Approximate-nearest-neighbour search over arbitrary float vectors is not part of InnoDB / MyISAM and cannot be added via plugin. Woods does not emulate vector search in MySQL, the gem only ships adapters that delegate to a real vector engine. The shipped pairing for MySQL apps is `:qdrant` for vectors with Woods' own `:sqlite` metadata store; Woods never stores metadata in your application database.
+Woods has no MySQL vector adapter. A MySQL application can use the `:local`
+preset, Qdrant, or a separate PostgreSQL connection for pgvector. Woods' metadata
+store remains a separate choice: SQLite or in-memory. The pgvector row's JSON
+metadata does not replace that store.
 
 ### pgvector (PostgreSQL extension)
 
@@ -52,7 +58,7 @@ The vector store you can use depends on the primary database your Rails app uses
 
 **Strengths:**
 - Zero additional infrastructure if you're on PostgreSQL
-- Transactional consistency with metadata (same database)
+- Stores each vector and its per-vector JSON metadata in one PostgreSQL row
 - Familiar SQL interface, works with ActiveRecord
 - Supports HNSW indexing
 - Backed by strong open-source community
@@ -108,7 +114,7 @@ smaller provider output width or another backend. See the
 
 **When to use:** PostgreSQL is your primary database, you value simplicity, and scale is under ~50K vectors.
 
-**When to avoid:** MySQL is your primary database (can't use pgvector), you need sub-millisecond search, or you're indexing multiple large codebases.
+**When to avoid:** You do not want to operate PostgreSQL, you need sub-millisecond search, or you're indexing multiple large codebases.
 
 ---
 

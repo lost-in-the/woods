@@ -56,9 +56,11 @@ It describes what the service does, but misses that `order.save!` triggers `afte
 :send_confirmation_email` on `Order`, which itself enqueues `InventoryJob` via
 `after_save :reserve_stock` on `LineItem`.
 
-With Woods, the dependency graph links `CheckoutService` → `Order` → `LineItem` →
-`InventoryJob`. A single retrieval call assembles the full execution picture: the service,
-the models it touches, the callbacks those models fire, and the jobs those callbacks enqueue.
+With Woods, published graph relationships can connect related services, models,
+callbacks, and jobs for retrieval. Arbitrary method-body constant references are
+not exhaustively indexed, so the whole `CheckoutService` → `Order` → `LineItem` →
+`InventoryJob` chain may not be recorded. Inspect the source and any flow evidence,
+including reported ambiguity and traversal limits, before concluding what runs.
 
 ---
 
@@ -175,11 +177,13 @@ Three tools answered "what is in this Rails app" for coding agents in 2026. Wood
 | Rubydex (Shopify) | 0.4.1, announced 2026-05-12 | Rust static index of declarations, references, ancestors; experimental `rdx mcp` | Symbol references across a large tree, fast re-index, reported 15 to 80 percent token reduction | Resolved callbacks, inlined concerns, routes as Rails builds them, database partition, churn |
 | rails-mcp-server | 2.0.0 | Boots the app; `analyze_models`, `get_routes`, `get_schema` | Live model, route, and schema listings over MCP | Callback side effects, request flows, git churn, graph reports, persistent index with generations |
 | ruby-lsp-rails | 0.5.0.beta1 | Runtime server over `rails runner` for the editor | Model columns, association targets, route info at the cursor | A persistent index other tools can read, graph analysis, multi-database facts |
-| Woods | 2.0 | Boots the app once, publishes an atomic JSON generation, serves it without Rails | Resolved runtime behavior on top of structure: inlined concerns, callback side effects, flows, churn, PageRank; database partition and Packwerk boundaries are in progress on this branch | Symbol-level references inside method bodies (Rubydex is the better fit and is complementary) |
+| Woods | 2.0 | Boots the app once, publishes an atomic JSON generation, serves it without Rails | Resolved runtime behavior on top of structure: inlined concerns, callback side effects, flows, churn, PageRank; recorded database partitions and Packwerk boundaries | Symbol-level references inside method bodies (Rubydex is the better fit and is complementary) |
 
 Woods and Rubydex are complementary. Rubydex answers "where is this symbol referenced". Woods answers "what happens when this runs, and what does it touch". An agent can use both: Rubydex for references, Woods for behavior, boundaries, and blast radius.
 
-The database-partition layer, in progress on this branch, is the one place Woods will be alone. Rubydex is static, and the other two resolve associations without saying which database each side lives on. See [Extractor reference](EXTRACTOR_REFERENCE.md#modelextractor) for the fields.
+Woods records database-partition metadata on models and Packwerk package ownership
+and boundaries. See [Extractor reference](EXTRACTOR_REFERENCE.md#modelextractor)
+for the fields and their coverage limits.
 
 ---
 

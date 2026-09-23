@@ -46,10 +46,7 @@ Run installation and extraction commands from your Rails application root in its
 
 ### 1. Install and configure
 
-These steps are for **Woods 2.x**. Choose a published 2.x version from the release information below and confirm it on [RubyGems](https://rubygems.org/gems/woods/versions). If only prereleases are available, use an exact prerelease pin; `~> 2.0` will not select one. Follow the chosen version's tag documentation rather than assuming every feature on `main` is published. If you choose 1.x, use its tag documentation instead of this quickstart.
-
-<details>
-<summary>Release information and Gemfile version constraints</summary>
+These steps are for **Woods 2.x**. Choose a published 2.x version from [RubyGems](https://rubygems.org/gems/woods/versions). If only prereleases are available, use an exact prerelease pin; `~> 2.0` will not select one. Follow the chosen version's tag documentation rather than assuming every feature on `main` is published. If you choose 1.x, use its tag documentation instead of this quickstart.
 
 <!-- release-state:version-banner -->
 > **This tree documents version 2.0.0.** It is a major update from 1.x: read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating. The full history is in the [CHANGELOG](CHANGELOG.md).
@@ -67,9 +64,7 @@ These steps are for **Woods 2.x**. Choose a published 2.x version from the relea
 > RubyGems treats 2.0.0.beta4 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Once published, install it explicitly with `gem "woods", "2.0.0.beta4"`. The released constraint stays `gem "woods", "~> 1.6"`.
 <!-- release-state:end -->
 
-</details>
-
-Expand the release information above, then add its appropriate `gem "woods", …` declaration to your Gemfile's `:development` group and run:
+Once a stable 2.x release is published, add `gem "woods", "~> 2.0"` to your Gemfile's `:development` group. For a prerelease, use its exact published version instead. Then run:
 
 ```bash
 bundle install
@@ -132,7 +127,7 @@ Run one watcher through your normal development startup. It catches up on
 changes, publishes complete generations, and lets the Index Server refresh on
 later tool calls. The [startup guide](docs/WATCH_DAEMON.md#managed-development-startup)
 covers Puma, existing Foreman workflows, and Docker/Grove supervision. Managed
-startup is **unreleased; check installed capabilities**. Older packages run the raw
+startup requires a supporting gem; **check installed capabilities**. Older packages run the raw
 `bin/rails woods:watch` task under an external restart-capable supervisor.
 
 Without a watcher, run `bin/rails woods:incremental` after edits or

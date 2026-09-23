@@ -60,12 +60,12 @@ PORO and library targets. No dependents or test-only dependents do not establish
 absence of production callers; check source before making that claim.
 
 The response `graph_coverage` notice, `total_is_exact` field, and human label
-`witness types unambiguous` (#470/#471) are unreleased after Woods `2.0.0.beta3`.
+`witness types unambiguous` (#470/#471) are included in Woods `2.0.0`.
 Verify the installed server version and actual response fields; this plugin does
 not add them. Apply these limits to older servers even without the notice.
 Supporting stdio and HTTP servers expose the paginated traversal payload in
 `structuredContent.data` independently of the text renderer (#481, also
-unreleased after `2.0.0.beta3`). Check the installed response; older default
+included in Woods `2.0.0`). Check the installed response; older default
 responses may carry only text. Do not pass an unsupported `format` argument.
 
 `total_is_exact: false` means a budget-limited prefix; a true value describes only
@@ -106,7 +106,7 @@ recorded reachability does not establish observed execution. See the
 
 Pass explicit `limit` and `offset` when paging `graph_analysis`. Enforcing the
 advertised default of 20 rows per section and preserving total/offset on last
-and empty pages (#519) are unreleased after `2.0.0.beta3`; check the installed
+and empty pages (#519) are included in Woods `2.0.0`; check the installed
 response rather than inferring support from the plugin version. On supporting
 servers, read `<section>_total` and `<section>_offset` in JSON, or the human
 pagination notice. An empty later page does not mean no findings. Totals count

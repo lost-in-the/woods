@@ -139,7 +139,7 @@ before using `codebase_retrieve`, including after reload. The guidance grants
 no extraction, configuration-change, or Console authorization. Detailed usage
 belongs in the [agent guide](AGENT_GUIDE.md).
 
-This addition is unreleased after `2.0.0.beta2`. The SDK omits `instructions`
+This addition is included in Woods `2.0.0`. The SDK omits `instructions`
 when negotiating protocol `2024-11-05`; that behavior is preserved. Older gems,
 legacy clients, and clients that do not show server instructions can use the
 agent guide or investigation skill. Leave protocol negotiation enabled rather
@@ -200,7 +200,7 @@ process after publishing a new embedded index.
 
 ### Graph-analysis pages
 
-Unreleased after `2.0.0.beta3`: `graph_analysis` enforces its advertised default
+Included in Woods `2.0.0`: `graph_analysis` enforces its advertised default
 of 20 rows per section. Pass `limit` and `offset` to page one selected `analysis`
 or each section of `analysis: "all"`. Explicit limits also bound nested hub
 `dependents` lists. Older servers may return every section row when `limit` is
@@ -220,7 +220,7 @@ they do not establish complete source-reference coverage.
 Search responses retain `query`, `result_count`, and `results`; `result_count`
 is the number returned, not an estimated total. The additive `completeness`
 object describes the requested types, literal filters, and fields in the pinned
-generation. This contract is unreleased after `2.0.0.beta2`.
+generation. This contract is included in Woods `2.0.0`.
 
 | `reason` | `status` | `has_more` | `total_matches` |
 |---|---|---|---|
@@ -266,16 +266,16 @@ Supporting servers expose the annotated, paginated traversal result in
 stdio and HTTP servers. Read `data.total_is_exact`, `data.graph_coverage`, budget
 counters and optional explanation witnesses there; `content[0].text` and
 `structuredContent.text` keep the same human-readable rendering. No `format`
-tool argument is needed or accepted. This additive data payload is unreleased
-after `2.0.0.beta3`; verify the installed response before relying on it. Older
+tool argument is needed or accepted. This additive data payload is included in
+Woods `2.0.0`; verify the installed response before relying on it. Older
 human-renderer responses can carry only text. The structured nodes and witnesses
 cover the same page, not an additional traversal or an unpaginated graph.
 
 Successful responses carry `graph_coverage` with `scope: "published_relationships"`,
 `source_references: "not_exhaustive"`, and a human-readable `notice`. Text formats
 show the same notice, including compact, root-only and empty-page responses.
-This response metadata and the total exactness field below are unreleased after
-Woods `2.0.0.beta3`; older servers need the same conservative interpretation.
+This response metadata and the total exactness field below are included in Woods
+`2.0.0`; older servers need the same conservative interpretation.
 
 ### Dependency traversal budgets
 
@@ -316,14 +316,14 @@ for stable pages. No wall-clock deadline is used, so cutoffs are deterministic.
 Budgets cover traversal work after per-generation graph loading and cache
 preparation (JSON parsing, typed-edge normalization, node types and database
 metadata). They do not cap that initial load, elapsed time, or total process
-memory. These arguments are unreleased in Woods 2.0.0.beta2; check the connected
+memory. These arguments are included in Woods `2.0.0`; check the connected
 server's tool schema before sending them to an older installation.
 
 ### Traversal explanations
 
 Supporting development versions accept `explain: true` on `dependencies` and
-`dependents`. Check the connected schema first; this option is unreleased after
-2.0.0.beta2. Omitted or false keeps the existing compact response.
+`dependents`. Check the connected schema first; this option is included in Woods
+`2.0.0`. Omitted or false keeps the existing compact response.
 
 The additive `explanation` object contains:
 
@@ -349,7 +349,7 @@ it describes identifier-level reachability, never a uniquely typed path.
 A true value means only that identities along this witness have unambiguous
 types. It does not establish source-reference coverage or observed execution.
 Text labels this `witness types unambiguous=yes/no`; the JSON key and its meaning
-remain unchanged. The text label change is unreleased after `2.0.0.beta3`.
+remain unchanged. The text label change is included in Woods `2.0.0`.
 `types` filters retain the compact traversal's identifier-level semantics: any
 registered type can qualify a name, while edge evidence keeps its actual source
 owner. Multiple relationship kinds between the same endpoints remain separate.

@@ -13,7 +13,8 @@
 > When the optional [`tokenizers`](https://github.com/ankane/tokenizers-ruby)
 > gem is installed, the Ollama path uses the real BERT WordPiece tokenizer
 > (`Woods::Embedding::TokenCounter`) instead of this heuristic. The 4.0
-> divisor below is what the gem falls back to everywhere else.
+> divisor applies to the OpenAI/default path; Ollama falls back to 1.5 when
+> its tokenizer is unavailable.
 
 This is a historical record of the benchmark that picked 4.0 over the
 original 3.5 divisor. It is cited from five places in `lib/` as the evidence
@@ -35,17 +36,21 @@ for that choice, keep the numbers below intact if you edit this doc.
 | 3.8 | 16.2% | 42.5% |
 | **4.0 (shipped)** | **10.6%** | **35.4%** |
 
-Mean chars/token across the corpus was **4.41** (range 3.94–5.42). The
-heuristic always overestimated, never underestimated, across all 19 files,
-which is what makes it safe for token-limit enforcement even at its worst
-case. Code lines and comment/YARD lines had similar ratios (4.38 vs. 4.27
-chars/token), no separate handling needed for either.
+Mean chars/token across the corpus was **4.41** (range 3.94–5.42). These
+aggregate results favor the 4.0 divisor for this sample; they do not establish
+an upper bound on token counts. The recorded range includes values below 4.0,
+so the heuristic can underestimate. Code lines and comment/YARD lines had
+similar ratios (4.38 vs. 4.27 chars/token) in this sample.
+
+The character estimate covers only the text passed to the counter. It does not
+bound the serialized MCP response: text rendering, structured output, provenance,
+and JSON framing can add bytes and tokens beyond that input.
 
 ## What shipped
 
 **The divisor changed from 3.5 to 4.0.** It roughly halves the mean
-overestimate (26.2% → 10.6%) while keeping the conservative
-always-overestimates property, at zero new runtime dependencies. The
+error (26.2% → 10.6%) at zero new runtime dependencies. It remains an estimate,
+not a guarantee that arbitrary input fits a model's token limit. The
 constant lives in one place now (`Woods::TokenUtils::CHARS_PER_TOKEN_BY_PROVIDER`),
 not scattered across call sites, see `lib/woods/token_utils.rb` for the
 current definition and `docs/EMBEDDING_MODELS.md` for the Ollama-side ratio.
@@ -53,8 +58,9 @@ current definition and `docs/EMBEDDING_MODELS.md` for the Ollama-side ratio.
 **tiktoken_ruby was deliberately not added as a runtime dependency.** A 10.6%
 mean error is acceptable for chunking decisions, budget estimates, and
 truncation; a native-extension dependency for marginal accuracy gains wasn't
-worth it. The optional `tokenizers` gem covers the case where exact counts
-matter more (see above).
+worth it. The optional `tokenizers` gem provides counts for its supported BERT
+WordPiece tokenizer, not every model. Strict token-limit enforcement requires
+the tokenizer used by the target model.
 
 ## Reproducing this benchmark
 

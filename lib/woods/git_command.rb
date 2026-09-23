@@ -7,18 +7,17 @@ module Woods
   # than at the process working directory, so extraction launched from another
   # checkout never reports that checkout's history.
   #
-  # `WOODS_GIT_DIR` wins when set. It is the escape hatch for a container over
-  # a linked worktree: `.git` there is a file naming an absolute host path that
-  # may not be mounted, and git's own `GIT_DIR` is not enough, because a
-  # worktree's private git directory reaches the shared object store through a
-  # relative `commondir` pointer that resolves outside the mount, which
-  # `GIT_COMMON_DIR` does not override (B-181, B-186).
+  # `WOODS_GIT_DIR` wins when set and selects HEAD exactly as `--git-dir`
+  # does. For a container over a linked worktree, select its private directory
+  # within the complete mounted Git layout (shared objects, refs and worktrees).
+  # Selecting the shared root instead selects the primary checkout's HEAD.
+  # A same-path mount that resolves the worktree's .git pointer needs no override.
   #
   # Three call sites use this, and the documentation promises all three:
   # per-unit enrichment (`Extractor`), manifest provenance (`GitProvenance`),
   # and the `woods:incremental` diff range (`lib/tasks/woods.rake`).
   module GitCommand
-    # Environment variable naming the canonical git directory.
+    # Environment variable naming the explicitly selected git directory.
     OVERRIDE_KEY = 'WOODS_GIT_DIR'
 
     module_function

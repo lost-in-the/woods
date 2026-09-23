@@ -2134,19 +2134,19 @@ module Woods
       cause = error.to_s.lines.first.to_s.strip
       Rails.logger.warn(
         '[Woods] git cannot resolve HEAD for this working tree, so no unit will carry git ' \
-        "metadata: #{cause}. Over a linked worktree in a container, mount the canonical git " \
-        'directory and point WOODS_GIT_DIR at it; GIT_DIR alone is not enough, because the ' \
-        "worktree's private git directory reaches the shared one through a relative pointer."
+        "metadata: #{cause}. For a linked worktree, mount the complete shared .git directory " \
+        'at its original path, or set WOODS_GIT_DIR to /mounted-common/worktrees/<id> within ' \
+        'the relocated complete layout. Derive <id> from the worktree Git metadata, not its branch name; ' \
+        "selecting /mounted-common itself uses the primary checkout's HEAD."
       )
     end
 
     # The git command line every enrichment call runs.
     #
     # `-C <root>` keeps the result independent of the process working
-    # directory. `WOODS_GIT_DIR` wins when set: it names the canonical git
-    # directory directly, which is the escape hatch for a container that can
-    # mount that directory but not the host path a worktree pointer names
-    # (B-181).
+    # directory. `WOODS_GIT_DIR` wins when set and selects that git directory's
+    # HEAD. A relocated linked worktree needs its worktree-specific directory
+    # inside the complete shared Git layout (B-181).
     #
     # @param args [Array<String>] git arguments
     # @return [Array<String>] full argv

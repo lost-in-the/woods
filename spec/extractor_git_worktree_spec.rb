@@ -19,8 +19,8 @@ require 'woods/git_provenance'
 # that was never committed, where a fully absent git directory correctly omits
 # the keys.
 #
-# B-181: the escape hatch. `WOODS_GIT_DIR` names the canonical git directory
-# and wins over whatever the worktree pointer says.
+# B-181: `WOODS_GIT_DIR` explicitly selects a git directory. For a linked
+# worktree, preserve its private HEAD and the complete shared Git layout.
 RSpec.describe 'Git enrichment over a linked worktree' do
   let(:scratch) { Dir.mktmpdir('woods_git_worktree') }
   let(:main_repo) { File.join(scratch, 'main') }
@@ -38,6 +38,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
 
     build_main_repo
     add_worktree
+    commit_feature_change
 
     stub_const('Rails', double('Rails'))
     allow(Rails).to receive(:root).and_return(Pathname.new(worktree))
@@ -81,6 +82,13 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     run!('git', 'worktree', 'add', '--quiet', worktree, '-b', 'feature', chdir: main_repo)
   end
 
+  def commit_feature_change
+    File.write(app_file, "class Post\n  def feature; end\nend\n")
+    run!('git', 'add', '.', chdir: worktree)
+    run!('git', 'commit', '--quiet', '-m', 'feature post', chdir: worktree)
+    @feature_sha = run!('git', 'rev-parse', 'HEAD', chdir: worktree).strip
+  end
+
   # The private git directory the worktree's .git file points at.
   def private_gitdir
     File.read(File.join(worktree, '.git')).sub('gitdir:', '').strip
@@ -121,7 +129,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     it 'logs one warning naming the cause' do
       enrich!
 
-      expect(logger).to have_received(:warn).with(/WOODS_GIT_DIR/).once
+      expect(logger).to have_received(:warn).with(%r{WOODS_GIT_DIR.*worktrees/<id>}).once
     end
 
     it 'records provenance as unknown' do
@@ -143,7 +151,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     it 'logs one warning naming the cause' do
       enrich!
 
-      expect(logger).to have_received(:warn).with(/WOODS_GIT_DIR/).once
+      expect(logger).to have_received(:warn).with(%r{WOODS_GIT_DIR.*worktrees/<id>}).once
     end
 
     it 'records provenance as unknown' do
@@ -154,34 +162,47 @@ RSpec.describe 'Git enrichment over a linked worktree' do
   end
 
   describe 'WOODS_GIT_DIR' do
-    let(:canonical) { File.join(main_repo, '.git') }
+    let(:mounted_common) { File.join(scratch, 'mounted-common') }
+
+    before do
+      # The worktree ID is metadata, not the branch name ('wt' vs 'feature').
+      @mounted_gitdir = File.join(mounted_common, 'worktrees', File.basename(private_gitdir))
+      FileUtils.cp_r(File.join(main_repo, '.git'), mounted_common)
+    end
 
     it 'wins over an unreachable commondir and restores the git keys' do
       break_commondir!
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => canonical))
+      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
 
       unit = enrich!
 
-      expect(unit.metadata[:git][:commit_count]).to eq(1)
-      expect(unit.metadata[:git][:change_frequency]).to eq(:new)
+      expect(unit.metadata[:git][:commit_count]).to eq(2)
+      expect(unit.metadata[:git][:recent_commits].map { |commit| commit[:message] })
+        .to eq(['feature post', 'add post'])
     end
 
-    it 'wins over a missing gitdir pointer' do
-      break_gitdir_pointer!
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => canonical))
+    it 'uses the relocated layout when the original shared directory is absent' do
+      FileUtils.rm_rf(File.join(main_repo, '.git'))
+      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
 
       unit = enrich!
 
-      expect(unit.metadata[:git][:last_author]).to eq('Specs')
+      expect(unit.metadata[:git][:recent_commits].first).to include(sha: @feature_sha[0, 8], message: 'feature post')
     end
 
     it 'restores provenance for the manifest' do
       break_commondir!
 
-      provenance = Woods::GitProvenance.new(root: worktree, env: { 'WOODS_GIT_DIR' => canonical }).to_h
+      provenance = Woods::GitProvenance.new(root: worktree, env: { 'WOODS_GIT_DIR' => @mounted_gitdir }).to_h
 
-      expect(provenance[:git_sha]).to match(/\A[0-9a-f]{40}\z/)
-      expect(provenance[:git_branch]).to eq('main')
+      expect(provenance).to eq(git_branch: 'feature', git_sha: @feature_sha)
+    end
+
+    it 'honors an explicit shared-root override without guessing the worktree branch' do
+      provenance = Woods::GitProvenance.new(root: worktree, env: { 'WOODS_GIT_DIR' => mounted_common }).to_h
+      main_sha = run!('git', 'rev-parse', 'HEAD', chdir: main_repo).strip
+
+      expect(provenance).to eq(git_branch: 'main', git_sha: main_sha)
     end
 
     it 'is ignored when it is empty' do
@@ -189,7 +210,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
 
       unit = enrich!
 
-      expect(unit.metadata[:git][:commit_count]).to eq(1)
+      expect(unit.metadata[:git][:commit_count]).to eq(2)
     end
   end
 
@@ -197,7 +218,13 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     it 'still enriches without any override' do
       unit = enrich!
 
-      expect(unit.metadata[:git][:commit_count]).to eq(1)
+      expect(unit.metadata[:git][:commit_count]).to eq(2)
+    end
+
+    it 'records the exact feature branch and SHA without an override' do
+      provenance = Woods::GitProvenance.new(root: worktree, env: {}).to_h
+
+      expect(provenance).to eq(git_branch: 'feature', git_sha: @feature_sha)
     end
 
     it 'logs no warning' do

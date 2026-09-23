@@ -48,7 +48,7 @@ its token, allowed origins and TLS as described in [Option C](#option-c-http-rac
 
 The rake task does two things before starting the MCP server:
 
-1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC. The rake task saves the protocol output and redirects application stdout to stderr. In the runtime isolation fix (unreleased after `2.0.0.beta4`), that redirection remains active throughout the server's lifetime; only the MCP transport writes to the saved protocol pipe. Rails loggers, `puts`, and writes to standard output during queries stay on stderr.
+1. **Captures stdout before Rails boots.** Rails boot emits OpenTelemetry warnings, gem notices, and other output to stdout. An MCP client cannot parse these as JSON-RPC. The rake task saves the protocol output and redirects application stdout to stderr. In the runtime isolation fix (included in Woods `2.0.0`), that redirection remains active throughout the server's lifetime; only the MCP transport writes to the saved protocol pipe. Rails loggers, `puts`, and writes to standard output during queries stay on stderr.
 2. **Calls `Rails.application.eager_load!`** to load all application models. Without eager loading, only the models that happen to be autoloaded before the first query appear in the registry.
 
 ### MCP client configuration
@@ -201,7 +201,7 @@ request. Missing or incorrect tokens receive `401 Unauthorized`.
 The HTTP authentication scheme is ASCII case-insensitive (`Bearer`, `bearer`,
 or `BEARER`); the token remains case-sensitive and must match exactly after one
 space. This applies to both Console HTTP and `woods-mcp-http`. Case-insensitive
-scheme support is unreleased after `2.0.0.beta3`; use the canonical `Bearer`
+scheme support is included in Woods `2.0.0`; use the canonical `Bearer`
 spelling in client configuration for compatibility with earlier releases.
 
 For non-loopback access, `console_mcp_allowed_origins` must include the public
@@ -805,7 +805,7 @@ to enforce their narrower parameterized scope grammar.
 
 Prefer `bundle exec rake woods:console`: it captures output before the Rails environment boots. Direct `rails runner` invocation can redirect output only after Rails has booted; it cannot recover an already contaminated protocol stream.
 
-The runtime isolation fix is unreleased after `2.0.0.beta4`. Earlier builds restore stdout after boot, so a logger that writes there can interleave SQL or application logs with MCP responses. On those builds, configure the Console process's application logger to write to stderr or a file. Discarding stderr does not fix logs written to stdout.
+The runtime isolation fix is included in Woods `2.0.0`. Earlier builds restore stdout after boot, so a logger that writes there can interleave SQL or application logs with MCP responses. On those builds, configure the Console process's application logger to write to stderr or a file. Discarding stderr does not fix logs written to stdout.
 
 With a build containing the fix, application output remains on stderr during tool calls. If protocol contamination persists, inspect wrapper scripts and output emitted before the rake task starts; reserve stdout for MCP and retain stderr for diagnosis. Do not disable Console redaction or credential scanning to troubleshoot transport logging.
 

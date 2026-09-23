@@ -23,7 +23,7 @@ This guide covers the most common problems encountered when installing, extracti
 | `No such container` | Wrong container name | Check with `docker ps --format '{{.Names}}'` |
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
-| `Extraction failed for …; the previous generation remains active` | A consumer handled a source error during incremental extraction or refresh (unreleased after `2.0.0.beta3`) | Fix the logged source error and retry the [complete batch](INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry); watch keeps it pending |
+| `Extraction failed for …; the previous generation remains active` | A consumer handled a source error during incremental extraction or refresh (included in Woods `2.0.0`) | Fix the logged source error and retry the [complete batch](INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry); watch keeps it pending |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 0` for complete history |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
@@ -55,7 +55,7 @@ If a tool call fails with **"Tool not found: … not available in the installed 
 
 ### Watcher startup or planned restart fails
 
-Managed `woods-watch` startup is **unreleased after `2.0.0.beta4`**; record the
+Managed `woods-watch` startup is **included in Woods `2.0.0`**; record the
 loaded version/path and revision, then verify executable and generator help.
 If changing an initializer stops every Foreman process, replace a bare
 `woods:watch` entry with the [managed setup](WATCH_DAEMON.md#managed-development-startup).
@@ -89,8 +89,8 @@ arrangement instead of installing an inactive directive.
 In development versions containing #413, `woods:validate` rejects graphs that
 parse as JSON but disagree with their indexes. Errors name the section and
 identity, for example `reverse["http_api"]: missing "Order"`, a duplicate typed
-variant, or an indexed unit absent from `nodes`. This is unreleased after
-`2.0.0.beta2`; check the installed gem before expecting these diagnostics.
+variant, or an indexed unit absent from `nodes`. This is included in Woods
+`2.0.0`; check the installed gem before expecting these diagnostics.
 
 Keep the failing generation and report the exact errors. Run a full extraction
 in a fresh application process with the intended bundle, then validate again.
@@ -119,7 +119,7 @@ Scoped resets leave corrupt state untouched. Valid state keeps any unrelated
 operation entries, and missing state remains a no-op without creating a file.
 A permission failure must be corrected before repair can succeed.
 
-This recovery is unreleased after `2.0.0.beta2`; check the installed version.
+This recovery is included in Woods `2.0.0`; check the installed version.
 Older versions report corrupt state as nothing to repair. Stop pipeline writers,
 back up the configured guard state's `pipeline_guard.json`, and remove only that
 file before restarting, or upgrade to a version containing the fix.
@@ -191,7 +191,12 @@ For subsequent runs, use incremental mode instead of full extraction:
 bundle exec rake woods:incremental
 ```
 
-Incremental extraction only re-extracts files that changed since the last run. It skips unchanged units and is typically 5-10× faster.
+Incremental extraction dispatches the selected changed paths, including affected
+concern consumers and whole-app extractors whose trigger paths changed. The default
+Git range is `HEAD~1`; pass an explicit range or `CHANGED_FILES` for other batches.
+It can reduce extraction work, but Rails boot, graph rebuilding, and publication
+still contribute to runtime. Measure the improvement in your application; Woods
+does not guarantee a speedup. See the [incremental contract](INCREMENTAL_EXTRACTION.md).
 
 ---
 
@@ -259,7 +264,7 @@ dependents after an incremental run.
 identities when restoring and updating the graph.
 
 **Fix:** Check whether the installed version includes B-193; this fix is
-unreleased. After upgrading to a version containing the fix, run
+included in Woods `2.0.0`. After upgrading to a version containing the fix, run
 `bundle exec rake woods:extract` once to rebuild lost reverse dependencies.
 Loading an already damaged graph does not restore discarded entries. See the
 [incremental graph contract](INCREMENTAL_EXTRACTION.md#the-contract).
@@ -270,7 +275,7 @@ Loading an already damaged graph does not restore discarded entries. See the
 most files as `change_frequency: new` in a shallow CI checkout.
 
 **Cause:** A shallow clone truncates HEAD ancestry. The shallow-checkout guard is
-unreleased after 2.0.0.beta2: current source omits git enrichment and warns once,
+included in Woods `2.0.0`: Woods omits git enrichment and warns once,
 rather than treating the truncated history as complete. If repository depth
 cannot be verified, enrichment is also omitted; check git access and version.
 
@@ -291,8 +296,8 @@ ancestry needed for churn metadata.
 
 ### Git enrichment warns that history could not be read completely
 
-Current source uses an explicit merge-diff mode requiring **Git 2.31 or newer**.
-This is unreleased after 2.0.0.beta2: first confirm the installed Woods version.
+Woods 2.0 uses an explicit merge-diff mode requiring **Git 2.31 or newer**.
+First confirm the installed Woods version.
 Check `git --version` inside the same container/process environment as extraction,
 and upgrade git if it is older. On a supported version, check that the application's
 `HEAD` and object store can be read using the same `WOODS_GIT_DIR` setting.
@@ -324,29 +329,62 @@ When it does not, the git keys are omitted from every unit, provenance records
 `"unknown"`, and one warning names git's own reason. Absent keys mean "not
 known"; they never mean "brand new".
 
-**Fix:** Point `WOODS_GIT_DIR` at the *canonical* git directory, the one the
-worktree's `gitdir:` pointer ultimately leads to, and make sure it is mounted:
+**Fix:** Restore access to both the worktree-specific Git directory and the
+shared objects and refs using the mount layouts below, then run a full
+`woods:extract` to replace retained metadata.
+
+### Git directory mounts for linked worktrees
+
+`WOODS_GIT_DIR` is passed directly to Git's `--git-dir`. It selects that
+directory's `HEAD` for manifest provenance, per-file history, and incremental
+diff ranges. **For a linked worktree, pointing it at the shared `.git` root
+selects the primary checkout's HEAD.** A successful Git command alone does
+not prove Woods is reading the intended branch.
+
+First inspect Git metadata on the host, from the intended worktree:
 
 ```bash
-# docker-compose.yml, mounting the parent repository's git directory
-#   volumes:
-#     - /path/to/repo/.git:/canonical-git:ro
-WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
+git -C /path/to/worktree rev-parse --absolute-git-dir
+# Example: /path/to/repo/.git/worktrees/wt
+git -C /path/to/worktree rev-parse --path-format=absolute --git-common-dir
+# Example: /path/to/repo/.git
+git -C /path/to/worktree rev-parse --abbrev-ref HEAD
+git -C /path/to/worktree rev-parse HEAD
 ```
 
-`WOODS_GIT_DIR` wins over whatever the worktree pointer says, and applies to
-every git call Woods makes: per-unit enrichment, `manifest.json` provenance,
-and the diff range `woods:incremental` resolves. All three run through
-`Woods::GitCommand.argv`, so the override cannot reach two of them and miss the
-third.
+The worktree ID in this example is `wt`. Use the ID returned by Git metadata;
+it need not match the branch name. Choose one of these layouts:
 
-**`GIT_DIR` alone is not enough for a linked worktree.** Woods honors git's own
-`GIT_DIR` and `GIT_COMMON_DIR` because git does, but setting `GIT_DIR` to a
-worktree's private git directory only moves the failure: the `commondir`
-pointer inside it is relative, so it still resolves to a path that is not
-mounted, and `GIT_COMMON_DIR` does not override it. Either mount the canonical
-git directory at the same absolute path the pointer names, or use
-`WOODS_GIT_DIR`.
+- **Same-path mount:** mount the complete shared directory read-only at its
+  original absolute path (`/path/to/repo/.git:/path/to/repo/.git:ro`). With the
+  application's existing `.git` pointer resolvable, leave `WOODS_GIT_DIR`
+  unset and remove conflicting Git-directory overrides from the environment.
+- **Relocated mount:** mount that complete directory read-only at a new path
+  (`/path/to/repo/.git:/mounted-common:ro`), including `objects`, `refs`, and
+  `worktrees`. Select the worktree-specific directory inside it:
+
+  ```bash
+  WOODS_GIT_DIR=/mounted-common/worktrees/wt bundle exec rake woods:extract
+  ```
+
+Mounting only the private worktree directory can leave its `commondir` pointer
+without access to shared objects and refs. Git's own environment variables are
+inherited by the subprocess; check any existing `GIT_DIR` and `GIT_COMMON_DIR`
+settings when diagnosing the effective layout. The complete layouts above
+preserve both worktree identity and shared storage.
+
+In the extraction container, verify the relocated selection against the host
+branch and exact SHA before extracting (replace `/app` and `wt` as needed):
+
+```bash
+git --git-dir=/mounted-common/worktrees/wt --work-tree=/app -C /app rev-parse --abbrev-ref HEAD
+git --git-dir=/mounted-common/worktrees/wt --work-tree=/app -C /app rev-parse HEAD
+```
+
+After fixing the selection, run full `woods:extract` and verify the published
+manifest. Incremental extraction can retain older per-file Git metadata.
+A commit alone does not necessarily trigger the source-file watcher; run a
+full extraction when current history and provenance are required.
 
 ---
 
@@ -406,17 +444,23 @@ retries after a later filesystem event.
 
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
 
-**Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different branch than the worktree is actually on, or report `"unknown"`. The extracted units themselves are correct, only the provenance metadata is off.
+**Symptom:** `git_branch` / `git_sha` in `manifest.json` name a different
+branch or SHA than the intended worktree, or report `"unknown"`.
 
-**Cause:** In a linked git worktree, `.git` is a *file* containing a `gitdir:` pointer to the real git directory, often an absolute host path. When extraction runs where that path can't be resolved (e.g. inside a container where the host path isn't mounted), git can't read the ref. Woods now reports `"unknown"` in that case rather than emitting a stale, misleading value (previously it fell back to a baked `GIT_BRANCH`/`GIT_SHA` build arg).
+**Cause:** An unreachable `.git` file's `gitdir:` pointer prevents Git from
+resolving the worktree's HEAD. An override selecting the shared `.git` root
+instead resolves the primary checkout's HEAD successfully. That wrong selection
+also affects per-file history and HEAD-based incremental ranges.
 
-**Fix:** Make the worktree's git directory reachable from the extraction environment, for example, mount the parent repository (the directory the `gitdir:` pointer references) into the container, or run extraction from a normal (non-worktree) checkout. With the real git directory reachable, `git_branch`/`git_sha` resolve correctly. If the checkout legitimately ships without a `.git` at all (a source tarball, or a Docker `COPY` that excludes it), set `GIT_BRANCH` / `GIT_SHA` explicitly. Woods honors these when there is no `.git` at the root (or no git binary), but suppresses them when a `.git` *is* present but unresolvable (so a stale build arg can't mask a worktree).
+**Fix:** Follow [Git directory mounts for linked worktrees](#git-directory-mounts-for-linked-worktrees),
+compare the selected branch and exact SHA in the extraction environment, then
+run a full extraction. Compare the newly published manifest, not a retained
+generation. A commit without a source edit may leave the watcher idle.
 
-When the canonical git directory is mounted but not at the path the pointer
-names, set `WOODS_GIT_DIR` to where it actually is. It wins over the pointer for
-provenance and for unit-level git metadata both. Setting git's own `GIT_DIR` to
-the worktree's private git directory does not work: its `commondir` pointer is
-relative and resolves outside the mount.
+For a checkout legitimately shipped without `.git` (such as a source tarball),
+`GIT_BRANCH` / `GIT_SHA` can supply provenance. They are fallbacks only when
+`.git` is absent or Git is unavailable; a present but unresolvable `.git`
+reports `"unknown"` instead of substituting stale build arguments.
 
 ---
 
@@ -426,9 +470,9 @@ relative and resolves outside the mount.
 
 ### Index cannot be resolved at startup
 
-**Symptom:** An Index MCP executable exits with `Could not resolve a published Woods index in: /path/to/...` even though extraction completed. This headline is unreleased after `2.0.0.beta3`; older versions say `No manifest.json found`. Both mean the selected index could not resolve its manifest, not that an atomic index needs a root manifest.
+**Symptom:** An Index MCP executable exits with `Could not resolve a published Woods index in: /path/to/...` even though extraction completed. This headline is included in Woods `2.0.0`; older versions say `No manifest.json found`. Both mean the selected index could not resolve its manifest, not that an atomic index needs a root manifest.
 
-Embedded Index MCP startup through `IndexReader` also raises an `ArgumentError` with the selected directory and layout guidance when the marker cannot resolve a manifest, including malformed marker shapes such as `[]` or a numeric `payload` (unreleased after `2.0.0.beta3`). Earlier builds may expose a raw `TypeError` or `NoMethodError` for those shapes. Inspect the marker and preserve the failing index before attempting recovery.
+Embedded Index MCP startup through `IndexReader` also raises an `ArgumentError` with the selected directory and layout guidance when the marker cannot resolve a manifest, including malformed marker shapes such as `[]` or a numeric `payload` (included in Woods `2.0.0`). Earlier builds may expose a raw `TypeError` or `NoMethodError` for those shapes. Inspect the marker and preserve the failing index before attempting recovery.
 
 **Cause:** The selected directory is not the published index root, the published generation cannot be resolved, or the path is not visible to the MCP process. A container path is appropriate for a container process; a host process needs the host-visible path.
 
