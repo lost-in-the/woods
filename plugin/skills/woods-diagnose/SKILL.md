@@ -119,6 +119,13 @@ the collision even when the namespace wrappers are valid. The expanded error
 guidance (B-149) is available in Woods `2.0.0.beta3`; check the installed version
 first. Follow the [loader compatibility guidance](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#check-the-loader-for-wrapper-nested-classes).
 
+The incremental/refresh collision guard (#561) is unreleased after 2.0.0; verify
+the writer revision before relying on it. A refusal preserves the prior
+generation. Older writers could already have overwritten ownership: repair the
+producer/source issue and perform a successful full extraction to recover.
+Supported loaders can still encounter the separate Struct/Data wrapper bug
+(#559), so do not assume every collision requires renaming application constants.
+
 ```bash
 bin/rails woods:validate
 bin/rails woods:stats

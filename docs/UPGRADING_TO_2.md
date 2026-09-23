@@ -64,6 +64,19 @@ extraction. Rebuild embeddings and exports if identifiers change. A genuine
 duplicate under a supported loader still needs distinct constants or one source
 file. Woods does not provide a classic-mode naming fallback for this case.
 
+Valid Struct/Data assignments inside namespace wrappers can also produce the
+wrong identity on supported loaders ([#559](https://github.com/lost-in-the/woods/issues/559)).
+Confirm the declarations and runtime identity before changing application code.
+
+**Unreleased after 2.0.0:** the collision guard also applies to incremental
+extraction and targeted refresh ([#561](https://github.com/lost-in-the/woods/issues/561)).
+Those paths previously could publish a conflicting source that a full extraction
+would reject. Refusal leaves the last published generation readable. If an older
+run already replaced a unit's owner, fixing the guard alone cannot reconstruct
+the lost unit: correct the producer/source issue and run a successful full
+extraction, then validate it. Keep the previous generation until the rebuild
+succeeds; do not delete the index to bypass the collision.
+
 ### 1. Record the current installation
 
 Run in the same environment that boots Rails:

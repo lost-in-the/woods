@@ -297,6 +297,126 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   include IndexComparison
 
+  describe 'typed source collision publication (#561)' do
+    before do
+      @collision_paths = %w[original candidate].map do |name|
+        identifier = "Collision#{name.capitalize}"
+        path = write_file("app/models/collision_#{name}.rb", <<~RUBY)
+          class #{identifier}
+            def #{name}_owner_marker; :#{name}; end
+          end
+        RUBY
+        load app_path(path)
+        path
+      end
+    end
+
+    after do
+      %i[CollisionOriginal CollisionCandidate].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    # Deliberately faulty producer, independent of any naming/parser defect.
+    # Its two source classes remain valid and loadable. Cover the plural file
+    # entry point too when installed, so module discovery cannot bypass this
+    # invariant test by changing the PORO extractor's return contract.
+    def inject_source_identity_collision
+      remap = lambda do |result|
+        Array(result).compact.each do |unit|
+          unit.identifier = 'CollisionOriginal' if unit.identifier == 'CollisionCandidate'
+        end
+        result
+      end
+      methods = [:extract_all]
+      rule = Woods::PathDispatcher.new.file_rules_for(@collision_paths.last).find { |value| value.extractor_key == :poros }
+      methods << rule.method_name
+      methods.each do |method|
+        consumer = allow_any_instance_of(Woods::Extractors::PoroExtractor)
+        consumer.to receive(method).and_wrap_original do |original, *args, **kwargs|
+          remap.call(original.call(*args, **kwargs))
+        end
+      end
+    end
+
+    def published_collision_snapshot(index)
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      {
+        marker: File.binread(File.join(index, 'generation.json')),
+        graph: File.binread(payload.join('dependency_graph.json')),
+        units: Dir[payload.join('poros/*.json')].to_h { |path| [File.basename(path), File.binread(path)] }
+      }
+    end
+
+    def reader_collision_snapshot(reader)
+      {
+        original: reader.find_unit('CollisionOriginal', type: 'poro'),
+        candidate: reader.find_unit('CollisionCandidate', type: 'poro'),
+        graph: JSON.parse(JSON.generate(reader.dependency_graph.to_h))
+      }
+    end
+
+    %i[full incremental refresh].each do |operation|
+      it "refuses #{operation} cross-file identity collisions without replacing the last good reader generation" do
+        require 'woods/mcp/index_reader'
+        index = full_extraction
+        reader = Woods::MCP::IndexReader.new(index)
+        published = published_collision_snapshot(index)
+        observed = reader_collision_snapshot(reader)
+        expect(observed.fetch(:original).fetch('source_code')).to include('original_owner_marker')
+        expect(observed.fetch(:candidate).fetch('source_code')).to include('candidate_owner_marker')
+        inject_source_identity_collision
+        writer = Woods::Extractor.new(output_dir: index)
+
+        attempt = lambda do
+          case operation
+          when :full then writer.extract_all
+          when :incremental then writer.extract_changed([@collision_paths.last])
+          when :refresh then writer.refresh(:poros)
+          end
+        end
+        expect(&attempt).to raise_error(Woods::ExtractionError, /same-type identifier collision/) do |error|
+          expect(error.message).to include('CollisionOriginal', *@collision_paths)
+        end
+        expect(published_collision_snapshot(index)).to eq(published)
+        expect(reader_collision_snapshot(reader)).to eq(observed)
+        # The same held-open reader remains usable; no reconnect hides stale
+        # in-memory graph state or an accidentally advanced generation pointer.
+        expect(reader.find_unit('CollisionOriginal', type: 'poro').fetch('file_path')).to eq(@collision_paths.first)
+      end
+    end
+
+    %i[incremental refresh].each do |operation|
+      it "accepts an explicit removed-source rename during #{operation}" do
+        require 'woods/mcp/index_reader'
+        index = full_extraction
+        reader = Woods::MCP::IndexReader.new(index)
+        before = reader.find_unit('CollisionOriginal', type: 'poro')
+        generation = Woods::Generation.new(output_dir: index)
+        token = generation.current.token
+        from = @collision_paths.first
+        to = 'app/models/relocated/collision_original.rb'
+        write_file(to, File.read(app_path(from)))
+        delete_file(from)
+        load app_path(to)
+        writer = Woods::Extractor.new(output_dir: index)
+        if operation == :incremental
+          writer.extract_changed([to, from])
+        else
+          writer.refresh(:poros)
+        end
+
+        expect(generation.current.token).not_to eq(token)
+        moved = reader.find_unit('CollisionOriginal', type: 'poro')
+        expect(moved.fetch('file_path')).to eq(to)
+        expect(moved.fetch('source_code')).to eq(before.fetch('source_code'))
+        expect(reader.dependency_graph.node('CollisionOriginal', type: :poro).fetch(:file_path)).to eq(app_path(to))
+        expect(reader.dependency_graph.identifiers_for_path(app_path(from))).not_to include('CollisionOriginal')
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+  end
+
   # ── Harness driver ───────────────────────────────────────────────────────
 
   # Run a cold full extraction of the current tree into a throwaway directory.

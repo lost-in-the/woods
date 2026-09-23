@@ -13,6 +13,7 @@ require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'dependency_graph'
+require_relative 'extraction_identities'
 require_relative 'payload_store'
 require_relative 'git_provenance'
 require_relative 'git_history'
@@ -74,6 +75,7 @@ module Woods
   #   extractor.extract_changed(["app/models/user.rb", "app/services/checkout.rb"])
   #
   class Extractor
+    include ExtractionIdentities
     include FilenameUtils
     include Extractors::SourceNesting
 
@@ -793,6 +795,7 @@ module Woods
 
       @dependents_dirty = Set.new
       @incremental_written = {}
+      @identity_claims = {}
       # nil = no scope was computed for this run, so every re-extracted
       # controller has its flows reassembled. {#refresh} leaves it that way.
       @flow_scope = nil
@@ -1432,17 +1435,17 @@ module Woods
       retained_paths = {}
 
       units.each do |unit|
-        if retained_paths.key?(unit.identifier)
-          prior_path = retained_paths[unit.identifier]
-          if unit.file_path != prior_path
-            raise Woods::ExtractionError, same_type_collision_message(type, unit, prior_path)
-          end
+        identity = unit.identifier
+        path = identity_source(unit.file_path)
+        if retained_paths.key?(identity)
+          prior_path = retained_paths[identity]
+          reject_identity_collision!(unit, prior_path) if path != prior_path
 
           dropped += 1
           next
         end
 
-        retained_paths[unit.identifier] = unit.file_path
+        retained_paths[identity] = path
         deduped << unit
       end
 
@@ -3221,13 +3224,15 @@ module Woods
       result = checked_extraction(key, extractor) { extractor.extract_all }
       return Set.new if SourceInputs::ConsumerErrors.failed?(extractor)
 
-      units = Array(result).compact.uniq(&:identifier)
+      units = deduplicate_type_units(key, Array(result).compact)
       Rails.logger.info "[Woods] Re-ran #{key} wholesale: #{units.size} units"
 
-      touched = register_and_write(key, units, affected_types)
+      touched = with_replacement_ownership(key) { register_and_write(key, units, affected_types) }
       touched.merge(remove_replaced_units(key, units, affected_types))
       @source_inputs&.consume_extractor(key, units) unless source_consumer_failed?(key, extractor)
       touched
+    rescue IdentityCollisionError
+      raise
     rescue StandardError => e
       if @wholesale_mutations.to_i.positive?
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -3480,9 +3485,10 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers written
     def register_and_write(extractor_key, units, affected_types)
-      units = Array(units).compact
+      units = deduplicate_type_units(extractor_key, Array(units).compact)
       return Set.new if units.empty?
 
+      verify_identity_claims!(units)
       affected_types&.add(extractor_key)
       type_dir = payload_dir.join(extractor_key.to_s)
       FileUtils.mkdir_p(type_dir)

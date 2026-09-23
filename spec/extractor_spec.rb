@@ -825,6 +825,7 @@ RSpec.describe Woods::Extractor do
       node = { type: :concern, file_path: source_path }
       graph = extractor.instance_variable_get(:@dependency_graph)
       allow(graph).to receive(:node_types).with('things:one').and_return([:concern])
+      allow(graph).to receive(:node).and_call_original
       allow(graph).to receive(:node).with('things:one', type: :concern).and_return(node)
       allow(graph).to receive(:register).and_call_original
 

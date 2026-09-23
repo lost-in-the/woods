@@ -2937,5 +2937,18 @@
     ],
     "description": "Issue #475: approved post-2.0 work adds a verified constant registry and parser-backed source reference collection, then integrates generation-scoped candidate caching into full/incremental/refresh extraction. Forward/reverse parity, target additions without caller edits, conservative Ruby lookup and measured blast-radius costs are acceptance gates. The initial collector/resolver foundation is not wired into extraction; #552 separately supplies missing standalone modules.",
     "status": "in-progress"
+  },
+  {
+    "id": "B-215",
+    "title": "Reject conflicting source ownership in every extraction writer",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/extraction_identities.rb"
+    ],
+    "description": "Issue #561: Share collision checks across full, incremental and refresh publication. Retained versus fresh source claims and duplicate wholesale results must refuse while preserving the active generation; same-file re-derivation, independent types, confirmed moves and authoritative replacement remain supported. Keep separate from #559 producer naming. Focused regression and independent review pass; booted and CI acceptance pending.",
+    "status": "in-progress"
   }
 ]
