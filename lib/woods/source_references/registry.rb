@@ -100,7 +100,7 @@ module Woods
         return false if declaration.fetch('singleton_depth', 0).positive?
 
         result = @lookup.call(declaration['name'], nesting: declaration.fetch('enclosing_nesting', []),
-                                                  allow_private: true)
+                                                   allow_private: true)
         return runtime_declaration?(declaration, identifier, result) if result[:status] == :resolved
 
         type == :lib && @lookup.call("::#{identifier}")[:status] == :missing &&
