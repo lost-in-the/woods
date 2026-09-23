@@ -8,6 +8,7 @@ require 'timeout'
 require 'woods/watch/daemon'
 require 'woods/payload_store'
 require 'woods/extraction_identities'
+require 'woods/source_references/pass'
 
 RSpec.describe Woods::Watch::Daemon do
   let(:root) { Dir.mktmpdir('woods_watch_root') }
@@ -167,6 +168,25 @@ RSpec.describe Woods::Watch::Daemon do
             .with(array_including(*paths.map { |path| File.join(root, path) }, File.join(root, 'app/models/third.rb')))
         end
       end
+    end
+
+    it 'retains a failed reference baseline batch without silently starting a full extraction' do
+      error = Woods::SourceReferences::RebuildRequired.new('Run bin/rails woods:extract once for a full extraction')
+      allow(extractor).to receive(:extract_changed).and_raise(error)
+      path = touch('app/models/user.rb')
+      daemon = build
+      generation = daemon.generation.current.number
+
+      expect(daemon.process([path])[:state]).to eq(:degraded)
+      expect(status['reason']).to include('full extraction')
+      expect(daemon.generation.current.number).to eq(generation)
+      expect(extractor).not_to have_received(:extract_all)
+
+      allow(extractor).to receive(:extract_changed) { publish_generation('retry') && ['Thing'] }
+      other = touch('app/models/other.rb')
+      expect(daemon.process([other])[:state]).to eq(:running)
+      expect(extractor).to have_received(:extract_changed)
+        .with(array_including(File.join(root, path), File.join(root, other)))
     end
 
     it 'degrades rather than crashing when a mid-edit syntax error breaks the reload' do

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'woods/source_references/pass'
+require 'woods/source_inputs/stable_reader'
 
 RSpec.describe Woods::SourceReferences::Pass do
   let(:root) { '/reference-app' }
@@ -134,6 +135,14 @@ RSpec.describe Woods::SourceReferences::Pass do
   it 'fails a syntax error rather than publishing a falsely empty edge set' do
     sources['app/models/ref_caller.rb'] = 'class RefCaller; def'
     expect { run_pass }.to raise_error(Woods::ExtractionError, /parse/)
+  end
+
+  it 'reports a captured-source read failure with the path and retry guidance' do
+    error = Woods::SourceInputs::StableReader::Error.new('source_snapshot_mismatch')
+    allow(session).to receive(:read_source).with('app/models/ref_caller.rb').and_raise(error)
+    expect { run_pass }.to raise_error(
+      Woods::ExtractionError, %r{app/models/ref_caller.rb.*source_snapshot_mismatch.*fresh process}
+    )
   end
 
   it 'excludes external, generated and vendored files from source analysis' do

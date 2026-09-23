@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'registry'
+require_relative '../source_inputs/stable_reader'
 
 module Woods
   module SourceReferences
@@ -72,7 +73,7 @@ module Woods
         prior = @baseline&.fetch('files')&.[](path)
         return prior if prior && prior['identity'] == identity
 
-        source = @session.read_source(path)
+        source = stable_source(path)
         @bytes += source.fetch('source').bytesize
         raise Woods::ExtractionError, 'Source-reference parse byte budget exceeded' if @bytes > MAX_SOURCE_BYTES
 
@@ -80,6 +81,14 @@ module Woods
         raise Woods::ExtractionError, "Could not parse source references in #{path}" if result['parse_error']
 
         { 'identity' => source.fetch('identity'), 'analysis' => result }
+      end
+
+      def stable_source(path)
+        @session.read_source(path)
+      rescue SourceInputs::StableReader::Error => e
+        raise Woods::ExtractionError, "Could not verify source references in #{path}: #{e.reason}. " \
+                                      'Retry the complete extraction batch in a fresh process against stable source; ' \
+                                      'the previous published generation remains active.'
       end
 
       def verify_consumption(unit, path, fresh, extractor_keys)

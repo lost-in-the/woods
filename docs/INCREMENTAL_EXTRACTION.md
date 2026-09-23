@@ -632,6 +632,14 @@ cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
 
+This also tightens scoped refreshes: if a retained reference-bearing Ruby unit's
+source changed outside the selected batch, the writer refuses to combine its old
+runtime facts with references resolved from the new source. For example,
+`woods:refresh[events]` cannot adopt an edited service unit. The prior generation
+stays active and can report `drifted`; use a full extraction to establish a
+consistent baseline. Omitted non-reference inputs, such as a view changed before
+capture, retain the existing per-consumer freshness behavior.
+
 A source change during reference analysis or final verification also prevents
 publication. Correct source errors and retry the complete batch against a stable
 tree. Reference-only edge updates do not refresh a retained unit's runtime
