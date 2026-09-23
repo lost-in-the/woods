@@ -7,489 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0.beta4] - 2026-09-22
-
-### Build
-
-- Allow the exact 1.6.3 maintenance tag and branch from the released 1.6.2 base while keeping publication disabled until a separately reviewed candidate SHA is pinned. Preserve all CI, immutable-artifact, package-test and protected-environment release gates.
-
-### Documentation
-
-- Correct watcher retry guidance to include heartbeat-driven recovery, identify
-  session identity corrections as available in 2.0.0.beta3, and align the
-  coding-agent Docker synopsis with the container-first setup guide.
-- Scope orphan results to recorded relationships, document the limits of artifact
-  permission defaults, correct Claude Code worktree registration guidance, and
-  expose embedding-free lexical retrieval in the MCP tool cookbook.
-Update the distributed agent guides to identify Woods 2.0.0.beta3 capabilities and plugin 2.3.36 hook recovery accurately, while preserving installed-version and schema checks.
-- Clarify that beta/RC development retains the last prepared version, source
-  candidates require Git revision evidence, and development reopening applies
-  only after a final release. Release transitions and version ordering are unchanged.
-
-### Fixed
-
-Accept ASCII case variants of the HTTP `Bearer` authentication scheme for Index and Console MCP. Token bytes, constant-time comparison, and existing delimiter rules remain unchanged. (#497)
-- Console SQL validation now distinguishes keyword grammar from identically named functions before applying the read-only function allowlist. SQLite application-defined keyword functions are rejected before execution; ordinary window, predicate, and numeric pagination syntax remains supported.
-- Report malformed generation marker shapes during embedded Index MCP startup as an actionable `ArgumentError` with the selected directory and published-layout guidance, matching executable preflight behavior. Preserve legacy flat and payload indexes and leave later generation-refresh error handling unchanged.
-- Make file-backed session clearing idempotent for Unicode and punctuated IDs, and discard expired history before appending or merging legacy and encoded files. This prevents expired events from becoming visible again through record, read, or listing; live history, disabled TTL, and retention limits retain their existing behavior.
-Dependency and dependent responses now disclose that published relationships are not exhaustive source-reference coverage, including compact and empty answers. Human witness labels say “witness types unambiguous” while preserving the JSON `typed_path_complete` contract. Successful traversal responses add `total_is_exact`; budget-limited text reports a root-inclusive lower bound and its cutoff reason, independently of pagination. (#470, #471)
-GraphQL parent metadata and summary chunks now read the selected declaration's superclass, rather than borrowing a nested or sibling class's parent. Compact qualified declarations preserve their explicit parent; implicit, dynamic, or unavailable parents remain unknown. Identifiers and dependency classification are unchanged.
-- Preserve the published generation when incremental extraction or named refresh encounters handled source errors. Failed consumers no longer replace last-good units with empty or partial output; watch retains the complete batch for retry.
-- Make missing-index startup headlines describe an unresolved published index instead of implying that atomic indexes require a root `manifest.json`; retain the examined path, layout explanation and existing-index-first remedy (#482).
-- Make `woods-mcp-start` resolve generation payload symlinks before checking their manifest, matching the library's index-root containment check. Preflight rejects escaping links and avoids manifest probes through broken links; contained links and symlinked index roots remain supported. The library already rejected escaping payloads before serving the index.
-- Clarify lexical retrieval responses with actual included-source and considered-candidate counts alongside the shortlist limit. Charge count text to the existing estimated context budget across full, compact, outline and scoped results, distinguishing no matches from matching candidates whose sources do not fit without changing ranking or MCP response structure.
-Stabilize mailer output across Rails processes by sorting action-name inventories consistently and labeling direct Proc defaults and callback filters by source location and callable kind. Preserve callback order, duplicate registrations and ordinary default value types without executing callables. Run a full extraction after upgrading to refresh retained mailer records; affected source hashes may change once. (#484)
-- Stabilize mailer object callback labels across boots by reusing the model extractor's guarded default-representation formatter. Preserve custom labels, literal hexadecimal text, callback order, duplicates and conditions; do not execute callbacks or change non-Proc defaults. Run a full extraction after upgrading to refresh retained mailer metadata; stored index schemas are unchanged.
-- Accept `WOODS_OUTPUT` after the explicit path and `WOODS_DIR` in Index MCP startup, while preserving the launcher's no-path error. Missing-index diagnostics now name the examined directory, describe atomic and legacy layouts, and suggest pointing at an existing index before re-extracting.
-- Recommend explicit embedding-free lexical mode in no-provider startup and retrieval messages, including the required MCP environment change and restart; semantic defaults and typed errors are unchanged.
-- Reconcile Rake tasks across all contributing files on incremental changes and deletions, retaining surviving definitions and removing obsolete source from shared tasks.
-Scope PORO and lib `parent_class` metadata and source annotations to the selected declaration. Nested or sibling error classes no longer supply an unrelated superclass; implicit parents remain nil and explicit constant-path parents retain their names (#474).
-- Reject pgvector HNSW `vector` widths above 2,000 before database writes, and reject invalid migration dimensions before creating files. Correct the 3,072-dimensional generator example and document explicit provider output sizing; no vector truncation or implicit conversion is performed (#524).
-- Describe prepared prereleases without claiming RubyGems publication from VERSION alone, and retain the published 1.6.2 maintenance changelog so generated stable-version guidance stays accurate.
-- Preserve actual GraphQL and gem-source types in `Woods::PublishedIndex` typed lookup and enumeration while retaining the `graphql` and `rails_source` family aliases (#518).
-- Enforce `graph_analysis`'s advertised default of 20 rows per section and retain total/offset context on last and empty pages in every renderer. Correct the structure glossary: graph nodes include isolated units, and retriever entry counts depend on mode and store coverage (#519).
-- Coordinate agent configuration apply and recovery on shared managed targets across application roots, preventing concurrent user-scoped installations from overwriting each other. Keep application-specific receipts, refuse stale plans, and report/protect every coordination path in previews (#520).
-- Apply JSON temporal history limits after matching the requested unit, preserving access to retained records across gaps and deletions with SQLite parity (#521).
-- Reconcile reused in-memory vector and metadata stores during full embedding rebuilds, removing vanished units and publishing empty corpora without changing incremental purge guards. Failed embedding preserves the previous promoted dump and checkpoint (#522).
-Validate persisted JSON snapshot shapes before reading history or capturing the next snapshot. Unusable nested unit records and summary fields now warn and skip the entire snapshot, preserving valid legacy records, corrupt-file retention, and caller SHA validation (#492).
-- Use the same JSON snapshot validity checks for reads and retention: reject filename/content SHA mismatches before selecting a capture baseline, and prune corrupt files before valid legacy snapshots with missing or null timestamps. Timestamp-less snapshots remain eligible for ordinary oldest-first retention.
-Expose the paginated dependencies/dependents payload in `structuredContent.data` with every renderer, including packaged stdio and HTTP defaults, while preserving rendered text and existing tool arguments (#481).
-- Stabilize direct Proc/lambda model validation option values in extracted and published metadata using callable kind and source-location labels, without executing them. Preserve validation order, duplicates, conditions and non-Proc values; nested containers are not recursively normalized. Run a full extraction to refresh retained validation metadata; index schemas are unchanged.
-- Reconcile registered initializers deleted during watch downtime with a full extraction after a fresh environment boot, preserving whole-application runtime facts.
-- Keep the stable extraction guard and output directory after `woods:clean`, so a concurrent writer can finish acquiring its lock safely.
-
-### Security
-
-- Redact protected Console fields before serialization, normalize the remaining values to their JSON-compatible representation, and redact and scan again before JSON or Markdown rendering. Symbol values and custom serializers cannot introduce unscanned credentials in the final response, and protected serializers remain uncalled. The direct credential scanner also scans Symbol values while preserving their type.
-- Check resolved relations against the Console blocked-table policy before default model tools fetch records or counts, including association parent lookups; reuse the checked relation so dynamic default scopes are evaluated once.
-- Refuse unsupported SQLite identifier and table-reference syntax before Console SQL execution, preserving blocked-table and function policies; ordinary bare and simple quoted identifiers remain supported.
-- Preserve blocked-table visibility after subqueries and parenthesized JOIN predicates, including quoted aliases, across supported SQL dialects.
-
-## [2.0.0.beta3] - 2026-09-18
+## [2.0.0] - 2026-09-23
 
 ### Added
 
-- Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
-- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
-  from filling the volatility report (B-188). Apply the per-target edge cap before
-  the global top 20, preserve the default output, and expose the configured cap
-  and reported count alongside the full qualifying count when enabled.
-
-- Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
-  real MiniLM vectors, per-strategy quality floors, latency observations, and
-  exact output-token counts. Preserve known failed queries in the evidence (#227).
-- Bound `dependencies` and `dependents` traversal work independently of response
-  pagination, with configurable node/edge budgets and explicit partial-result
-  reasons. Filtered edges and reverse relationship checks consume the edge
-  budget; complete small results retain their existing shape (#311).
-
-- Document the published filesystem layout for non-Ruby consumers, with pinned
-  Bash/jq and Python reads, retention-race handling, and structural snapshot
-  publication guidance (#306).
-
-- `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets watch status, incremental/clean guards,
-  daemon startup checks, and MCP trust fresh foreign-container heartbeats without
-  checking an unrelated local pid. This is opt-in; foreign records expire after
-  15 minutes, and malformed or excessively future timestamps are rejected (#321).
-
-- `WOODS_WATCH_POLL_INTERVAL` configures positive, finite seconds between watch
-  polling scans, including fallback from native watching (default 1.0; #322).
-
-- Published manifests record `woods_version`, the last publisher's gem version,
-  for Rails extraction and static self-maps. MCP exposes it independently of the
-  reader version, and `woods:validate` gives nonfatal warnings for malformed
-  writer versions or different major versions. Older manifests remain valid
-  without this optional provenance field (#323).
-- Supply concise, capability-aware Index MCP instructions through initialization and modern discovery, with status-first retrieval guidance, bounded traversal and source verification. Preserve the SDK's omission for protocol `2024-11-05`; tool registration and authorization remain unchanged. (#402)
-- Added generation-bound source-input evidence with bounded `current` / `drifted` / `unknown` status, per-consumer incremental provenance, private keyed content identities, and a fresh-process `woods-extract` launcher. The opt-in session hook now checks source content through the shared no-environment status task. Old indexes and unproved boot/runtime consumption remain explicitly unknown.
-Add separately opt-in, bounded Claude orientation and post-edit candidate context from a retained published generation, with explicit uncertainty, repeat suppression, independent refresh controls, and an installed `woods-hook-context` helper.
-Explicit Claude and OpenCode edit adapters preserve every affected patch path,
-including both rename sides, through the shared durable refresh queue. Native
-OpenCode registration is optional and version-pinned; unsupported or escaping
-events produce diagnostics without claiming refresh.
-MCP `search` now reports whether its returned matches exhaust the requested domain, prove an additional match, or leave the remainder unknown after a scan budget or regex timeout. Bounded lookahead shares the existing scan budget, deep reads preserve typed identities, and detected artifact corruption remains an error. JSON and text formats distinguish returned counts from exact totals; agent guidance explains how to narrow partial searches. Mixed Rails/gem source directories remain searchable and loadable by lexical retrieval while rejecting unrelated type mismatches.
-`woods:validate` now checks semantic graph invariants against typed unit indexes and artifacts within one pinned published generation. It detects broken reverse membership, invalid sources, duplicate typed variants, file/type index drift, and missing indexed nodes while accepting cycles, unresolved targets, legacy string edges, and the Woods static source map. Validation remains read-only, preserves existing report/exit behavior, and reports actionable identities without repairing the graph.
-
-The validator, deep search, and lexical retrieval accept all four GraphQL unit types in the shared `graphql/` directory, preserving actual typed identities and existing directory-family search labels.
-`dependencies` and `dependents` accept optional `explain: true` to retain typed source ownership, original edge direction and relationship attributes, and bounded shortest witnesses. Explanations distinguish direct records from transitive reachability, preserve unknown labels and ambiguous target candidates, and retain ancestor context across pages. Existing compact responses remain unchanged; explanation work shares traversal budgets.
-Publish additive `reverse_via` target buckets with typed source identities, relationship labels and association attributes, preserving existing `reverse` arrays and legacy graph loading.
-- Mark whole-file caching, configuration, test mapping, Rails source, and gem source graph nodes and typed variants with `kind: "file_profile"`, preserving file membership and identifiers while letting consumers distinguish profiles from constant-owned units (#417).
-Add `woods-agent-config` for explicit Claude Code project/user setup, update, and removal. Preview saves one private edit plan; apply checks its original snapshots, preserves unrelated configuration, tracks owned entries and instruction sections, and supports recovery after interrupted writes. Host/Compose preflight checks the installed Index Server and published index.
-- Add opt-in compact source evidence and declared API outlines to retrieval and lookup, with complete published spans, explicit omissions, honest generation/source provenance, and typed SHA-guarded full-source follow-up. Existing full-source behavior remains the default.
-- Add explicit embedding-free lexical retrieval over published extraction units. Set `WOODS_RETRIEVAL_MODE=lexical` for Index MCP or `config.retrieval_mode = :lexical` for Ruby builders; field-aware ranked results preserve typed identity, generation consistency and budgeted matching evidence without provider or vector access. Semantic retrieval remains the default.
-- Add explicit package and application-relative source-path scopes to ranked retrieval and discovery, with eligibility before candidate limits, typed scope metadata, and native scoped vector searches without re-embedding.
-
-### Fixed
-
-- Reflect model callbacks from Rails' per-event chains instead of nonexistent
-  per-kind readers; include `before_commit` and keep `callback_count` equal to
-  the emitted callback list. Preserve framework callbacks with stable Proc/lambda
-  source-site labels and address-free default callback-object descriptions in
-  metadata and chunks, including Rails 6's `raw_filter`, so separate-process
-  extractions of unchanged models remain equivalent. Preserve custom object labels.
-
-- Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
-  and upgrade guidance before suggesting changes to valid namespace wrappers
-  on older-loader or classic-mode hosts (B-149).
-
-- Stabilize controller inline callback and condition labels across processes and
-  checkout paths, including action chunks; retain `unless` conditions in the
-  generated filter-chain header (B-167).
-
-- Publish metadata-only changes in local embedding snapshots without re-embedding
-  unchanged source; retain no-op dumps and source-hash checkpoints (B-119).
-
-- Search Boolean metadata fields as `true`/`false` consistently in SQLite and
-  InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
-
-- Keep the default SQLite metadata database inside the effective `WOODS_OUTPUT`
-  directory for embedding tasks, isolating indexes while preserving explicit
-  database overrides (B-156). Existing databases are not moved; run `woods:embed`
-  for the selected index after upgrading.
-
-- Treat non-object JSON snapshots and files removed or made unreadable during
-  a read as absent across lookup, listing, diffs, and unit history (B-158).
-
-- Count corrupt and unreadable SHA-named JSON snapshots toward retention and
-  evict them before valid history, preserving the just-captured snapshot and
-  unrelated files (B-163).
-
-- Count the final retrieval context after formatting and type-rank metadata,
-  keeping `tokens_used` and its trace consistent with the configured counter
-  or estimate (B-197, #354).
-
-- Order tied hybrid retrieval candidates deterministically before graph seed
-  selection, truncation and reciprocal-rank fusion across supported Ruby versions
-  (B-192).
-
-- Bound OpenAI embedding requests to 36 valid inputs, preserving chunk order and
-  rejecting partial or dimension-inconsistent batches (B-157). Chunk-heavy runs
-  use more HTTP requests to stay within the API's input and total-token limits.
-
-- Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
-
-- Prevent single-component cache keys from colliding with multi-component or
-  empty keys by uniformly length-prefixing components (B-155). Custom callers
-  using persistent single-component keys should clear that cache domain on upgrade.
-
-- Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
-
-- Omit per-unit git enrichment for shallow checkouts or unverifiable repository
-  depth, with one warning and full-history recovery guidance, instead of
-  reporting truncated commit counts as complete churn data (B-189).
-
-- Validate direct/legacy Console scope arrays with the active SQL dialect and
-  MySQL session quote modes, refusing subqueries hidden by mismatched quote
-  stripping while retaining the supported tools' narrower scope grammar (B-154).
-
-- Read and clear legacy Redis session indexes before any new record without
-  `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
-  and keeps reader-only upgrades compatible with older SET writers (B-162).
-
-- Allow full extraction when ActionMailer is absent and skip non-app mailers
-  instead of publishing empty units at fabricated paths; share that ownership
-  gate with incremental class discovery (B-153).
-
-- Repair corrupt pipeline cooldown state on an explicit all-reset, including
-  `pipeline_repair` in custom operator-configured servers; ordinary reads still
-  deny operations and scoped resets preserve corrupt state (B-159).
-
-- Normalize incremental change paths before deduplication and dispatch, including
-  trailing root slashes, repeated separators and dot segments (B-148).
-
-- Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
-
-- Reflect model methods after schema loading so full and incremental runs agree
-  on Rails-generated constructors while preserving application overrides (B-202, #363).
-
-- Parse job `perform_params` and shared `initialize_params` from Ruby parameter
-  syntax, avoiding phantom names from keyword/default expressions while preserving
-  the existing metadata fields and named rest/block arguments (B-151).
-
-- Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
-  loading, including relative requires, conditional entries, aliases and custom
-  environment sections (B-203, #364).
-
-- Preserve navigation edges for real named routes such as `file_path`,
-  `image_url`, `download_path`, and `root_path`; unresolved asset/filesystem
-  helper names still produce no edge (B-152).
-
-- Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
-
-- Explain the full-extraction recovery for runtime job removals and bundle
-  upgrades; missing gem-path warnings now include the bundle-update remedy
-  without changing incremental discovery rules (B-165, B-166).
-
-- Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
-
-- Preserve changes to nested `extracted_at` metadata when deciding whether to
-  rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
-- Read per-unit git enrichment in one streamed HEAD history walk instead of
-  repeated 500-path batches (B-195, #305). Merge commits compare with their first
-  parent while all HEAD ancestry is visited; counts can change from legacy
-  pathspec simplification. Optional enrichment now requires Git 2.31 or newer;
-  incomplete/failed history is omitted with a warning. Run full extraction
-  after upgrading to refresh retained metadata. Host speedup remains unmeasured.
-
-- Apply the same app-owned path exclusions to full and incremental git enrichment;
-  external, vendored, and node_modules units no longer gain empty git metadata (B-194).
-
-- Prune default excluded package directories before recursively discovering
-  `package.yml`, avoiding scans of indexes and snapshots under `tmp/` (B-196, #305).
-
-- Preserve namespaced and CamelCase graph-retrieval subjects, keep snake_case
-  lookup working, and exclude tracing instructions from fallback metadata searches (B-190).
-
-- Order equal PageRank scores by identifier before assigning retrieval importance
-  percentiles, making their ranking weights deterministic across Ruby versions
-  and graph insertion orders (B-191).
-
-- Reduce payload-seed metadata lookups by classifying each entry once. Preserve
-  per-file hardlink/copy fallback, atomic publication and generation retention
-  while reducing full and incremental seed overhead (#305).
-
-- Keep runtime trace evidence for same-name instance and singleton methods separate, including inherited singleton owners and caller kinds. Legacy untyped events enrich instance methods only; re-record old singleton traces.
-
-- Ruby trace enrichment now records the nearest observed calling Ruby method
-  instead of the callee receiver. Recording keeps separate fiber stacks, handles
-  recursive and unwound calls, and leaves outside-recording callers unknown
-  without binding or backtrace inspection (#309).
-
-- Scope per-file git metadata to HEAD history instead of every ref, excluding
-  unmerged branches and tool checkpoints from churn and authorship (#319). Run
-  a full `woods:extract` after upgrading to refresh previously published metadata.
-
-- Full extraction no longer creates empty type directories at the index root
-  before publishing its generation payload. Existing root directories and legacy
-  flat-index files are preserved (#320).
-
-- Watch startup reconciles environment-boot-covered restart inputs with one full
-  extraction instead of repeatedly exiting 75. Live changes and changes during
-  environment initialization still require restart; failed reconciliation and
-  deleted restart inputs survive retries and supervisor restarts. Built-in
-  watchers establish detection before startup extraction begins (#318).
-
-- Add `console_mcp_http_enabled` (default `true`) so stdio-only Console setups
-  can explicitly disable HTTP and its boot-time token warnings. Production
-  still refuses to boot without a token when HTTP Console is enabled (#304).
-
-- Solid Cache conditional writes on MySQL no longer claim ownership of a
-  pre-existing row when the adapter reports matched rows as affected rows.
-  Validate ownership using the per-attempt serialized payload, with live MySQL
-  contention/recovery coverage and documented crash/eviction limits (#228).
-- Keep Notion model/column/migration data and Unblocked full/partial documents tied to their exact extracted type. Refuse incomplete export reads before mutation, and preserve remote documents when same-name, same-file types cannot be represented safely by Unblocked's existing URI scheme.
-Preserve the selected extraction type when framework search and recent changes read colliding identifiers. Session controller lookup and root outgoing-edge selection now retain the controller type. Public untyped lookup, downstream references and the bare-name multi-step context pool retain their existing contracts.
-Obsidian export preserves same-name units of different types, their separate outgoing links, and original public identifiers. Collision-bearing vaults publish a version-2 typed manifest; ordinary version-1 manifests and note paths remain unchanged. Ambiguous bare targets are omitted with a diagnostic, and incomplete typed reads cannot trigger stale-note deletion.
-- Reject ambiguous cross-type dependencies in session context with an actionable `ambiguous_identity` MCP error instead of silently selecting a source or reusing another type's context key. Leave unresolved controllers in the timeline without a misleading source reference. Pin candidate discovery and all assembly reads to one generation; retain typed controller roots, metadata-only timelines, and successful response shapes. Refs #213; this does not migrate global identifiers.
-- Refresh Console credential indexes from a fresh encrypted-file and key snapshot, retain the last valid index when refresh fails, and update all live embedded servers without retaining abandoned servers. Each response scan uses one complete credential index.
-Keep credential scanner refresh snapshots limited to live weakly referenced
-scanners on older Ruby versions, avoiding unsafe receiver access after garbage
-collection while preserving updates to every live Console server.
-- Refuse incomplete native embedding input before changing stores or checkpoints, retaining legacy flat-index support while rejecting malformed JSON. A source-empty unit now retires superseded vectors and checkpoints its no-content state without calling the embedding provider (#442, #444).
-- Terminate the evaluation command's owned process group on timeout, including ordinary descendants whose parent has already exited.
-- Let only the hook that removes a recorded dead-owner marker replace its mkdir lock, so concurrent recovery does not leave all edits queued behind an abandoned empty directory.
-- Refuse Obsidian exports that would overwrite unmanaged notes, indexes, settings, or sidecars. Preflight all destinations, record generated asset digests separately from the public manifest, and suppress sweeps on conflicts or write failures. Legacy assets are adopted only when byte-identical; changed legacy sidecars require inspection and backup or a fresh export directory.
-- Coordinate `Woods.extract!` and `Woods.extract_changed!` with task/watch writers and raise on lock timeout or failed generation publication, so background jobs can retry unsuccessful extraction.
-- Accept Rails 6.0 positional middleware options on Ruby 3 while preserving explicit keyword precedence, required bearer tokens, and unknown-option refusal. Add an installed-gem CI contract for all advertised direct runtime dependency floors, with a constrained Rails 6.0.0 fixture and recorded transitive resolution.
-- Honor configured context-token defaults in Builder-created semantic/lexical retrieval, caches, and MCP while preserving explicit budgets and the legacy custom-collaborator fallback. Deprecate the inert similarity_threshold option with a warning instead of changing ranking behavior (#446).
-- Preserve the dispatched controller's runtime class name in session traces, with a Rails-inflector fallback, so acronym namespaces retain source context in `session_trace`.
-- Preserve each logical directory alias in polling and startup catch-up so an earlier irrelevant alias cannot hide an extraction input such as `app/models`. Detect cycles per traversal branch while retaining ignored-subtree pruning.
-
-### Changed
-
-- Clarify the existing search-regex timeout exclusion: Ruby 3.0/3.1 remain
-  supported without a per-match time bound. Run the Index MCP process on Ruby
-  3.2+ for the one-second per-match limit; no runtime mitigation was added
-  for older interpreters (B-161).
-
-- Reduce payload-clone allocation and traversal overhead while preserving
-  hardlinks, copy fallback and immutable generation ownership (#305).
-- Make extraction profiling additive: report git enrichment, reconciliation,
-  finalization, pointer publication and retention separately, with a distinct
-  whole-run wall-time line (#305).
-- Expand opt-in refresh hooks to the shared extraction input rules, including
-  services, controllers, jobs, views, locales, and supported tests/lib paths.
-  Restart inputs request fresh full extraction. Preserve queued edits across
-  failures and daemon deferral, bound the worker lifetime, and carry JSON batches
-  through Docker command prefixes without host-bundle or environment-forwarding
-  assumptions. Existing manual incremental and watch behavior is unchanged.
-Add a trusted, disabled-by-default release profile for the supported 1.6.2 security maintenance line. Publication requires a separately reviewed exact candidate SHA pin on main, all fixed maintenance CI rows, and the existing immutable artifact and protected publication safeguards. The v2 release path retains its existing requirements.
-
-### Documentation
-
-- Clarify that source literals and optional session traces can contain sensitive information, and correct the session FileStore configuration example.
-- Qualify the `~> 2.0` installation examples for stable releases and direct prerelease adopters to the exact published version in the README release table. Keep agent setup and plugin guidance aligned with installed-version capabilities; clarify that the refresh-hook deadline starts after complete event input is collected and queued.
-
-### Testing
-
-- Raise the default-suite CI line-coverage floor from 85% to 90%, calibrated against current local and CI measurements. Branch coverage remains measured without a gate; per-file floors and combined opt-in coverage remain separate work.
-
-## [2.0.0.beta2] - 2026-09-10
-
-### Added
-
-- **`release:prepare` runs a live preflight before printing the tag and dispatch
-  commands.** The new `release:preflight` task (also runnable standalone) checks, via
-  `gh api`, that the live `release` environment still requires review and disallows admin
-  bypass; that `REQUIRED_CI_JOBS` in `script/validate-release-run` still matches
-  `ci.yml`'s job names; and that both `release.yml` download-artifact steps set
-  `merge-multiple: true`. Every check is advisory: a missing or failing `gh` skips with a
-  note rather than blocking prepare. CONTRIBUTING.md and the release-flow skill also gained
-  a "when a dispatch fails" guide (which failures a main merge alone fixes versus which need
-  the tag moved, and only before publication) and the documented final step for creating the
-  GitHub Release entry by hand, which the workflow deliberately never automates.
-- **A release_v2 spec greps `spec/` for hard-coded current-version literals** (`'= 2.0.0'`,
-  `"2.0.0\n"`, `gem_version: '2.0.0'`-shaped strings), built from `Woods::VERSION`'s base, so
-  the next version bump cannot leave one behind the way the beta1 cut did.
-- **`WOODS_PROFILE=1` logs a timing line per extraction phase.** The per-extractor
-  lines already reported extraction itself; everything after it (payload seed, previous
-  graph load, eager load, blast radius, re-extraction, type index, graph analysis, flows,
-  manifest and summary, publish) was unattributed, so a slow run could only be split by
-  guessing. One `[Woods] [profile] <phase> in N.NNs` line per phase, on the monotonic
-  clock. Off by default and free when off.
-- **`durable_payload_writes` restores the per-file `fsync` on payload files.** Boolean,
-  default `false`. Off is not the weaker setting: readers resolve only through
-  `generation.json`, and every publish now flushes the whole payload before writing that
-  pointer, so the contract holds either way. Turning the key on buys exactly one thing, an
-  individual payload file being durable before the pointer exists, and pays two forced
-  flushes per file (about 8.9ms each on btrfs) for it. It cannot disable the publish
-  flush, which has no opt-out.
-
-- **`incremental_blast_radius_depth` bounds how far an incremental run re-extracts.**
-  `extract_changed` walked the unbounded transitive dependent closure of every changed
-  file, so one edit to a widely referenced unit re-extracted most of the app. The new key
-  caps the walk at N reverse hops (`nil`, the default, keeps the unbounded closure). A
-  unit outside the cap keeps its content and still gets its `dependents` list refreshed by
-  the run's second pass, which the equivalence harness now covers under a cap of 1. The
-  default stays unbounded on purpose: an STI grandchild inherits its grandparent's
-  associations, validations and callback chain while sitting two hops away in the graph,
-  and nested `has_many :through` resolves the same way, so a host opts in for a tree it
-  knows has neither. On a 200-service chain in the dummy app, one leaf edit re-extracts
-  200 units unbounded and 2 under a depth of 1.
-
-### Changed
-
-- **Payload durability moved from every file to the generation pointer.** `AtomicFile.write`
-  fsynced the temp file and the containing directory for every file it wrote, so a full
-  extraction of a large application paid two forced flushes 8323 times: 71.3s of the write
-  phase for 8000 files on btrfs, against 1.0s for one filesystem flush. Payload writes (unit
-  files, type indexes, the dependency graph, the graph analysis, the manifest, the summary,
-  the flow documents) now skip both, and `publish_generation` calls the new
-  `AtomicFile.sync_directory_tree` on the payload directory immediately before writing
-  `generation.json`.
-
-  The guarantee that replaces the old one: **when `generation.json` is durable, every file
-  in the payload it names is durable.** What is given up is an individual payload file being
-  durable before the pointer exists, and nothing reads a payload file in that window, since
-  every reader resolves through the pointer and a crash there leaves an unreferenced partial
-  payload the next run prunes. `generation.json` itself, the watch daemon's status file, the
-  update check cache, the Obsidian and Unblocked exports, Notion sync state, temporal
-  snapshots, embedding checkpoints and MCP task records all keep the per-file fsync: their
-  readers do not go through the pointer. The gem mapper's self-map publishes through the
-  same pointer but keeps its per-file fsync for now; it is a small payload and adopts the
-  single flush in a follow-up.
-
-  `sync_directory_tree` tries `syncfs(2)` through Fiddle, then `sync -f <dir>`, then a bare
-  `sync`, then an `fsync` on every file in the tree, and returns which one ran. The last
-  resort is what keeps this honest: the chain never silently does nothing, it only gets
-  slower. Fiddle is required inside a rescue and stays out of the gemspec, since it is a
-  bundled gem from Ruby 3.5. `bench/atomic_write_bench.rb` measures all four modes.
-
-- **Seeding a payload creates each directory once rather than once per file.**
-  `PayloadStore#clone` ran `FileUtils.mkdir_p` before every file it replicated.
-  `Pathname#find` visits a directory before its children, so the directory branch had
-  already created every parent a file could need. 8001 files across four type directories
-  on btrfs: 0.906s before, 0.847s after.
-
-- **Cycle detection is capped, and says so.** `GraphAnalyzer#analyze` runs on every
-  extraction regardless of the change set, and enumerating every cycle was the largest
-  part of it: one cycle per DFS back-edge, uncapped in count and in length, each
-  canonicalized by joining a path that on a deep DFS is thousands of nodes long. Two new
-  config keys bound it, `graph_cycle_limit` (default 500) and `graph_cycle_max_length`
-  (default 50, in distinct nodes); either firing sets the new
-  `stats.cycle_limit_reached` in `graph_analysis.json`. Set either to `nil` to remove
-  its cap and restore exhaustive enumeration. Signatures are now keyed by a digest of
-  the rotated cycle rather than the joined path. On a synthetic 8201-node graph, cycle
-  detection went from 8.6s to 0.4s.
-- **Bridge detection reuses its work.** `bfs_shortest_path` carries parent pointers
-  instead of enqueueing a copy of the path so far for every node it reaches, and forward
-  adjacency resolves through a per-analyzer memo instead of being re-derived on each of
-  the 200 sampled traversals. Output is unchanged. On the same graph, bridges went from
-  2.2s to 0.6s and the whole report from 3.1s to 1.0s.
-- **Flow assembly caches loaded units and parsed sources.** One `FlowAssembler` serves a
-  whole precompute run, but nothing was cached across it: a unit's JSON was re-globbed
-  and re-parsed on every expansion, and its source re-parsed once per action of every
-  controller that reached it. Three per-instance LRU memos (unit data, whole-source AST,
-  and the method index derived from it) bound at 1000 entries each. On 435 controllers x
-  7 actions over 3000 services, precompute went from 20.5s to 3.8s.
-- **The manifest and `SUMMARY.md` read each type index once.** Both derive their totals
-  from the per-type `_index.json` files and run back to back at the end of every
-  incremental run, so every index was globbed, read and parsed twice. An unreadable index
-  still drops that type from both, now with one warning instead of two.
-- **The incremental flow refresh is scoped to the flow assembly radius.** Flows were
-  reassembled for every controller in the run's touched set, and the touched set is the
-  graph's whole reverse closure, so one leaf edit re-ran flow assembly for nearly every
-  controller in the app. A flow document reaches `FlowPrecomputer::DEFAULT_MAX_DEPTH`
-  units, so the run now walks the pre-change graph to that same depth and reassembles
-  only the controllers inside it. Controllers outside it carry their
-  `metadata[:flow_paths]` annotation forward out of the previous flow index rather than
-  losing it. A targeted `refresh`, a routes re-run, and a controller whose action set no
-  longer matches the index all still reassemble in full. On 50 controllers over a
-  50-service chain in the dummy app, one edit at the far end went from 50 controllers
-  reassembled to 3 plus 47 carried.
-- **`graph_sha` is digested from the bytes written.** `graph_analysis.json`'s digest of
-  `dependency_graph.json` came from reading the file back off disk, one whole-file read
-  per run of an artifact that on a large app is tens of megabytes, to digest bytes the
-  run had just serialized. The value is unchanged.
-
-### Fixed
-
-- `TraceEnricher.record` rejects calls without a block before creating a
-  TracePoint, preventing an enabled hook from leaking into subsequent execution (#308).
-
-- **The Changed list only names the surface inventory when regenerating it actually moved
-  it.** `release:prepare` used to list `.Codex/release-v2/surface-inventory.json`
-  unconditionally, even on the ordinary run where nothing in the public surface changed.
-- **The release banner no longer links an upgrade guide that does not exist yet.** A major
-  version bump past `docs/UPGRADING_TO_2.md`'s own major derived a
-  `docs/UPGRADING_TO_<major>.md` link without checking the file exists.
-- **Changelog entries merged from a duplicate heading no longer carry a stray blank line.**
-  Two occurrences of the same `###` heading in one `## [Unreleased]` cycle folded into a
-  release section with a blank line between their bullets, splitting one list into two; they
-  now join tight.
-- **Release validation names the live-backends CI job as it is called.** The release
-  validator required a CI job named `Live backends (pgvector + Qdrant + Solid Cache)`,
-  but the job gained `+ Redis` in its name, so every release dispatch failed at
-  release-context with nothing published. The prefix now matches, and a spec checks every
-  required contract job against the names in `ci.yml` so a rename cannot drift again.
-- **Release candidate jobs find the downloaded artifact.** `actions/download-artifact` with
-  `artifact-ids` extracts into `dist/<artifact-name>/`, so the digest check and the install
-  in `dist/` failed with a missing file on every dispatch since the switch to artifact ids.
-  Both downloads now set `merge-multiple: true`; the workflow spec requires it.
-- **Release candidate tests accept a prerelease version.** The clean-install smoke specs
-  pinned `2.0.0` as a literal in the dummy app's Gemfile, the loaded-version check, and a
-  snapshot fixture, so the first prerelease failed them (Bundler never resolves a prerelease
-  from an unpinned requirement). They now use `Woods::VERSION`. The candidate host also
-  installs `webrick` so `woods-mcp-http` finds a Rack handler on Rubies that no longer ship one.
-- **Inspector contract specs track the pinned `@modelcontextprotocol/inspector` version instead
-  of a literal.** Bumping the dev dependency to 2.6.0 fixed the SDK bug where Inspector sent a
-  legacy `logging/setLevel` call after negotiating the modern 2026-07-28 protocol, so the two
-  `pending` stdio/HTTP examples in `mcp_inspector_contract_spec.rb` asserted a stderr message
-  that no longer occurs. Those examples now assert a clean modern handshake, and every version
-  literal in that file reads from `package.json` instead. `sdk_dependency_spec.rb`'s deliberate
-  version-and-integrity trip wire is bumped to match the new pin.
-
-## [2.0.0.beta1] - 2026-09-09
-
-### Added
-
-- **`WOODS_GIT_DIR` names the canonical git directory outright.** It wins over
+- **`WOODS_GIT_DIR` selects a Git directory and its HEAD explicitly.** It wins over
   whatever repository Woods would otherwise find, at all three of Woods's git
   call sites: per-unit enrichment, `manifest.json` provenance, and the
   `woods:incremental` diff range. All three build their command line with the
-  new `Woods::GitCommand.argv`. This is the escape hatch for a container that
-  can mount the canonical git directory but not the host path a linked
-  worktree's `gitdir:` pointer names.
+  new `Woods::GitCommand.argv`. For a container with a relocated complete Git
+  layout, select the linked worktree's `worktrees/<id>` directory, deriving
+  the ID from Git metadata. Selecting the shared root instead selects the
+  primary checkout's HEAD. A same-path mount needs no override.
 - **Database-partition layer for multi-database apps (#280).** Model units record
   `metadata[:database]` from `connection_db_config` (Rails 6.1+, `nil` on 6.0), so a model
   that inherits `connects_to` from an abstract class reports the inherited database.
@@ -696,6 +225,97 @@ Add a trusted, disabled-by-default release profile for the supported 1.6.2 secur
 - `Woods::ChangeSet` — one normalization of "what changed" (absolutize, de-duplicate, split
   present from vanished) shared by every entry point, so the git-diff caller and the watch
   daemon can't drift apart.
+- **`release:prepare` runs a live preflight before printing the tag and dispatch
+  commands.** The new `release:preflight` task (also runnable standalone) checks, via
+  `gh api`, that the live `release` environment still requires review and disallows admin
+  bypass; that `REQUIRED_CI_JOBS` in `script/validate-release-run` still matches
+  `ci.yml`'s job names; and that both `release.yml` download-artifact steps set
+  `merge-multiple: true`. Every check is advisory: a missing or failing `gh` skips with a
+  note rather than blocking prepare. CONTRIBUTING.md and the release-flow skill also gained
+  a "when a dispatch fails" guide (which failures a main merge alone fixes versus which need
+  the tag moved, and only before publication) and the documented final step for creating the
+  GitHub Release entry by hand, which the workflow deliberately never automates.
+- **A release_v2 spec greps `spec/` for hard-coded current-version literals** (`'= 2.0.0'`,
+  `"2.0.0\n"`, `gem_version: '2.0.0'`-shaped strings), built from `Woods::VERSION`'s base, so
+  the next version bump cannot leave one behind the way the beta1 cut did.
+- **`WOODS_PROFILE=1` logs a timing line per extraction phase.** The per-extractor
+  lines already reported extraction itself; everything after it (payload seed, previous
+  graph load, eager load, blast radius, re-extraction, type index, graph analysis, flows,
+  manifest and summary, publish) was unattributed, so a slow run could only be split by
+  guessing. One `[Woods] [profile] <phase> in N.NNs` line per phase, on the monotonic
+  clock. Off by default and free when off.
+- **`durable_payload_writes` restores the per-file `fsync` on payload files.** Boolean,
+  default `false`. Off is not the weaker setting: readers resolve only through
+  `generation.json`, and every publish now flushes the whole payload before writing that
+  pointer, so the contract holds either way. Turning the key on buys exactly one thing, an
+  individual payload file being durable before the pointer exists, and pays two forced
+  flushes per file (about 8.9ms each on btrfs) for it. It cannot disable the publish
+  flush, which has no opt-out.
+
+- **`incremental_blast_radius_depth` bounds how far an incremental run re-extracts.**
+  `extract_changed` walked the unbounded transitive dependent closure of every changed
+  file, so one edit to a widely referenced unit re-extracted most of the app. The new key
+  caps the walk at N reverse hops (`nil`, the default, keeps the unbounded closure). A
+  unit outside the cap keeps its content and still gets its `dependents` list refreshed by
+  the run's second pass, which the equivalence harness now covers under a cap of 1. The
+  default stays unbounded on purpose: an STI grandchild inherits its grandparent's
+  associations, validations and callback chain while sitting two hops away in the graph,
+  and nested `has_many :through` resolves the same way, so a host opts in for a tree it
+  knows has neither. On a 200-service chain in the dummy app, one leaf edit re-extracts
+  200 units unbounded and 2 under a depth of 1.
+- Optional `changelog/<type>_<slug>.md` entry files let parallel branches record changes without editing the same Unreleased block. `release:prepare` validates, folds, and removes consumed entries; release validation refuses leftover entries at the tagged SHA (B-179).
+- Add optional `volatile_dependency_limit_per_target` to keep one hot dependency
+  from filling the volatility report (B-188). Apply the per-target edge cap before
+  the global top 20, preserve the default output, and expose the configured cap
+  and reported count alongside the full qualifying count when enabled.
+
+- Gate retrieval quality in CI with a versioned Canopy runtime corpus, captured
+  real MiniLM vectors, per-strategy quality floors, latency observations, and
+  exact output-token counts. Preserve known failed queries in the evidence (#227).
+- Bound `dependencies` and `dependents` traversal work independently of response
+  pagination, with configurable node/edge budgets and explicit partial-result
+  reasons. Filtered edges and reverse relationship checks consume the edge
+  budget; complete small results retain their existing shape (#311).
+
+- Document the published filesystem layout for non-Ruby consumers, with pinned
+  Bash/jq and Python reads, retention-race handling, and structural snapshot
+  publication guidance (#306).
+
+- `WOODS_WATCH_TRUST_FOREIGN_HOST=1` lets watch status, incremental/clean guards,
+  daemon startup checks, and MCP trust fresh foreign-container heartbeats without
+  checking an unrelated local pid. This is opt-in; foreign records expire after
+  15 minutes, and malformed or excessively future timestamps are rejected (#321).
+
+- `WOODS_WATCH_POLL_INTERVAL` configures positive, finite seconds between watch
+  polling scans, including fallback from native watching (default 1.0; #322).
+
+- Published manifests record `woods_version`, the last publisher's gem version,
+  for Rails extraction and static self-maps. MCP exposes it independently of the
+  reader version, and `woods:validate` gives nonfatal warnings for malformed
+  writer versions or different major versions. Older manifests remain valid
+  without this optional provenance field (#323).
+- Supply concise, capability-aware Index MCP instructions through initialization and modern discovery, with status-first retrieval guidance, bounded traversal and source verification. Preserve the SDK's omission for protocol `2024-11-05`; tool registration and authorization remain unchanged. (#402)
+- Added generation-bound source-input evidence with bounded `current` / `drifted` / `unknown` status, per-consumer incremental provenance, private keyed content identities, and a fresh-process `woods-extract` launcher. The opt-in session hook now checks source content through the shared no-environment status task. Old indexes and unproved boot/runtime consumption remain explicitly unknown.
+Add separately opt-in, bounded Claude orientation and post-edit candidate context from a retained published generation, with explicit uncertainty, repeat suppression, independent refresh controls, and an installed `woods-hook-context` helper.
+Explicit Claude and OpenCode edit adapters preserve every affected patch path,
+including both rename sides, through the shared durable refresh queue. Native
+OpenCode registration is optional and version-pinned; unsupported or escaping
+events produce diagnostics without claiming refresh.
+MCP `search` now reports whether its returned matches exhaust the requested domain, prove an additional match, or leave the remainder unknown after a scan budget or regex timeout. Bounded lookahead shares the existing scan budget, deep reads preserve typed identities, and detected artifact corruption remains an error. JSON and text formats distinguish returned counts from exact totals; agent guidance explains how to narrow partial searches. Mixed Rails/gem source directories remain searchable and loadable by lexical retrieval while rejecting unrelated type mismatches.
+`woods:validate` now checks semantic graph invariants against typed unit indexes and artifacts within one pinned published generation. It detects broken reverse membership, invalid sources, duplicate typed variants, file/type index drift, and missing indexed nodes while accepting cycles, unresolved targets, legacy string edges, and the Woods static source map. Validation remains read-only, preserves existing report/exit behavior, and reports actionable identities without repairing the graph.
+
+The validator, deep search, and lexical retrieval accept all four GraphQL unit types in the shared `graphql/` directory, preserving actual typed identities and existing directory-family search labels.
+`dependencies` and `dependents` accept optional `explain: true` to retain typed source ownership, original edge direction and relationship attributes, and bounded shortest witnesses. Explanations distinguish direct records from transitive reachability, preserve unknown labels and ambiguous target candidates, and retain ancestor context across pages. Existing compact responses remain unchanged; explanation work shares traversal budgets.
+Publish additive `reverse_via` target buckets with typed source identities, relationship labels and association attributes, preserving existing `reverse` arrays and legacy graph loading.
+- Mark whole-file caching, configuration, test mapping, Rails source, and gem source graph nodes and typed variants with `kind: "file_profile"`, preserving file membership and identifiers while letting consumers distinguish profiles from constant-owned units (#417).
+Add `woods-agent-config` for explicit Claude Code project/user setup, update, and removal. Preview saves one private edit plan; apply checks its original snapshots, preserves unrelated configuration, tracks owned entries and instruction sections, and supports recovery after interrupted writes. Host/Compose preflight checks the installed Index Server and published index.
+- Add opt-in compact source evidence and declared API outlines to retrieval and lookup, with complete published spans, explicit omissions, honest generation/source provenance, and typed SHA-guarded full-source follow-up. Existing full-source behavior remains the default.
+- Add explicit embedding-free lexical retrieval over published extraction units. Set `WOODS_RETRIEVAL_MODE=lexical` for Index MCP or `config.retrieval_mode = :lexical` for Ruby builders; field-aware ranked results preserve typed identity, generation consistency and budgeted matching evidence without provider or vector access. Semantic retrieval remains the default.
+- Add explicit package and application-relative source-path scopes to ranked retrieval and discovery, with eligibility before candidate limits, typed scope metadata, and native scoped vector searches without re-embedding.
+- Add managed development watcher startup with fresh-process restart handling,
+  explicit Foreman/external/Puma installation modes, portable owned configuration,
+  preview/update/removal/recovery, and separate supervision diagnostics. Keep raw
+  `woods:watch` supervision compatible. See [#538](https://github.com/lost-in-the/woods/issues/538).
 
 ### Performance
 
@@ -812,6 +432,27 @@ Add a trusted, disabled-by-default release profile for the supported 1.6.2 secur
   the new task exit codes, the incremental baseline guard, and `reload`'s
   write-access requirement; every claim that expires at tag time is wrapped in a
   `release-state` fence, listed in the new release note in `docs/README.md`.
+- Clarify that source literals and optional session traces can contain sensitive information, and correct the session FileStore configuration example.
+- Qualify the `~> 2.0` installation examples for stable releases and direct prerelease adopters to the exact published version in the README release table. Keep agent setup and plugin guidance aligned with installed-version capabilities; clarify that the refresh-hook deadline starts after complete event input is collected and queued.
+- Correct watcher retry guidance to include heartbeat-driven recovery, identify
+  session identity corrections as available in 2.0.0.beta3, and align the
+  coding-agent Docker synopsis with the container-first setup guide.
+- Scope orphan results to recorded relationships, document the limits of artifact
+  permission defaults, correct Claude Code worktree registration guidance, and
+  expose embedding-free lexical retrieval in the MCP tool cookbook.
+Update the distributed agent guides to identify Woods 2.0.0.beta3 capabilities and plugin 2.3.36 hook recovery accurately, while preserving installed-version and schema checks.
+- Clarify that beta/RC development retains the last prepared version, source
+  candidates require Git revision evidence, and development reopening applies
+  only after a final release. Release transitions and version ordering are unchanged.
+Add a guide mapping automatic index maintenance to the canonical watcher, Docker,
+Grove, MCP, freshness, and client-hook documentation. Correct startup/idle-revival
+claims, explain managed versus external supervision and portable setup ownership,
+and require observed updates in the installation handoff. Update the paired plugin
+guidance with installed-version checks for [#538](https://github.com/lost-in-the/woods/issues/538).
+- Prepare the installation guides and plugin capability notes for the final
+  2.0 release while retaining installed-version and publication checks. Correct
+  backend pairing, incremental scope and timing, execution-coverage, and token
+  estimation claims so the guides describe the implemented contracts.
 
 ### Upgrade Notes
 
@@ -941,6 +582,95 @@ derive unit identifiers, which changes the index format's observable contract.
   EXTA-15, CON-4, STO-7, STO-10, STO-14, INF-5, INF-6, INF-13, R2-4, R2-5, R2-6).
 
 - **STO-12**: Corrected the `Storage::Snapshotter` doc comment: `Snapshotter::Metadata.validate_store!` can use plain `respond_to?` only because `MetadataStore::Interface` defines neither `#each_entry` nor `#bulk_load` — adding either stub would silently convert the check into the B-108 bug. `spec/storage/snapshotter/vector_spec.rb`'s float-truncation tolerance block (which passed whether or not the load raised, stale since the M10 fix) now asserts the raise.
+- **Payload durability moved from every file to the generation pointer.** `AtomicFile.write`
+  fsynced the temp file and the containing directory for every file it wrote, so a full
+  extraction of a large application paid two forced flushes 8323 times: 71.3s of the write
+  phase for 8000 files on btrfs, against 1.0s for one filesystem flush. Payload writes (unit
+  files, type indexes, the dependency graph, the graph analysis, the manifest, the summary,
+  the flow documents) now skip both, and `publish_generation` calls the new
+  `AtomicFile.sync_directory_tree` on the payload directory immediately before writing
+  `generation.json`.
+
+  The guarantee that replaces the old one: **when `generation.json` is durable, every file
+  in the payload it names is durable.** What is given up is an individual payload file being
+  durable before the pointer exists, and nothing reads a payload file in that window, since
+  every reader resolves through the pointer and a crash there leaves an unreferenced partial
+  payload the next run prunes. `generation.json` itself, the watch daemon's status file, the
+  update check cache, the Obsidian and Unblocked exports, Notion sync state, temporal
+  snapshots, embedding checkpoints and MCP task records all keep the per-file fsync: their
+  readers do not go through the pointer. The gem mapper's self-map publishes through the
+  same pointer but keeps its per-file fsync for now; it is a small payload and adopts the
+  single flush in a follow-up.
+
+  `sync_directory_tree` tries `syncfs(2)` through Fiddle, then `sync -f <dir>`, then a bare
+  `sync`, then an `fsync` on every file in the tree, and returns which one ran. The last
+  resort is what keeps this honest: the chain never silently does nothing, it only gets
+  slower. Fiddle is required inside a rescue and stays out of the gemspec, since it is a
+  bundled gem from Ruby 3.5. `bench/atomic_write_bench.rb` measures all four modes.
+
+- **Seeding a payload creates each directory once rather than once per file.**
+  `PayloadStore#clone` ran `FileUtils.mkdir_p` before every file it replicated.
+  `Pathname#find` visits a directory before its children, so the directory branch had
+  already created every parent a file could need. 8001 files across four type directories
+  on btrfs: 0.906s before, 0.847s after.
+
+- **Cycle detection is capped, and says so.** `GraphAnalyzer#analyze` runs on every
+  extraction regardless of the change set, and enumerating every cycle was the largest
+  part of it: one cycle per DFS back-edge, uncapped in count and in length, each
+  canonicalized by joining a path that on a deep DFS is thousands of nodes long. Two new
+  config keys bound it, `graph_cycle_limit` (default 500) and `graph_cycle_max_length`
+  (default 50, in distinct nodes); either firing sets the new
+  `stats.cycle_limit_reached` in `graph_analysis.json`. Set either to `nil` to remove
+  its cap and restore exhaustive enumeration. Signatures are now keyed by a digest of
+  the rotated cycle rather than the joined path. On a synthetic 8201-node graph, cycle
+  detection went from 8.6s to 0.4s.
+- **Bridge detection reuses its work.** `bfs_shortest_path` carries parent pointers
+  instead of enqueueing a copy of the path so far for every node it reaches, and forward
+  adjacency resolves through a per-analyzer memo instead of being re-derived on each of
+  the 200 sampled traversals. Output is unchanged. On the same graph, bridges went from
+  2.2s to 0.6s and the whole report from 3.1s to 1.0s.
+- **Flow assembly caches loaded units and parsed sources.** One `FlowAssembler` serves a
+  whole precompute run, but nothing was cached across it: a unit's JSON was re-globbed
+  and re-parsed on every expansion, and its source re-parsed once per action of every
+  controller that reached it. Three per-instance LRU memos (unit data, whole-source AST,
+  and the method index derived from it) bound at 1000 entries each. On 435 controllers x
+  7 actions over 3000 services, precompute went from 20.5s to 3.8s.
+- **The manifest and `SUMMARY.md` read each type index once.** Both derive their totals
+  from the per-type `_index.json` files and run back to back at the end of every
+  incremental run, so every index was globbed, read and parsed twice. An unreadable index
+  still drops that type from both, now with one warning instead of two.
+- **The incremental flow refresh is scoped to the flow assembly radius.** Flows were
+  reassembled for every controller in the run's touched set, and the touched set is the
+  graph's whole reverse closure, so one leaf edit re-ran flow assembly for nearly every
+  controller in the app. A flow document reaches `FlowPrecomputer::DEFAULT_MAX_DEPTH`
+  units, so the run now walks the pre-change graph to that same depth and reassembles
+  only the controllers inside it. Controllers outside it carry their
+  `metadata[:flow_paths]` annotation forward out of the previous flow index rather than
+  losing it. A targeted `refresh`, a routes re-run, and a controller whose action set no
+  longer matches the index all still reassemble in full. On 50 controllers over a
+  50-service chain in the dummy app, one edit at the far end went from 50 controllers
+  reassembled to 3 plus 47 carried.
+- **`graph_sha` is digested from the bytes written.** `graph_analysis.json`'s digest of
+  `dependency_graph.json` came from reading the file back off disk, one whole-file read
+  per run of an artifact that on a large app is tens of megabytes, to digest bytes the
+  run had just serialized. The value is unchanged.
+- Clarify the existing search-regex timeout exclusion: Ruby 3.0/3.1 remain
+  supported without a per-match time bound. Run the Index MCP process on Ruby
+  3.2+ for the one-second per-match limit; no runtime mitigation was added
+  for older interpreters (B-161).
+
+- Reduce payload-clone allocation and traversal overhead while preserving
+  hardlinks, copy fallback and immutable generation ownership (#305).
+- Make extraction profiling additive: report git enrichment, reconciliation,
+  finalization, pointer publication and retention separately, with a distinct
+  whole-run wall-time line (#305).
+- Expand opt-in refresh hooks to the shared extraction input rules, including
+  services, controllers, jobs, views, locales, and supported tests/lib paths.
+  Restart inputs request fresh full extraction. Preserve queued edits across
+  failures and daemon deferral, bound the worker lifetime, and carry JSON batches
+  through Docker command prefixes without host-bundle or environment-forwarding
+  assumptions. Existing manual incremental and watch behavior is unchanged.
+Add a trusted, disabled-by-default release profile for the supported 1.6.2 security maintenance line. Publication requires a separately reviewed exact candidate SHA pin on main, all fixed maintenance CI rows, and the existing immutable artifact and protected publication safeguards. The v2 release path retains its existing requirements.
 
 ### Fixed
 
@@ -2323,6 +2053,254 @@ derive unit identifiers, which changes the index format's observable contract.
   lock-timeout abort). The diff is also rooted at the extracted application
   (`git -C Rails.root`), consistent with the provenance rooting, so it can no
   longer diff whatever checkout the process happened to start in.
+- `TraceEnricher.record` rejects calls without a block before creating a
+  TracePoint, preventing an enabled hook from leaking into subsequent execution (#308).
+
+- **The Changed list only names the surface inventory when regenerating it actually moved
+  it.** `release:prepare` used to list `.Codex/release-v2/surface-inventory.json`
+  unconditionally, even on the ordinary run where nothing in the public surface changed.
+- **The release banner no longer links an upgrade guide that does not exist yet.** A major
+  version bump past `docs/UPGRADING_TO_2.md`'s own major derived a
+  `docs/UPGRADING_TO_<major>.md` link without checking the file exists.
+- **Changelog entries merged from a duplicate heading no longer carry a stray blank line.**
+  Two occurrences of the same `###` heading in one `## [Unreleased]` cycle folded into a
+  release section with a blank line between their bullets, splitting one list into two; they
+  now join tight.
+- **Release validation names the live-backends CI job as it is called.** The release
+  validator required a CI job named `Live backends (pgvector + Qdrant + Solid Cache)`,
+  but the job gained `+ Redis` in its name, so every release dispatch failed at
+  release-context with nothing published. The prefix now matches, and a spec checks every
+  required contract job against the names in `ci.yml` so a rename cannot drift again.
+- **Release candidate jobs find the downloaded artifact.** `actions/download-artifact` with
+  `artifact-ids` extracts into `dist/<artifact-name>/`, so the digest check and the install
+  in `dist/` failed with a missing file on every dispatch since the switch to artifact ids.
+  Both downloads now set `merge-multiple: true`; the workflow spec requires it.
+- **Release candidate tests accept a prerelease version.** The clean-install smoke specs
+  pinned `2.0.0` as a literal in the dummy app's Gemfile, the loaded-version check, and a
+  snapshot fixture, so the first prerelease failed them (Bundler never resolves a prerelease
+  from an unpinned requirement). They now use `Woods::VERSION`. The candidate host also
+  installs `webrick` so `woods-mcp-http` finds a Rack handler on Rubies that no longer ship one.
+- **Inspector contract specs track the pinned `@modelcontextprotocol/inspector` version instead
+  of a literal.** Bumping the dev dependency to 2.6.0 fixed the SDK bug where Inspector sent a
+  legacy `logging/setLevel` call after negotiating the modern 2026-07-28 protocol, so the two
+  `pending` stdio/HTTP examples in `mcp_inspector_contract_spec.rb` asserted a stderr message
+  that no longer occurs. Those examples now assert a clean modern handshake, and every version
+  literal in that file reads from `package.json` instead. `sdk_dependency_spec.rb`'s deliberate
+  version-and-integrity trip wire is bumped to match the new pin.
+- Reflect model callbacks from Rails' per-event chains instead of nonexistent
+  per-kind readers; include `before_commit` and keep `callback_count` equal to
+  the emitted callback list. Preserve framework callbacks with stable Proc/lambda
+  source-site labels and address-free default callback-object descriptions in
+  metadata and chunks, including Rails 6's `raw_filter`, so separate-process
+  extractions of unchanged models remain equivalent. Preserve custom object labels.
+
+- Explain the Zeitwerk 2.6.9 naming requirement in identifier-collision errors
+  and upgrade guidance before suggesting changes to valid namespace wrappers
+  on older-loader or classic-mode hosts (B-149).
+
+- Stabilize controller inline callback and condition labels across processes and
+  checkout paths, including action chunks; retain `unless` conditions in the
+  generated filter-chain header (B-167).
+
+- Publish metadata-only changes in local embedding snapshots without re-embedding
+  unchanged source; retain no-op dumps and source-hash checkpoints (B-119).
+
+- Search Boolean metadata fields as `true`/`false` consistently in SQLite and
+  InMemory, preserving numeric `1`/`0` and null semantics (B-199, #356).
+
+- Keep the default SQLite metadata database inside the effective `WOODS_OUTPUT`
+  directory for embedding tasks, isolating indexes while preserving explicit
+  database overrides (B-156). Existing databases are not moved; run `woods:embed`
+  for the selected index after upgrading.
+
+- Treat non-object JSON snapshots and files removed or made unreadable during
+  a read as absent across lookup, listing, diffs, and unit history (B-158).
+
+- Count corrupt and unreadable SHA-named JSON snapshots toward retention and
+  evict them before valid history, preserving the just-captured snapshot and
+  unrelated files (B-163).
+
+- Count the final retrieval context after formatting and type-rank metadata,
+  keeping `tokens_used` and its trace consistent with the configured counter
+  or estimate (B-197, #354).
+
+- Order tied hybrid retrieval candidates deterministically before graph seed
+  selection, truncation and reciprocal-rank fusion across supported Ruby versions
+  (B-192).
+
+- Bound OpenAI embedding requests to 36 valid inputs, preserving chunk order and
+  rejecting partial or dimension-inconsistent batches (B-157). Chunk-heavy runs
+  use more HTTP requests to stay within the API's input and total-token limits.
+
+- Match embedded NUL literally in SQLite metadata searches, including substrings after NUL; preserve ASCII case folding and literal wildcard characters (B-198, #355).
+
+- Prevent single-component cache keys from colliding with multi-component or
+  empty keys by uniformly length-prefixing components (B-155). Custom callers
+  using persistent single-component keys should clear that cache domain on upgrade.
+
+- Make middleware argument metadata, generated source and hashes stable across Rails processes by describing runtime identities structurally while preserving literal and nested configuration (#362).
+
+- Omit per-unit git enrichment for shallow checkouts or unverifiable repository
+  depth, with one warning and full-history recovery guidance, instead of
+  reporting truncated commit counts as complete churn data (B-189).
+
+- Validate direct/legacy Console scope arrays with the active SQL dialect and
+  MySQL session quote modes, refusing subqueries hidden by mismatched quote
+  stripping while retaining the supported tools' narrower scope grammar (B-154).
+
+- Read and clear legacy Redis session indexes before any new record without
+  `WRONGTYPE`; atomic SET/ZSET access tolerates concurrent index migration
+  and keeps reader-only upgrades compatible with older SET writers (B-162).
+
+- Allow full extraction when ActionMailer is absent and skip non-app mailers
+  instead of publishing empty units at fabricated paths; share that ownership
+  gate with incremental class discovery (B-153).
+
+- Repair corrupt pipeline cooldown state on an explicit all-reset, including
+  `pipeline_repair` in custom operator-configured servers; ordinary reads still
+  deny operations and scoped resets preserve corrupt state (B-159).
+
+- Normalize incremental change paths before deduplication and dispatch, including
+  trailing root slashes, repeated separators and dot segments (B-148).
+
+- Load lazy Rails routes before caching navigation helpers, preserving view-to-controller dependencies during fresh-process incremental extraction (#360).
+
+- Reflect model methods after schema loading so full and incremental runs agree
+  on Rails-generated constructors while preserving application overrides (B-202, #363).
+
+- Parse job `perform_params` and shared `initialize_params` from Ruby parameter
+  syntax, avoiding phantom names from keyword/default expressions while preserving
+  the existing metadata fields and named rest/block arguments (B-151).
+
+- Resolve ERB-backed Solid Queue recurring schedules using Rails configuration
+  loading, including relative requires, conditional entries, aliases and custom
+  environment sections (B-203, #364).
+
+- Preserve navigation edges for real named routes such as `file_path`,
+  `image_url`, `download_path`, and `root_path`; unresolved asset/filesystem
+  helper names still produce no edge (B-152).
+
+- Resolve and track app-owned nested model mixins through runtime source locations, refreshing includer source and callbacks on incremental edits (B-150, #361).
+
+- Explain the full-extraction recovery for runtime job removals and bundle
+  upgrades; missing gem-path warnings now include the bundle-update remedy
+  without changing incremental discovery rules (B-165, B-166).
+
+- Preserve all reverse dependencies on symbolic external targets such as `http_api` after incremental graph reloads and re-registration (B-193, #305).
+
+- Preserve changes to nested `extracted_at` metadata when deciding whether to
+  rewrite a unit; only Woods' top-level extraction stamp is ignored (B-147).
+- Read per-unit git enrichment in one streamed HEAD history walk instead of
+  repeated 500-path batches (B-195, #305). Merge commits compare with their first
+  parent while all HEAD ancestry is visited; counts can change from legacy
+  pathspec simplification. Optional enrichment now requires Git 2.31 or newer;
+  incomplete/failed history is omitted with a warning. Run full extraction
+  after upgrading to refresh retained metadata. Host speedup remains unmeasured.
+
+- Apply the same app-owned path exclusions to full and incremental git enrichment;
+  external, vendored, and node_modules units no longer gain empty git metadata (B-194).
+
+- Prune default excluded package directories before recursively discovering
+  `package.yml`, avoiding scans of indexes and snapshots under `tmp/` (B-196, #305).
+
+- Preserve namespaced and CamelCase graph-retrieval subjects, keep snake_case
+  lookup working, and exclude tracing instructions from fallback metadata searches (B-190).
+
+- Order equal PageRank scores by identifier before assigning retrieval importance
+  percentiles, making their ranking weights deterministic across Ruby versions
+  and graph insertion orders (B-191).
+
+- Reduce payload-seed metadata lookups by classifying each entry once. Preserve
+  per-file hardlink/copy fallback, atomic publication and generation retention
+  while reducing full and incremental seed overhead (#305).
+
+- Keep runtime trace evidence for same-name instance and singleton methods separate, including inherited singleton owners and caller kinds. Legacy untyped events enrich instance methods only; re-record old singleton traces.
+
+- Ruby trace enrichment now records the nearest observed calling Ruby method
+  instead of the callee receiver. Recording keeps separate fiber stacks, handles
+  recursive and unwound calls, and leaves outside-recording callers unknown
+  without binding or backtrace inspection (#309).
+
+- Scope per-file git metadata to HEAD history instead of every ref, excluding
+  unmerged branches and tool checkpoints from churn and authorship (#319). Run
+  a full `woods:extract` after upgrading to refresh previously published metadata.
+
+- Full extraction no longer creates empty type directories at the index root
+  before publishing its generation payload. Existing root directories and legacy
+  flat-index files are preserved (#320).
+
+- Watch startup reconciles environment-boot-covered restart inputs with one full
+  extraction instead of repeatedly exiting 75. Live changes and changes during
+  environment initialization still require restart; failed reconciliation and
+  deleted restart inputs survive retries and supervisor restarts. Built-in
+  watchers establish detection before startup extraction begins (#318).
+
+- Add `console_mcp_http_enabled` (default `true`) so stdio-only Console setups
+  can explicitly disable HTTP and its boot-time token warnings. Production
+  still refuses to boot without a token when HTTP Console is enabled (#304).
+
+- Solid Cache conditional writes on MySQL no longer claim ownership of a
+  pre-existing row when the adapter reports matched rows as affected rows.
+  Validate ownership using the per-attempt serialized payload, with live MySQL
+  contention/recovery coverage and documented crash/eviction limits (#228).
+- Keep Notion model/column/migration data and Unblocked full/partial documents tied to their exact extracted type. Refuse incomplete export reads before mutation, and preserve remote documents when same-name, same-file types cannot be represented safely by Unblocked's existing URI scheme.
+Preserve the selected extraction type when framework search and recent changes read colliding identifiers. Session controller lookup and root outgoing-edge selection now retain the controller type. Public untyped lookup, downstream references and the bare-name multi-step context pool retain their existing contracts.
+Obsidian export preserves same-name units of different types, their separate outgoing links, and original public identifiers. Collision-bearing vaults publish a version-2 typed manifest; ordinary version-1 manifests and note paths remain unchanged. Ambiguous bare targets are omitted with a diagnostic, and incomplete typed reads cannot trigger stale-note deletion.
+- Reject ambiguous cross-type dependencies in session context with an actionable `ambiguous_identity` MCP error instead of silently selecting a source or reusing another type's context key. Leave unresolved controllers in the timeline without a misleading source reference. Pin candidate discovery and all assembly reads to one generation; retain typed controller roots, metadata-only timelines, and successful response shapes. Refs #213; this does not migrate global identifiers.
+- Refresh Console credential indexes from a fresh encrypted-file and key snapshot, retain the last valid index when refresh fails, and update all live embedded servers without retaining abandoned servers. Each response scan uses one complete credential index.
+Keep credential scanner refresh snapshots limited to live weakly referenced
+scanners on older Ruby versions, avoiding unsafe receiver access after garbage
+collection while preserving updates to every live Console server.
+- Refuse incomplete native embedding input before changing stores or checkpoints, retaining legacy flat-index support while rejecting malformed JSON. A source-empty unit now retires superseded vectors and checkpoints its no-content state without calling the embedding provider (#442, #444).
+- Terminate the evaluation command's owned process group on timeout, including ordinary descendants whose parent has already exited.
+- Let only the hook that removes a recorded dead-owner marker replace its mkdir lock, so concurrent recovery does not leave all edits queued behind an abandoned empty directory.
+- Refuse Obsidian exports that would overwrite unmanaged notes, indexes, settings, or sidecars. Preflight all destinations, record generated asset digests separately from the public manifest, and suppress sweeps on conflicts or write failures. Legacy assets are adopted only when byte-identical; changed legacy sidecars require inspection and backup or a fresh export directory.
+- Coordinate `Woods.extract!` and `Woods.extract_changed!` with task/watch writers and raise on lock timeout or failed generation publication, so background jobs can retry unsuccessful extraction.
+- Accept Rails 6.0 positional middleware options on Ruby 3 while preserving explicit keyword precedence, required bearer tokens, and unknown-option refusal. Add an installed-gem CI contract for all advertised direct runtime dependency floors, with a constrained Rails 6.0.0 fixture and recorded transitive resolution.
+- Honor configured context-token defaults in Builder-created semantic/lexical retrieval, caches, and MCP while preserving explicit budgets and the legacy custom-collaborator fallback. Deprecate the inert similarity_threshold option with a warning instead of changing ranking behavior (#446).
+- Preserve the dispatched controller's runtime class name in session traces, with a Rails-inflector fallback, so acronym namespaces retain source context in `session_trace`.
+- Preserve each logical directory alias in polling and startup catch-up so an earlier irrelevant alias cannot hide an extraction input such as `app/models`. Detect cycles per traversal branch while retaining ignored-subtree pruning.
+Accept ASCII case variants of the HTTP `Bearer` authentication scheme for Index and Console MCP. Token bytes, constant-time comparison, and existing delimiter rules remain unchanged. (#497)
+- Console SQL validation now distinguishes keyword grammar from identically named functions before applying the read-only function allowlist. SQLite application-defined keyword functions are rejected before execution; ordinary window, predicate, and numeric pagination syntax remains supported.
+- Report malformed generation marker shapes during embedded Index MCP startup as an actionable `ArgumentError` with the selected directory and published-layout guidance, matching executable preflight behavior. Preserve legacy flat and payload indexes and leave later generation-refresh error handling unchanged.
+- Make file-backed session clearing idempotent for Unicode and punctuated IDs, and discard expired history before appending or merging legacy and encoded files. This prevents expired events from becoming visible again through record, read, or listing; live history, disabled TTL, and retention limits retain their existing behavior.
+Dependency and dependent responses now disclose that published relationships are not exhaustive source-reference coverage, including compact and empty answers. Human witness labels say “witness types unambiguous” while preserving the JSON `typed_path_complete` contract. Successful traversal responses add `total_is_exact`; budget-limited text reports a root-inclusive lower bound and its cutoff reason, independently of pagination. (#470, #471)
+GraphQL parent metadata and summary chunks now read the selected declaration's superclass, rather than borrowing a nested or sibling class's parent. Compact qualified declarations preserve their explicit parent; implicit, dynamic, or unavailable parents remain unknown. Identifiers and dependency classification are unchanged.
+- Preserve the published generation when incremental extraction or named refresh encounters handled source errors. Failed consumers no longer replace last-good units with empty or partial output; watch retains the complete batch for retry.
+- Make missing-index startup headlines describe an unresolved published index instead of implying that atomic indexes require a root `manifest.json`; retain the examined path, layout explanation and existing-index-first remedy (#482).
+- Make `woods-mcp-start` resolve generation payload symlinks before checking their manifest, matching the library's index-root containment check. Preflight rejects escaping links and avoids manifest probes through broken links; contained links and symlinked index roots remain supported. The library already rejected escaping payloads before serving the index.
+- Clarify lexical retrieval responses with actual included-source and considered-candidate counts alongside the shortlist limit. Charge count text to the existing estimated context budget across full, compact, outline and scoped results, distinguishing no matches from matching candidates whose sources do not fit without changing ranking or MCP response structure.
+Stabilize mailer output across Rails processes by sorting action-name inventories consistently and labeling direct Proc defaults and callback filters by source location and callable kind. Preserve callback order, duplicate registrations and ordinary default value types without executing callables. Run a full extraction after upgrading to refresh retained mailer records; affected source hashes may change once. (#484)
+- Stabilize mailer object callback labels across boots by reusing the model extractor's guarded default-representation formatter. Preserve custom labels, literal hexadecimal text, callback order, duplicates and conditions; do not execute callbacks or change non-Proc defaults. Run a full extraction after upgrading to refresh retained mailer metadata; stored index schemas are unchanged.
+- Accept `WOODS_OUTPUT` after the explicit path and `WOODS_DIR` in Index MCP startup, while preserving the launcher's no-path error. Missing-index diagnostics now name the examined directory, describe atomic and legacy layouts, and suggest pointing at an existing index before re-extracting.
+- Recommend explicit embedding-free lexical mode in no-provider startup and retrieval messages, including the required MCP environment change and restart; semantic defaults and typed errors are unchanged.
+- Reconcile Rake tasks across all contributing files on incremental changes and deletions, retaining surviving definitions and removing obsolete source from shared tasks.
+Scope PORO and lib `parent_class` metadata and source annotations to the selected declaration. Nested or sibling error classes no longer supply an unrelated superclass; implicit parents remain nil and explicit constant-path parents retain their names (#474).
+- Reject pgvector HNSW `vector` widths above 2,000 before database writes, and reject invalid migration dimensions before creating files. Correct the 3,072-dimensional generator example and document explicit provider output sizing; no vector truncation or implicit conversion is performed (#524).
+- Describe prepared prereleases without claiming RubyGems publication from VERSION alone, and retain the published 1.6.2 maintenance changelog so generated stable-version guidance stays accurate.
+- Preserve actual GraphQL and gem-source types in `Woods::PublishedIndex` typed lookup and enumeration while retaining the `graphql` and `rails_source` family aliases (#518).
+- Enforce `graph_analysis`'s advertised default of 20 rows per section and retain total/offset context on last and empty pages in every renderer. Correct the structure glossary: graph nodes include isolated units, and retriever entry counts depend on mode and store coverage (#519).
+- Coordinate agent configuration apply and recovery on shared managed targets across application roots, preventing concurrent user-scoped installations from overwriting each other. Keep application-specific receipts, refuse stale plans, and report/protect every coordination path in previews (#520).
+- Apply JSON temporal history limits after matching the requested unit, preserving access to retained records across gaps and deletions with SQLite parity (#521).
+- Reconcile reused in-memory vector and metadata stores during full embedding rebuilds, removing vanished units and publishing empty corpora without changing incremental purge guards. Failed embedding preserves the previous promoted dump and checkpoint (#522).
+Validate persisted JSON snapshot shapes before reading history or capturing the next snapshot. Unusable nested unit records and summary fields now warn and skip the entire snapshot, preserving valid legacy records, corrupt-file retention, and caller SHA validation (#492).
+- Use the same JSON snapshot validity checks for reads and retention: reject filename/content SHA mismatches before selecting a capture baseline, and prune corrupt files before valid legacy snapshots with missing or null timestamps. Timestamp-less snapshots remain eligible for ordinary oldest-first retention.
+Expose the paginated dependencies/dependents payload in `structuredContent.data` with every renderer, including packaged stdio and HTTP defaults, while preserving rendered text and existing tool arguments (#481).
+- Stabilize direct Proc/lambda model validation option values in extracted and published metadata using callable kind and source-location labels, without executing them. Preserve validation order, duplicates, conditions and non-Proc values; nested containers are not recursively normalized. Run a full extraction to refresh retained validation metadata; index schemas are unchanged.
+- Reconcile registered initializers deleted during watch downtime with a full extraction after a fresh environment boot, preserving whole-application runtime facts.
+- Keep the stable extraction guard and output directory after `woods:clean`, so a concurrent writer can finish acquiring its lock safely.
+Keep Console MCP application stdout redirected to stderr throughout stdio operation, with a dedicated pipe for protocol responses and notifications. Rails SQL/application loggers and runtime writes to standard output no longer corrupt JSON-RPC after boot. Preserve SDK framing, negotiation, errors, EOF and interrupt handling; use the rake launcher to capture Rails environment boot output too. (#536)
+Guard generated Puma startup using plugin files in the active Woods gem, including Git/path bundles. Branches with an older Woods gem that lacks the plugin can boot Puma without a watcher. Explicit watcher installation updates now refresh an existing owned directive in place, preserving surrounding text, newline style, and removal ownership; repeating setup leaves it unchanged. Existing generated Puma setups should preview and apply `bin/rails generate woods:watch --operation update --mode puma` with a supporting bundle. (#542)
+- Watcher startup generator refusals now exit nonzero, so unsupported Puma versions and installation conflicts cannot appear successful to automation. The existing diagnostics and file-preservation behavior remain intact (#544).
+- Preserve application Bundler path, external configuration, group selection, and
+  application environment during managed watcher installation preflight. Reset
+  inherited activation state without making a working container bundle appear
+  missing; retain selected lockfiles and frozen-resolution requests (#540).
+- Correct linked-worktree Git mount guidance and the runtime repair warning to
+  select the worktree-specific HEAD within the complete shared Git layout.
+  Regressions cover exact branch/SHA, feature-only history and incremental paths
+  after relocation. Document the need for full extraction when current Git
+  metadata is required after a commit that does not trigger the source watcher.
 
 ### Testing
 
@@ -2348,6 +2326,7 @@ derive unit identifiers, which changes the index format's observable contract.
   migration race) never executed anywhere. The `live-backends` job now
   lists it; that job already provides the ephemeral `redis` client install,
   the redis service, and `WOODS_REDIS_URL`.
+- Raise the default-suite CI line-coverage floor from 85% to 90%, calibrated against current local and CI measurements. Branch coverage remains measured without a gate; per-file floors and combined opt-in coverage remain separate work.
 
 ### Security
 
@@ -2360,6 +2339,25 @@ derive unit identifiers, which changes the index format's observable contract.
   before optional libraries can select conflicting dependency versions.
 - Update Inspector transitive dependencies `fast-uri` and `qs` to patched versions
   and audit the pinned Node dependency tree in CI.
+- Redact protected Console fields before serialization, normalize the remaining values to their JSON-compatible representation, and redact and scan again before JSON or Markdown rendering. Symbol values and custom serializers cannot introduce unscanned credentials in the final response, and protected serializers remain uncalled. The direct credential scanner also scans Symbol values while preserving their type.
+- Check resolved relations against the Console blocked-table policy before default model tools fetch records or counts, including association parent lookups; reuse the checked relation so dynamic default scopes are evaluated once.
+- Refuse unsupported SQLite identifier and table-reference syntax before Console SQL execution, preserving blocked-table and function policies; ordinary bare and simple quoted identifiers remain supported.
+- Preserve blocked-table visibility after subqueries and parenthesized JOIN predicates, including quoted aliases, across supported SQL dialects.
+
+### Build
+
+- Allow the exact 1.6.3 maintenance tag and branch from the released 1.6.2 base while keeping publication disabled until a separately reviewed candidate SHA is pinned. Preserve all CI, immutable-artifact, package-test and protected-environment release gates.
+
+## [1.6.3] - 2026-09-22
+
+### Build
+
+- Add the explicit, no-publish preparation cycle for the 1.6.3 security maintenance release; keep version writes task-owned and publication dependent on a reviewed trusted-main SHA pin.
+
+### Security
+
+- Apply blocked-table policy to resolved model relations and SQLite table syntax before reads, retain table boundaries across comments, and reject quoted spellings of existing denied SQL functions.
+- Scan the serialized Console response after protected-field redaction so Symbol values and custom JSON output cannot bypass credential scanning.
 
 ## [1.6.2] - 2026-09-18
 

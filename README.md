@@ -49,19 +49,6 @@ Run installation and extraction commands from your Rails application root in its
 These steps are for **Woods 2.x**. Choose a published 2.x version from [RubyGems](https://rubygems.org/gems/woods/versions). If only prereleases are available, use an exact prerelease pin; `~> 2.0` will not select one. Follow the chosen version's tag documentation rather than assuming every feature on `main` is published. If you choose 1.x, use its tag documentation instead of this quickstart.
 
 <!-- release-state:version-banner -->
-> **This tree documents version 2.0.0.** It is a major update from 1.x: read [what changed and how to upgrade](docs/UPGRADING_TO_2.md) before updating. The full history is in the [CHANGELOG](CHANGELOG.md).
->
-> `main` is the development branch and can run ahead of the latest published gem. The gem badge above shows the latest published version; documentation for a published version lives on its tag.
->
-> ### Version: this tree declares prerelease 2.0.0.beta4; `main` documents 2.0.0
->
-> | Line | Version | Documentation |
-> |---|---|---|
-> | Documented here | **2.0.0**, unreleased | this README and the [documentation index](docs/README.md) |
-> | Declared prerelease | **2.0.0.beta4** | [the v2.0.0.beta4 tag](https://github.com/lost-in-the/woods/tree/v2.0.0.beta4) |
-> | Latest published gem | **1.6.2** | [the v1.6.2 tag](https://github.com/lost-in-the/woods/tree/v1.6.2) |
->
-> RubyGems treats 2.0.0.beta4 as a prerelease, so `gem "woods", "~> 2.0"` does not resolve it. Once published, install it explicitly with `gem "woods", "2.0.0.beta4"`. The released constraint stays `gem "woods", "~> 1.6"`.
 <!-- release-state:end -->
 
 Once a stable 2.x release is published, add `gem "woods", "~> 2.0"` to your Gemfile's `:development` group. For a prerelease, use its exact published version instead. Then run:

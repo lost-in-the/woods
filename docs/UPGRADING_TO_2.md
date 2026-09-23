@@ -2,12 +2,10 @@
 
 Woods 2.0 changes observable index identifiers, publication layout, vector-store reconciliation, and the supported MCP surface. Plan a clean re-index. Do not upgrade a shared or durable index in place without a backup and a rollback window.
 
-This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
+This guide covers the supported 1.6.x line and targets 2.0.0. Use the latest
+published 1.6.x security patch as the rollback version.
 
 <!-- release-state:upgrade-availability -->
-> This tree declares 2.0.0.beta4 as a prerelease. After RubyGems lists it, pin it with
-> `gem "woods", "2.0.0.beta4"`; `~> 2.0` resolves only once
-> 2.0.0 is published.
 <!-- release-state:end -->
 
 ## Upgrade outcome
