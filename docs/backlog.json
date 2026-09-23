@@ -2829,5 +2829,17 @@
     ],
     "description": "Issue #542: generated Puma startup now checks plugin files in the active gem, including Git/path bundles, so an older activated gem without the plugin can still boot the web server. Explicit owned-configuration updates refresh the directive in place; setup remains idempotent and surrounding text, newline style and removal ownership are preserved. Actual Puma and migration regressions pass (74 focused examples); two independent reviews approved. Full PR CI is required before merge.",
     "status": "resolved"
+  },
+  {
+    "id": "B-207",
+    "title": "Return failure when watcher installation is refused",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "operations",
+    "files": [
+      "lib/generators/woods/watch_generator.rb"
+    ],
+    "description": "Issue #544: Rails generators normally swallow Thor errors after printing them and return success. Opt the watcher generator into failure exits so preflight and ownership refusals reliably fail automation while preserving diagnostics and application files. A subprocess regression checks the real exit status; woods-testbed adds an actual Rails 6/Puma 4.3 refusal check alongside supported Puma source and installed-artifact lifecycle coverage.",
+    "status": "resolved"
   }
 ]

@@ -60,7 +60,8 @@ RSpec.describe 'Woods watcher Rails generator' do
   end
 
   it 'requires explicit startup selection and gives a usable error before changing anything' do
-    _stdout, stderr, _status = generate('--mode', 'procfile')
+    _stdout, stderr, status = generate('--mode', 'procfile')
+    expect(status.exitstatus).to eq(1)
     expect(stderr).to match(/Foreman.*Puma/m)
     expect(Dir.children(@root).sort).to eq(%w[Gemfile Procfile.dev])
   end

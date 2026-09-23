@@ -131,6 +131,9 @@ Run setup in the normal application bundle environment. The unreleased #540 fix
 preserves `BUNDLE_PATH`, `BUNDLE_APP_CONFIG`, and group selection during preflight;
 older Git builds may falsely report missing gems. Check the loaded revision
 before changing persistent Bundler settings to work around that error.
+The unreleased #544 fix makes generator refusals exit nonzero. Earlier Git builds
+can exit zero after printing a refusal; verify the diagnostic and applied setup
+before treating their exit status as installation success.
 For an interrupted install, use the generator's `--operation recover --pretend`
 before applying recovery; preserve journals when concurrent edits block it. The
 Rails generator command boots the app first: use the runbook's direct bundled

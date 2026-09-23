@@ -101,6 +101,11 @@ If normal task discovery works but installer preflight cannot find Rails or an
 installed dependency, check the loaded revision and bundle environment before
 reinstalling gems or adding a persistent `.bundle/config` workaround.
 
+Installer refusals return a nonzero exit status with their diagnostic (#544,
+unreleased after `2.0.0.beta4`). Earlier Git builds printed the refusal but exited
+successfully, so automation using those builds must also check the diagnostic and
+whether installation actually applied.
+
 Use `--child-command 'bundle exec rails woods:watch'` when that is the
 application's actual Rails entrypoint. Command strings become explicit argument
 vectors; shell pipelines, variable expansion, and shell setup scripts are not
