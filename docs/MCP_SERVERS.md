@@ -272,6 +272,10 @@ references (including references to generic PORO and library classes) may have n
 edge. No dependents, a test-only dependent, or a completed traversal does not prove
 there are no production callers. Verify important absence claims in source.
 
+A supporting post-2.0 writer recovers additional [constant source references](EXTRACTOR_REFERENCE.md#constant-source-references)
+(unreleased; planned for 2.1). Upgrading the reader alone cannot add relationships
+to an old index. The coverage warning still applies.
+
 Supporting servers expose the annotated, paginated traversal result in
 `structuredContent.data` for every renderer, including the default packaged
 stdio and HTTP servers. Read `data.total_is_exact`, `data.graph_coverage`, budget

@@ -150,6 +150,10 @@ do not establish absence of production callers. Check source before claiming abs
 The `graph_coverage` notice makes this scope explicit in supporting responses;
 that metadata is included in Woods `2.0.0`.
 
+A supporting post-2.0 writer recovers additional [constant source references](EXTRACTOR_REFERENCE.md#constant-source-references)
+(unreleased; planned for 2.1). Upgrading the reader alone cannot add relationships
+to an old index. The coverage warning still applies.
+
 Start at depth 1 or 2. A deeper unfiltered traversal can obscure the direct evidence that matters. Common relationship values include associations (`belongs_to`, `has_many`, `has_one`), code references, renders, redirects, form actions, and navigation links.
 
 Both return at most 50 nodes by default and say so with a `Showing N of M (truncated)`

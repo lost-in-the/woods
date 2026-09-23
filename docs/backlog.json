@@ -2935,7 +2935,7 @@
       "lib/woods/source_references/",
       "lib/woods/extractor.rb"
     ],
-    "description": "Issue #475: approved post-2.0 work adds a verified constant registry and parser-backed source reference collection, then integrates generation-scoped candidate caching into full/incremental/refresh extraction. Forward/reverse parity, target additions without caller edits, conservative Ruby lookup and measured blast-radius costs are acceptance gates. The initial collector/resolver foundation is not wired into extraction; #552 separately supplies missing standalone modules.",
+    "description": "Issue #475: approved post-2.0 work adds a verified constant registry and parser-backed source reference collection, then integrates generation-scoped candidate caching into full/incremental/refresh extraction. Forward/reverse parity, target additions without caller edits, conservative Ruby lookup and measured blast-radius costs are acceptance gates. Collector/resolver foundations merged in #557. Full/incremental/refresh integration now publishes candidate caches and matching forward/reverse edges, with a required full baseline rebuild for older indexes. Booted equivalence and independent review pass; testbed/performance acceptance remains before closing this ticket. #552 separately supplies missing standalone modules.",
     "status": "in-progress"
   },
   {

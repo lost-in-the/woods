@@ -32,6 +32,17 @@ This guide covers the most common problems encountered when installing, extracti
 | Tool returns `error_code: :not_configured` | Feature flag or credential not set | Check `config_key` in `_meta` and the linked `doc_link` |
 | Tool returns `error_code: :rate_limited` | `PipelineGuard` 5-min cooldown hit | Wait `retry_after_seconds` from `_meta`, then retry |
 
+### Source-reference baseline needs a full extraction
+
+**Unreleased after 2.0.0; planned for 2.1.** The related initial diagnostic is
+`Source-reference baseline is missing or incompatible`. Both mean the writer
+cannot safely reuse its reference cache or verify the source consumed by retained
+units. It can follow an older-index upgrade, missing cache artifacts, or source
+changes omitted from the refresh batch. Confirm the loaded gem revision and
+output directory, then follow the [full baseline rebuild](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
+The failed operation leaves the published generation unchanged. Preserve pending
+watcher work; increasing traversal budgets cannot repair extraction coverage.
+
 ### First-Pass Diagnostics
 
 For a single-call health snapshot, call the Index Server's `woods_status` tool. It reports:

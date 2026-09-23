@@ -307,6 +307,13 @@ deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
 paging alone only visits the discovered prefix. See the
 [budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
 
+On a reviewed post-2.0 writer containing the unreleased reference expansion,
+missing/incompatible reference-cache state requires a full extraction before
+incremental maintenance resumes. Check the loaded revision, not VERSION alone.
+Increasing `max_nodes` cannot recover edges the writer never recorded. Follow the
+[baseline diagnostic](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#source-reference-baseline-needs-a-full-extraction)
+and preserve pending work. This plugin does not add extraction capabilities.
+
 ## 4. Check semantic retrieval
 
 Do not treat structural `ready: true` or bootstrap `hydrated` as proof that

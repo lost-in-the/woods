@@ -40,6 +40,33 @@ Separately, dependency scanning does not capture every method-body constant
 reference ([#475](https://github.com/lost-in-the/woods/issues/475)). A missing unit
 or edge is not proof of unused code; cross-check the application source.
 
+### Constant source references
+
+**Unreleased after Woods 2.0.0; planned for 2.1.** For Git/path installations,
+record the loaded gem path and exact revision; the development version alone
+does not establish that this change is installed.
+
+After discovery and deduplication, extraction adds `code_reference` relationships
+from models, controllers, services, POROs, library units and concerns to verified,
+indexed class/module targets. It parses original Ruby source and attributes reads
+to their declaring owner. Ordinary method bodies, singleton methods and callback
+blocks participate. Comments, plain strings and declaration names do not establish
+references. Rails relationships derived through runtime reflection stay intact.
+
+Resolution respects qualified names and supported lexical/runtime context.
+Dynamic constant lookup, uncertain aliases, ambiguous typed identities and
+unsupported scopes remain unresolved. In particular, references inside
+`class << self` are recorded as candidates but currently skipped during resolution;
+ordinary `def self.method` bodies are supported. A source reference does not prove
+execution, and an absent edge does not prove there are no callers. The internal cache retains parsed candidates, their scope, and collector skip
+reasons; it does not establish complete reference coverage.
+
+Forward edges and reverse relationships publish together. Incremental extraction
+and targeted refresh reconsider cached references when targets appear, disappear
+or change resolution, including references in unchanged callers. Larger recorded
+dependency sets can increase the incremental blast radius; no separate limit is
+applied to these edges. See [source-reference baseline and upgrades](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
+
 ### Identifier naming (source-derived units)
 
 File-based extractors derive an identifier in three steps, first match wins:

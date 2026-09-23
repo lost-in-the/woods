@@ -48,6 +48,65 @@ RSpec.describe Woods::SourceInputs::Session do
     Woods::SourceInputs::Verifier.new(manifest: manifest, output_dir: @output).call
   end
 
+  describe 'source read capability' do
+    it 'reads captured bytes without claiming the unit consumed them' do
+      path = 'app/services/pay.rb'
+      write(path, 'class Pay; end')
+      run = session
+      expect(run.source_identity(path)).to eq(OpenSSL::HMAC.hexdigest('SHA256', @key.bytes, 'class Pay; end'))
+      expect(run.consumed_source?(:services, path)).to be(false)
+      result = run.read_source(path)
+      expect(result).to include('path' => path, 'source' => 'class Pay; end', 'identity' => run.source_identity(path))
+      expect(run.consumed_source?(:services, path)).to be(false)
+      run.consume_unit(:services, path)
+      expect(run.consumed_source?(:services, path)).to be(true)
+    end
+
+    it 'distinguishes retained consumption from changed current snapshot bytes' do
+      path = 'app/services/pay.rb'
+      write(path, 'before')
+      baseline_run = session
+      baseline_run.consume_unit(:services, path)
+      persist(finish(baseline_run))
+      expect(session('incremental').consumed_source?(:services, path)).to be(true)
+      write(path, 'after')
+      run = session('incremental')
+      expect(run.consumed_source?(:services, path)).to be(false)
+      expect(run.read_source(path)['source']).to eq('after')
+      expect(run.consumed_source?(:services, path)).to be(false)
+      run.consume_unit(:services, path)
+      expect(run.consumed_source?(:services, path)).to be(true)
+    end
+
+    it 'keeps missing or legacy unit ledgers unproven despite matching file scopes' do
+      path = 'app/services/pay.rb'
+      write(path, 'before')
+      expect(session('incremental').consumed_source?(:services, path)).to be(false)
+      persist(finish(session))
+      run = session('incremental')
+      expect(run.read_source(path)['source']).to eq('before')
+      expect(run.consumed_source?(:services, path)).to be(false)
+      expect(run.consumed_source?(:poros, path)).to be(false)
+    end
+
+    it 'refuses uncaptured paths, unavailable identities and edits after session creation' do
+      path = 'app/services/pay.rb'
+      write(path, 'before')
+      run = session
+      write('app/services/new.rb', 'new')
+      expect(run.source_identity('../foreign.rb')).to be_nil
+      expect(run.consumed_source?(:services, '../foreign.rb')).to be(false)
+      expect { run.read_source('app/services/new.rb') }
+        .to raise_error(Woods::SourceInputs::StableReader::Error, 'uncaptured_source_path')
+      write(path, 'after')
+      expect { run.read_source(path) }
+        .to raise_error(Woods::SourceInputs::StableReader::Error, 'source_snapshot_mismatch')
+      File.chmod(0o644, File.join(@output, Woods::SourceInputs::PrivateKey::FILE_NAME))
+      expect { session.read_source(path) }
+        .to raise_error(Woods::SourceInputs::StableReader::Error, 'source_identity_unavailable')
+    end
+  end
+
   it 'retains pre-consumption bytes when a source changes while extraction runs' do
     write('app/services/pay.rb', 'before')
     run = session

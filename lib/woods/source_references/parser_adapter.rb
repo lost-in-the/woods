@@ -13,7 +13,10 @@ module Woods
         parser.diagnostics.consumer = ->(diagnostic) { diagnostics << diagnostic }
         parser.diagnostics.all_errors_are_fatal = true
         parser.diagnostics.ignore_warnings = true
-        buffer = ::Parser::Source::Buffer.new('(source references)', source: source)
+        # Ruby source defaults to UTF-8 even when read as untouched binary bytes.
+        # Source::Buffer still honors an explicit encoding magic comment.
+        input = source.encoding == Encoding::BINARY ? source.dup.force_encoding(Encoding::UTF_8) : source
+        buffer = ::Parser::Source::Buffer.new('(source references)', source: input)
         [parser.parse(buffer), nil]
       rescue ::Parser::SyntaxError => e
         diagnostic = diagnostics.last

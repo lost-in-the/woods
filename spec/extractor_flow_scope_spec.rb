@@ -90,13 +90,13 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
   # `reconcile_changed_paths` because that is the first hook that runs after
   # the payload directory exists.
   def stub_incremental_run
-    %i[safe_eager_load! finalize_incremental_unit_json regenerate_type_index
+    %i[safe_eager_load! prepare_source_reference_baseline finalize_incremental_unit_json regenerate_type_index
        write_dependency_graph write_incremental_graph_analysis patch_flow_annotations
        sweep_orphaned_flow_files write_manifest write_structural_summary
        publish_generation].each do |phase|
       allow(extractor).to receive(phase)
     end
-    %i[reconcile_class_based_types rerun_whole_app_extractors reannotate_packages
+    %i[reconcile_class_based_types enrich_source_references_incremental rerun_whole_app_extractors reannotate_packages
        prune_vanished_units].each do |phase|
       allow(extractor).to receive(phase).and_return(Set.new)
     end

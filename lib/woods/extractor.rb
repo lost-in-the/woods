@@ -59,6 +59,7 @@ require_relative 'change_set'
 require_relative 'generation'
 require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
+require_relative 'source_references/extraction'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -78,6 +79,7 @@ module Woods
     include ExtractionIdentities
     include FilenameUtils
     include Extractors::SourceNesting
+    include SourceReferences::Extraction
 
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
@@ -360,7 +362,9 @@ module Woods
     # flat index — the output root also holds `generation.json`, `dumps/`,
     # `tasks/`, `woods.sqlite3` and `payloads/` itself, none of which belong
     # to a generation's payload.
-    PAYLOAD_FILES = %w[manifest.json source_inputs.json dependency_graph.json graph_analysis.json SUMMARY.md].freeze
+    PAYLOAD_FILES = %w[
+      manifest.json source_inputs.json source_references.json dependency_graph.json graph_analysis.json SUMMARY.md
+    ].freeze
 
     # Payload directories that are not per-type unit directories.
     PAYLOAD_DIRS = %w[flows].freeze
@@ -434,6 +438,7 @@ module Woods
       # Phase 1.6: Package membership. Runs before the graph is rebuilt so
       # registration copies metadata[:package] onto the node (#280).
       profile_phase('package annotation') { annotate_packages }
+      profile_phase('source references') { enrich_source_references_full }
 
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
       # `#remove`/`#unregister`, so surgical removal is now possible — but a
@@ -603,6 +608,7 @@ module Woods
       end
 
       raise_on_handled_extraction_failure!
+      touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       finalize_incremental_unit_json(affected_types)
 
       # Regenerate type indexes for affected types
@@ -666,6 +672,7 @@ module Woods
       end
 
       raise_on_handled_extraction_failure!
+      touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       finalize_incremental_unit_json(affected_types)
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
@@ -790,6 +797,7 @@ module Woods
         @dependency_graph = DependencyGraph.from_h(JSON.parse(AtomicFile.read(graph_path))) if graph_path.exist?
       end
 
+      prepare_source_reference_baseline
       ModelNameCache.reset!
       profile_phase('eager load') { safe_eager_load! }
 
@@ -895,6 +903,9 @@ module Woods
     # handoff can additionally establish the pre-Bundler/Rails boot boundary.
     def begin_source_inputs(operation)
       @failed_consumers = Set.new
+      @source_reference_refreshed = Set.new
+      @source_reference_paths = nil
+      @source_reference_baseline = nil
       @source_inputs = SourceInputs::Session.new(root: Rails.root, output_dir: @output_dir,
                                                  baseline_path: source_input_baseline_path,
                                                  operation: operation)
@@ -943,6 +954,7 @@ module Woods
       return unless @source_inputs
 
       manifest = @source_inputs.finish(generation: @payload_generation, eager_load_complete: @eager_load_complete)
+      verify_source_reference_publication!(manifest)
       AtomicFile.write(payload_dir.join(SourceInputs::Manifest::FILE_NAME), JSON.pretty_generate(manifest.data))
     end
 
@@ -3513,6 +3525,7 @@ module Woods
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
         @source_inputs&.consume_unit(extractor_key, unit.file_path) unless source_consumer_failed?(extractor_key)
+        (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
         written.add(unit.identifier)
       end
     end

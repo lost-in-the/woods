@@ -5,6 +5,7 @@ require 'woods/source_inputs/scanner'
 require 'woods/source_inputs/manifest'
 require 'woods/source_inputs/handoff'
 require 'woods/source_inputs/consumer_errors'
+require 'woods/source_inputs/stable_reader'
 
 module Woods
   module SourceInputs
@@ -29,6 +30,38 @@ module Woods
         @snapshot = unavailable_snapshot(e.message)
         @identities = {}
         @verified_boot = false
+      end
+
+      # Read original captured bytes, without certifying runtime consumption.
+      #
+      # @param path [String] root-relative or absolute application source path
+      # @param limits [Hash] StableReader byte/time budget overrides
+      # @return [Hash] original source bytes, relative path and captured HMAC
+      # @raise [StableReader::Error] when source cannot be read as captured
+      def read_source(path, **limits)
+        raise StableReader::Error, 'source_identity_unavailable' unless @key
+
+        identity = source_identity(path)
+        raise StableReader::Error, 'uncaptured_source_path' unless identity
+
+        StableReader.new(root: @root, key: @key).read(path, identity: identity, **limits)
+      end
+
+      # @param path [String] root-relative or absolute application source path
+      # @return [String, nil] captured private HMAC, never a public raw content hash
+      def source_identity(path)
+        @snapshot.fetch('files')[relative_path(path)]&.dup&.freeze
+      end
+
+      # A fresh read cannot establish which bytes produced retained runtime facts.
+      # This checks only explicit unit consumption against this session's capture.
+      #
+      # @param key [String, Symbol] extractor ledger key
+      # @param path [String] root-relative or absolute application source path
+      # @return [Boolean] whether that unit consumer acknowledged captured bytes
+      def consumed_source?(key, path)
+        identity = source_identity(path)
+        !identity.nil? && @identities.fetch("unit:#{key}", {})[relative_path(path)] == identity
       end
 
       def consume_file(key, path)
