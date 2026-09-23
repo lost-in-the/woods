@@ -2924,5 +2924,18 @@
     ],
     "description": "Issue #555: After 2.0.0 publication, reopening 2.0.1.alpha incorrectly claimed that the released ~> 2.0 constraint could not resolve until 2.0.1 shipped. Describe the documented version as unreleased while retaining accurate stable-install guidance. Generate the fence through release:reopen and cover the patch transition with a regression. Release contracts pass (231 examples); independent review approved. Full PR CI is required before merge.",
     "status": "resolved"
+  },
+  {
+    "id": "B-214",
+    "title": "Capture conservative source references for PORO and library dependency edges",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/source_references/",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Issue #475: approved post-2.0 work adds a verified constant registry and parser-backed source reference collection, then integrates generation-scoped candidate caching into full/incremental/refresh extraction. Forward/reverse parity, target additions without caller edits, conservative Ruby lookup and measured blast-radius costs are acceptance gates. The initial collector/resolver foundation is not wired into extraction; #552 separately supplies missing standalone modules.",
+    "status": "in-progress"
   }
 ]

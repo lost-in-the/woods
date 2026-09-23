@@ -1,0 +1,1 @@
+- Add internal constant-reference collection and conservative resolution foundations for PORO and library dependency coverage (#475). This first stage does not change extraction output; graph integration follows separately.
