@@ -38,7 +38,7 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 Choose the published version using the canonical
 [installation guide](https://github.com/lost-in-the/woods/blob/main/docs/GETTING_STARTED.md#1-install-the-gem)
-and its linked README release table. When only prereleases are published for
+and confirm the selected version on RubyGems. When only prereleases are published for
 2.x, add the exact published beta/RC constraint shown there to the development
 group; `~> 2.0` does not select prereleases. Use `gem "woods", "~> 2.0"` only after
 a stable 2.x release is published. Follow the selected version's tag docs and
@@ -108,10 +108,16 @@ When Woods is installed only in Docker, launch it through the application servic
 }
 ```
 
+For linked worktrees, verify source/index alignment and the extraction's Git
+branch and exact SHA. Preserve the complete shared Git layout and select the
+worktree-specific directory when using the installed version's `WOODS_GIT_DIR`
+override; the shared root selects the primary checkout's HEAD. Follow the
+[worktree mount guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
+
 Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
 
 Offer one automatic-maintenance owner within the setup scope. The managed launcher,
-watcher generator, and Puma adapter (#538) are **unreleased after `2.0.0.beta4`**.
+watcher generator, and Puma adapter (#538) are **included in Woods `2.0.0`**.
 Record the loaded gem path and revision, then verify `bundle exec woods-watch
 --help` and `bin/rails generate woods:watch --help` before using them. Follow the
 [managed startup runbook](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup):
@@ -121,17 +127,17 @@ existing authorization. Preserve `bin/dev`; never claim an unused Procfile is
 active. Keep the portable receipt with generated files and respect edit conflicts.
 Puma installation supports the normal default `config/puma.rb` route; an existing
 environment-specific file or custom `-C` route needs a different explicit owner.
-The unreleased #542 guard checks plugin files in the active gem, including Git/path
+The #542 guard included in Woods `2.0.0` checks plugin files in the active gem, including Git/path
 bundles. Older gems without the plugin skip watcher startup. Existing generated
 Puma setups need an explicit `--operation update --mode puma` (preview first) to
 upgrade the owned guard in place; repeating setup preserves it. The wrapper and
 Foreman entry still require a supporting gem. Remove owned setup before a permanent
 downgrade; do not hand-edit the receipt or its managed block.
-Run setup in the normal application bundle environment. The unreleased #540 fix
+Run setup in the normal application bundle environment. The #540 fix in Woods `2.0.0`
 preserves `BUNDLE_PATH`, `BUNDLE_APP_CONFIG`, and group selection during preflight;
 older Git builds may falsely report missing gems. Check the loaded revision
 before changing persistent Bundler settings to work around that error.
-The unreleased #544 fix makes generator refusals exit nonzero. Earlier Git builds
+The #544 fix in Woods `2.0.0` makes generator refusals exit nonzero. Earlier Git builds
 can exit zero after printing a refusal; verify the diagnostic and applied setup
 before treating their exit status as installation success.
 For an interrupted install, use the generator's `--operation recover --pretend`
@@ -191,7 +197,7 @@ for transport, retry and custom-root limits.
 
 ## Ask before expanding scope
 
-For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is unreleased after `2.0.0.beta3`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
+For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is included in Woods `2.0.0`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
 
 Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, Console MCP/live-data access, HTTP transport, or purge overrides. The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama. Recommend `gem "tokenizers", "~> 0.5"` for exact counting on dense Ruby source, while stating that it is optional.
 

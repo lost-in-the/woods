@@ -12,15 +12,15 @@ If an agent will perform the installation, use the safety and handoff checklist 
 
 ## 1. Install the gem
 
-Use the [README release table](../README.md) to choose a version, then confirm
-that **exact version is published** on the [RubyGems versions page](https://rubygems.org/gems/woods/versions)
-before editing the Gemfile. A prepared release checkout can update the README
+Choose a version from the [RubyGems versions page](https://rubygems.org/gems/woods/versions)
+and confirm that **exact version is published** before editing the Gemfile.
+A prepared release checkout can update the documentation
 before its gem is published; if the version is absent, choose an available
 version or wait for publication.
 
 If the published 2.x line has only beta or release-candidate versions, use an
-exact pin to the published prerelease, following the README's prerelease
-instructions; `~> 2.0` does not select prereleases. Follow the selected version's
+exact pin to the published prerelease; `~> 2.0` does not select prereleases.
+Follow the selected version's
 tag documentation. The `main` guides may describe features absent from the
 published gem.
 
@@ -152,7 +152,7 @@ Enable one watcher through the application's normal development startup. The
 [managed startup guide](WATCH_DAEMON.md#managed-development-startup) covers
 opt-in Puma integration for a simple Rails application, an owned Foreman entry
 for existing Procfile workflows, and external supervision for Docker/Grove.
-The managed launcher and generator are **unreleased after `2.0.0.beta4`**;
+The managed launcher and generator are **included in Woods `2.0.0`**;
 check the installed commands before using them. Older packages can run the raw
 `bin/rails woods:watch` task under an external restart-capable supervisor.
 

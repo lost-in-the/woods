@@ -4,7 +4,7 @@
 application inputs with source bytes visible to the reader. It is separate from
 index age, HEAD equality, daemon liveness and external database/runtime state.
 
-This capability is unreleased after `2.0.0.beta2`. Check the installed gem's
+This capability is included in Woods `2.0.0`. Check the installed gem's
 `woods-extract --help`, `rake -T woods:source_status`, and `woods_status` schema
 before using it; upgrading the plugin alone does not upgrade Woods.
 

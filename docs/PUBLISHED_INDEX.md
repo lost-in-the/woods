@@ -111,7 +111,7 @@ The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit 
 
 ### Actual unit types and directory families
 
-Unreleased after `2.0.0.beta3`: `unit` and `units` accept actual published
+Included in Woods `2.0.0`: `unit` and `units` accept actual published
 `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`, and
 `gem_source` types. Enumeration preserves each unit's actual type rather than
 labeling every GraphQL member `graphql` or every gem source `rails_source`.

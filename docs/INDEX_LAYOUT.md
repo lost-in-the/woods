@@ -94,8 +94,8 @@ families and `manifest.provenance.mode`; it is not Rails runtime evidence.
 ### Semantic graph validation
 
 `woods:validate` checks raw graph data against the unit indexes and artifacts in
-one pinned published generation. This validation is unreleased after
-`2.0.0.beta2`. It checks the shapes of `nodes`, `edges`, `reverse`, `file_map`,
+one pinned published generation. This validation is included in Woods `2.0.0`.
+It checks the shapes of `nodes`, `edges`, `reverse`, `file_map`,
 `type_index`, and optional `variants`; typed identities must be unique and agree
 with the actual indexed units. Forward sources must exist. Reverse, file, and
 type memberships must match the union of primary and variant contributions.

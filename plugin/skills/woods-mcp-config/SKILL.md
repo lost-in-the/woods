@@ -58,7 +58,7 @@ Use this shape for any stdio-capable MCP client, adapted to the client's configu
 MCP registration does not start automatic indexing. Existing readers observe
 published generations without reconnecting; separately verify the watcher owner,
 startup catch-up, and a real edit. Native launcher/Puma installation (#538) is
-unreleased after `2.0.0.beta4`: check installed `woods-watch` and generator help
+included in Woods `2.0.0`: check installed `woods-watch` and generator help
 before offering it. Preserve the existing external service in Docker/Grove and
 keep its source/index aligned across switches. See
 [automatic maintenance](https://github.com/lost-in-the/woods/blob/main/docs/AUTOMATIC_MAINTENANCE.md).
@@ -82,7 +82,13 @@ When Woods is installed only in Docker, prefer running the server through the ap
 }
 ```
 
-Use a host-side bundle only after verifying Ruby, the application bundle, and the index are available on the host. Always pass the path visible to the process that runs `woods-mcp`. Prefer an explicit index path on all versions. After `2.0.0.beta3`, an unreleased change adds `WOODS_OUTPUT` as a fallback after the positional path and `WOODS_DIR`; check the installed version's configuration guide before relying on it. `woods-mcp-start` still refuses a missing path rather than selecting its working directory.
+Use a host-side bundle only after verifying Ruby, the application bundle, and the index are available on the host. Always pass the path visible to the process that runs `woods-mcp`. Prefer an explicit index path on all versions. Woods `2.0.0` includes `WOODS_OUTPUT` as a fallback after the positional path and `WOODS_DIR`; check the installed version's configuration guide before relying on it. `woods-mcp-start` still refuses a missing path rather than selecting its working directory.
+
+For linked worktrees, verify source/index alignment and the extraction's Git
+branch and exact SHA. Preserve the complete shared Git layout and select the
+worktree-specific directory when using the installed version's `WOODS_GIT_DIR`
+override; the shared root selects the primary checkout's HEAD. Follow the
+[worktree mount guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
 
@@ -126,7 +132,7 @@ For Docker/SSH, configure `~/.woods/console.yml` or `WOODS_CONSOLE_CONFIG`; the 
 
 Reserve stdout for MCP. Through Woods `2.0.0.beta4`, configure the Console
 process's Rails logger to use stderr or a file, including logs during queries.
-Runtime stdout isolation is unreleased after that version; verify the installed
+Runtime stdout isolation is included in Woods `2.0.0`; verify the installed
 revision before relying on it. Use the rake entry point to capture Rails boot
 output as well.
 

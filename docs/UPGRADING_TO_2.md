@@ -2,12 +2,10 @@
 
 Woods 2.0 changes observable index identifiers, publication layout, vector-store reconciliation, and the supported MCP surface. Plan a clean re-index. Do not upgrade a shared or durable index in place without a backup and a rollback window.
 
-This guide assumes the last v1 release, 1.6.1, and targets 2.0.0.
+This guide covers the supported 1.6.x line and targets 2.0.0. Use the latest
+published 1.6.x security patch as the rollback version.
 
 <!-- release-state:upgrade-availability -->
-> This tree declares 2.0.0.beta4 as a prerelease. After RubyGems lists it, pin it with
-> `gem "woods", "2.0.0.beta4"`; `~> 2.0` resolves only once
-> 2.0.0 is published.
 <!-- release-state:end -->
 
 ## Upgrade outcome
@@ -95,7 +93,11 @@ Also back up managed Obsidian/Unblocked destinations before allowing a mass stal
 
 ### 3. Choose a rollback point
 
-Keep the v1 Gemfile/lockfile commit and all durable-store backups until v2 extraction, MCP calls, retrieval, and exports are verified. Downgrading the gem does not translate v2 identifiers back to v1.
+Record and test a Gemfile/lockfile selecting the latest published 1.6.x security
+patch as the rollback bundle. If the current installation is older, verify that
+patched v1 bundle before beginning the v2 migration. Keep its commit and all
+durable-store backups until v2 extraction, MCP calls, retrieval, and exports are
+verified. Downgrading the gem does not translate v2 identifiers back to v1.
 
 ## Upgrade the application
 
@@ -142,7 +144,7 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
-Unreleased after `2.0.0.beta3`: `woods:clean` removes index artifacts but keeps
+Included in Woods `2.0.0`: `woods:clean` removes index artifacts but keeps
 the output directory and its hidden extraction guard. This stable guard lets
 concurrent writers coordinate safely; its presence does not mean an index remains.
 
@@ -331,7 +333,7 @@ Complete every applicable check:
 If verification fails:
 
 1. stop v2 MCP, watcher, embedding, and exporter processes;
-2. restore the v1 Gemfile and lockfile or deploy the recorded v1 commit;
+2. restore the tested, patched v1 Gemfile and lockfile or deploy its recorded commit;
 3. run the v1 `woods:clean` before restoring anything under the configured output directory;
 4. either restore the complete pre-upgrade v1 output-directory backup, or run a fresh v1 extraction and then restore its v1 `dumps/` and configuration artifacts;
 5. restore external vector-store and managed export backups when v2 modified them;

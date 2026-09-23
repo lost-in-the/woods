@@ -66,7 +66,19 @@ The published payload's `manifest.json` records the extraction's `git_branch` an
 
 Woods uses worktree-aware Git commands. If a present `.git` cannot be resolved, provenance is `"unknown"`; stale `GIT_BRANCH`/`GIT_SHA` values are not substituted. Those environment variables are fallbacks only when the root has no `.git` or Git is unavailable. Temporal snapshots skip an unknown SHA.
 
-For extraction in a container, make the canonical Git directory and the worktree's pointer resolvable there. Mounting only the private worktree Git directory can leave its shared object store unreachable. Follow the [Git provenance troubleshooting guide](TROUBLESHOOTING.md) for mount and `WOODS_GIT_DIR` guidance, and the [published index layout](INDEX_LAYOUT.md) when locating the manifest.
+For extraction in a container, mount the complete shared Git layout at the
+original path so the worktree's `.git` pointer resolves without an override,
+or select `/mounted-common/worktrees/<id>` with `WOODS_GIT_DIR` inside a
+relocated complete mount. Derive `<id>` from Git metadata, not the branch name.
+Selecting the shared root instead uses the primary checkout's HEAD, affecting
+provenance, per-file history, and incremental paths. Follow the
+[worktree mount and verification steps](TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees)
+and the [published index layout](INDEX_LAYOUT.md) when locating the manifest.
+
+Compare the branch and exact SHA in the extraction environment with the intended
+worktree, then verify the published manifest after full extraction. A commit
+alone may not trigger the source-file watcher; use full `woods:extract` when
+current Git history is required.
 
 ## Troubleshooting
 

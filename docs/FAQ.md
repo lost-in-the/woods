@@ -134,7 +134,7 @@ When a model includes a concern, the behavior defined in that concern is part of
 
 ### How do I update the index after code changes?
 
-Use incremental mode, which re-extracts only files that have changed since the last run:
+Use incremental mode to dispatch a selected batch of changed paths:
 
 ```bash
 bundle exec rake woods:incremental
@@ -143,7 +143,12 @@ bundle exec rake woods:incremental
 docker compose exec app bundle exec rake woods:incremental
 ```
 
-Incremental mode is ideal for CI pipelines and local development workflows. It is typically 5-10× faster than a full extraction. Nine unit types, `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source`, don't map to individual files, so incremental mode re-runs their extractor **wholesale** whenever the relevant trigger path changes (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines/rails_source; `rails_source` participates only when `include_framework_sources` is enabled). You never need to run a full extraction just because one of these changed, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for details.
+The default Git range is `HEAD~1`; CI variables, an explicit range, or
+`CHANGED_FILES` can select another batch. Incremental extraction also refreshes
+affected concern consumers and re-runs whole-app extractors when their trigger
+paths change. It can reduce work, but has no universal speedup: Rails boot, graph
+work, and publication still take time. See the [incremental contract](INCREMENTAL_EXTRACTION.md)
+for scope, whole-app triggers, and cases that require a full extraction.
 
 ---
 
@@ -411,7 +416,13 @@ When you run `rake woods:embed`, Woods generates embedding vectors for each extr
 
 ### What is the `codebase_retrieve` tool for?
 
-`codebase_retrieve` is the primary semantic search tool on the Index Server. It accepts a natural-language description of what you're looking for ("find where user email validation happens", "which services send Stripe API calls") and returns the most relevant extracted units as formatted context. It requires embedding configuration, without an embedding provider the tool responds with an error (`isError`, code `:not_configured`) and a remediation hint covering provider setup and the `search` tool for pattern-based matching in the meantime. Token budget is controlled by `config.max_context_tokens` (default: 8000).
+`codebase_retrieve` ranks extracted units for a natural-language query, such as
+"find where user email validation happens". Default semantic mode requires an
+embedding provider and vector store. Explicit lexical mode ranks published
+extraction text without either: set `WOODS_RETRIEVAL_MODE=lexical` in the MCP
+process environment and restart it. There is no automatic fallback between
+modes. See the [retrieval guide](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+for setup, ranking evidence, and the estimated text-budget contract.
 
 ---
 

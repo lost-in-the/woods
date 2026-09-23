@@ -89,8 +89,13 @@ Recovery choices, in the order they are worth trying:
 3. Run a full `woods:extract` when the range cannot be repaired this run.
 
 The diff itself is rooted at the extracted application (`git -C Rails.root`),
-so it cannot read whatever checkout the process happened to start in — the
-same rooting rule the manifest's git provenance follows.
+independently of the process working directory. An explicit `WOODS_GIT_DIR`
+selects that Git directory's HEAD for both the diff and manifest provenance.
+For a linked worktree, use its worktree-specific directory within the complete
+shared layout; selecting the shared root instead reads the primary checkout's
+HEAD. See [worktree mount verification](TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
+Git-only changes may not trigger the source-file watcher; see the
+[watcher limitation](WATCH_DAEMON.md#watcher-backends).
 
 Named, source-defined app modules included by runtime models are tracked as concern units even
 outside `concerns/` directories. Changing their source refreshes their includers,
@@ -100,7 +105,7 @@ to populate these previously missing source mappings.
 
 ## Handled source errors and retry
 
-Unreleased after `2.0.0.beta3`: when an incremental extraction or named refresh
+Included in Woods `2.0.0`: when an incremental extraction or named refresh
 records a handled consumer error (for example malformed locale or schedule
 YAML), it raises `Woods::ExtractionError` before publishing. Empty output from
 that failed consumer does not authorize replacing or deleting its last-good

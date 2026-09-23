@@ -51,7 +51,7 @@ Do not infer permission to configure Console MCP from a request to “set up Woo
 Create or switch to the branch requested by the repository owner. Select the
 published version using the [installation guide](GETTING_STARTED.md#1-install-the-gem).
 Before stable 2.x is published, use the exact published prerelease constraint
-from the README release table; `~> 2.0` will not select a beta or release candidate.
+from RubyGems; `~> 2.0` will not select a beta or release candidate.
 Use the selected version's tag documentation and verify its capabilities before
 configuring features described on `main`.
 
@@ -190,7 +190,7 @@ receipt for future update/removal. Unrelated servers, hooks, settings,
 instruction text, permissions, and line-ending conventions are retained;
 changing JSON may reformat its whitespace.
 
-Unreleased after `2.0.0.beta3`: apply and recovery coordinate on the actual
+Included in Woods `2.0.0`: apply and recovery coordinate on the actual
 managed file paths, including user configuration and shared instruction files.
 Two application roots sharing those files cannot apply overlapping plans at the
 same time. A competing operation reports a conflict; after it finishes, create a
@@ -224,8 +224,8 @@ If `codebase_retrieve` reports that semantic search is disabled, that is expecte
 Within the owner's setup authorization, select one development startup owner.
 Follow [managed startup](WATCH_DAEMON.md#managed-development-startup): Puma for
 simple Rails startup, a verified existing Foreman command/Procfile, or the existing
-external Docker/Grove supervisor. The launcher/generator are **unreleased after
-`2.0.0.beta4`**; check installed `woods-watch --help` and generator help first.
+external Docker/Grove supervisor. The launcher/generator are **included in Woods
+`2.0.0`**; check installed `woods-watch --help` and generator help first.
 Preserve `bin/dev`; a file that only starts Rails does not consume a Procfile.
 For older gems use their raw task with a restart-capable external supervisor,
 not a bare Foreman entry.

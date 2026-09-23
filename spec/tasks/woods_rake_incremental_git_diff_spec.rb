@@ -218,9 +218,9 @@ RSpec.describe 'woods:incremental changed-path parsing' do
   # ── The git directory override reaches the range lookup (B-186/B-181) ──
   #
   # `WOODS_GIT_DIR` exists because a container over a linked worktree can mount
-  # the canonical git directory but not the host path the worktree's `gitdir:`
-  # pointer names. Enrichment and manifest provenance both honour it. The
-  # incremental range lookup is the third git call Woods makes, and it ran
+  # complete shared Git layout at a new path and explicitly select the
+  # worktree-specific directory inside it. Enrichment and manifest provenance
+  # both honour it. The incremental range lookup is the third git call Woods makes, and it ran
   # `git -C <root>` directly, so `woods:incremental` still exited 1 in exactly
   # the container the override was added for.
   describe 'WOODS_GIT_DIR' do
@@ -238,21 +238,16 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       run(main_repo, 'git', 'add', '-A')
       run(main_repo, 'git', 'commit', '--quiet', '-m', 'edit')
       run(main_repo, 'git', 'worktree', 'add', '--quiet', worktree, '-b', 'feature')
-      break_commondir!
+      File.write(File.join(worktree, 'app/models/feature.rb'), "class Feature; end\n")
+      run(worktree, 'git', 'add', '-A')
+      run(worktree, 'git', 'commit', '--quiet', '-m', 'feature only')
+      private_gitdir = run(worktree, 'git', 'rev-parse', '--absolute-git-dir')
+      mounted_common = File.join(scratch, 'mounted-common')
+      @mounted_gitdir = File.join(mounted_common, 'worktrees', File.basename(private_gitdir))
+      FileUtils.mv(File.join(main_repo, '.git'), mounted_common)
     end
 
     after { FileUtils.rm_rf(scratch) }
-
-    # The private git directory is right there; its commondir names a directory
-    # that exists and holds objects/ and refs/ but is not the repository. That
-    # is the shape B-186 was verified in.
-    def break_commondir!
-      private_gitdir = File.read(File.join(worktree, '.git')).sub('gitdir:', '').strip
-      unreachable = File.join(scratch, 'unreachable-common')
-      FileUtils.mkdir_p(File.join(unreachable, 'objects'))
-      FileUtils.mkdir_p(File.join(unreachable, 'refs'))
-      File.write(File.join(private_gitdir, 'commondir'), "#{unreachable}\n")
-    end
 
     it 'reports a failure without the override, because no ref resolves' do
       paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: worktree)
@@ -261,13 +256,13 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       expect(failure).to be_a(String)
     end
 
-    it 'resolves the range when WOODS_GIT_DIR names the canonical git directory' do
-      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => File.join(main_repo, '.git')))
+    it 'resolves the feature range through its relocated worktree-specific git directory' do
+      stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => @mounted_gitdir))
 
       paths, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: worktree)
 
       expect(failure).to be_nil
-      expect(paths).to eq(['app/models/user.rb'])
+      expect(paths).to eq(['app/models/feature.rb'])
     end
   end
 end

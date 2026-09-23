@@ -40,8 +40,8 @@ Use the application's normal Docker command and environment variables when appli
 
 Compare normal task discovery with installer preflight in the same container and
 application environment. Early Git builds of the watcher installer stripped
-`BUNDLE_PATH` and `BUNDLE_APP_CONFIG`; #540 fixes this, unreleased after
-`2.0.0.beta4`. Record the loaded revision and bundle configuration source before
+`BUNDLE_PATH` and `BUNDLE_APP_CONFIG`; Woods `2.0.0` includes the #540 fix.
+Record the loaded revision and bundle configuration source before
 reinstalling dependencies or writing a local bundle-path workaround. Follow the
 [watcher installation guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup).
 
@@ -49,7 +49,7 @@ reinstalling dependencies or writing a local bundle-path workaround. Follow the
 
 Early generated guards checked only whether Woods was activated. An older gem
 can satisfy that check without providing `puma/plugin/woods.rb`. The #542 fix is
-unreleased after `2.0.0.beta4`: verify the loaded revision, then use a supporting
+included in Woods `2.0.0`: verify the loaded revision, then use a supporting
 bundle to preview and apply `bin/rails generate woods:watch --operation update
 --mode puma`. The updated guard checks the active gem's require paths, so older
 gems boot without a watcher. Repeating setup does not upgrade the guard. Follow
@@ -60,7 +60,7 @@ do not change the owned directive or receipt manually.
 
 First identify the lifecycle owner. The raw task deliberately exits 75; a bare
 Foreman entry then stops all services. Managed `woods-watch`/Puma setup (#538)
-is unreleased after `2.0.0.beta4`: verify installed executable/generator help and
+is included in Woods `2.0.0`: verify installed executable/generator help and
 loaded revision before proposing it. Supporting launchers retry boot failures,
 reject idle TTL, and park ownership/protocol conflicts until owner restart.
 Inspect separate supervision state rather than treating its parent PID as a
@@ -79,14 +79,14 @@ whether boot inputs keep changing during initialization or catch-up.
 
 ### Watch retains facts from an initializer deleted while stopped
 
-Record the installed revision. Unreleased after `2.0.0.beta3`, startup preserves
+Record the installed revision. In Woods `2.0.0`, startup preserves
 registered deleted boot inputs as full-extraction obligations. On earlier builds,
 stop watch, run a successful full extraction in a fresh process, then restart
 standalone `woods:watch`. See the installed version's watch guide.
 
 ### A cleaned index directory still exists
 
-Unreleased after `2.0.0.beta3`, `woods:clean` retains the output directory and
+In Woods `2.0.0`, `woods:clean` retains the output directory and
 hidden extraction guard for concurrent writer coordination. Verify published
 artifacts are gone; do not remove that guard while writers may be running.
 
@@ -165,7 +165,7 @@ with `server.version`; missing/null is unknown, not a failure. A validator
 major-version warning calls for full extraction and upgrade review, while a match
 does not certify retained units were migrated. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
-Unreleased after `2.0.0.beta3`: incremental/refresh handled source errors keep
+Included in Woods `2.0.0`: incremental/refresh handled source errors keep
 the previous generation active and leave watch batches pending. Repair the
 logged source error and retry the complete batch; see
 [handled source errors](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry).
@@ -208,6 +208,16 @@ access with its `WOODS_GIT_DIR` setting. A failed history stream is discarded;
 repair git access and run full extraction to refresh retained metadata. See the
 [history contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#git-enrichment-history).
 
+For linked-worktree provenance/history mismatches, check the installed version's
+`WOODS_GIT_DIR` support and compare the selected branch and exact SHA inside the
+extraction environment. Mount the complete shared `.git` at its original path
+with no override, or select `/mounted-common/worktrees/<id>` within a relocated
+complete mount. Derive `<id>` from Git metadata, not the branch name. Selecting
+the shared root uses the primary checkout's HEAD and also changes incremental
+ranges. A commit alone may leave the source-file watcher idle; run full
+extraction after repair or when current Git history is required. See the
+[worktree mount guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
+
 After a bundle change or removal of a dynamically defined job, incremental
 extraction can retain stale runtime units. Use a fresh process with the updated
 bundle for full extraction, then validate. For missing external gem paths,
@@ -236,13 +246,13 @@ Compare the client config with the exact command, absolute `cwd`, bundle, and in
 bundle exec woods-mcp-start ./tmp/woods
 ```
 
-If startup says `Could not resolve a published Woods index` (unreleased after
-`2.0.0.beta3`) or names a missing `manifest.json` on older versions, first check
+If startup says `Could not resolve a published Woods index` (included in Woods
+`2.0.0`) or names a missing `manifest.json` on older versions, first check
 the selected index path: an atomic index uses `generation.json` to locate its
 payload manifest. The new headline does not change index validation or recovery.
 Point at an existing index before suggesting a new extraction. Prefer the
-explicit path above; `WOODS_DIR` is also supported. An unreleased change after
-`2.0.0.beta3` adds `WOODS_OUTPUT` after those two choices, so verify the installed
+explicit path above; `WOODS_DIR` is also supported. Woods `2.0.0` includes
+`WOODS_OUTPUT` after those two choices, so verify the installed
 version's configuration guide before relying on that fallback.
 
 Then reconnect through the MCP client and call `woods_status`. Use client-native tool inspection after initialization. Expect 14 packaged Index tools, not all conditional schemas.
@@ -330,7 +340,7 @@ Console failures are live Rails/config/security failures, not Index failures. Ve
 For stdio parse errors or response mismatches during tool calls, check for Rails
 logs on stdout. Through Woods `2.0.0.beta4`, stdout is restored after boot;
 configure the Console process's logger to use stderr or a file. Runtime stdout
-isolation is unreleased after that version: verify a patched installed revision
+isolation is included in Woods `2.0.0`: verify a patched installed revision
 before relying on it. Prefer `bundle exec rake woods:console`; direct Rails
 runner invocation cannot capture output already emitted during Rails boot.
 See the [Console logging diagnosis](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#rails-logs-break-mcp-protocol).

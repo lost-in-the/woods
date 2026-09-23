@@ -41,7 +41,7 @@ child exits. Use the managed launcher below for native Procfile development.
 
 ### Managed development startup
 
-**Unreleased after `2.0.0.beta4` ([#538](https://github.com/lost-in-the/woods/issues/538)).**
+**Included in Woods `2.0.0` ([#538](https://github.com/lost-in-the/woods/issues/538)).**
 Record the installed gem path and Git revision as well as VERSION; a checkout
 can have new behavior with the last beta's version. Verify both commands before
 using the new setup:
@@ -95,14 +95,14 @@ Foreman command. No process-manager gem is installed automatically.
 Run setup with the same application environment as normal startup. Preflight
 preserves environment-based Bundler configuration, including `BUNDLE_PATH`,
 `BUNDLE_APP_CONFIG`, and excluded groups, while resetting inherited activation
-state and requesting frozen resolution. Earlier Git builds of this unreleased
+state and requesting frozen resolution. Earlier Git builds of this
 installer dropped those settings ([#540](https://github.com/lost-in-the/woods/issues/540)).
 If normal task discovery works but installer preflight cannot find Rails or an
 installed dependency, check the loaded revision and bundle environment before
 reinstalling gems or adding a persistent `.bundle/config` workaround.
 
 Installer refusals return a nonzero exit status with their diagnostic (#544,
-unreleased after `2.0.0.beta4`). Earlier Git builds printed the refusal but exited
+included in Woods `2.0.0`). Earlier Git builds printed the refusal but exited
 successfully, so automation using those builds must also check the diagnostic and
 whether installation actually applied.
 
@@ -133,8 +133,8 @@ Explicit updates refresh owned directives in place, preserving surrounding text
 and the block's newline style. Repeating setup preserves the existing directive.
 Earlier Git builds used a Puma guard that checked only whether Woods was loaded;
 use the update command above with a supporting bundle to install the capability
-guard ([#542](https://github.com/lost-in-the/woods/issues/542), unreleased after
-`2.0.0.beta4`). Do not hand-edit the owned block or receipt.
+guard ([#542](https://github.com/lost-in-the/woods/issues/542), included in Woods
+`2.0.0`). Do not hand-edit the owned block or receipt.
 
 For a permanent downgrade, remove the startup configuration while the supporting
 gem is still installed. The updated Puma guard lets a branch with an older gem
@@ -314,7 +314,7 @@ is alive, so *alive has to mean covered*.
 The standalone `woods:watch` task snapshots reload/restart inputs before invoking
 Rails' `environment` task. Inputs unchanged across that boundary, including
 carried paths that remain deleted, may be reconciled by a full extraction.
-Unreleased after `2.0.0.beta3`: registered restart inputs deleted while the
+Included in Woods `2.0.0`: registered restart inputs deleted while the
 daemon was stopped also trigger a full extraction after a fresh environment
 boot. Nominal framework paths still use the bounded deletion sweep.
 Changes during environment initialization still require restart. Lock contention,
@@ -427,6 +427,14 @@ only whole seconds.
 Ignored by default: `.git`, `node_modules`, `tmp`, `log`, `coverage`,
 `vendor/bundle`, `public/assets`, `public/packs`, `storage`. That ignore list is
 what keeps a polling scan bounded.
+
+A commit, ref update, or other Git-only change does not necessarily trigger a
+source-file event. The watcher can therefore keep source current while the
+published Git history or provenance still describes an earlier commit. Run full
+`woods:extract` when current Git metadata is required; incremental extraction
+refreshes history only for rewritten units. For containerized linked worktrees,
+verify [Git directory selection](TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees)
+as well as source and index mounts.
 
 Polling and startup catch-up preserve each logical path when multiple directory
 symlinks point to the same source tree. For example, `a_shared/user.rb` and
@@ -797,7 +805,7 @@ hooks (`plugin/hooks/hooks.json`), both shipped disabled:
 Both read `cwd` from the hook payload, so a linked worktree uses its own index.
 Both require an existing `generation.json` and `WOODS_HOOKS_ENABLED=1`;
 `WOODS_HOOKS_DISABLED=1` overrides enablement. The broader refresh task is
-**unreleased after Woods 2.0.0.beta2**. Check the installed gem's task list
+**included in Woods `2.0.0`**. Check the installed gem's task list
 (`bundle exec rake -T woods:hook_refresh`, through the application container
 when appropriate) before enabling this plugin version. An older gem's unknown
 task error leaves queued events in place; installing the plugin does not upgrade
@@ -960,8 +968,8 @@ supplies batches to it.
 
 ### Optional bounded context hints
 
-Context hints are a separate Claude Code opt-in, **unreleased after Woods
-2.0.0.beta2**. Verify `bundle exec woods-hook-context --help` in the installed
+Context hints are a separate Claude Code opt-in, **included in Woods `2.0.0`**.
+Verify `bundle exec woods-hook-context --help` in the installed
 application bundle before enabling `WOODS_HOOK_CONTEXT_ENABLED=1`. The plugin
 version alone does not establish gem support. `WOODS_HOOKS_DISABLED=1` disables
 both context and refresh; `WOODS_HOOKS_ENABLED` controls only the existing

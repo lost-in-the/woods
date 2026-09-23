@@ -210,7 +210,7 @@ config.vector_store_options = {
 
 Woods uses an HNSW index over pgvector's `vector` representation, which supports
 **1–2,000 dimensions** ([pgvector's HNSW limits](https://github.com/pgvector/pgvector#hnsw)).
-Unreleased after `2.0.0.beta3`: the adapter rejects wider dimensions before any
+Included in Woods `2.0.0`: the adapter rejects wider dimensions before any
 SQL, and `woods:pgvector` rejects invalid widths before writing a migration.
 There is no automatic vector truncation or half-precision conversion.
 
@@ -282,7 +282,7 @@ in the promoted dump; the index MCP server loads that snapshot at startup or
 reload. Incremental embedding publishes changes to paths, dependencies, and
 other unit metadata even when unchanged source needs no new embedding. A run
 with no content or metadata changes keeps the existing dump and retention
-window. Unreleased after `2.0.0.beta3`: a full `Indexer#index_all` run replaces
+window. Included in Woods `2.0.0`: a full `Indexer#index_all` run replaces
 the published corpus even when a custom caller reuses in-memory vector and
 metadata stores. Deleted units, including metadata-only records, are removed;
 an empty full rebuild publishes an empty dump. Failed embedding leaves the
@@ -451,7 +451,7 @@ A malformed record invalidates the entire snapshot, rather than exposing partial
 history. Legacy bare identifier keys, omitted/null unit collections, and optional per-unit hash
 fields remain supported; timestamp strings are not restricted to a new format.
 Unit history limits count matching unit records, not the most recent snapshots
-searched (JSON fallback correction unreleased after `2.0.0.beta3`). A unit
+searched (JSON fallback correction included in Woods `2.0.0`). A unit
 missing from newer snapshots can still have retained history.
 Snapshot lists and unit history omit unusable files; direct lookup returns no
 snapshot, and a diff with an unavailable snapshot returns empty added, modified,
@@ -704,7 +704,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 |----------|---------|---------|
 | `WOODS_RETRIEVAL_MODE` | `semantic` | Explicit packaged MCP retrieval mode: `semantic` or `lexical`. Lexical reads extraction unit JSON without provider autodetection, credentials or vector artifacts. |
 | `WOODS_DIR` | unset | MCP extraction-index path, after a positional argument and before `WOODS_OUTPUT`. See precedence below. |
-| `WOODS_OUTPUT` | unset | MCP index-path fallback when neither a positional path nor `WOODS_DIR` is set; unreleased after `2.0.0.beta3`. |
+| `WOODS_OUTPUT` | unset | MCP index-path fallback when neither a positional path nor `WOODS_DIR` is set; included in Woods `2.0.0`. |
 | `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
 | `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
@@ -720,7 +720,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_QDRANT_URL`, `WOODS_QDRANT_COLLECTION`, `WOODS_QDRANT_API_KEY` | n/a | Override/require Qdrant connection settings when a pgvector/Qdrant-backed index is served outside its host application (no `Woods.configuration` available). |
 | `WOODS_PG_URL` | n/a | Required when a pgvector-backed index is served outside its host application. |
 
-**MCP index path precedence (unreleased after `2.0.0.beta3`):** positional
+**MCP index path precedence (included in Woods `2.0.0`):** positional
 argument → `WOODS_DIR` → `WOODS_OUTPUT` → current directory for `woods-mcp`
 and `woods-mcp-http`. `woods-mcp-start` still requires one of the first three;
 it never silently selects the current directory. An explicitly empty
@@ -773,7 +773,7 @@ existing index before deciding another extraction is needed.
 
 ### Managed watcher startup
 
-**Unreleased after `2.0.0.beta4`.** `woods-watch` wraps the raw task for native
+**Included in Woods `2.0.0`.** `woods-watch` wraps the raw task for native
 Foreman/Puma lifecycle management. `--root PATH` selects the application working
 directory; `--boot-timeout SECONDS` defaults to `300` and bounds boot/handshake,
 not extraction. Explicit child argv follows `--`. Output-directory precedence
@@ -788,7 +788,7 @@ separate supervision status. Raw task settings above remain compatible.
 ### Opt-in plugin refresh hooks
 
 These settings control the plugin shell worker. Check installed
-`woods:hook_refresh` support first; the task is unreleased after 2.0.0.beta2.
+`woods:hook_refresh` support first; the task is included in Woods `2.0.0`.
 See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions) and
 [optional context limits](WATCH_DAEMON.md#optional-bounded-context-hints).
 
@@ -821,26 +821,23 @@ tasks for manual refreshes; hook transport is not a general shell execution API.
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
 | `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |
 | `WOODS_PROFILE` | unset | Set to `"1"` to log disjoint `[Woods] [profile] <phase> in N.NNs` durations, including git enrichment, reconciliation, payload sync, pointer publication (`publish`) and retention (`payload prune`). Separate `[profile total]` lines report whole extraction wall time, including unprofiled setup and failed runs; never add these totals to phase durations. Excludes process/Rails boot before extraction. Off by default. |
-| `WOODS_GIT_DIR` | unset | Absolute path to the canonical git directory. Wins over the repository Woods would otherwise find, at all three of its git call sites: per-unit `commit_count`/`change_frequency` (enrichment), `manifest.json`'s `git_branch`/`git_sha` (provenance), and the `woods:incremental` diff range. All three build their command line with `Woods::GitCommand.argv`. |
+| `WOODS_GIT_DIR` | unset | Absolute path passed directly to Git's `--git-dir`, selecting that directory's `HEAD`. For a linked worktree use its `worktrees/<id>` directory inside the complete shared Git layout. Wins over the repository Woods would otherwise find, at all three of its git call sites: per-unit `commit_count`/`change_frequency` (enrichment), `manifest.json`'s `git_branch`/`git_sha` (provenance), and the `woods:incremental` diff range. All three build their command line with `Woods::GitCommand.argv`. |
 | `GIT_BRANCH`, `GIT_SHA` | unset | Provenance for a checkout with no `.git` at all (a source tarball, a Docker `COPY` that excludes it). Ignored when a `.git` is present but unresolvable, so a stale build arg cannot mask a worktree. |
 
-**`GIT_DIR` alone is not enough for a linked git worktree.** Woods runs git as a
-subprocess, so git's own `GIT_DIR` and `GIT_COMMON_DIR` are honored wherever git
-honors them. But pointing `GIT_DIR` at a worktree's *private* git directory only
-moves the failure: that directory reaches the shared object store through a
-relative `commondir` pointer, which still resolves outside a container mount,
-and `GIT_COMMON_DIR` does not override it. `git rev-parse --git-dir` then
-succeeds while no ref resolves.
+For linked worktrees in containers, preserve access to the complete shared
+Git directory and the worktree-specific HEAD. A same-path mount that resolves
+the existing `.git` pointer needs no override. For a relocated complete layout,
+set `WOODS_GIT_DIR=/mounted-common/worktrees/<id>`, deriving `<id>` from Git's
+worktree metadata rather than the branch name. Selecting `/mounted-common`
+itself selects the primary checkout's HEAD and can produce incorrect history,
+provenance, and incremental paths. See the canonical
+[worktree mount and verification steps](TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
-Woods refuses to enrich in that state rather than writing `commit_count: 0` and
-`change_frequency: "new"` on every unit: the git keys are omitted, provenance is
-`"unknown"`, and one warning names the cause. Point `WOODS_GIT_DIR` at the
-canonical git directory (the one a worktree's `gitdir:` pointer ultimately leads
-to) and mount it:
-
-```bash
-WOODS_GIT_DIR=/canonical-git bundle exec rake woods:extract
-```
+Git subprocesses inherit Git's own environment variables, so inspect existing
+`GIT_DIR` and `GIT_COMMON_DIR` settings when resolving layout problems.
+If HEAD cannot be resolved, enrichment omits the Git keys and provenance is
+`"unknown"` for a present but unresolvable `.git`; one warning names the cause.
+After correcting the layout, run a full extraction to refresh retained metadata.
 
 ### Exporters
 
@@ -860,11 +857,10 @@ The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicatin
 
 ## Git enrichment history
 
-Current source requires **Git 2.31 or newer** for optional per-unit git
+Woods 2.0 requires **Git 2.31 or newer** for optional per-unit git
 metadata. Extraction still succeeds when git is unavailable or history cannot
 be read completely. Git enrichment is omitted in either case; a failed or
 incomplete streamed history read logs a warning.
-This requirement and the history policy below are unreleased after 2.0.0.beta2.
 
 Per-unit enrichment also requires a non-shallow repository. A shallow checkout
 or a failed repository-depth probe omits enrichment with one warning per

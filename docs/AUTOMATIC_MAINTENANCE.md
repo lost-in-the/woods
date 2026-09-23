@@ -8,7 +8,7 @@ extraction or MCP restart.
 
 This page maps that workflow to its canonical documentation. The raw watcher and
 hooks are available in Woods `2.0.0.beta4`; the managed launcher, installation
-generator, and Puma adapter are **unreleased after `2.0.0.beta4`**. Check the
+generator, and Puma adapter are **included in Woods `2.0.0`**. Check the
 installed gem/revision and plugin separately. Installing the gem or registering
 an MCP connection does **not** enable automatic index maintenance.
 

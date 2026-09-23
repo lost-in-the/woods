@@ -356,7 +356,7 @@ column.
 Use `lookup` on the returned identifier for source, actions, and routes. Search
 `source_code` for textual matches beyond names. Supporting versions distinguish
 exact totals from a bounded result prefix; `partial` means this is discovery,
-not an exhaustive list. Completeness metadata is unreleased after `2.0.0.beta2`;
+not an exhaustive list. Completeness metadata is included in Woods `2.0.0`;
 see the [search contract](MCP_SERVERS.md#search-completeness).
 
 ---

@@ -85,12 +85,10 @@ module Woods
       ''
     end
 
-    # +WOODS_GIT_DIR+ names the canonical git directory outright and wins when
-    # set. It is the escape hatch for a container that can mount that
-    # directory but not the host path a linked worktree's +.git+ file points
-    # at; git's own +GIT_DIR+ is not enough there, because a worktree's
-    # private git directory reaches the shared one through a relative
-    # +commondir+ pointer that resolves outside the mount.
+    # +WOODS_GIT_DIR+ selects a git directory and its HEAD outright and wins when
+    # set. A relocated linked worktree needs its private directory inside the
+    # complete mounted Git layout, preserving access to shared objects and refs.
+    # Selecting the shared root instead uses the primary checkout's HEAD.
     #
     # @param args [Array<String>] git arguments
     # @return [Array<String>] full argv

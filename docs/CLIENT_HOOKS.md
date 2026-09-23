@@ -2,7 +2,7 @@
 
 Edit hooks are optional. MCP reads and `woods:watch` work independently of them.
 Check the installed gem exposes `woods:hook_refresh` before enabling these
-unreleased adapters; updating the plugin does not update the application gem.
+adapters included in Woods `2.0.0`; updating the plugin does not update the application gem.
 Start the client from the Rails application root, with an existing index.
 
 ## Supported client contracts

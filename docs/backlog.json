@@ -2841,5 +2841,21 @@
     ],
     "description": "Issue #544: Rails generators normally swallow Thor errors after printing them and return success. Opt the watcher generator into failure exits so preflight and ownership refusals reliably fail automation while preserving diagnostics and application files. A subprocess regression checks the real exit status; woods-testbed adds an actual Rails 6/Puma 4.3 refusal check alongside supported Puma source and installed-artifact lifecycle coverage.",
     "status": "resolved"
+  },
+  {
+    "id": "B-208",
+    "title": "Preserve linked-worktree Git identity in container guidance",
+    "severity": "high",
+    "category": "docs",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/git_command.rb",
+      "lib/woods/extractor.rb",
+      "spec/extractor_git_worktree_spec.rb",
+      "spec/tasks/woods_rake_incremental_git_diff_spec.rb",
+      "docs/TROUBLESHOOTING.md"
+    ],
+    "description": "Issue #546: the documented shared-root WOODS_GIT_DIR override selects the primary checkout HEAD. Correct the warning and guidance to preserve a same-path complete layout or select the actual worktree admin directory within a relocated complete layout. Real divergent-worktree regressions assert exact feature branch/SHA, feature-only history and changed paths while preserving explicit override semantics and unavailable-Git behavior. Document commit-only watcher freshness limits. Validated by 48 focused Git examples, the full 9567-example suite (zero failures; three optional tokenizer checks pending), and full RuboCop. Independent review confirmed explicit override compatibility and the documented watcher limitation.",
+    "status": "resolved"
   }
 ]

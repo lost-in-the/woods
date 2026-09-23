@@ -5,7 +5,7 @@ This guide is for coding agents using an already connected Woods MCP server. Woo
 Supporting servers also send a concise version of this workflow in MCP
 initialization/discovery instructions, without requiring an installed plugin.
 Check the connected server's version and registered tools; this feature is
-unreleased after `2.0.0.beta2`, and protocol `2024-11-05` omits the field.
+included in Woods `2.0.0`, and protocol `2024-11-05` omits the field.
 The [initialization contract](MCP_SERVERS.md#initialization-guidance) describes
 availability. This guide remains the detailed reference when instructions are
 absent or the client does not display them.
@@ -35,7 +35,9 @@ Use this four-step loop for most codebase questions:
 3. **Traverse** from that identifier with `dependencies`, `dependents`, or `trace_flow`.
 4. **Verify** important claims against the returned source paths and current repository files.
 
-Identifiers are namespaced and typed. Never invent one from a filename when `search` can return the exact value.
+Identifiers are namespaced and typed. Never invent one from a filename when
+`search` can return the exact value. Carry both the returned `identifier` and
+`type` into `lookup`; the same identifier can belong to more than one unit type.
 
 ## Pick the smallest useful tool
 
@@ -64,7 +66,7 @@ Do not start with a broad graph or semantic query when an exact search will answ
 ### Understand a model
 
 1. `search(query: "^Order$", types: ["model"])`
-2. `lookup(identifier: <returned identifier>)`
+2. `lookup(identifier: <returned identifier>, type: <returned type>)`
 3. Read resolved schema, associations, validations, scopes, enums, callbacks, and included concerns.
 4. `dependencies(identifier: ..., depth: 1)` for collaborators.
 5. `dependents(identifier: ..., depth: 1)` for callers and affected features.
@@ -123,7 +125,7 @@ an exact total within the requested index/query domain. Narrow types, literal
 prefix/suffix filters, or deep fields when `partial` is true. A detected artifact
 failure remains an error with unknown completeness, never proof of no matches.
 
-This metadata is unreleased after `2.0.0.beta2`; older servers may omit it.
+This metadata is included in Woods `2.0.0`; older servers may omit it.
 Do not infer completeness from a full page or missing metadata. See the
 [search response contract](MCP_SERVERS.md#search-completeness).
 
@@ -136,7 +138,7 @@ call graphs: selective scanning can miss arbitrary method-body constant referenc
 including generic PORO and library targets. No dependents or test-only dependents
 do not establish absence of production callers. Check source before claiming absence.
 The `graph_coverage` notice makes this scope explicit in supporting responses;
-that metadata is unreleased after `2.0.0.beta3`.
+that metadata is included in Woods `2.0.0`.
 
 Start at depth 1 or 2. A deeper unfiltered traversal can obscure the direct evidence that matters. Common relationship values include associations (`belongs_to`, `has_many`, `has_one`), code references, renders, redirects, form actions, and navigation links.
 
@@ -148,8 +150,8 @@ across turns. In a multi-database app each row names the unit's database.
 
 On supporting servers, inspect `structuredContent.data` for traversal nodes,
 `graph_coverage`, exactness, budgets and optional explanation witnesses, regardless
-of the text renderer. This packaged stdio/HTTP payload is unreleased after
-`2.0.0.beta3`; check the actual response and use its text when structured data is
+of the text renderer. This packaged stdio/HTTP payload is included in Woods
+`2.0.0`; check the actual response and use its text when structured data is
 absent. There is no traversal `format` argument. See the
 [response contract](MCP_SERVERS.md#dependency-graph-coverage).
 
@@ -157,7 +159,7 @@ A traversal can also stop at its independent node or edge budget. Treat
 `partial`/`partial_reason` as incomplete graph evidence even on the final page;
 paging cannot recover nodes the walk never reached. Supporting responses include
 `total_is_exact: false` for a cutoff and true for a finished walk, independently of
-pagination. This field is unreleased after `2.0.0.beta3`; on older servers inspect
+pagination. This field is included in Woods `2.0.0`; on older servers inspect
 `partial` directly. `nodes_total` remains the root-inclusive admitted prefix count,
 not the full reachable total when partial. Even an exact count covers only the
 requested root, depth, filters and published graph generation. Check the connected schema
@@ -171,7 +173,7 @@ Follow `parent`/`edge_id` references; `context: true` ancestors are outside the
 current result page. Unknown labels and ambiguous candidate types stay unknown;
 `typed_path_complete: false` does not establish a uniquely typed path. True means
 only unambiguous witness types, not complete source coverage. Supporting text
-responses label this `witness types unambiguous` (unreleased after `2.0.0.beta3`). See the
+responses label this `witness types unambiguous` (included in Woods `2.0.0`). See the
 [explanation contract](MCP_SERVERS.md#traversal-explanations).
 
 Use recorded relationship labels as evidence. Do not infer execution or call
