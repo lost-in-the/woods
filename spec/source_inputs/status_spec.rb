@@ -70,6 +70,13 @@ RSpec.describe Woods::SourceInputs::Status do
     expect { status(mode: 'unbounded') }.to raise_error(ArgumentError)
   end
 
+  it 'rejects undecodable explicit paths as configuration errors at construction' do
+    %i[root output_dir payload_dir].each do |option|
+      expect { status(**{ option => "bad_\xFF".b }) }
+        .to raise_error(Woods::SourcePathEncoding::Invalid, 'source paths must contain valid UTF-8 bytes')
+    end
+  end
+
   it 'runs the task without invoking a Rails environment or provider' do
     old = Rake.application
     Rake.application = Rake::Application.new

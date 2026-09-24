@@ -50,6 +50,18 @@ RSpec.describe Woods::SourceInputs::Session do
   end
 
   describe 'source read capability' do
+    it 'keeps an undecodable consumer path unverified with JSON-safe diagnostics' do
+      path = 'app/services/bad_'.b + "\xFF.rb".b
+      run = session
+      expect { run.read_source(path) }
+        .to raise_error(Woods::SourceInputs::StableReader::Error, 'uncaptured_source_path')
+      run.consume_unit(:services, path)
+      manifest = finish(run)
+      expect(JSON.parse(JSON.generate(manifest.data))['errors'])
+        .to include(include('reason' => 'undecodable_source_path', 'path' => include('\\xFF')))
+      expect(verify(manifest)['state']).to eq('unknown')
+    end
+
     it 'reads captured bytes without claiming the unit consumed them' do
       path = 'app/services/pay.rb'
       write(path, 'class Pay; end')

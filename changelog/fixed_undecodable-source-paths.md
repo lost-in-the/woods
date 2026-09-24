@@ -1,0 +1,1 @@
+- Handle undecodable filenames without crashing source capture or polling: keep source evidence incomplete, bound escaped diagnostics, and retain the previous generation when reference verification fails. Preserve valid UTF-8 paths under the C locale.

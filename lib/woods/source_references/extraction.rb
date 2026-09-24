@@ -156,6 +156,7 @@ module Woods
         unstable = errors.any? do |error|
           %w[source_changed_during_extraction source_changed_during_read source_file_unreadable
              source_tree_unavailable external_source_path nonregular_source unverified_symlink_directory
+             undecodable_source_path
              scan_time_budget scan_file_budget scan_byte_budget].include?(error['reason'])
         end
         return unless unstable

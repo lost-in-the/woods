@@ -95,4 +95,18 @@ RSpec.describe 'Source provenance publication' do
     expect(generation.current.token).to eq(previous.token)
     expect(File.binread(source_path)).to eq(bytes)
   end
+
+  it 'retains the active generation when an undecodable path prevents reference verification' do
+    prepare.send(:publish_generation, 'full')
+    generation = Woods::Generation.new(output_dir: @output)
+    previous = generation.current
+    File.binwrite(File.join(@root.b, 'unrelated_'.b + "\xFF".b), 'input')
+    extractor = prepare
+    extractor.instance_variable_set(:@source_reference_paths, Set.new([@source]))
+
+    expect(extractor.send(:publish_generation, 'full')).to be_nil
+    expect { extractor.raise_on_publication_failure! }.to raise_error(Woods::ExtractionError)
+    expect(generation.current.token).to eq(previous.token)
+    expect(Woods::SourceInputs::Status.new(output_dir: @output, mode: 'deep').call['state']).to eq('unknown')
+  end
 end

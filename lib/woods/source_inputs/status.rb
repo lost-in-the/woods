@@ -28,11 +28,11 @@ module Woods
       def initialize(output_dir:, payload_dir: nil, generation: nil, root: nil, mode: 'quick')
         raise ArgumentError, 'source status mode must be quick or deep' unless BUDGETS.key?(mode)
 
-        @output = File.expand_path(output_dir.to_s)
-        @root = root
+        @output = SourcePathEncoding.expand(output_dir)
+        @root = SourcePathEncoding.utf8!(root) if root
         @mode = mode
         @generation = generation
-        @payload = payload_dir
+        @payload = SourcePathEncoding.utf8!(payload_dir) if payload_dir
       end
 
       def call
@@ -52,6 +52,8 @@ module Woods
         unknown('source_manifest_unavailable')
       rescue Manifest::Invalid, SystemCallError, IOError
         unknown('invalid_source_manifest')
+      rescue EncodingError, SourcePathEncoding::Invalid
+        unknown('undecodable_source_path')
       end
 
       private

@@ -115,6 +115,41 @@ RSpec.describe Woods::SourceInputs::Scanner do
     expect(scan['files'].keys).to eq([path])
   end
 
+  %w[app/services public/uploads].each do |directory|
+    it "records incomplete evidence for a byte-invalid filename in #{directory}" do
+      write("#{directory}/bad_".b + "\xFF.rb".b, 'input')
+      write('app/services/good.rb', 'input')
+      result = scan
+      expect(result['complete']).to be(false)
+      expect(result['files'].keys).to eq(['app/services/good.rb'])
+      error = result['errors'].find { |item| item['reason'] == 'undecodable_source_path' }
+      expect(error.fetch('path')).to include('bad_', '\\xFF')
+      expect(JSON.parse(JSON.generate(result))['complete']).to be(false)
+    end
+  end
+
+  it 'prunes undecodable directories and bounds path diagnostics and traversal' do
+    directory = "app/services/#{'x' * 200}/".b + ('x' * 230).b + "\xFF".b
+    write(File.join(directory, 'child.rb'), 'input')
+    allow(File).to receive(:lstat).and_call_original
+    result = scan
+    expect(File).not_to have_received(:lstat).with(a_string_ending_with('/child.rb'))
+    expect(result['complete']).to be(false)
+    expect(result['errors'].first.fetch('path').bytesize).to be <= 1030
+    expect(result['errors'].first.fetch('path')).to end_with('...')
+    expect(JSON.parse(JSON.generate(result))['complete']).to be(false)
+    expect(result['files']).to be_empty
+  end
+
+  it 'counts undecodable entries against the file budget and caps their diagnostics' do
+    25.times { |index| write("public/uploads/#{index}_".b + "\xFF".b, 'input') }
+    result = scan
+    expect(result['complete']).to be(false)
+    expect(result['errors'].size).to eq(20)
+    expect(result['metrics']['visited_files']).to eq(25)
+    expect(scan(max_files: 1)['errors']).to include('reason' => 'scan_file_budget')
+  end
+
   it 'returns explicit file and byte budget errors' do
     write('app/services/pay.rb', 'a' * 100)
     write('app/services/order.rb', 'b' * 100)

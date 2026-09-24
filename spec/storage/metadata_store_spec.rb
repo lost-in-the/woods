@@ -2,8 +2,22 @@
 
 require 'spec_helper'
 require 'woods/storage/metadata_store'
+require 'woods/storage_identity'
 
 RSpec.describe Woods::Storage::MetadataStore do
+  shared_examples 'identity inventory' do
+    it 'enumerates exact typed storage keys, including records without source or vectors' do
+      factory = Woods::StorageIdentity.key('reports', 'factory')
+      view = Woods::StorageIdentity.key('reports', 'database_view')
+      store.store(factory, type: 'factory', identifier: 'reports', source_code: '')
+      store.store(view, type: 'database_view', identifier: 'reports', source_code: 'SELECT report')
+
+      expect(store.all_identifiers).to contain_exactly(factory, view)
+      store.delete(factory)
+      expect(store.all_identifiers).to eq([view])
+    end
+  end
+
   # The #search contract every adapter must honour — see the doc comment on
   # MetadataStore::Interface#search. Builder swaps these adapters freely, so a
   # behavioural difference means the same query returns different results
@@ -297,6 +311,10 @@ RSpec.describe Woods::Storage::MetadataStore do
       expect { dummy.delete('id') }.to raise_error(NotImplementedError)
     end
 
+    it 'raises NotImplementedError for #all_identifiers' do
+      expect { dummy.all_identifiers }.to raise_error(NotImplementedError)
+    end
+
     it 'raises NotImplementedError for #count' do
       expect { dummy.count }.to raise_error(NotImplementedError)
     end
@@ -304,6 +322,8 @@ RSpec.describe Woods::Storage::MetadataStore do
 
   describe Woods::Storage::MetadataStore::SQLite do
     let(:store) { described_class.new(database: ':memory:') }
+
+    include_examples 'identity inventory'
 
     describe 'database path configuration' do
       it 'accepts only the database keyword' do
@@ -549,6 +569,8 @@ RSpec.describe Woods::Storage::MetadataStore do
 
   describe Woods::Storage::MetadataStore::InMemory do
     let(:store) { described_class.new }
+
+    include_examples 'identity inventory'
 
     # The in-memory adapter and the SQLite adapter must be substitutable
     # — Builder picks one based on config without the rest of the pipeline

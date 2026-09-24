@@ -100,7 +100,7 @@ module Woods
       # silently dropped all but one.
       #
       # This method computes the expected constant path — from
-      # +Rails.autoloaders.main+ when a Rails autoloader is up, from the
+      # the owning Rails autoloader (main or once) when available, from the
       # same path-to-constant convention offline otherwise — and returns the
       # first declaration (class or module) whose qualified name equals it.
       # When the path is not managed, or no declaration matches (an
@@ -233,16 +233,16 @@ module Woods
       #   is not under a managed root
       def managed_constant_path(file_path)
         file_path = File.expand_path(file_path.to_s)
-        root, owner, foreign_root = managed_root_for(file_path)
+        root, owner, loader, foreign_root = managed_root_for(file_path)
         return nil unless root
 
-        return loader_expected_cpath(file_path) if owner == :loader
-        return foreign_loader_constant_path(file_path, root, foreign_root) if owner == :foreign_loader
+        return loader_expected_cpath(file_path, loader) if owner == :loader
+        return foreign_loader_constant_path(file_path, root, foreign_root, loader) if owner == :foreign_loader
 
         local_managed_constant_path(file_path, root)
       end
 
-      # The constant path the active main loader expects for +file_path+,
+      # The constant path the owning loader expects for +file_path+,
       # asked through the loader's own API so its inflector, namespace
       # collapse, and ignore rules decide (a custom `api => API` inflection
       # must win over the local camelizer). Available on Zeitwerk 2.6.9+;
@@ -251,9 +251,9 @@ module Woods
       # local camelizer must not rescue it.
       #
       # @param file_path [String] Expanded absolute path to the file
+      # @param loader [Zeitwerk::Loader] Owning loader
       # @return [String, nil]
-      def loader_expected_cpath(file_path)
-        loader = main_loader
+      def loader_expected_cpath(file_path, loader)
         return nil unless loader.respond_to?(:cpath_expected_at)
 
         loader.cpath_expected_at(file_path)
@@ -281,19 +281,20 @@ module Woods
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] Active managed root the path is relative to
       # @param foreign_root [String, nil] Matching managed root from loader.dirs
+      # @param loader [Zeitwerk::Loader] Owning loader for the foreign root
       # @return [String, nil]
-      def foreign_loader_constant_path(file_path, root, foreign_root)
+      def foreign_loader_constant_path(file_path, root, foreign_root, loader)
         mapped = foreign_root && mapped_foreign_path(file_path, root, foreign_root)
         return nil unless mapped
 
         # If the corresponding boot-root path exists, the real loader can
         # answer with full semantics: ignores, root namespaces, collapses,
         # and custom inflections. A nil answer is an authoritative non-claim.
-        return loader_expected_cpath(mapped) if File.exist?(mapped)
+        return loader_expected_cpath(mapped, loader) if File.exist?(mapped)
 
-        return nil unless copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
+        return nil unless copied_only_loader_fallback_allowed?(file_path, root, foreign_root, loader)
 
-        inflected_managed_constant_path(file_path, root)
+        inflected_managed_constant_path(file_path, root, loader)
       end
 
       # @param file_path [String] Expanded absolute path under the active root
@@ -314,22 +315,23 @@ module Woods
       #
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] The managed root the path is relative to
+      # @param loader [Zeitwerk::Loader] Owning loader for the corresponding foreign root
       # @return [String]
-      def inflected_managed_constant_path(file_path, root)
+      def inflected_managed_constant_path(file_path, root, loader)
         relative = file_path[root.length..].to_s.sub(/\.rb\z/, '')
         segments = relative.split('/').reject(&:empty?)
         current = root.chomp('/')
         segments.map do |segment|
           current = File.join(current, segment)
-          loader_camelize(segment, current)
+          loader_camelize(segment, current, loader)
         end.join('::')
       end
 
       # @param segment [String] Path segment without extension
       # @param abspath [String] Absolute path passed to Zeitwerk inflectors
+      # @param loader [Zeitwerk::Loader] Owning loader
       # @return [String]
-      def loader_camelize(segment, abspath)
-        loader = main_loader
+      def loader_camelize(segment, abspath, loader)
         inflector = loader.respond_to?(:inflector) ? loader.inflector : nil
         return camelize_segment(segment) unless inflector.respond_to?(:camelize)
 
@@ -345,20 +347,27 @@ module Woods
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] Active managed root the path is relative to
       # @param foreign_root [String] Matching boot-loader managed root
+      # @param loader [Zeitwerk::Loader] Owning loader for the foreign root
       # @return [Boolean]
-      def copied_only_loader_fallback_allowed?(file_path, root, foreign_root)
-        loader_root_namespace(foreign_root) == Object &&
-          !mapped_path_uses_collapsed_directory?(file_path, root, foreign_root) &&
-          !mapped_path_crosses_loader_root?(file_path, root, foreign_root)
+      def copied_only_loader_fallback_allowed?(file_path, root, foreign_root, loader)
+        loader_root_namespace(foreign_root, loader) == Object &&
+          !mapped_path_uses_collapsed_directory?(file_path, root, foreign_root, loader) &&
+          !mapped_path_crosses_loader_root?(file_path, root, foreign_root, loader)
       end
 
       # A nested loader root resets Zeitwerk's constant-path origin. The
       # copied-only fallback cannot ask +cpath_expected_at+ about a file that
       # exists only in the active copy, so it must not camelize the nested
       # root directory as an extra namespace segment.
-      def mapped_path_crosses_loader_root?(file_path, root, foreign_root)
+      #
+      # @param file_path [String] Expanded absolute path to the file
+      # @param root [String] Active managed root
+      # @param foreign_root [String] Matching boot-loader managed root
+      # @param loader [Zeitwerk::Loader] Owning loader for the foreign root
+      # @return [Boolean]
+      def mapped_path_crosses_loader_root?(file_path, root, foreign_root, loader)
         mapped = mapped_foreign_path(file_path, root, foreign_root)
-        Array(main_loader.dirs).any? do |dir|
+        Array(loader.dirs).any? do |dir|
           nested = File.expand_path(dir.to_s.chomp('/'))
           nested != foreign_root && mapped.start_with?("#{nested}/")
         end
@@ -367,9 +376,9 @@ module Woods
       end
 
       # @param foreign_root [String] Matching boot-loader managed root
+      # @param loader [Zeitwerk::Loader] Owning loader for the foreign root
       # @return [Module]
-      def loader_root_namespace(foreign_root)
-        loader = main_loader
+      def loader_root_namespace(foreign_root, loader)
         namespaced_dirs = loader.dirs(namespaces: true) if loader.respond_to?(:dirs)
         return Object unless namespaced_dirs.respond_to?(:[])
 
@@ -381,9 +390,9 @@ module Woods
       # @param file_path [String] Expanded absolute path to the file
       # @param root [String] Active managed root
       # @param foreign_root [String] Matching boot-loader managed root
+      # @param loader [Zeitwerk::Loader] Owning loader for the foreign root
       # @return [Boolean]
-      def mapped_path_uses_collapsed_directory?(file_path, root, foreign_root)
-        loader = main_loader
+      def mapped_path_uses_collapsed_directory?(file_path, root, foreign_root, loader)
         return false unless loader.respond_to?(:__collapse?)
 
         relative = file_path[root.length..].to_s.sub(%r{\A/}, '').sub(/\.rb\z/, '')
@@ -401,11 +410,12 @@ module Woods
       # The managed root directory containing +file_path+, if any, with the
       # authority that vouches for it.
       #
-      # When a Rails autoloader is up, its directory list is the authority
-      # for the files it claims. For a file it does NOT claim, the
-      # non-claim stays authoritative whenever the loader demonstrably
-      # belongs to the active root (any loader directory under it) or
-      # reports an empty set (classic mode): unmanaged. Only when every
+      # Both Rails autoloaders' directory lists are checked for direct
+      # ownership before any copied-root inference. The most specific root
+      # wins; equally specific roots owned by different loaders are ambiguous.
+      # For a file neither claims, the non-claim stays authoritative whenever
+      # either loader has a directory in the active tree, or both report an
+      # empty set (classic mode). Only when every
       # loader root belongs to a DIFFERENT tree — copied-app and
       # multi-worktree extractions, where the loader belongs to the boot
       # root while Rails.root is repointed per slot — does the root-relative
@@ -415,28 +425,37 @@ module Woods
       # {MANAGED_PATH_PATTERN} stands in offline.
       #
       # @param file_path [String] Absolute path to the source file
-      # @return [Array(String, Symbol), nil] `[root, owner]` with owner
-      #   +:loader+, +:foreign_loader+, or +:convention+, or nil when the
-      #   file is unmanaged
+      # @return [Array, nil] `[root, authority, loader, foreign_root]`, with
+      #   authority +:loader+, +:foreign_loader+, or +:convention+; nil when
+      #   unmanaged. The last two fields are omitted for the offline convention.
       def managed_root_for(file_path)
         file_path = File.expand_path(file_path)
-        loader = main_loader
-        unless loader
+        loaders = rails_loaders
+        if loaders.empty?
           root = MANAGED_PATH_PATTERN.match(file_path)&.captures&.first
           return root ? [root, :convention] : nil
         end
 
-        dirs = Array(loader.dirs).map { |dir| File.expand_path(dir.to_s.chomp('/')) }
+        roots = loaders.flat_map do |loader|
+          Array(loader.dirs).map { |dir| [File.expand_path(dir.to_s.chomp('/')), loader] }
+        end.uniq
 
-        claimed = dirs.find { |dir| file_path.start_with?("#{dir}/") }
-        return [claimed, :loader] if claimed
+        claimed = roots.select { |dir, _loader| file_path.start_with?("#{dir}/") }
+        unless claimed.empty?
+          deepest = claimed.map { |dir, _loader| dir.length }.max
+          owners = claimed.select { |dir, _loader| dir.length == deepest }
+          return nil unless owners.one?
+
+          dir, loader = owners.first
+          return [dir, :loader, loader]
+        end
 
         active = active_root
         return nil unless active
-        return nil if dirs.any? { |dir| dir.start_with?("#{active}/") }
-        return nil if dirs.empty?
+        return nil if roots.any? { |dir, _loader| dir == active || dir.start_with?("#{active}/") }
+        return nil if roots.empty?
 
-        active_root_managed_for(file_path, active, dirs)
+        active_root_managed_for(file_path, active, roots)
       end
 
       # Root-relative managed root for a file the autoloader does not
@@ -450,10 +469,9 @@ module Woods
       #
       # @param file_path [String] Absolute path to the source file
       # @param active [String] Expanded active extraction root
-      # @param dirs [Array<String>] Foreign loader roots
-      # @return [Array(String, Symbol, String), nil] `[root, :foreign_loader,
-      #   foreign_root]`, or nil
-      def active_root_managed_for(file_path, active, dirs)
+      # @param roots [Array<Array>] Foreign `[directory, loader]` pairs
+      # @return [Array, nil] `[root, :foreign_loader, loader, foreign_root]`, or nil
+      def active_root_managed_for(file_path, active, roots)
         return nil unless file_path.start_with?("#{active}/")
 
         shape = file_path[active.length..].to_s.match(%r{\A(/app/[^/]+/)})
@@ -461,20 +479,18 @@ module Woods
 
         root = "#{active}#{shape[1]}"
         suffix = shape[1].chomp('/')
-        candidates = dirs.select { |dir| dir.end_with?(suffix) }
+        candidates = roots.select { |dir, _loader| dir.end_with?(suffix) }
         return nil if candidates.empty?
 
-        existing = candidates.select do |foreign_root|
+        existing = candidates.select do |foreign_root, _loader|
           File.exist?(mapped_foreign_path(file_path, root, foreign_root))
         end
 
-        return [root, :foreign_loader, existing.first] if existing.one?
-        return nil if existing.any?
+        candidates = existing unless existing.empty?
+        return nil unless candidates.one?
 
-        foreign_root = candidates.one? ? candidates.first : nil
-        return nil unless foreign_root
-
-        [root, :foreign_loader, foreign_root]
+        foreign_root, loader = candidates.first
+        [root, :foreign_loader, loader, foreign_root]
       end
 
       # The active extraction root, expanded: the boot root in a normal
@@ -490,21 +506,23 @@ module Woods
         nil
       end
 
-      # The main Rails autoloader, or nil when there is none to consult
+      # The available Rails autoloaders, or an empty array when none can be consulted
       # (no Rails, a spec stub). In classic mode the loader exists with an
       # empty directory list — an authoritative empty set.
       #
-      # @return [Zeitwerk::Loader, nil]
-      def main_loader
-        return nil unless defined?(Rails) && Rails.respond_to?(:autoloaders)
+      # @return [Array<Zeitwerk::Loader>]
+      def rails_loaders
+        return [] unless defined?(Rails) && Rails.respond_to?(:autoloaders)
 
         autoloaders = Rails.autoloaders
-        return nil unless autoloaders.respond_to?(:main)
+        %i[main once].filter_map do |name|
+          next unless autoloaders.respond_to?(name)
 
-        main = autoloaders.main
-        main.respond_to?(:dirs) ? main : nil
+          loader = autoloaders.public_send(name)
+          loader if loader.respond_to?(:dirs)
+        end.uniq
       rescue StandardError
-        nil
+        []
       end
 
       # Camelize one path segment the way Zeitwerk's default inflector

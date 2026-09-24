@@ -424,6 +424,17 @@ Return the first failing layer, commands/evidence, root-cause hypothesis, whethe
 
 Canonical guide: [TROUBLESHOOTING.md](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
 
+## SQLite metadata and typed semantic results
+
+If a SQLite-backed index retains deleted units after embedding, or a `:local`
+reader returns no type-filtered semantic matches after restart, record the exact
+embedding and reader revisions. The SQLite reconciliation and metadata hydration
+fix (#572) is unreleased after Woods `2.0.0`. With that fix, a full embed removes
+stale SQLite rows; restarting the reader restores vector type filters from the
+configured SQLite metadata store. Incremental empty-input and bulk-deletion
+guards still apply. See the canonical
+[SQLite metadata configuration](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#sqlite-metadata).
+
 ## Lexical retrieval capability check
 
 Lexical retrieval is available from `2.0.0.beta3`. Before proposing it, verify the installed gem
@@ -460,6 +471,36 @@ unproved boot/consumer coverage remain unknown. A fresh `bundle exec woods-extra
 inside the application environment establishes preboot evidence. Never publish
 `.source-inputs.key`, silently change its permissions, or delete queued edits to
 hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
+### Source paths with invalid filename bytes (unreleased after Woods 2.0.0; #573)
+
+Check the writer revision before relying on this handling. An
+`undecodable_source_path` diagnostic means Woods could not represent a filename
+as UTF-8; source freshness remains unknown and reference publication preserves
+the previous generation. Inspect the escaped path, correct the filename in the
+application checkout, and retry extraction. Do not fabricate current freshness
+or discard the prior index. Valid Unicode filenames remain supported, including
+under a C locale. See [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
+### Surviving-file ownership moves (unreleased after Woods 2.0.0; #574)
+
+Check the writer revision before relying on this correction. A moved class can
+keep its identity when a complete Rails boot proves its unique new owner. For
+file-derived identities, submit both changed paths together so extraction can
+prove that the surviving old file released the identity. Retry the complete
+batch after resolving boot or extraction failures; do not disable collision
+checks or delete the previous generation to force a move through. Simultaneous
+owners still fail. See [incremental extraction](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md).
+
+### Once-loader naming (unreleased after Woods 2.0.0; #579)
+
+Check the loaded writer revision when a declared library child is misnamed as
+its enclosing wrapper. Writers with this fix use the owning Rails loader,
+including `config.autoload_lib_once` naming rules. Run one full extraction after
+upgrading an affected index before resuming incremental maintenance. This does
+not combine unmanaged files that reopen one namespace or invent a class for a
+VERSION-only file. Preserve collision diagnostics for those cases. See
+[extractor naming](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#identifier-naming-source-derived-units).
 
 ## Compact evidence capability check
 

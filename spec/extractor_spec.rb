@@ -929,12 +929,12 @@ RSpec.describe Woods::Extractor do
       expect(extractor.send(:extract_with_rule, service_rule, service_path)).to be_nil
     end
 
-    it 'still returns [] for a genuinely constructed extractor lacking the rule method' do
-      # Seeding the memo hash sidesteps construction, as the reconcile specs
-      # do. An instance without the method IS the "defines nothing" answer.
+    it 'returns nil when a constructed extractor cannot perform the configured rule' do
+      # Skipping an unsupported method provides no evidence of which
+      # identities the source currently owns, even when construction worked.
       extractor.instance_variable_set(:@incremental_extractors, { services: Object.new })
 
-      expect(extractor.send(:extract_with_rule, service_rule, service_path)).to eq([])
+      expect(extractor.send(:extract_with_rule, service_rule, service_path)).to be_nil
     end
   end
 

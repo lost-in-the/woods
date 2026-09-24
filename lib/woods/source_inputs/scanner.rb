@@ -17,8 +17,8 @@ module Woods
       attr_reader :root, :scopes
 
       def initialize(root:, output_dir:, key:, scopes: Scopes.new, **limits)
-        @root = File.expand_path(root.to_s)
-        @output_dir = File.expand_path(output_dir.to_s)
+        @root = SourcePathEncoding.expand(root)
+        @output_dir = SourcePathEncoding.expand(output_dir)
         @key = key
         @scopes = scopes
         @limits = DEFAULT_LIMITS.merge(limits)
@@ -42,6 +42,9 @@ module Woods
       rescue SystemCallError, IOError
         error('source_tree_unavailable')
         result
+      rescue EncodingError, SourcePathEncoding::Invalid
+        error('undecodable_source_path')
+        result
       end
 
       private
@@ -49,11 +52,12 @@ module Woods
       def walk
         raise Errno::ENOENT, @root unless File.directory?(@root)
 
-        @resolved_root = File.realpath(@root)
+        @resolved_root = SourcePathEncoding.utf8!(File.realpath(@root))
         Find.find(@root, ignore_error: false) do |path|
           next if path == @root
 
           check_budget!
+          path = decoded_entry(path)
           relative = path.delete_prefix("#{@root}/")
           if ignored_directory?(path, relative)
             Find.prune if File.directory?(path)
@@ -66,6 +70,17 @@ module Woods
           check_budget!
           visit(path, relative, stat)
         end
+      end
+
+      def decoded_entry(path)
+        decoded = SourcePathEncoding.utf8(path)
+        return decoded if decoded
+
+        @visited += 1
+        check_budget!
+        relative = path.b.delete_prefix("#{@root}/".b)
+        error('undecodable_source_path', SourcePathEncoding.diagnostic(relative))
+        Find.prune
       end
 
       def ignored_directory?(path, relative)
@@ -92,7 +107,7 @@ module Woods
         consumers = @scopes.for_path(relative)
         return if consumers.empty?
 
-        real = File.realpath(path)
+        real = SourcePathEncoding.utf8!(File.realpath(path))
         unless real.start_with?("#{@resolved_root}/")
           error('external_source_path', relative)
           return
@@ -104,6 +119,8 @@ module Woods
         consumers.each { |scope| (@scope_paths[scope] ||= []) << relative }
       rescue SystemCallError, IOError
         error('source_file_unreadable', relative)
+      rescue EncodingError, SourcePathEncoding::Invalid
+        error('undecodable_source_path', SourcePathEncoding.diagnostic(relative))
       end
 
       # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
@@ -113,7 +130,7 @@ module Woods
         flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
         File.open(resolved, flags) do |file|
           before = stamp(file.stat)
-          unless before == expected && File.realpath(path) == resolved
+          unless before == expected && resolved_path(path) == resolved
             error('source_changed_during_read', path.delete_prefix("#{@root}/"))
             return nil
           end
@@ -122,12 +139,16 @@ module Woods
             return nil
           end
           identity = hash_stream(file)
-          unless before == stamp(file.stat) && before == stamp(File.stat(resolved)) && File.realpath(path) == resolved
+          unless before == stamp(file.stat) && before == stamp(File.stat(resolved)) && resolved_path(path) == resolved
             error('source_changed_during_read', path.delete_prefix("#{@root}/"))
             return nil
           end
           identity
         end
+      end
+
+      def resolved_path(path)
+        SourcePathEncoding.utf8!(File.realpath(path))
       end
 
       def hash_stream(file)

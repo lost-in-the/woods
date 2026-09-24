@@ -237,6 +237,17 @@ step before it.
    path no longer produces are dropped. This is what indexes a file the index
    has never seen, and what removes definitions deleted from a surviving
    source file. Multi-file Rake tasks use wholesale reconciliation below.
+
+   **Unreleased after 2.0.0:** changed-path candidates are collected and checked
+   before registration or pruning. Moving an identity out of a surviving file
+   works in either changed-path order only when completed extraction proves
+   the old file no longer produces it and the new owner is unique. Failed or
+   unsupported extraction cannot release an owner. For runtime classes, a
+   complete eager load, an authoritative discovery inventory with one current
+   class, and that class's canonical source location can establish the move.
+   GraphQL's mixed runtime/file inventory does not grant this authority.
+   Incomplete eager loading cannot establish a surviving-file ownership move;
+   genuine simultaneous source owners still abort before publication.
 3. **Re-extract the rest of the blast radius**: units whose own file did not
    change but which depend on something that did.
 4. **Reconcile class-based types** against each extractor's

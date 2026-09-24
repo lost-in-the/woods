@@ -626,6 +626,23 @@ RSpec.describe 'Optional GraphQL extraction', :booted_app do
   end
 end
 
+RSpec.describe 'Once-loader extraction across Rails processes', :booted_app do
+  it 'publishes declared once-owned children with their loader rules through full and incremental extraction' do
+    script = File.expand_path('../fixtures/once_loader/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), "#{error}\n#{output}"
+    result = JSON.parse(output.lines.last)
+
+    expect(result).to include('valid' => true, 'incremental_equivalent' => true)
+    if Gem::Version.new(result.fetch('rails')) >= Gem::Version.new('7.1')
+      expect(result.fetch('autoload_lib_once')).to be(true)
+    end
+    expect(result.fetch('identifiers')).to contain_exactly('OnceKit::Container::API', 'OnceKit::Container::Parser',
+                                                           'OnceKit::Container::Renderer', 'OnceNamespace::Tool',
+                                                           'OnceCollapsed')
+  end
+end
+
 RSpec.describe 'Model callbacks across Rails processes', :booted_app do
   it 'preserves framework callbacks, metadata and chunk hashes across independent boots' do
     results = Array.new(2) do

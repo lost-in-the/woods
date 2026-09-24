@@ -1456,6 +1456,86 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'proven ownership moves out of surviving files (#574)' do
+    def ownership_source(split: false)
+      nested = split ? '' : 'class Car < OwnershipFleet; end'
+      "class OwnershipFleet < ApplicationRecord\n  self.table_name = 'posts'\n  #{nested}\nend\n"
+    end
+
+    def prepare_ownership_split
+      @ownership_old = write_file('app/models/ownership_fleet.rb', ownership_source)
+      @ownership_new = 'app/models/ownership_fleet/car.rb'
+      load app_path(@ownership_old)
+      full_extraction
+    end
+
+    def split_runtime_owner
+      # Retire the old class as a Rails reload would; a stale, still-discovered
+      # class must not supply evidence that ownership has uniquely moved.
+      OwnershipFleet::Car.abstract_class = true
+      OwnershipFleet.send(:remove_const, :Car)
+      write_file(@ownership_old, ownership_source(split: true))
+      write_file(@ownership_new, 'class OwnershipFleet::Car < OwnershipFleet; end')
+      load app_path(@ownership_old)
+      load app_path(@ownership_new)
+    end
+
+    after do
+      if Object.const_defined?(:OwnershipFleet, false)
+        OwnershipFleet::Car.abstract_class = true if OwnershipFleet.const_defined?(:Car, false)
+        OwnershipFleet.abstract_class = true
+        Object.send(:remove_const, :OwnershipFleet)
+      end
+    end
+
+    [false, true].each do |new_first|
+      it "keeps a nested STI model split equivalent and stable after another old-file edit, new first=#{new_first}" do
+        require 'woods/mcp/index_reader'
+        index = prepare_ownership_split
+        reader = Woods::MCP::IndexReader.new(index)
+        expect(reader.find_unit('OwnershipFleet::Car', type: 'model').fetch('file_path')).to eq(@ownership_old)
+        marker = File.binread(File.join(index, 'generation.json'))
+        split_runtime_owner
+        order = new_first ? [@ownership_new, @ownership_old] : [@ownership_old, @ownership_new]
+
+        touched = Woods::Extractor.new(output_dir: index).extract_changed(order)
+
+        expect(touched).to include('OwnershipFleet::Car')
+        expect(File.binread(File.join(index, 'generation.json'))).not_to eq(marker)
+        expect(reader.find_unit('OwnershipFleet::Car', type: 'model').fetch('file_path')).to eq(@ownership_new)
+        expect(differences(index, full_extraction)).to be_empty
+
+        File.open(app_path(@ownership_old), 'a') { |file| file.puts('# unrelated surviving-file edit') }
+        Woods::Extractor.new(output_dir: index).extract_changed([@ownership_old])
+        expect(reader.find_unit('OwnershipFleet::Car', type: 'model').fetch('file_path')).to eq(@ownership_new)
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it "keeps a file-derived lib move equivalent regardless of changed-path order, new first=#{new_first}" do
+        old = write_file('lib/old_helpers.rb', 'class OwnershipHelpers; end')
+        index = full_extraction
+        write_file(old, 'class OwnershipOtherHelpers; end')
+        fresh = write_file('lib/new_helpers.rb', 'class OwnershipHelpers; end')
+
+        Woods::Extractor.new(output_dir: index).extract_changed(new_first ? [fresh, old] : [old, fresh])
+
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    it 'does not publish a runtime move when eager loading was incomplete' do
+      index = prepare_ownership_split
+      marker = File.binread(File.join(index, 'generation.json'))
+      split_runtime_owner
+      allow(Rails.application).to receive(:eager_load!).and_raise(NameError, 'synthetic incomplete eager load')
+
+      expect do
+        Woods::Extractor.new(output_dir: index).extract_changed([@ownership_old, @ownership_new])
+      end.to raise_error(Woods::IdentityCollisionError)
+      expect(File.binread(File.join(index, 'generation.json'))).to eq(marker)
+    end
+  end
+
   describe 'class-based move-shape (M1)' do
     # A model file moved with its constant unchanged: the first
     # reconciliation pass sees the class as known, the prune removes it for
