@@ -7,6 +7,7 @@ require_relative 'cache_store'
 # — otherwise a narrow `require 'woods/cache/cache_middleware'` raises
 # NameError (STO-5).
 require_relative '../embedding/provider'
+require 'securerandom'
 
 module Woods
   module Cache
@@ -108,6 +109,9 @@ module Woods
     class CachedEmbeddingProvider
       include Embedding::Provider::Interface
 
+      # @return [Object] underlying provider, including any resilience wrapper
+      attr_reader :provider
+
       # @param provider [Embedding::Provider::Interface] The real embedding provider
       # @param cache_store [CacheStore] Cache backend instance
       # @param ttl [Integer] TTL for cached embeddings in seconds
@@ -117,6 +121,10 @@ module Woods
         @ttl = ttl
         @inflight = {}
         @inflight_mutex = Mutex.new
+        identity = @provider.cache_identity if @provider.respond_to?(:cache_identity)
+        # Unknown custom providers cannot prove cross-instance compatibility.
+        # Hash every identity so endpoint credentials never enter backend keys.
+        @embedding_identity = Digest::SHA256.hexdigest(JSON.generate(identity || SecureRandom.hex(16)))
       end
 
       # Embed a single text, returning a cached vector when available.
@@ -128,7 +136,7 @@ module Woods
       # @param text [String] Text to embed
       # @return [Array<Float>] Embedding vector
       def embed(text)
-        cached = @cache_store.read(embedding_key(text))
+        cached = read_cached(text)
         return cached unless cached.nil?
 
         with_single_flight(text) { @provider.embed(text) }
@@ -147,13 +155,17 @@ module Woods
       # @return [Array<Array<Float>>] Embedding vectors (same order as input)
       def embed_batch(texts)
         results, misses, miss_indices = partition_cached(texts)
-        return results if misses.empty?
+        if misses.empty?
+          validate_vectors!(results, texts.size)
+          return results
+        end
 
         to_fetch, to_fetch_positions, our_entries, awaiting = claim_inflight(misses)
 
         fetch_and_fulfill(to_fetch, to_fetch_positions, our_entries, results, miss_indices)
         await_others(awaiting, results, miss_indices)
 
+        validate_vectors!(results, texts.size)
         results
       end
 
@@ -169,6 +181,19 @@ module Woods
       # @return [String]
       def model_name
         @provider.model_name
+      end
+
+      # Preserve pure configuration declarations through this wrapper.
+      def cache_identity
+        @provider.cache_identity if @provider.respond_to?(:cache_identity)
+      end
+
+      def configured_dimensions
+        @provider.configured_dimensions if @provider.respond_to?(:configured_dimensions)
+      end
+
+      def requested_dimensions
+        @provider.requested_dimensions if @provider.respond_to?(:requested_dimensions)
       end
 
       # Delegate the per-provider input cap so Builder's chunker / text
@@ -200,6 +225,7 @@ module Woods
 
         begin
           vector = yield
+          validate_vectors!([vector], 1)
           write_cache(text, vector)
           entry.fulfill(vector)
           vector
@@ -283,13 +309,7 @@ module Woods
 
         begin
           fresh_vectors = @provider.embed_batch(to_fetch)
-          # Reject a malformed provider response up-front rather than silently
-          # fulfilling waiters with `nil` (or masking a missing tail vector by
-          # under-writing the cache).
-          if fresh_vectors.size != to_fetch.size
-            raise ArgumentError,
-                  "provider returned #{fresh_vectors.size} vectors for #{to_fetch.size} texts"
-          end
+          validate_fresh_vectors!(fresh_vectors, to_fetch.size)
         rescue StandardError => e
           our_entries.each { |entry| entry.reject(e) }
           raise
@@ -350,7 +370,7 @@ module Woods
         miss_indices = []
 
         texts.each_with_index do |text, idx|
-          cached = @cache_store.read(embedding_key(text))
+          cached = read_cached(text)
           if cached
             results[idx] = cached
           else
@@ -362,29 +382,32 @@ module Woods
         [results, misses, miss_indices]
       end
 
-      # Build a cache key for an embedding text.
-      #
-      # The provider's model_name is folded into the key: a cached embedding
-      # is only valid for the exact model that produced it. Without this, a
-      # persistent shared backend (Redis/SolidCache) returns the previous
-      # model's vector after a model switch or upgrade — different dimensions
-      # error mid-batch, same dimensions silently corrupt similarity scores
-      # (which the provider-vs-store dimension check can't detect, since it
-      # compares declared widths, not cache contents).
-      #
-      # model_name (a plain attribute) is used rather than dimensions on
-      # purpose: for every supported provider the model uniquely determines
-      # the vector dimensionality, and `Provider#dimensions` can force a live
-      # network probe (Ollama memoizes `embed('test').length`; OpenAI probes
-      # for unknown models). Keying on dimensions made every cache lookup —
-      # including hits — depend on the provider being reachable, defeating the
-      # cache exactly when the backend is down. model_name distinguishes
-      # models without any I/O.
-      #
+      def read_cached(text)
+        vector = @cache_store.read(embedding_key(text))
+        validate_vectors!([vector], 1) unless vector.nil?
+        vector
+      end
+
+      # Validate the complete batch before writing or fulfilling any entry.
+      def validate_fresh_vectors!(vectors, count)
+        raise ArgumentError, "provider returned #{vectors.size} vectors for #{count} texts" if vectors.size != count
+
+        validate_vectors!(vectors, count)
+      end
+
+      def validate_vectors!(vectors, count)
+        width = @provider.configured_dimensions if @provider.respond_to?(:configured_dimensions)
+        Embedding::Provider::VectorValidation.validate!(
+          vectors, expected_count: count, provider: 'CachedEmbeddingProvider', expected_dimensions: width
+        )
+      end
+
+      # Configuration identity is captured without probing dimensions. Version
+      # the domain to prevent reuse of old model-only keys after an upgrade.
       # @param text [String]
       # @return [String]
       def embedding_key(text)
-        Cache.cache_key(:embeddings, @provider.model_name.to_s, Digest::SHA256.hexdigest(text))
+        Cache.cache_key(:embeddings, 'configuration-v1', @embedding_identity, Digest::SHA256.hexdigest(text))
       end
     end
 

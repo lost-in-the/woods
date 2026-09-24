@@ -9,7 +9,7 @@ require 'woods/embedding/text_preparer'
 require 'woods/storage/vector_store'
 
 RSpec.describe 'OpenAI requests for chunk-heavy indexing' do
-  let(:provider) { Woods::Embedding::Provider::OpenAI.new(api_key: 'test-key') }
+  let(:provider) { Woods::Embedding::Provider::OpenAI.new(api_key: 'test-key', dimensions: 2) }
   let(:vector_store) { Woods::Storage::VectorStore::InMemory.new }
   let(:http) { instance_double(Net::HTTP) }
   let(:requests) { [] }

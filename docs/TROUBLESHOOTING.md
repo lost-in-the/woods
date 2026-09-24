@@ -472,6 +472,22 @@ the unreachable payload. A resident `woods:watch` process handles the same
 failure differently: it reports `degraded`, carries the changed paths, and
 retries after a later filesystem event.
 
+For the optional embedded `pipeline_extract` tool, a client using the Tasks
+extension sees the task become `failed` for this publication refusal on a
+revision containing #584 (unreleased after `2.0.0`). A background-start response
+alone does not mean extraction completed. The packaged Index Server does not
+register this tool.
+
+### Incremental extraction or refresh reports "Extraction failed for ..."
+
+A selected whole-app extractor raised before returning a complete result, or
+its initialization failed. On revisions containing #584 (unreleased after
+`2.0.0`), a successful sibling extractor cannot turn that failed batch into a
+successful publication. Readers retain the prior generation. Inspect the
+earlier log line naming the failed extractor, fix its cause, then retry the
+complete changed-file list or refresh selection. Preserve the published index;
+deleting it does not repair the failing extractor.
+
 ---
 
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
@@ -747,6 +763,15 @@ bundle exec rake woods:embed
 Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` rather than letting it become a runtime error: `rake woods:embed` refuses before embedding anything (comparing the provider's dimension against the width the `woods_vectors` table or Qdrant collection was created with), and the MCP server refuses at boot (comparing against the dump's WVF1 header). The message names both dimensions and the remedy, drop the vector store and re-index.
 
 **A dimension mismatch is never silently tolerated.** If you are getting poor results without seeing this error, the cause is something else.
+
+For an unsupported `dimensions` request or a wrong-width cached vector, compare
+the installed embedding and reader revisions as well as the model, endpoint,
+and explicit width configuration. The request/cache consistency fix (#586) is
+unreleased after `2.0.0`: it separates stored widths from requested reductions,
+keeps fixed-width ada requests compatible, and separates embedding cache entries
+by provider configuration. See [embedding options](CONFIGURATION_REFERENCE.md#embedding-options)
+and [cache identity](CONFIGURATION_REFERENCE.md#retrieval-cache-options). Do not
+remove a width guard to accept mismatched vectors.
 
 ---
 

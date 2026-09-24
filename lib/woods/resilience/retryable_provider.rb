@@ -81,6 +81,19 @@ module Woods
         @provider.model_name
       end
 
+      # Optional pure configuration contracts; neither may probe the provider.
+      def cache_identity
+        @provider.cache_identity if @provider.respond_to?(:cache_identity)
+      end
+
+      def configured_dimensions
+        @provider.configured_dimensions if @provider.respond_to?(:configured_dimensions)
+      end
+
+      def requested_dimensions
+        @provider.requested_dimensions if @provider.respond_to?(:requested_dimensions)
+      end
+
       # Delegate the per-provider input cap. The retry wrapper does not
       # change the provider's budget, so just hand through whatever the
       # inner provider reports. `respond_to?` alone is the wrong guard

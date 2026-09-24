@@ -1,0 +1,1 @@
+- Keep embedding requests, stored vector widths, and cache identities consistent when restoring provider configuration or changing models, endpoints, or requested dimensions; refuse malformed or mismatched vectors before publication.

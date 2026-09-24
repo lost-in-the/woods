@@ -40,6 +40,7 @@ module Woods
         identities = scopes.values.flat_map(&:values).uniq.sort
         indices = identities.each_with_index.to_h
         new('version' => VERSION, 'generation' => generation, 'root' => snapshot.fetch('root'),
+            'captured_at' => snapshot['captured_at'],
             'key_id' => snapshot.fetch('key_id'), 'rules' => snapshot.fetch('rules'),
             'extra_roots' => snapshot.fetch('extra_roots'), 'boot_verified' => boot_verified,
             'complete' => snapshot.fetch('complete'), 'errors' => (snapshot.fetch('errors') + errors).uniq,
@@ -89,7 +90,15 @@ module Woods
 
       def valid_header?
         valid_root? && %w[key_id rules].all? { |key| digest?(@data[key]) } &&
+          valid_capture_time? &&
           %w[boot_verified complete].all? { |key| [true, false].include?(@data[key]) }
+      end
+
+      # Optional so existing version-1 manifests remain readable. Consumers
+      # needing a catch-up boundary must reconcile when it is absent.
+      def valid_capture_time?
+        value = @data['captured_at']
+        value.nil? || (value.is_a?(Numeric) && value.finite? && value.positive?)
       end
 
       def valid_root?

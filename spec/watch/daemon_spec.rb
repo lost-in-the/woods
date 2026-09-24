@@ -51,8 +51,17 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
-  def publish_generation(reason)
-    Woods::Generation.new(output_dir: output_dir).bump!(reason: reason)
+  def publish_generation(reason, payload: nil)
+    generation = Woods::Generation.new(output_dir: output_dir)
+    key = Woods::SourceInputs::PrivateKey.new(output_dir: output_dir, create: true)
+    snapshot = Woods::SourceInputs::Scanner.new(root: root, output_dir: output_dir, key: key).call
+    scopes = snapshot.fetch('scope_paths').transform_values do |paths|
+      paths.to_h { |path| [path, snapshot.fetch('files').fetch(path)] }
+    end
+    manifest = Woods::SourceInputs::Manifest.build(snapshot: snapshot, scopes: scopes, boot_verified: true,
+                                                   generation: generation.current.number + 1)
+    File.write(File.join(output_dir, payload || '', 'source_inputs.json'), JSON.generate(manifest.data))
+    generation.bump!(reason: reason, payload: payload)
   end
 
   def touch(relative)
@@ -595,8 +604,6 @@ RSpec.describe Woods::Watch::Daemon do
 
     it 'does nothing when every file predates the last successful extraction' do
       touch('app/services/already_indexed.rb')
-      # The generation file is the watermark: written last on a successful run.
-      sleep 0.01
       publish_generation('full')
 
       build(watcher: fake_watcher, catch_up: true).run
@@ -689,10 +696,8 @@ RSpec.describe Woods::Watch::Daemon do
 
     it 'still stands down when the payload directory the pointer names is present' do
       touch('app/services/already_indexed.rb')
-      sleep 0.01
       Woods::PayloadStore.new(output_dir).create(1)
-      Woods::Generation.new(output_dir: output_dir)
-                       .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+      publish_generation('full', payload: Woods::PayloadStore.name_for(1))
 
       build(watcher: fake_watcher, catch_up: true).run
 

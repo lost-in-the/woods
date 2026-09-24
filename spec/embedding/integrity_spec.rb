@@ -9,6 +9,7 @@ require 'woods/embedding/text_preparer'
 require 'woods/embedding/fake'
 require 'woods/storage/snapshotter'
 require 'woods/mcp/index_reader'
+require 'woods/cache/cache_middleware'
 
 RSpec.describe 'Embedding publication integrity' do
   around do |example|
@@ -69,6 +70,27 @@ RSpec.describe 'Embedding publication integrity' do
     end
     { ids: vectors.each_entry.to_a.map(&:first).sort, metadata: records, files: files,
       checkpoint: File.binread(File.join(@root, 'checkpoint.json')), dump: artifact.latest_dump_path.to_s }
+  end
+
+  context 'with embedding response caching' do
+    let(:raw_provider) { Woods::Embedding::Provider::Fake.new(dims: 8) }
+    let(:provider) do
+      Woods::Cache::CachedEmbeddingProvider.new(provider: raw_provider, cache_store: Woods::Cache::InMemory.new)
+    end
+
+    it 'retains the previous dump and checkpoint when a replacement batch has the wrong width' do
+      publish(units)
+      indexer.index_all
+      previous = persisted
+      changed = units.map do |unit|
+        unit.merge('source_code' => "#{unit['source_code']}\n# changed", 'source_hash' => 'changed')
+      end
+      publish(changed, name: 'gen-2')
+      allow(raw_provider).to receive(:embed_batch) { |texts| Array.new(texts.size) { Array.new(7, 0.1) } }
+
+      expect { indexer.index_all }.to raise_error(Woods::Error, /dimension 7, expected 8/)
+      expect(persisted).to eq(previous)
+    end
   end
 
   %i[corrupt missing missing_index wrong_type count_mismatch bad_manifest bad_marker missing_payload

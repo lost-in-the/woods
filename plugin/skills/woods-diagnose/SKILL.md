@@ -84,6 +84,29 @@ registered deleted boot inputs as full-extraction obligations. On earlier builds
 stop watch, run a successful full extraction in a fresh process, then restart
 standalone `woods:watch`. See the installed version's watch guide.
 
+### Watch misses an edit made while another extraction publishes
+
+Record the loaded revision; a matching `2.0.0` version alone does not prove the
+#585 repair is present. Supporting Git builds use the generation's optional
+source-capture boundary and recorded dirty paths, with content checks for
+unchanged candidates. Legacy or invalid boundary metadata causes one full
+startup reconciliation under the usual reload/restart rules. On older builds,
+finish a full extraction against settled source before restarting watch.
+Do not infer source freshness from a recent generation marker or remove a
+foreign watch claim. See the installed version's
+[startup catch-up guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md).
+
+### Extraction fails while a sibling extractor succeeds
+
+The #584 publication-reporting repair is unreleased after Woods `2.0.0`.
+Supporting revisions refuse the whole publication after a consumer constructor
+or extraction failure and keep the previous generation active. Fix the logged
+cause and retry the complete batch; do not treat a sibling's success as a
+completed extraction. For custom/embedded pipeline tools, acknowledgement only
+means the background task started: inspect its final task state. Those operator
+tools are not registered by the packaged default Index Server. See
+[extraction failures](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
+
 ### A cleaned index directory still exists
 
 In Woods `2.0.0`, `woods:clean` retains the output directory and
@@ -315,6 +338,13 @@ for source fallback, runtime-only removal and reference-coverage limits.
 
 ## Deferred refresh hooks
 
+For missing Unicode edit events on a host without jq, inspect the locale and
+the installed hook files. The #592 UTF-8 fallback repair is unreleased after
+Woods `2.0.0`; it fixes edit queueing and SessionStart decoding under `LC_ALL=C`.
+Older hooks can use jq or a UTF-8 locale. Confirm the pending queue and published
+generation, since hook exit zero does not establish refresh. See
+[client hook recovery](https://github.com/lost-in-the/woods/blob/main/docs/CLIENT_HOOKS.md#queue-paths-and-recovery).
+
 Expanded hook coverage and `woods:hook_refresh` (#408) are available in Woods
 `2.0.0.beta3`. Verify the installed task through the configured host/container
 command before diagnosing this plugin's queue. Read `<output>/hook.log` and
@@ -384,6 +414,14 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 - Stale vectors or missing same-name types: follow the installed version's upgrade guide and run the documented embed refresh; do not rename public identifiers or edit vector IDs by hand.
 - Dimension mismatch: rebuild into a store matching the configured model; do not suppress the preflight.
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
+
+For an unsupported OpenAI `dimensions` option or stale vectors after changing
+provider width/endpoint, check the installed revision: the embedding request and
+cache consistency fix (#586) is unreleased after Woods `2.0.0`. It distinguishes
+stored vector width from explicit reduction, omits unsupported width parameters
+for fixed-width ada, and scopes embedding cache entries to provider configuration.
+Follow the installed version's [embedding options and cache guidance](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#embedding-options);
+never bypass a width refusal or infer this capability from the plugin version.
 
 For metadata appearing in another index or worktree, compare `WOODS_OUTPUT`,
 `config.output_dir`, and any explicit `metadata_store_options[:database]`.

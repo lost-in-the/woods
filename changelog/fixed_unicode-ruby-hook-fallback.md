@@ -1,0 +1,1 @@
+- Preserve Unicode roots, output directories and edit paths through Ruby-only refresh and SessionStart hooks under the C locale. Keep failed batches queued and sanitize malformed JSON/encoding diagnostics (#592).

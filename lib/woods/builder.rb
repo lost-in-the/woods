@@ -191,10 +191,9 @@ module Woods
     #   their own implementation without patching the Builder. It flows
     #   through {#build_resilient_embedding_provider} like the built-ins.
     #
-    # Strips `embedding_options` keys that belong to the ResolvedConfig layer
-    # (like `:dimension`) before splatting into the provider's constructor —
-    # those keys are useful for the Snapshotter's schema header but
-    # aren't part of the provider's API.
+    # The legacy :dimension option aliases the explicit :dimensions request.
+    # Stored observed widths use :expected_dimensions so restoring an index
+    # does not accidentally change the provider request.
     #
     # @return [Embedding::Provider::Interface] Embedding provider instance
     # @raise [ArgumentError] if the configured type is not recognized
@@ -244,8 +243,8 @@ module Woods
     end
 
     PROVIDER_OPTION_KEYS = {
-      openai: %i[api_key model dimension dimensions],
-      ollama: %i[model host num_ctx read_timeout dimension dimensions],
+      openai: %i[api_key model dimension dimensions expected_dimensions],
+      ollama: %i[model host num_ctx read_timeout dimension dimensions expected_dimensions],
       fake: %i[model dims dimension dimensions]
     }.freeze
     private_constant :PROVIDER_OPTION_KEYS
@@ -328,10 +327,9 @@ module Woods
     # Build the deterministic fake provider (#178).
     #
     # Dimension resolution: `embedding_options[:dims]` maps directly onto
-    # the {Embedding::Provider::Fake} constructor; failing that, the
-    # ResolvedConfig-level `embedding_options[:dimension]` key — normally
-    # snapshot-only bookkeeping stripped by {#provider_kwargs} — is
-    # honoured, so hosts that declare their dimension there (and the MCP
+    # the {Embedding::Provider::Fake} constructor; failing that, the legacy
+    # `embedding_options[:dimension]` alias is honoured, so hosts that
+    # declare their dimension there (and the MCP
     # boot path, which restores exactly that key from woods.json) get
     # vectors of the recorded dimension.
     #

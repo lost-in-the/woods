@@ -2,6 +2,7 @@
 
 require 'net/http'
 require 'json'
+require_relative 'vector_configuration'
 
 module Woods
   # Standalone-load guard — keeps `require 'woods/embedding/provider'`
@@ -158,7 +159,7 @@ module Woods
         #   check is skipped.
         # @raise [InvalidEmbeddingResponse] on any violation
         # @return [void]
-        def validate!(vectors, expected_count:, provider:, indexes: nil)
+        def validate!(vectors, expected_count:, provider:, indexes: nil, expected_dimensions: nil)
           fail_with = lambda do |msg|
             raise InvalidEmbeddingResponse.new(msg, provider: provider, batch_size: expected_count)
           end
@@ -169,7 +170,7 @@ module Woods
 
           validate_indexes!(indexes, expected_count, fail_with) if indexes
 
-          validate_vector_shapes!(vectors, fail_with)
+          validate_vector_shapes!(vectors, fail_with, expected_dimensions)
         end
 
         # @api private
@@ -187,8 +188,7 @@ module Woods
         private_class_method :validate_indexes!
 
         # @api private
-        def validate_vector_shapes!(vectors, fail_with)
-          dimension = nil
+        def validate_vector_shapes!(vectors, fail_with, dimension)
           vectors.each_with_index do |vector, i|
             check_vector_shape!(vector, i, fail_with)
             dimension ||= vector.size
@@ -223,6 +223,7 @@ module Woods
       class Ollama
         include Interface
         include DiscardableClient
+        include VectorConfiguration
 
         DEFAULT_MODEL = 'nomic-embed-text'
         DEFAULT_HOST = 'http://localhost:11434'
@@ -270,14 +271,15 @@ module Woods
         #   unknown models. Set explicitly only if running a model with a
         #   known-larger native context that isn't in the registry yet.
         # @param dimensions [Integer, nil] Requested output vector size.
+        # @param expected_dimensions [Integer, nil] Expected width; never sent to the API.
         # @param read_timeout [Integer] HTTP read timeout in seconds.
         #   Bump this for slow / cold-start hosts or very large batches.
-        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil,
-                       dimensions: nil, read_timeout: DEFAULT_READ_TIMEOUT)
+        def initialize(model: DEFAULT_MODEL, host: DEFAULT_HOST, num_ctx: nil, # rubocop:disable Metrics/ParameterLists
+                       dimensions: nil, expected_dimensions: nil, read_timeout: DEFAULT_READ_TIMEOUT)
           @model = model
           @host = host
           @num_ctx = num_ctx || MODEL_CONTEXT_LENGTHS.fetch(model, FALLBACK_NUM_CTX)
-          @dimensions = normalize_dimensions(dimensions)
+          configure_dimensions(dimensions: dimensions, expected_dimensions: expected_dimensions)
           @read_timeout = read_timeout
           @uri = URI("#{host}/api/embed")
         end
@@ -293,7 +295,7 @@ module Woods
 
           response = post_request(build_body(text))
           vectors = Array(response['embeddings'])
-          VectorValidation.validate!(vectors, expected_count: 1, provider: 'Ollama')
+          validate_vectors!(vectors, expected_count: 1, provider: 'Ollama')
           vectors.first
         end
 
@@ -311,7 +313,7 @@ module Woods
 
           response = post_request(build_body(texts))
           vectors = Array(response['embeddings'])
-          VectorValidation.validate!(vectors, expected_count: texts.size, provider: 'Ollama')
+          validate_vectors!(vectors, expected_count: texts.size, provider: 'Ollama')
           vectors
         end
 
@@ -321,7 +323,13 @@ module Woods
         #
         # @return [Integer] number of dimensions
         def dimensions
-          @dimensions ||= embed('test').length
+          configured_dimensions || @observed_dimensions || embed('test').length
+        end
+
+        # Pure configuration identity; probes never change request semantics or keys.
+        # @return [Array]
+        def cache_identity
+          [self.class.name, @host, @model, @num_ctx, requested_dimensions, configured_dimensions]
         end
 
         # Return the model name.
@@ -343,15 +351,6 @@ module Woods
 
         private
 
-        def normalize_dimensions(value)
-          return if value.nil?
-
-          dimensions = Integer(value)
-          raise ArgumentError, "dimensions must be positive, got #{value.inspect}" unless dimensions.positive?
-
-          dimensions
-        end
-
         # Cap interpolated response bodies so misconfigured Ollama responses
         # (e.g. proxied HTML error pages) don't unbounded-leak into logs or
         # re-raised error messages.
@@ -370,7 +369,7 @@ module Woods
         # tokens and returns 400 when the input exceeds that default.
         def build_body(input)
           body = { model: @model, input: input }
-          body[:dimensions] = @dimensions if @dimensions
+          body[:dimensions] = requested_dimensions if requested_dimensions
           body[:options] = { num_ctx: @num_ctx } if @num_ctx
           body
         end

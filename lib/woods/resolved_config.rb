@@ -38,7 +38,7 @@ module Woods
     # @return [Time]
     attr_reader :created_at
 
-    # @return [Hash] Provider details — :class, :model, :host, :num_ctx, :read_timeout, :dimension
+    # @return [Hash] Provider details, including observed :dimension and :requested_dimensions
     attr_reader :embedding_provider
 
     # @return [Hash] Store types — :vector_store, :metadata_store, :graph_store (Symbols)
@@ -87,7 +87,7 @@ module Woods
       require_relative 'version'
 
       opts = (config.embedding_options || {}).transform_keys(&:to_sym)
-      declared_dim = opts[:dimensions] || opts[:dimension] || opts[:dims]
+      declared_dim = opts[:expected_dimensions] || opts[:dimensions] || opts[:dimension] || opts[:dims]
       dim = provider.respond_to?(:dimensions) ? provider.dimensions : declared_dim
       model = provider.respond_to?(:model_name) ? provider.model_name : (opts[:model] || config.embedding_model)
 
@@ -99,6 +99,11 @@ module Woods
         num_ctx: opts[:num_ctx],
         read_timeout: opts[:read_timeout]
       }.compact
+      provider_hash[:requested_dimensions] = if provider.respond_to?(:requested_dimensions)
+                                               provider.requested_dimensions
+                                             else
+                                               opts[:dimensions] || opts[:dimension]
+                                             end
 
       new(
         schema_version: SCHEMA_VERSION_SUPPORTED,
@@ -289,7 +294,7 @@ module Woods
 
       def parse_provider(raw)
         data = normalize_keys(raw)
-        {
+        parsed = {
           class: data[:class].to_s,
           model: data[:model].to_s,
           dimension: data[:dimension].to_i,
@@ -297,6 +302,8 @@ module Woods
           num_ctx: data[:num_ctx],
           read_timeout: data[:read_timeout]
         }.compact
+        parsed[:requested_dimensions] = data[:requested_dimensions] if data.key?(:requested_dimensions)
+        parsed
       end
 
       def parse_stores(raw)
@@ -338,7 +345,15 @@ module Woods
         when String  then provider
         when Class   then provider.name
         when nil     then ''
-        else provider.to_s
+        else resolve_provider_object_class(provider)
+        end
+      end
+
+      def resolve_provider_object_class(provider)
+        if %w[Woods::Resilience::RetryableProvider Woods::Cache::CachedEmbeddingProvider].include?(provider.class.name)
+          resolve_provider_class(provider.provider)
+        else
+          provider.class.name || provider.to_s
         end
       end
     end

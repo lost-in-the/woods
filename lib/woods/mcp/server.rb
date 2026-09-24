@@ -1316,6 +1316,7 @@ module Woods
                 require_relative '../extractor' unless defined?(Woods::Extractor)
                 extractor = Woods::Extractor.new(output_dir: output_dir)
                 incremental ? extractor.extract_changed(files) : extractor.extract_all
+                extractor.raise_on_publication_failure!
               end
             end
 
