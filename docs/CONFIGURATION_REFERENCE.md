@@ -136,6 +136,26 @@ config.embedding_options = {
 }
 ```
 
+`dimensions:` explicitly requests an output width; use it to reduce a
+`text-embedding-3-small` or `text-embedding-3-large` vector. The legacy singular
+`dimension:` remains an alias for this explicit request; if both are supplied,
+they must agree. `expected_dimensions:` records an expected output width
+without requesting a reduction. Standalone snapshot restoration uses that
+separate channel. Provider responses must match the expected width before
+Woods accepts them.
+
+`text-embedding-ada-002` has a fixed width of 1,536. A matching declared width
+is accepted without sending the API's unsupported `dimensions` parameter;
+other widths are refused before a request.
+
+Embedding snapshots store observed `dimension` separately from
+`requested_dimensions`. Standalone readers restore both. For legacy snapshots
+without the latter field, Woods restores a reduction only when the model is
+exactly `text-embedding-3-small` or `text-embedding-3-large` and the recorded
+width is below that model's native width. It does not infer support for
+reductions from arbitrary model names. Store and snapshot width checks still
+apply; changing models or widths requires rebuilding a compatible vector store.
+
 OpenAI embedding batches are sent in slices of at most 36 texts, preserving
 input order. For inputs within the API's 8,192-token per-text limit, this stays
 below both the 2,048-input limit and the 300,000-token total request limit.
@@ -159,6 +179,11 @@ config.embedding_options = {
 ```
 
 The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `mxbai-embed-large` → 512, `snowflake-arctic-embed` → 512, `snowflake-arctic-embed2` → 8192, `all-minilm` → 512). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
+
+An explicit `dimensions:` option (or its legacy `dimension:` alias) is sent to
+Ollama and requires server/model support. A stored width is restored through
+`expected_dimensions:` instead.
+Discovering a width through a probe never adds `dimensions` to later requests.
 
 **Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
 
@@ -335,9 +360,24 @@ overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
 
+Embedding entries are scoped to the provider family, endpoint, model, requested
+and declared widths, and relevant input options. Cache lookups never call a
+provider's probing `dimensions` method. Keys contain hashes rather than raw
+endpoint credentials or API keys. Malformed cached vectors and known-width
+mismatches are refused. This configuration key format starts a fresh embedding
+cache after upgrading; old entries expire under their existing TTLs.
+
+Custom provider objects may expose a pure, JSON-compatible `cache_identity`
+containing every setting that affects their vectors, plus a non-probing
+`configured_dimensions` reader for width validation. Otherwise each cache
+wrapper has its own namespace; cached vectors are still checked for valid
+numeric content and consistent batch widths. Configuration changes require a
+new provider and wrapper. A remotely replaced model under an unchanged name
+still requires an explicit cache/model-version change and re-embedding.
+
 `Woods::Cache.cache_key` length-prefixes every component, including a single
-component, so different argument counts cannot share a response. Existing
-multi-component keys used by Woods' wrappers remain unchanged. Custom callers
+component, so different argument counts cannot share a response. This component
+encoding is unchanged; the embedding wrapper uses the new identity above. Custom callers
 using single-component keys must clear their affected persistent cache domain
 when upgrading, since older unprefixed entries can alias the new encoding;
 subsequent calls refill it normally. Namespace clearing still covers both formats.

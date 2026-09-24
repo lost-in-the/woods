@@ -439,10 +439,10 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
     end
 
     it 'sends explicitly configured dimensions in requests' do
-      described_class.new(dimensions: 256).embed('text')
+      described_class.new(dimensions: 5).embed('text')
 
       expect(http_double).to have_received(:request) do |request|
-        expect(JSON.parse(request.body)['dimensions']).to eq(256)
+        expect(JSON.parse(request.body)['dimensions']).to eq(5)
       end
     end
   end
