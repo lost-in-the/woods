@@ -47,7 +47,7 @@ module Woods
         return false unless lookup.module_object?(scope)
 
         location = SourceReferences::ValueClass::SOURCE_LOCATION.bind(scope).call(name, false)
-        location && File.expand_path(location.first) == File.expand_path(file_path)
+        location&.first && File.expand_path(location.first) == File.expand_path(file_path)
       end
 
       def callable_module?(identifier, path, lookup)

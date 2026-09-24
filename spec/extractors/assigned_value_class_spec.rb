@@ -180,6 +180,22 @@ RSpec.describe 'Assigned value class discovery' do
     load path
     expect(Woods::Extractors::PoroExtractor.new.extract_poro_file(path).identifier).to eq('AssignedValues::Ordinary')
   end
+  %w[app/models lib].each do |directory|
+    it "discovers an assigned child inside a native wrapper with no Ruby source in #{directory}" do
+      unit, path = extract_value("#{directory}/native_values.rb", <<~SOURCE)
+        class Struct
+          WoodsAssignedProbe = Struct.new(:value)
+        end
+      SOURCE
+      expect(unit&.identifier).to eq('Struct::WoodsAssignedProbe')
+      analysis = Woods::SourceReferences::Collector.new.call(File.read(path))
+      registry = Woods::SourceReferences::Registry.new(units: [unit], sources: { path => analysis }, root: tmp_dir)
+      expect(registry.owner?('Struct::WoodsAssignedProbe', file_path: path)).to be(true)
+    ensure
+      Struct.send(:remove_const, :WoodsAssignedProbe) if Struct.const_defined?(:WoodsAssignedProbe, false)
+    end
+  end
+
   it 'preserves a top-level named Struct lookup without admitting its alias as a reference target' do
     unit, path = extract_value('app/models/assigned_named_value.rb', <<~SOURCE)
       AssignedNamedValue = Struct.new('AssignedNamedUnderlying', :value)
