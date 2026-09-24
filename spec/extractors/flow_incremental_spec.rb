@@ -171,6 +171,90 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
 
   # ── M3 defect 1: annotations ─────────────────────────────────────────────
 
+  %i[full incremental refresh].each do |mode|
+    it "withdraws disabled flow documents and untouched controller annotations during #{mode}" do
+      index_dir = extract_all_to_tmp
+      expect(Dir[File.join(payload_of(index_dir), 'flows', '*.json')]).not_to be_empty
+      previous_payload = payload_of(index_dir)
+      previous_flows = Dir[File.join(previous_payload, 'flows', '*.json')].to_h { |file| [file, File.binread(file)] }
+      Woods.configuration.precompute_flows = false
+      runner = Woods::Extractor.new(output_dir: index_dir)
+      case mode
+      when :full then runner.extract_all
+      when :incremental then runner.extract_changed([])
+      when :refresh then runner.refresh(:jobs)
+      end
+      runner.raise_on_publication_failure!
+
+      expect(payload_of(index_dir)).not_to eq(previous_payload)
+      expect(Dir[File.join(payload_of(index_dir), 'flows', '*.json')]).to be_empty
+      require 'woods/mcp/server'
+      expect(Woods::MCP::Server.send(:load_precomputed_flow, payload_of(index_dir), 'PostsController#create')).to be_nil
+      controllers = Dir[File.join(payload_of(index_dir), 'controllers', '*.json')]
+                    .reject { |file| File.basename(file) == '_index.json' }
+      expect(controllers).not_to be_empty
+      controllers.each do |file|
+        expect(JSON.parse(File.read(file)).fetch('metadata')).not_to have_key('flow_paths')
+      end
+      previous_flows.each { |file, bytes| expect(File.binread(file)).to eq(bytes) }
+      require_relative '../support/index_comparison'
+      expect(IndexComparison.differences(payload_of(index_dir), payload_of(extract_all_to_tmp))).to be_empty
+    ensure
+      Woods.configuration.precompute_flows = true
+    end
+  end
+
+  it 'keeps the prior flow generation active when withdrawal fails' do
+    index_dir = extract_all_to_tmp
+    previous = payload_of(index_dir)
+    Woods.configuration.precompute_flows = false
+    allow(FileUtils).to receive(:remove_entry).and_call_original
+    allow(FileUtils).to receive(:remove_entry).with(an_object_satisfying { |path| path.basename.to_s == 'flows' })
+                                              .and_raise(IOError, 'flow withdrawal failed')
+    expect { Woods::Extractor.new(output_dir: index_dir).extract_changed([]) }
+      .to raise_error(IOError, /flow withdrawal failed/)
+    expect(payload_of(index_dir)).to eq(previous)
+    expect(flow_index(index_dir)).not_to be_empty
+  ensure
+    Woods.configuration.precompute_flows = true
+  end
+
+  %i[incremental refresh].each do |mode|
+    it "withdraws annotations and keeps index counts under a literal glob-character root during #{mode}" do
+      original = extract_all_to_tmp
+      index_dir = "#{original}[literal]*"
+      FileUtils.mv(original, index_dir)
+      @scratch_dirs << index_dir
+      previous = payload_of(index_dir)
+      controllers = Pathname.new(previous).join('controllers').children
+                            .select { |path| path.extname == '.json' && path.basename.to_s != '_index.json' }
+                            .select { |path| JSON.parse(File.read(path)).fetch('metadata').key?('flow_paths') }
+      expect(controllers).not_to be_empty
+      old_index = JSON.parse(File.read(File.join(previous, 'controllers/_index.json')))
+      old_manifest = JSON.parse(File.read(File.join(previous, 'manifest.json')))
+      Woods.configuration.precompute_flows = false
+      runner = Woods::Extractor.new(output_dir: index_dir)
+      mode == :incremental ? runner.extract_changed([]) : runner.refresh(:jobs)
+      runner.raise_on_publication_failure!
+      current = payload_of(index_dir)
+
+      expect(current).not_to eq(previous)
+      expect(File).not_to exist(File.join(current, 'flows'))
+      controllers.each do |path|
+        data = JSON.parse(File.read(File.join(current, 'controllers', path.basename)))
+        expect(data.fetch('metadata')).not_to have_key('flow_paths')
+        expect(JSON.parse(File.read(path)).fetch('metadata')).to have_key('flow_paths')
+      end
+      updated = JSON.parse(File.read(File.join(current, 'controllers/_index.json')))
+      expect(updated.map { |unit| unit.fetch('identifier') })
+        .to match_array(old_index.map { |unit| unit.fetch('identifier') })
+      expect(JSON.parse(File.read(File.join(current, 'manifest.json'))).fetch('total_units'))
+        .to eq(old_manifest.fetch('total_units'))
+    ensure
+      Woods.configuration.precompute_flows = true
+    end
+  end
+
   it 'refreshes metadata[:flow_paths] on a controller re-extracted incrementally' do
     index_dir = extract_all_to_tmp
     write_controller('widgets_controller', 'WidgetsController',

@@ -1,0 +1,5 @@
+# frozen_string_literal: true
+
+# Real optional serializer discovery, isolated from the base runtime bundle.
+eval_gemfile File.expand_path('rails_7.2.gemfile', __dir__)
+gem 'active_model_serializers', '~> 0.10'
