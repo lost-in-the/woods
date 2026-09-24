@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'woods/retrieval/search_executor'
 require 'woods/retrieval/query_classifier'
 require 'woods/retrieval/ranker'
+require 'woods/storage_identity'
 require 'woods/retrieval/context_assembler'
 require 'woods/storage/metadata_store'
 require 'woods/storage/graph_store'
@@ -77,6 +78,70 @@ RSpec.describe Woods::Retrieval::Ranker do
   end
 
   # ── RRF (Reciprocal Rank Fusion) ───────────────────────────────────
+
+  describe 'unit-level reciprocal rank fusion' do
+    def fused_signature(chunks)
+      candidates = [candidate(identifier: 'Other', score: 0.99)]
+      chunks.times do |index|
+        candidates << candidate(identifier: "Chunky#chunk_#{index}", score: 0.98 - (index * 0.01))
+      end
+      candidates << candidate(identifier: 'Tail', score: 0.5)
+      candidates << candidate(identifier: 'Tail', score: 0.7, source: :keyword)
+      candidates << candidate(identifier: 'Control', score: 0.1, source: :keyword)
+      ranker.rank(candidates, classification: classification).map { |item| [item.identifier, item.score] }
+    end
+
+    it 'keeps unit scores and order invariant when one source returns more chunks' do
+      expect(fused_signature(3)).to eq(fused_signature(1))
+      expect(fused_signature(10)).to eq(fused_signature(1))
+    end
+
+    it 'does not let many chunks outweigh genuine agreement between sources' do
+      candidates = [candidate(identifier: 'Other', score: 0.99),
+                    candidate(identifier: 'Other', score: 0.9, source: :keyword)]
+      10.times { |index| candidates << candidate(identifier: "Chunky#chunk_#{index}", score: 0.98) }
+
+      expect(ranker.rank(candidates, classification: classification).first.identifier).to eq('Other')
+    end
+
+    it 'retains evidence from lower ranked duplicates independently of their ranking contribution' do
+      candidates = [candidate(identifier: 'Unit#chunk_0', score: 0.9),
+                    candidate(identifier: 'Unit#chunk_1', score: 0.8, metadata: { 'type' => 'lib' },
+                              matched_fields: ['source_code']),
+                    candidate(identifier: 'Unit#chunk_2', score: 0.7, matched_fields: ['file_path']),
+                    candidate(identifier: 'Unit', score: 0.6, source: :keyword, matched_fields: ['identifier'])]
+      before = Marshal.dump(candidates)
+      unit = ranker.rank(candidates, classification: classification).first
+
+      expect(unit.identifier).to eq('Unit')
+      expect(unit.metadata).to eq('type' => 'lib')
+      expect(unit.matched_fields).to contain_exactly('source_code', 'file_path', 'identifier')
+      expect(Marshal.dump(candidates)).to eq(before)
+    end
+
+    it 'keeps same-named units of different types separate' do
+      lib = Woods::StorageIdentity.key('Shared', 'lib')
+      model = Woods::StorageIdentity.key('Shared', 'model')
+      candidates = [candidate(identifier: "#{lib}#chunk_0", score: 0.9),
+                    candidate(identifier: "#{lib}#chunk_1", score: 0.8),
+                    candidate(identifier: model, score: 0.7, source: :keyword)]
+
+      expect(ranker.rank(candidates, classification: classification).map(&:identifier))
+        .to contain_exactly(lib, model)
+    end
+
+    it 'breaks equal source scores deterministically rather than by chunk arrival order' do
+      candidates = [candidate(identifier: 'B#chunk_1', score: 0.9),
+                    candidate(identifier: 'A#chunk_0', score: 0.9),
+                    candidate(identifier: 'B#chunk_0', score: 0.9),
+                    candidate(identifier: 'C', score: 0.4, source: :keyword)]
+      expected = ranker.rank(candidates, classification: classification).map { |item| [item.identifier, item.score] }
+      actual = ranker.rank(candidates.reverse, classification: classification)
+                     .map { |item| [item.identifier, item.score] }
+
+      expect(actual).to eq(expected)
+    end
+  end
 
   describe 'Reciprocal Rank Fusion' do
     it 'merges candidates from multiple sources using RRF' do
