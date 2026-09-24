@@ -123,7 +123,7 @@ RSpec.describe 'App-owned nested extractor paths' do
     expect(serialized_unit(unit).fetch('file_path')).to eq(path)
   end
 
-  it 'preserves an external component source path without inventing a sidecar' do
+  it 'excludes an external component even when its directory shares the application prefix' do
     stub_const('ViewComponent::Base', Class.new)
     stub_const('PortableMetadataComponent', Class.new(ViewComponent::Base))
     app = File.join(tmp_dir, 'app')
@@ -135,8 +135,6 @@ RSpec.describe 'App-owned nested extractor paths' do
 
     unit = Woods::Extractors::ViewComponentExtractor.new.extract_component(PortableMetadataComponent)
 
-    expect(unit.source_code).to eq(source)
-    expect(unit.metadata.fetch(:sidecar_template)).to be_nil
-    expect(serialized_unit(unit).fetch('file_path')).to eq(path)
+    expect(unit).to be_nil
   end
 end

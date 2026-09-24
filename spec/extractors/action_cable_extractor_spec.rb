@@ -303,6 +303,7 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
         stub_rails_root('/rails')
         allow(File).to receive(:exist?).and_call_original
         allow(File).to receive(:exist?).with('/rails/app/channels/fallback_channel.rb').and_return(true)
+        allow(File).to receive(:file?).with('/rails/app/channels/fallback_channel.rb').and_return(true)
       end
 
       it 'falls back to convention path when source_location is nil' do
@@ -471,6 +472,9 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
           public_methods: [],
           source_location: '/rails/app/channels/good_channel.rb'
         )
+        allow(File).to receive(:exist?).with('/rails/app/channels/bad_channel.rb').and_return(true)
+        allow(File).to receive(:file?).with('/rails/app/channels/bad_channel.rb').and_return(true)
+        allow(File).to receive(:read).with('/rails/app/channels/bad_channel.rb').and_return('class BadChannel; end')
         stub_application_cable_channel(base, [@bad_channel, @good_channel])
       end
 
@@ -573,6 +577,7 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
   def build_mock_channel(name, source:, public_methods:, source_location:)
     channel = double(name || 'anonymous')
     allow(channel).to receive(:name).and_return(name)
+    allow(channel).to receive(:<).with(channel_base_class).and_return(true)
     allow(channel).to receive(:instance_methods).with(false).and_return(public_methods)
     allow(channel).to receive(:methods).with(false).and_return([])
     stub_channel_source_location(channel, source_location)
@@ -594,6 +599,7 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
     return unless source_location
 
     allow(File).to receive(:exist?).with(source_location).and_return(true)
+    allow(File).to receive(:file?).with(source_location).and_return(true)
     allow(File).to receive(:read).with(source_location).and_return(source)
   end
 

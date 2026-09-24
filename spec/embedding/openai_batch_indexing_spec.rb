@@ -62,7 +62,7 @@ RSpec.describe 'OpenAI requests for chunk-heavy indexing' do
       expect(vectors.fetch("Chunked#chunk_#{index}")).to eq([index.to_f, 1.0])
     end
     checkpoint = JSON.parse(File.read(File.join(@output_dir, 'checkpoint.json')))
-    expect(checkpoint.fetch('Chunked')).to eq('source')
+    expect(checkpoint.fetch('hashes').fetch('Chunked')).to eq('source')
   end
 
   context 'when a later request fails' do
@@ -70,7 +70,7 @@ RSpec.describe 'OpenAI requests for chunk-heavy indexing' do
     let(:fail_second_request) { true }
 
     it 'stores no partial vectors or successful checkpoint' do
-      expect { indexer.index_all }.to raise_error(Woods::Error, /second request failed/)
+      expect { indexer.index_all }.to raise_error(Woods::Error, /Embedding failed.*Chunked/)
       expect(vector_store.count).to eq(0)
       expect(File).not_to exist(File.join(@output_dir, 'checkpoint.json'))
       expect(File).not_to exist(File.join(@output_dir, 'dumps', 'latest'))

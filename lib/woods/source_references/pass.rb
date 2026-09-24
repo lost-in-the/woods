@@ -66,7 +66,7 @@ module Woods
           key = [unit['type'], unit['identifier']]
           path = @inputs.relative(unit['file_path'])
           base = original_dependencies(unit, key)
-          additions = resolved_dependencies(unit, path).reject { |edge| base.include?(edge) }
+          additions = all_resolved_dependencies(unit) - base
           dependencies[key] = base + additions
           owner_record(unit, path, additions)
         end
@@ -78,7 +78,10 @@ module Woods
       def owner_record(unit, path, additions)
         return unless @files.key?(path) && RuntimeLookup::CONSTANT.match?(unit['identifier'].to_s)
 
-        { 'type' => unit['type'], 'identifier' => unit['identifier'], 'file_path' => path, 'added' => additions }
+        record = { 'type' => unit['type'], 'identifier' => unit['identifier'], 'file_path' => path,
+                   'added' => additions }
+        record['file_paths'] = reference_paths(unit) if SourceContributors.multiple?(unit)
+        record
       end
 
       def fresh?(unit)
@@ -106,10 +109,22 @@ module Woods
         prior = @previous[key]
         expected = @files.key?(path) || @baseline.fetch('files').key?(path)
         if expected && RuntimeLookup::CONSTANT.match?(unit['identifier'].to_s) &&
-           (!prior || prior['file_path'] != path)
+           !same_owner_paths?(prior, unit, path)
           raise_rebuild("reference ownership is missing or incompatible for #{key.join(':')}")
         end
         prior
+      end
+
+      def all_resolved_dependencies(unit)
+        reference_paths(unit).flat_map { |source| resolved_dependencies(unit, source) }.uniq
+      end
+
+      def same_owner_paths?(prior, unit, path)
+        prior && prior['file_path'] == path && (prior['file_paths'] || [path]) == reference_paths(unit)
+      end
+
+      def reference_paths(unit)
+        SourceContributors.paths(unit).map { |path| @inputs.relative(path) }
       end
 
       def normalize_edge(edge)

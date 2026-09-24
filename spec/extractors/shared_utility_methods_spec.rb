@@ -91,6 +91,21 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
     end
   end
 
+  describe 'application source containment' do
+    it 'does not confuse a sibling root with application source' do
+      expect(utility.app_source?('/application/app/components/card.rb', '/app')).to be false
+    end
+
+    it 'excludes dependencies relative to the root, not its parent directory names' do
+      expect(utility.app_source?('/vendor/my_app/app/components/card.rb', '/vendor/my_app')).to be true
+      expect(utility.app_source?('/vendor/my_app/vendor/card.rb', '/vendor/my_app')).to be false
+    end
+
+    it 'normalizes path traversal before applying containment' do
+      expect(utility.app_source?('/app/../elsewhere/card.rb', '/app')).to be false
+    end
+  end
+
   # ── #resolve_source_location ────────────────────────────────────
 
   describe '#resolve_source_location' do

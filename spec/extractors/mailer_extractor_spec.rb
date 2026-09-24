@@ -51,7 +51,7 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   # ── Helper to build a mock mailer ─────────────────────────────────────
 
   def build_mailer(name:, actions: [], defaults: {}, delivery_method: :smtp, callbacks: [], instance_methods_list: [])
-    klass = Class.new
+    klass = Class.new(action_mailer_base)
     klass.define_singleton_method(:name) { name }
     klass.define_singleton_method(:action_methods) { Set.new(actions) }
     klass.define_singleton_method(:default) { defaults }
@@ -68,7 +68,7 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       mailer1 = build_mailer(name: 'UserMailer', actions: %w[welcome_email])
       mailer2 = build_mailer(name: 'OrderMailer', actions: %w[confirmation])
 
-      allow(application_mailer).to receive(:descendants).and_return([mailer1, mailer2])
+      allow(action_mailer_base).to receive(:descendants).and_return([mailer1, mailer2])
 
       create_file('app/mailers/user_mailer.rb', 'class UserMailer < ApplicationMailer; end')
       create_file('app/mailers/order_mailer.rb', 'class OrderMailer < ApplicationMailer; end')
@@ -77,6 +77,18 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(units.size).to eq(2)
       identifiers = units.map(&:identifier)
       expect(identifiers).to contain_exactly('UserMailer', 'OrderMailer')
+    end
+
+    it 'includes the application base and independent ActionMailer branches together' do
+      base_mailer = build_mailer(name: 'ApplicationMailer')
+      direct = build_mailer(name: 'DirectMailer')
+      child = build_mailer(name: 'ChildMailer')
+      allow(action_mailer_base).to receive(:descendants).and_return([base_mailer, direct, child])
+      allow(application_mailer).to receive(:descendants).and_return([child])
+      %w[application_mailer direct_mailer child_mailer].each do |name|
+        create_file("app/mailers/#{name}.rb", "class #{name.camelize} < ActionMailer::Base; end")
+      end
+      expect(described_class.new.discoverable_classes).to contain_exactly(base_mailer, direct, child)
     end
 
     it 'constructs and discovers nothing when ActionMailer is absent' do
@@ -115,21 +127,21 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       # Override the name method to return nil
       anon_mailer.define_singleton_method(:name) { nil }
 
-      allow(application_mailer).to receive(:descendants).and_return([anon_mailer])
+      allow(action_mailer_base).to receive(:descendants).and_return([anon_mailer])
 
       units = described_class.new.extract_all
       expect(units).to be_empty
     end
 
     it 'skips ActionMailer::Base itself' do
-      allow(application_mailer).to receive(:descendants).and_return([action_mailer_base])
+      allow(action_mailer_base).to receive(:descendants).and_return([action_mailer_base])
 
       units = described_class.new.extract_all
       expect(units).to be_empty
     end
 
     it 'returns empty array when no descendants' do
-      allow(application_mailer).to receive(:descendants).and_return([])
+      allow(action_mailer_base).to receive(:descendants).and_return([])
 
       units = described_class.new.extract_all
       expect(units).to eq([])

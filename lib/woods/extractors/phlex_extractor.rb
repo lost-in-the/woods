@@ -66,7 +66,7 @@ module Woods
         return [] unless @component_base
 
         load_component_files
-        @component_base.descendants
+        @component_base.descendants.select { |component| app_component?(component) }
       end
 
       # Extract a single component
@@ -74,7 +74,7 @@ module Woods
       # @param component [Class] The component class
       # @return [ExtractedUnit] The extracted unit
       def extract_component(component)
-        return nil if component.name.nil?
+        return nil unless app_component?(component)
 
         unit = ExtractedUnit.new(
           type: :component,
@@ -94,6 +94,10 @@ module Woods
       end
 
       private
+
+      def app_component?(component)
+        @component_base && component.name && component < @component_base && app_source_file?(source_file_for(component))
+      end
 
       # Find the base component class used in the application.
       # Skips ApplicationComponent if it's actually a ViewComponent subclass

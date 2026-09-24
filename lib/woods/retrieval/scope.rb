@@ -3,6 +3,7 @@
 require 'json'
 require 'set'
 require_relative '../storage_identity'
+require_relative '../source_contributors'
 require_relative '../storage/metadata_store'
 
 module Woods
@@ -83,13 +84,28 @@ module Woods
       def validate_packages!(records)
         names = records.filter_map { |unit| unit['identifier'] if unit['type'] == 'package' }
         names.concat(records.filter_map { |unit| unit.dig('metadata', 'package') })
+        names.concat(records.flat_map do |unit|
+          SourceContributors.records(unit).filter_map do |record|
+            record['package']
+          end
+        end)
         unknown = packages - names
         raise InvalidScopeError, "unknown package scope: #{unknown.join(', ')}" unless unknown.empty?
       end
 
       def eligible?(unit, types, excluded)
-        return false unless packages.empty? || packages.include?(unit.dig('metadata', 'package'))
-        return false unless source_paths.empty? || path_match?(unit['file_path'])
+        contributors = SourceContributors.records(unit)
+        owners = if contributors.empty?
+                   [unit.dig('metadata', 'package')]
+                 else
+                   contributors.map do |record|
+                     record['package']
+                   end
+                 end
+        return false unless packages.empty? || owners.all? { |owner| packages.include?(owner) }
+
+        paths = SourceContributors.paths(unit)
+        return false unless source_paths.empty? || (paths.any? && paths.all? { |path| path_match?(path) })
         return Array(types).map(&:to_s).include?(unit['type']) if types && !types.empty?
 
         !Array(excluded).map(&:to_s).include?(unit['type'])

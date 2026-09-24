@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'set'
 require 'net/http'
 require 'uri'
 require 'woods'
@@ -145,9 +146,12 @@ module Woods
         query = "limit=#{limit}"
         query += "&after=#{URI.encode_www_form_component(after)}" if after
         result = request(:get, "documents?#{query}")
-        return result if result.is_a?(Array)
+        page = result.is_a?(Array) ? result : result.is_a?(Hash) && (result['items'] || result['data'])
+        unless page.is_a?(Array) && page.all?(Hash)
+          raise Woods::Error, 'Unblocked document inventory incomplete: malformed page'
+        end
 
-        result['items'] || result['data'] || []
+        page
       end
 
       # List every document in a collection, paging until exhausted.
@@ -160,19 +164,20 @@ module Woods
       def all_documents(collection_id:)
         docs = []
         after = nil
+        seen_cursors = Set.new
 
         loop do
           page = list_documents(limit: PAGE_SIZE, after: after)
           break if page.empty?
 
           docs.concat(page)
-          break if page.size < PAGE_SIZE
-
           after = page.last['id']
-          # A full page with no cursor id would refetch page 1 forever —
-          # stop with what we have rather than loop against the budget.
-          break if after.nil?
+          unless after.is_a?(String) && !after.empty? && seen_cursors.add?(after)
+            raise Woods::Error, 'Unblocked document inventory incomplete: missing or repeated pagination cursor'
+          end
         end
+
+        return docs if collection_id.nil?
 
         docs.select { |doc| doc['collectionId'] == collection_id }
       end

@@ -95,6 +95,64 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
     end
   end
 
+  describe 'schedule identity allocation' do
+    def schedules(first_name: 'cleanup')
+      create_file('config/recurring.yml', "#{first_name}:\n  class: CleanupJob\n  schedule: every day\n")
+      create_file('config/sidekiq_cron.yml', "cleanup:\n  class: OtherJob\n  cron: '0 * * * *'\n")
+    end
+
+    it 'qualifies every conflicting format while preserving each task and job' do
+      schedules
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('scheduled:solid_queue:cleanup',
+                                                         'scheduled:sidekiq_cron:cleanup')
+      expect(units.map { |unit| unit.metadata[:task_name] }).to eq(%w[cleanup cleanup])
+      expect(units.map { |unit| unit.dependencies.first[:target] }).to eq(%w[CleanupJob OtherJob])
+    end
+
+    it 'uses the same identifiers through the file entry point' do
+      schedules
+      extractor = described_class.new
+      units = extractor.extract_scheduled_job_file(Rails.root.join('config/recurring.yml').to_s, :solid_queue)
+      expect(units.map(&:identifier)).to eq(['scheduled:solid_queue:cleanup'])
+    end
+
+    it 'reserves unique legacy names before allocating collision names' do
+      schedules
+      create_file('config/schedule.rb', "every 1.hour do\n  runner 'CleanupJob.perform_later'\nend\n")
+      File.open(Rails.root.join('config/recurring.yml'), 'a') do |file|
+        file.write("solid_queue:cleanup:\n  class: ReservedJob\n  schedule: every day\n")
+      end
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier).uniq.size).to eq(4)
+      expect(units.find { |unit| unit.metadata[:job_class] == 'ReservedJob' }.identifier)
+        .to eq('scheduled:solid_queue:cleanup')
+      expect(units.find { |unit| unit.metadata[:schedule_format] == :whenever }.identifier)
+        .to eq('scheduled:whenever_cleanup_job_0')
+    end
+
+    it 'allocates the same names when schedule enumeration order changes' do
+      schedules
+      extractor = described_class.new
+      expected = extractor.extract_all.map { |unit| [unit.identifier, unit.metadata] }.sort_by(&:first)
+      files = extractor.instance_variable_get(:@schedule_files)
+      extractor.instance_variable_set(:@schedule_files, files.to_a.reverse.to_h)
+      expect(extractor.extract_all.map { |unit| [unit.identifier, unit.metadata] }.sort_by(&:first)).to eq(expected)
+    end
+
+    it 'restores the legacy identifier after the conflicting format is removed' do
+      schedules
+      File.unlink(Rails.root.join('config/sidekiq_cron.yml'))
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['scheduled:cleanup'])
+    end
+
+    it 'refuses names that normalize to the same identity inside one format' do
+      create_file('config/recurring.yml',
+                  "1:\n  class: FirstJob\n  schedule: daily\n'1':\n  class: SecondJob\n  schedule: weekly\n")
+      expect { described_class.new.extract_all }.to raise_error(ArgumentError, /same-format schedule/)
+    end
+  end
+
   # ── Solid Queue (config/recurring.yml) ─────────────────────────────
 
   describe 'Solid Queue format' do

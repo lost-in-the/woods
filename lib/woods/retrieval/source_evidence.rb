@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_contributors'
+
 require 'digest'
 require 'json'
 require_relative '../ast/parser'
@@ -170,7 +172,7 @@ module Woods
 
       def format_evidence(mode, selected, metadata, total)
         parts = ["Evidence: #{mode}; published-unit coordinates (physical location unavailable).",
-                 "Unit: #{field(:type)}:#{field(:identifier)}; path: #{field(:file_path)}",
+                 "Unit: #{field(:type)}:#{field(:identifier)}; #{SourceContributors.label(@unit)}",
                  "Source SHA256: #{Digest::SHA256.hexdigest(@source)}",
                  "Generation: #{@generation || 'unavailable (not recorded by this metadata store)'}"]
         selected.each do |span|
@@ -183,17 +185,27 @@ module Woods
         parts.join("\n\n")
       end
 
+      def span_provenance(span)
+        result = span.to_h.merge(sha256: Digest::SHA256.hexdigest(span_text(span)))
+        if SourceContributors.multiple?(@unit)
+          result[:physical_location] =
+            SourceContributors.physical_span(@unit, start_byte: span.start_byte, end_byte: span.end_byte)
+        end
+        result
+      end
+
       def provenance(mode, selected, metadata, all)
         { mode: mode, owner: { identifier: field(:identifier), type: field(:type) },
           coordinate_system: 'published_unit', source_sha256: Digest::SHA256.hexdigest(@source),
           source_path: field(:file_path), physical_location: nil,
           physical_location_reason: 'published unit may contain synthesized or inlined source',
           generation: @generation, generation_status: @generation ? 'recorded' : 'unavailable',
-          spans: selected.map { |span| span.to_h.merge(sha256: Digest::SHA256.hexdigest(span_text(span))) },
+          spans: selected.map { |span| span_provenance(span) },
           omitted_spans: all.size - selected.size, runtime_fields: metadata.map(&:first),
           source_complete: false, full_evidence: { tool: 'lookup', evidence: 'full',
                                                    identifier: field(:identifier), type: field(:type),
                                                    source_sha256: Digest::SHA256.hexdigest(@source) } }
+          .merge(SourceContributors.attribution(@unit))
       end
     end
   end

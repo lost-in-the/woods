@@ -34,7 +34,7 @@ module Woods
 
       def reference_record(unit)
         { 'type' => unit.type.to_s, 'identifier' => unit.identifier, 'file_path' => unit.file_path,
-          'dependencies' => JSON.parse(JSON.generate(unit.dependencies)) }
+          'metadata' => unit.metadata, 'dependencies' => JSON.parse(JSON.generate(unit.dependencies)) }
       end
 
       # Called before any incremental consumer mutates the seeded generation.
@@ -129,17 +129,23 @@ module Woods
         type = data.fetch('type').to_sym
         identifier = data.fetch('identifier')
         node = @dependency_graph.node(identifier, type: type)
-        attributes = DependencyGraph.persisted_node_attributes(node)
-        unit = ExtractedUnit.new(type: type, identifier: identifier, file_path: node[:file_path])
-        unit.namespace = node[:namespace]
-        unit.dependencies = edges
+        unit = reference_unit(data, node, edges)
         mark_dependents_dirty(identifier)
         @dependency_graph.register(unit)
-        @dependency_graph.annotate(identifier, type: type, **attributes)
+        @dependency_graph.annotate(identifier, type: type, **DependencyGraph.persisted_node_attributes(node))
         mark_dependents_dirty(identifier)
         data['dependencies'] = edges
         AtomicFile.write(record.fetch(:path), json_serialize(data), durable: payload_writes_durable?)
         affected_types.add(record.fetch(:extractor_key))
+      end
+
+      def reference_unit(data, node, edges)
+        unit = ExtractedUnit.new(type: data.fetch('type').to_sym, identifier: data.fetch('identifier'),
+                                 file_path: node[:file_path])
+        unit.namespace = node[:namespace]
+        unit.metadata = data.fetch('metadata', {})
+        unit.dependencies = edges
+        unit
       end
 
       def write_source_reference_cache(result)

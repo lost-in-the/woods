@@ -168,7 +168,7 @@ RSpec.describe 'Embedding publication integrity' do
       after = persisted
       expect(after[:ids]).not_to include('Unit0')
       expect(after[:metadata].to_h.fetch('Unit0')['source_code']).to eq(empty)
-      expect(JSON.parse(after[:checkpoint]).fetch('Unit0')).to eq(Digest::SHA256.hexdigest(empty))
+      expect(JSON.parse(after[:checkpoint]).fetch('hashes').fetch('Unit0')).to eq(Digest::SHA256.hexdigest(empty))
       expect(indexer.index_incremental).to eq(processed: 0, skipped: 10, errors: 0)
       expect(persisted).to eq(after)
       expect(provider.calls.size).to eq(calls)
@@ -303,7 +303,7 @@ RSpec.describe 'Embedding publication integrity' do
     publish(changed, name: 'gen-2')
     allow(durable_store).to receive(:each_id).and_raise('enumeration unavailable')
     expect { indexer(vector_store: durable_store).index_incremental }
-      .to raise_error(Woods::Error, /Cannot reconcile source-empty units/)
+      .to raise_error(Woods::Error, /existing durable vector IDs could not be read/)
     expect(Marshal.dump(durable_store.entries)).to eq(before)
     expect(File.binread(File.join(@root, 'checkpoint.json'))).to eq(checkpoint)
     allow(durable_store).to receive(:each_id).and_call_original
@@ -335,7 +335,7 @@ RSpec.describe 'Embedding publication integrity' do
     expect do
       indexer(vector_store: durable_store,
               batch_size: 1).index_incremental
-    end.to raise_error(Woods::Error, /provider failure/)
+    end.to raise_error(Woods::Error, /Embedding failed.*Unit9/)
     expect(Marshal.dump(durable_store.entries)).to eq(before)
     expect(File.binread(File.join(@root, 'checkpoint.json'))).to eq(checkpoint)
   end

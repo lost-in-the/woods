@@ -19,6 +19,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
     stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names_regex: /\b(?:User|Post)\b/))
 
     allow(File).to receive(:exist?) { |path| file_system.key?(path.to_s) }
+    allow(File).to receive(:file?) { |path| file_system.key?(path.to_s) }
     allow(File).to receive(:read) { |path| file_system.fetch(path.to_s, '') }
   end
 
@@ -36,7 +37,10 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
     klass.define_singleton_method(:name) { name }
     klass.define_singleton_method(:public_instance_methods) { |_inherited = true| methods }
     klass.define_singleton_method(:instance_methods) { |_inherited = true| methods }
-    klass.define_singleton_method(:superclass) { superclass || Object }
+    klass.define_singleton_method(:superclass) do
+      superclass || (ViewComponent::Base if defined?(ViewComponent::Base)) || Object
+    end
+    klass.define_singleton_method(:<) { |other| self.superclass == other }
 
     init_method = double('Method', parameters: params)
     klass.define_singleton_method(:instance_method) do |method_name|
@@ -231,7 +235,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       end
 
       it 'logs the error and returns nil' do
-        klass = Class.new
+        klass = Class.new(ViewComponent::Base)
         klass.define_singleton_method(:name) { 'BrokenComponent' }
         klass.define_singleton_method(:instance_methods) { |_| [] }
         klass.define_singleton_method(:public_instance_methods) { |_| raise StandardError, 'boom' }
@@ -498,7 +502,8 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       stub_const('ViewComponent::Preview', preview_base)
       preview = Class.new(preview_base)
       stub_const('ButtonComponentPreview', preview)
-      real = Class.new
+      real = build_component(name: 'ButtonComponent')
+      file_system['/rails/app/components/button_component.rb'] = 'class ButtonComponent; end'
       stub_const('ButtonComponent', real)
 
       base = build_view_component_base(descendants: [real, preview])
@@ -508,7 +513,8 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
     end
 
     it 'excludes anonymous classes' do
-      real = Class.new
+      real = build_component(name: 'CardComponent')
+      file_system['/rails/app/components/card_component.rb'] = 'class CardComponent; end'
       stub_const('CardComponent', real)
       base = build_view_component_base(descendants: [real, Class.new])
       stub_const('ViewComponent::Base', base)

@@ -188,6 +188,10 @@ module Woods
         @provider.cache_identity if @provider.respond_to?(:cache_identity)
       end
 
+      def input_budget
+        @provider.input_budget if @provider.respond_to?(:input_budget)
+      end
+
       def configured_dimensions
         @provider.configured_dimensions if @provider.respond_to?(:configured_dimensions)
       end

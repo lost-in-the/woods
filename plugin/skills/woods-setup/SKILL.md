@@ -226,7 +226,7 @@ for transport, retry and custom-root limits.
 
 For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is included in Woods `2.0.0`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
 
-Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, Console MCP/live-data access, HTTP transport, or purge overrides. The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama. Recommend `gem "tokenizers", "~> 0.5"` for exact counting on dense Ruby source, while stating that it is optional.
+Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, Console MCP/live-data access, HTTP transport, or purge overrides. The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama. Do not claim that installing a tokenizer gem establishes exact counts for every model. Supporting builds after 2.0.0 split complete prefixed inputs and request Ollama `truncate: false`; consult the installed embedding guide and its model-specific limits.
 
 ## Handoff
 

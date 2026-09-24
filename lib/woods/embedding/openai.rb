@@ -3,6 +3,7 @@
 require 'net/http'
 require 'json'
 require_relative 'provider'
+require_relative 'input_budget'
 
 module Woods
   module Embedding
@@ -30,9 +31,8 @@ module Woods
         }.freeze
         # Conservatively chunk below OpenAI's 8192-token input limit across
         # text-embedding-3-small / -3-large / ada-002. The chunker uses
-        # 8191 as its ceiling — the actual chunk size lands well
-        # below it once chars-per-token estimation and the prefix
-        # allowance are factored in (see Builder#build_chunker).
+        # 8191 as its ceiling, checked against complete input bytes for known
+        # byte-BPE models (including every context-prefix character).
         MAX_INPUT_TOKENS = 8191
 
         # The API accepts at most 2048 inputs and 300,000 total tokens per
@@ -62,6 +62,7 @@ module Woods
         def embed(text)
           raise ArgumentError, 'embed(text) requires a non-empty string' if text.nil? || text.to_s.strip.empty?
 
+          input_budget.validate!(text)
           response = post_request(request_body(text))
           vectors = Array(response['data']).map { |item| item['embedding'] }
           validate_vectors!(vectors, expected_count: 1, provider: 'OpenAI')
@@ -77,10 +78,7 @@ module Woods
         # @raise [Woods::Error] if the API returns an error
         # @raise [ArgumentError] if the array is empty or any element is nil/empty
         def embed_batch(texts)
-          raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
-          if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
-            raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
-          end
+          validate_inputs!(texts)
 
           vectors = texts.each_slice(MAX_REQUEST_INPUTS).flat_map do |slice|
             response = post_request(request_body(slice))
@@ -132,7 +130,24 @@ module Woods
           MAX_INPUT_TOKENS
         end
 
+        # Known cl100k byte-BPE models have a dependency-free UTF-8 byte bound.
+        # Unknown future/custom model names retain honest sizing estimates;
+        # the API remains authoritative and rejects over-limit input.
+        def input_budget
+          @input_budget ||= InputBudget.new(limit: max_input_tokens, model: @model,
+                                            method: DIMENSIONS.key?(@model) ? 'utf8_bytes_bound' : 'estimate')
+        end
+
         private
+
+        def validate_inputs!(texts)
+          raise ArgumentError, 'embed_batch(texts) requires a non-empty array' if texts.nil? || texts.empty?
+          if texts.any? { |t| t.nil? || t.to_s.strip.empty? }
+            raise ArgumentError, 'embed_batch(texts) rejects nil/empty entries (OpenAI returns 400)'
+          end
+
+          texts.each { |text| input_budget.validate!(text) }
+        end
 
         # Validate the batch response's shape/cardinality/indexes and
         # return vectors reordered to match the input order.

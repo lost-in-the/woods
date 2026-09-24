@@ -115,7 +115,7 @@ Columns:
 | `include_framework_sources` | Boolean | `true` | user-settable | Extract Rails and gem source code |
 | `concurrent_extraction` | Boolean | `false` | user-settable | Enable parallel extraction (experimental) |
 | `vector_store` / `metadata_store` / `graph_store` / `embedding_provider` | Symbol | n/a | preset-derived | Adapter types. Set by presets; override individually to mix stacks. |
-| chars-per-token ratio (used by ContextAssembler, TextPreparer, Builder, cost_model) | Float | `4.0` (OpenAI) / `1.5` (Ollama) | computed | Derived from the active embedding provider via `Woods::TokenUtils.chars_per_token_for(...)`. Not directly user-settable; change `embedding_provider` to change the ratio. |
+| chars-per-token ratio (used by ContextAssembler, TextPreparer, Builder, cost_model) | Float | `4.0` (OpenAI) / `1.5` (Ollama) | computed | A sizing estimate derived from the active provider via `Woods::TokenUtils.chars_per_token_for(...)`, not a proof of token count. Complete embedding admission uses the provider-specific bound described below. |
 
 ## Embedding options
 
@@ -187,12 +187,13 @@ Discovering a width through a probe never adds `dimensions` to later requests.
 
 **Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
 
-**Optional exact tokenization.** Install the [`tokenizers`](https://github.com/ankane/tokenizers-ruby) gem alongside Woods to get BERT WordPiece token counting. Without it, Woods falls back to a chars/token ratio, which under-counts dense Ruby source (CamelCase constants, callback DSLs) and can silently over-pack chunks. Recommended for any Ollama setup.
-
-```ruby
-# Gemfile (optional)
-gem 'tokenizers', '~> 0.5'
-```
+**Input counting (unreleased after 2.0.0).** Complete inputs include metadata
+prefixes. Known OpenAI embedding models use a conservative byte upper bound;
+Ollama/custom model counts remain estimates. Woods requests `truncate: false`
+from Ollama and refuses/splits oversized inputs without dropping source.
+Installing `tokenizers` no longer implicitly downloads BERT or establishes an
+exact count for an unrelated model. A caller-supplied local tokenizer must match
+the selected model. See the model guide for limitations.
 
 See [EMBEDDING_MODELS.md](EMBEDDING_MODELS.md) for the full model comparison and the procedure for adding a new model to the registry.
 

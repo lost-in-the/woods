@@ -169,7 +169,7 @@ RSpec.describe 'Embedding configuration consistency' do
     expect(provider.dimensions).to eq(3)
     provider.embed('query')
     expect(provider).to have_received(:post_request).with(
-      model: 'nomic-embed-text', input: 'query', options: { num_ctx: 2048 }
+      model: 'nomic-embed-text', input: 'query', truncate: false, options: { num_ctx: 2048 }
     )
   end
 

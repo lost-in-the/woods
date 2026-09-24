@@ -1,20 +1,12 @@
 # Token Estimation Benchmark
 
-> **Single source of truth:** `Woods::TokenUtils.chars_per_token_for(provider)`
-> in `lib/woods/token_utils.rb`. Production code uses **4.0 chars/token** for
-> the OpenAI path and **1.5 chars/token** for the Ollama / WordPiece path.
-> Both are applied consistently by `Woods::Builder#chars_per_token_for`,
-> `ContextAssembler`, `TextPreparer`, and `ExtractedUnit#estimated_tokens`.
-> The cost-model layer (`lib/woods/cost_model/`) is the one exception, it
-> uses its own pre-aggregated `TOKENS_PER_CHUNK` constant (450) rather than
-> a per-string ratio, since it measures a different thing (per-chunk average
-> vs. per-string chars/token).
->
-> When the optional [`tokenizers`](https://github.com/ankane/tokenizers-ruby)
-> gem is installed, the Ollama path uses the real BERT WordPiece tokenizer
-> (`Woods::Embedding::TokenCounter`) instead of this heuristic. The 4.0
-> divisor applies to the OpenAI/default path; Ollama falls back to 1.5 when
-> its tokenizer is unavailable.
+> **Historical sizing evidence, not an input-limit guarantee.**
+> `Woods::TokenUtils.chars_per_token_for(provider)` supplies character estimates
+> for retrieval assembly and initial sizing. Unreleased builds after 2.0.0 use
+> a conservative UTF-8 byte bound for known OpenAI embedding models and honest
+> estimates for Ollama/custom models. Prefixes count toward admission; oversized
+> inputs are split without dropping source. The optional tokenizer gem no longer
+> downloads or implicitly selects BERT. See [Embedding Models](EMBEDDING_MODELS.md).
 
 This is a historical record of the benchmark that picked 4.0 over the
 original 3.5 divisor. It is cited from five places in `lib/` as the evidence
@@ -58,9 +50,9 @@ current definition and `docs/EMBEDDING_MODELS.md` for the Ollama-side ratio.
 **tiktoken_ruby was deliberately not added as a runtime dependency.** A 10.6%
 mean error is acceptable for chunking decisions, budget estimates, and
 truncation; a native-extension dependency for marginal accuracy gains wasn't
-worth it. The optional `tokenizers` gem provides counts for its supported BERT
-WordPiece tokenizer, not every model. Strict token-limit enforcement requires
-the tokenizer used by the target model.
+worth it. An explicitly injected local tokenizer must match the target model. A conservative
+upper bound can also establish admission for a known encoding; a character
+average cannot.
 
 ## Reproducing this benchmark
 

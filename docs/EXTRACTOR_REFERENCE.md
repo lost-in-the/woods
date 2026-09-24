@@ -289,7 +289,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **What it captures:** ActionMailer classes with their mailer actions, defaults, template paths, callbacks, and helper usage.
 
 **Key details:**
-- Discovers `ApplicationMailer.descendants` when that class exists, otherwise `ActionMailer::Base.descendants`; an app without ActionMailer contributes no mailer units.
+- **Unreleased after 2.0.0:** discovers all app-owned `ActionMailer::Base.descendants`, including parallel abstract bases and direct subclasses even when `ApplicationMailer` exists. An app without ActionMailer contributes no mailer units.
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata
 - Extracts `default from:`, `layout`, and per-action subject patterns
@@ -355,6 +355,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### PhlexExtractor
 
+**Unreleased after 2.0.0:** discovery and direct extraction require an existing app-owned source file; dependency components are excluded.
+
 **What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, Stimulus controller names, and route helper usage.
 
 **Key details:**
@@ -364,6 +366,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 ---
 
 ### ViewComponentExtractor
+
+**Unreleased after 2.0.0:** discovery and direct extraction require an existing app-owned source file and runtime ancestry; dependency components are excluded.
 
 **What it captures:** ViewComponent classes from `app/components`. Extracts slots, template paths, preview class references, and collection rendering support.
 
@@ -450,7 +454,7 @@ remain unsupported because the block does not establish ordinary lexical class
 nesting. Woods does not execute the constructor or its method bodies.
 
 Run a **full extraction** after upgrading the writer. It repairs older wrapper
-identities and rebuilds the source-reference cache in format 2; incremental
+identities and rebuilds the source-reference cache in format 3; incremental
 extraction refuses format 1 even when source files are unchanged. Existing
 readers can continue serving the last published index until the full extraction
 succeeds. Genuine collisions between different files still refuse publication.
@@ -633,7 +637,7 @@ same ancestry correction to `metadata.is_pundit`.
 
 #### Package membership
 
-Every app-owned unit under a package root carries `metadata[:package]` with the package name (longest root wins; `.` when only a root package exists). Framework sources and units with no path never carry it. The graph node carries the same value as `package`. When a `package.yml` changes, an incremental run re-annotates every unit whose package changed in the same run, so `metadata[:package]` never lags behind the file that defines it.
+Every single-file app-owned unit under a package root carries `metadata[:package]` with the package name (longest root wins; `.` when only a root package exists). Framework sources and units with no path never carry it. The graph node carries the same value as `package`. When a `package.yml` changes, an incremental run re-annotates every unit whose package changed in the same run, so `metadata[:package]` never lags behind the file that defines it.
 
 ---
 
@@ -653,12 +657,21 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 **What it captures:** ActionCable channel classes with stream subscriptions, subscribed/unsubscribed hooks, broadcast patterns, and action methods.
 
 **Key details:**
-- Discovers via `ActionCable::Channel::Base.descendants`
+- Discovers via `ActionCable::Channel::Base.descendants`. **Unreleased after 2.0.0:** discovery and direct extraction exclude dependency-owned source files.
 - Records stream names, authentication checks in `subscribed`, and any `broadcast_to` calls
 
 ---
 
 ### ScheduledJobExtractor
+
+**Unreleased after 2.0.0:** unique schedule names retain `scheduled:<name>`.
+Names shared across scheduler formats become `scheduled:<format>:<name>`, with
+a deterministic suffix if that identifier is already a literal task name.
+`metadata.task_name` preserves the original name. Ambiguous names within one
+format refuse publication; the last generation stays usable. Run a full
+extraction to remove dependency-owned components/channels and reconcile these
+expanded mailer and schedule identities in an existing index.
+
 
 **What it captures:** Scheduled job definitions from cron-style config files. Supports multiple scheduling backends.
 
@@ -826,6 +839,33 @@ namespace.
 - Excludes `lib/tasks/` (covered by RakeTaskExtractor) and `lib/generators/`
 - File-based scanning; no assumption about class hierarchy
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
+
+**Unreleased after 2.0.0:** compatible reopened library classes/modules across
+files form one typed unit. Matching inferred names alone are insufficient:
+conflicting declaration kinds/parents, unresolved constructors and aliases still
+refuse ambiguous ownership. Extraction does not require or execute unmanaged
+files. The sorted first path remains the compatibility `file_path`; it is a
+primary display path, not a claim that every definition resides there.
+
+Aggregates add `metadata.source_contributors_version: 1`, `source_contributors`,
+and sorted `defined_in`. Each contributor records its own path, raw-file SHA256,
+physical line range and half-open byte range inside the published composite.
+Generated headers/separators lie outside those ranges. Per-file facts remain
+separate; sorted paths do not establish runtime override order. The unit's
+`source_hash` describes the composite. One-file units retain their prior shape.
+
+The graph maps every contributor to the typed owner. Any relevant library edit,
+deletion or dependency-triggered refresh reconciles the complete library family
+once per batch; direct file extraction also returns the aggregate. This costs
+more than re-reading only the primary file, and preserves full/incremental facts.
+A contributor read failure prevents publishing a partial aggregate.
+
+Git facts remain per contributor: Woods does not fabricate a summed aggregate
+commit count or churn rank. A unit-level package is emitted only when every
+contributor belongs to the same package. Retrieval package/path scopes require
+**all** contributors to match, avoiding disclosure of out-of-scope source.
+Run one full extraction after upgrading: source-reference cache format 3 must
+be rebuilt, and existing indexes do not yet contain contributor provenance.
 
 Loaded Struct/Data assignments use the [assigned value-class ownership rules](#assigned-value-classes)
 to avoid naming sibling files after their shared namespace wrapper.
