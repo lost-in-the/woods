@@ -138,6 +138,23 @@ RSpec.describe Woods::Console::CredentialIndex do
       expect(result).to eq('a=[REDACTED:credential] b=[REDACTED:credential]')
     end
 
+    [%w[synthetic_secret synthetic_secret_suffix], %w[synthetic_secret_suffix synthetic_secret]].each do |secrets|
+      it "redacts the longest shared-prefix credential with #{secrets.first} indexed first" do
+        index = described_class.new(secrets: secrets)
+
+        expect(index.redact('synthetic_secret_suffix / synthetic_secret'))
+          .to eq('[REDACTED:credential] / [REDACTED:credential]')
+      end
+    end
+
+    it 'redacts equal-length, duplicate, and contained credentials as complete values' do
+      index = described_class.new(secrets: %w[synthetic_secret different_secret synthetic_secret
+                                              prefix_synthetic_secret_suffix])
+
+      expect(index.redact('prefix_synthetic_secret_suffix different_secret synthetic_secret'))
+        .to eq('[REDACTED:credential] [REDACTED:credential] [REDACTED:credential]')
+    end
+
     it 'returns the input unchanged when no secret appears' do
       expect(index.redact('hello world')).to eq('hello world')
     end

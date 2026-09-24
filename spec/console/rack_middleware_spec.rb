@@ -154,16 +154,74 @@ RSpec.describe Woods::Console::RackMiddleware do
     end
 
     context 'when console_mcp_enabled is true' do
+      let(:token) { 'console-middleware-spec-token-32-chars' }
+      let(:authorized_env) do
+        { 'REQUEST_METHOD' => 'POST', 'PATH_INFO' => '/mcp/console',
+          'HTTP_AUTHORIZATION' => "Bearer #{token}" }
+      end
+
       before do
         Woods.configure # ensure a configuration exists regardless of spec order
         allow(Woods.configuration).to receive(:console_mcp_enabled).and_return(true)
+        allow(Woods.configuration).to receive(:console_mcp_http_enabled).and_return(true)
+        allow(Woods.configuration).to receive(:console_mcp_token).and_return(token)
+        allow(Woods.configuration).to receive(:console_mcp_allowed_origins).and_return([])
+      end
+
+      it 'rejects missing and incorrect tokens before initializing a manually mounted transport' do
+        expect(middleware).not_to receive(:ensure_transport)
+
+        [nil, 'Bearer incorrect'].each do |header|
+          expect(middleware.call(authorized_env.merge('HTTP_AUTHORIZATION' => header)).first).to eq(401)
+        end
+      end
+
+      it 'fails closed when the configured token is absent or too short' do
+        expect(middleware).not_to receive(:ensure_transport)
+
+        [nil, 'short'].each do |configured_token|
+          allow(Woods.configuration).to receive(:console_mcp_token).and_return(configured_token)
+          expect(middleware.call(authorized_env).first).to eq(401)
+        end
+      end
+
+      it 'rejects foreign origins and hosts before initializing a manually mounted transport' do
+        expect(middleware).not_to receive(:ensure_transport)
+
+        { 'HTTP_ORIGIN' => 'https://foreign.example', 'HTTP_HOST' => 'foreign.example' }.each do |header, value|
+          expect(middleware.call(authorized_env.merge(header => value)).first).to eq(403)
+        end
+      end
+
+      it 'resolves tokens after construction and on each request' do
+        transport = double('transport', handle_request: [200, {}, ['console']])
+        allow(middleware).to receive(:ensure_transport).and_return(transport)
+        replacement = 'replacement-middleware-token-32-chars'
+        allow(Woods.configuration).to receive(:console_mcp_token).and_return(replacement)
+
+        expect(middleware.call(authorized_env).first).to eq(401)
+        expect(middleware.call(authorized_env.merge('HTTP_AUTHORIZATION' => "Bearer #{replacement}")).first).to eq(200)
+      end
+
+      it 'protects a custom manual path even without the railtie guards' do
+        custom = described_class.new(app, path: '/private-console')
+        expect(custom).not_to receive(:ensure_transport)
+
+        expect(custom.call('PATH_INFO' => '/private-console', 'REQUEST_METHOD' => 'POST').first).to eq(401)
+      end
+
+      it 'passes through while HTTP is disabled without applying the guards' do
+        allow(Woods.configuration).to receive(:console_mcp_http_enabled).and_return(false)
+        expect(middleware).not_to receive(:ensure_transport)
+
+        expect(middleware.call('PATH_INFO' => '/mcp/console').last).to eq(['app'])
       end
 
       it 'dispatches requests at the mounted path to the MCP transport' do
         transport = double('transport', handle_request: [200, {}, ['console']])
         allow(middleware).to receive(:ensure_transport).and_return(transport)
 
-        _status, _headers, body = middleware.call('REQUEST_METHOD' => 'POST', 'PATH_INFO' => '/mcp/console')
+        _status, _headers, body = middleware.call(authorized_env)
         expect(body).to eq(['console'])
       end
 
@@ -178,11 +236,7 @@ RSpec.describe Woods::Console::RackMiddleware do
           middleware.instance_variable_set(:@stateless_mode, true)
           transport
         end
-        env = {
-          'REQUEST_METHOD' => 'POST',
-          'PATH_INFO' => '/mcp/console',
-          'HTTP_MCP_SESSION_ID' => 'stale-session'
-        }
+        env = authorized_env.merge('HTTP_MCP_SESSION_ID' => 'stale-session')
 
         middleware.call(env)
 
@@ -203,11 +257,7 @@ RSpec.describe Woods::Console::RackMiddleware do
           transport
         end
 
-        sessionful.call(
-          'REQUEST_METHOD' => 'POST',
-          'PATH_INFO' => '/mcp/console',
-          'HTTP_MCP_SESSION_ID' => 'live-session'
-        )
+        sessionful.call(authorized_env.merge('HTTP_MCP_SESSION_ID' => 'live-session'))
 
         expect(received_request.env['HTTP_MCP_SESSION_ID']).to eq('live-session')
       end

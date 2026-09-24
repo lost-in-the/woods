@@ -15,6 +15,7 @@ Woods.configure do |config|
   config.console_mcp_enabled = true
   config.console_mcp_http_enabled = ENV.fetch('WOODS_TEST_CONSOLE_HTTP', '1') == '1'
   config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN', 'console-mcp-spec-token-32-characters')
+  config.console_mcp_allowed_origins = ENV.fetch('WOODS_TEST_CONSOLE_ALLOWED_ORIGINS', '').split(',')
   config.console_embedded_read_tools = ENV.fetch('WOODS_CONSOLE_READ_TOOLS', '1') == '1'
   config.console_blocked_tables = %w[schema_migrations ar_internal_metadata]
 end
@@ -27,6 +28,10 @@ end
 Object.const_set(:WoodsConsoleMcpSpecApplication, app_class)
 WoodsConsoleMcpSpecApplication.config.root = root
 WoodsConsoleMcpSpecApplication.config.secret_key_base = 'woods-console-mcp-spec-secret'
+if ENV['WOODS_TEST_CONSOLE_MANUAL_MOUNT'] == '1'
+  require 'woods/console/rack_middleware'
+  WoodsConsoleMcpSpecApplication.config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
+end
 WoodsConsoleMcpSpecApplication.initialize!
 
 ActiveRecord::Base.establish_connection(:test)

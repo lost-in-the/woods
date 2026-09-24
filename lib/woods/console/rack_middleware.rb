@@ -2,6 +2,8 @@
 
 require 'json'
 require 'woods/observability/structured_logger'
+require 'woods/mcp/bearer_auth'
+require 'woods/mcp/origin_guard'
 
 module Woods
   module Console
@@ -13,9 +15,10 @@ module Woods
     #
     # == Basic setup (Tier 1 tools only)
     #
-    # Add to config/application.rb or an initializer:
+    # The Woods railtie mounts this middleware automatically. Configure the
+    # path in config/application.rb before Rails constructs its middleware:
     #
-    #   config.middleware.use Woods::Console::RackMiddleware, path: '/mcp/console'
+    #   Woods.configure { |config| config.console_mcp_path = '/mcp/console' }
     #
     # This mounts the 9 executable Tier 1 tools at /mcp/console. Explicit
     # read-tool mode registers console_sql and console_query as well.
@@ -26,6 +29,7 @@ module Woods
     #
     #   Woods.configure do |config|
     #     config.console_mcp_enabled = true
+    #     config.console_mcp_token = ENV.fetch('WOODS_CONSOLE_MCP_TOKEN')
     #     config.console_blocked_tables = %w[authorizations credentials]
     #     config.console_redacted_columns = %w[api_token password_digest]
     #   end
@@ -39,13 +43,14 @@ module Woods
     #
     # == Enabling read tools (console_sql + console_query)
     #
-    # Set embedded_read_tools: true to unlock the sql and query tools:
+    # Set console_embedded_read_tools to unlock the sql and query tools:
     #
     #   # config/initializers/woods_console.rb
-    #   Rails.application.config.middleware.use \
-    #     Woods::Console::RackMiddleware,
-    #     path: '/mcp/console',
-    #     embedded_read_tools: true
+    #   Woods.configure { |config| config.console_embedded_read_tools = true }
+    #
+    # Legacy manual mounts remain guarded: each instance enforces the configured
+    # bearer token and origin policy before building or dispatching the server,
+    # even when it appears before the railtie's outer HTTP guards.
     #
     # Security posture with embedded_read_tools: true:
     #
@@ -106,13 +111,17 @@ module Woods
         return @app.call(env) unless env['PATH_INFO'].to_s.start_with?(@path)
         return @app.call(env) unless enabled?
 
+        @guarded_request.call(env)
+      end
+
+      private
+
+      def handle_request(env)
         transport = ensure_transport
         request_env = env.dup
         request_env.delete('HTTP_MCP_SESSION_ID') if @stateless_mode
         transport.handle_request(Rack::Request.new(request_env))
       end
-
-      private
 
       def initialize_options(app, path: '/mcp/console', embedded_read_tools: false, # rubocop:disable Metrics/ParameterLists
                              unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil,
@@ -125,6 +134,19 @@ module Woods
         @stateless = stateless
         @mutex = Mutex.new
         @transport = nil
+        @guarded_request = guarded_request
+      end
+
+      # Every entry point owns its guards; an earlier manual mount cannot rely
+      # on middleware later in the Rails stack. Resolve configuration lazily
+      # so settings from application initializers and token rotation apply.
+      def guarded_request
+        authenticated = Woods::MCP::BearerAuth.new(
+          method(:handle_request), token: -> { Woods.configuration&.console_mcp_token }
+        )
+        Woods::MCP::OriginGuard.new(
+          authenticated, allowed_origins: -> { Array(Woods.configuration&.console_mcp_allowed_origins) }
+        )
       end
 
       # Whether the console is enabled, read from the live configuration on

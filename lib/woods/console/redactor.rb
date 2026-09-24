@@ -65,7 +65,8 @@ module Woods
         case key
         when 'record'         then value.is_a?(Hash) ? ctx.redact(value) : value
         when 'records'        then redact_hash_array(value, ctx)
-        when 'rows', 'values' then redact_positional(value, plan)
+        when 'rows'           then redact_positional(value, plan)
+        when 'values'         then redact_positional(value, plan, single_column: plan[:column_count] == 1)
         when 'associations'   then redact_association_map(value, ctx)
         else                       value
         end
@@ -93,7 +94,8 @@ module Woods
       # `columns` header: the column-name mask plus any EAV key-value rules
       # resolved to column indexes.
       def positional_plan(columns, ctx)
-        { mask: positional_mask(columns, ctx),
+        { column_count: columns.is_a?(Array) ? columns.length : nil,
+          mask: positional_mask(columns, ctx),
           kv_rules: positional_kv_rules(columns, ctx) }
       end
 
@@ -139,14 +141,19 @@ module Woods
       end
 
       # Redact positional row data using a precomputed plan. Handles both
-      # nested arrays (multi-column pluck, sql/query rows) and flat scalar
-      # arrays (pluck with a single column — Rails collapses the result).
-      def redact_positional(rows, plan)
+      # nested arrays (multi-column pluck, sql/query rows) and single-column
+      # pluck values. Rails collapses the row for single-column pluck, so an
+      # Array/Hash value is still one cell and must be redacted as a whole.
+      def redact_positional(rows, plan, single_column: false)
         return rows unless rows.is_a?(Array)
         return rows if plan[:mask].nil? && plan[:kv_rules].empty?
 
         rows.map do |row|
-          row.is_a?(Array) ? redact_row(row, plan) : redact_scalar(row, plan[:mask])
+          if !single_column && row.is_a?(Array)
+            redact_row(row, plan)
+          else
+            redact_scalar(row, plan[:mask])
+          end
         end
       end
 
