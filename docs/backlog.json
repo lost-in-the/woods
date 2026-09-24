@@ -3092,8 +3092,8 @@
       "lib/woods/extractors/lib_extractor.rb",
       "lib/woods/extractors/source_nesting.rb"
     ],
-    "description": "Files such as lib/acme.rb and lib/acme/version.rb can both be assigned the enclosing Acme identity. The collision guard now refuses these ordinary reopened-namespace layouts. Recent Struct/Data wrapper fixes do not define how multiple source files contribute to a single unmanaged library constant. Choose an explicit compatible representation retaining every source fragment and provenance (aggregation or deliberately qualified identities). Do not suppress collisions or keep one file arbitrarily. Test unmanaged libraries, once-autoloaded libraries and multiple core-extension files across full/incremental extraction. Coordinate nonconstant identity consequences with #213. GitHub: #575.",
-    "status": "in-progress"
+    "description": "Files such as lib/acme.rb and lib/acme/version.rb can both be assigned the enclosing Acme identity. The collision guard now refuses these ordinary reopened-namespace layouts. Recent Struct/Data wrapper fixes do not define how multiple source files contribute to a single unmanaged library constant. Choose an explicit compatible representation retaining every source fragment and provenance (aggregation or deliberately qualified identities). Do not suppress collisions or keep one file arbitrarily. Test unmanaged libraries, once-autoloaded libraries and multiple core-extension files across full/incremental extraction. Coordinate nonconstant identity consequences with #213. GitHub: #575. Completed with validated per-file contributor records, compatible library aggregation, typed graph/file ownership, per-file Git/package facts and chunk citations. Full/incremental/refresh, deletion and once-autoloaded fixtures pass; a full extraction rebuilds source-reference cache format 3.",
+    "status": "resolved"
   },
   {
     "id": "B-227",
@@ -3253,8 +3253,8 @@
       "lib/woods/extractors",
       "lib/woods/chunking/semantic_chunker.rb"
     ],
-    "description": "Issue #594: R19/R21/R22/R44-R46/R58: verify external component ownership policy with real optional gems; consider explicitly documented mailer coverage expansion; recognize actual manager/policy ancestry; support state-machine declaration forms; select the real migration rather than a preceding helper; represent same-named schedules from different formats deliberately; preserve class and instance methods with identical bare names as distinct chunks. Each requires its own regression and compatibility decision. Do not execute historical migrations or silence identity collisions; distinguish new bugs from documented coverage choices. Completed R22/R45/R58 in #613: selected runtime manager/policy ancestry, structural migration ownership and distinct method chunk identifiers. R44 now also has reviewed default/parenthesized literal declarations, selected-owner isolation and actual state_machines/AASM registry equivalence across full/incremental/refresh. External component ownership (R19), mailer coverage choice (R21) and multi-format schedule identities (R46) remain separately tracked.",
-    "status": "in-progress"
+    "description": "Issue #594: R19/R21/R22/R44-R46/R58: verify external component ownership policy with real optional gems; consider explicitly documented mailer coverage expansion; recognize actual manager/policy ancestry; support state-machine declaration forms; select the real migration rather than a preceding helper; represent same-named schedules from different formats deliberately; preserve class and instance methods with identical bare names as distinct chunks. Each requires its own regression and compatibility decision. Do not execute historical migrations or silence identity collisions; distinguish new bugs from documented coverage choices. Completed R22/R45/R58 in #613: selected runtime manager/policy ancestry, structural migration ownership and distinct method chunk identifiers. R44 now also has reviewed default/parenthesized literal declarations, selected-owner isolation and actual state_machines/AASM registry equivalence across full/incremental/refresh. Completed remaining R19/R21/R46 with application-root ownership for components/channels, all application ActionMailer inheritance branches and deterministic collision-only schedule qualification. Real Phlex/ViewComponent boot fixtures cover full/incremental/refresh and are registered in CI.",
+    "status": "resolved"
   },
   {
     "id": "B-239",
@@ -3266,8 +3266,8 @@
       "lib/woods/export",
       "lib/woods/unblocked"
     ],
-    "description": "Issue #595: R18: branch-sensitive export URIs change remote keys and purge accounting, and branch delimiters are interpolated unescaped. Design migration from earlier manifest identities, retain remote ownership and separate branches where intended, and report refused cleanup honestly. Test a legacy manifest with non-main and delimiter-bearing branches, an offline fake client, idempotent second sync and purge guards. Coordinate typed identity decisions with #213; no live remote content deletion during qualification.",
-    "status": "in-progress"
+    "description": "Issue #595: R18: branch-sensitive export URIs change remote keys and purge accounting, and branch delimiters are interpolated unescaped. Design migration from earlier manifest identities, retain remote ownership and separate branches where intended, and report refused cleanup honestly. Test a legacy manifest with non-main and delimiter-bearing branches, an offline fake client, idempotent second sync and purge guards. Coordinate typed identity decisions with #213; no live remote content deletion during qualification. Completed scoped version-2 receipts, encoded refs and explicit resumable migration with preview. Replacement content plus live remote identity/collection is verified before cleanup; ambiguous legacy shared-file identities are retained for manual review. Independent ownership/loss probes and typed warm-run tests pass.",
+    "status": "resolved"
   },
   {
     "id": "B-240",
@@ -3279,8 +3279,8 @@
       "lib/woods/embedding/text_preparer.rb",
       "lib/woods/retrieval/ranker.rb"
     ],
-    "description": "Issue #596: R28/R56: character estimates can understate multilingual model input size, while multiple vector chunks of one unit can dominate rank fusion before source deduplication. These are sizing/scoring mechanisms with unmeasured provider or retrieval-quality impact. Add meaningful offline length-rejection and ranking fixtures before choosing a fix; preserve complete atomic embedding failure and genuine cross-source agreement. Include offending unit identity in safe diagnostics; do not silently skip rejected units.",
-    "status": "in-progress"
+    "description": "Issue #596: R28/R56: character estimates can understate multilingual model input size, while multiple vector chunks of one unit can dominate rank fusion before source deduplication. These are sizing/scoring mechanisms with unmeasured provider or retrieval-quality impact. Add meaningful offline length-rejection and ranking fixtures before choosing a fix; preserve complete atomic embedding failure and genuine cross-source agreement. Include offending unit identity in safe diagnostics; do not silently skip rejected units. R28 implemented: bound complete prepared inputs, retain all source through splitting, refuse provider truncation and checkpoint ordered preparation fingerprints; real pgvector/Qdrant retry checks pass. R56 remains open: unique-unit RRF lowered captured hybrid precision@5 from 0.7500 to 0.7083 and MRR from 1.0000 to 0.8333, below unchanged floors. Three fixed alternatives failed the same gate; ranking changes were reverted, preserving all 28 baseline contexts. Design distinct graph-path relevance versus duplicate chunk votes and qualify independently annotated chunk-heavy cases before retrying.",
+    "status": "ready"
   },
   {
     "id": "B-241",
@@ -3294,7 +3294,7 @@
       "lib/woods/console/embedded_executor.rb",
       "lib/woods/console/rack_middleware.rb"
     ],
-    "description": "Issue #597: R15/R43/R82/R83: align explicitly configured host/origin allowlists across Woods and the MCP SDK, including IPv6/port semantics; reject or clearly migrate unsupported nested console.yml rather than silently selecting local mode; define singular association counts; give consistent actionable HTTP eager-load failure behavior. Preserve authentication, redaction and table guards. Establish real transport/ActiveRecord regressions and reproduce host boot errors before considering narrow fallback. Coordinate code integration with the pending private patch without publishing its details. Completed R43/R82/R83 in #614: strict top-level launcher configuration with safe key diagnostics, guarded singular association counts and stable HTTP 503 after eager-load NameError until restart. Real executable and booted Rails regressions pass. R15 remains: decide and independently review Woods/SDK origin and host ownership; no guard was disabled in these fixes.",
+    "description": "Issue #597: R15/R43/R82/R83: align explicitly configured host/origin allowlists across Woods and the MCP SDK, including IPv6/port semantics; reject or clearly migrate unsupported nested console.yml rather than silently selecting local mode; define singular association counts; give consistent actionable HTTP eager-load failure behavior. Preserve authentication, redaction and table guards. Establish real transport/ActiveRecord regressions and reproduce host boot errors before considering narrow fallback. Coordinate code integration with the pending private patch without publishing its details. Completed R43/R82/R83 in #614: strict top-level launcher configuration with safe key diagnostics, guarded singular association counts and stable HTTP 503 after eager-load NameError until restart. Real executable and booted Rails regressions pass. R15 policy alignment is implemented and independently qualified in the existing private patch, including real transport, SDK-floor and booted Rails checks. This entry remains open pending coordinated private integration; no advisory or release publication occurred.",
     "status": "in-progress"
   },
   {
