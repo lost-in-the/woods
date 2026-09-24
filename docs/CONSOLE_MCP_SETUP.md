@@ -329,6 +329,15 @@ user: deploy
 command: cd /app && bundle exec rake woods:console
 ```
 
+**Unreleased after 2.0.0:** the launcher rejects unknown keys, nested
+`connection:`/`console:` sections, blank or non-string values, and options that
+do not apply to the selected mode. Keep `mode` and `command` at the top level;
+use `directory` for direct mode, `container` for Docker, and `host`/`user` for SSH.
+Configure access controls and redaction in the Rails initializer, not this
+process-launch file. Move legacy nested launch settings to the matching example
+above. An empty file or mapping still selects the default direct command;
+supported `command`/`directory` overrides can omit `mode` for direct execution.
+
 Override config path with environment variable:
 
 ```bash
@@ -376,6 +385,13 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
+**Unreleased after 2.0.0:** `console_association_count` returns `0` or `1` for
+`belongs_to` and `has_one`, including missing targets. It counts the association's
+relation, applying `scope` to the target model; collection associations retain
+their ordinary count. Target-table and scope-column checks still apply before
+association reads. The tool does not call a custom association getter to count
+an already loaded model object.
+
 ### Tier 2: Domain-aware (9 tools): inventory only, not executable
 
 | Tool | Description |
@@ -420,9 +436,21 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 
 ## Configuration options
 
-Set these in your Rails initializer:
+Set the request-time flags and protection settings below in your Rails initializer.
+A **custom endpoint path** must be set earlier, after Woods is required in
+`config/application.rb`, because the Railtie captures it while mounting middleware:
 
 ```ruby
+# config/application.rb, after Bundler.require(*Rails.groups)
+Woods.configure { |config| config.console_mcp_path = '/internal/woods-console' }
+```
+
+Restart after changing the path. Leaving the default `/mcp/console` requires no
+path assignment. Session tracing also needs early configuration; follow
+[session tracer options](CONFIGURATION_REFERENCE.md#session-tracer-options).
+
+```ruby
+# config/initializers/woods.rb
 Woods.configure do |config|
   # Master on/off switch for the Console MCP feature (Layer 0). Default: false.
   # Applies to every transport: stdio, launcher wrapper, and Rack.
@@ -431,9 +459,6 @@ Woods.configure do |config|
   # console path is indistinguishable from an unknown route). Set to true only
   # after configuring the layers below that match your threat model.
   config.console_mcp_enabled = true
-
-  # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
-  config.console_mcp_path = '/mcp/console'
 
   # HTTP Origin + Host allow-list. Defaults to loopback only. Non-loopback
   # Rack deployments must include their public MCP host; browser clients from
@@ -842,6 +867,23 @@ fail closed with `Woods::ConfigurationError`.
 ### Slow first request on HTTP/Rack middleware
 
 The middleware lazy-initializes the MCP server on the first request, which includes `Rails.application.eager_load!`. This can take several seconds on large apps. Subsequent requests are fast. If you want to pre-warm, call a health check endpoint that touches the middleware path at app startup.
+
+**Unreleased after 2.0.0:** if that eager load raises `NameError` (including a
+Zeitwerk naming error), HTTP Console returns a stable `503` and records one
+`console.eager_load.failed` diagnostic. That worker remains unavailable until
+restart; it does not serve a partially populated model registry or repeatedly
+retry loading on incoming requests. The response and diagnostic omit the raw
+application exception. Reproduce it in the same application environment:
+
+```bash
+bundle exec rails runner 'Rails.application.eager_load!'
+```
+
+Fix the application error, then restart the Rails workers. Authentication and
+requests outside the Console mount retain their normal behavior. Other exception
+types retain Rails' usual failure handling. The existing stdio entry point warns
+on eager-load `NameError` and continues; its model list may be incomplete, so fix
+the same application error there too.
 
 ### Timeout errors on large models
 

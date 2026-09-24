@@ -77,12 +77,68 @@ the application's actual `rails woods:watch` or `rake woods:watch` entrypoint,
 with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
+### Managed watcher parks after its owning container disappeared
+
+The explicit lease-based recovery command (#591) is unreleased after `2.0.0`.
+Check the loaded revision and `bundle exec woods-watch --help` before using it.
+Supporting daemons write a claim token and hold a lifetime lease; recovery checks
+the exact selected token and a free matching lease. Use the installed version's
+[claim recovery procedure](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup).
+Never remove a claim or lock sidecar manually, infer death from age alone, or use
+recovery against a live supervisor. Legacy/unverifiable claims cannot use this
+command. Recovery leaves status and pending work intact; remove the reader-only
+foreign-host trust override from owner startup. Blank idle timeouts are also
+normalized by supporting builds; older tasks may reject an empty value.
+
+### Verified extraction selects the wrong output or cannot use its identity key
+
+In supporting #591 builds (unreleased after `2.0.0`), an implicit preboot output
+that disagrees with finalized Rails configuration refuses before publication.
+Pass matching `--output` or `WOODS_OUTPUT` explicitly and retain the same capture,
+key and writer destination. Read the safe key-path/ownership/permissions diagnosis;
+never rotate or print key bytes as a generic fix. Follow
+[source capture setup](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
 ### Watch retains facts from an initializer deleted while stopped
 
 Record the installed revision. In Woods `2.0.0`, startup preserves
 registered deleted boot inputs as full-extraction obligations. On earlier builds,
 stop watch, run a successful full extraction in a fresh process, then restart
 standalone `woods:watch`. See the installed version's watch guide.
+
+### Watch misses an edit made while another extraction publishes
+
+Record the loaded revision; a matching `2.0.0` version alone does not prove the
+#585 repair is present. Supporting Git builds use the generation's optional
+source-capture boundary and recorded dirty paths, with content checks for
+unchanged candidates. Legacy or invalid boundary metadata causes one full
+startup reconciliation under the usual reload/restart rules. On older builds,
+finish a full extraction against settled source before restarting watch.
+Do not infer source freshness from a recent generation marker or remove a
+foreign watch claim. See the installed version's
+[startup catch-up guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md).
+
+### Extraction fails while a sibling extractor succeeds
+
+The #584 publication-reporting repair is unreleased after Woods `2.0.0`.
+Supporting revisions refuse the whole publication after a consumer constructor
+or extraction failure and keep the previous generation active. Fix the logged
+cause and retry the complete batch; do not treat a sibling's success as a
+completed extraction. For custom/embedded pipeline tools, acknowledgement only
+means the background task started: inspect its final task state. Those operator
+tools are not registered by the packaged default Index Server. See
+[extraction failures](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
+
+### Manager, policy or migration identity does not match the source
+
+The selected-declaration repairs in #594 are unreleased after `2.0.0`.
+Supporting writers use actual loaded ancestry where available and inspect
+historical migration declarations without executing them. An unresolved qualified
+migration namespace needs the documented source/normal-boot setup; do not load
+historical migrations to force discovery. Full re-extraction repairs previously
+misidentified migration units. Method chunks now distinguish `self.call`, `call`
+and punctuation-bearing names, so rebuild affected embeddings after upgrading.
+See the [extractor contracts](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md).
 
 ### A cleaned index directory still exists
 
@@ -249,8 +305,17 @@ ranges. A commit alone may leave the source-file watcher idle; run full
 extraction after repair or when current Git history is required. See the
 [worktree mount guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
-After a bundle change or removal of a dynamically defined job, incremental
-extraction can retain stale runtime units. Use a fresh process with the updated
+Builds containing #588 (unreleased after `2.0.0`) reconcile the whole jobs and
+serializers families on relevant Ruby batches, including nested runtime classes.
+Incomplete discovery retains unproven units and refuses ownership transfers.
+Direct incremental calls reject restart-sensitive inputs; apply migrations and
+run full extraction in a fresh Rails process. Fresh one-shot incremental tasks
+escalate those inputs themselves. Disabling `precompute_flows` withdraws stored
+flows on the next successful writer run. Check the revision and follow the
+[runtime reconciliation guide](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#runtime-removals-and-bundle-updates).
+
+After a bundle change or on older builds after removal of a dynamically defined
+job, incremental extraction can retain stale runtime units. Use a fresh process with the updated
 bundle for full extraction, then validate. For missing external gem paths,
 first distinguish an upgraded bundle from a reader on a different host/mount.
 The more explicit `woods:validate` bundle-update remedy (B-166) is available in Woods
@@ -314,6 +379,13 @@ cannot explain an absent structural unit. Follow the
 for source fallback, runtime-only removal and reference-coverage limits.
 
 ## Deferred refresh hooks
+
+For missing Unicode edit events on a host without jq, inspect the locale and
+the installed hook files. The #592 UTF-8 fallback repair is unreleased after
+Woods `2.0.0`; it fixes edit queueing and SessionStart decoding under `LC_ALL=C`.
+Older hooks can use jq or a UTF-8 locale. Confirm the pending queue and published
+generation, since hook exit zero does not establish refresh. See
+[client hook recovery](https://github.com/lost-in-the/woods/blob/main/docs/CLIENT_HOOKS.md#queue-paths-and-recovery).
 
 Expanded hook coverage and `woods:hook_refresh` (#408) are available in Woods
 `2.0.0.beta3`. Verify the installed task through the configured host/container
@@ -385,6 +457,23 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 - Dimension mismatch: rebuild into a store matching the configured model; do not suppress the preflight.
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
 
+For an unsupported OpenAI `dimensions` option or stale vectors after changing
+provider width/endpoint, check the installed revision: the embedding request and
+cache consistency fix (#586) is unreleased after Woods `2.0.0`. It distinguishes
+stored vector width from explicit reduction, omits unsupported width parameters
+for fixed-width ada, and scopes embedding cache entries to provider configuration.
+Follow the installed version's [embedding options and cache guidance](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#embedding-options);
+never bypass a width refusal or infer this capability from the plugin version.
+
+Injected-provider restoration (#599) is unreleased after Woods `2.0.0`.
+Supporting writers preserve effective non-secret built-in settings through known
+wrappers. If a snapshot carries `requires_host_provider`, use a supporting reader
+and configure the compatible provider explicitly, or deliberately select lexical
+mode. Older readers do not enforce this additive marker. Record both writer and
+reader revisions when an endpoint or context size changes after restoration;
+do not remove the marker or copy endpoint credentials into `woods.json`. See
+[injected providers](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#injecting-a-provider-object).
+
 For metadata appearing in another index or worktree, compare `WOODS_OUTPUT`,
 `config.output_dir`, and any explicit `metadata_store_options[:database]`.
 The default SQLite path following `WOODS_OUTPUT` during embedding (B-156) is
@@ -392,6 +481,16 @@ available in Woods `2.0.0.beta3`; check the installed version before relying on 
 An explicit database path still wins. See the
 [SQLite path contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#sqlite-metadata)
 for isolation and upgrade steps.
+
+### Restored snapshot files are not visible
+
+`woods:clean` deletes history stored inside the output directory. Follow the
+[upgrade backup and selective-restore sequence](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#3-clean-and-re-extract)
+before cleaning; do not restore an old structural baseline over a new one.
+`WOODS_SNAPSHOTS=true` enables store construction, but it still prefers SQLite
+and does not import JSON history. A retained JSON history needs an explicit
+`JsonSnapshotStore` reader if SQLite became available. Preserve the original
+backup and verify an old snapshot before resuming writers.
 
 ## 5. Check Console separately
 
@@ -557,3 +656,46 @@ the named file before moving it aside, or choose a new export directory. Older v
 byte-identical generated assets into `_woods/ownership.json`; changed legacy sidecars may need this
 manual recovery. Never fabricate ownership receipts or remove personal files to silence the error.
 See the installed version's `docs/OBSIDIAN_INTEGRATION.md` for the exact safety contract.
+
+## Source freshness and query errors after 2.0.0
+
+Check the installed revision before using these unreleased diagnostics:
+
+- Builds containing #589 expose `recorded_root`, `checked_root`, and `root_source`.
+  A recorded-root check does not certify a copied checkout. Follow `deep_check`
+  for a quick-reader timeout, `inspect_source_scan` for mapping/permission/limit
+  problems, and `fresh_capture` for incomplete capture or boot evidence. Preserve
+  mixed recommendations. Missing evidence cannot prove all files were added or
+  unreadable files deleted. A size refusal preserves the previous publication;
+  narrow configured extra roots before retrying. See
+  [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+- Builds containing #593 return actual types from family-filtered search and
+  reject unknown type names. An unknown flow unit or snapshot is `not_found`,
+  while a valid empty answer remains successful. Repeated `corrupt_artifact`
+  errors after a malformed generation marker require validation and restoration
+  or a fresh extraction; never edit the pointer to guess a payload. See
+  [Index MCP contracts](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#resource-identity-and-damaged-generation-markers).
+- Builds containing #590 retain intended private bundle settings during managed
+  preflight. Compare named identity fields and owned bytes before changing an
+  installer setup. Keep receipts; use the supporting executable for removal
+  before downgrading and real parent directories for temporary plans. See
+  [managed configuration](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
+
+### Console HTTP remains unavailable after a Rails boot error
+
+In builds containing #597's HTTP repair (unreleased after `2.0.0`), an eager-load
+`NameError` makes that worker return a stable, non-cacheable HTTP 503. Reproduce
+the application's eager loading, correct its naming or boot failure, and restart
+the worker; do not keep retrying against a partially loaded model registry or
+relax authentication/table rules. A 401 still indicates authentication failure.
+See [Console startup diagnostics](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md).
+
+### Missing default or parenthesized state machines
+
+The #594 literal state-machine repair is unreleased after `2.0.0`; verify the
+writer's revision before relying on it. Supporting builds recognize direct
+`state_machine` calls with the default `state` attribute or an explicit name,
+including multiline parenthesized arguments. They do not infer dynamic or
+inherited machines from missing edges. Re-extract with a supporting writer and
+compare the selected model's actual registry when coverage is uncertain. See the
+[extractor contract](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#statemachineextractor).

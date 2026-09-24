@@ -55,8 +55,9 @@ end
 
 if $PROGRAM_NAME == __FILE__
   begin
-    puts JSON.generate(WoodsHookEvent.normalize(ARGV.fetch(0), JSON.parse($stdin.read(1_048_577))))
-  rescue JSON::ParserError, ArgumentError, KeyError, TypeError
+    input = $stdin.binmode.read(1_048_577).force_encoding(Encoding::UTF_8)
+    puts JSON.generate(WoodsHookEvent.normalize(ARGV.fetch(0), JSON.parse(input)))
+  rescue JSON::ParserError, EncodingError, ArgumentError, KeyError, TypeError
     warn '[Woods hooks] Unsupported or malformed edit event; no refresh queued.'
     exit 1
   end

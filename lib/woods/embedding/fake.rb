@@ -89,6 +89,18 @@ module Woods
           @dims
         end
 
+        alias configured_dimensions dimensions
+
+        # @return [Array] deterministic, non-secret embedding configuration
+        def cache_identity
+          [self.class.name, @model, @dims]
+        end
+
+        # Pure constructor settings for restoring the deterministic provider.
+        def configuration_options
+          { model: @model, dims: @dims }
+        end
+
         # @return [String] the configured model name (default
         #   {DEFAULT_MODEL_NAME})
         def model_name

@@ -76,7 +76,7 @@ RSpec.describe 'plugin hooks (#280)' do
   def restricted_bin(dir, without:)
     bin = File.join(dir, 'restricted-bin')
     FileUtils.mkdir_p(bin)
-    %w[cat head mktemp mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
+    %w[cat head tail mktemp mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
       next if without.include?(tool)
 
       real = `which #{tool}`.strip
@@ -515,12 +515,12 @@ RSpec.describe 'plugin hooks (#280)' do
   describe 'woods-session-start.sh' do
     let(:base_env) { { 'WOODS_HOOKS_ENABLED' => '1' } }
 
-    def status_command(dir, state: 'current', exit_code: 0)
+    def status_command(dir, state: 'current', exit_code: 0, **evidence)
       script = File.join(dir, 'source-status.sh')
       File.write(script, <<~SH)
         #!/bin/sh
         printf '%s' "$1" > "#{dir}/status-argument"
-        printf '%s\\n' '#{JSON.generate(state: state)}'
+        printf '%s\\n' '#{JSON.generate(state: state, **evidence)}'
         exit #{exit_code}
       SH
       FileUtils.chmod(0o755, script)
@@ -559,6 +559,37 @@ RSpec.describe 'plugin hooks (#280)' do
       end
     end
 
+    [true, false].each do |with_jq|
+      it "uses reason-specific freshness advice with #{with_jq ? 'jq' : 'Ruby only under C locale'}" do
+        Dir.mktmpdir('woods-hook-advice') do |dir|
+          make_app(dir)
+          environment = if with_jq
+                          {}
+                        else
+                          { 'PATH' => restricted_bin(dir, without: ['jq']), 'LC_ALL' => 'C', 'LANG' => 'C' }
+                        end
+          env = status_command(dir, state: 'unknown', recommendations: ['deep_check']).merge(environment)
+          out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(status).to be_success, err
+          expect(out).to include('source freshness is unknown', 'source_check: deep')
+          expect(out).to include('this check could not verify the current source contents')
+          expect(out).not_to include('woods-extract full')
+
+          env = status_command(dir, state: 'unknown', recommendations: %w[deep_check fresh_capture inspect_source_scan])
+                .merge(environment)
+          out, = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(out).to include('source_check: deep', 'woods-extract full', 'permissions', 'source mapping')
+
+          [nil, 'deep_check', ['unrecognized']].each do |malformed|
+            env = status_command(dir, state: 'unknown', recommendations: malformed).merge(environment)
+            out, = run_hook(session_start, { 'cwd' => dir }, env)
+            expect(out).to include('source freshness is unknown', 'woods-extract full')
+            expect(out).not_to include('source_check: deep')
+          end
+        end
+      end
+    end
+
     it 'stays quiet for verified current source or no existing index' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)
@@ -583,6 +614,25 @@ RSpec.describe 'plugin hooks (#280)' do
         expect(out).to include('source freshness is drifted')
         task = File.read(File.join(dir, 'status-argument'))
         expect(task).to start_with('woods:source_status[')
+        options = JSON.parse(Base64.strict_decode64(task.split('[', 2).last.delete_suffix(']')))
+        expect(options).to eq('output' => output, 'mode' => 'quick')
+      end
+    end
+
+    it 'checks a Unicode root and output through the Ruby-only fallback under C locale' do
+      Dir.mktmpdir('woods-hook') do |parent|
+        dir = File.join(parent, 'projet-雪')
+        output = 'tmp/索引'
+        make_app(dir, tmp_subdir: output)
+        bin = restricted_bin(parent, without: %w[jq flock])
+        env = status_command(dir, state: 'drifted').merge(
+          'WOODS_OUTPUT' => output, 'PATH' => bin, 'LC_ALL' => 'C', 'LANG' => 'C'
+        )
+        out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
+        expect(status).to be_success
+        expect(err).to eq('')
+        expect(out).to include('source freshness is drifted')
+        task = File.read(File.join(dir, 'status-argument'))
         options = JSON.parse(Base64.strict_decode64(task.split('[', 2).last.delete_suffix(']')))
         expect(options).to eq('output' => output, 'mode' => 'quick')
       end

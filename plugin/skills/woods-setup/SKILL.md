@@ -7,6 +7,14 @@ description: Install, upgrade, and first-run-configure the Woods Rails code-inte
 
 Install a structural Index Server first. Embeddings and Console MCP are separate opt-ins.
 
+For builds containing #590 (unreleased after `2.0.0`), managed preflight retains
+intended bundle settings, project receipts omit the unused user config directory,
+and watcher ownership tolerates Git checkout umasks. Check the installed revision
+before relying on this. Keep the supporting executable for update/removal before
+a permanent downgrade; never delete a receipt to bypass a conflict. Use a private
+real directory for plan files when the system temporary path is a symlink. Follow
+the [portability guidance](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
+
 ## Managed configuration availability
 
 `woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the
@@ -19,6 +27,13 @@ journals contain private configuration bytes. See the canonical
 [managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
 for host/Compose preflight, actual Claude file locations, conflict recovery,
 and removal. Preserve manual setup for older installed versions.
+
+For v1-to-v2 upgrades, follow the [migration runbook](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md).
+A clean removes snapshot history inside the output directory as well as generated
+index files. Back up consistently and choose whether to retain history before
+cleaning. Remove legacy no-op `log_level` and unsafe-eval settings. Set custom
+Console paths and session-tracer setup in `config/application.rb` before Railtie
+initialization; other Console flags can remain in the normal initializer.
 
 ## Preflight
 

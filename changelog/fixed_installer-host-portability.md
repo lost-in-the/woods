@@ -1,0 +1,1 @@
+- Preserve application Bundler settings during agent preflight, accept Git checkout permission differences in watcher ownership, keep project-scoped agent receipts independent of user configuration directories, and document safe temporary plan paths on hosts with symlinked `/tmp`.

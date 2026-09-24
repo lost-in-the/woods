@@ -42,15 +42,23 @@ module Woods
           extract_configuration_file(file)
         end
 
-        profiler = BehavioralProfile.new
-        profile = profiler.extract
-        SourceInputs::ConsumerErrors.record(self) if SourceInputs::ConsumerErrors.failed?(profiler)
+        profile = extract_behavioral_profile
         units << profile if profile
 
         units
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "BehavioralProfile integration failed: #{e.message}")
         units || []
+      end
+
+      # Re-derive the synthetic unit from resolved runtime values, never from
+      # its nominal config/application.rb source path.
+      # @return [ExtractedUnit, nil]
+      def extract_behavioral_profile
+        profiler = BehavioralProfile.new
+        profile = profiler.extract
+        SourceInputs::ConsumerErrors.record(self) if SourceInputs::ConsumerErrors.failed?(profiler)
+        profile
       end
 
       # Extract a single configuration file

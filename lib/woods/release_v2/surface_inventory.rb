@@ -138,6 +138,7 @@ module Woods
 
           load ROOT.join('lib/tasks/woods.rake') unless Rake::Task.task_defined?('woods:extract')
           load ROOT.join('lib/tasks/woods_evaluation.rake') unless Rake::Task.task_defined?('woods:evaluate')
+          load ROOT.join('lib/tasks/woods_checks.rake') unless Rake::Task.task_defined?('woods:check:moved_messages')
           @release_rake_application = Rake.application
         end
 

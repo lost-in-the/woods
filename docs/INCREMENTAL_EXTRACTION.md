@@ -60,6 +60,7 @@ failure a CI chain cannot afford:
 |---|---|
 | `CHANGED_FILES` is set | Comma-separated application-relative or contained absolute paths; normalized before filtering. Git is not consulted. |
 | The git range resolves | Current behavior: extract the changed paths, or exit 0 with `No relevant files changed` when nothing relevant changed. |
+| A changed input requires a restart | On revisions containing #588, the fresh one-shot task selects full extraction before relevance filtering, including schema-only changes. |
 | The range fails **and** a `:running` watch daemon maintains the index | Stand down with a printed reason, exit 0 — the daemon's start-up catch-up covers whatever changed. |
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
 | There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
@@ -440,12 +441,27 @@ discovery set.
 
 ### Runtime removals and bundle updates
 
-Jobs discovered through `ApplicationJob.descendants` supplement the job-file
-scan, but jobs are not part of `CLASS_BASED_DISCOVERY` removal reconciliation.
-If a dynamically defined or gem-owned job disappears without a tracked source
-path changing, its unit can survive subsequent incremental runs. A full
-extraction in a fresh Rails process removes it; an in-process full extraction
-can still see an old constant retained by that process (B-165).
+Hybrid runtime reconciliation (#588) is unreleased after `2.0.0`; check the
+loaded writer revision. Jobs and serializers use the union of their directory
+scan and current runtime descendants. A Ruby-file change, or a blast radius
+containing a job or serializer, reruns both families wholesale. This costs a
+complete job and serializer scan for that batch, preserving the same file-pass
+precedence, nested identities, JSON and graph facts as full extraction. A
+serializer nested in a controller retains its own identity; the controller does
+not become a serializer unit. Runtime objects left behind by a reload cannot
+claim a name now owned by another constant.
+
+All members of those two families count as refreshed and participate in graph,
+source-reference and metadata maintenance, even when only one file changed.
+Unit-file writes retain the existing byte-equality check; this does not promise
+a single-file write cost or an unchanged manifest for such a batch.
+
+Discovery-based removal requires a complete eager load. Failed or reported-partial discovery
+refuses publication, preserving the previous generation; incomplete eager
+loading retains missing units. An empty change set does not discover arbitrary
+runtime-only additions or removals. Use `refresh(:jobs, :serializers)` after
+updating the runtime explicitly, or full extraction in a fresh process after a
+bundle change. An old constant still bound in that process remains observable.
 
 After adding, removing, or updating bundled gems, boot the updated bundle in a
 fresh process and run:
@@ -495,6 +511,13 @@ Everything in this section is gated on `precompute_flows` (default false).
 The family has three parts: `flows/flow_index.json` (entry point → relative
 document path), one document per controller action, and
 `metadata[:flow_paths]` on the controller units.
+
+On revisions containing #588 (unreleased after `2.0.0`), switching the gate off
+withdraws the seeded `flows/` family and removes controller flow annotations on
+the next full, incremental or targeted-refresh publication. An incremental run
+with no changed files still publishes this withdrawal. The preceding generation
+is unchanged; any withdrawal failure prevents publication. `trace_flow` then
+uses its normal query-time assembly instead of an obsolete precomputed document.
 
 A full extraction computes all three in one pass. An incremental run computes
 them for its **delta**:
@@ -563,6 +586,11 @@ cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above. Like an
 incremental run, `refresh` rewrites the graph, `graph_analysis.json`, the
 affected type indexes and the manifest, so the result is durable.
 
+`refresh(:configurations)` derives `BehavioralProfile` from resolved
+`Rails.application.config`. Its nominal `config/application.rb` source path is
+not a separate configuration unit. Refresh assumes the caller already updated
+the runtime; it does not rerun Rails initialization or apply database migrations.
+
 ## What a change actually requires: reload, restart, or neither
 
 `Woods::ReloadPolicy` answers the question a resident process has to ask before
@@ -605,7 +633,30 @@ it, and belong to whoever implements the reload step:
 the batch demands, and `paths_requiring(:restart)` names the offending paths in
 the restart message a supervisor sees. See `docs/WATCH_DAEMON.md`.
 
+The one-shot `woods:incremental` task also uses the shared `InputRules` decision
+before relevance filtering on revisions containing #588. Run it in a fresh
+Rails process with migrations already applied: `db/schema.rb`,
+`db/structure.sql`, and other restart inputs select full extraction, including
+when mixed with ordinary model edits. A migration source file alone retains
+its existing file-extraction classification; Woods does not apply migrations.
+
+The direct `Extractor#extract_changed` API and optional embedded
+`pipeline_extract` incremental mode cannot establish a fresh boot. They refuse
+restart-sensitive batches before creating a payload and instruct the caller to
+run `woods:extract` in a fresh Rails process. With the MCP Tasks extension this
+is a failed task, and the prior generation stays active. Calling a full
+extraction on an already stale embedded runtime does not refresh that runtime.
+
 ## Running the differential harness
+
+The real ActiveJob/AMS and fresh schema-task probes have a separate optional
+bundle and run in their own processes (also in the Rails 7.2 CI row):
+
+```bash
+BUNDLE_GEMFILE=gemfiles/serializers.gemfile bundle install
+WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/serializers.gemfile \
+  bin/rspec spec/integration/incremental_runtime_spec.rb
+```
 
 `spec/integration/incremental_equivalence_spec.rb` is the oracle. It boots the
 `spec/dummy` app against a tmpdir copy, applies randomized
@@ -759,3 +810,11 @@ A source change during reference analysis or final verification also prevents
 publication. Correct source errors and retry the complete batch against a stable
 tree. Reference-only edge updates do not refresh a retained unit's runtime
 metadata, extraction timestamp or Git history.
+
+Whole-extractor failure reporting (#584) is unreleased after `2.0.0`; verify the
+writer revision before relying on it. If a selected whole-app extractor cannot
+be initialized or raises before replacing any units, incremental extraction and
+targeted refresh fail without advancing the published generation, even when
+other extractors succeeded. Correct the logged cause and retry the complete
+changed-file batch or refresh selection. The existing refusal after a
+replacement has begun writing remains in place.

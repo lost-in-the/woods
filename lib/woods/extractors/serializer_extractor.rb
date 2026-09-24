@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative '../source_references/runtime_lookup'
 
 module Woods
   module Extractors
@@ -61,24 +62,11 @@ module Woods
 
         # Class-based discovery for loaded gems
         seen = units.to_set(&:identifier)
-        BASE_CLASSES.each_key do |base_class_name|
-          base_class = begin
-            base_class_name.constantize
-          rescue NameError
-            nil
-          end
-          next unless base_class
+        discoverable_classes.each do |klass|
+          next if seen.include?(klass.name)
 
-          base_class.descendants.each do |klass|
-            next if klass.name.nil?
-            next if seen.include?(klass.name)
-
-            unit = extract_serializer_class(klass, base_class_name)
-            if unit
-              units << unit
-              seen << unit.identifier
-            end
-          end
+          unit = extract_serializer_class(klass)
+          units << unit if unit
         end
 
         units.compact
@@ -112,15 +100,22 @@ module Woods
         nil
       end
 
-      private
+      # Current, named descendants of the supported runtime serializer bases.
+      # Stale class objects retained after Rails reload do not own their name.
+      # @return [Array<Class>]
+      def discoverable_classes
+        BASE_CLASSES.keys.filter_map(&:safe_constantize).flat_map(&:descendants).uniq.select do |klass|
+          runtime_base_for(klass)
+        end
+      end
 
       # Extract a serializer from its class (runtime introspection)
       #
       # @param klass [Class] The serializer class
-      # @param base_class_name [String] Name of the detected base class
       # @return [ExtractedUnit, nil] The extracted unit
-      def extract_serializer_class(klass, base_class_name)
-        return nil if klass.name.nil?
+      def extract_serializer_class(klass)
+        base_class_name = runtime_base_for(klass)
+        return nil unless base_class_name
 
         file_path = source_file_for(klass)
         source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
@@ -140,6 +135,23 @@ module Woods
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract serializer #{klass.name}: #{e.message}")
         nil
+      end
+
+      private
+
+      # The live constant and a supported ancestor jointly establish ownership.
+      # @param klass [Class]
+      # @return [String, nil] supported base name for a current serializer class
+      def runtime_base_for(klass)
+        return nil unless klass.is_a?(Class) && klass.name
+
+        lookup = SourceReferences::RuntimeLookup.new
+        return nil unless lookup.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
+
+        BASE_CLASSES.keys.find do |name|
+          base = name.safe_constantize
+          base && klass < base
+        end
       end
 
       # ──────────────────────────────────────────────────────────────────────

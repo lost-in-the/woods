@@ -1216,7 +1216,7 @@ RSpec.describe Woods::Extractor do
   # re-raises once the replacement has registered, written, or removed
   # anything, so the run aborts before publication and the preceding
   # generation stays resolved — the same fail-closed posture the flow family
-  # uses. A failure that landed nothing is still swallowed.
+  # uses. A failure that landed nothing is recorded for the batch guard.
   describe '#replace_type_wholesale fail-closed (M8)' do
     let(:output_dir) { File.join(tmpdir, 'output') }
 
@@ -1347,7 +1347,7 @@ RSpec.describe Woods::Extractor do
       expect(index.map { |entry| entry['identifier'] }).to eq(['GET /old'])
     end
 
-    it 'still swallows a failure that landed nothing, so the run learns nothing rather than dying' do
+    it 'records a failure that landed nothing so the batch cannot report success' do
       failing = double('RoutesExtractor')
       allow(failing).to receive(:extract_all).and_raise(StandardError, 'route table exploded')
       cascaded = described_class::ROUTE_CONSUMER_EXTRACTORS.to_h do |consumer|
@@ -1359,13 +1359,15 @@ RSpec.describe Woods::Extractor do
       result = nil
       expect { result = extractor.send(:replace_type_wholesale, :routes, Set.new) }.not_to raise_error
       expect(result).to eq(Set.new)
+      expect { extractor.send(:raise_on_handled_extraction_failure!) }
+        .to raise_error(Woods::ExtractionError, /routes.*previous generation/)
     end
 
     # The counter must be reset BEFORE extract_all: register_and_write is
     # shared with the reconcile paths that run earlier in the same pass, and
     # one of those leaving the counter positive must not turn a later,
-    # mutation-free wholesale failure into an abort.
-    it 'does not inherit an earlier reconcile pass\'s count when the wholesale extractor fails before mutating' do
+    # mutation-free wholesale failure into a misleading post-mutation error.
+    it 'refuses the batch without inheriting an earlier reconcile pass\'s mutation count' do
       seed_published_generation
       service_unit = Woods::ExtractedUnit.new(type: :service, identifier: 'RealService',
                                               file_path: 'app/services/real_service.rb')
@@ -1386,13 +1388,11 @@ RSpec.describe Woods::Extractor do
       stub_const('Woods::Extractor::EXTRACTORS',
                  described_class::EXTRACTORS.merge(cascaded.merge(routes: double(new: raising))))
 
-      result = nil
-      expect { result = extractor.extract_changed(['config/routes.rb']) }.not_to raise_error
+      expect { extractor.extract_changed(['config/routes.rb']) }
+        .to raise_error(Woods::ExtractionError, /Extraction failed for routes.*previous generation/)
 
-      # The rescue swallowed as designed: the reconcile work survives, the
-      # run completes, and it publishes a consistent generation.
-      expect(result).to include('RealService')
-      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(2)
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(1)
+      expect(published_graph_nodes).not_to include('RealService')
       expect(published_graph_nodes - published_index_identifiers).to be_empty
     end
 

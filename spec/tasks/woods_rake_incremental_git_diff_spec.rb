@@ -124,6 +124,26 @@ RSpec.describe 'woods:incremental changed-path parsing' do
 
     after { FileUtils.remove_entry(repo_dir) }
 
+    %w[db/schema.rb db/structure.sql config/application.rb].each do |path|
+      it "escalates #{path} before relevance filtering in the freshly booted task" do
+        require 'woods/extractor'
+        stub_const('Rails', double('Rails', root: Pathname.new(repo_dir)))
+        stub_const('ENV', ENV.to_h.merge('CHANGED_FILES' => path, 'WOODS_OUTPUT' => repo_dir))
+        allow(Woods::RakeHelpers).to receive(:woods_daemon_coverage).and_return(:absent)
+        allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock).and_yield
+        extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil)
+        allow(Woods::Extractor).to receive(:new).and_return(extractor)
+        expect(extractor).to receive(:extract_all).and_return({ models: [] })
+        expect(extractor).not_to receive(:extract_changed)
+
+        Rake.with_application(Rake::Application.new) do
+          load File.expand_path('../../lib/tasks/woods.rake', __dir__)
+          expect { expect { Rake::Task['woods:incremental'].execute }.not_to raise_error }
+            .to output(/full extraction/i).to_stdout
+        end
+      end
+    end
+
     it 'normalizes and contains paths before filtering and preserves missing paths' do
       require 'woods/extractor'
       stub_const('Rails', double('Rails', root: Pathname.new("#{repo_dir}//")))

@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'declaration_ancestry'
 
 module Woods
   module Extractors
@@ -66,7 +67,8 @@ module Woods
 
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
-        unit.metadata = extract_metadata(source, class_name)
+        ancestry = DeclarationAncestry.new(source: source, identifier: class_name, file_path: file_path)
+        unit.metadata = extract_metadata(source, class_name, ancestry)
         unit.dependencies = extract_dependencies(source, class_name)
 
         unit
@@ -100,14 +102,14 @@ module Woods
       # Metadata Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_metadata(source, class_name)
+      def extract_metadata(source, class_name, ancestry)
         {
           evaluated_models: detect_evaluated_models(source, class_name),
           decision_methods: detect_decision_methods(source),
           public_methods: extract_public_methods(source),
           class_methods: extract_class_methods(source),
           initialize_params: extract_initialize_params(source),
-          is_pundit: pundit_policy?(source),
+          is_pundit: pundit_policy?(source, ancestry),
           custom_errors: extract_custom_errors(source),
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') },
           method_count: source.scan(/def\s+(?:self\.)?\w+/).size
@@ -165,8 +167,10 @@ module Woods
         models.uniq
       end
 
-      def pundit_policy?(source)
-        source.match?(/< ApplicationPolicy/) ||
+      def pundit_policy?(source, ancestry)
+        return false if ancestry.foreign?
+
+        ancestry.application_policy? ||
           source.match?(/def\s+initialize\s*\(\s*user\s*,/) ||
           source.match?(/attr_reader\s+:user\s*,\s*:record/)
       end

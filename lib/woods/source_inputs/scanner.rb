@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'find'
 require 'openssl'
 require 'woods/source_inputs/private_key'
 require 'woods/source_inputs/scopes'
@@ -28,6 +27,7 @@ module Woods
       end
 
       def call
+        @captured_at = Time.now.to_f
         @started = monotonic
         @files = {}
         @scope_paths = {}
@@ -53,23 +53,35 @@ module Woods
         raise Errno::ENOENT, @root unless File.directory?(@root)
 
         @resolved_root = SourcePathEncoding.utf8!(File.realpath(@root))
-        Find.find(@root, ignore_error: false) do |path|
-          next if path == @root
+        pending = children(@root)
+        scan_entry(pending.pop, pending) until pending.empty?
+      end
 
-          check_budget!
-          path = decoded_entry(path)
-          relative = path.delete_prefix("#{@root}/")
-          if ignored_directory?(path, relative)
-            Find.prune if File.directory?(path)
-            next
-          end
-          stat = File.lstat(path)
-          next if stat.directory?
+      def scan_entry(path, pending)
+        check_budget!
+        path = decoded_entry(path)
+        return unless path
 
-          @visited += 1
-          check_budget!
-          visit(path, relative, stat)
-        end
+        relative = path.delete_prefix("#{@root}/")
+        return if ignored_directory?(path, relative)
+
+        stat = File.lstat(path)
+        return pending.concat(children(path)) if stat.directory?
+
+        @visited += 1
+        check_budget!
+        visit(path, relative, stat)
+      rescue SystemCallError, IOError
+        error('source_tree_unavailable', relative)
+      end
+
+      # An unreadable entry cannot certify completeness, but must not hide
+      # accessible siblings. Keep traversal order deterministic and bounded.
+      def children(path)
+        Dir.children(path, encoding: Encoding::BINARY).sort.reverse.map { |name| File.join(path.b, name) }
+      rescue SystemCallError, IOError
+        error('source_tree_unavailable', path == @root ? nil : path.delete_prefix("#{@root}/"))
+        []
       end
 
       def decoded_entry(path)
@@ -80,7 +92,7 @@ module Woods
         check_budget!
         relative = path.b.delete_prefix("#{@root}/".b)
         error('undecodable_source_path', SourcePathEncoding.diagnostic(relative))
-        Find.prune
+        nil
       end
 
       def ignored_directory?(path, relative)
@@ -177,6 +189,7 @@ module Woods
 
       def result
         { 'root' => @root, 'key_id' => @key.identifier, 'rules' => @scopes.fingerprint,
+          'captured_at' => @captured_at,
           'extra_roots' => @scopes.extra_roots, 'files' => @files.sort.to_h,
           'scope_paths' => @scope_paths.transform_values(&:sort).sort.to_h,
           'errors' => @errors, 'complete' => @errors.empty?,

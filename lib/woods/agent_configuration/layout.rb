@@ -64,8 +64,22 @@ module Woods
       end
 
       def identity
-        { 'client' => 'claude', 'scope' => scope, 'root' => root, 'config_dir' => config_dir,
-          'config_path' => config_path, 'receipt_path' => receipt_path }
+        { 'client' => 'claude', 'scope' => scope, 'root' => root,
+          'config_path' => config_path, 'receipt_path' => receipt_path }.tap do |value|
+          value['config_dir'] = config_dir if scope == 'user'
+        end
+      end
+
+      # Older project receipts/plans included an unused user configuration path.
+      # Only that field is irrelevant; every actual target and scope stays exact.
+      def self.validate_identity!(record, expected, message:)
+        raise Conflict, "#{message} (identity field: layout)" unless record.is_a?(Hash)
+
+        record = record.except('config_dir') if expected['client'] == 'claude' && expected['scope'] == 'project'
+        return if record == expected
+
+        fields = (record.keys | expected.keys).reject { |key| record.slice(key) == expected.slice(key) }
+        raise Conflict, "#{message} (identity fields: #{fields.join(', ')})"
       end
     end
   end

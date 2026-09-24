@@ -53,10 +53,10 @@ RSpec.describe 'Published directory type families' do
     expect(report.valid?).to be(true)
   end
 
-  it 'deep searches the GraphQL family while preserving historical directory-family result labels' do
+  it 'deep searches the GraphQL family while preserving concrete unit types' do
     result = reader.search('frobnicate', types: ['graphql'], fields: ['source_code'])
     expect(result[:results].size).to eq(4)
-    expect(result[:results].map { |row| row[:type] }.uniq).to eq(['graphql'])
+    expect(result[:results].map { |row| row[:type] }).to contain_exactly(*graphql_types)
     expect(result[:completeness]).to include(status: 'complete', total_matches: 4)
     expect(reader.each_unit.map { |unit| unit['type'] }).to eq(graphql_types)
   end

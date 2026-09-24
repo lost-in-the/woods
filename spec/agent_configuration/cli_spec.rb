@@ -95,4 +95,37 @@ RSpec.describe Woods::AgentConfiguration::CLI do
     expect(run_command('apply', removal)).to eq(0)
     expect(File).not_to exist(File.join(directory, '.mcp.json'))
   end
+
+  it 'explains symlinked temporary parents and accepts a private plan under their real path' do
+    real_directory = File.join(File.realpath(directory), 'private plans')
+    FileUtils.mkdir_p(real_directory, mode: 0o700)
+    alias_directory = File.join(directory, 'tmp-alias')
+    File.symlink(real_directory, alias_directory)
+    aliased_plan = File.join(alias_directory, 'setup.json')
+    expect(run_command('setup', '--plan', aliased_plan)).to eq(1)
+    expect(errors.string).to include('Symlink', 'File.realpath', 'parent directory')
+    expect(File).not_to exist(aliased_plan)
+
+    safe_plan = File.join(File.realpath(alias_directory), 'setup.json')
+    expect(run_command('setup', '--plan', safe_plan)).to eq(0), errors.string
+    expect(File.stat(safe_plan).mode & 0o777).to eq(0o600)
+    expect(run_command('show', aliased_plan)).to eq(1)
+    expect(errors.string).to include('File.realpath')
+    expect(run_command('apply', safe_plan)).to eq(0), errors.string
+
+    File.symlink(safe_plan, File.join(real_directory, 'linked.json'))
+    expect(run_command('apply', File.join(real_directory, 'linked.json'))).to eq(1)
+    expect(errors.string).to include('Symlink')
+  end
+
+  it 'still refuses managed symlink targets when the plan parent is real' do
+    original = File.join(File.realpath(directory), 'original.json')
+    File.write(original, '{}')
+    File.symlink(original, File.join(directory, '.mcp.json'))
+    target = File.join(File.realpath(directory), 'setup.json')
+    expect(run_command('setup', '--plan', target)).to eq(1)
+    expect(errors.string).to include('Symlink')
+    expect(File.read(original)).to eq('{}')
+    expect(File).not_to exist(target)
+  end
 end

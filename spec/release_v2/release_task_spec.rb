@@ -31,6 +31,8 @@ RSpec.describe 'release rake tasks' do
     Rake.with_application(application) do
       Rake::Task.define_task('release') { raise 'bundler release ran' }
       Rake::Task.define_task('release:rubygem_push') { raise 'bundler gem push ran' }
+      Rake::Task.define_task('unsafe_tag') { raise 'bundler tag prerequisite ran' }
+      Rake::Task.define_task('release:source_control_push' => 'unsafe_tag') { raise 'bundler git push ran' }
       Rake::Task.define_task('release_v2:write_surface_inventory') do
         inventory_runs << :written
         on_write_inventory.call
@@ -44,6 +46,11 @@ RSpec.describe 'release rake tasks' do
   end
 
   let(:inventory_runs) { [] }
+
+  before do
+    report = "Preflight (advisory, does not block prepare):\n  offline task-wiring fixture\n"
+    allow(Woods::Release::Preflight).to receive(:report).with(root: root).and_return(report)
+  end
 
   it 'exposes one documented task per transition, each taking the target version' do
     with_release_tasks do |application|
@@ -102,7 +109,7 @@ RSpec.describe 'release rake tasks' do
     stub_prepare_result
 
     with_release_tasks(on_write_inventory: lambda {
-      File.write(inventory_path, "#{File.read(inventory_path)}\n")
+      File.write(inventory_path, "#{File.read(inventory_path, encoding: Encoding::UTF_8)}\n")
     }) do |application|
       expect { application['release:prepare'].invoke('2.0.0.beta1') }
         .to output(%r{Changed: \.Codex/release-v2/surface-inventory\.json, CHANGELOG\.md}).to_stdout
@@ -158,6 +165,14 @@ RSpec.describe 'release rake tasks' do
     expect(inventory_runs).to be_empty
   end
 
+  it 'prints an alpha target for reopen without performing a transition' do
+    expect(Woods::Release::Preparer).not_to receive(:reopen)
+    with_release_tasks do |application|
+      expect { application['release:reopen'].invoke }
+        .to raise_error(SystemExit).and output(/release:reopen\[X\.Y\.Z\.alpha\]/).to_stderr
+    end
+  end
+
   it 'refuses to run without a target version' do
     with_release_tasks do |application|
       expect { application['release:prepare'].invoke }
@@ -171,6 +186,9 @@ RSpec.describe 'release rake tasks' do
         .to raise_error(SystemExit).and output(/release:prepare/).to_stderr
       expect { application['release:rubygem_push'].invoke }
         .to raise_error(SystemExit).and output(/dispatch workflow/).to_stderr
+      expect { application['release:source_control_push'].invoke }
+        .to raise_error(SystemExit).and output(/tag.*push/).to_stderr
+      expect(application['release:source_control_push'].prerequisites).to be_empty
     end
   end
 
@@ -178,7 +196,7 @@ RSpec.describe 'release rake tasks' do
   # rediscovers it by running it. Keep it listed, and say what to run instead.
   it 'keeps the blocked tasks visible in the task list with a pointer to the flow' do
     with_release_tasks do |application|
-      %w[release release:rubygem_push].each do |name|
+      %w[release release:rubygem_push release:source_control_push].each do |name|
         expect(application[name].comment).to include('BLOCKED'), "#{name} is not listed as blocked"
         expect(application[name].comment).to include('release:prepare')
       end

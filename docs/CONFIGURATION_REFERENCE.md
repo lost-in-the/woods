@@ -136,6 +136,26 @@ config.embedding_options = {
 }
 ```
 
+`dimensions:` explicitly requests an output width; use it to reduce a
+`text-embedding-3-small` or `text-embedding-3-large` vector. The legacy singular
+`dimension:` remains an alias for this explicit request; if both are supplied,
+they must agree. `expected_dimensions:` records an expected output width
+without requesting a reduction. Standalone snapshot restoration uses that
+separate channel. Provider responses must match the expected width before
+Woods accepts them.
+
+`text-embedding-ada-002` has a fixed width of 1,536. A matching declared width
+is accepted without sending the API's unsupported `dimensions` parameter;
+other widths are refused before a request.
+
+Embedding snapshots store observed `dimension` separately from
+`requested_dimensions`. Standalone readers restore both. For legacy snapshots
+without the latter field, Woods restores a reduction only when the model is
+exactly `text-embedding-3-small` or `text-embedding-3-large` and the recorded
+width is below that model's native width. It does not infer support for
+reductions from arbitrary model names. Store and snapshot width checks still
+apply; changing models or widths requires rebuilding a compatible vector store.
+
 OpenAI embedding batches are sent in slices of at most 36 texts, preserving
 input order. For inputs within the API's 8,192-token per-text limit, this stays
 below both the 2,048-input limit and the 300,000-token total request limit.
@@ -159,6 +179,11 @@ config.embedding_options = {
 ```
 
 The provider reads `model:`, `host:`, and `num_ctx:` from `embedding_options`. `num_ctx` is auto-selected from a per-model registry (`nomic-embed-text` → 2048, `bge-m3` → 8192, `mxbai-embed-large` → 512, `snowflake-arctic-embed` → 512, `snowflake-arctic-embed2` → 8192, `all-minilm` → 512). Unknown models fall back to 2048, matching Ollama's conservative embedding default. Set `num_ctx:` explicitly only when running a model with a known-larger native context that isn't in the registry yet.
+
+An explicit `dimensions:` option (or its legacy `dimension:` alias) is sent to
+Ollama and requires server/model support. A stored width is restored through
+`expected_dimensions:` instead.
+Discovering a width through a probe never adds `dimensions` to later requests.
 
 **Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
 
@@ -187,6 +212,39 @@ Anything responding to `#embed` and `#embed_batch` can be assigned directly, it 
 ```ruby
 config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
 ```
+
+Unreleased after `2.0.0`: snapshots capture the effective settings of injected
+Ollama, OpenAI, and Fake instances, including through Woods' retry and embedding
+cache wrappers. An injected instance takes precedence over unused
+`embedding_options`. Ollama retains its model, host, context size, read timeout,
+and vector settings; OpenAI and Fake retain their model and vector settings.
+Capturing constructor settings makes no requests. When a live `provider:` is
+passed to `ResolvedConfig.from_configuration`, its existing dimension-discovery
+behavior remains available. The explicit request width remains separate from
+the observed width.
+
+API keys are never stored; standalone OpenAI restoration still requires
+`OPENAI_API_KEY`. Only plain HTTP(S) origins can be persisted as Ollama hosts
+(an optional trailing `/` is allowed). URLs containing user information, a path
+prefix, query, or fragment are omitted and marked `requires_host_provider`.
+Those components may be legitimate routing settings, but can also carry
+credentials; Woods refuses to reconstruct a different endpoint by dropping them.
+The same restriction applies when reading older snapshot endpoints.
+
+**Reader compatibility:** snapshots marked `requires_host_provider` need a
+supporting reader. Older schema-1 readers cannot enforce that marker and may
+silently select defaults; do not use them for implicit restoration of these
+snapshots. Ordinary built-in snapshots with non-secret settings remain
+schema-1 compatible.
+
+Custom providers and custom wrappers are also marked `requires_host_provider`;
+Woods does not serialize arbitrary client state or infer a built-in from a custom
+class name. Embedding in the configured host continues to work. To serve such a
+snapshot semantically, provide an explicitly configured compatible provider in
+the reader's host initializer. Implicit standalone restoration reports a
+configuration error instead of choosing defaults. Explicit lexical retrieval
+does not restore or call an embedding provider. Record the loaded revision
+before relying on these snapshot improvements.
 
 ## Storage options
 
@@ -343,9 +401,25 @@ already running requests may finish against the previous corpus. Retired entries
 expire according to their configured TTL or backend eviction; disabling both
 can retain unused entries indefinitely. Embedding-vector caches are separate and survive context invalidation.
 
+Embedding entries are scoped to the provider family, endpoint, model, requested
+and declared widths, and relevant input options. Cache lookups never call a
+provider's probing `dimensions` method. Keys contain hashes rather than raw
+endpoint credentials or API keys. Malformed cached vectors and known-width
+mismatches are refused. This configuration key format starts a fresh embedding
+cache after upgrading; old entries expire under their existing TTLs.
+
+Custom provider objects may expose a pure, JSON-compatible `cache_identity`
+containing every setting that affects their vectors, plus a non-probing
+`configured_dimensions` reader for width validation. Otherwise each cache
+wrapper has its own namespace; cached vectors are still checked for valid
+numeric content and consistent batch widths. Configuration changes require a
+new provider and wrapper. A remotely replaced model under an unchanged name
+still requires an explicit cache/model-version change and re-embedding.
+
 `Woods::Cache.cache_key` length-prefixes every component, including a single
-component, so different argument counts cannot share a response. This encoding
-is independent of the retriever's context namespace. Custom callers
+component, so different argument counts cannot share a response. This component
+encoding is unchanged and independent of the retriever's context namespace;
+the embedding wrapper uses the new identity above. Custom callers
 using single-component keys must clear their affected persistent cache domain
 when upgrading, since older unprefixed entries can alias the new encoding;
 subsequent calls refill it normally. Namespace clearing still covers both formats.
@@ -513,21 +587,34 @@ there is no full population count to publish. Both caps must be a positive Integ
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `session_tracer_enabled` | Boolean | `false` | Enable session tracing middleware |
+| `session_tracer_enabled` | Boolean | `false` | Enable session tracing middleware; set with its store in `config/application.rb` before Railtie initialization |
 | `session_tracer_allow_production` | Boolean | `false` | Explicitly allow session tracing in `Rails.env.production?`. Without this opt-in, the Railtie warns and leaves the tracer disabled even when `session_tracer_enabled` is true. Review trace contents, retention, and access controls before enabling it. |
 | `session_store` | Object | `nil` | Store backend: `FileStore`, `RedisStore`, or `SolidCacheStore` |
 | `session_id_proc` | Proc | `nil` | Custom proc to extract session ID from requests |
 | `session_exclude_paths` | Array&lt;String&gt; | `[]` | Path patterns to exclude from tracing |
 
-```ruby
-require 'woods/session_tracer/file_store' # the stores are not autoloaded
+Configure the complete tracer setup in `config/application.rb`, after Woods is
+required and before Rails initialization. A `config/initializers/woods.rb`
+assignment is too late to mount this middleware; Woods warns and tracing stays
+disabled. Restart the server after changing it.
 
-config.session_tracer_enabled = true
-config.session_store = Woods::SessionTracer::FileStore.new(
-  base_dir: Rails.root.join('tmp/session_traces')
-)
-config.session_exclude_paths = ['/health', '/metrics', '/assets']
+```ruby
+# config/application.rb, after Bundler.require(*Rails.groups)
+require 'woods/session_tracer/file_store'
+
+Woods.configure do |config|
+  config.session_tracer_enabled = true
+  config.session_store = Woods::SessionTracer::FileStore.new(
+    base_dir: File.expand_path('../tmp/session_traces', __dir__)
+  )
+  config.session_exclude_paths = ['/health', '/metrics', '/assets']
+end
 ```
+
+The Rails middleware records traces. Reading them with `session_trace` additionally
+requires a custom Index Server process configured with the same store; the
+packaged Index executable does not load application initializers. See
+[conditional capabilities](MCP_SERVERS.md#conditional-index-capabilities).
 
 ### File session retention
 
@@ -700,7 +787,7 @@ deployment guide including defense layers.
 | `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
-| `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
+| `console_mcp_path` | String | `/mcp/console` | URL path captured when Rack middleware mounts. Set a custom path in `config/application.rb` before Railtie initialization, then restart. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
 | `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses, and which are refused as aggregate, scope, find, and order inputs. |
@@ -802,6 +889,11 @@ in its finalized development environment. See [startup and installation](WATCH_D
 for the generator's explicit modes, portable receipt, update/removal, and the
 separate supervision status. Raw task settings above remain compatible.
 
+**Unreleased after 2.0.0 (#591):** blank/whitespace-only idle timeouts count as
+unset consistently. `woods-watch --recover-claim INDEX --claim-token TOKEN`
+provides explicit recovery only for a matching abandoned managed lifetime lease;
+see [ownership recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
+
 ### Opt-in plugin refresh hooks
 
 These settings control the plugin shell worker. Check installed
@@ -829,6 +921,11 @@ and checks publication failure before acknowledging work. Use ordinary extractio
 tasks for manual refreshes; hook transport is not a general shell execution API.
 
 ### Extraction rake tasks
+
+The separate `woods-extract` launcher captures before Rails configuration runs:
+custom `output_dir` applications must supply matching `--output` or `WOODS_OUTPUT`.
+Its implicit default is `tmp/woods`; the unreleased #591 guard refuses a finalized
+configuration mismatch before publication. See [launcher output selection](SOURCE_FRESHNESS.md#establish-a-fresh-baseline).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

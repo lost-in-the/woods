@@ -567,9 +567,9 @@ module Woods
 
       def handle_association_count(params)
         model = resolve_model(params['model'])
-        association_name = params['association']
+        association_name = params['association'].to_sym
         requested_scope = params['scope']
-        reflection = model.reflect_on_association(association_name.to_sym)
+        reflection = model.reflect_on_association(association_name)
 
         raise ValidationError, "Unknown association '#{association_name}' on #{params['model']}" unless reflection
 
@@ -587,10 +587,16 @@ module Woods
         validate_scope_columns!(requested_scope, reflection.klass.name) if requested_scope
 
         record = checked_relation(model).find(params['id'])
-        scope = record.public_send(association_name)
+        scope = record.association(association_name).scope
         scope = apply_scope(scope, requested_scope, model_name: reflection.klass.name) if requested_scope
         gate_association_sql!(scope)
-        { 'count' => scope.count }
+        { 'count' => association_count(scope, reflection) }
+      end
+
+      def association_count(scope, reflection)
+        return scope.count if reflection.collection?
+
+        scope.exists? ? 1 : 0
       end
 
       # Materialize a model's default scope once, inspect the resolved SQL,

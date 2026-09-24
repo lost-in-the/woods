@@ -22,7 +22,7 @@ end
 
 begin
   config = File.file?(config_path) ? YAML.safe_load_file(config_path, aliases: false) : {}
-  config ||= {}
+  config = {} if config.nil?
   raise Woods::Console::ConnectionError, "#{config_path} must contain a YAML mapping" unless config.is_a?(Hash)
 
   Woods::Console::ConnectionManager.new(config: config).replace_process!

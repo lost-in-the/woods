@@ -66,7 +66,7 @@ or publishes.
 Unreleased behind, restates the fences, regenerates the surface inventory, and
 prints the tag and dispatch commands. Entry files are folded in filename order
 after inline entries, then only the consumed files are removed. Invalid types,
-empty entries, headings, or symlinks refuse before any write. A prepared release
+empty entries, headings, symlinks, or nested directories refuse before any write. A prepared release
 has no entry files; the tag validator rejects any leftovers at the release SHA
 even if more inline Unreleased notes exist. Ordinary beta-cycle work can still
 collect new entries before the next prepare. `release:reopen` sets the next alpha and
@@ -106,8 +106,8 @@ checks below; write the commit and pull request; quote the tag and dispatch
 commands the task printed.
 
 **May not**: edit VERSION or a fence by hand; create, move, or push a tag; run
-`gem push`, `rake release`, or `rake release:rubygem_push` (the last two are
-blocked and abort); trigger the `repository_dispatch` release workflow. Tagging
+`gem push`, `rake release`, `rake release:rubygem_push`, or
+`rake release:source_control_push` (the Rake mutation tasks are blocked and abort); trigger the `repository_dispatch` release workflow. Tagging
 and dispatch are maintainer steps, always.
 
 ## 5. Checks to run after a transition
@@ -140,12 +140,12 @@ stays independent.
 |---|---|---|
 | `release:prepare refused: the working tree has uncommitted changes` | uncommitted work | commit or discard first |
 | `does not come after the current version` | target moves backwards | pick a later version |
-| `main is developing X.Y.Z` | target base does not match the alpha | release the base `main` is on, or reopen at a new base first |
+| `main is developing X.Y.Z` | target base does not match the alpha | prepare within the current base; reopening requires a completed final release and cannot retarget an alpha/beta/RC |
 | `the Unreleased section is empty; nothing to release` | a beta or rc with no entries since the last one | there is nothing new to publish |
 | `the Unreleased section is empty and no X.Y.Z prerelease section exists` | a final release with nothing to ship | there is nothing to release |
 | `entries sit outside a ### heading in Unreleased` | an entry with no `###` block | file it under a heading |
 | `release tag ... is an alpha development marker` | an alpha reached a validator | the release commit was skipped; run `release:prepare` |
-| `version-banner does not match the ... state` | a fence was hand-edited | re-run the task for the current VERSION |
+| `version-banner does not match the ... state` | a fence was hand-edited | restore the exact task-generated fence from the last valid commit; if its renderer changed, fix the release tooling with a reviewed repair (there is no same-version transition) |
 | `surface-inventory.json is stale` | a public surface changed | `bin/rake release_v2:write_surface_inventory` |
 
 ## 8. When a dispatch fails

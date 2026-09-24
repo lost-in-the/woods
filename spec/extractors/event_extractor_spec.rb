@@ -116,21 +116,21 @@ RSpec.describe Woods::Extractors::EventExtractor do
     end
 
     it 'records publisher file paths in metadata' do
-      publisher_path = create_file('app/services/order_service.rb', <<~RUBY)
+      create_file('app/services/order_service.rb', <<~RUBY)
         ActiveSupport::Notifications.instrument("order.completed")
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.first.metadata[:publishers]).to include(publisher_path)
+      expect(units.first.metadata[:publishers]).to eq(['app/services/order_service.rb'])
     end
 
     it 'records subscriber file paths in metadata' do
-      subscriber_path = create_file('app/listeners/order_listener.rb', <<~RUBY)
+      create_file('app/listeners/order_listener.rb', <<~RUBY)
         ActiveSupport::Notifications.subscribe("order.completed") { }
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.first.metadata[:subscribers]).to include(subscriber_path)
+      expect(units.first.metadata[:subscribers]).to eq(['app/listeners/order_listener.rb'])
     end
 
     it 'does not duplicate the same file in publishers list' do
@@ -310,7 +310,7 @@ RSpec.describe Woods::Extractors::EventExtractor do
     end
 
     it 'records publisher file paths in metadata for Wisper' do
-      publisher_path = create_file('app/services/order_service.rb', <<~RUBY)
+      create_file('app/services/order_service.rb', <<~RUBY)
         class OrderService
           include Wisper::Publisher
           def call
@@ -320,17 +320,17 @@ RSpec.describe Woods::Extractors::EventExtractor do
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.first.metadata[:publishers]).to include(publisher_path)
+      expect(units.first.metadata[:publishers]).to eq(['app/services/order_service.rb'])
     end
 
     it 'records subscriber file paths in metadata for Wisper' do
-      subscriber_path = create_file('app/controllers/orders_controller.rb', <<~RUBY)
+      create_file('app/controllers/orders_controller.rb', <<~RUBY)
         include Wisper::Publisher
         order_service.on(:order_created) { |o| }
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.first.metadata[:subscribers]).to include(subscriber_path)
+      expect(units.first.metadata[:subscribers]).to eq(['app/controllers/orders_controller.rb'])
     end
   end
 
@@ -405,12 +405,12 @@ RSpec.describe Woods::Extractors::EventExtractor do
     end
 
     it 'includes publisher paths in annotation' do
-      publisher_path = create_file('app/services/order_service.rb', <<~RUBY)
+      create_file('app/services/order_service.rb', <<~RUBY)
         ActiveSupport::Notifications.instrument("order.completed")
       RUBY
 
       units = described_class.new.extract_all
-      expect(units.first.source_code).to include(publisher_path)
+      expect(units.first.source_code).to include('# Publishers: app/services/order_service.rb')
     end
   end
 
@@ -510,9 +510,9 @@ RSpec.describe Woods::Extractors::EventExtractor do
       by_name = units.to_h { |unit| [unit.identifier, unit] }
 
       expect(units.size).to eq(2)
-      expect(by_name['order.shipped'].metadata[:publishers]).to eq([@bus_path])
-      expect(by_name['order.shipped'].metadata[:subscribers]).to eq([@listener_path])
-      expect(by_name['order.paid'].metadata[:publishers]).to eq([@bus_path])
+      expect(by_name['order.shipped'].metadata[:publishers]).to eq(['app/services/order_bus.rb'])
+      expect(by_name['order.shipped'].metadata[:subscribers]).to eq(['app/listeners/order_listener.rb'])
+      expect(by_name['order.paid'].metadata[:publishers]).to eq(['app/services/order_bus.rb'])
       expect(by_name['order.shipped'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
       expect(by_name['order.paid'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
     end

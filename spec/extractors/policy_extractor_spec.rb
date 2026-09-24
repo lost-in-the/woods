@@ -38,6 +38,7 @@ RSpec.describe Woods::Extractors::PolicyExtractor do
     end
 
     it 'discovers files in nested directories' do
+      stub_const('Billing', Module.new)
       create_file('app/policies/billing/upgrade_policy.rb', <<~RUBY)
         class Billing::UpgradePolicy
           def initialize(account)

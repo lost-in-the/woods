@@ -92,7 +92,7 @@ RSpec.describe 'lib/tasks/woods_checks.rake' do
       write_dependency_graph(dir, coverage)
     end
 
-    def run_task(dir, task, env: {})
+    def run_task(dir, task, env: {}, cwd: dir)
       rakefile = File.join(dir, 'Rakefile')
       File.write(rakefile, <<~RUBY)
         $LOAD_PATH.unshift(#{File.join(root, 'lib').inspect})
@@ -101,7 +101,7 @@ RSpec.describe 'lib/tasks/woods_checks.rake' do
       RUBY
 
       Open3.capture3({ 'WOODS_OUTPUT' => dir }.merge(env), RbConfig.ruby, File.join(root, 'bin/rake'),
-                     '--rakefile', rakefile, task, chdir: dir)
+                     '--rakefile', rakefile, task, chdir: cwd)
     end
 
     def build_two_generations(dir)
@@ -112,6 +112,25 @@ RSpec.describe 'lib/tasks/woods_checks.rake' do
                     methods_by_unit: { 'Checkout' => %w[call], 'Pricing' => %w[rate total] },
                     coverage: { 'spec/checkout_spec.rb' => 'Checkout' })
       write_generation_pointer(dir, 2)
+    end
+
+    [nil, 'custom/index', :absolute].each do |override|
+      it "uses the selected Rakefile root from another cwd with output #{override.inspect}" do
+        Dir.mktmpdir('woods-checks-task') do |dir|
+          app = File.join(dir, 'app')
+          FileUtils.mkdir_p(app)
+          output = override == 'custom/index' ? File.join(dir, override) : File.join(app, 'tmp/woods')
+          build_two_generations(output)
+          value = override == :absolute ? output : override
+
+          out, err, status = run_task(app, 'woods:check:moved_messages',
+                                      env: { 'WOODS_OUTPUT' => value }, cwd: dir)
+
+          expect(status).to be_success, "#{out}\n#{err}"
+          expect(out).to include('Comparing generation 1 to 2')
+          expect(out).to include('Checkout -> Pricing')
+        end
+      end
     end
 
     it 'reports a candidate move, defaulting to the latest two published generations, with no Rails boot' do

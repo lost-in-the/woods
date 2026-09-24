@@ -162,7 +162,7 @@ RSpec.describe 'Index search completeness' do
     expect { reader.search('needle', fields: ['source_code'], limit: 1) }.to raise_error(Errno::ENOENT)
   end
 
-  it 'searches real gem-source units sharing the framework directory without changing search type labels' do
+  it 'searches real gem-source units sharing the framework directory with their actual typed identities' do
     unit = Woods::ExtractedUnit.new(type: :gem_source, identifier: 'gems/widget/lib/widget.rb',
                                     file_path: '/gems/widget/lib/widget.rb')
     unit.source_code = 'module Widget; needle; end'
@@ -171,7 +171,7 @@ RSpec.describe 'Index search completeness' do
 
     result = reader.search('needle', types: ['rails_source'], fields: ['source_code'])
 
-    expect(result[:results]).to eq([{ identifier: unit.identifier, type: 'rails_source', match_field: 'source_code' }])
+    expect(result[:results]).to eq([{ identifier: unit.identifier, type: 'gem_source', match_field: 'source_code' }])
     expect(result[:completeness]).to include(status: 'complete', total_matches: 1)
     expect(reader.each_unit.to_a.first).to include('identifier' => unit.identifier, 'type' => 'gem_source')
   end

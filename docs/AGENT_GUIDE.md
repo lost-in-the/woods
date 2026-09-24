@@ -86,6 +86,10 @@ Bare names identify units, not methods across the application. For example,
 be a FactoryBot factory in `spec/factories/`. Find the owning class with
 `search` and `lookup`, then pass its identifier with `#order`.
 
+**Unreleased after `2.0.0` (#593):** an unknown indexed flow unit returns
+`not_found`; a known unit with no discovered operations remains a successful
+empty flow. Neither outcome establishes whether an unindexed caller exists.
+
 Flow assembly derives operations from source. A receiverless local call such
 as `order` inside `CheckoutService#call` may remain visible without expanding
 the local method body. Follow it in source or trace `CheckoutService#order`

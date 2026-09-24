@@ -414,6 +414,36 @@ RSpec.describe 'Booted-app extraction', :booted_app do
         expect(File).not_to exist(File.join(dir, 'extraction.lock'))
       end
     end
+
+    %i[full incremental refresh].each do |mode|
+      it "refuses a pre-mutation whole-extractor failure during #{mode} and can retry the complete run" do
+        dir = Woods.configuration.output_dir.to_s
+        generation = Woods::Generation.new(output_dir: dir)
+        before_token = generation.current.token
+        before_manifest = File.binread(generation.payload_dir.join('manifest.json'))
+        failed = Woods::Extractors::RouteExtractor
+        allow_any_instance_of(failed).to receive(:extract_all)
+          .and_raise(Woods::ExtractionError, 'route table unavailable')
+        runner = Woods::Extractor.new(output_dir: dir)
+        run = lambda do
+          case mode
+          when :full then runner.extract_all
+          when :incremental then runner.extract_changed(['config/routes.rb'])
+          when :refresh then runner.refresh(:middleware, :routes)
+          end
+        end
+
+        expect { run.call }.to raise_error(Woods::ExtractionError, /routes|route table/)
+        expect(generation.current.token).to eq(before_token)
+        expect(File.binread(generation.payload_dir.join('manifest.json'))).to eq(before_manifest)
+        expect(Woods::MCP::IndexReader.new(dir).find_unit('Post', type: 'model')).not_to be_nil
+
+        allow_any_instance_of(failed).to receive(:extract_all).and_call_original
+        run.call
+        runner.raise_on_publication_failure!
+        expect(generation.current.token).not_to eq(before_token)
+      end
+    end
   end
 
   # Full-path flow precomputation is fail closed: a failure anywhere in the

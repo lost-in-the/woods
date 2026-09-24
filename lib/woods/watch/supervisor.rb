@@ -25,7 +25,7 @@ module Woods
       def initialize(command:, root:, env: ENV.to_h, logger: $stderr, boot_timeout: 300,
                      shutdown_timeout: 10, retry_delays: RETRY_DELAYS)
         raise ArgumentError, 'WOODS_WATCH_IDLE_TIMEOUT must be unset for managed watching' unless
-          env['WOODS_WATCH_IDLE_TIMEOUT'].to_s.empty?
+          env['WOODS_WATCH_IDLE_TIMEOUT'].to_s.strip.empty?
 
         @command = command
         @root = File.realpath(root)

@@ -1,0 +1,1 @@
+- Extract default-attribute and parenthesized `state_machines` declarations, including multiline arguments, without changing named-machine identifiers. Keep each declaration's states, events and initial state within its own block; do not execute callbacks or infer dynamic attribute names.

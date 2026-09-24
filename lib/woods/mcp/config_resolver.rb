@@ -164,6 +164,13 @@ module Woods
       # @param artifact [Woods::IndexArtifact]
       # @return [Woods::Configuration]
       def self.populate_from_stored(config, stored, artifact:, env: ENV)
+        if stored.requires_host_provider?
+          raise ConfigMismatch,
+                'This embedding snapshot requires an explicit host provider configuration. ' \
+                'Configure the original provider in the host initializer, or use lexical retrieval; ' \
+                'Woods cannot safely reconstruct these settings from woods.json.'
+        end
+
         config.output_dir = artifact.output_dir.to_s
         config.vector_store = stored.stores[:vector_store] || :in_memory
         config.metadata_store = stored.stores[:metadata_store] || :in_memory
@@ -177,7 +184,11 @@ module Woods
         opts[:host] = stored.embedding_provider[:host] if stored.embedding_provider[:host]
         opts[:num_ctx] = stored.embedding_provider[:num_ctx] if stored.embedding_provider[:num_ctx]
         opts[:read_timeout] = stored.embedding_provider[:read_timeout] if stored.embedding_provider[:read_timeout]
-        opts[:dimension] = stored.embedding_provider[:dimension] if stored.embedding_provider[:dimension]&.positive?
+        if stored.dimension.positive?
+          opts[provider_sym == :fake ? :dimension : :expected_dimensions] = stored.dimension
+        end
+        requested = stored.embedding_provider[:requested_dimensions] || legacy_requested_dimensions(stored)
+        opts[:dimensions] = requested if requested
 
         # OpenAI needs an api_key to construct. `woods.json` deliberately
         # never stores credentials; pull from env here so the standalone
@@ -206,6 +217,19 @@ module Woods
         config
       end
       private_class_method :populate_from_stored
+
+      # Old snapshots stored only the resulting width. A reduced width for
+      # either known OpenAI v3 model can only be reproduced by requesting it.
+      # Do not infer this capability for ada, Ollama, or arbitrary model names.
+      def self.legacy_requested_dimensions(stored)
+        return if stored.embedding_provider.key?(:requested_dimensions)
+        return unless provider_symbol(stored.embedding_provider[:class]) == :openai
+
+        native = { 'text-embedding-3-small' => 1536, 'text-embedding-3-large' => 3072 }
+        width = native[stored.embedding_provider[:model]]
+        stored.dimension if width && stored.dimension.positive? && stored.dimension < width
+      end
+      private_class_method :legacy_requested_dimensions
 
       def self.restore_store_options(config, stored, artifact:, env:)
         if config.metadata_store == :sqlite
@@ -250,12 +274,7 @@ module Woods
       # @param class_name [String]
       # @return [Symbol, String] symbol for known providers, raw string otherwise
       def self.provider_symbol(class_name)
-        case class_name.to_s
-        when /Ollama/ then :ollama
-        when /OpenAI/ then :openai
-        when /Fake/ then :fake
-        else class_name.to_s
-        end
+        ResolvedConfig::BUILTIN_PROVIDERS.fetch(class_name.to_s, class_name.to_s)
       end
       private_class_method :provider_symbol
 

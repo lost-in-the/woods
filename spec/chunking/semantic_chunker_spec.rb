@@ -778,7 +778,7 @@ RSpec.describe Woods::Chunking::SemanticChunker do
 
       it 'still recognizes the following method' do
         types = chunker.chunk(unit).map(&:chunk_type)
-        expect(types).to include(:method_positive)
+        expect(types).to include(:method_positive?)
       end
     end
 
@@ -798,7 +798,7 @@ RSpec.describe Woods::Chunking::SemanticChunker do
       end
 
       it 'is not misread as endless — body and end stay in the method chunk' do
-        setter_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_timeout }
+        setter_chunk = chunker.chunk(unit).find { |c| c.chunk_type == :method_timeout= }
         expect(setter_chunk.content).to include('@timeout = Integer(value)')
       end
 

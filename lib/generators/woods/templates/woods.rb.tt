@@ -122,7 +122,8 @@ Woods.configure do |config|
 
   # config.console_mcp_enabled = false
   # config.console_mcp_http_enabled = true  # set false for stdio-only Console use
-  # config.console_mcp_path    = '/mcp/console'
+  # A custom console_mcp_path belongs in config/application.rb before Railtie
+  # initialization, not this initializer. The default is '/mcp/console'.
 
   # Console HTTP requires a strong bearer token. Its Origin/Host guard is
   # loopback-only by default; list the public MCP host and any browser client

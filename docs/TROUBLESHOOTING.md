@@ -78,12 +78,22 @@ the selected owner or installed command and restarting that owner; do not delete
 claim files or kill PIDs taken from status. No index-visible record exists before
 the first boot resolves the application's output directory.
 
+For an abandoned foreign-container claim, follow
+[ownership-verified claim recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
+The unreleased command after 2.0.0 requires the exact token and a free lifetime
+lease; old claims require the documented legacy recovery. Age is not proof of
+abandonment. `woods:clean` preserves ownership sidecars and does not reset them.
+
 Unset `WOODS_WATCH_IDLE_TIMEOUT` in managed modes. If the boot deadline is reached,
 diagnose Bundler/initializer startup before increasing `--boot-timeout`; a valid
 long extraction has a separate readiness state and is not bounded by that clock.
 If setup created a Procfile but normal `bin/dev` still only launches Rails, choose
 Puma or explicitly run the selected Foreman command. The generator never rewrites
 `bin/dev` or starts services during preview.
+
+An empty idle-timeout variable crashes older tasks even though managed validation
+accepts it. Unset it on those builds; the unreleased #591 fix consistently treats
+empty or whitespace-only values as unset.
 
 If installation reports a pending transaction, use `woods:watch --operation
 recover` through the Rails generator, initially with `--pretend`; see
@@ -472,6 +482,32 @@ the unreachable payload. A resident `woods:watch` process handles the same
 failure differently: it reports `degraded`, carries the changed paths, and
 retries after a later filesystem event.
 
+For the optional embedded `pipeline_extract` tool, a client using the Tasks
+extension sees the task become `failed` for this publication refusal on a
+revision containing #584 (unreleased after `2.0.0`). A background-start response
+alone does not mean extraction completed. The packaged Index Server does not
+register this tool.
+
+### Incremental extraction or refresh reports "Extraction failed for ..."
+
+A selected whole-app extractor raised before returning a complete result, or
+its initialization failed. On revisions containing #584 (unreleased after
+`2.0.0`), a successful sibling extractor cannot turn that failed batch into a
+successful publication. Readers retain the prior generation. Inspect the
+earlier log line naming the failed extractor, fix its cause, then retry the
+complete changed-file list or refresh selection. Preserve the published index;
+deleting it does not repair the failing extractor.
+
+### Incremental extraction reports "Restart-sensitive inputs"
+
+On revisions containing #588 (unreleased after `2.0.0`), the direct incremental
+API and optional embedded pipeline refuse schema or boot-configuration inputs.
+Apply required migrations, then run `bin/rails woods:extract` in a fresh Rails
+process. Reusing an embedded server's old Rails configuration or schema cache
+cannot establish current runtime facts. The fresh one-shot `woods:incremental`
+task selects a full run automatically for these inputs. See the
+[runtime input contract](INCREMENTAL_EXTRACTION.md#what-a-change-actually-requires-reload-restart-or-neither).
+
 ---
 
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
@@ -747,6 +783,15 @@ bundle exec rake woods:embed
 Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` rather than letting it become a runtime error: `rake woods:embed` refuses before embedding anything (comparing the provider's dimension against the width the `woods_vectors` table or Qdrant collection was created with), and the MCP server refuses at boot (comparing against the dump's WVF1 header). The message names both dimensions and the remedy, drop the vector store and re-index.
 
 **A dimension mismatch is never silently tolerated.** If you are getting poor results without seeing this error, the cause is something else.
+
+For an unsupported `dimensions` request or a wrong-width cached vector, compare
+the installed embedding and reader revisions as well as the model, endpoint,
+and explicit width configuration. The request/cache consistency fix (#586) is
+unreleased after `2.0.0`: it separates stored widths from requested reductions,
+keeps fixed-width ada requests compatible, and separates embedding cache entries
+by provider configuration. See [embedding options](CONFIGURATION_REFERENCE.md#embedding-options)
+and [cache identity](CONFIGURATION_REFERENCE.md#retrieval-cache-options). Do not
+remove a width guard to accept mismatched vectors.
 
 ---
 
@@ -1057,3 +1102,8 @@ source root/private key, a quick scan limit and an unverified boot boundary are
 different causes. Try `source_check: "deep"` for a budget limit; use the fresh
 launcher for a new verified baseline. Do not delete pending hook events or alter
 key permissions just to suppress a warning. See [source freshness](SOURCE_FRESHNESS.md).
+
+If `woods-extract` refuses an identity key, use
+[identity-key recovery](SOURCE_FRESHNESS.md#identity-key-recovery). If it reports a
+configured-output mismatch, rerun with an explicit matching `--output` or
+`WOODS_OUTPUT`; do not bypass the check or move a capture/key to another index.

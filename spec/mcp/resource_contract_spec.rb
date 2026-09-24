@@ -86,6 +86,32 @@ RSpec.describe 'Index MCP resource contract' do
     end
   end
 
+  it 'reads encoded slash-bearing unit identities through the same lookup map' do
+    units = {
+      'views/posts/show.html.erb' => %w[view_template view_templates],
+      'GET /posts/:id' => %w[route routes],
+      'spec/models/post_spec.rb' => %w[test_mapping test_mappings],
+      'gems/active_record/base.rb' => %w[gem_source rails_source]
+    }
+    units.each do |identifier, (type, directory)|
+      dir = File.join(index_dir, directory)
+      FileUtils.mkdir_p(dir)
+      data = { identifier: identifier, type: type, source_code: 'published fixture', metadata: {} }
+      filename = Woods::MCP::IndexReader.new(index_dir).send(:unit_filename, identifier)
+      File.write(File.join(dir, filename), JSON.generate(data))
+      File.write(File.join(dir, '_index.json'), JSON.generate([{ identifier: identifier }]))
+    end
+    # Publish the complete fixture before the held-open server caches its map.
+    # rubocop:disable-next Style/CombinableLoops
+    units.each do |identifier, (type, _)|
+      uri = "codebase://unit/#{URI.encode_www_form_component(identifier).gsub('+', '%20')}"
+      response = read(uri)
+      content = response.dig('result', 'contents', 0)
+      expect(content).not_to be_nil, response.inspect
+      expect(JSON.parse(content.fetch('text'))).to include('identifier' => identifier, 'type' => type)
+    end
+  end
+
   it 'returns a stable corrupt-artifact error when either static resource is missing' do
     server
     %w[manifest.json dependency_graph.json].each do |filename|

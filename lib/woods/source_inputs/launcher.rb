@@ -17,7 +17,10 @@ module Woods
 
       def self.run(argv, **options)
         new(argv, **options).run
-      rescue OptionParser::ParseError, ArgumentError, PrivateKey::Unavailable, SystemCallError => e
+      rescue PrivateKey::Unavailable => e
+        warn "woods-extract: #{e.diagnostic}"
+        1
+      rescue OptionParser::ParseError, ArgumentError, SystemCallError => e
         warn "woods-extract: #{e.message}"
         1
       end
@@ -27,12 +30,13 @@ module Woods
         @command = command
         @original_directory = Dir.pwd
         @root = @original_directory
+        @implicit_output = !ENV.key?('WOODS_OUTPUT')
         @output = ENV.fetch('WOODS_OUTPUT', 'tmp/woods')
         @extra_roots = []
         parse!
       end
 
-      def run # rubocop:disable Metrics/MethodLength -- handoff lifetime encloses the fresh child
+      def run
         return 0 if @help
 
         operation, task = task_for_arguments
@@ -40,24 +44,39 @@ module Woods
         rules = Scopes.new(extra_roots: @extra_roots)
         snapshot = Scanner.new(root: @root, output_dir: @output, key: key, scopes: rules).call
         nonce = SecureRandom.hex(32)
+        bytes = capture_bytes(snapshot, nonce, operation, rules)
         Tempfile.create(['woods-source-capture-', '.json']) do |file|
           file.binmode
           file.chmod(0o600)
-          file.write(JSON.generate(version: 1, nonce: nonce, root: @root, output: @output,
-                                   operation: operation, rules: rules.fingerprint,
-                                   launcher_pid: Process.pid, snapshot: snapshot))
+          file.write(bytes)
           file.flush
           file.fsync
-          descriptor = JSON.generate(path: file.path, nonce: nonce, extra_roots: @extra_roots)
-          environment = { Handoff::ENV_KEY => descriptor, 'WOODS_OUTPUT' => @output }
-          if ENV['BUNDLE_GEMFILE']
-            environment['BUNDLE_GEMFILE'] = File.expand_path(ENV.fetch('BUNDLE_GEMFILE'), @original_directory)
-          end
-          run_child(environment, task)
+          descriptor = JSON.generate(path: file.path, nonce: nonce, extra_roots: @extra_roots,
+                                     implicit_output: @implicit_output)
+          run_child(child_environment(descriptor), task)
         end
       end
 
       private
+
+      def capture_bytes(snapshot, nonce, operation, rules)
+        bytes = JSON.generate(version: 1, nonce: nonce, root: @root, output: @output,
+                              operation: operation, rules: rules.fingerprint,
+                              launcher_pid: Process.pid, snapshot: snapshot)
+        return bytes if bytes.bytesize <= Manifest::MAX_BYTES
+
+        raise ArgumentError, "source capture exceeds #{Manifest::MAX_BYTES} bytes; " \
+                             'narrow additional source roots or reduce scoped inputs before retrying'
+      end
+
+      def child_environment(descriptor)
+        environment = { Handoff::ENV_KEY => descriptor }
+        environment['WOODS_OUTPUT'] = @output unless @implicit_output
+        if ENV['BUNDLE_GEMFILE']
+          environment['BUNDLE_GEMFILE'] = File.expand_path(ENV.fetch('BUNDLE_GEMFILE'), @original_directory)
+        end
+        environment
+      end
 
       def parse!
         parser.permute!(@arguments)
@@ -68,7 +87,10 @@ module Woods
         OptionParser.new do |options|
           options.banner = 'Usage: woods-extract [options] full | incremental PATH... | refresh TYPE...'
           options.on('--root PATH', 'Application root (default: current directory)') { |path| @root = path }
-          options.on('--output PATH', 'Index output (default: WOODS_OUTPUT or tmp/woods)') { |path| @output = path }
+          options.on('--output PATH', 'Custom output (default: WOODS_OUTPUT or tmp/woods)') do |path|
+            @output = path
+            @implicit_output = false
+          end
           options.on('--source-root PATH', 'Additional application-relative runtime source root') do |path|
             @extra_roots << path
           end

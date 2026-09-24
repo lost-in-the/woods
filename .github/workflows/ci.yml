@@ -111,6 +111,9 @@ jobs:
       - name: Run booted-app extraction
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb
 
+      - name: Run declaration ownership against booted Rails
+        run: bundle exec rspec spec/integration/declaration_identity_spec.rb
+
       - name: Run encrypted Console credential rotation
         run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb
 
@@ -125,12 +128,17 @@ jobs:
       - name: Fresh-process source provenance
         env:
           WOODS_RUN_BOOTED_APP: '1'
-        run: bundle exec rspec spec/integration/source_input_drift_spec.rb
+        run: bundle exec rspec spec/integration/source_input_drift_spec.rb spec/integration/source_output_spec.rb
 
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
-      # Each example boots its own subprocess with the matrix appraisal.
+      # Isolate booted spec files so fixture applications cannot share state.
       - name: Run Console transport boot contracts
-        run: bin/rspec spec/console/transport_boot_spec.rb spec/console/stdio_e2e_spec.rb spec/console/collection_redaction_spec.rb
+        run: |
+          bin/rspec spec/console/transport_boot_spec.rb
+          bin/rspec spec/console/stdio_e2e_spec.rb
+          bin/rspec spec/console/collection_redaction_spec.rb
+          bin/rspec spec/console/association_count_runtime_spec.rb
+          bin/rspec spec/console/http_eager_load_failure_spec.rb
 
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full
@@ -175,6 +183,37 @@ jobs:
       # Assigned value classes boot their own Rails app and loader (#559).
       - name: Run assigned value-class ownership integration
         run: bundle exec rspec spec/integration/assigned_value_classes_spec.rb
+
+      # Optional AMS stays outside the base bundle. This fixture boots fresh
+      # processes and performs no network I/O after dependency installation.
+      - name: Install optional serializer fixture bundle
+        if: matrix.rails == '7.2'
+        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        env:
+          BUNDLE_GEMFILE: gemfiles/serializers.gemfile
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Run hybrid runtime and fresh schema task equivalence
+        if: matrix.rails == '7.2'
+        env:
+          BUNDLE_GEMFILE: gemfiles/serializers.gemfile
+        run: bundle exec rspec spec/integration/incremental_runtime_spec.rb
+
+      # Actual optional state-machine registries, kept out of the base bundle.
+      - name: Install optional state-machine fixture bundle
+        if: matrix.rails == '7.2'
+        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        env:
+          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Run literal state-machine forms against loaded registries
+        if: matrix.rails == '7.2'
+        env:
+          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
+        run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
 
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but
@@ -304,6 +343,8 @@ jobs:
           spec/feedback
           spec/session_tracer
           spec/evaluation
+          spec/release_v2/release_validator_spec.rb
+          spec/release_v2/surface_inventory_spec.rb
 
   # Drives both packaged MCP executables with the official Ruby client and the
   # pinned Inspector CLI, including a real HTTP socket. Its own job because the

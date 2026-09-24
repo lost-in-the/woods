@@ -16,7 +16,7 @@ def fail_release(message)
 end
 
 def git(*args)
-  output, status = Open3.capture2e('git', *args)
+  output, status = Open3.capture2e('git', *args, binmode: true)
   fail_release("git #{args.join(' ')} failed: #{output.strip}") unless status.success?
 
   output.strip
@@ -57,9 +57,11 @@ def trusted_release_refs(tag, remote, main_ref)
 end
 
 def release_file(path, release_sha, trusted_checkout)
-  return File.read(path) unless trusted_checkout
+  bytes = trusted_checkout ? git('show', "#{release_sha}:#{path}") : File.binread(path)
+  source = bytes.force_encoding(Encoding::UTF_8)
+  fail_release("#{path} must be valid UTF-8") unless source.valid_encoding?
 
-  git('show', "#{release_sha}:#{path}")
+  source
 end
 
 # Statically parse the exact Woods::VERSION constant, never executing

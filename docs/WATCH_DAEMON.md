@@ -116,9 +116,17 @@ supported. Do not prepend an `environment` task or an already booted Rails runne
 The generator records relative owned paths and fingerprints in `.woods-watch.json`.
 Commit it with the generated configuration so a new clone/worktree can update or
 remove that setup. Runtime transaction state stays under `tmp/woods-watch-install/`;
-keep that directory ignored. Changes to owned content or executable permissions
-cause a conflict rather than an overwrite. Review the conflict and restore or
-adapt the owned setup explicitly; do not delete the receipt to force an overwrite.
+keep that directory ignored. Changes to owned content or removal of the owner's
+executable bit cause a conflict rather than an overwrite. Review the conflict
+and restore or adapt the owned setup explicitly; do not delete the receipt to
+force an overwrite.
+
+Unreleased after `2.0.0`: ownership compares the executable bit Git records,
+so ordinary checkout permissions such as `0755` and `0775` both retain ownership.
+Older builds compare the entire mode and can refuse setup in a clone made under
+a different umask. Record the loaded revision before relying on this fix.
+Saved preview/apply snapshots still check exact permissions: a chmod after a
+preview of that file requires a fresh preview.
 
 ```bash
 # Change modes or update owned setup (include the selected mode's options).
@@ -177,6 +185,56 @@ owner parks the launcher with a diagnostic until its normal owner restarts it.
 There is no automatic ownership takeover. Managed duplicate prevention is scoped
 to one host/process namespace; do not mix raw and managed writers across different
 containers sharing an index. Use one external owner for that arrangement.
+
+**Unreleased after 2.0.0 ([#591](https://github.com/lost-in-the/woods/issues/591)):**
+empty and whitespace-only idle-timeout values behave as unset in the task,
+launcher and installer. Earlier builds accepted an empty value in managed
+validation but crashed during task startup; unset it when using those builds.
+
+### Recovering an abandoned managed claim
+
+**Unreleased after 2.0.0; verify `woods-watch --help` before using this command.**
+New managed daemons hold a lifetime filesystem lock in `watch_claim.json.lease`.
+The Rails child holds it throughout startup, extraction and shutdown, independently
+of its launcher. Its `watch_claim.json` records a fresh `token` and lease identity.
+After the original owner/container has stopped, inspect the claim at the exact
+index used by the application, then select its token explicitly:
+
+```bash
+bundle exec woods-watch --recover-claim /app/tmp/woods --claim-token TOKEN_FROM_CLAIM
+```
+
+Run this inside the environment that can access that index and its sidecars.
+Recovery does not boot Rails or start a watcher. It holds both the startup
+coordination lock and lifetime lease, checks the token and lease inode, and
+removes only the selected abandoned claim. Restart the normal Foreman/Puma/external
+owner afterward and verify startup reconciliation. Tokens select a claim; they
+are not credentials. A changed token means another owner claimed the index:
+inspect it rather than repeatedly substituting tokens.
+
+Recovery preserves the old status record. Keep the reader-only
+`WOODS_WATCH_TRUST_FOREIGN_HOST` override unset in the owner startup environment;
+otherwise its existing status precheck can honor the retired container's last
+heartbeat until the normal 15-minute freshness bound expires. Lifetime lease
+protection remains active without that override.
+
+A live local or foreign owner keeps its lease even if its claim is old. Recovery
+refuses a held lock, unknown protocol, missing/replaced lease, malformed record,
+or unavailable locking. Claim age, heartbeat age and a PID in a different container
+never prove abandonment. The filesystem must support cooperative `flock` across
+every process sharing the index; this is not a distributed lease service. Do not
+mix old/raw writers with managed ownership across containers. Never unlink,
+replace or recreate the `.lease` or `.lock` sidecars while writers may exist.
+`woods:clean` preserves these sidecars and the claim, including during forced
+cleanup; it does not reset watcher ownership.
+
+Legacy claims have no lifetime-lease proof and cannot use this command. Stop
+their original owner through its process manager. If the original namespace is
+gone and ownership cannot be verified, choose a new empty output directory,
+configure exactly one writer and its readers to use it, and run a fresh full
+extraction. Keep the old index until the replacement is verified. This recovery
+does not require deleting the unverifiable claim or guessing whether its PID is
+dead. Upgrading Woods alone does not rewrite a live or abandoned legacy claim.
 
 Daemon liveness, completed startup reconciliation, and source freshness remain
 different facts. Managed supervision records under `watch_supervisors/` expose
@@ -329,15 +387,27 @@ against a settled boot configuration. If Rails is already initialized or the
 handling. Use `bundle exec rake woods:watch` as a separate process, rather than
 `bundle exec rake environment woods:watch`.
 
-So `run` reconciles before it waits. The watermark is `generation.json`'s mtime, written last on every successful run, so it means "when this index was last
-known good", and everything modified since is uncovered, whoever changed it.
-With no generation file there is no index, every file is uncovered, and the
-storm threshold correctly turns that into one full extraction. A marker whose
-payload pointer no longer resolves counts as no index too: the marker can
-outlive the directory it names (a partial restore from a CI artifact, an
-external cleanup targeting the large directories), and readers deliberately
-degrade a dangling pointer to the index root, so trusting the mtime there would
-report "current at startup" over a directory holding nothing.
+So `run` reconciles before it waits. Supporting Git builds record source
+capture start as optional `captured_at` metadata in the generation's
+`source_inputs.json`. Startup considers files modified from that boundary,
+rounded down to include the entire second on coarse filesystems, plus recorded
+source-change error paths. Publication time is too late: a file can change
+between capture and publication, including after final source verification.
+
+A bounded content scan excludes candidates only when their recorded consumer
+identities all match the current bytes. Unchanged files in the capture second
+therefore do not repeatedly trigger extraction. Missing identity evidence keeps
+the candidate uncovered. This startup check is not a full source-freshness
+certification; use [`source_freshness`](SOURCE_FRESHNESS.md) for that evidence.
+
+An older index without this capture boundary, or one with invalid/mismatched
+metadata or a dangling payload pointer, receives a full reconciliation under
+the same reload/restart rules. A successful full publication records the new
+boundary even when no incremental units would change, so the migration does
+not repeat on every startup. With no generation at all, every file is uncovered
+and the normal storm threshold applies. On older installed versions that still
+use the marker mtime, recover by completing a full extraction against settled
+source before restarting watch.
 
 **The built-in watcher establishes detection before reconciliation runs.**
 Polling signals readiness after its baseline scan; native watching signals after
@@ -350,8 +420,8 @@ minutes on a storm-triggered full run) used to be lost twice: no watcher
 existed yet to see it, and the polling watcher takes its baseline snapshot
 inside `start`, after the save, so its first diff already excluded it. Worse,
 the save's mtime predates the generation bump catch-up publishes at the end, so
-a future restart's watermark check would read the file as already covered,
-permanently. Starting the watcher first closes that window; `enqueue`/`drain`
+older marker-based catch-up could miss it again on restart. Starting the watcher
+first closes the live-event window; `enqueue`/`drain`
 already tolerate the duplicate paths this produces against whatever catch-up
 finds on its own via the tree scan.
 

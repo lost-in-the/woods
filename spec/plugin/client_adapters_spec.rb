@@ -251,6 +251,60 @@ RSpec.describe 'explicit edit client adapters' do
     expect(JSON.parse(File.read(@record))['events']).to eq([{ 'path' => relative, 'operation' => 'add' }])
   end
 
+  %w[C C.UTF-8].each do |locale|
+    it "retains Unicode edit and legacy paths through the Ruby fallback under #{locale}" do
+      bin, bash = ruby_only_path
+      @root = File.join(@root, 'projet-雪')
+      output = 'tmp/索引'
+      @output = File.join(@root, output)
+      FileUtils.mkdir_p(@output)
+      File.write(File.join(@output, 'generation.json'), '{}')
+      File.write(File.join(@output, 'hook-pending.txt'), "app/services/ancien-é.rb\n")
+      File.open(@rake, 'a') { |file| file.puts('exit 75') }
+      relative = "app/services/with space,\n雪.rb"
+      payload = envelope([{ path: "#{@root}/#{relative}", operation: 'add' }])
+      environment = { 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => @rake, 'PATH' => bin,
+                      'WOODS_OUTPUT' => output, 'LC_ALL' => locale, 'LANG' => locale }
+
+      stdout, stderr, status = Open3.capture3(environment, bash, File.join(hooks, 'woods-refresh.sh'),
+                                              'opencode', stdin_data: JSON.generate(payload))
+
+      expect(status).to be_success
+      expect(stdout).to eq('')
+      expect(stderr).to eq('')
+      events = [{ 'path' => relative, 'operation' => 'add' },
+                { 'path' => 'app/services/ancien-é.rb', 'operation' => 'update' }]
+      batch = JSON.parse(File.read(@record))
+      expect(batch).to include('output' => output, 'version' => 1)
+      expect(batch.fetch('events')).to match_array(events)
+      queued = Dir[File.join(@output, 'hook-pending/*.json')].flat_map do |path|
+        value = JSON.parse(File.read(path))
+        value.is_a?(Array) ? value : [value]
+      end
+      expect(queued).to match_array(events)
+      expect(File.read(File.join(@output, 'hook.log'))).to include('status 75')
+      expect(File.exist?(File.join(@output, 'hook-pending.txt'))).to be(false)
+    end
+  end
+
+  it 'preserves an invalid-byte pending record and sanitizes the Ruby fallback error' do
+    bin, bash = ruby_only_path
+    pending_dir = File.join(@output, 'hook-pending')
+    FileUtils.mkdir_p(pending_dir)
+    pending = File.join(pending_dir, 'existing.json')
+    original = "{\"path\":\"PRIVATE FIXTURE \xff\"}".b
+    File.binwrite(pending, original)
+    environment = { 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => @rake, 'PATH' => bin,
+                    'LC_ALL' => 'C', 'LANG' => 'C' }
+    _, stderr, status = Open3.capture3(environment, bash, File.join(hooks, 'woods-refresh.sh'), 'opencode',
+                                       stdin_data: JSON.generate(envelope([{ path: 'app/services/new.rb',
+                                                                             operation: 'add' }])))
+    expect(status).to be_success
+    expect(stderr).to eq("[Woods hooks] Invalid UTF-8 or JSON data; refresh not confirmed.\n")
+    expect(File.binread(pending)).to eq(original)
+    expect(Dir[File.join(pending_dir, '*.json')].size).to eq(2)
+  end
+
   it 'rejects malformed registered-client events without logging their contents' do
     bad = { 'hook_event_name' => 'PostToolUse', 'tool_name' => 'Write', 'tool_input' => ['PRIVATE FIXTURE'] }
     stdout, stderr, status = Open3.capture3(RbConfig.ruby, File.join(hooks, 'adapters/normalize.rb'), 'claude',

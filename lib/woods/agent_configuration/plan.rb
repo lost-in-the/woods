@@ -3,6 +3,7 @@
 require 'base64'
 require 'json'
 require_relative 'document'
+require_relative 'layout'
 
 module Woods
   module AgentConfiguration
@@ -19,9 +20,17 @@ module Woods
       end
 
       def self.load(path)
+        validate_path!(path)
         object = allocate
         object.instance_variable_set(:@data, Document.new(path).json)
         object
+      end
+
+      def self.validate_path!(path)
+        Document.validate_path!(path)
+      rescue Conflict => e
+        raise Conflict, "#{e.message}. Use a regular plan file under a real parent directory; " \
+                        'for temporary plans, create a private directory and resolve it with File.realpath.'
       end
 
       def add(document, content, description:)
@@ -67,12 +76,13 @@ module Woods
       private
 
       def validate_format!(layout)
-        valid = data.is_a?(Hash) && data['schema_version'] == SCHEMA_VERSION && data['layout'] == layout.identity &&
+        valid = data.is_a?(Hash) && data['schema_version'] == SCHEMA_VERSION &&
                 %w[setup update remove].include?(data['operation']) && data['changes'].is_a?(Array) &&
                 data['changes'].all?(Hash)
-        return if valid
+        message = 'Plan format or selected application/client/scope differs; create a fresh preview'
+        raise Conflict, message unless valid
 
-        raise Conflict, 'Plan format or selected application/client/scope differs; create a fresh preview'
+        Layout.validate_identity!(data['layout'], layout.identity, message: message)
       end
 
       def validate_paths!(layout)

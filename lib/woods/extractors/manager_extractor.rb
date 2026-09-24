@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'declaration_ancestry'
 
 module Woods
   module Extractors
@@ -56,7 +57,9 @@ module Woods
         class_name = extract_class_name(file_path, source, 'managers')
 
         return nil unless class_name
-        return nil unless manager_file?(source)
+
+        ancestry = DeclarationAncestry.new(source: source, identifier: class_name, file_path: file_path)
+        return nil unless ancestry.manager?
 
         unit = ExtractedUnit.new(
           type: :manager,
@@ -66,7 +69,7 @@ module Woods
 
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
-        unit.metadata = extract_metadata(source, class_name)
+        unit.metadata = extract_metadata(source, class_name, ancestry)
         unit.dependencies = extract_dependencies(source, class_name)
 
         unit
@@ -76,16 +79,6 @@ module Woods
       end
 
       private
-
-      # ──────────────────────────────────────────────────────────────────────
-      # Class Discovery
-      # ──────────────────────────────────────────────────────────────────────
-
-      def manager_file?(source)
-        source.match?(/< SimpleDelegator/) ||
-          source.match?(/< DelegateClass\(/) ||
-          source.match?(/include Delegator/)
-      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Source Annotation
@@ -108,10 +101,10 @@ module Woods
       # Metadata Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_metadata(source, class_name)
+      def extract_metadata(source, class_name, ancestry)
         {
           wrapped_model: detect_wrapped_model(source, class_name),
-          delegation_type: detect_delegation_type(source),
+          delegation_type: ancestry.delegation_type,
           public_methods: extract_public_methods(source),
           class_methods: extract_class_methods(source),
           initialize_params: extract_initialize_params(source),
@@ -160,13 +153,6 @@ module Woods
       # @return [String] the camelized constant name
       def constant_name_for(name)
         name.respond_to?(:camelize) ? name.camelize : name.split('_').map(&:capitalize).join
-      end
-
-      def detect_delegation_type(source)
-        return :delegate_class if source.match?(/< DelegateClass\(/)
-        return :simple_delegator if source.match?(/< SimpleDelegator/)
-
-        :unknown
       end
 
       def extract_delegated_methods(source)

@@ -1,0 +1,1 @@
+- Block Bundler source-control publication tasks, reject nested changelog entries before preparation, include published-index checks in surface inventory, validate release text as UTF-8 under any locale, and correct transition/recovery guidance. No release transition or publication occurs as part of these fixes.
