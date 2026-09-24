@@ -2935,7 +2935,7 @@
       "lib/woods/source_references/",
       "lib/woods/extractor.rb"
     ],
-    "description": "Issue #475: Collector/resolver foundations merged in #557; #560 integrates generation-scoped source-reference caches and matching forward/reverse edges into full/incremental/refresh publication. Supporting writers require a full baseline rebuild for older indexes. Independent review, default and booted suites, held-reader source/artifact acceptance pass. Five alternating Canopy pairs measured full +5.67%, leaf +30.21% (+195 ms), concern +10.27% (+72 ms); edges 411 to 457 and target traversal 1 to 9, with unchanged leaf/concern re-extraction counts. The overhead received explicit review; keep this tracking item open for bounded large-host correctness and performance confirmation before 2.1. #552 supplies standalone modules; coverage remains conservative.",
+    "description": "Issue #475: Collector/resolver foundations merged in #557; #560 integrates generation-scoped source-reference caches and matching forward/reverse edges, and #565 supplies callable standalone modules. Supporting writers require a full baseline rebuild for older indexes. Final combined candidate with #566/#567 passed 53 source checks and 51 installed-gem checks in woods-testbed PR34. Five alternating pairs measured full +10.88% (+166 ms), leaf +21.87% (+158 ms), concern +35.89% (+250 ms); nodes 419 to 422, edges 411 to 460, target traversal 1 to 9, with unchanged incremental affected counts 3/5. All ranges are separated in this run; these are real combined functionality costs, not isolated fix costs. Keep open for bounded large-host correctness/performance confirmation before 2.1; no release or Admin handoff is part of this work.",
     "status": "in-progress"
   },
   {
@@ -2948,7 +2948,7 @@
       "lib/woods/extractor.rb",
       "lib/woods/extraction_identities.rb"
     ],
-    "description": "Issue #561: #564 shares source-ownership collision checks across full, incremental and refresh publication. Conflicting retained/fresh claims and wholesale results refuse while preserving the active generation; same-source updates, independent types, confirmed moves and complete replacements remain supported. Independent review, 9,660 default examples, 227 focused cases, booted collision/move cases on Rails 7.2 and 8.0, and all 31 CI checks passed before merge. Separate #559 producer naming defects remain open.",
+    "description": "Issue #561: #564 shares source-ownership collision checks across full, incremental and refresh publication. Conflicting retained/fresh claims and wholesale results refuse while preserving the active generation; same-source updates, independent types, confirmed moves and complete replacements remain supported. Independent review, 9,660 default examples, 227 focused cases, booted collision/move cases on Rails 7.2 and 8.0, and all 31 CI checks passed before merge. The separate #559 producer naming defects are corrected in #566; collision enforcement remains independently required.",
     "status": "resolved"
   },
   {
@@ -2962,7 +2962,46 @@
       "lib/woods/source_references/value_class.rb",
       "lib/woods/source_references/cache.rb"
     ],
-    "description": "Issue #559: Discover source-owned loaded Struct/Data child classes in PORO and library wrappers without borrowing the parent identity. Preserve top-level assignment and canonical library-module lookup compatibility, reject shadow factories as reference targets, and keep genuine collision guards. Verify full, incremental, refresh and actual watcher reload with custom inflections, unchanged callers and cache-format migration. Full baseline rebuild required; planned for 2.1. Final review and combined testbed acceptance pending.",
-    "status": "in-progress"
+    "description": "Issue #559 / PR566: Publish verified loaded Struct/Data child identities across PORO and library namespace wrappers, preserving named top-level Struct and canonical library-module lookup compatibility. Native wrappers with no Ruby source are supported; shadow factories remain excluded as reference targets. Independent review, 9,799 default examples, 46 final guard/registry checks, and six actual Rails ownership/watcher cases each on 7.2 and 8.0 pass. Combined source/artifact acceptance passes in testbed PR34. Cache format 2 requires a full upgrade baseline; real cross-source collisions still refuse atomically.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-217",
+    "title": "Publish application GraphQL schema classes with searchable configuration",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/graphql_extractor.rb",
+      "spec/fixtures/optional_graphql/boot.rb"
+    ],
+    "description": "Issue #558 / PR567: Publish each verified application GraphQL::Schema once as graphql_type with graphql_kind: schema and searchable captured configuration. Real graphql-ruby schema/query controls replace the misleading type-level complexity fixture. Full, incremental schema edit, targeted refresh and packaged MCP lookup/search pass in the combined testbed candidate. GraphQL work passes independent review, 9,795 default examples and 48 booted examples each on Rails 7.2 and 8.0.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-218",
+    "title": "Discover loaded GraphQL resolvers through runtime ancestry",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/graphql_extractor.rb",
+      "spec/extractors/graphql_discovery_spec.rb"
+    ],
+    "description": "Issue #562 / PR567: Loaded source-owned resolver subclasses qualify through verified runtime ancestry, including application superclass chains, leading qualification and whitespace variants. The gem-absent source fallback remains bounded and discovery does not autoload constants or execute resolver bodies. Working query controls plus edit/create/delete and formatting-only changes pass in real Rails and packaged testbed acceptance; independent review and full suites pass.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-219",
+    "title": "Combine runtime type inventories from all application GraphQL schemas",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/graphql_extractor.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Issue #563 / PR567: Combine all current application schemas by canonical Ruby identity, preserving shared types and schema-local duplicate names. Query-root role changes withdraw old typed payloads before replacement; incomplete introspection, partial-boot demotion and fresh cross-kind source conflicts refuse publication while retaining the previous generation. Runtime absence alone still does not prove incremental removal. Independent guard review, full/default/booted suites and combined source/artifact testbed checks pass.",
+    "status": "resolved"
   }
 ]

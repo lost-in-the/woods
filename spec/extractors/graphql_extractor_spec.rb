@@ -789,14 +789,12 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
     # read back 0 regardless of the actual schema-level limit.
     it 'detects schema-level max_complexity with the real value, not 0' do
       source = <<~RUBY
-        module Types
-          class QueryType < Types::BaseObject
-            max_complexity 250
-          end
+        class ApplicationSchema < GraphQL::Schema
+          max_complexity 250
         end
       RUBY
 
-      path = create_file('app/graphql/types/query_type.rb', source)
+      path = create_file('app/graphql/application_schema.rb', source)
 
       unit = described_class.new.extract_graphql_file(path)
 
@@ -1194,7 +1192,7 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
     # Real singleton methods rather than stubs: `verify_partial_doubles` is on,
     # and a bare Class.new implements neither `types` nor `descendants`.
     def stub_schema_with(types)
-      schema = Class.new do
+      schema = Class.new(GraphQL::Schema) do
         class << self
           attr_accessor :type_map
         end
@@ -1202,31 +1200,33 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       end
       schema.type_map = types
       stub_const('AppSchema', schema)
-      stub_const('GraphQL::Schema', Class.new { def self.descendants = @descendants || [] })
-      GraphQL::Schema.instance_variable_set(:@descendants, [schema])
+      allow(GraphQL::Schema).to receive(:descendants).and_return([schema])
+      path = create_file('app/graphql/app_schema.rb', 'class AppSchema < GraphQL::Schema; end')
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('AppSchema').and_return([path, 1])
       schema
     end
 
     it 'returns the schema type classes when the runtime is available' do
-      user_type = Class.new
+      user_type = Class.new(GraphQL::Schema::Object)
       stub_const('Types::UserType', user_type)
       stub_schema_with({ 'User' => user_type })
 
-      expect(described_class.new.discoverable_classes).to eq([user_type])
+      expect(described_class.new.discoverable_classes).to eq([AppSchema, user_type])
     end
 
     it 'rejects anonymous type classes' do
       stub_schema_with({ 'Anon' => Class.new })
 
-      expect(described_class.new.discoverable_classes).to eq([])
+      expect(described_class.new.discoverable_classes).to eq([AppSchema])
     end
 
     it 'skips graphql-ruby introspection types' do
-      user_type = Class.new
+      user_type = Class.new(GraphQL::Schema::Object)
       stub_const('Types::UserType', user_type)
       stub_schema_with({ '__Schema' => Class.new, 'User' => user_type })
 
-      expect(described_class.new.discoverable_classes).to eq([user_type])
+      expect(described_class.new.discoverable_classes).to eq([AppSchema, user_type])
     end
   end
 

@@ -288,6 +288,23 @@ Recovery through `reset_cooldowns` (B-159) is available in Woods `2.0.0.beta3`.
 Check the installed version before attempting it and follow the
 [corrupt cooldown recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#corrupt-pipeline-cooldown-state).
 
+## Missing GraphQL units
+
+Woods 2.0.0 can omit schema classes, resolvers inherited through application
+superclasses, and runtime types owned by additional schemas (#558, #562, #563).
+The fixes are **unreleased after 2.0.0, planned for 2.1**; check the writer's loaded
+revision before expecting them. A supporting writer publishes schema classes as
+`graphql_type` with `metadata.graphql_kind: "schema"`, and combines the runtime
+type inventories of every current application schema. Confirm that the application
+boots, then run full extraction and validate to establish a complete upgrade baseline.
+
+A schema introspection failure stops publication and leaves the prior generation
+active. Fix the named schema error and retry; do not treat a partial boot or an
+empty type inventory as proof that a query root was removed. Missing embeddings
+cannot explain an absent structural unit. Follow the
+[GraphQL extraction contract](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#graphqlextractor)
+for source fallback, runtime-only removal and reference-coverage limits.
+
 ## Deferred refresh hooks
 
 Expanded hook coverage and `woods:hook_refresh` (#408) are available in Woods

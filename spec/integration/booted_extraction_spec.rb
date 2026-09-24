@@ -612,6 +612,20 @@ RSpec.describe 'Optional ActionMailer extraction', :booted_app do
   end
 end
 
+RSpec.describe 'Optional GraphQL extraction', :booted_app do
+  it 'publishes all schemas and resolver families consistently through full, incremental, refresh and packaged MCP' do
+    script = File.expand_path('../fixtures/optional_graphql/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), "#{error}\n#{output}"
+    result = JSON.parse(output.lines.last)
+    expect(result.fetch('checks')).to include('three working schemas', 'schema source and metadata',
+                                              'packaged MCP typed lookup and source search',
+                                              'root promotion full/incremental equivalence',
+                                              'root demotion full/incremental equivalence',
+                                              'GraphQL refresh full equivalence')
+  end
+end
+
 RSpec.describe 'Model callbacks across Rails processes', :booted_app do
   it 'preserves framework callbacks, metadata and chunk hashes across independent boots' do
     results = Array.new(2) do

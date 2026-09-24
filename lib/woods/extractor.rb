@@ -283,7 +283,8 @@ module Woods
       components: { type: :component, method: :extract_component },
       view_components: { type: :view_component, method: :extract_component },
       action_cable_channels: { type: :action_cable_channel, method: :extract_channel },
-      # Additions only — see `reconcile_removals: false`. GraphQL is the one
+      # Additions and known-type role changes, without discovery-based removals.
+      # See `reconcile_removals: false`. GraphQL is the one
       # entry whose discovery set is not authoritative for its unit type
       # (#167).
       # `types:` because this extractor emits four unit types, not one:
@@ -2976,6 +2977,9 @@ module Woods
         known = Array(spec[:types] || spec[:type])
                 .flat_map { |type| @dependency_graph.units_of_type(type) }.to_set
 
+        if key == :graphql
+          touched.merge(reconcile_graphql_classification(extractor, discovered, excluded, affected_types))
+        end
         touched.merge(add_discovered_classes(key, spec, discovered, known, excluded, affected_types))
         next if spec[:reconcile_removals] == false
 
@@ -2983,6 +2987,31 @@ module Woods
       end
 
       touched
+    end
+
+    # A new schema can promote an unchanged object to a query root. All four
+    # GraphQL kinds share one payload filename, so withdraw the old typed owner
+    # before writing its replacement. An incomplete inventory cannot demote it.
+    def reconcile_graphql_classification(extractor, discovered, excluded, affected_types)
+      unless extractor.runtime_discovery_complete?
+        (@failed_consumers ||= Set.new).add(:graphql)
+        return Set.new
+      end
+      return Set.new unless @eager_load_complete
+
+      discovered.each_with_object(Set.new) do |klass, touched|
+        next if excluded.include?(klass.name)
+
+        previous = @dependency_graph.node_types(klass.name) & GRAPHQL_TYPES
+        expected = extractor.runtime_unit_type(klass)
+        next if previous.empty? || !expected || previous == [expected]
+
+        unit = extractor.extract_from_runtime_type(klass)
+        source_consumer_failed?(:graphql, extractor)
+        next unless unit
+
+        touched.merge(register_and_write(:graphql, [unit], affected_types))
+      end
     end
 
     # Pruned class-based identifiers the tree still governs, and that the
@@ -3479,6 +3508,7 @@ module Woods
       return Set.new if units.empty?
 
       verify_identity_claims!(units)
+      withdraw_previous_graphql_kinds(units, affected_types) if extractor_key == :graphql
       affected_types&.add(extractor_key)
       type_dir = payload_dir.join(extractor_key.to_s)
       FileUtils.mkdir_p(type_dir)
@@ -3506,6 +3536,37 @@ module Woods
         (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
         written.add(unit.identifier)
       end
+    end
+
+    # GraphQL kinds share a payload filename. Validate retained source ownership
+    # for the whole batch, then remove old kinds before any replacement write.
+    # This covers discovery, changed-file dispatch, and targeted refresh alike.
+    def withdraw_previous_graphql_kinds(units, affected_types)
+      replacements = units.flat_map do |unit|
+        current = identity_source(unit.file_path)
+        GRAPHQL_TYPES.each do |type|
+          key = [type, unit.identifier]
+          next unless @identity_claims.key?(key) && @identity_claims[key] != current
+
+          reject_identity_collision!(unit, @identity_claims[key])
+        end
+        previous = (@dependency_graph.node_types(unit.identifier) & GRAPHQL_TYPES) - [unit.type]
+        previous.map do |type|
+          prior = identity_source(@dependency_graph.node(unit.identifier, type: type)[:file_path])
+          unless Array(@authoritative_replacement_types).include?(unit.type) ||
+                 prior == current || confirmed_source_move?(prior, current)
+            reject_identity_collision!(unit, prior)
+          end
+          [unit.identifier, type]
+        end
+      end
+      if replacements.any? && !@eager_load_complete
+        (@failed_consumers ||= Set.new).add(:graphql)
+        raise Woods::ExtractionError,
+              'GraphQL classification changed during an incomplete eager load; retry after a complete application boot'
+      end
+
+      replacements.each { |identifier, type| remove_unit(identifier, affected_types, type: type) }
     end
 
     # Remove a unit from the graph and delete its JSON from the index.
