@@ -63,6 +63,10 @@ gates below deliberately fail more strictly.
 
 ### Payload artifacts
 
+Read JSON artifacts as UTF-8 regardless of the reader process's locale. Unit
+identifiers, source code, paths, and metadata can contain non-ASCII characters.
+Reject invalid UTF-8 rather than replacing bytes in published source evidence.
+
 | Artifact | Presence and meaning |
 |---|---|
 | `manifest.json` | Required for a complete structural publication. Counts by extractor directory, totals, extraction timestamp and provenance. Optional fields vary by writer/version; see [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance). |

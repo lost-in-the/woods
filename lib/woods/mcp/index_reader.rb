@@ -1263,7 +1263,13 @@ module Woods
         data = File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
           raise IOError, "non-regular unit file: #{dir}/#{filename}" unless file.stat.file?
 
-          JSON.parse(file.read)
+          # Decode the checked descriptor's bytes as UTF-8, independent of the
+          # process locale. JSON parsers may accept invalid UTF-8 verbatim, so
+          # validate before parsing instead of replacing malformed source bytes.
+          content = file.binmode.read.force_encoding(Encoding::UTF_8)
+          raise JSON::ParserError, "invalid UTF-8 in unit file: #{dir}/#{filename}" unless content.valid_encoding?
+
+          JSON.parse(content)
         end
         unless valid_published_unit?(data, dir, identifier)
           raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"

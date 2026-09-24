@@ -5,7 +5,11 @@ require 'digest'
 require 'json'
 require 'tmpdir'
 require 'fileutils'
+require 'open3'
+require 'rbconfig'
+require 'timeout'
 require 'woods/mcp/index_reader'
+require 'woods/export/typed_reader'
 
 RSpec.describe Woods::MCP::IndexReader do
   # Release finding H1: a C/US-ASCII host locale makes bare `Pathname#read`
@@ -14,21 +18,151 @@ RSpec.describe Woods::MCP::IndexReader do
   # string reads. These specs pin the fix: artifact reads must work under a
   # US-ASCII default external encoding.
   #
-  # The fixtures here are intentionally minimal flat indexes (manifest.json
-  # at the index root), which is the layout current_payload_dir falls back
-  # to and the shape spec/fixtures/woods uses.
+  # Exercise both legacy flat indexes and the published generation layout.
 
   let(:branch) { 'feature/café' }
+  let(:source) { 'class Café; def dessert; "crème brûlée"; end; end' }
+  let(:payload_name) { nil }
 
   let(:index_dir) do
     Dir.mktmpdir('woods-encoding-index').tap do |dir|
-      write_manifest(dir)
-      write_model_index(dir)
-      write_summary(dir)
+      payload = payload_name ? File.join(dir, payload_name) : dir
+      FileUtils.mkdir_p(payload)
+      write_manifest(payload)
+      write_model_index(payload)
+      write_summary(payload)
+      File.binwrite(File.join(payload, 'dependency_graph.json'), JSON.generate(nodes: {}, edges: {}, reverse: {}))
+      Woods::Generation.new(output_dir: dir).bump!(payload: payload_name) if payload_name
     end
   end
 
   let(:reader) { described_class.new(index_dir) }
+  let(:unit_path) { File.join(index_dir, payload_name.to_s, 'models', unit_filename('Café')) }
+
+  after { FileUtils.remove_entry(index_dir) }
+
+  shared_examples 'UTF-8 unit reads' do
+    [nil, 'model'].each do |type|
+      it "preserves the complete unit in #{type ? 'typed' : 'untyped'} lookup under US-ASCII" do
+        unit = in_us_ascii_locale { reader.find_unit('Café', type: type) }
+
+        expect(unit).to include('identifier' => 'Café', 'type' => 'model', 'source_code' => source)
+        expect(unit.fetch('source_code').encoding).to eq(Encoding::UTF_8)
+      end
+    end
+
+    it 'enumerates complete typed units under US-ASCII' do
+      units = in_us_ascii_locale { reader.each_unit.to_a }
+
+      expect(units).to contain_exactly(include('identifier' => 'Café', 'type' => 'model', 'source_code' => source))
+    end
+
+    it 'searches non-ASCII source under US-ASCII' do
+      result = in_us_ascii_locale { reader.search('brûlée', fields: ['source_code']) }
+
+      expect(result[:results]).to contain_exactly(identifier: 'Café', type: 'model', match_field: 'source_code')
+    end
+
+    it 'searches identifiers and source within package and path scopes under US-ASCII' do
+      in_us_ascii_locale do
+        scope = { packages: ['packs/café'], source_paths: ['app/models'] }
+        identifiers = reader.search('Café', **scope)
+        sources = reader.search('brûlée', fields: ['source_code'], **scope)
+
+        expect(identifiers[:results]).to contain_exactly(identifier: 'Café', type: 'model', match_field: 'identifier')
+        expect(sources[:results]).to contain_exactly(identifier: 'Café', type: 'model', match_field: 'source_code')
+        expect(sources[:applied_scope]).to include(eligible_units: 1, packages: ['packs/café'])
+      end
+    end
+
+    it 'provides complete UTF-8 units to typed export consumers under US-ASCII' do
+      in_us_ascii_locale do
+        export = Woods::Export::TypedReader.new(reader)
+
+        expect(export.find('Café', 'model')).to include('source_code' => source)
+        expect(export.all).to contain_exactly(include('identifier' => 'Café', 'source_code' => source))
+      end
+    end
+
+    %i[typed bulk].each do |operation|
+      it "rejects invalid UTF-8 during #{operation} reads without replacing bytes" do
+        File.binwrite(unit_path, File.binread(unit_path).sub('brûlée'.b, "\xFF".b))
+
+        in_us_ascii_locale do
+          expect { operation == :typed ? reader.find_unit('Café', type: 'model') : reader.each_unit.to_a }
+            .to raise_error(JSON::ParserError, /UTF-8/)
+        end
+      end
+    end
+  end
+
+  context 'with a legacy flat index' do
+    include_examples 'UTF-8 unit reads'
+  end
+
+  context 'with a published generation' do
+    let(:payload_name) { 'payloads/utf8' }
+
+    include_examples 'UTF-8 unit reads'
+
+    it 'rejects a unit replaced with a symlink before the checked open' do
+      path = unit_path
+      allow(File).to receive(:open).and_wrap_original do |original, candidate, *args, &block|
+        if candidate.to_s == path
+          File.rename(path, "#{path}.original")
+          File.symlink("#{path}.original", path)
+        end
+        original.call(candidate, *args, &block)
+      end
+
+      expect { in_us_ascii_locale { reader.find_unit('Café', type: 'model') } }.to raise_error(Errno::ELOOP)
+    end
+
+    it 'rejects a unit replaced with a FIFO before opening without blocking' do
+      path = unit_path
+      allow(File).to receive(:open).and_wrap_original do |original, candidate, *args, &block|
+        if candidate.to_s == path
+          File.unlink(path)
+          File.mkfifo(path)
+        end
+        original.call(candidate, *args, &block)
+      end
+
+      expect do
+        Timeout.timeout(2) { in_us_ascii_locale { reader.each_unit.to_a } }
+      end.to raise_error(IOError, /non-regular unit file/)
+    end
+
+    it 'boots lexical MCP and returns non-ASCII source through packaged stdio under a C locale' do
+      metadata = {
+        'io.modelcontextprotocol/protocolVersion' => '2026-07-28',
+        'io.modelcontextprotocol/clientInfo' => { name: 'encoding-spec', version: '1' },
+        'io.modelcontextprotocol/clientCapabilities' => {}
+      }
+      calls = [
+        ['lookup', { identifier: 'Café', type: 'model' }],
+        ['codebase_retrieve', { query: 'brûlée' }]
+      ]
+      requests = calls.each_with_index.map do |(name, arguments), i|
+        JSON.generate(jsonrpc: '2.0', id: i + 1, method: 'tools/call',
+                      params: { name: name, arguments: arguments, _meta: metadata })
+      end.join("\n")
+      env = { 'LANG' => 'C', 'LC_ALL' => 'C', 'WOODS_RETRIEVAL_MODE' => 'lexical',
+              'MCP_PROTOCOL_VERSION' => nil, 'OPENAI_API_KEY' => nil, 'WOODS_SNAPSHOTS' => nil }
+      executable = File.expand_path('../../exe/woods-mcp', __dir__)
+      stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, '-EUS-ASCII', '-rbundler/setup',
+                                              executable, index_dir, stdin_data: "#{requests}\n")
+
+      expect(status).to be_success, stderr.force_encoding(Encoding::UTF_8)
+      responses = stdout.force_encoding(Encoding::UTF_8).lines.map { |line| JSON.parse(line) }
+      expect(responses.map { |response| response.fetch('id') }).to eq([1, 2])
+      responses.each do |response|
+        result = response.fetch('result')
+        expect(result.fetch('isError')).to be(false)
+        expect(result.fetch('content').map { |item| item.fetch('text') }.join).to include('Café', 'crème brûlée')
+      end
+    end
+  end
 
   describe 'JSON artifact reads' do
     it 'parses manifest.json and _index.json under a US-ASCII default external encoding' do
@@ -107,7 +241,7 @@ RSpec.describe Woods::MCP::IndexReader do
       'git_sha' => 'abc1234',
       'git_branch' => branch
     )
-    File.write(File.join(dir, 'manifest.json'), manifest)
+    File.binwrite(File.join(dir, 'manifest.json'), manifest)
   end
 
   def write_model_index(dir)
@@ -120,17 +254,19 @@ RSpec.describe Woods::MCP::IndexReader do
                             'estimated_tokens' => 100,
                             'chunk_count' => 1
                           }])
-    File.write(File.join(models_dir, '_index.json'), index)
+    File.binwrite(File.join(models_dir, '_index.json'), index)
     unit = JSON.generate(
       'identifier' => 'Café',
       'type' => 'model',
-      'file_path' => 'app/models/café.rb'
+      'file_path' => 'app/models/café.rb',
+      'source_code' => source,
+      'metadata' => { 'package' => 'packs/café' }
     )
-    File.write(File.join(models_dir, unit_filename('Café')), unit)
+    File.binwrite(File.join(models_dir, unit_filename('Café')), unit)
   end
 
   def write_summary(dir)
-    File.write(File.join(dir, 'SUMMARY.md'), <<~SUMMARY)
+    File.binwrite(File.join(dir, 'SUMMARY.md'), <<~SUMMARY)
       # Codebase Index Summary
 
       ## Café review

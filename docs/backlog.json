@@ -3015,5 +3015,84 @@
     ],
     "description": "Issue #568: Preserve individual source consumption for successfully returned models even when an optional framework model fails; failed units and the model family remain unverified, and changed retained source still refuses. Reproduced with ActionText::EncryptedRichText and a missing optional table. Regression failed before the fix; 212 source-input/reference specs, independent review, full lint, and real Rails 7.2/8.0 flow (31 each) and namespace (19 each) checks passed. Final PR CI and combined source/artifact qualification gate the merge. Existing missing-ledger baselines need one full extraction after upgrading.",
     "status": "resolved"
+  },
+  {
+    "id": "B-221",
+    "title": "Read typed and bulk index artifacts as UTF-8 under C locale",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp/index_reader.rb"
+    ],
+    "description": "Typed lookup and bulk published-unit reads use the platform default encoding. With LANG=C and non-ASCII source, untyped lookup succeeds while typed lookup raises Encoding::InvalidByteSequenceError. Bulk consumers include lexical retrieval and scoped search. Preserve the no-follow/nonblocking regular-file checks; decode published JSON as UTF-8 consistently. Add C-locale tests for typed/untyped lookup, each_unit, scoped search and lexical startup with non-ASCII content. GitHub: #570.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-222",
+    "title": "Normalize incremental changes relative to the Rails application root",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/rake_helpers.rb",
+      "lib/tasks/woods.rake"
+    ],
+    "description": "git diff emits repository-relative paths when Rails.root is a subdirectory; task filtering drops relevant changes. CHANGED_FILES also filters before normalization, dropping ./ and contained absolute paths. Empty CI base variables select an invalid range, and the documented workflow lacks a reliable fetched base/cold-cache fallback. Normalize and contain paths before filtering; obtain application-relative Git changes including deletions and renames; ignore blank CI variables; keep unresolved nonempty ranges failing clearly. Verify a real nested-app repo and update CI recipes to fetch the base and use full extraction without a baseline. GitHub: #571.",
+    "status": "ready"
+  },
+  {
+    "id": "B-223",
+    "title": "Reconcile SQLite metadata and hydrate vector type metadata in local retrieval",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "storage",
+    "files": [
+      "lib/woods/embedding/indexer.rb",
+      "lib/woods/storage/metadata_store.rb",
+      "lib/woods/mcp/bootstrapper.rb"
+    ],
+    "description": "A real offline full embed with SQLite metadata retains a deleted unit because reconciliation requires each_entry, which SQLite does not expose. Separately, standalone bootstrap fills vector metadata before constructing the configured SQLite metadata store, so hydrated vectors lack type-filter metadata. Enumerate durable metadata identities through a supported adapter contract, including vectorless units; preserve purge guards and typed identities. Construct/use the same configured metadata store for vector backfill and retrieval. Cover full/incremental deletion and local-preset dump-to-bootstrap typed retrieval with an offline provider. GitHub: #572.",
+    "status": "ready"
+  },
+  {
+    "id": "B-224",
+    "title": "Handle undecodable source paths without crashing extraction or status",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/watch/tree_scan.rb",
+      "lib/woods/source_inputs/scanner.rb",
+      "lib/woods/source_inputs/status.rb"
+    ],
+    "description": "An invalid UTF-8 filename encountered by the source tree walker raises ArgumentError before scope filtering. This can abort extraction or turn woods_status into an internal error, including when the filename is outside indexed application source. Handle byte-invalid paths before regex/split operations, emit bounded JSON-safe diagnostic evidence, and retain an incomplete/unknown verdict. Test scanner, session and status under C and UTF-8 locales; do not claim current or silently bless an incomplete capture. GitHub: #573.",
+    "status": "ready"
+  },
+  {
+    "id": "B-225",
+    "title": "Allow proven unit ownership moves when the previous file survives",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extraction_identities.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "The incremental collision guard accepts relocation only if the old file disappeared. Moving a class out of a still-existing file therefore rejects a valid unique owner. File-derived identities can also accept or reject the same move depending on changed-file order. Collect and reconcile ownership before mutating outputs. Accept a move only when this run proves the former path no longer owns the identity and the replacement is unique. Preserve rejection of genuine simultaneous owners and incomplete discovery. Add booted full/incremental equivalence plus both path orders. Follow-up to #561/#564. GitHub: #574.",
+    "status": "ready"
+  },
+  {
+    "id": "B-226",
+    "title": "Represent reopened unmanaged library namespaces without false identity collisions",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/lib_extractor.rb",
+      "lib/woods/extractors/source_nesting.rb"
+    ],
+    "description": "Files such as lib/acme.rb and lib/acme/version.rb can both be assigned the enclosing Acme identity. The collision guard now refuses these ordinary reopened-namespace layouts. Recent Struct/Data wrapper fixes do not define how multiple source files contribute to a single unmanaged library constant. Choose an explicit compatible representation retaining every source fragment and provenance (aggregation or deliberately qualified identities). Do not suppress collisions or keep one file arbitrarily. Test unmanaged libraries, once-autoloaded libraries and multiple core-extension files across full/incremental extraction. Coordinate nonconstant identity consequences with #213. GitHub: #575.",
+    "status": "ready"
   }
 ]
