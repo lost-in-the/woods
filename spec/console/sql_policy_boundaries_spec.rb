@@ -30,7 +30,9 @@ RSpec.describe 'Console SQL policy boundaries' do
     end
     allow(connection).to receive(:execute)
     allow(connection).to receive(:select_value).and_return('')
-    allow(connection).to receive(:select_all).and_return(double(columns: ['id'], rows: [[1]]))
+    allow(connection).to receive(:select_all).and_return(
+      double(columns: ['id'], rows: [[1]], column_types: { 'id' => double(type: :integer) })
+    )
   end
 
   def request(sql, **params)
@@ -111,7 +113,8 @@ RSpec.describe 'Console SQL policy boundaries' do
    'SELECT (SELECT u FROM users u) AS visible', 'SELECT derived FROM (SELECT * FROM users) AS derived',
    'SELECT u$ FROM users AS u$', 'SELECT "ü" FROM users AS "ü"',
    'WITH x AS (SELECT users FROM users) SELECT * FROM x',
-   'SELECT array_agg(u.*) FROM users u'].each do |sql|
+   'SELECT array_agg(u.*) FROM users u', 'SELECT u FROM users* u',
+   'SELECT "u" FROM users"u"'].each do |sql|
     it "refuses composite projections without field provenance: #{sql}" do
       expect(request(sql)).to include('ok' => false, 'error_type' => 'validation')
       expect(connection).not_to have_received(:select_all)
@@ -122,6 +125,18 @@ RSpec.describe 'Console SQL policy boundaries' do
     expect(request('SELECT u.id FROM users AS u')['ok']).to be true
     expect(request('SELECT u.* FROM users AS u')['ok']).to be true
     expect(request('SELECT array_agg(u.id) FROM users AS u')['ok']).to be true
+  end
+
+  it 'refuses unrecognized PostgreSQL result types before returning their values' do
+    allow(connection).to receive(:select_all).and_return(
+      double(columns: ['opaque'], rows: [['synthetic opaque']], column_types: { 'opaque' => double(type: nil) })
+    )
+    expect(request("SELECT '0/1'::pg_lsn AS opaque")).to include('ok' => false, 'error_type' => 'validation')
+  end
+
+  it 'refuses missing PostgreSQL result metadata when a protection policy is active' do
+    allow(connection).to receive(:select_all).and_return(double(columns: ['opaque'], rows: [['synthetic opaque']]))
+    expect(request('SELECT 1 AS opaque')).to include('ok' => false, 'error_type' => 'validation')
   end
 
   it 'refuses quoted executable-comment fragments without swallowing following SQL' do

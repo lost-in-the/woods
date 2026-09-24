@@ -1084,7 +1084,7 @@ RSpec.describe 'Console MCP transport wiring applies a caller-carried redaction 
 
   it 'masks a direct unaliased protected-column select through the shared context' do
     allow(stub_connection).to receive(:select_all).and_return(
-      double('result', columns: %w[status], rows: [[10]])
+      double('result', columns: %w[status], rows: [[10]], column_types: { 'status' => double(type: :integer) })
     )
 
     response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT status FROM posts')
@@ -1096,7 +1096,8 @@ RSpec.describe 'Console MCP transport wiring applies a caller-carried redaction 
 
   it 'masks a paired EAV selection through the shared context' do
     allow(stub_connection).to receive(:select_all).and_return(
-      double('result', columns: %w[key value], rows: [%w[legacy_api_token tok_plain_secret]])
+      double('result', columns: %w[key value], rows: [%w[legacy_api_token tok_plain_secret]],
+                       column_types: { 'key' => double(type: :string), 'value' => double(type: :string) })
     )
 
     response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT key, value FROM settings')

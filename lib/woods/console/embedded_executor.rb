@@ -798,6 +798,7 @@ module Woods
         query_sql = limit ? "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{limit}" : sql
         validate_sql_policy!(query_sql) if limit
         result = active_connection.select_all(query_sql)
+        validate_sql_result_types!(result)
 
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       rescue SqlValidationError => e
@@ -810,6 +811,33 @@ module Woods
         SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(sql)
         validate_protected_sql_usage!(sql)
         gate_sql!(sql)
+      end
+
+      # PostgreSQL represents unregistered composite/opaque types (including
+      # arrays of them) with a nil type identity. Their output headers cannot
+      # tell the redactor which nested fields are protected. This final fence
+      # complements pre-execution checks without relying on alias spelling.
+      # Legitimate custom types can also refuse while redaction is active.
+      def validate_sql_result_types!(result)
+        return unless sql_dialect == :postgres
+        return if @safe_context.redacted_columns.empty? && redacted_kv_columns.empty?
+
+        return if recognized_sql_result_types?(result)
+
+        raise ValidationError,
+              'Rejected: PostgreSQL returned an unrecognized result type that cannot preserve ' \
+              'protected field identity. ' \
+              'Select ordinary scalar columns or use a structured Console tool.'
+      end
+
+      def recognized_sql_result_types?(result)
+        types = result.column_types if result.respond_to?(:column_types)
+        return false unless types
+
+        result.columns.each_with_index.all? do |column, index|
+          type = types[index] || types[column]
+          type&.type
+        end
       end
 
       # @param sql [String] Validated SQL (already passed SqlValidator)
@@ -1623,7 +1651,7 @@ module Woods
       end
 
       def composite_sql_reference?(expressions, source)
-        identifier = /(?:"#{Regexp.escape(source)}"|#{Regexp.escape(source)})/i
+        identifier = /(?:"#{Regexp.escape(source.gsub('"', '""'))}"|#{Regexp.escape(source)})/i
         token = /(?<![\w.$])#{identifier}(?![\w$]|\s*\.)/
         wildcard = /(?<![\w.$])#{identifier}\s*\.\s*\*/
         expressions.any? do |expression|
@@ -1633,11 +1661,11 @@ module Woods
 
       def sql_relation_names(factor)
         identifier = /(?:[[:alpha:]_][[:alnum:]_$]*|"(?:""|[^"])+")/
-        source = /\A\s*(?:ONLY\s*\(?\s*)?(#{identifier})(?:\s*\.\s*(#{identifier}))?/i
+        source = /\A\s*(?:ONLY\b\s*\(?\s*)?(#{identifier})(?:\s*\.\s*(#{identifier}))?/i
         match = source.match(factor)
         names = match ? [match[2] || match[1]] : []
-        rest = match ? factor[match.end(0)..] : factor
-        aliases = /(?:\A|\))\s+(?:AS\s+)?(#{identifier})/i
+        rest = match ? factor[match.end(0)..].sub(/\A\s*\*/, '') : factor
+        aliases = /(?:\A|\))\s*(?:AS\s+)?(#{identifier})/i
         names.concat(rest.scan(aliases).flatten)
 
         names.map { |name| name.delete_prefix('"').delete_suffix('"').gsub('""', '"') }

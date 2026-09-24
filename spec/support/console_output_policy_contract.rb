@@ -104,6 +104,7 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     assert_request!(server, 'console_sql', { sql: nested }, refused: true)
     ["SELECT u FROM #{TABLES[0]} u", "SELECT ARRAY[u] AS result FROM #{TABLES[0]} u",
      "SELECT array_agg(u.*) FROM #{TABLES[0]} u",
+     "SELECT u FROM #{TABLES[0]}* u", "SELECT u FROM #{TABLES[0]}\"u\"",
      "SELECT derived FROM (SELECT * FROM #{TABLES[0]}) AS derived"].each do |sql|
       unless connection.select_all(sql).to_json.include?(SECRET)
         raise 'Composite fixture did not contain protected value'
@@ -112,6 +113,17 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
       assert_request!(server, 'console_sql', { sql: sql }, refused: true)
     end
     assert_request!(server, 'console_sql', { sql: "SELECT u.id FROM #{TABLES[0]} u" })
+    verify_postgres_types!(server)
+  end
+
+  def self.verify_postgres_types!(server)
+    assert_request!(server, 'console_sql', { sql: "SELECT 1 AS id, 'ordinary' AS label" })
+    assert_request!(server, 'console_sql', { sql: "SELECT ARRAY[1,2] AS ids, ARRAY['a','b'] AS labels" })
+    assert_request!(server, 'console_sql', { sql: "SELECT '0/16B6C50'::pg_lsn AS opaque" }, refused: true)
+    # Compact valid PostgreSQL syntax intentionally misses the preliminary
+    # projection scan: actual result metadata must still prevent disclosure.
+    sql = "SELECT\"u\" FROM #{TABLES[0]}\"u\""
+    assert_request!(server, 'console_sql', { sql: sql }, refused: true)
   end
 
   def self.verify_mysql!(connection, server)
