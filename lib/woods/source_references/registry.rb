@@ -2,6 +2,7 @@
 
 require 'pathname'
 require_relative 'runtime_lookup'
+require_relative 'value_class'
 
 module Woods
   module SourceReferences
@@ -80,7 +81,7 @@ module Woods
 
         path = absolute(path)
         source = @sources[path]
-        return unless verified_declaration?(source, identifier, type)
+        return unless verified_declaration?(source, identifier, type, path)
 
         { identifier: identifier, type: type, path: path }
       end
@@ -89,15 +90,17 @@ module Woods
         path && identifier.is_a?(String) && RuntimeLookup::CONSTANT.match?(identifier)
       end
 
-      def verified_declaration?(source, identifier, type)
+      def verified_declaration?(source, identifier, type, path)
         return false unless source && source['parse_error'].nil?
 
-        source.fetch('declarations', []).any? { |decl| declaration?(decl, identifier, type) }
+        source.fetch('declarations', []).any? { |decl| declaration?(decl, identifier, type, path) }
       end
 
-      def declaration?(declaration, identifier, type)
+      def declaration?(declaration, identifier, type, path)
         return false unless declaration['owner'] == identifier
         return false if declaration.fetch('singleton_depth', 0).positive?
+
+        return ValueClass.new.call(declaration, file_path: path) == identifier if declaration['constructor']
 
         result = @lookup.call(declaration['name'], nesting: declaration.fetch('enclosing_nesting', []),
                                                    allow_private: true)

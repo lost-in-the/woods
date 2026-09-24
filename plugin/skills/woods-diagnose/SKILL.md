@@ -123,8 +123,16 @@ The incremental/refresh collision guard (#561) is unreleased after 2.0.0; verify
 the writer revision before relying on it. A refusal preserves the prior
 generation. Older writers could already have overwritten ownership: repair the
 producer/source issue and perform a successful full extraction to recover.
-Supported loaders can still encounter the separate Struct/Data wrapper bug
-(#559), so do not assume every collision requires renaming application constants.
+Woods 2.0.0 can also misidentify Struct/Data classes inside namespace wrappers
+(#559). The fix is unreleased after 2.0.0, planned for 2.1: verify the writer's
+loaded revision before expecting assigned PORO/library child identities. A full
+extraction repairs old identities and establishes reference-cache format 2;
+incremental extraction refuses the older cache. Preserve the last generation
+until the rebuild succeeds. Do not rename valid application constants or disable
+collision checks to bypass an older writer's inference. Follow the
+[assigned value-class contract](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#assigned-value-classes);
+constructor blocks and unverified dynamic assignments remain outside reference
+coverage. Updating this plugin does not upgrade the writer.
 
 ```bash
 bin/rails woods:validate

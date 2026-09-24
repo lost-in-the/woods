@@ -172,6 +172,10 @@ jobs:
       - name: Run inflected-naming integration
         run: bundle exec rspec spec/integration/inflected_naming_spec.rb
 
+      # Assigned value classes boot their own Rails app and loader (#559).
+      - name: Run assigned value-class ownership integration
+        run: bundle exec rspec spec/integration/assigned_value_classes_spec.rb
+
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but
   # cannot prove backend locking or transaction behavior.

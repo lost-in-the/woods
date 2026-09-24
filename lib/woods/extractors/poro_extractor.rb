@@ -7,6 +7,7 @@ require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
 require_relative '../source_references/collector'
 require_relative 'standalone_module_discovery'
+require_relative 'assigned_value_discovery'
 
 module Woods
   module Extractors
@@ -120,7 +121,7 @@ module Woods
       def extract_class_unit(file_path, source, ar_names, analysis)
         return nil unless class_source?(source, analysis)
 
-        class_name = infer_class_name(file_path, source)
+        class_name = infer_class_name(file_path, source, analysis)
         return nil unless class_name
         return nil if ar_names.include?(class_name)
         return nil if analysis.fetch('declarations').any? do |declaration|
@@ -188,15 +189,25 @@ module Woods
       # @param file_path [String] Absolute path to the file
       # @param source [String] Ruby source code
       # @return [String, nil] The inferred class name
-      def infer_class_name(file_path, source)
+      def infer_class_name(file_path, source, analysis = SourceReferences::Collector.new.call(source))
         # Explicit class keyword — Zeitwerk-governed naming first (G-1), then
         # enclosing modules joined by position (#174)
+        assigned = AssignedValueDiscovery.new.call(file_path, analysis: analysis,
+                                                              expected: managed_constant_path(file_path.to_s))
+        return assigned if assigned
+
         qualified = governed_class_name(file_path, source) || qualified_first_class_name(source)
         return qualified if qualified
 
-        # Struct.new / Data.define: ConstantName = Struct.new(...)
-        struct_match = source.match(/^(\w[\w:]*)\s*=\s*(?:Struct\.new|Data\.define)/)
-        return struct_match[1] if struct_match
+        # Preserve historical top-level assignment lookup identities, including
+        # named Struct aliases. Reference targets still require verified ownership.
+        assignments = analysis.fetch('declarations').select { |record| record['constructor'] }
+        unless assignments.empty?
+          legacy = assignments.find do |record|
+            record['enclosing_nesting'].empty? && record.fetch('singleton_depth', 0).zero?
+          end
+          return legacy && legacy['owner']
+        end
 
         # Fall back: derive from file path using Rails naming convention
         path_based_class_name(file_path)

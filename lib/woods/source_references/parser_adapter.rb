@@ -4,6 +4,8 @@ module Woods
   module SourceReferences
     # Optional parser-gem backend with the same ownership rules as Prism.
     class ParserAdapter
+      KINDS = { class: :declaration, module: :declaration, const: :constant, sclass: :singleton,
+                def: :method, defs: :method }.freeze
       DYNAMIC_BLOCK_METHODS = %i[class_eval module_eval instance_eval class_exec module_exec instance_exec].freeze
 
       def parse(source)
@@ -24,11 +26,10 @@ module Woods
       end
 
       def kind(node)
+        return KINDS[node.type] if KINDS.key?(node.type)
+
         case node.type
-        when :class, :module then :declaration
-        when :const then :constant
-        when :sclass then :singleton
-        when :def, :defs then :method
+        when :casgn then value_constructor(node) ? :value_class : :other
         when :block, :numblock then dynamic_scope?(node) ? :dynamic_scope : :other
         else :other
         end
@@ -54,6 +55,26 @@ module Woods
                 else node.children
                 end
         nodes.grep(::Parser::AST::Node)
+      end
+
+      def value_constructor(node)
+        call = node.children[2]
+        return unless call
+
+        call = call.children.first if %i[block numblock].include?(call.type)
+        return unless call.type == :send
+
+        receiver, method = call.children
+        name = constant_name(receiver)
+        name if { new: %w[Struct ::Struct], define: %w[Data ::Data] }.fetch(method, []).include?(name)
+      end
+
+      def assignment_name(node)
+        parent, name = node.children
+        prefix = parent ? constant_name(parent) : nil
+        return if parent && !prefix
+
+        [prefix, name.to_s].compact.join('::')
       end
 
       def declaration_name(node)

@@ -64,9 +64,15 @@ extraction. Rebuild embeddings and exports if identifiers change. A genuine
 duplicate under a supported loader still needs distinct constants or one source
 file. Woods does not provide a classic-mode naming fallback for this case.
 
-Valid Struct/Data assignments inside namespace wrappers can also produce the
-wrong identity on supported loaders ([#559](https://github.com/lost-in-the/woods/issues/559)).
-Confirm the declarations and runtime identity before changing application code.
+Woods 2.0.0 can also misidentify valid Struct/Data assignments inside namespace
+wrappers on supported loaders ([#559](https://github.com/lost-in-the/woods/issues/559)).
+**Unreleased after 2.0.0; planned for 2.1:** supporting writers verify the loaded
+assignment's identity and source ownership for PORO and library units. Check
+the exact writer revision, then follow the [assigned value-class rules](EXTRACTOR_REFERENCE.md#assigned-value-classes).
+Run a full extraction to repair old wrapper identities and rebuild reference-cache
+format 2; incremental extraction refuses the older format. Keep the previous
+generation until that rebuild succeeds. Do not rename valid application constants
+to work around an older writer's inference.
 
 **Unreleased after 2.0.0:** the collision guard also applies to incremental
 extraction and targeted refresh ([#561](https://github.com/lost-in-the/woods/issues/561)).

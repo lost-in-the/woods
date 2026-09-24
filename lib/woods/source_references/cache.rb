@@ -41,7 +41,7 @@ module Woods
       private_constant :UniqueObject
 
       FILE_NAME = 'source_references.json'
-      VERSION = 1
+      VERSION = 2
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -142,8 +142,12 @@ module Woods
         end
 
         def declaration!(record)
-          shape!(record, %w[owner name kind nesting enclosing_nesting line end_line], %w[singleton_depth])
+          shape!(record, %w[owner name kind nesting enclosing_nesting line end_line], %w[singleton_depth constructor])
           lexical_record!(record)
+          if record.key?('constructor')
+            require!(record['kind'] == 'class' && %w[Struct ::Struct Data ::Data].include?(record['constructor']),
+                     'invalid value-class constructor')
+          end
           require!(%w[class module].include?(record['kind']), 'invalid declaration kind')
           nesting!(record['enclosing_nesting'])
           line!(record['end_line'])

@@ -17,6 +17,29 @@ RSpec.describe Woods::SourceReferences::Collector do
         references(source).map { |reference| reference.fetch('name') }
       end
 
+      it 'records literal value-class assignments without attributing their dynamic block bodies' do
+        result = collector.call(<<~SOURCE)
+          module ValueSpace
+            Item = Struct.new(:value) do
+              def call
+                Hidden.call
+              end
+            end
+            ::RootValue = ::Data.define(:value)
+            AliasValue = Item
+            OtherValue = Class.new
+          end
+        SOURCE
+        assignments = result['declarations'].select { |record| record.key?('constructor') }
+        expected = [
+          ['ValueSpace::Item', 'Struct', ['ValueSpace']], ['RootValue', '::Data', ['ValueSpace']]
+        ]
+        actual = assignments.map { |record| record.values_at('owner', 'constructor', 'enclosing_nesting') }
+        expect(actual).to eq(expected)
+        expect(result['references'].map { |record| record['name'] }).not_to include('Hidden')
+        expect(result['skipped']).to include(hash_including('reason' => 'dynamic_declaration'))
+      end
+
       it 'captures qualified constructors, callback calls, arguments and method defaults' do
         source = <<~RUBY_SOURCE
           class CheckoutController < ApplicationController
