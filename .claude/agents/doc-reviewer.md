@@ -28,7 +28,7 @@ You review whether documentation is in sync with the current implementation.
 | Configuration options | `docs/CONFIGURATION_REFERENCE.md`, `CLAUDE.md` Commands |
 | Dependency graph changes | `docs/RETRIEVAL_GUIDE.md` graph traversal / ranking sections |
 | Output format changes | `docs/RETRIEVAL_GUIDE.md` context assembly / token budget sections |
-| Backlog item completed | `docs/backlog.json` — flip `status` to `resolved` (see `.claude/skills/backlog-workflow/SKILL.md`). The gem's build-phase design docs were removed for 2.0 (see `git log --follow -- docs/design/`) — `docs/backlog.json` is the only live tracker. |
+| Backlog item completed | The GitHub issue's remaining scope, PR links and validation evidence (see `.claude/skills/backlog-workflow/SKILL.md`). `docs/backlog.json` holds pending decisions only; `.Codex/backlog-archive.json` is historical. |
 
 ## What You Don't Do
 

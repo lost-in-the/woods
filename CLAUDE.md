@@ -263,7 +263,11 @@ Key references:
 
 ## Backlog Workflow
 
-See `.claude/skills/backlog-workflow/SKILL.md` for the full workflow: picking items, implementing with TDD, marking resolved, and adding new work.
+GitHub issues own active work; Projects organize those issues. `docs/backlog.json`
+contains only pending maintainer decisions from the old ledger. Completed B-ID
+records and migration links live in `.Codex/backlog-archive.json`. See
+`.claude/skills/backlog-workflow/SKILL.md` for choosing issues, implementing with
+TDD and closing with evidence. Do not recreate a parallel local task queue.
 
 ## Release Flow
 

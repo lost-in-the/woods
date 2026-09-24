@@ -13,6 +13,22 @@ Woods welcomes bug fixes, extractor coverage, storage and retrieval improvements
 
 Search existing issues and pull requests first. A minimal reproduction in a small Rails app is more useful than a large application dump; never attach secrets or production data.
 
+### Work tracking
+
+[GitHub issues](https://github.com/lost-in-the/woods/issues) own active work,
+acceptance criteria and resolution evidence. Projects organize those issues.
+Use `release-gate` for required work on the next combined candidate,
+`post-release` for deferred work, and `needs-decision` for maintainer choices.
+Recommended cleanup may share a release milestone without being a blocker.
+
+The old B-ID ledger has been reconciled: `docs/backlog.json` holds only pending
+maintainer decisions, and `.Codex/backlog-archive.json` preserves completed
+records and links to migrated issues. `tracked-on-github` is a migration state,
+not a claim that the issue is fixed. The original v2 planning snapshot lives at
+`.Codex/release-v2/backlog-archive.json`; its statuses are historical. New work
+belongs in issues rather than another local JSON queue. Preserve evidence when
+closing an issue, and distinguish fixed defects from declined proposals.
+
 ## Development setup
 
 Prerequisites are Git, Ruby 3.0 or later, and a Bundler version compatible with that Ruby. The repository tests several Ruby versions and intentionally does not pin one local version; select a supported Ruby with your normal version manager, then confirm `ruby --version` and `bundle --version`. `bin/setup` installs the bundle but does not install or select Ruby.

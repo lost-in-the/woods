@@ -1,93 +1,68 @@
 ---
 name: backlog-workflow
-description: Woods backlog workflow — picking items, implementing with TDD, marking resolved, and adding new work. Use when the user asks "what's next?", references backlog items, opens a session without a clear task, or when closing out work to record what shipped.
+description: Woods issue workflow — choosing work, implementing with TDD, recording evidence, and reconciling historical backlog IDs.
 ---
 
 # Backlog Workflow
 
-Woods tracks work in `docs/backlog.json`. Each entry carries an id, title,
-description, status, and optional effort estimate. The workflow below is
-the canonical path from "what do I pick?" to "what did I ship?"
+GitHub issues own active work and acceptance criteria. GitHub Projects organize
+those issues; they do not create a second source of implementation status.
+See [Contributing](../../../CONTRIBUTING.md#work-tracking).
 
-## 1. Pick an item
+## 1. Pick an issue
 
-1. Read `docs/backlog.json` for context. (The build-phase gap-analysis docs it
-   superseded were removed for 2.0 — see `git log --follow -- docs/COVERAGE_GAP_ANALYSIS.md`
-   and `docs/USE_CASES_AND_FEATURE_GAPS.md` if you need the history.)
-2. Prefer items that are:
-   - `status: "ready"` (not `"blocked"` or `"in-progress"`)
-   - Small enough to complete in a session (effort S or early-M)
-   - Not dependent on an unfinished item
-3. Announce the pick — quote the id and title verbatim so the user can
-   redirect before any code changes.
+1. Read the issue, recent comments and linked PRs. Check current source before
+   treating a historical report as an unfixed bug.
+2. Prefer bounded, reproducible issues without unresolved dependencies. Announce
+   the issue number and scope before implementation.
+3. Treat `release-gate` as required for the next combined candidate,
+   `post-release` as explicitly deferred, and `needs-decision` as awaiting a
+   maintainer choice. A milestone can also contain recommended cleanup: milestone
+   membership alone does not make an issue a blocker.
+4. Search open and closed issues before filing another report. Preserve the
+   distinction between a current reproduction, source inspection, an old
+   observation and a proposed feature.
 
-## 2. Implement with TDD
+## 2. Implement and validate
 
-New extractors and new features in existing extractors are **strict TDD**
-per CLAUDE.md:
+New extractors and extractor features follow strict TDD per CLAUDE.md. Bug fixes
+need a regression that fails without the fix. Keep refactors and unrelated
+follow-ups separate.
 
-1. Write a failing spec in `spec/` that describes the desired behaviour.
-2. Implement the smallest change to pass the spec.
-3. Refactor under green.
+Run focused checks, the default suite and lint as required by CONTRIBUTING.md.
+Run booted Rails, installed-artifact or live-backend checks when the behavior
+depends on them. Report exact candidate identity and validation limits; a green
+validator alone does not prove full/incremental equivalence.
 
-Bug fixes: fix first, then add a regression test that would have caught
-it. Refactors: lean on existing specs; add coverage *before* refactoring
-if gaps exist.
+## 3. Close with evidence
 
-Run the relevant spec file after every edit; run the full suite
-(`bin/rspec`) before marking the item done. Lint via `bundle exec
-rubocop -a`.
+1. Update the issue with the implemented scope, PR and test evidence. Use a
+   closing reference only when the issue's actual remaining scope is complete.
+2. Keep unresolved subitems explicit, or split independently actionable work
+   into linked issues. Do not close a mixed ticket merely because one fix merged.
+3. Update project status where available. Do not copy issue status into a local
+   JSON backlog or claim completion while the relevant checks fail.
+4. Keep confidential security findings in the private process described by
+   SECURITY.md; public issues must not disclose pending private patch details.
 
-Host-app validation: if the change affects extraction output, re-run
-against `woods-testbed` using the shared instructions in `CLAUDE.md`.
+## 4. Historical records and pending decisions
 
-## 3. Mark the item resolved
-
-1. Update `docs/backlog.json`:
-   - Flip `status` from `ready` (or `in-progress`) to `resolved`.
-2. Record validation evidence and any remaining limitations in the PR.
-
-## 4. Add new work discovered along the way
-
-When implementing reveals new bugs, gaps, or follow-ups:
-
-1. Do **not** expand scope of the current item. Keep the PR focused.
-2. Append a new backlog entry to `docs/backlog.json` with:
-   - Unique id in the existing `B-NNN` format (next zero-padded integer
-     after the current max).
-   - `status: "ready"` if actionable, `"needs-triage"` if unclear.
-   - Brief rationale that references the item you discovered it from.
-3. Mention the new id in the PR description so reviewers see the trail.
-
-## Format reference
-
-Backlog entries follow the shape already in `docs/backlog.json`:
-
-```json
-{
-  "id": "B-042",
-  "title": "Short imperative title",
-  "severity": "critical | high | medium | low",
-  "category": "code-bug | config | docs | test-gap | security",
-  "layer": "extraction | retrieval | storage | mcp | console | ...",
-  "files": ["lib/woods/..."],
-  "description": "One-paragraph rationale + acceptance criteria.",
-  "status": "ready | in-progress | resolved | needs-triage",
-  "depends_on": ["B-NNN"]
-}
-```
-
-Required fields: `id`, `title`, `severity`, `category`, `layer`,
-`files`, `description`, `status`. Optional fields used in
-`docs/backlog.json`: `depends_on` (array of other backlog ids —
-include when this item can't start until another resolves). Keep
-the field order stable when updating existing entries.
+- `docs/backlog.json` contains only unresolved maintainer decisions from the old
+  B-ID ledger. A `needs-triage` entry is not an approved implementation task.
+- `.Codex/backlog-archive.json` preserves completed B-ID records and migration
+  links. `tracked-on-github` means the linked issue owns live status; it does not
+  mean the work is fixed. Do not refresh archived prose as issues evolve.
+- `.Codex/release-v2/backlog-archive.json` preserves the old v2 planning snapshot.
+  Its old statuses are historical, not current release requirements.
+- Once a queued decision is made, open/update the appropriate issue or archive
+  the entry with the explicit reason for declining it. Preserve its B-ID and
+  decision trail; do not label declined proposals as implemented fixes.
+- New actionable work goes directly to GitHub. Do not allocate new B-IDs or
+  recreate a parallel local work queue.
 
 ## Anti-patterns
 
-- Don't silently add code that isn't tied to a backlog entry. Either
-  open an item first or bundle it into an existing in-progress item.
-- Don't mark `resolved` while specs are red or the full suite has
-  failures the change caused.
-- Don't delete a resolved item — keep it in the archive so reviewers
-  can trace history.
+- Do not leave fixed subitems presented as open defects.
+- Do not turn every speculative improvement into a release gate.
+- Do not close an intermittent failure as fixed just because retries pass.
+- Do not discard historical evidence when archiving or migrating work.
