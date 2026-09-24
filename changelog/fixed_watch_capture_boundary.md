@@ -1,0 +1,1 @@
+- Catch source edits made between extraction capture and publication when watch starts, including the interval after final verification and whole-second file timestamps. Compare candidate content with the published source identities to avoid repeating unchanged work, and reconcile older indexes without capture metadata once before using the new boundary (#585).

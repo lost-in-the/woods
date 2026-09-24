@@ -84,6 +84,18 @@ registered deleted boot inputs as full-extraction obligations. On earlier builds
 stop watch, run a successful full extraction in a fresh process, then restart
 standalone `woods:watch`. See the installed version's watch guide.
 
+### Watch misses an edit made while another extraction publishes
+
+Record the loaded revision; a matching `2.0.0` version alone does not prove the
+#585 repair is present. Supporting Git builds use the generation's optional
+source-capture boundary and recorded dirty paths, with content checks for
+unchanged candidates. Legacy or invalid boundary metadata causes one full
+startup reconciliation under the usual reload/restart rules. On older builds,
+finish a full extraction against settled source before restarting watch.
+Do not infer source freshness from a recent generation marker or remove a
+foreign watch claim. See the installed version's
+[startup catch-up guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md).
+
 ### A cleaned index directory still exists
 
 In Woods `2.0.0`, `woods:clean` retains the output directory and

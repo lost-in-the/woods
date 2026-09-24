@@ -126,10 +126,12 @@ RSpec.describe 'Managed watch daemon lifecycle' do
   it 'does not mistake a generation marker without a manifest for a usable publication' do
     FileUtils.rm_f(File.join(root, 'app/models/user.rb'))
     generation.bump!(reason: 'missing payload', payload: 'payloads/missing')
+    allow(extractor).to receive(:extract_all) { generation.bump!(reason: 'still missing manifest') }
     start_daemon
     watcher.ready!
     expect(next_event).to eq([:backend_ready, {}])
-    expect(next_event).to eq([:startup, { state: 'degraded', generation: 1, reason: 'no_index' }])
+    expect(next_event).to eq([:startup, { state: 'degraded', generation: 2, reason: 'no_index' }])
+    expect(extractor).to have_received(:extract_all).once
   end
 
   it 'does not overwrite an existing foreign owner, even with the raw force flag' do

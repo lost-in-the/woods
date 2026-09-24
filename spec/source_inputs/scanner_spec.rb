@@ -28,6 +28,18 @@ RSpec.describe Woods::SourceInputs::Scanner do
     described_class.new(root: @root, output_dir: @output, key: @key, **limits).call
   end
 
+  it 'records the capture start before walking rather than when the scan finishes' do
+    started = Time.at(1_790_000_000.75)
+    scanner = described_class.new(root: @root, output_dir: @output, key: @key)
+    allow(Time).to receive(:now).and_return(started)
+    allow(scanner).to receive(:walk).and_wrap_original do |method|
+      allow(Time).to receive(:now).and_return(started + 60)
+      method.call
+    end
+
+    expect(scanner.call.fetch('captured_at')).to eq(started.to_f)
+  end
+
   it 'captures shared input scopes without booting a Rails application' do
     write('app/services/pay.rb', 'class Pay; end')
     write('config/locales/en.yml', 'en: {}')
