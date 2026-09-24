@@ -45,18 +45,18 @@ validator alone does not prove full/incremental equivalence.
 4. Keep confidential security findings in the private process described by
    SECURITY.md; public issues must not disclose pending private patch details.
 
-## 4. Historical records and pending decisions
+## 4. Historical records and future decisions
 
-- `docs/backlog.json` contains only unresolved maintainer decisions from the old
-  B-ID ledger. A `needs-triage` entry is not an approved implementation task.
-- `.Codex/backlog-archive.json` preserves completed B-ID records and migration
-  links. `tracked-on-github` means the linked issue owns live status; it does not
-  mean the work is fixed. Do not refresh archived prose as issues evolve.
+- The old `docs/backlog.json` queue is retired. All its B-IDs are preserved in
+  `.Codex/backlog-archive.json`, including completed records, approved decisions
+  and migration links. `tracked-on-github` means the issue owns live status;
+  `not-planned` records a declined proposal. Neither means a bug was fixed.
+  Do not refresh archived prose as issues evolve.
 - `.Codex/release-v2/backlog-archive.json` preserves the old v2 planning snapshot.
   Its old statuses are historical, not current release requirements.
-- Once a queued decision is made, open/update the appropriate issue or archive
-  the entry with the explicit reason for declining it. Preserve its B-ID and
-  decision trail; do not label declined proposals as implemented fixes.
+- New decisions belong in GitHub issues with `needs-decision`. Record the
+  maintainer's choice and the reason for closure or implementation there;
+  do not label declined proposals as implemented fixes.
 - New actionable work goes directly to GitHub. Do not allocate new B-IDs or
   recreate a parallel local work queue.
 

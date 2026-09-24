@@ -71,9 +71,9 @@ and stdio or Streamable HTTP endpoints directly.
 
 Historical build-phase documents are not user guides. Source checkouts also contain the [MCP protocol decision record](https://github.com/lost-in-the/woods/blob/main/docs/design/MCP_2026_STRATEGY.md) and [generated self-analysis diagrams](https://github.com/lost-in-the/woods/tree/main/docs/self-analysis); these maintainer-only paths are not packaged with the gem.
 
-[GitHub issues](https://github.com/lost-in-the/woods/issues) track active work.
-`backlog.json` now contains only pending decisions from the old ledger;
-completed records and issue migration links are archived under `.Codex/`.
+[GitHub issues](https://github.com/lost-in-the/woods/issues) track active work
+and pending decisions. The old local backlog is retired; historical records,
+approved decisions and issue migration links are archived under `.Codex/`.
 See [work tracking](../CONTRIBUTING.md#work-tracking) for ownership and release labels.
 
 Contract records that read as maintainer reference rather than guides:

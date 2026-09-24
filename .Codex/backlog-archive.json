@@ -705,6 +705,22 @@
     "depends_on": []
   },
   {
+    "id": "B-055",
+    "slug": "durable-graph-store-extraction-writes",
+    "title": "Decide whether to retain speculative durable graph adapter work",
+    "severity": "low",
+    "category": "implementation",
+    "layer": "storage",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/storage/graph_store.rb",
+      "lib/woods/mcp/bootstrapper.rb"
+    ],
+    "description": "Maintainer approved archival on 2026-09-24. No shipped durable GraphStore exists; do not design speculative adapter write semantics. Retain the existing durable-backend refusal and extraction-write ownership contract. Reopen only with a concrete adapter proposal, whose implementation must own the corresponding extraction write path. No adapter code or current safety contract was changed by this decision.",
+    "status": "not-planned",
+    "depends_on": []
+  },
+  {
     "id": "B-056",
     "slug": "obsidian-vault-exporter",
     "title": "Obsidian vault exporter (human graph-view + agent sidecar)",
@@ -1369,6 +1385,23 @@
     "depends_on": []
   },
   {
+    "id": "B-100",
+    "slug": "type-prefixed-identifiers-design",
+    "title": "Decide whether public identifiers need a type-prefix migration",
+    "severity": "medium",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/",
+      "lib/woods/dependency_graph.rb",
+      "lib/woods/embedding/indexer.rb"
+    ],
+    "description": "Maintainer approved retiring the blanket public identifier-renaming proposal on 2026-09-24; #213 closed as not planned. Known consumer collisions now use typed identity. Reopen only for a reproduced remaining consumer collision that cannot be addressed locally without renaming public identities. This is a design disposition, not a claim of universal collision freedom; original rationale is retained in the closed issue.",
+    "status": "not-planned",
+    "depends_on": [],
+    "github_issue": "https://github.com/lost-in-the/woods/issues/213"
+  },
+  {
     "id": "B-101",
     "slug": "index-validator-wire-or-delete",
     "title": "IndexValidator: no production caller and no dimension checking despite CLAUDE.md's claim",
@@ -1706,6 +1739,21 @@
     "github_issue": "https://github.com/lost-in-the/woods/issues/618"
   },
   {
+    "id": "B-123",
+    "slug": "config-extractors-unimplemented",
+    "title": "Decide whether to deprecate unsupported extractor selection",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "extraction",
+    "files": [
+      "lib/woods.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Maintainer approved a post-release follow-up to deprecate the no-op config.extractors option on 2026-09-24, rather than implement extractor selection. The linked issue owns the compatibility cycle, warning policy and future removal boundary; full/incremental/refresh/watch coverage must remain unchanged. Filing the issue does not change runtime configuration behavior.",
+    "status": "tracked-on-github",
+    "github_issue": "https://github.com/lost-in-the/woods/issues/630"
+  },
+  {
     "id": "B-124",
     "slug": "rake-top-level-helper-methods",
     "title": "woods.rake defines ~12 bare helper methods on Object in every host app",
@@ -1966,6 +2014,19 @@
     ],
     "description": "Resolved by the credential-rotation correction (438a9f60) and WeakMap liveness follow-up (e514b84e). Each server response context owns its scanner; CredentialScannerRegistry tracks live scanners under a mutex and rebuild_credential_index refreshes all live scanners for the shared Rails application after a successful index build. spec/integration/console_credential_rotation_spec.rb covers two live servers receiving the rotated index, later-server freshness and failed refresh preservation; spec/console/credential_scanner_registry_spec.rb covers build failure, garbage collection and scan snapshot consistency. This replaces the former last-build-wins state; per-one-server rotation is not the shared-application contract.",
     "status": "resolved"
+  },
+  {
+    "id": "B-144",
+    "title": "Decide whether to retire unsupported eval confirmation scaffolding",
+    "severity": "low",
+    "category": "design-gap",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/confirmation.rb"
+    ],
+    "description": "Maintainer approved a post-release cleanup to remove unsupported eval/confirmation scaffolding after auditing callers on 2026-09-24. The linked issue requires preserving shared safeguards, checking direct Ruby compatibility and coordinating private integration. console_eval remains unregistered; no code removal or tool-surface change occurred in this tracking cleanup.",
+    "status": "tracked-on-github",
+    "github_issue": "https://github.com/lost-in-the/woods/issues/631"
   },
   {
     "id": "B-145",

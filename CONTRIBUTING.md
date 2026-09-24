@@ -21,10 +21,10 @@ Use `release-gate` for required work on the next combined candidate,
 `post-release` for deferred work, and `needs-decision` for maintainer choices.
 Recommended cleanup may share a release milestone without being a blocker.
 
-The old B-ID ledger has been reconciled: `docs/backlog.json` holds only pending
-maintainer decisions, and `.Codex/backlog-archive.json` preserves completed
-records and links to migrated issues. `tracked-on-github` is a migration state,
-not a claim that the issue is fixed. The original v2 planning snapshot lives at
+The old `docs/backlog.json` queue is retired. `.Codex/backlog-archive.json`
+preserves every B-ID, completed record, approved decision and issue migration
+link. `tracked-on-github` is a migration state, and `not-planned` records a
+declined proposal; neither claims a bug was fixed. The original v2 snapshot lives at
 `.Codex/release-v2/backlog-archive.json`; its statuses are historical. New work
 belongs in issues rather than another local JSON queue. Preserve evidence when
 closing an issue, and distinguish fixed defects from declined proposals.
