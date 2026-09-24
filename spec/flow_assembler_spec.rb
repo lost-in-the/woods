@@ -40,6 +40,16 @@ RSpec.describe Woods::FlowAssembler do
   end
 
   describe '#assemble' do
+    it 'reads a literal index root containing glob metacharacters' do
+      nested = File.join(extracted_dir, 'literal[abc]*')
+      FileUtils.mkdir_p(nested)
+      write_unit('PostsController', source_code: 'class PostsController; def index; render :index; end; end')
+      FileUtils.mv(File.join(extracted_dir, 'controllers'), nested)
+      stub_graph_defaults
+      flow = described_class.new(graph: graph, extracted_dir: nested).assemble('PostsController#index')
+      expect(flow.steps).not_to be_empty
+    end
+
     it 'produces a FlowDocument' do
       write_unit('PostsController', source_code: <<~RUBY)
         class PostsController < ApplicationController

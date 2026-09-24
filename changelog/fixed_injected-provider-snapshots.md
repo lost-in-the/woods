@@ -1,0 +1,1 @@
+- Preserve effective settings of injected built-in embedding providers through snapshot restoration and known wrappers; omit unsafe endpoint metadata and require explicit host configuration when a provider cannot be reconstructed safely.

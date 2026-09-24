@@ -164,6 +164,13 @@ module Woods
       # @param artifact [Woods::IndexArtifact]
       # @return [Woods::Configuration]
       def self.populate_from_stored(config, stored, artifact:, env: ENV)
+        if stored.requires_host_provider?
+          raise ConfigMismatch,
+                'This embedding snapshot requires an explicit host provider configuration. ' \
+                'Configure the original provider in the host initializer, or use lexical retrieval; ' \
+                'Woods cannot safely reconstruct these settings from woods.json.'
+        end
+
         config.output_dir = artifact.output_dir.to_s
         config.vector_store = stored.stores[:vector_store] || :in_memory
         config.metadata_store = stored.stores[:metadata_store] || :in_memory
@@ -267,12 +274,7 @@ module Woods
       # @param class_name [String]
       # @return [Symbol, String] symbol for known providers, raw string otherwise
       def self.provider_symbol(class_name)
-        case class_name.to_s
-        when /Ollama/ then :ollama
-        when /OpenAI/ then :openai
-        when /Fake/ then :fake
-        else class_name.to_s
-        end
+        ResolvedConfig::BUILTIN_PROVIDERS.fetch(class_name.to_s, class_name.to_s)
       end
       private_class_method :provider_symbol
 

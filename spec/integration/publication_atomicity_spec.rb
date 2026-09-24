@@ -141,9 +141,9 @@ RSpec.describe 'Publication atomicity', type: :integration do
       expect(reader.find_unit('Post')['source_code']).to eq('pre-generation body')
     end
 
-    # A pointer whose directory is gone (pruned by retention, or a torn write)
-    # must degrade to the root, never fail the read or read outside the index.
-    it 'falls back to the root when the payload pointer names a missing directory' do
+    # Once a marker names a payload, a leftover root manifest cannot prove
+    # the contents of that publication. Keep valid flat layouts above working.
+    it 'refuses a missing published payload even when an older flat index remains' do
       write_payload(dir, total_units: 4, post_body: 'root body')
       Woods::AtomicFile.write(
         File.join(dir, Woods::Generation::FILENAME),
@@ -153,11 +153,11 @@ RSpec.describe 'Publication atomicity', type: :integration do
 
       reader = Woods::MCP::IndexReader.new(dir)
 
-      expect(reader.manifest['total_units']).to eq(4)
-      expect(reader.find_unit('Post')['source_code']).to eq('root body')
+      expect { reader.manifest }.to raise_error(Woods::Generation::InvalidMarker)
+      expect { reader.find_unit('Post') }.to raise_error(Woods::Generation::InvalidMarker)
     end
 
-    it 'refuses a pointer that would escape the index root, reading the root instead' do
+    it 'refuses an escaping pointer without substituting the older root index' do
       write_payload(dir, total_units: 5, post_body: 'root body')
       Woods::AtomicFile.write(
         File.join(dir, Woods::Generation::FILENAME),
@@ -167,7 +167,7 @@ RSpec.describe 'Publication atomicity', type: :integration do
 
       reader = Woods::MCP::IndexReader.new(dir)
 
-      expect(reader.manifest['total_units']).to eq(5)
+      expect { reader.manifest }.to raise_error(Woods::Generation::InvalidMarker)
     end
   end
 
@@ -242,17 +242,22 @@ RSpec.describe 'Publication atomicity', type: :integration do
       expect(reader.manifest['total_units']).to eq(2)
     end
 
-    it 'keeps the loaded payload pinned while the generation marker is temporarily corrupt' do
+    it 'finishes an already pinned read but refuses a new pin until the corrupt marker is repaired' do
       publish('gen-1', number: 1, total_units: 1, post_body: 'v1')
       reader = Woods::MCP::IndexReader.new(dir)
-      reader.manifest
-      File.write(File.join(dir, Woods::Generation::FILENAME), 'not json')
-
+      marker_path = File.join(dir, Woods::Generation::FILENAME)
+      original = File.binread(marker_path)
       result = Timeout.timeout(1) do
-        reader.with_pinned_generation { reader.find_unit('Post')['source_code'] }
+        reader.with_pinned_generation do
+          reader.manifest
+          File.write(marker_path, 'not json')
+          reader.find_unit('Post')['source_code']
+        end
       end
-
       expect(result).to eq('v1')
+      expect { reader.with_pinned_generation { reader.manifest } }.to raise_error(Woods::Generation::InvalidMarker)
+      File.binwrite(marker_path, original)
+      expect(reader.with_pinned_generation { reader.find_unit('Post')['source_code'] }).to eq('v1')
     end
 
     it 'keeps a generation readable while another process has it pinned' do

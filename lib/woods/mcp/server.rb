@@ -601,6 +601,8 @@ module Woods
             respond.call(renderer.render(:search, payload))
           rescue Retrieval::Scope::InvalidScopeError => e
             respond_err.call(e.message, code: :unsupported_argument, tool: 'search', argument: 'scope')
+          rescue ArgumentError => e
+            respond_err.call(e.message, code: :invalid_params, tool: 'search', argument: 'types')
           rescue IOError, SystemCallError, JSON::ParserError, EncodingError
             respond_err.call(
               'Search completeness: unknown (unreadable_or_corrupt_source). ' \
@@ -1169,6 +1171,10 @@ module Woods
             }
           ) do |entry_point:, server_context:, depth: nil|
             max_depth = coerce_int.call(depth) || 3
+            unless reader.find_unit(entry_point.split('#', 2).first)
+              next respond_err.call('Flow entry unit not found; use search and lookup to select an indexed unit.',
+                                    code: :not_found, tool: 'trace_flow', entry_point: entry_point)
+            end
 
             # Prefer the precomputed flow JSON written by FlowPrecomputer during
             # extraction (gated on `config.precompute_flows`) — it avoids
@@ -1894,7 +1900,7 @@ module Woods
 
         def define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing)
           define_list_snapshots_tool(server, snapshot_store, respond, snap_missing)
-          define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing)
+          define_snapshot_diff_tool(server, snapshot_store, respond, respond_err, snap_missing)
           define_unit_history_tool(server, snapshot_store, respond, snap_missing)
           define_snapshot_detail_tool(server, snapshot_store, respond, respond_err, snap_missing)
         end
@@ -1919,7 +1925,7 @@ module Woods
           end
         end
 
-        def define_snapshot_diff_tool(server, snapshot_store, respond, snap_missing)
+        def define_snapshot_diff_tool(server, snapshot_store, respond, respond_err, snap_missing)
           server.define_tool(
             name: 'snapshot_diff',
             description: 'Compare two extraction snapshots by git SHA. Returns lists of added, modified, and deleted units.',
@@ -1932,6 +1938,15 @@ module Woods
             }
           ) do |sha_a:, sha_b:, server_context:|
             next snap_missing.call('snapshot_diff') unless snapshot_store
+
+            unless [sha_a, sha_b].all? { |sha| sha.match?(/\A[0-9a-f]+\z/i) }
+              next respond_err.call('Snapshot SHAs must be hexadecimal identifiers from list_snapshots.',
+                                    code: :invalid_params, tool: 'snapshot_diff')
+            end
+            unless snapshot_store.find(sha_a) && snapshot_store.find(sha_b)
+              next respond_err.call('One or both snapshots were not found; use list_snapshots for available SHAs.',
+                                    code: :not_found, tool: 'snapshot_diff')
+            end
 
             result = snapshot_store.diff(sha_a, sha_b)
             respond.call(JSON.pretty_generate({
@@ -2498,8 +2513,9 @@ module Woods
 
           target = URI::DEFAULT_PARSER.unescape(raw_target).force_encoding(Encoding::UTF_8)
           return unless target.valid_encoding?
-          return if target.match?(%r{[%\\/\x00-\x1f\x7f]})
-          return if %w[. ..].include?(target)
+          return if target.match?(/[%\\\x00-\x1f\x7f]/) || target.start_with?('/')
+          return if target.split('/').any? { |part| %w[. ..].include?(part) }
+          return if parsed.host == 'type' && target.include?('/')
 
           [parsed.host.to_sym, target]
         rescue URI::InvalidURIError

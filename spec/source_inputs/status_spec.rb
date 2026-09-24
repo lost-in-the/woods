@@ -26,6 +26,74 @@ RSpec.describe Woods::SourceInputs::Status do
     described_class.new(output_dir: @output, payload_dir: @payload, generation: 1, **options).call
   end
 
+  def publish_source
+    FileUtils.mkdir_p(File.join(@root, 'app/services'))
+    File.write(File.join(@root, 'app/services/probe.rb'), 'original')
+    capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+    scopes = capture.fetch('scope_paths').transform_values do |paths|
+      paths.to_h { |path| [path, capture.fetch('files').fetch(path)] }
+    end
+    manifest = Woods::SourceInputs::Manifest.build(snapshot: capture, scopes: scopes, boot_verified: true,
+                                                   generation: 1)
+    File.write(@manifest_path, JSON.generate(manifest.data))
+    File.write(File.join(@output, 'generation.json'), JSON.generate(number: 1, payload: 'payloads/00000001'))
+  end
+
+  it 'binds task transport to the invoking checkout and makes recorded-root reads explicit' do
+    publish_source
+    Dir.mktmpdir('woods-copied-source') do |copy|
+      FileUtils.cp_r(File.join(@root, '.'), copy)
+      File.write(File.join(copy, 'app/services/probe.rb'), 'edited copy')
+      copied_output = File.join(copy, 'index')
+      encoded = Base64.strict_encode64(JSON.generate(output: copied_output, mode: 'deep'))
+      result = Dir.chdir(copy) { described_class.from_transport(encoded) }
+      expect(result).to include('state' => 'drifted', 'recorded_root' => @root,
+                                'checked_root' => copy, 'root_source' => 'working_directory')
+      expect(described_class.new(output_dir: copied_output).call)
+        .to include('state' => 'current', 'recorded_root' => @root, 'checked_root' => @root,
+                    'root_source' => 'recorded')
+    end
+  end
+
+  it 'preserves explicit root mapping for container indexes and never assumes a monorepo cwd is the app' do
+    publish_source
+    Dir.mktmpdir('woods-source-monorepo') do |workspace|
+      encoded = Base64.strict_encode64(JSON.generate(output: @output))
+      result = Dir.chdir(workspace) { described_class.from_transport(encoded) }
+      expect(result).to include('state' => 'drifted', 'checked_root' => workspace)
+      mapped = Base64.strict_encode64(JSON.generate(output: @output, root: @root))
+      expect(Dir.chdir(workspace) { described_class.from_transport(mapped) })
+        .to include('state' => 'current', 'checked_root' => @root, 'root_source' => 'explicit')
+    end
+  end
+
+  it 'distinguishes quick reader budgets from capture and boot uncertainty in its advice' do
+    publish_source
+    scanner = instance_double(Woods::SourceInputs::Scanner)
+    capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+    allow(Woods::SourceInputs::Scanner).to receive(:new).and_return(scanner)
+    allow(scanner).to receive(:call).and_return(capture.merge('complete' => false,
+                                                              'errors' => [{ 'reason' => 'scan_time_budget' }]))
+    expect(status['recommendations']).to eq(['deep_check'])
+    allow(scanner).to receive(:call).and_return(capture.merge('complete' => false, 'errors' => [
+                                                                { 'reason' => 'scan_time_budget' },
+                                                                { 'reason' => 'source_file_unreadable' }
+                                                              ]))
+    expect(status['recommendations']).to contain_exactly('deep_check', 'inspect_source_scan')
+    expect(status(mode: 'deep')['recommendations']).to eq(['inspect_source_scan'])
+    allow(scanner).to receive(:call).and_return(capture.merge('complete' => false,
+                                                              'errors' => [{ 'reason' => 'scan_time_budget' }]))
+    manifest = JSON.parse(File.read(@manifest_path)).merge('boot_verified' => false)
+    File.write(@manifest_path, JSON.generate(manifest))
+    expect(status['recommendations']).to contain_exactly('deep_check', 'fresh_capture')
+    allow(scanner).to receive(:call).and_return(capture)
+    expect(status['recommendations']).to eq(['fresh_capture'])
+    manifest['boot_verified'] = true
+    manifest['errors'] = [{ 'reason' => 'scan_time_budget' }]
+    File.write(@manifest_path, JSON.generate(manifest))
+    expect(status['recommendations']).to eq(['fresh_capture'])
+  end
+
   it 'uses the supplied served payload and generation, even when the latest marker differs' do
     File.write(File.join(@output, 'generation.json'),
                JSON.generate(number: 2, token: 'new', payload: 'payloads/00000002'))

@@ -213,6 +213,39 @@ Anything responding to `#embed` and `#embed_batch` can be assigned directly, it 
 config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
 ```
 
+Unreleased after `2.0.0`: snapshots capture the effective settings of injected
+Ollama, OpenAI, and Fake instances, including through Woods' retry and embedding
+cache wrappers. An injected instance takes precedence over unused
+`embedding_options`. Ollama retains its model, host, context size, read timeout,
+and vector settings; OpenAI and Fake retain their model and vector settings.
+Capturing constructor settings makes no requests. When a live `provider:` is
+passed to `ResolvedConfig.from_configuration`, its existing dimension-discovery
+behavior remains available. The explicit request width remains separate from
+the observed width.
+
+API keys are never stored; standalone OpenAI restoration still requires
+`OPENAI_API_KEY`. Only plain HTTP(S) origins can be persisted as Ollama hosts
+(an optional trailing `/` is allowed). URLs containing user information, a path
+prefix, query, or fragment are omitted and marked `requires_host_provider`.
+Those components may be legitimate routing settings, but can also carry
+credentials; Woods refuses to reconstruct a different endpoint by dropping them.
+The same restriction applies when reading older snapshot endpoints.
+
+**Reader compatibility:** snapshots marked `requires_host_provider` need a
+supporting reader. Older schema-1 readers cannot enforce that marker and may
+silently select defaults; do not use them for implicit restoration of these
+snapshots. Ordinary built-in snapshots with non-secret settings remain
+schema-1 compatible.
+
+Custom providers and custom wrappers are also marked `requires_host_provider`;
+Woods does not serialize arbitrary client state or infer a built-in from a custom
+class name. Embedding in the configured host continues to work. To serve such a
+snapshot semantically, provide an explicitly configured compatible provider in
+the reader's host initializer. Implicit standalone restoration reports a
+configuration error instead of choosing defaults. Explicit lexical retrieval
+does not restore or call an embedding provider. Record the loaded revision
+before relying on these snapshot improvements.
+
 ## Storage options
 
 | Option | Type | Default | Description |

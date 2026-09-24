@@ -116,9 +116,17 @@ supported. Do not prepend an `environment` task or an already booted Rails runne
 The generator records relative owned paths and fingerprints in `.woods-watch.json`.
 Commit it with the generated configuration so a new clone/worktree can update or
 remove that setup. Runtime transaction state stays under `tmp/woods-watch-install/`;
-keep that directory ignored. Changes to owned content or executable permissions
-cause a conflict rather than an overwrite. Review the conflict and restore or
-adapt the owned setup explicitly; do not delete the receipt to force an overwrite.
+keep that directory ignored. Changes to owned content or removal of the owner's
+executable bit cause a conflict rather than an overwrite. Review the conflict
+and restore or adapt the owned setup explicitly; do not delete the receipt to
+force an overwrite.
+
+Unreleased after `2.0.0`: ownership compares the executable bit Git records,
+so ordinary checkout permissions such as `0755` and `0775` both retain ownership.
+Older builds compare the entire mode and can refuse setup in a clone made under
+a different umask. Record the loaded revision before relying on this fix.
+Saved preview/apply snapshots still check exact permissions: a chmod after a
+preview of that file requires a fresh preview.
 
 ```bash
 # Change modes or update owned setup (include the selected mode's options).

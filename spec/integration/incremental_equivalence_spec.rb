@@ -59,7 +59,8 @@ ARTIFACT_TEMPLATES = [
   ->(i) { "lib/gen/lb_#{i}.rb" },
   ->(i) { "lib/tasks/rk_#{i}.rake" },                 # multi-unit file
   ->(i) { "config/locales/loc_#{i}.yml" },
-  ->(i) { "config/initializers/ini_#{i}.rb" },        # also a middleware trigger
+  # Initializers require a new Rails boot and full extraction. Their task
+  # equivalence is covered in incremental_runtime_spec, not this live process.
   ->(i) { "app/views/gen/erb_#{i}.html.erb" },
   ->(i) { "spec/models/spc_#{i}_spec.rb" },
   ->(i) { "spec/factories/fac_#{i}.rb" },             # whole-app: factories
@@ -1900,7 +1901,6 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     when /\.erb\z/ then "<div><%= Rails.cache.fetch('#{base}_#{nonce}') { 1 } %></div>\n"
     when %r{\Adb/migrate/} then migration_source(base, nonce)
     when %r{\Aspec/factories/} then factory_source(base, nonce)
-    when %r{\Aconfig/initializers/} then "# initializer #{nonce}\nRails.application.config.x.#{base} = #{nonce}\n"
     when %r{\Aapp/graphql/} then graphql_source(relative, base, nonce)
     when %r{concerns/} then "module #{camelize(base)}\n  extend ActiveSupport::Concern\n  # #{nonce}\nend\n"
     when /_spec\.rb\z/ then "RSpec.describe Post do\n  it 'x#{nonce}' do\n    expect(Post).to be_a(Class)\n  end\nend\n"

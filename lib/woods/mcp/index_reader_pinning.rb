@@ -64,6 +64,15 @@ module Woods
           return super unless reader && tool_names&.include?(request[:name])
 
           reader.with_pinned_generation { super }
+        rescue Woods::Generation::InvalidMarker
+          message = 'Published generation marker is unavailable or malformed; run woods:validate and restore or rebuild the index.'
+          meta = { error_code: :corrupt_artifact, tool: request[:name] }
+          meta[:completeness] = SearchResults.unavailable if request[:name] == 'search'
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: message }], error: true,
+                                               structured_content: { text: message },
+                                               meta: meta
+          ).to_h
         end
 
         def read_resource_contents(request, **kwargs)
@@ -71,6 +80,13 @@ module Woods
           return super unless reader
 
           reader.with_pinned_generation { super }
+        rescue Woods::Generation::InvalidMarker => e
+          raise ::MCP::Server::RequestHandlerError.new(
+            'Published generation marker is unavailable or malformed.', request,
+            error_type: :internal_error, original_error: e,
+            error_code: ::JsonRpcHandler::ErrorCode::INTERNAL_ERROR,
+            error_data: { uri: request[:uri], error_code: 'corrupt_artifact' }
+          )
         end
       end
     end

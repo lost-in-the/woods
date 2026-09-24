@@ -58,6 +58,7 @@ namespace :woods do
   desc 'Incremental extraction based on git changes'
   task incremental: :environment do
     require 'woods/extractor'
+    require 'woods/input_rules'
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
@@ -71,8 +72,9 @@ namespace :woods do
     # PathDispatcher alongside the dispatch itself — a second hand-maintained
     # pattern list here would drift, and a path this filter drops never
     # reaches the index however good the dispatch behind it is (#164).
-    dispatcher = Woods::PathDispatcher.new
-    changed_files = changed_files.reject(&:empty?).select { |f| dispatcher.relevant?(f) }
+    input_rules = Woods::InputRules.new
+    changed_files = changed_files.reject(&:empty?).reject { |path| input_rules.action(path) == :ignore }
+    full = changed_files.any? { |path| input_rules.action(path) == :full }
 
     if changed_files.empty?
       puts 'No relevant files changed. Skipping extraction.'
@@ -91,13 +93,17 @@ namespace :woods do
       puts 'Warning: a watch daemon is alive but degraded — extracting anyway rather than assuming coverage.'
     end
 
-    puts "Incremental extraction for #{changed_files.size} changed files..."
+    puts "#{full ? 'Full' : 'Incremental'} extraction for #{changed_files.size} changed files..."
     changed_files.each { |f| puts "  - #{f}" }
     puts
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
     affected = Woods::RakeHelpers.woods_with_extraction_lock(output_dir) do
-      extracted = extractor.extract_changed(changed_files)
+      extracted = if full
+                    extractor.extract_all.values.flatten(1).map(&:identifier).uniq
+                  else
+                    extractor.extract_changed(changed_files)
+                  end
       extractor.raise_on_publication_failure!
       extracted
     end

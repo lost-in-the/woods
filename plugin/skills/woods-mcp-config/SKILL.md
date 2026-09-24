@@ -5,6 +5,14 @@ description: Configure Woods MCP connections with the exact client JSON shapes a
 
 # Woods MCP configuration
 
+For builds containing #590 (unreleased after `2.0.0`), managed preflight retains
+intended bundle settings, project receipts omit the unused user config directory,
+and watcher ownership tolerates Git checkout umasks. Check the installed revision
+before relying on this. Keep the supporting executable for update/removal before
+a permanent downgrade; never delete a receipt to bypass a conflict. Use a private
+real directory for plan files when the system temporary path is a symlink. Follow
+the [portability guidance](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
+
 ## Managed configuration availability
 
 `woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the

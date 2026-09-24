@@ -22,7 +22,7 @@ RSpec.describe 'whole-extractor failure reporting' do
         case mode
         when :full, :concurrent then extractor.extract_all
         when :incremental then extractor.extract_changed(changed_paths)
-        when :refresh then extractor.refresh(:middleware, :scheduled_jobs)
+        when :refresh then extractor.refresh(:routes, :scheduled_jobs)
         end
       end
 
@@ -38,7 +38,7 @@ RSpec.describe 'whole-extractor failure reporting' do
           end
 
           expect { run_mode(mode) }.to raise_error(StandardError, /schedule|scheduled_jobs/)
-          expect(middleware_consumer).to have_received(:extract_all).at_least(:twice)
+          expect(route_consumer).to have_received(:extract_all).at_least(:twice)
           expect_previous_publication
 
           if failure == :extraction

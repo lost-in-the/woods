@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'reference_patterns'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative '../source_references/runtime_lookup'
 
 module Woods
   module Extractors
@@ -82,7 +83,10 @@ module Woods
       def discoverable_classes
         return [] unless defined?(ApplicationJob)
 
-        ApplicationJob.descendants.reject { |job_class| job_class.name.nil? }
+        lookup = SourceReferences::RuntimeLookup.new
+        ApplicationJob.descendants.select do |klass|
+          klass.name && lookup.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
+        end
       end
 
       # Extract a job from its file

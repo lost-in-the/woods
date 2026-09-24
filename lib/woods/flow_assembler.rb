@@ -390,7 +390,10 @@ module Woods
       ]
 
       filenames.each do |filename|
-        Dir[File.join(@extracted_dir, '*', filename)].each do |path|
+        Dir.children(@extracted_dir).sort.each do |directory|
+          path = File.join(@extracted_dir, directory, filename)
+          next unless File.file?(path)
+
           # Force UTF-8: the extractor writes the routes-comment header in
           # source_code using Unicode box-drawing characters; reading under
           # the platform default (US-ASCII on some CIs) raises

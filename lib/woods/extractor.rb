@@ -232,7 +232,12 @@ module Woods
     # class-based entry point to re-extract them through. Re-extracting one
     # of these by file is faithful only when the file names the unit; see
     # {#re_extracted_units}.
-    CLASS_DISCOVERED_FALLBACK = { job: :extract_job_class }.freeze
+    CLASS_DISCOVERED_FALLBACK = { job: :extract_job_class, serializer: :extract_serializer_class }.freeze
+
+    # These families combine file discovery with runtime descendants. Only
+    # their union can authorize removals; a per-file pass cannot see nested
+    # classes, while a descendant-only pass cannot see source-only units.
+    HYBRID_DISCOVERY_EXTRACTORS = %i[jobs serializers].freeze
 
     # Unit types each extractor owns — the inverse of {TYPE_TO_EXTRACTOR_KEY}.
     #
@@ -502,6 +507,8 @@ module Woods
       if Woods.configuration.precompute_flows
         Rails.logger.info '[Woods] Precomputing request flows...'
         profile_phase('flows') { precompute_flows }
+      else
+        withdraw_disabled_flows
       end
 
       profile_phase('graph write') do
@@ -551,11 +558,19 @@ module Woods
     #
     # @param changed_files [Array<String>] List of changed file paths
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
+    # @raise [Woods::ExtractionError] when boot-captured inputs require a fresh
+    #   Rails process and full extraction instead of reusing this runtime
     def extract_changed(changed_files)
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
-      prepare_incremental_run(operation: 'incremental')
-
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
+      require_relative 'input_rules'
+      restart_paths = change_set.relative_paths.select { |path| InputRules.new.action(path) == :full }
+      unless restart_paths.empty?
+        raise Woods::ExtractionError,
+              "Restart-sensitive inputs (#{restart_paths.join(', ')}) require a fresh Rails process; " \
+              'run woods:extract after applying schema/configuration changes'
+      end
+      prepare_incremental_run(operation: 'incremental')
       affected_types = Set.new
 
       # Blast radius from the pre-change graph, bounded by
@@ -563,6 +578,12 @@ module Woods
       affected_ids = profile_phase('blast radius') do
         @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
       end
+      @refresh_hybrid_discovery = change_set.relative_paths.any? { |path| path.end_with?('.rb') } ||
+                                  affected_ids.any? do |id|
+                                    @dependency_graph.node_types(id).any? do |type|
+                                      CLASS_DISCOVERED_FALLBACK.key?(type)
+                                    end
+                                  end
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
@@ -577,6 +598,9 @@ module Woods
       end
 
       profile_phase('reconciliation') do
+        if @refresh_hybrid_discovery
+          HYBRID_DISCOVERY_EXTRACTORS.each { |key| touched.merge(replace_type_wholesale(key, affected_types)) }
+        end
         touched.merge(reconcile_class_based_types(affected_types))
         touched.merge(reconcile_model_mixins(affected_types))
         touched.merge(rerun_whole_app_extractors(change_set, affected_types))
@@ -814,6 +838,7 @@ module Woods
       @flow_scope = nil
       @previous_flow_index_entries = nil
       @incremental_extractors = nil
+      @refresh_hybrid_discovery = false
       @active_record_names = nil
       @package_resolver = nil
       @persisted_index_stats = nil
@@ -846,9 +871,10 @@ module Woods
     #   reading "incremental" after a `woods:refresh[routes]` is being misled
     # @return [void]
     def finalize_incremental_run(touched, reason: 'incremental')
+      withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
       profile_phase('graph write') { write_dependency_graph }
 
-      if touched.empty?
+      if touched.empty? && !withdrew_flows
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
         return
       end
@@ -1503,6 +1529,31 @@ module Woods
       rewrite_flow_annotated_units
       sweep_orphaned_flow_files
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
+    end
+
+    # Withdraw the derived family in this unpublished payload. Atomic unit
+    # replacement preserves hardlinked bytes in the preceding generation.
+    # @return [Boolean] whether disabling precomputation changed the payload
+    def withdraw_disabled_flows
+      flows = payload_dir.join('flows')
+      changed = flows.exist?
+      FileUtils.remove_entry(flows) if changed
+      controllers = payload_dir.join('controllers')
+      return changed unless controllers.directory?
+
+      annotated = false
+      controllers.children.sort.each do |file|
+        next unless file.extname == '.json' && file.basename.to_s != '_index.json'
+
+        data = JSON.parse(AtomicFile.read(file))
+        next unless data.fetch('metadata', {}).key?('flow_paths')
+
+        data['metadata'].delete('flow_paths')
+        AtomicFile.write(file, json_serialize(data), durable: payload_writes_durable?)
+        annotated = true
+      end
+      regenerate_type_index(:controllers) if annotated
+      changed || annotated
     end
 
     # Precompute runs after write_results (FlowAssembler reads unit JSON
@@ -2484,7 +2535,13 @@ module Woods
     #
     # @return [Hash{Symbol => Hash}] type => `{ count:, chunks:, namespaces: }`
     def persisted_index_stats
-      @persisted_index_stats ||= Dir[payload_dir.join('*/_index.json').to_s].each_with_object({}) do |path, stats|
+      return @persisted_index_stats if @persisted_index_stats
+
+      directories = payload_dir.directory? ? payload_dir.children.sort : []
+      paths = directories.filter_map do |directory|
+        directory.join('_index.json') if directory.directory? && directory.join('_index.json').file?
+      end
+      @persisted_index_stats ||= paths.each_with_object({}) do |path, stats|
         entries = JSON.parse(AtomicFile.read(path))
         stats[File.basename(File.dirname(path)).to_sym] = {
           count: entries.size,
@@ -2684,8 +2741,8 @@ module Woods
       @persisted_index_stats = nil
 
       # Scan existing unit JSON files (exclude _index.json)
-      index = Dir[type_dir.join('*.json')].filter_map do |file|
-        next if File.basename(file) == '_index.json'
+      index = type_dir.children.sort.filter_map do |file|
+        next unless file.extname == '.json' && file.basename.to_s != '_index.json'
 
         data = JSON.parse(AtomicFile.read(file))
         {
@@ -2869,6 +2926,11 @@ module Woods
       dispatcher = PathDispatcher.new
       change_set.existing_paths.filter_map do |absolute_path|
         rules = dispatcher.file_rules_for(change_set.relativize(absolute_path))
+        if @refresh_hybrid_discovery
+          rules = rules.reject do |rule|
+            HYBRID_DISCOVERY_EXTRACTORS.include?(rule.extractor_key)
+          end
+        end
         next if rules.empty?
 
         entries = rules.map do |rule|
@@ -3341,7 +3403,7 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @return [Set<String>] identifiers removed
     def remove_replaced_units(key, units, affected_types)
-      if CLASS_BASED_DISCOVERY.key?(key) && !@eager_load_complete
+      unless replacement_discovery_complete?(key)
         Rails.logger.warn(
           "[Woods] Skipping stale-unit removal for #{key}: the eager load was incomplete, " \
           'so its discovery set is known-partial — the type may hold stale units until a clean boot'
@@ -3827,6 +3889,7 @@ module Woods
 
       extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
       return nil unless extractor_key
+      return nil if @refresh_hybrid_discovery && HYBRID_DISCOVERY_EXTRACTORS.include?(extractor_key)
 
       extractor = extractor_for(extractor_key)
       if extractor.nil?
@@ -3850,7 +3913,9 @@ module Woods
     #
     # @return [ExtractedUnit, Array<ExtractedUnit>, nil]
     def re_extracted_units(extractor, type, unit_id, file_path, extractor_key)
-      if (method = CLASS_BASED[type])
+      if type == :configuration && unit_id == 'BehavioralProfile'
+        extractor.extract_behavioral_profile
+      elsif (method = CLASS_BASED[type])
         klass = constant_for_identifier(unit_id)
         klass && extractor.public_send(method, klass)
       elsif runtime_model_mixin_file?(extractor, type, file_path)

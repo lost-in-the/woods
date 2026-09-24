@@ -96,6 +96,53 @@ RSpec.describe 'Source provenance publication' do
     expect(File.binread(source_path)).to eq(bytes)
   end
 
+  it 'preserves the active payload when the new source manifest exceeds its reader limit' do
+    prepare.send(:publish_generation, 'full')
+    generation = Woods::Generation.new(output_dir: @output)
+    previous = generation.current
+    source_path = File.join(generation.payload_dir, 'source_inputs.json')
+    bytes = File.binread(source_path)
+    extractor = prepare
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 100)
+
+    expect(extractor.send(:publish_generation, 'full')).to be_nil
+    expect { extractor.raise_on_publication_failure! }
+      .to raise_error(Woods::ExtractionError, /source_manifest_too_large.*narrow additional source roots/)
+    expect(generation.current.token).to eq(previous.token)
+    expect(File.binread(source_path)).to eq(bytes)
+  end
+
+  it 'writes exactly the pretty JSON bytes checked against the publication limit, with no appended newline' do
+    prepare.send(:publish_generation, 'full')
+    payload = Woods::Generation.new(output_dir: @output).payload_dir
+    bytes = File.binread(File.join(payload, 'source_inputs.json'))
+
+    expect(bytes).to eq(JSON.pretty_generate(published_manifest.data))
+    expect(bytes).not_to end_with("\n")
+    expect(bytes.bytesize).to be <= Woods::SourceInputs::Manifest::MAX_BYTES
+  end
+
+  it 'retains publication refusal after unit diagnostics have filled their path budget' do
+    prepare.send(:publish_generation, 'full')
+    generation = Woods::Generation.new(output_dir: @output)
+    previous = generation.current
+    extractor = prepare
+    extractor.instance_variable_set(:@source_reference_paths, Set.new([@source]))
+    session = extractor.instance_variable_get(:@source_inputs)
+    FileUtils.mkdir_p(File.join(@root, 'custom_loader'))
+    40.times do |index|
+      path = File.join(@root, 'custom_loader', "unit_#{index}.rb")
+      File.write(path, 'uncaptured input')
+      session.consume_unit(:custom, path)
+    end
+    File.write(@source, 'changed after capture')
+
+    expect(extractor.send(:publish_generation, 'full')).to be_nil
+    expect { extractor.raise_on_publication_failure! }
+      .to raise_error(Woods::ExtractionError, /Source-reference source changed/)
+    expect(generation.current.token).to eq(previous.token)
+  end
+
   it 'retains the active generation when an undecodable path prevents reference verification' do
     prepare.send(:publish_generation, 'full')
     generation = Woods::Generation.new(output_dir: @output)

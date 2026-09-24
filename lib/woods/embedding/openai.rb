@@ -111,6 +111,12 @@ module Woods
           [self.class.name, ENDPOINT.to_s, @model, requested_dimensions, configured_dimensions]
         end
 
+        # Pure constructor settings; credentials are supplied by the reader's host.
+        def configuration_options
+          { model: @model, dimensions: requested_dimensions,
+            expected_dimensions: configured_dimensions || @observed_dimensions }
+        end
+
         # Return the model name.
         #
         # @return [String] the OpenAI model name

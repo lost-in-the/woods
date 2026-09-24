@@ -7,7 +7,7 @@ module Woods
   class IdentityCollisionError < ExtractionError; end
 
   # Shared source-ownership checks for full, incremental and refresh writers.
-  module ExtractionIdentities
+  module ExtractionIdentities # rubocop:disable Metrics/ModuleLength -- keep replacement authority beside collision checks
     private
 
     def identity_source(path)
@@ -140,7 +140,8 @@ module Woods
     end
 
     def replacement_discovery_complete?(key)
-      !self.class::CLASS_BASED_DISCOVERY.key?(key) || @eager_load_complete
+      runtime = self.class::CLASS_BASED_DISCOVERY.key?(key) || self.class::HYBRID_DISCOVERY_EXTRACTORS.include?(key)
+      !runtime || @eager_load_complete
     end
   end
 end

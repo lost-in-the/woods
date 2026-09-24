@@ -16,14 +16,22 @@ module Woods
       def initialize(manifest:, output_dir:, root: nil, generation: nil, max_seconds: DEFAULT_SECONDS, **limits)
         @manifest = manifest.is_a?(Manifest) ? manifest : Manifest.new(manifest)
         @output_dir = output_dir
-        @root = root || @manifest.data.fetch('root')
+        @root = SourcePathEncoding.expand(root || @manifest.data.fetch('root'))
+        @root_source = root ? 'explicit' : 'recorded'
         @generation = generation
         @limits = limits.merge(max_seconds: max_seconds)
       end
 
       # rubocop:enable Metrics/ParameterLists
 
-      def call # rubocop:disable Metrics/AbcSize -- cheap refusal checks precede the only source scan
+      def call
+        verify.merge('recorded_root' => @manifest.data.fetch('root'), 'checked_root' => @root,
+                     'root_source' => @root_source)
+      end
+
+      private
+
+      def verify # rubocop:disable Metrics/AbcSize -- cheap refusal checks precede the only source scan
         return unknown('generation_mismatch') if @generation && @generation != @manifest.data['generation']
         return unknown('source_root_unavailable') unless File.directory?(@root)
 
@@ -43,8 +51,6 @@ module Woods
         unknown('undecodable_source_path')
       end
 
-      private
-
       def compare(current)
         previous = @manifest.expanded
         changes = { 'added' => [], 'changed' => [], 'removed' => [] }
@@ -55,7 +61,7 @@ module Woods
       end
 
       def complete?(current)
-        @manifest.data['complete'] && current['complete']
+        @manifest.comparison_complete? && current['complete']
       end
 
       def compare_scope(scope, paths, changes, current)
@@ -78,6 +84,7 @@ module Woods
         reasons = (@manifest.data.fetch('errors') + current.fetch('errors')).map { |error| error['reason'] }.compact
         reasons << 'incomplete_capture' unless @manifest.data['complete']
         reasons << 'incomplete_verification' unless current['complete']
+        reasons << 'incomplete_comparison_baseline' unless @manifest.comparison_complete?
         reasons << 'unverified_boot_boundary' unless @manifest.data['boot_verified']
         reasons << 'unverified_consumption_scopes' unless @manifest.data.fetch('unverified_scopes').empty?
         reasons.uniq
@@ -88,7 +95,9 @@ module Woods
         counts = changes.transform_values(&:size)
         { 'state' => state_for(counts, reasons), 'mode' => 'content', 'generation' => @manifest.data['generation'],
           'checked_at' => Time.now.utc.iso8601, 'reasons' => reasons,
+          'verification_reasons' => current.fetch('errors').map { |error| error['reason'] }.uniq,
           'complete' => current['complete'] && @manifest.data['complete'],
+          'comparison_complete' => @manifest.comparison_complete?,
           'counts' => counts, 'truncated' => counts.values.any? { |count| count > SUMMARY_LIMIT },
           'changes' => changes.transform_values { |paths| paths.first(SUMMARY_LIMIT) },
           'metrics' => current.fetch('metrics') }

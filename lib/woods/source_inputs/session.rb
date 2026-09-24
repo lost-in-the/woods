@@ -12,6 +12,8 @@ module Woods
     # Records successful consumers, never merely paths found by a final scan.
     # An incremental run starts from the preceding generation's scope ledger.
     class Session # rubocop:disable Metrics/ClassLength -- per-run consumer ledger and publication coverage
+      MAX_ERRORS = 30
+
       def initialize(root:, output_dir:, baseline_path:, operation:)
         @root = SourcePathEncoding.expand(root)
         @output = SourcePathEncoding.expand(output_dir)
@@ -117,10 +119,22 @@ module Woods
         end
         @unverified << 'incomplete_eager_load' unless eager_load_complete
         Manifest.build(snapshot: @snapshot, scopes: @identities, boot_verified: verified_coverage?,
-                       generation: generation, errors: @errors, unverified_scopes: @unverified)
+                       generation: generation, errors: @errors, unverified_scopes: @unverified,
+                       comparison_complete: comparison_complete?)
       end
 
       private
+
+      def record_error(error)
+        # Bound path samples independently so noisy unit diagnostics cannot
+        # hide a later instability reason or its watcher catch-up paths.
+        count = @errors.count { |existing| existing['reason'] == error['reason'] }
+        @errors << error if count < MAX_ERRORS && !@errors.include?(error)
+      end
+
+      def comparison_complete?
+        @operation == 'full' || !!(compatible_baseline? && @baseline.comparison_complete?)
+      end
 
       def declared_roots
         roots = Handoff.extra_roots
@@ -136,7 +150,7 @@ module Woods
           Manifest.parse(file.read(Manifest::MAX_BYTES + 1))
         end
       rescue Manifest::Invalid, SystemCallError, IOError
-        @errors << { 'reason' => 'invalid_source_baseline' } unless @operation == 'full'
+        record_error('reason' => 'invalid_source_baseline') unless @operation == 'full'
         nil
       end
 
@@ -144,7 +158,7 @@ module Woods
         return snapshot_identities if @operation == 'full'
         return @baseline.expanded if compatible_baseline?
 
-        @errors << { 'reason' => 'missing_or_incompatible_source_baseline' }
+        record_error('reason' => 'missing_or_incompatible_source_baseline')
         {}
       end
 
@@ -167,7 +181,7 @@ module Woods
         if identity
           (@identities[scope] ||= {})[relative] = identity
         elsif File.exist?(File.join(@root, relative))
-          @errors << { 'reason' => 'uncaptured_source_path', 'path' => relative }
+          record_error('reason' => 'uncaptured_source_path', 'path' => relative)
         else
           @identities[scope]&.delete(relative)
         end
@@ -178,17 +192,39 @@ module Woods
 
         decoded = SourcePathEncoding.utf8(path)
         unless decoded
-          if @errors.size < 20
-            @errors << { 'reason' => 'undecodable_source_path', 'path' => SourcePathEncoding.diagnostic(path) }
-          end
+          record_error('reason' => 'undecodable_source_path', 'path' => SourcePathEncoding.diagnostic(path))
           return nil
         end
 
-        absolute = File.expand_path(decoded, @root)
+        application_source_path(File.expand_path(decoded, @root))
+      end
+
+      def application_source_path(absolute)
         # Installed gem/framework source is outside application-source coverage.
         return nil unless absolute.start_with?("#{@root}/")
 
-        absolute.delete_prefix("#{@root}/")
+        relative = absolute.delete_prefix("#{@root}/")
+        return relative if @rules.extra_roots.any? { |root| relative.start_with?("#{root}/") }
+        return nil if installed_gem_roots.any? { |root| absolute.start_with?("#{root}/") }
+
+        relative
+      end
+
+      # A vendor-shaped path alone is not ownership evidence. Local path gems
+      # have their gemspec in the checkout, not in an installation's metadata.
+      def installed_gem_roots
+        @installed_gem_roots ||= Gem.loaded_specs.values.filter_map { |spec| installed_gem_root(spec) }
+      end
+
+      def installed_gem_root(spec)
+        return unless spec.loaded_from && File.file?(spec.loaded_from)
+
+        base = File.expand_path(spec.base_dir)
+        path = File.expand_path(spec.full_gem_path)
+        return unless File.expand_path(spec.loaded_from).start_with?("#{base}/specifications/") &&
+                      path.start_with?("#{base}/gems/") && File.directory?(path)
+
+        path
       end
 
       def replace_scope(scope)
@@ -213,20 +249,28 @@ module Woods
       def preserve_baseline_coverage
         return unless @baseline
 
-        @errors.concat(@baseline.data.fetch('errors'))
+        @baseline.data.fetch('errors').each { |error| record_error(error) }
         @unverified.concat(@baseline.data.fetch('unverified_scopes'))
-        @errors << { 'reason' => 'incomplete_source_baseline' } unless @baseline.data['complete']
+        record_error('reason' => 'incomplete_source_baseline') unless @baseline.data['complete']
       end
 
       def verify_stability
         return unless @key
 
         after = scan
-        @errors.concat(after.fetch('errors'))
+        after.fetch('errors').each { |error| record_error(error) }
+        changed_paths(after).first(MAX_ERRORS).each do |path|
+          record_error('reason' => 'source_changed_during_extraction', 'path' => path)
+        end
+      end
+
+      def changed_paths(after)
         before_files = @snapshot.fetch('files')
         after_files = after.fetch('files')
-        changed = (before_files.keys | after_files.keys).reject { |path| before_files[path] == after_files[path] }
-        changed.first(30).each { |path| @errors << { 'reason' => 'source_changed_during_extraction', 'path' => path } }
+        changed = (before_files.keys & after_files.keys).reject { |path| before_files[path] == after_files[path] }
+        changed.concat(after_files.keys - before_files.keys) if @snapshot['complete']
+        changed.concat(before_files.keys - after_files.keys) if after['complete']
+        changed
       end
 
       # A custom loader can consume Ruby outside the standard dispatch roots.
@@ -241,7 +285,7 @@ module Woods
         end.uniq
         missing = paths - @snapshot.fetch('files').keys
         missing.first(30).each do |path|
-          @errors << { 'reason' => 'loaded_source_outside_coverage', 'path' => path }
+          record_error('reason' => 'loaded_source_outside_coverage', 'path' => path)
         end
       end
 

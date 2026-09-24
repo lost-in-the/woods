@@ -209,6 +209,25 @@ error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
 
+### Resource identity and damaged generation markers
+
+**Unreleased after `2.0.0` (#593):** unit resource identifiers may contain
+slashes, such as `views/posts/show.html.erb` or `GET /posts/:id`. Encode the
+whole identifier as one URI segment (`%2F` for `/`) in
+`codebase://unit/{identifier}`. Raw multi-segment paths, dot traversal segments,
+double encoding and backslashes remain invalid. Type resource names cannot
+contain slashes.
+
+A held-open server returns `corrupt_artifact` for a malformed published
+generation marker or an unavailable/outside-root payload pointer. Repeated
+calls retain that error rather than presenting the cached generation as current.
+An already pinned request can finish against its known generation. New requests
+resume after a valid marker is restored; a leftover flat root manifest is not
+substituted for a missing or invalid named payload. Run
+`woods:validate` and restore a known-good publication or complete a fresh
+extraction; do not point the marker at an arbitrary payload directory.
+Legacy flat indexes without a generation marker remain supported.
+
 ### Graph-analysis pages
 
 Included in Woods `2.0.0`: `graph_analysis` enforces its advertised default
@@ -245,10 +264,15 @@ therefore establishes another match; an exactly full page can instead be
 complete if the requested domain is exhausted. Deep lookahead shares
 `WOODS_SEARCH_MAX_SCAN` with the initial scan and retains round-robin scanning
 across types. Search does not count the entire omitted tail or offer pagination.
-The existing `types` filter and result labels name directory families:
-`rails_source` includes both Rails and gem source units. Deep reads accept those
-two stored types only in that shared directory; `lookup` and lexical retrieval
-retain the unit's actual `rails_source` or `gem_source` type.
+**Unreleased after `2.0.0` (#593):** `search.types` accepts concrete unit types
+such as `graphql_mutation` and `gem_source`, plus the directory-family aliases
+`graphql` (all four GraphQL types) and `rails_source` (Rails and gem sources).
+Aliases expand the same way with or without a package/source-path scope.
+Results always carry the actual stored type, so their `(type, identifier)` can
+be passed to `lookup`; an unknown type returns `invalid_params` instead of an
+apparently complete empty result. This corrects the older unscoped family
+labels. Retrieval tools continue to use their own documented concrete-type
+filters; search aliases do not change those contracts.
 
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the

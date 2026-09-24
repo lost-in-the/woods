@@ -191,6 +191,44 @@ RSpec.describe Woods::Watch::Installation do
     expect { installer(operation: 'update').apply }.to raise_error(described_class::Conflict, /edited/)
   end
 
+  it 'checks the Git owner-executable bit even when another execute bit remains set' do
+    installer.apply
+    File.chmod(0o655, File.join(@root, 'bin/woods-watch'))
+    before = tree
+    expect { installer(operation: 'remove').apply }.to raise_error(described_class::Conflict, /edited/)
+    expect(tree).to eq(before)
+  end
+
+  it 'refuses changed wrapper bytes even with portable executable permissions' do
+    installer.apply
+    wrapper = File.join(@root, 'bin/woods-watch')
+    File.chmod(0o775, wrapper)
+    File.open(wrapper, 'a') { |file| file.puts('# user edit') }
+    before = tree
+    expect { installer(operation: 'update').apply }.to raise_error(described_class::Conflict, /edited/)
+    expect(tree).to eq(before)
+  end
+
+  it 'refuses a missing owned wrapper before removing other owned files' do
+    installer.apply
+    File.unlink(File.join(@root, 'bin/woods-watch'))
+    before = tree
+    expect { installer(operation: 'remove').apply }.to raise_error(described_class::Conflict, /removed/)
+    expect(tree).to eq(before)
+  end
+
+  it 'retains exact permission snapshots between preview and apply of a wrapper update' do
+    installer.apply
+    wrapper = File.join(@root, 'bin/woods-watch')
+    File.chmod(0o775, wrapper)
+    installation = installer(operation: 'update', child_command: %w[bundle exec rails woods:watch])
+    preview = installation.plan
+    File.chmod(0o755, wrapper)
+    before = tree
+    expect { installation.apply(preview) }.to raise_error(described_class::Conflict, /Changed since preview/)
+    expect(tree).to eq(before)
+  end
+
   it 'does not overwrite an unowned wrapper or Woods process entry' do
     File.write(File.join(@root, 'bin/woods-watch'), 'custom launcher')
     expect { installer.apply }.to raise_error(described_class::Conflict, /unowned/i)
@@ -252,6 +290,38 @@ RSpec.describe Woods::Watch::Installation do
       expect(File.exist?(File.join(clone, 'bin/woods-watch'))).to be(false)
     ensure
       @root = old_root
+    end
+  end
+
+  [0o022, 0o002].each do |mask|
+    it "keeps ownership through a real Git checkout under umask #{mask.to_s(8)}" do
+      installer.apply
+      git = lambda do |*arguments|
+        output, status = Open3.capture2e('git', '-C', @root, *arguments)
+        raise output unless status.success?
+      end
+      git.call('init', '-q')
+      git.call('add', 'Gemfile', 'bin', 'config', 'Procfile.dev', '.woods-watch.json')
+      git.call('-c', 'user.name=Woods fixture', '-c', 'user.email=fixture@example.invalid',
+               '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Owned watcher fixture')
+      original_root = @root
+      Dir.mktmpdir('woods git clone ') do |parent|
+        clone = File.join(parent, 'application')
+        output, status = Open3.capture2e(Gem.ruby, '-e', 'File.umask(Integer(ARGV.shift)); exec(*ARGV)',
+                                         mask.to_s, 'git', 'clone', '-q', '--no-local', original_root, clone)
+        expect(status).to be_success, output
+        @root = File.realpath(clone)
+        wrapper = File.join(@root, 'bin/woods-watch')
+        expect(File.stat(wrapper).mode & 0o777).to eq(0o777 & ~mask)
+        expect(installer.apply).to eq('already_applied')
+        expect(File.stat(wrapper).mode & 0o777).to eq(0o777 & ~mask)
+        expect(installer(operation: 'update', mode: 'puma').apply).to eq('applied')
+        expect(installer(operation: 'remove').apply).to eq('applied')
+        expect(read('config/puma.rb')).to eq("threads 3, 3\n")
+        expect(File).not_to exist(wrapper)
+      ensure
+        @root = original_root
+      end
     end
   end
 

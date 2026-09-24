@@ -272,8 +272,17 @@ ranges. A commit alone may leave the source-file watcher idle; run full
 extraction after repair or when current Git history is required. See the
 [worktree mount guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
-After a bundle change or removal of a dynamically defined job, incremental
-extraction can retain stale runtime units. Use a fresh process with the updated
+Builds containing #588 (unreleased after `2.0.0`) reconcile the whole jobs and
+serializers families on relevant Ruby batches, including nested runtime classes.
+Incomplete discovery retains unproven units and refuses ownership transfers.
+Direct incremental calls reject restart-sensitive inputs; apply migrations and
+run full extraction in a fresh Rails process. Fresh one-shot incremental tasks
+escalate those inputs themselves. Disabling `precompute_flows` withdraws stored
+flows on the next successful writer run. Check the revision and follow the
+[runtime reconciliation guide](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#runtime-removals-and-bundle-updates).
+
+After a bundle change or on older builds after removal of a dynamically defined
+job, incremental extraction can retain stale runtime units. Use a fresh process with the updated
 bundle for full extraction, then validate. For missing external gem paths,
 first distinguish an upgraded bundle from a reader on a different host/mount.
 The more explicit `woods:validate` bundle-update remedy (B-166) is available in Woods
@@ -422,6 +431,15 @@ stored vector width from explicit reduction, omits unsupported width parameters
 for fixed-width ada, and scopes embedding cache entries to provider configuration.
 Follow the installed version's [embedding options and cache guidance](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#embedding-options);
 never bypass a width refusal or infer this capability from the plugin version.
+
+Injected-provider restoration (#599) is unreleased after Woods `2.0.0`.
+Supporting writers preserve effective non-secret built-in settings through known
+wrappers. If a snapshot carries `requires_host_provider`, use a supporting reader
+and configure the compatible provider explicitly, or deliberately select lexical
+mode. Older readers do not enforce this additive marker. Record both writer and
+reader revisions when an endpoint or context size changes after restoration;
+do not remove the marker or copy endpoint credentials into `woods.json`. See
+[injected providers](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#injecting-a-provider-object).
 
 For metadata appearing in another index or worktree, compare `WOODS_OUTPUT`,
 `config.output_dir`, and any explicit `metadata_store_options[:database]`.
@@ -586,3 +604,27 @@ the named file before moving it aside, or choose a new export directory. Older v
 byte-identical generated assets into `_woods/ownership.json`; changed legacy sidecars may need this
 manual recovery. Never fabricate ownership receipts or remove personal files to silence the error.
 See the installed version's `docs/OBSIDIAN_INTEGRATION.md` for the exact safety contract.
+
+## Source freshness and query errors after 2.0.0
+
+Check the installed revision before using these unreleased diagnostics:
+
+- Builds containing #589 expose `recorded_root`, `checked_root`, and `root_source`.
+  A recorded-root check does not certify a copied checkout. Follow `deep_check`
+  for a quick-reader timeout, `inspect_source_scan` for mapping/permission/limit
+  problems, and `fresh_capture` for incomplete capture or boot evidence. Preserve
+  mixed recommendations. Missing evidence cannot prove all files were added or
+  unreadable files deleted. A size refusal preserves the previous publication;
+  narrow configured extra roots before retrying. See
+  [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+- Builds containing #593 return actual types from family-filtered search and
+  reject unknown type names. An unknown flow unit or snapshot is `not_found`,
+  while a valid empty answer remains successful. Repeated `corrupt_artifact`
+  errors after a malformed generation marker require validation and restoration
+  or a fresh extraction; never edit the pointer to guess a payload. See
+  [Index MCP contracts](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#resource-identity-and-damaged-generation-markers).
+- Builds containing #590 retain intended private bundle settings during managed
+  preflight. Compare named identity fields and owned bytes before changing an
+  installer setup. Keep receipts; use the supporting executable for removal
+  before downgrading and real parent directories for temporary plans. See
+  [managed configuration](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
