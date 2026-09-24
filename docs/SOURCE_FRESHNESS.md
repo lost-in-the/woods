@@ -90,6 +90,15 @@ scanner's exclusions. Explicit source roots override generic exclusions; the
 index output is always excluded. Contained file symlinks are checked for stable
 resolution; directory symlinks and escaping/unreadable inputs leave uncertainty.
 
+**Unreleased after 2.0.0; planned for 2.1:** source paths use UTF-8 bytes even
+when the process locale is `C`. A filename with invalid UTF-8 bytes produces
+`undecodable_source_path` and incomplete coverage; directory entries with those
+names are pruned. Diagnostic labels escape the original bytes and are bounded.
+The watcher skips these entries, and reference verification retains the preceding
+generation. Rename the affected entries to valid UTF-8 names before a fresh
+capture. Explicit root/output paths with invalid UTF-8 bytes are rejected as
+configuration errors.
+
 Every consuming scope keeps its own identities. An events scan can reread a
 service file while its service unit remains untouched; refreshing events does
 not certify the retained service unit. Successful file/whole-extractor work

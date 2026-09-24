@@ -3067,7 +3067,7 @@
       "lib/woods/source_inputs/status.rb"
     ],
     "description": "An invalid UTF-8 filename encountered by the source tree walker raises ArgumentError before scope filtering. This can abort extraction or turn woods_status into an internal error, including when the filename is outside indexed application source. Handle byte-invalid paths before regex/split operations, emit bounded JSON-safe diagnostic evidence, and retain an incomplete/unknown verdict. Test scanner, session and status under C and UTF-8 locales; do not claim current or silently bless an incomplete capture. GitHub: #573.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-225",

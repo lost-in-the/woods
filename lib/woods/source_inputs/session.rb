@@ -13,8 +13,8 @@ module Woods
     # An incremental run starts from the preceding generation's scope ledger.
     class Session # rubocop:disable Metrics/ClassLength -- per-run consumer ledger and publication coverage
       def initialize(root:, output_dir:, baseline_path:, operation:)
-        @root = File.expand_path(root.to_s)
-        @output = File.expand_path(output_dir.to_s)
+        @root = SourcePathEncoding.expand(root)
+        @output = SourcePathEncoding.expand(output_dir)
         @operation = operation.to_s
         @errors = []
         @unverified = []
@@ -176,7 +176,15 @@ module Woods
       def relative_path(path)
         return nil if path.nil? || path.to_s.empty?
 
-        absolute = File.expand_path(path.to_s, @root)
+        decoded = SourcePathEncoding.utf8(path)
+        unless decoded
+          if @errors.size < 20
+            @errors << { 'reason' => 'undecodable_source_path', 'path' => SourcePathEncoding.diagnostic(path) }
+          end
+          return nil
+        end
+
+        absolute = File.expand_path(decoded, @root)
         # Installed gem/framework source is outside application-source coverage.
         return nil unless absolute.start_with?("#{@root}/")
 

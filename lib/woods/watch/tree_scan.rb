@@ -2,6 +2,7 @@
 
 require 'find'
 require 'set'
+require 'woods/source_path_encoding'
 
 module Woods
   module Watch
@@ -48,12 +49,15 @@ module Woods
       # @yieldparam path [String] absolute path to a regular file
       # @return [void]
       def each_file(root:, ignored:, visited: nil, &block)
-        base = root.to_s
+        base = SourcePathEncoding.utf8(root)
+        return unless base
+
         prefix = "#{base}/"
         visited = (visited || Set.new).dup
         visited << real_dir(base)
 
         Find.find(base) do |path|
+          path = decoded_entry(path)
           next if path == base
 
           skip = skip?(path.delete_prefix(prefix), ignored)
@@ -63,6 +67,11 @@ module Woods
         # The root vanished mid-walk (a worktree removed under us). Nothing to
         # report; the caller's next cycle sees it gone.
         nil
+      end
+
+      # Prune before any string matching or descent into an undecodable entry.
+      def decoded_entry(path)
+        SourcePathEncoding.utf8(path) || Find.prune
       end
 
       # Classify one entry and act on it.
@@ -126,7 +135,7 @@ module Woods
 
       # @return [String, nil] resolved path, or nil for a broken/looping link
       def real_dir(path)
-        File.realpath(path)
+        SourcePathEncoding.utf8(File.realpath(path))
       rescue SystemCallError
         nil
       end
@@ -147,6 +156,9 @@ module Woods
       # @param relative [String] path relative to the watched root
       # @return [Boolean] whether any segment is a dotfile Woods does not read
       def hidden?(relative)
+        relative = SourcePathEncoding.utf8(relative)
+        return true unless relative
+
         relative.split(File::SEPARATOR).any? { |segment| hidden_segment?(segment) }
       end
 

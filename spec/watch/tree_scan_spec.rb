@@ -29,6 +29,16 @@ RSpec.describe Woods::Watch::TreeScan do
     expect(files).to eq([target])
   end
 
+  it 'skips undecodable entries and prunes their directories before classification' do
+    target = write('app/models/user.rb')
+    write('app/models/bad_'.b + "\xFF.rb".b)
+    write(File.join('app/bad_'.b + "\xFF".b, 'child.rb'))
+    allow(File).to receive(:lstat).and_call_original
+
+    expect(files).to eq([target])
+    expect(File).not_to have_received(:lstat).with(a_string_ending_with('/child.rb'))
+  end
+
   it 'skips ignored directories' do
     write('app/models/user.rb')
     write('node_modules/pkg/index.js')

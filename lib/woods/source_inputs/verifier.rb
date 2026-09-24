@@ -39,6 +39,8 @@ module Woods
         unknown(e.message)
       rescue SystemCallError, IOError
         unknown('source_root_unavailable')
+      rescue EncodingError, SourcePathEncoding::Invalid
+        unknown('undecodable_source_path')
       end
 
       private
