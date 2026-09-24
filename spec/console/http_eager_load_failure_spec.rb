@@ -41,6 +41,11 @@ RSpec.describe 'HTTP Console with a real Rails eager-load failure', :booted_app 
         end
         ConsoleFailureApplication.config.root = ARGV.fetch(0)
         ConsoleFailureApplication.initialize!
+        # Exercise pass-through without depending on Rails' version-specific
+        # rendering of an unrouted request while show_exceptions is disabled.
+        Rails.application.routes.draw do
+          get '/ordinary', to: ->(_env) { [404, { 'content-type' => 'text/plain' }, ['ordinary fixture response']] }
+        end
         direct_failure = begin
           Rails.application.eager_load!
           nil
@@ -80,7 +85,7 @@ RSpec.describe 'HTTP Console with a real Rails eager-load failure', :booted_app 
         ordinary = request.call('/ordinary', true)
         puts JSON.generate(direct_failure: direct_failure, first: first, second: second,
                            denied_before: denied_before, denied_after: denied_after,
-                           attempts_before: attempts_before, ordinary: ordinary.first,
+                           attempts_before: attempts_before, ordinary: ordinary,
                            attempts: Rails.application.console_load_attempts)
       RUBY
       root = File.expand_path('../..', __dir__)
@@ -93,7 +98,8 @@ RSpec.describe 'HTTP Console with a real Rails eager-load failure', :booted_app 
       expect(result.fetch('first').first).to eq(503)
       expect(result.fetch('second')).to eq(result.fetch('first'))
       expect(result.values_at('denied_before', 'denied_after')).to eq([[401, 403, 403], [401, 403, 403]])
-      expect(result.values_at('attempts_before', 'ordinary', 'attempts')).to eq([0, 404, 1])
+      expect(result.values_at('attempts_before', 'attempts')).to eq([0, 1])
+      expect(result.fetch('ordinary')).to eq([404, 'ordinary fixture response'])
       expect(result.fetch('first').last).not_to include('MissingApplicationModelBase', directory)
       expect(err.scan('console.eager_load.failed').length).to eq(1)
     end
