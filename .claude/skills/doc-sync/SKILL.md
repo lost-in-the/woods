@@ -9,8 +9,8 @@ After any implementation that changes extraction output, dependencies, configura
 
 ## What to Check
 
-1. **`docs/README.md`** — Is the status table current? Mark completed features, update phase status.
-2. **`docs/backlog.json`** — Is the resolved item's `status` flipped to `resolved`? (The build-phase design-doc backlog this superseded was removed for 2.0 — see `git log --follow -- docs/design/`.)
+1. **`docs/README.md`** — Does navigation still point to the canonical guide for the changed behavior?
+2. **GitHub issue** — Does its remaining scope match the implementation and validation evidence? Follow `.claude/skills/backlog-workflow/SKILL.md`; the local queue is retired, and `.Codex/backlog-archive.json` is historical.
 3. **`CLAUDE.md`** — Do the Architecture, Gotchas, or Commands sections reflect the change?
 4. **`docs/design/`** — If the change implements something from a live design doc (`MCP_2026_STRATEGY.md`), update it to reflect what was actually built vs. what was planned.
 

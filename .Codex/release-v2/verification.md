@@ -1,5 +1,9 @@
 # Release V2 Verification Record
 
+This is historical release evidence. The original planning snapshot is preserved
+in `backlog-archive.json`; its unfinished statuses are not current release gates.
+GitHub issues and the current release milestone own live work and validation.
+
 The August sections below are historical. The [2026-09-18 readiness audit](#readiness-audit-2026-09-18) records the newer frozen baseline and its limits; it is not approval to publish a final artifact.
 
 ## Branch Baseline
