@@ -63,14 +63,14 @@ RSpec.describe Woods::MCP::IndexReader do
       end
     end
 
-    it 'does not translate errors from generation refresh after successful startup' do
+    it 'reports corrupt generation refresh as a typed marker error after successful startup' do
       Dir.mktmpdir('woods-reader-startup') do |dir|
         File.write(File.join(dir, 'manifest.json'), JSON.generate('total_units' => 0))
         index = described_class.new(dir)
         expect(index.manifest).to eq('total_units' => 0)
         File.write(File.join(dir, 'generation.json'), '[]')
 
-        expect { index.manifest }.to raise_error(TypeError)
+        expect { index.manifest }.to raise_error(Woods::Generation::InvalidMarker)
       end
     end
   end

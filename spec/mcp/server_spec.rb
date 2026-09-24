@@ -1519,7 +1519,7 @@ RSpec.describe Woods::MCP::Server do
 
     it 'returns an MCP error response when assembly raises' do
       allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'unit not found')
-      response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
+      response = call_tool(server, 'trace_flow', entry_point: 'PostsController#action')
       expect(response.error?).to be(true)
       expect(response_text(response)).to include('trace_flow failed')
       expect(response_text(response)).to include('unit not found')
@@ -1551,6 +1551,7 @@ RSpec.describe Woods::MCP::Server do
       end
 
       before do
+        FileUtils.cp_r(File.join(fixture_dir, 'controllers'), tmp_index_dir)
         FileUtils.mkdir_p(File.join(tmp_index_dir, 'flows'))
         File.write(
           File.join(tmp_index_dir, 'manifest.json'),

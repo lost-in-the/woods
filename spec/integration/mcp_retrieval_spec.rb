@@ -231,7 +231,7 @@ RSpec.describe 'MCP Retrieval Tools Integration', :integration do
     it 'returns an MCP error when assembly fails' do
       allow(mock_assembler).to receive(:assemble).and_raise(StandardError, 'unit not found')
 
-      response = call_tool(server, 'trace_flow', entry_point: 'Unknown#action')
+      response = call_tool(server, 'trace_flow', entry_point: 'PostsController#create')
 
       expect(response.error?).to be(true)
       expect(response_text(response)).to include('trace_flow failed')

@@ -46,12 +46,15 @@ module Woods
 
       # Most output directories contain one unit type. RailsSourceExtractor
       # emits gem_source units in rails_source/, while GraphQL publishes four
-      # subtypes in graphql/. Directory-filtered search retains its historical
-      # family labels while artifact readers preserve the actual unit type.
+      # subtypes in graphql/. Search accepts directory-family aliases and
+      # concrete types, and returns each unit's actual public type.
       UNIT_TYPES_BY_DIR = DIR_TO_TYPE.transform_values { |type| [type].freeze }
                                      .merge('rails_source' => %w[rails_source gem_source].freeze,
                                             'graphql' => %w[graphql_type graphql_mutation graphql_resolver graphql_query].freeze)
                                      .freeze
+      UNIT_TYPE_TO_DIR = UNIT_TYPES_BY_DIR.each_with_object({}) do |(directory, types), result|
+        types.each { |type| result[type] = directory }
+      end.freeze
 
       # Maximum number of loaded unit files to cache in memory.
       MAX_UNIT_CACHE = 50
@@ -489,6 +492,7 @@ module Woods
       # @api private
       def search_within_pin(query = nil, types: nil, fields: %w[identifier], limit: 20,
                             exact_prefix: nil, exact_suffix: nil, packages: nil, source_paths: nil)
+        types = normalize_search_types(types)
         scope = search_scope(packages, source_paths, types)
         prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
         suffix = exact_suffix.blank? ? nil : exact_suffix.downcase
@@ -508,7 +512,7 @@ module Woods
         phase2_scanned = 0
 
         begin
-          dirs = scope || !types ? TYPE_DIRS : types.filter_map { |type| TYPE_TO_DIR[type] }.uniq
+          dirs = types ? types.map { |type| UNIT_TYPE_TO_DIR.fetch(type) }.uniq : TYPE_DIRS
           # Identifier matches retain priority. Deep candidates are interleaved
           # across types so an early large directory cannot consume their budget.
           phase2_queues = {}
@@ -516,7 +520,11 @@ module Woods
             dirs.each do |dir|
               type_name = DIR_TO_TYPE[dir]
               entries = search_index_entries(dir)
-              entries = scoped_search_entries(entries, dir, scope) if scope
+              entries = if scope
+                          scoped_search_entries(entries, dir, scope)
+                        else
+                          typed_search_entries(entries, dir, types)
+                        end
               if entries.size > 1
                 matching_count = entries.count do |entry|
                   identifier_passes_filters?(entry['identifier'], pattern, prefix, suffix)
@@ -592,6 +600,37 @@ module Woods
         Retrieval::Scope.new(metadata_store: metadata, packages: packages, source_paths: source_paths, types: types)
       end
       private :search_scope
+
+      def normalize_search_types(types)
+        return nil if types.nil? || types == []
+        unless types.is_a?(Array) && types.all?(String)
+          raise ArgumentError, 'search types must be an array of type names'
+        end
+
+        types.flat_map do |type|
+          if TYPE_TO_DIR.key?(type)
+            UNIT_TYPES_BY_DIR.fetch(TYPE_TO_DIR.fetch(type))
+          elsif UNIT_TYPE_TO_DIR.key?(type)
+            [type]
+          else
+            raise ArgumentError, "unknown search type: #{type}"
+          end
+        end.uniq
+      end
+      private :normalize_search_types
+
+      # Family directories can contain distinct public types. Legacy summaries
+      # omit type, so inspect the published unit instead of inventing an alias.
+      def typed_search_entries(entries, dir, types)
+        possible = UNIT_TYPES_BY_DIR.fetch(dir)
+        entries.filter_map do |entry|
+          actual = possible.one? ? possible.first : load_search_unit(DIR_TO_TYPE.fetch(dir), entry['identifier'])['type']
+          next if types && !types.include?(actual)
+
+          entry.merge('scope_type' => actual)
+        end
+      end
+      private :typed_search_entries
 
       def scoped_search_entries(entries, dir, scope)
         entries.flat_map do |entry|
@@ -870,7 +909,7 @@ module Woods
             expected_dir.join('manifest.json').to_s, File::RDONLY
           )
           file.flock(File::LOCK_SH)
-          marker = @generation.current
+          marker = published_marker
           resolved = resolve_payload_dir(marker)
           marker_still_matches = marker.number.zero? || (same_generation?(marker) && resolved == expected_dir)
           if marker_still_matches && expected_dir.directory?
@@ -881,13 +920,16 @@ module Woods
           file.flock(File::LOCK_UN)
           file.close
           load_generation(marker) unless marker.number.zero?
+        rescue Woods::Generation::InvalidMarker
+          file&.close unless file&.closed?
+          raise
         rescue Errno::ENOENT
           file&.close unless file&.closed?
           return if saw_missing_manifest && missing_manifest_dir == expected_dir
 
           saw_missing_manifest = true
           missing_manifest_dir = expected_dir
-          marker = @generation.current
+          marker = published_marker
           load_generation(marker) unless marker.number.zero?
         end
       end
@@ -934,13 +976,26 @@ module Woods
         return nil if @pin_depth.positive?
 
         signature = generation_signature
-        return nil if signature.nil? || signature == @generation_signature
+        if signature.nil?
+          published_marker if @loaded_generation
+          return nil
+        end
+        return nil if signature == @generation_signature
 
+        marker = published_marker
+        resolve_payload_dir(marker)
+        load_generation(marker) unless marker.number.zero? || same_generation?(marker)
         @generation_signature = signature
-        marker = @generation.current
-        return nil if marker.number.zero? || same_generation?(marker)
+        @loaded_generation
+      end
 
-        load_generation(marker)
+      def published_marker
+        marker = @generation.current!
+        if marker.number.zero? && @loaded_generation&.positive? && current_payload_dir != @index_dir
+          raise Woods::Generation::InvalidMarker, 'Published generation marker is missing'
+        end
+
+        marker
       end
 
       # Adopt one already-read marker as the reader's loaded generation.
@@ -949,8 +1004,9 @@ module Woods
       # @param marker [Woods::Generation::Marker]
       # @return [void]
       def load_generation(marker)
+        directory = resolve_payload_dir(marker)
         reload!
-        @payload_dir = resolve_payload_dir(marker)
+        @payload_dir = directory
         @loaded_token = marker.token
         @loaded_generation = marker.number
       end
@@ -968,7 +1024,7 @@ module Woods
 
         marker = Woods::Generation.new(output_dir: @index_dir).current
         resolve_payload_dir(marker).join('manifest.json').file?
-      rescue TypeError, NoMethodError
+      rescue TypeError, NoMethodError, Woods::Generation::InvalidMarker
         # Match Bootstrapper's startup preflight for malformed marker shapes.
         # Keep this local: errors during later generation refresh still surface.
         false
@@ -995,7 +1051,12 @@ module Woods
       # @param marker [Woods::Generation::Marker]
       # @return [Pathname]
       def resolve_payload_dir(marker)
-        Woods::Generation.new(output_dir: @index_dir).payload_dir(marker)
+        directory = Woods::Generation.new(output_dir: @index_dir).payload_dir(marker)
+        if marker.payload && !marker.payload.empty? && directory == @index_dir
+          raise Woods::Generation::InvalidMarker, 'Published generation payload is unavailable or outside the index'
+        end
+
+        directory
       end
 
       # Compare the *token*, not the number.
@@ -1103,9 +1164,11 @@ module Woods
       #   generation file
       def generation_signature
         stat = File.stat(@generation.path)
-        [stat.mtime.to_f, stat.size, stat.ino]
-      rescue SystemCallError
+        [stat.mtime.to_f, stat.ctime.to_f, stat.size, stat.ino]
+      rescue Errno::ENOENT
         nil
+      rescue SystemCallError
+        raise Woods::Generation::InvalidMarker, 'Published generation marker is unavailable'
       end
 
       # Case-insensitive literal prefix/suffix check on an identifier.
@@ -1211,8 +1274,9 @@ module Woods
       # Read the selected type bucket, never the identifier-only lookup map.
       # Keep the existing per-file signature checks and LRU cache for deep reads.
       def load_search_unit(type, identifier)
-        data = load_unit(TYPE_TO_DIR.fetch(type), unit_filename(identifier))
-        unless valid_published_unit?(data, TYPE_TO_DIR.fetch(type), identifier)
+        directory = TYPE_TO_DIR[type] || UNIT_TYPE_TO_DIR.fetch(type)
+        data = load_unit(directory, unit_filename(identifier))
+        unless valid_published_unit?(data, directory, identifier)
           raise IOError, "typed unit identity mismatch: #{type}:#{identifier}"
         end
 
