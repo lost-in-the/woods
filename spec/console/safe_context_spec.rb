@@ -49,6 +49,7 @@ RSpec.describe Woods::Console::SafeContext do
       let(:mysql_connection) do
         instance_double('MysqlConnection').tap do |conn|
           allow(conn).to receive(:adapter_name).and_return('Mysql2')
+          allow(conn).to receive(:select_value).with('SELECT @@SESSION.max_execution_time').and_return(123)
           allow(conn).to receive(:execute)
           allow(conn).to receive(:transaction) do |&block|
             block.call

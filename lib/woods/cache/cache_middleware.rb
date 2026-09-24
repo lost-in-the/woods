@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'securerandom'
 require_relative 'cache_store'
 
 module Woods
@@ -403,6 +404,8 @@ module Woods
         @retriever = retriever
         @cache_store = cache_store
         @context_ttl = context_ttl
+        @context_namespace = SecureRandom.hex(16)
+        @context_mutex = Mutex.new
       end
 
       # Expose the wrapped stores so the MCP +reload+ tool and
@@ -414,20 +417,16 @@ module Woods
       def metadata_store = @retriever.metadata_store
       def graph_store    = @retriever.graph_store
 
-      # Invalidate every cached context result. Called from the MCP +reload+
-      # tool after the retriever's stores have been re-hydrated from a fresh
-      # embed — otherwise cached results from the old embedding run would
-      # linger until their TTL expires and contradict the new stores.
+      # Retire this retriever's cached contexts after its corpus reloads.
       #
-      # Embedding caches (query → vector) are NOT cleared: the query-vector
-      # mapping is deterministic for a given provider+model and survives any
-      # index reload. Only context results (query → ranked units) go stale.
+      # Each instance owns an unpredictable namespace. Rotation prevents an
+      # in-flight request from repopulating the active cache with old results;
+      # retired entries expire by their TTL. Other retrievers and embedding
+      # caches remain independent, without any global backend deletion.
       #
       # @return [void]
       def invalidate_context_cache!
-        @cache_store.clear(namespace: :context)
-      rescue StandardError => e
-        warn("[Woods] CachedRetriever context-cache invalidation failed: #{e.message}")
+        @context_mutex.synchronize { @context_namespace = SecureRandom.hex(16) }
       end
 
       # Execute the retrieval pipeline with context-level caching.
@@ -474,7 +473,8 @@ module Woods
       # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
       def context_key(query, budget, types: nil, exclude_types: nil)
-        Cache.cache_key(:context, query, budget.to_s, fingerprint(types), fingerprint(exclude_types))
+        namespace = @context_mutex.synchronize { @context_namespace }
+        Cache.cache_key(:context, namespace, query, budget.to_s, fingerprint(types), fingerprint(exclude_types))
       end
 
       def fingerprint(types)

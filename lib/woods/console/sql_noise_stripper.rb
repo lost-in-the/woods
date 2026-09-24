@@ -30,8 +30,8 @@ module Woods
       # newline-separated statement structure is preserved for callers that
       # check for multiple statements.
       #
-      # Block comments are non-nested — real SQL engines do not support nested
-      # block comments, and neither does this stripper.
+      # This legacy helper is not a security scanner. Use strip_noise for
+      # quote-aware and PostgreSQL nested-comment handling.
       #
       # @param sql [String] the SQL string to process
       # @return [String] a new string with all SQL comments removed
@@ -59,9 +59,8 @@ module Woods
       #     Dollar-quoted strings (`$$...$$`, `$tag$...$tag$`) are also stripped.
       #   - `:mysql` — single-quoted strings support both `\'` (backslash-escape)
       #     and `''` (doubled-quote) as apostrophe escapes. Dollar-quoted strings
-      #     are also stripped (MySQL does not use them, but stripping them is
-      #     harmless and keeps the two dialects consistent).
-      #   - `:sqlite` — doubled apostrophes escape strings; dollar signs stay literal.
+      #     are not recognized by the combined MySQL security scanner.
+      #   - `:sqlite` — doubled apostrophes escape strings; backslashes and dollar signs are literal.
       # @return [String] a new string with all string literals replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
       DOLLAR_QUOTED = /\$(\w*)\$.*?\$\1\$/m
@@ -98,13 +97,30 @@ module Woods
       # never under-detect: an unterminated literal is treated as an ordinary
       # character rather than swallowing the rest of the statement.
       #
+      # `#` opens a MySQL line comment, mirroring `--`, but only under the
+      # `:mysql` dialect — PostgreSQL does not treat `#` as a comment, and
+      # collapsing it there would hide SQL that a real PostgreSQL server
+      # still executes. A MySQL `/*! ... */` executable comment is left
+      # visible as one span, including MariaDB's `/*M! ... */` spelling:
+      # its body can execute, so it must stay visible to every downstream
+      # scan without changing literal state outside the span. Leaving it
+      # visible under `:postgres` too is over-detection at
+      # worst, never under-detection, on a server where it really is inert.
+      # An ordinary `/* ... */` block comment is replaced by a single
+      # newline rather than vanishing outright, mirroring how a `--`/`#`
+      # line comment's own trailing newline survives: SqlValidator's
+      # statement-leader scan needs a durable marker showing a comment sat
+      # here so a comment-hidden statement (`SELECT 1 /*;*/ DELETE ...`)
+      # still reads as following a boundary once comments are gone.
+      #
       # @param sql [String] the SQL string to process
       # @param dialect [Symbol] `:postgres` (default), `:mysql`, or `:sqlite` — controls
-      #   single-quote escape rules (see {.strip_literals}).
+      #   single-quote escape rules (see {.strip_literals}) and whether `#`
+      #   opens a line comment. MySQL quote flags reflect session sql_mode.
       # @return [String] a new string with comments removed and every string
       #   literal replaced by `''`
       # @raise [ArgumentError] if an unsupported dialect is provided
-      def self.strip_noise(sql, dialect: :postgres) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity,Metrics/AbcSize
+      def self.strip_noise(sql, dialect: :postgres, ansi_quotes: false, no_backslash_escapes: false) # rubocop:disable Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity,Metrics/AbcSize
         unless SUPPORTED_DIALECTS.include?(dialect)
           raise ArgumentError, "Unknown dialect #{dialect.inspect}. Supported: #{SUPPORTED_DIALECTS.inspect}"
         end
@@ -118,7 +134,11 @@ module Woods
           ch = sql[i]
 
           if ch == "'"
-            close = single_quote_end(sql, i, mysql: mysql)
+            close = single_quote_end(
+              sql, i,
+              backslash_escapes: (mysql && !no_backslash_escapes) ||
+                (dialect == :postgres && postgres_escape_string?(sql, i))
+            )
             if close
               out << "''"
               i = close
@@ -127,16 +147,33 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ['"', '`'].include?(ch)
-            close = quoted_identifier_end(sql, i, ch)
+          elsif ch == '"'
+            close = quoted_span_end(sql, i, quote: '"',
+                                            backslash_escapes: mysql && !ansi_quotes && !no_backslash_escapes)
             if close
+              # MySQL parses double quotes as strings unless ANSI_QUOTES is
+              # enabled. Treating them as literals prevents a `#` inside the
+              # value from hiding live SQL. PostgreSQL uses them for
+              # identifiers, which must remain visible to table/column scans.
+              out << double_quote_replacement(sql, i, close, mysql: mysql && !ansi_quotes)
+              i = close
+            else
+              out << ch
+              i += 1
+            end
+          elsif (mysql || dialect == :sqlite) && ch == '`'
+            close = quoted_span_end(sql, i, quote: '`', backslash_escapes: false)
+            if close
+              # Backticks delimit identifiers. Preserve the token for table
+              # and protected-column scans while shielding comment markers
+              # inside it from the noise scanner.
               out << sql[i...close]
               i = close
             else
               out << ch
               i += 1
             end
-          elsif dialect != :sqlite && ch == '$' && (tag = dollar_tag_at(sql, i))
+          elsif dialect == :postgres && ch == '$' && !preceded_by_word_char?(sql, i) && (tag = dollar_tag_at(sql, i))
             close = sql.index(tag, i + tag.length)
             if close
               out << "''"
@@ -145,14 +182,33 @@ module Woods
               out << ch
               i += 1
             end
-          elsif ch == '-' && sql[i + 1] == '-'
+          elsif dash_comment?(sql, i, mysql: mysql) || (mysql && ch == '#')
             nl = sql.index("\n", i)
             i = nl || len
-          elsif ch == '/' && sql[i + 1] == '*'
-            close = sql.index('*/', i + 2)
+          elsif sql[i, 3] == '/*!' || sql[i, 4] == '/*M!'
+            close = block_comment_end(sql, i, nested: dialect == :postgres)
             if close
-              out << ' '
-              i = close + 2
+              comment = sql[i...close]
+              yield comment if block_given?
+              # An executable comment is a lexical boundary even when its
+              # version guard makes its body inert. A quote in that body must
+              # never change the scanner's state outside the comment.
+              out << comment
+              i = close
+            else
+              out << ch
+              i += 1
+            end
+          elsif ch == '/' && sql[i + 1] == '*'
+            close = block_comment_end(sql, i, nested: dialect == :postgres)
+            if close
+              # Preserve a newline in place of the removed comment, mirroring
+              # line comments (see class docs): callers that check for
+              # statement structure (SqlValidator's statement-leader scan)
+              # need a survivable marker showing a comment sat here, the
+              # same way a `--`/`#` comment's own trailing newline does.
+              out << "\n"
+              i = close
             else
               # Unterminated block comment: never under-detect. Leave it in
               # place (over-detection is safe; the old regex also required a
@@ -169,22 +225,38 @@ module Woods
         out
       end
 
-      # Preserve quoted identifiers while shielding their comment markers.
-      # @api private
-      def self.quoted_identifier_end(sql, start, quote)
-        i = start + 1
-        while i < sql.length
-          if sql[i] == quote
-            return i + 1 unless sql[i + 1] == quote
+      def self.block_comment_end(sql, start, nested:)
+        depth = 1
+        position = start + 2
+        while (match = %r{/\*|\*/}.match(sql, position))
+          depth += 1 if nested && match[0] == '/*'
+          depth -= 1 if match[0] == '*/'
+          return match.end(0) if depth.zero?
 
-            i += 2
-          else
-            i += 1
-          end
+          position = match.end(0)
         end
         nil
       end
-      private_class_method :quoted_identifier_end
+      private_class_method :block_comment_end
+
+      # Session modes change MySQL quoting without changing the adapter name.
+      # Security consumers must reject SQL unsafe under any supported combination.
+      MYSQL_QUOTE_MODES = [false, true].product([false, true]).map do |ansi, no_backslash|
+        { ansi_quotes: ansi, no_backslash_escapes: no_backslash }.freeze
+      end.freeze
+
+      def self.security_views(sql, dialect:, mysql_modes: nil)
+        modes = dialect == :mysql && mysql_modes.nil? ? MYSQL_QUOTE_MODES : [mysql_modes || {}]
+        modes.map { |mode| strip_noise(sql, dialect: dialect, **mode) }.uniq
+      end
+
+      # MySQL requires whitespace/control after --; otherwise it is subtraction.
+      def self.dash_comment?(sql, index, mysql:)
+        return false unless sql[index, 2] == '--'
+
+        !mysql || sql[index + 2].nil? || sql[index + 2].match?(/[[:space:][:cntrl:]]/)
+      end
+      private_class_method :dash_comment?
 
       # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
       # `$tag$`) at the start of the given slice.
@@ -200,29 +272,69 @@ module Woods
       end
       private_class_method :dollar_tag_at
 
+      # Whether the character immediately before +index+ is a word character
+      # (`\w`). PostgreSQL allows `$` inside identifiers (`x$a$`), so a `$`
+      # is only a candidate dollar-quote opener when it does NOT follow an
+      # identifier character — otherwise `x$a$ FROM blocked, (SELECT 1 AS
+      # z$a$)` gets misread as one dollar-quoted literal spanning the real
+      # FROM clause.
+      #
+      # @api private
+      def self.preceded_by_word_char?(sql, index)
+        index.positive? && sql[index - 1].match?(/\w/)
+      end
+      private_class_method :preceded_by_word_char?
+
       # Return the index just past the closing quote of the single-quoted
       # literal that opens at +start+, honoring `''` (both dialects) and `\'`
       # (MySQL only) escapes. Returns nil when the literal is unterminated.
       #
       # @api private
-      def self.single_quote_end(sql, start, mysql:)
+      def self.single_quote_end(sql, start, backslash_escapes:)
+        quoted_span_end(sql, start, quote: "'", backslash_escapes: backslash_escapes)
+      end
+      private_class_method :single_quote_end
+
+      def self.double_quote_replacement(sql, start, close, mysql:)
+        mysql ? "''" : sql[start...close]
+      end
+      private_class_method :double_quote_replacement
+
+      # Return the index just past a quoted span. Doubled delimiters escape
+      # themselves in every supported dialect; MySQL strings/identifiers and
+      # PostgreSQL E-strings additionally honor backslash escapes.
+      #
+      # @api private
+      def self.quoted_span_end(sql, start, quote:, backslash_escapes:)
         i = start + 1
         len = sql.length
         while i < len
           c = sql[i]
-          if mysql && c == '\\'
+          if backslash_escapes && c == '\\'
             i += 2
-          elsif c == "'"
-            return i + 1 unless sql[i + 1] == "'" # closing quote
+          elsif c == quote
+            return i + 1 unless sql[i + 1] == quote # closing delimiter
 
-            i += 2 # doubled-quote escape — literal continues
+            i += 2 # doubled-delimiter escape — span continues
           else
             i += 1
           end
         end
         nil
       end
-      private_class_method :single_quote_end
-    end
+      private_class_method :quoted_span_end
+
+      # PostgreSQL E'...' strings opt into C-style backslash escapes. The E
+      # must begin a token; an identifier ending in e immediately before a
+      # quote is not an escape-string prefix.
+      #
+      # @api private
+      def self.postgres_escape_string?(sql, quote_index)
+        return false unless quote_index.positive? && sql[quote_index - 1].match?(/[eE]/)
+
+        quote_index < 2 || !sql[quote_index - 2].match?(/[A-Za-z0-9_$]/)
+      end
+      private_class_method :postgres_escape_string?
+    end # rubocop:enable Metrics/ModuleLength
   end
 end

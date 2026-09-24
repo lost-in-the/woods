@@ -24,7 +24,7 @@ module Woods
     #   validator.validate!('DELETE FROM users')            # raises SqlValidationError
     #   validator.valid?('SELECT 1')                       # => true
     #
-    class SqlValidator
+    class SqlValidator # rubocop:disable Metrics/ClassLength -- dialect views and delimiter checks supplement legacy validation
       # Forbidden statement prefixes (case-insensitive).
       #
       # Expanded beyond DML/DDL to cover:
@@ -97,15 +97,19 @@ module Woods
       end.freeze
 
       # @param dialect [Symbol, nil] Known connection dialect, when available
-      def initialize(dialect: nil)
+      def initialize(dialect: nil, mysql_modes: nil)
         @dialect = dialect
+        @mysql_modes = mysql_modes
       end
+
+      KNOWN_DIALECTS = %i[postgres mysql sqlite].freeze
 
       # @raise [SqlValidationError] if the SQL is not a safe read-only statement
       def validate!(sql)
         raise SqlValidationError, 'SQL is empty' if sql.nil? || sql.strip.empty?
 
         normalized = sql.strip
+        check_balanced_delimiters!(normalized)
         SqliteReadGuard.validate!(normalized) if @dialect == :sqlite
 
         # Reject multiple statements (semicolons not inside string literals)
@@ -147,14 +151,44 @@ module Woods
 
       private
 
+      def validation_views(sql)
+        dialects = @dialect ? [@dialect] : KNOWN_DIALECTS
+        dialects.flat_map do |dialect|
+          modes = if dialect == :mysql
+                    @mysql_modes ? [@mysql_modes] : SqlNoiseStripper::MYSQL_QUOTE_MODES
+                  else
+                    [{}]
+                  end
+          modes.map do |mode|
+            SqlNoiseStripper.strip_noise(sql, dialect: dialect, **mode) do |comment|
+              next unless comment.match?(/['"`$\\]/)
+
+              raise SqlValidationError,
+                    'Rejected: quoted executable comments have ambiguous SQL grammar; use ordinary SQL.'
+            end
+          end
+        end
+      end
+
+      def check_balanced_delimiters!(sql)
+        validation_views(sql).each do |stripped|
+          depth = 0
+          stripped.scan(/"(?:[^"]|"")*"|`(?:[^`]|``)*`|''|[()]/).each do |token|
+            depth += 1 if token == '('
+            depth -= 1 if token == ')'
+            raise SqlValidationError, 'Rejected: unbalanced SQL parentheses' if depth.negative?
+          end
+          raise SqlValidationError, 'Rejected: unbalanced SQL parentheses' unless depth.zero?
+        end
+      end
+
       # Check if the SQL contains multiple statements separated by semicolons.
       # Strips SQL comments and string literals before checking.
       #
       # @param sql [String]
       # @return [Boolean]
       def contains_multiple_statements?(sql)
-        stripped = SqlNoiseStripper.strip_noise(sql, dialect: @dialect || :postgres)
-        stripped.include?(';')
+        validation_views(sql).any? { |stripped| stripped.include?(';') }
       end
 
       # Check if the SQL starts with a forbidden keyword.
@@ -192,7 +226,12 @@ module Woods
       # @param sql [String]
       # @raise [SqlValidationError] if a dangerous function is found
       def check_dangerous_functions!(sql)
-        view = SqlNoiseStripper.strip_noise(sql, dialect: @dialect || :postgres)
+        validation_views(sql).each do |view|
+          check_dangerous_functions_in_view!(view)
+        end
+      end
+
+      def check_dangerous_functions_in_view!(view)
         view.scan(/(?:"([^"\n]+)"|`([^`]+)`|\b([a-z_][a-z0-9_]*))\s*\(/i) do |quoted, backtick, bare|
           func = (quoted || backtick || bare).downcase
           next unless DANGEROUS_FUNCTIONS.include?(func)

@@ -3,6 +3,9 @@
 require 'json'
 require 'woods/mcp/http_transport_options'
 require 'woods/observability/structured_logger'
+require 'woods/mcp/bearer_auth'
+require 'woods/mcp/origin_guard'
+require 'rack/request'
 
 module Woods
   module Console
@@ -66,7 +69,7 @@ module Woods
     # If your threat model requires stricter isolation, use the bridge mode instead
     # (docs/CONSOLE_MCP_SETUP.md) which runs the executor in a separate process.
     #
-    class RackMiddleware
+    class RackMiddleware # rubocop:disable Metrics/ClassLength -- mount-local authentication precedes legacy construction
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the MCP endpoint (default: '/mcp/console')
       # @param embedded_read_tools [Boolean] Enable sql/query tools in embedded mode (default: false)
@@ -108,10 +111,32 @@ module Woods
         return @app.call(env) unless env['PATH_INFO'].start_with?(@path)
         return [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]] unless enabled?
 
-        ensure_transport.handle_request(Rack::Request.new(env))
+        guarded_request.call(env)
       end
 
       private
+
+      # A manual mount may run before the railtie's guards. Resolve current
+      # configuration on every request before constructing a transport.
+      def guarded_request
+        config = Woods.configuration
+        token = config.console_mcp_token.to_s
+        authenticated = if token.length >= Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH
+                          Woods::MCP::BearerAuth.new(method(:handle_request), token: token)
+                        else
+                          ->(_env) { unauthorized_response }
+                        end
+        Woods::MCP::OriginGuard.new(authenticated, allowed_origins: Array(config.console_mcp_allowed_origins))
+      end
+
+      def unauthorized_response
+        [401, { 'content-type' => 'application/json', 'www-authenticate' => 'Bearer realm="woods-mcp-http"' },
+         [Woods::MCP::BearerAuth::UNAUTHORIZED_BODY]]
+      end
+
+      def handle_request(env)
+        ensure_transport.handle_request(Rack::Request.new(env))
+      end
 
       def enabled?
         Woods.configuration.console_mcp_enabled

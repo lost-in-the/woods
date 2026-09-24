@@ -35,13 +35,16 @@ RSpec.describe 'Console HTTP allowlist integration', :booted_app do
     FileUtils.remove_entry(@root)
   end
 
-  def dispatch(origins, host: 'console.example.invalid', origin: 'https://console.example.invalid', authenticated: true)
+  def dispatch(origins, host: 'console.example.invalid', origin: 'https://console.example.invalid', authenticated: true, # rubocop:disable Metrics/MethodLength -- exercises both real guarded Rack stacks
+               manual_mount: false)
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.console_mcp_enabled = true
     Woods.configuration.console_mcp_allowed_origins = origins
     middleware = Woods::Console::RackMiddleware.new(->(_env) { [404, {}, []] })
     token = 'synthetic-console-http-fixture-long-token'
+    Woods.configuration.console_mcp_token = token
     app = Woods::MCP::OriginGuard.new(Woods::MCP::BearerAuth.new(middleware, token: token), allowed_origins: origins)
+    app = Woods::Console::RackMiddleware.new(app) if manual_mount
     payload = JSON.generate(jsonrpc: '2.0', id: 1, method: 'initialize', params: {
                               protocolVersion: '2025-03-26', capabilities: {},
                               clientInfo: { name: 'console-http-fixture', version: '1' }
@@ -78,5 +81,13 @@ RSpec.describe 'Console HTTP allowlist integration', :booted_app do
     args = { host: 'localhost:9292', origin: 'http://localhost:3000' }
     expect(dispatch(['http://localhost'], **args)).to eq(403)
     expect(dispatch(['http://localhost:3000'], **args)).to eq(200)
+  end
+
+  it 'guards a manual mount preceding the outer guards using the real SDK' do
+    origins = ['https://console.example.invalid']
+    expect(dispatch(origins, manual_mount: true)).to eq(200)
+    expect(dispatch(origins, manual_mount: true, authenticated: false)).to eq(401)
+    expect(dispatch(origins, manual_mount: true, origin: 'https://foreign.invalid')).to eq(403)
+    expect(dispatch(origins, manual_mount: true, host: 'foreign.invalid')).to eq(403)
   end
 end

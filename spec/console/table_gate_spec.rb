@@ -195,12 +195,12 @@ RSpec.describe Woods::Console::TableGate do
 
       it 'ignores blocked names hidden inside a PG dollar-quoted literal' do
         sql = 'SELECT $tag$FROM authorizations$tag$ AS literal FROM users'
-        expect { gate.check_sql!(sql) }.not_to raise_error
+        expect { gate.check_sql!(sql, dialect: :postgres) }.not_to raise_error
       end
 
       it 'ignores blocked names hidden inside an unnamed dollar-quoted literal' do
         sql = 'SELECT $$FROM authorizations$$ AS literal FROM users'
-        expect { gate.check_sql!(sql) }.not_to raise_error
+        expect { gate.check_sql!(sql, dialect: :postgres) }.not_to raise_error
       end
 
       it 'rejects a blocked table inside a CTE body' do

@@ -12,6 +12,8 @@ require_relative 'scope_predicate_parser'
 require_relative 'sql_noise_stripper'
 require_relative 'sql_validator'
 require_relative 'table_gate'
+require_relative 'adapter_family'
+require_relative 'sql_output_policy'
 
 module Woods
   module Console
@@ -29,6 +31,8 @@ module Woods
     #   # => { 'ok' => true, 'result' => { 'count' => 42 }, 'timing_ms' => 1.2 }
     #
     class EmbeddedExecutor # rubocop:disable Metrics/ClassLength
+      include SqlOutputPolicy
+
       AGGREGATE_FUNCTIONS = %w[sum average minimum maximum count].freeze
 
       TIER1_TOOLS = BridgeProtocol::TIER1_TOOLS
@@ -47,6 +51,7 @@ module Woods
 
       # @param model_validator [ModelValidator] Validates model/column names
       # @param safe_context [SafeContext] Wraps execution in rolled-back transaction
+      # @param redaction_context [SafeContext, nil] Output policy supplied by the server renderer
       # @param connection [Object, nil] Database connection for adapter detection
       # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
       # @param table_gate [TableGate, nil] Enforces console_blocked_tables on every
@@ -69,9 +74,10 @@ module Woods
       #   refusal as before.
       def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false, # rubocop:disable Metrics/ParameterLists
                      table_gate: nil, eval_guard: nil, confirmation: nil, audit_logger: nil,
-                     unsafe_eval_enabled: false)
+                     unsafe_eval_enabled: false, redaction_context: nil)
         @model_validator = model_validator
         @safe_context = safe_context
+        @redaction_context = redaction_context || safe_context
         @connection = connection
         @read_tools_enabled = read_tools_enabled
         @table_gate = table_gate
@@ -427,7 +433,7 @@ module Woods
 
         begin
           SqliteReadGuard.validate!(sql) if sql_dialect == :sqlite
-          @table_gate.check_sql!(sql, dialect: sql_dialect == :sqlite ? :sqlite : nil)
+          @table_gate.check_sql!(sql, dialect: sql_dialect)
         rescue TableGateError, SqlValidationError => e
           raise ValidationError, e.message
         end
@@ -546,11 +552,7 @@ module Woods
       end
 
       def sql_dialect
-        name = active_connection.adapter_name.to_s.downcase
-        return :sqlite if name.include?('sqlite')
-        return :mysql if name.include?('mysql')
-
-        :postgres
+        AdapterFamily.for(active_connection)
       end
 
       def gate_association!(model_name, association)
@@ -594,6 +596,7 @@ module Woods
         limit = [params.fetch('limit', 10).to_i, 50].min
 
         @model_validator.validate_column!(params['model'], order_by)
+        refuse_protected_predicate_column!(order_by)
         direction = 'desc' unless %w[asc desc].include?(direction)
 
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -622,18 +625,25 @@ module Woods
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
         require_relative 'sql_validator'
-        SqlValidator.new(dialect: sql_dialect).validate!(sql)
-        # Post-validation, pre-execution TableGate — blocks every configured
-        # table even if the sql is otherwise well-formed.
-        gate_sql!(sql)
+        validate_sql_policy!(sql)
 
         limit = params['limit'] ? [params['limit'].to_i, MAX_SQL_LIMIT].min : nil
-        query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
+        query_sql = limit ? "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{limit}" : sql
+        validate_sql_policy!(query_sql) if limit
         result = active_connection.select_all(query_sql)
+        validate_sql_result_types!(result)
 
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       rescue SqlValidationError => e
         raise ValidationError, e.message
+      end
+
+      def validate_sql_policy!(sql)
+        SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(sql)
+        validate_protected_sql_usage!(sql)
+        # Check both submitted and wrapped SQL against blocked tables before
+        # the exact final statement reaches the adapter.
+        gate_sql!(sql)
       end
 
       # Build and execute a structured ActiveRecord query.
@@ -712,18 +722,18 @@ module Woods
       # @param model_name [String]
       # @return [Array<String>]
       def validated_select(select, model_name)
-        Array(select).flat_map { |s| s.to_s.split(',') }.map do |expr|
+        expressions = Array(select).flat_map { |s| s.to_s.split(',') }.map do |expr|
           validate_select_expression!(expr.strip, model_name)
         end
+        refuse_orphan_eav_value_selection!(expressions)
+        expressions
       end
 
       def validate_select_expression!(expr, model_name)
         match = SAFE_SELECT_EXPR.match(expr)
         raise ValidationError, "Rejected select expression: #{expr.inspect}" unless match
 
-        _fn, fn_arg, bare_col, _alias = match.captures
-        column = bare_col || fn_arg
-        validate_column_reference!(column, model_name) unless column == '*'
+        refuse_redacted_select_shapes!(match.captures, model_name)
         expr
       end
 
@@ -1006,8 +1016,7 @@ module Woods
       #
       # @return [Arel::Nodes::SqlLiteral]
       def random_function
-        adapter = active_connection.adapter_name.downcase
-        func = adapter.include?('mysql') ? 'RAND' : 'RANDOM'
+        func = AdapterFamily.for(active_connection) == :mysql ? 'RAND' : 'RANDOM'
         Arel.sql("#{func}()")
       end
 

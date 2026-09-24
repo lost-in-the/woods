@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'adapter_family'
+
 # Stub for environments that don't load ActiveRecord
 unless defined?(ActiveRecord::Rollback)
   module ActiveRecord
@@ -194,8 +196,12 @@ module Woods
         Thread.current[LEASED_CONNECTION_KEY] = connection
         result = nil
         connection.transaction do
-          set_timeout(connection)
-          result = yield(connection)
+          restore_timeout = set_timeout(connection)
+          begin
+            result = yield(connection)
+          ensure
+            restore_timeout&.call
+          end
           raise ActiveRecord::Rollback
         end
         result
@@ -241,14 +247,16 @@ module Woods
       # request, background job, etc.). Safe here because every #execute
       # is wrapped in a transaction.
       #
-      # MySQL uses `SET max_execution_time` (applies to SELECT only — DDL
-      # and DML statements cannot be time-limited via this variable).
+      # MySQL uses session-scoped `SET max_execution_time` for SELECTs.
+      # Return a callback that restores the previous value before releasing
+      # the pooled connection; rollback alone does not reset this setting.
       def set_timeout(connection, timeout_ms = @timeout_ms)
         adapter = connection.adapter_name.downcase
-        if adapter.include?('mysql')
-          connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
+        if AdapterFamily.for(connection) == :mysql
+          set_mysql_timeout(connection, timeout_ms)
         else
           connection.execute("SET LOCAL statement_timeout = '#{timeout_ms.to_i}ms'")
+          nil
         end
       rescue StandardError => e
         # Unsupported adapter (SQLite, Trilogy on unsupported version, Oracle) —
@@ -257,6 +265,12 @@ module Woods
         # Rails.logger when available; otherwise swallow as before.
         warn_timeout_unsupported(adapter, e)
         nil
+      end
+
+      def set_mysql_timeout(connection, timeout_ms)
+        previous_value = connection.select_value('SELECT @@SESSION.max_execution_time').to_i
+        connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
+        -> { connection.execute("SET max_execution_time = #{previous_value}") }
       end
 
       def warn_timeout_unsupported(adapter, error)

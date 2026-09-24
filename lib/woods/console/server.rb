@@ -176,7 +176,7 @@ module Woods
         # @param unsafe_eval_audit_log_path [String, Pathname, nil] JSONL audit log
         #   path for `console_eval`. Required when the opt-in is on.
         # @return [MCP::Server] Configured server ready for transport
-        def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists
+        def build_embedded(model_validator:, safe_context:, redacted_columns: [], # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
                            redacted_key_values: [], connection: nil,
                            read_tools_enabled: false, model_tables: {},
                            model_reflections: {},
@@ -201,6 +201,7 @@ module Woods
           table_gate = ctx&.table_gate
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_context,
+            redaction_context: safe_ctx,
             connection: connection, read_tools_enabled: read_tools_enabled,
             table_gate: table_gate,
             eval_guard: eval_wiring[:eval_guard],

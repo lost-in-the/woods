@@ -92,4 +92,8 @@ RSpec.describe 'Console SQLite read policy', :booted_app do
     expect(result.fetch('isError')).to be(true)
     expect(result.to_json).not_to include('blocked fixture')
   end
+
+  it 'preserves output policy through real server dispatch' do
+    expect(WoodsConsoleOutputPolicyContract.verify!(@connection)).to eq(:passed)
+  end
 end

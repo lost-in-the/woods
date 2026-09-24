@@ -539,6 +539,16 @@ RSpec.describe Woods::Console::CredentialScanner do
       expect(counts[:credential_index]).to eq(1)
     end
 
+    it 'redacts the whole longer indexed credential in nested response data' do
+      index = Woods::Console::CredentialIndex.new(secrets: %w[synthetic_secret synthetic_secret_suffix])
+      scanner = described_class.new(secret_index: index)
+
+      value, counts = scanner.scan('record' => { 'note' => ['synthetic_secret_suffix'] })
+
+      expect(value).to eq('record' => { 'note' => ['[REDACTED:credential]'] })
+      expect(counts[:credential_index]).to eq(1)
+    end
+
     it 'still applies shape patterns to other strings in the same scan' do
       scanner = described_class.new(secret_index: secret_index)
       value, counts = scanner.scan(

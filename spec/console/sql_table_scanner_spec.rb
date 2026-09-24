@@ -238,7 +238,7 @@ RSpec.describe Woods::Console::SqlTableScanner do
       let(:sql) { 'SELECT $tag$FROM authorizations$tag$ AS literal FROM users' }
 
       it 'does not return identifiers from dollar-quoted literals' do
-        expect(identifiers).not_to include('authorizations')
+        expect(described_class.identifiers_in(sql, dialect: :postgres)).not_to include('authorizations')
       end
 
       it 'still returns the real table' do
@@ -250,7 +250,7 @@ RSpec.describe Woods::Console::SqlTableScanner do
       let(:sql) { 'SELECT $$FROM authorizations$$ AS literal FROM users' }
 
       it 'does not return identifiers from unnamed dollar-quoted literals' do
-        expect(identifiers).not_to include('authorizations')
+        expect(described_class.identifiers_in(sql, dialect: :postgres)).not_to include('authorizations')
       end
     end
 
