@@ -428,7 +428,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
         run = lambda do
           case mode
           when :full then runner.extract_all
-          when :incremental then runner.extract_changed(%w[config/application.rb config/routes.rb])
+          when :incremental then runner.extract_changed(['config/routes.rb'])
           when :refresh then runner.refresh(:middleware, :routes)
           end
         end

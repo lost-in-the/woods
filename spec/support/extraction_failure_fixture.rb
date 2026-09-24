@@ -9,8 +9,8 @@ RSpec.shared_context 'published extraction failure fixture' do
   let(:output_dir) { File.join(@app_root, 'index') }
   let(:extractor) { Woods::Extractor.new(output_dir: output_dir) }
   let(:generation) { Woods::Generation.new(output_dir: output_dir) }
-  let(:changed_paths) { %w[config/application.rb config/recurring.yml] }
-  let(:middleware_consumer) { double('MiddlewareExtractor') }
+  let(:changed_paths) { %w[config/routes.rb config/recurring.yml] }
+  let(:route_consumer) { double('RouteExtractor') }
   let(:schedule_consumer) { double('ScheduledJobExtractor') }
   let(:schedule_class) { double('ScheduledJobExtractorClass', new: schedule_consumer) }
 
@@ -29,11 +29,11 @@ RSpec.shared_context 'published extraction failure fixture' do
     Woods.configuration.enable_snapshots = false
     Woods.configuration.output_dir = output_dir
     stub_const('Woods::Extractor::EXTRACTORS', {
-                 middleware: double('MiddlewareExtractorClass', new: middleware_consumer),
+                 routes: double('RouteExtractorClass', new: route_consumer),
                  scheduled_jobs: schedule_class
                })
-    allow(middleware_consumer).to receive(:extract_all) {
-      [fixture_unit(:middleware, 'Middleware', changed_paths.first)]
+    allow(route_consumer).to receive(:extract_all) {
+      [fixture_unit(:route, 'RouteFixture', changed_paths.first)]
     }
     allow(schedule_consumer).to receive(:extract_all) {
       [fixture_unit(:scheduled_job, 'scheduled:fixture', changed_paths.last)]
@@ -75,7 +75,7 @@ RSpec.shared_context 'published extraction failure fixture' do
   def expect_complete_retry
     expect(generation.current.token).not_to eq(@previous_token)
     reader = Woods::MCP::IndexReader.new(output_dir)
-    expect(reader.find_unit('Middleware', type: 'middleware').fetch('source_code')).to eq("# changed\n")
+    expect(reader.find_unit('RouteFixture', type: 'route').fetch('source_code')).to eq("# changed\n")
     expect(reader.find_unit('scheduled:fixture', type: 'scheduled_job').fetch('source_code')).to eq("# changed\n")
   end
 end

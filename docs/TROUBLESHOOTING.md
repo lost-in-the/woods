@@ -488,6 +488,16 @@ earlier log line naming the failed extractor, fix its cause, then retry the
 complete changed-file list or refresh selection. Preserve the published index;
 deleting it does not repair the failing extractor.
 
+### Incremental extraction reports "Restart-sensitive inputs"
+
+On revisions containing #588 (unreleased after `2.0.0`), the direct incremental
+API and optional embedded pipeline refuse schema or boot-configuration inputs.
+Apply required migrations, then run `bin/rails woods:extract` in a fresh Rails
+process. Reusing an embedded server's old Rails configuration or schema cache
+cannot establish current runtime facts. The fresh one-shot `woods:incremental`
+task selects a full run automatically for these inputs. See the
+[runtime input contract](INCREMENTAL_EXTRACTION.md#what-a-change-actually-requires-reload-restart-or-neither).
+
 ---
 
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
