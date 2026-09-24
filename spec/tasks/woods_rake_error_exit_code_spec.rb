@@ -77,6 +77,42 @@ RSpec.describe 'embedding and export task exit codes on reported errors' do
     RUBY
   end
 
+  def unblocked_fixture(stats:, preview: false)
+    <<~RUBY
+      require 'woods/unblocked/exporter'
+      Woods.configuration.unblocked_api_token = 'offline'
+      Woods.configuration.unblocked_collection_id = 'ours'
+      Woods.configuration.unblocked_repo_url = 'https://example.test/app'
+      ENV['UNBLOCKED_DRY_RUN'] = #{preview.to_s.inspect}
+      ENV['UNBLOCKED_MIGRATE_FROM_REF'] = 'old-branch'
+      class Woods::Unblocked::Exporter
+        def initialize(index_dir:, force_full:, force_purge:, dry_run:, migrate_from_ref:)
+          raise 'wrong preview flag' unless dry_run == #{preview}
+          raise 'wrong source ref' unless migrate_from_ref == 'old-branch'
+        end
+        def sync_all = #{stats.inspect}
+      end
+    RUBY
+  end
+
+  describe 'woods:unblocked_sync' do
+    it 'shows a machine-readable preview without claiming a completed sync' do
+      fixture = unblocked_fixture(preview: true, stats: { dry_run: true, complete: false, migration: [] })
+      out, err, status = run_task('woods:unblocked_sync', fixture)
+      expect(status).to be_success, "#{out}\n#{err}"
+      expect(out).to include('Sync preview', '"migration": []')
+      expect(out).not_to include('Sync complete!')
+    end
+
+    it 'fails incomplete cleanup even when no remote error was reported' do
+      fixture = unblocked_fixture(stats: { synced: 0, skipped: 12, deleted: 0, errors: [], complete: false })
+      out, _err, status = run_task('woods:unblocked_sync', fixture)
+      expect(status.exitstatus).to eq(1)
+      expect(out).to include('Sync incomplete')
+      expect(out).not_to include('Sync complete!')
+    end
+  end
+
   describe 'woods:embed' do
     it 'exits non-zero when the indexer reports errors' do
       out, err, status = run_task('woods:embed', embed_fixture(errors: 7))

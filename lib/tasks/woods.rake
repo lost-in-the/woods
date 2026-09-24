@@ -730,6 +730,8 @@ namespace :woods do
     env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
     force_full = env_flag.call('UNBLOCKED_FORCE_FULL_SYNC')
     force_purge = env_flag.call('UNBLOCKED_FORCE_PURGE')
+    dry_run = env_flag.call('UNBLOCKED_DRY_RUN')
+    migrate_from_ref = ENV.fetch('UNBLOCKED_MIGRATE_FROM_REF', nil)
 
     puts 'Syncing extraction data to Unblocked...'
     puts "  Output dir:     #{output_dir}"
@@ -741,12 +743,19 @@ namespace :woods do
     exporter = Woods::Unblocked::Exporter.new(
       index_dir: output_dir,
       force_full: force_full,
-      force_purge: force_purge
+      force_purge: force_purge,
+      dry_run: dry_run,
+      migrate_from_ref: migrate_from_ref
     )
     stats = exporter.sync_all
 
     puts
-    puts 'Sync complete!'
+    if stats[:dry_run]
+      puts 'Sync preview (no remote requests or local writes):'
+      puts JSON.pretty_generate(stats)
+      next
+    end
+    puts(stats[:complete] == false ? 'Sync incomplete; re-run after resolving the reported condition.' : 'Sync complete!')
     puts "  Documents synced:   #{stats[:synced]}"
     puts "  Documents skipped:  #{stats[:skipped]}"
     puts "  Documents deleted:  #{stats[:deleted]}"
@@ -771,6 +780,7 @@ namespace :woods do
         exit 1
       end
     end
+    exit 1 if stats[:complete] == false && stats[:errors].empty?
   end
 
   desc 'Relay findings to Unblocked (alias for unblocked_sync)'

@@ -446,6 +446,17 @@ RSpec.describe Woods::Unblocked::Client do
   end
 
   describe '#list_documents' do
+    it 'refuses malformed inventory pages instead of claiming an empty collection' do
+      stub_http_sequence({ 'unexpected' => [] })
+      expect { client.all_documents(collection_id: nil) }.to raise_error(Woods::Error, /incomplete.*malformed/)
+    end
+
+    it 'refuses repeated cursors instead of returning a partial inventory' do
+      page = [{ 'id' => 'repeat', 'uri' => 'known' }]
+      stub_http_sequence(page, page)
+      expect { client.all_documents(collection_id: nil) }.to raise_error(Woods::Error, /incomplete.*repeated/)
+    end
+
     it 'sends a GET to /documents with the limit and returns the array' do
       paths = stub_http_sequence([{ 'id' => 'd1', 'uri' => 'u1' }])
 
@@ -471,13 +482,13 @@ RSpec.describe Woods::Unblocked::Client do
   end
 
   describe '#all_documents' do
-    it 'pages via the after cursor until a short page and filters by collection' do
+    it 'pages through short pages until empty and filters by collection' do
       page1 = (1..200).map { |i| { 'id' => "d#{i}", 'uri' => "u#{i}", 'collectionId' => 'col-1' } }
       page2 = [
         { 'id' => 'd201', 'uri' => 'u201', 'collectionId' => 'col-1' },
         { 'id' => 'd202', 'uri' => 'u202', 'collectionId' => 'other' }
       ]
-      paths = stub_http_sequence(page1, page2)
+      paths = stub_http_sequence(page1, page2, [])
 
       result = client.all_documents(collection_id: 'col-1')
 
@@ -485,23 +496,24 @@ RSpec.describe Woods::Unblocked::Client do
       expect(result.size).to eq(201)
       expect(result.map { |d| d['collectionId'] }.uniq).to eq(['col-1'])
       # second request carried the last id of page1 as the cursor
-      expect(paths.size).to eq(2)
-      expect(paths.last).to include('after=d200')
+      expect(paths.size).to eq(3)
+      expect(paths[1]).to include('after=d200')
+      expect(paths.last).to include('after=d202')
     end
 
-    it 'stops after a single short page' do
-      paths = stub_http_sequence([{ 'id' => 'd1', 'uri' => 'u1', 'collectionId' => 'col-1' }])
+    it 'requests an empty page to establish the end of a short inventory' do
+      paths = stub_http_sequence([{ 'id' => 'd1', 'uri' => 'u1', 'collectionId' => 'col-1' }], [])
       result = client.all_documents(collection_id: 'col-1')
       expect(result.size).to eq(1)
-      expect(paths.size).to eq(1)
+      expect(paths.size).to eq(2)
     end
 
-    it 'stops rather than looping when a full page has no cursor id' do
+    it 'refuses an incomplete inventory when a page has no cursor id' do
       # A full page whose last item lacks 'id' would otherwise refetch page 1 forever.
       page = (1..200).map { |i| { 'uri' => "u#{i}", 'collectionId' => 'col-1' } }
       paths = stub_http_sequence(page, page)
-      result = client.all_documents(collection_id: 'col-1')
-      expect(result.size).to eq(200)
+      expect { client.all_documents(collection_id: 'col-1') }
+        .to raise_error(Woods::Error, /inventory incomplete/)
       expect(paths.size).to eq(1)
     end
   end

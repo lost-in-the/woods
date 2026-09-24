@@ -8,6 +8,7 @@ require_relative 'client'
 require_relative 'rate_limiter'
 require_relative 'document_builder'
 require_relative 'sync_manifest'
+require_relative 'uri_migration'
 require_relative '../export/typed_reader'
 
 module Woods
@@ -20,7 +21,7 @@ module Woods
     # remote document_id of everything last pushed, so each run only PUTs
     # new/changed documents, skips unchanged ones, and deletes documents whose
     # source unit has disappeared. Documents are upserted by URI, so a missing
-    # manifest (first run / CI cache miss) degrades to a correct full sync.
+    # manifest rebuilds current receipts without adopting remote deletion rights.
     #
     # @example
     #   exporter = Exporter.new(index_dir: "tmp/woods")
@@ -61,7 +62,8 @@ module Woods
       # @param output [IO] Progress output stream (default: $stdout)
       # @raise [ConfigurationError] if required config is missing
       def initialize(index_dir:, config: Woods.configuration, client: nil, reader: nil,
-                     manifest: nil, force_full: false, force_purge: false, output: $stdout)
+                     manifest: nil, force_full: false, force_purge: false, output: $stdout,
+                     migrate_from_ref: nil, dry_run: false)
         @collection_id = config.unblocked_collection_id
         raise ConfigurationError, 'unblocked_collection_id is required' unless @collection_id
 
@@ -80,7 +82,9 @@ module Woods
         # Cite the ref the index was actually extracted from. `main` was
         # hardcoded, so citations on a `master`-default repo pointed at a
         # branch that need not exist.
-        @builder = DocumentBuilder.new(repo_url: repo_url, ref: extracted_ref)
+        @repo_url = repo_url.chomp('/')
+        @migrate_from_ref = migrate_from_ref
+        @dry_run = dry_run
         @manifest = manifest || build_manifest(index_dir)
         @force_full = force_full
         @force_purge = force_purge
@@ -99,11 +103,13 @@ module Woods
       # @return [Hash] { synced:, skipped:, deleted:, errors: }
       def sync_all
         prepared = false
+        @stats = nil
         with_prepared_index do
           prepared = true
           @current_uris = Set.new
+          @attempted_uris = Set.new
           @budget_exhausted = false
-          reconcile_from_remote if @manifest.empty?
+          return preview if @dry_run
 
           synced = 0
           skipped = 0
@@ -128,11 +134,27 @@ module Woods
             errors.concat(result[:errors])
           end
 
-          deleted = @budget_exhausted || @ambiguous_uris.any? ? 0 : purge_stale(errors)
-          { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors) }
+          unless @budget_exhausted || errors.any?
+            pending = @migration.plan.map { |move| move['new_uri'] }.compact.to_set - @attempted_uris
+            replacements = @published_units.select { |unit| unit['file_path'] && pending.include?(effective_uri(unit)) }
+            result = sync_unit_data(replacements.map { |unit| [unit, unit] })
+            synced += result[:synced]
+            skipped += result[:skipped]
+            errors.concat(result[:errors])
+          end
+
+          deleted = 0
+          unless @budget_exhausted || @ambiguous_uris.any? || errors.any?
+            deleted = purge_stale(errors)
+            deleted += @migration.cleanup(current_uris: @current_uris, errors: errors,
+                                          replacement_hashes: migration_hashes, remote_documents: @remote_documents,
+                                          collection_id: @collection_id)
+          end
+          @stats = { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors),
+                     complete: errors.empty? && !@budget_exhausted && @migration.plan.empty? }
         end
       ensure
-        save_manifest if prepared
+        save_manifest if prepared && !@dry_run
       end
 
       # Sync all units of a given type.
@@ -141,6 +163,8 @@ module Woods
       # @return [Hash] { synced:, skipped:, errors: }
       def sync_type(type)
         with_prepared_index do
+          return preview if @dry_run
+
           units = units_for(type)
           log "  #{type}: #{units.size} units"
 
@@ -155,6 +179,8 @@ module Woods
       # @return [Hash] { synced:, skipped:, errors: }
       def sync_type_partial(type, max_count)
         with_prepared_index do
+          return preview if @dry_run
+
           units = units_for(type)
           units.each { |unit| track_uri(unit) }
           top = units.sort_by { |unit| -(unit['dependents'] || []).size }.first(max_count)
@@ -173,8 +199,19 @@ module Woods
         return yield if @prepared_index
 
         with_pinned_index do
+          @builder = DocumentBuilder.new(repo_url: @repo_url, ref: extracted_ref)
           @published_units = @typed_reader.all
           build_uri_index
+          @manifest.activate_scope(repo_url: @repo_url, ref: @builder.ref,
+                                   current_uris: @published_units.filter_map do |unit|
+                                     effective_uri(unit) if unit['file_path']
+                                   end)
+          @migration = UriMigration.new(manifest: @manifest, client: @client, from_ref: @migrate_from_ref,
+                                        replacements: migration_replacements)
+          unless @dry_run
+            inventory = @client.all_documents(collection_id: nil)
+            @remote_documents = inventory.to_h { |doc| [doc.fetch('uri'), doc] }
+          end
           @prepared_index = true
           begin
             yield
@@ -217,6 +254,7 @@ module Woods
 
         entries_with_data.each do |entry, unit_data|
           track_uri(unit_data)
+          (@attempted_uris ||= Set.new).add(effective_uri(unit_data)) if unit_data['file_path']
           if push_document(unit_data) == :skipped
             skipped += 1
           else
@@ -252,6 +290,10 @@ module Woods
         # keeps it, the rest get a `?unit=` suffix so each is a distinct remote
         # document (and a distinct manifest key).
         uri = effective_uri(unit_data)
+        remote = @remote_documents && @remote_documents[uri]
+        if remote && remote['collectionId'] != @collection_id
+          raise Woods::ExtractionError, 'export URI belongs to a different remote collection — push refused'
+        end
 
         doc = @builder.build(unit_data)
         # An empty body means the credential scrub failed closed (the builders
@@ -262,7 +304,8 @@ module Woods
         end
 
         hash = fingerprint(doc)
-        return :skipped if !@force_full && @manifest.unchanged?(uri, hash)
+        remote_matches = remote && remote['id'] && remote['id'] == @manifest.document_id_for(uri)
+        return :skipped if !@force_full && remote_matches && @manifest.unchanged?(uri, hash)
 
         response = @client.put_document(
           collection_id: @collection_id,
@@ -270,7 +313,8 @@ module Woods
           body: doc[:body],
           uri: uri
         )
-        document_id = (response['id'] if response.is_a?(Hash)) || @manifest.document_id_for(uri)
+        document_id = (response['id'] if response.is_a?(Hash)) || remote&.fetch('id', nil)
+        @remote_documents[uri] = { 'uri' => uri, 'id' => document_id, 'collectionId' => @collection_id }
         @manifest.record(uri: uri, hash: hash, document_id: document_id)
         :synced
       end
@@ -284,14 +328,31 @@ module Woods
       def purge_stale(errors)
         stale = @manifest.stale_uris(@current_uris)
         return 0 if stale.empty?
-        return 0 if guard_blocks_purge?(stale)
+
+        if guard_blocks_purge?(stale)
+          errors << 'cleanup incomplete: mass-deletion guard refused stale documents'
+          return 0
+        end
 
         resolve_missing_document_ids(stale)
 
         deleted = 0
         stale.each do |uri|
+          remote = @remote_documents[uri]
+          unless remote
+            @manifest.forget(uri)
+            next
+          end
           document_id = @manifest.document_id_for(uri)
-          next unless document_id
+          unless document_id
+            errors << "cleanup incomplete: remote document ID unresolved for #{uri}"
+            next
+          end
+
+          unless remote['id'] == document_id && remote['collectionId'] == @collection_id
+            errors << "cleanup incomplete: remote identity/collection changed for #{uri}"
+            next
+          end
 
           @client.delete_document(document_id: document_id)
           @manifest.forget(uri)
@@ -324,8 +385,8 @@ module Woods
         missing = stale.select { |uri| @manifest.document_id_for(uri).nil? }
         return if missing.empty?
 
-        ids_by_uri = @client.all_documents(collection_id: @collection_id)
-                            .to_h { |doc| [doc['uri'], doc['id']] }
+        ids_by_uri = @remote_documents.values.select { |doc| doc['collectionId'] == @collection_id }
+                                      .to_h { |doc| [doc['uri'], doc['id']] }
         missing.each do |uri|
           id = ids_by_uri[uri]
           @manifest.record(uri: uri, hash: nil, document_id: id) if id
@@ -352,27 +413,47 @@ module Woods
         true
       end
 
-      # Seed the manifest from the remote collection when we have no local
-      # state (first run / CI cache miss). The list endpoint returns no body,
-      # so hashes are nil (everything re-pushes), but recovering document_ids
-      # lets this run still purge orphaned documents.
-      #
-      # Auth failures re-raise: a 401/403 here dooms every subsequent call,
-      # and "proceeding with full sync" would burn the whole daily budget on
-      # guaranteed failures.
-      def reconcile_from_remote
-        @client.all_documents(collection_id: @collection_id).each do |doc|
-          uri = doc['uri']
-          next unless uri
+      # A preview reads published data and local ownership only. It makes no
+      # remote requests and never persists the in-memory migration plan.
+      def preview
+        { synced: 0, skipped: 0, deleted: 0, errors: [], complete: false, dry_run: true,
+          migration: @migration.plan, scope: { repo_url: @repo_url, ref: @builder.ref } }
+      end
 
-          @manifest.record(uri: uri, hash: nil, document_id: doc['id'])
+      def migration_replacements
+        return {} unless @migrate_from_ref
+
+        legacy_builder = DocumentBuilder.new(repo_url: @repo_url, ref: @migrate_from_ref)
+        @published_units.each_with_object({}) do |unit, mapping|
+          next unless unit['file_path']
+          next if @ambiguous_uris.include?(@builder.uri_for(unit))
+
+          old_base = legacy_builder.uri_for(unit)
+          old_raw = old_base.sub("/blob/#{encode_ref(@migrate_from_ref)}/", "/blob/#{@migrate_from_ref}/")
+          suffix = effective_uri(unit).delete_prefix(@builder.uri_for(unit))
+          # A v1 bare URI has no typed owner receipt. A new sibling may now
+          # own that bare URI; do not guess which historical unit it replaced.
+          next if suffix.empty? && @uri_primary.key?(@builder.uri_for(unit))
+
+          [old_base, old_raw].uniq.each { |base| mapping[base + suffix] = effective_uri(unit) }
         end
-      rescue ApiError => e
-        raise if [401, 403].include?(e.status)
+      end
 
-        log "  reconcile skipped (#{e.message}) — proceeding with full sync"
-      rescue StandardError => e
-        log "  reconcile skipped (#{e.message}) — proceeding with full sync"
+      def migration_hashes
+        pending = @migration.plan.map { |move| move['new_uri'] }.compact.to_set
+        @published_units.each_with_object({}) do |unit, hashes|
+          next unless unit['file_path']
+
+          uri = effective_uri(unit)
+          next unless pending.include?(uri)
+
+          document = @builder.build(unit)
+          hashes[uri] = fingerprint(document) unless document[:body].to_s.empty?
+        end
+      end
+
+      def encode_ref(ref)
+        ref.split('/').map { |segment| ERB::Util.url_encode(segment) }.join('/')
       end
 
       def track_uri(unit_data)
@@ -457,14 +538,15 @@ module Woods
         nil
       end
 
-      # Persist the manifest, downgrading failures to a warning: losing the
-      # manifest only costs a full re-check next run, which must not turn an
-      # otherwise-successful sync into a crash (this runs from an ensure, where
-      # a raise would also mask any in-flight exception).
+      # Persist receipts without masking an in-flight exception. A failed save
+      # leaves completion false: cleanup requires durable ownership evidence.
       def save_manifest
         @manifest.save
       rescue StandardError => e
-        log "  WARNING: sync manifest not persisted (#{e.message}) — next run will re-push all documents"
+        message = "sync manifest not persisted: #{e.class}: #{e.message}"
+        @stats[:errors] << message if @stats
+        @stats[:complete] = false if @stats
+        log "  WARNING: #{message} — recover local ownership state before cleanup"
       end
 
       def build_manifest(index_dir)

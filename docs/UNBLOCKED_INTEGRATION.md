@@ -241,11 +241,54 @@ document id of everything last pushed. On each run the exporter:
 - **pushes** only new or changed documents,
 - **deletes** documents whose source unit has disappeared.
 
-Documents are upserted by URI, so the sync is always safe to re-run. If the
-manifest is missing (first run, or a CI cache miss) the exporter reconciles
-document ids from the remote collection and falls back to a full re-push,
-rebuilding the manifest, correct, just more API calls than one run. In steady
-state an unchanged codebase costs ~0 calls.
+Documents are upserted by URI. **Unreleased after 2.0.0:** the manifest keeps
+separate repository/ref scopes; switching branches preserves the other branch's
+documents. Ref segments are URL-encoded, including `#`, `?`, and `%`.
+
+Every sync first inventories remote documents through all pages. A short page
+is not proof of completion; malformed pages or repeated cursors stop before
+writes. This adds listing calls even when all local documents are unchanged.
+URIs are unique across the remote organization: Woods refuses a URI already
+assigned to another collection instead of moving it.
+
+A missing manifest rebuilds receipts for current documents but does **not**
+adopt unrelated remote documents for deletion. Keep the manifest in a durable
+CI cache. An unreadable, corrupt, or wrong-collection manifest requires recovery
+from a known-good copy; setting force flags cannot recover ownership. Historical
+entries adopted remotely with a null content hash are not deletion authority.
+
+### Explicit ref migration
+
+Use migration only when retiring the old export scope, rather than publishing
+two branches independently. Keep one writer per local manifest **and** remote
+repository/ref scope; coordinate writers across worktrees and CI jobs.
+
+```bash
+UNBLOCKED_MIGRATE_FROM_REF=old-branch UNBLOCKED_DRY_RUN=1 bin/rails woods:unblocked_sync
+UNBLOCKED_MIGRATE_FROM_REF=old-branch bin/rails woods:unblocked_sync
+```
+
+Preview reads the pinned index and local receipts, makes no remote requests or
+local writes, and lists the proposed URI pairs. Review that list before applying.
+Use the same source and target ref to migrate formerly unescaped special-character
+URIs. Woods uploads replacements, persists successful receipts, then deletes
+only recorded old IDs with unambiguous current replacements. This bounded
+one-for-one cleanup does not require `UNBLOCKED_FORCE_PURGE`.
+
+Interrupted migration resumes on the next sync of the target scope, even without
+the environment variable. Missing ownership, changed remote IDs, missing
+replacements, failed writes, and incomplete cleanup remain visible as incomplete;
+Woods retains old copies until it can verify the replacement. It never infers
+ownership from the collection listing. Records without matching replacement
+units require operator review and manual cleanup. A historical bare URI shared
+by multiple current units is ambiguous and is also retained for review; Woods
+does not guess its old owner from the new lexically first identifier. Proven
+one-to-one migrations also upload replacements outside the ordinary top-N cap. This is not an API-level
+rename: remote IDs can change, so annotations attached to the old ID may not move.
+
+Do not run an older Woods exporter against the upgraded version-2 manifest.
+For rollback, stop sync and restore its pre-migration manifest together with the
+corresponding remote state; restoring just the file cannot undo remote deletions.
 
 Pair with `woods:incremental` to re-extract only changed files; the sync then
 pushes only the documents whose content actually changed.
@@ -273,10 +316,9 @@ enumeration or complete per-bucket listings plus strict typed lookup.
   is a small subset and an unguarded purge would wipe the collection.
 
   The guard also fires on *intentional* large removals: dropping a unit type
-  from the sync set, changing `unblocked_repo_url` (every URI changes), or a
-  big codebase deletion can all legitimately exceed 30%. The refusal warning
+  from the sync set or a big codebase deletion can all legitimately exceed 30%. The refusal warning
   names the counts, if the deletions are expected, re-run once with
-  `UNBLOCKED_FORCE_PURGE=1`.
+  `UNBLOCKED_FORCE_PURGE=1`. It does not bypass migration ownership checks.
 
 ## Troubleshooting
 
