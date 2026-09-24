@@ -2,6 +2,7 @@
 
 require 'json'
 require 'time'
+require 'uri'
 require_relative 'mcp/errors'
 
 module Woods
@@ -28,6 +29,12 @@ module Woods
   class ResolvedConfig # rubocop:disable Metrics/ClassLength
     # The only schema version this gem release can read or write.
     SCHEMA_VERSION_SUPPORTED = 1
+
+    BUILTIN_PROVIDERS = {
+      'Woods::Embedding::Provider::OpenAI' => :openai,
+      'Woods::Embedding::Provider::Ollama' => :ollama,
+      'Woods::Embedding::Provider::Fake' => :fake
+    }.freeze
 
     # @return [Integer]
     attr_reader :schema_version
@@ -74,9 +81,9 @@ module Woods
     # the model, not the config — and doesn't hurt OpenAI, whose provider
     # exposes the same +#dimensions+ interface.
     #
-    # When +provider:+ is omitted, dimension falls back to
-    # +config.embedding_options[:dimension]+ (useful for specs and for
-    # offline ResolvedConfig construction where no provider exists).
+    # Known injected providers expose pure constructor settings, including a
+    # configured or already observed width, without probing. Otherwise an
+    # omitted +provider:+ uses the declared embedding options for offline capture.
     #
     # @param config [Woods::Configuration]
     # @param gem_version [String] Defaults to {Woods::VERSION}
@@ -87,6 +94,10 @@ module Woods
       require_relative 'version'
 
       opts = (config.embedding_options || {}).transform_keys(&:to_sym)
+      concrete = unwrap_provider(provider || config.embedding_provider)
+      if BUILTIN_PROVIDERS.key?(concrete.class.name) && concrete.respond_to?(:configuration_options)
+        opts = concrete.configuration_options
+      end
       declared_dim = opts[:expected_dimensions] || opts[:dimensions] || opts[:dimension] || opts[:dims]
       dim = provider.respond_to?(:dimensions) ? provider.dimensions : declared_dim
       model = provider.respond_to?(:model_name) ? provider.model_name : (opts[:model] || config.embedding_model)
@@ -128,7 +139,7 @@ module Woods
       @schema_version = schema_version
       @gem_version = gem_version.to_s.freeze
       @created_at = created_at
-      @embedding_provider = deep_freeze(embedding_provider)
+      @embedding_provider = deep_freeze(self.class.sanitize_provider(embedding_provider))
       @stores = deep_freeze(stores)
       @store_options = deep_freeze(store_options)
       freeze
@@ -209,6 +220,22 @@ module Woods
     # @return [Hash]
     def to_h
       to_snapshot_json.freeze
+    end
+
+    # Only known built-ins with safely recorded settings can be reconstructed.
+    # An explicitly configured host provider may still use this snapshot.
+    def requires_host_provider?
+      embedding_provider[:requires_host_provider] == true
+    end
+
+    def self.sanitize_provider(provider)
+      result = provider.dup
+      result[:requires_host_provider] = true unless BUILTIN_PROVIDERS.key?(result[:class])
+      if result[:host] && !safe_provider_host?(result[:host])
+        result.delete(:host)
+        result[:requires_host_provider] = true
+      end
+      result
     end
 
     private
@@ -303,7 +330,18 @@ module Woods
           read_timeout: data[:read_timeout]
         }.compact
         parsed[:requested_dimensions] = data[:requested_dimensions] if data.key?(:requested_dimensions)
+        parsed[:requires_host_provider] = true if data[:requires_host_provider] == true
         parsed
+      end
+
+      # Paths and URL metadata can contain credentials. Keep only plain origins;
+      # do not strip a prefix/query and silently reconstruct a different service.
+      def safe_provider_host?(host)
+        uri = URI.parse(host)
+        uri.is_a?(URI::HTTP) && uri.host && !uri.userinfo && !uri.query && !uri.fragment &&
+          ['', '/'].include?(uri.path)
+      rescue URI::InvalidURIError, ArgumentError, TypeError
+        false
       end
 
       def parse_stores(raw)
@@ -350,11 +388,18 @@ module Woods
       end
 
       def resolve_provider_object_class(provider)
-        if %w[Woods::Resilience::RetryableProvider Woods::Cache::CachedEmbeddingProvider].include?(provider.class.name)
-          resolve_provider_class(provider.provider)
-        else
-          provider.class.name || provider.to_s
+        unwrap_provider(provider).class.name || '(anonymous provider)'
+      end
+
+      def unwrap_provider(provider)
+        seen = {}.compare_by_identity
+        while %w[Woods::Resilience::RetryableProvider Woods::Cache::CachedEmbeddingProvider].include?(provider.class.name)
+          raise Woods::MCP::ConfigMismatch, 'Embedding provider wrappers contain a cycle' if seen[provider]
+
+          seen[provider] = true
+          provider = provider.provider
         end
+        provider
       end
     end
   end
