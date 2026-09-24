@@ -335,9 +335,17 @@ overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
 
+**Unreleased after 2.0.0:** retrieval contexts are scoped to one retriever
+instance, including when Redis or Solid Cache is shared by applications or
+worktrees. Restarting the retriever starts a fresh context namespace. Reload
+retires only that instance's namespace, including results still in flight;
+already running requests may finish against the previous corpus. Retired entries
+expire according to their configured TTL or backend eviction; disabling both
+can retain unused entries indefinitely. Embedding-vector caches are separate and survive context invalidation.
+
 `Woods::Cache.cache_key` length-prefixes every component, including a single
-component, so different argument counts cannot share a response. Existing
-multi-component keys used by Woods' wrappers remain unchanged. Custom callers
+component, so different argument counts cannot share a response. This encoding
+is independent of the retriever's context namespace. Custom callers
 using single-component keys must clear their affected persistent cache domain
 when upgrading, since older unprefixed entries can alias the new encoding;
 subsequent calls refill it normally. Namespace clearing still covers both formats.

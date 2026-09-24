@@ -1,0 +1,1 @@
+- Isolate cached retrieval contexts by retriever instance and retire only that instance’s contexts on reload, preventing shared cache backends from mixing applications or restoring stale in-flight results.
