@@ -86,7 +86,7 @@ module Woods
         protected_paths = layout.allowed_paths + layout.runtime_paths
         raise Conflict, 'Plan output must differ from every managed/runtime target' if protected_paths.include?(target)
 
-        Document.validate_path!(target)
+        Plan.validate_path!(target)
         content = "#{JSON.pretty_generate(plan.data)}\n"
         raise Conflict, 'Plan exceeds the supported size' if content.bytesize > Document::MAX_BYTES
 

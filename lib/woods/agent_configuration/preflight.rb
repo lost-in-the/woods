@@ -3,8 +3,8 @@
 require 'json'
 require 'open3'
 require 'timeout'
-require 'bundler'
 require_relative 'error'
+require_relative '../watch/child_environment'
 
 module Woods
   module AgentConfiguration
@@ -32,8 +32,9 @@ module Woods
         end
       RUBY
 
-      def initialize(timeout: 30)
+      def initialize(timeout: 30, environment: ENV)
         @timeout = timeout
+        @environment = environment
       end
 
       def call(launcher)
@@ -54,7 +55,8 @@ module Woods
 
       def run(launcher)
         command = launcher.probe_command(SCRIPT)
-        environment = Bundler.unbundled_env.merge(launcher.probe_environment)
+        environment = Watch::ChildEnvironment.build(@environment.to_h, root: launcher.root)
+                                             .merge(launcher.probe_environment)
         Open3.popen3(environment, *command, chdir: launcher.root, unsetenv_others: true,
                                             pgroup: true) do |stdin, out, err, wait|
           stdin.close

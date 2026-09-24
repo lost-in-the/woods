@@ -140,9 +140,10 @@ client format is Claude Code (tested with 2.1.267).
 Create a private plan, inspect its paths and diff, then apply that same plan:
 
 ```bash
+woods_plan_dir="$(ruby -rtmpdir -e 'puts File.realpath(Dir.mktmpdir("woods-agent-plan-"))')"
 bundle exec woods-agent-config setup --client claude --scope project \
-  --root "$PWD" --instructions CLAUDE.md,AGENTS.md --plan /tmp/woods-setup.json --diff
-bundle exec woods-agent-config apply /tmp/woods-setup.json \
+  --root "$PWD" --instructions CLAUDE.md,AGENTS.md --plan "$woods_plan_dir/setup.json" --diff
+bundle exec woods-agent-config apply "$woods_plan_dir/setup.json" \
   --client claude --scope project --root "$PWD"
 ```
 
@@ -153,6 +154,10 @@ keep them private and remove them when no longer needed. `show FILE` prints its
 summary; `show FILE --diff` checks the original snapshots and prints a unified
 diff. Applying a changed snapshot fails rather than replacing the new content.
 A repeated identical setup makes no configuration edits.
+The example creates a private temporary directory and resolves its real path:
+on macOS, `/tmp` commonly points through a symlink. Plan files and managed
+targets reject symlink components; use the real parent directory for both
+preview and apply, and never use a symlink as the plan file itself.
 
 | Selection | Managed files |
 |---|---|
@@ -165,6 +170,15 @@ With `CLAUDE_CONFIG_DIR`, user scope uses that directory's `.claude.json`,
 configures the Index Server. Client trust and project approval remain Claude
 Code settings; apply does not change them.
 
+Unreleased after `2.0.0`: project ownership ignores the user's home and
+`CLAUDE_CONFIG_DIR`, including that unused field in older receipts and plans.
+The application root, client, scope, target paths, and original file snapshots
+must still match. User-scoped ownership remains tied to its user configuration
+paths. Record the loaded revision before relying on this compatibility fix.
+Older executables cannot consume newly written project identities. Keep a
+supporting Woods revision for updates/removal, or remove owned configuration
+with it before permanently downgrading.
+
 Preflight runs the selected installed bundle, validates its index, and checks
 its actual registered capabilities. It does not boot Rails or contact an
 embedding provider. The bundle must already resolve in frozen mode; prepare
@@ -174,6 +188,12 @@ to the selected root. For Compose, also select `--mode compose --service web
 --container-root /app`; run the configuration command where Docker Compose can
 access that project. Preflight verifies the index and installed gem inside that
 service. Both host and container subprocesses have time limits.
+
+Unreleased after `2.0.0`: host preflight preserves intended `BUNDLE_PATH`,
+`BUNDLE_APP_CONFIG`, and `BUNDLE_WITHOUT` settings while clearing activation of
+the caller's bundle and selecting the application's Gemfile. Older builds can
+report missing gems that the application already has; check the loaded revision
+and environment before reinstalling dependencies or writing bundle settings.
 
 Use `update --plan FILE` with the same client/scope/root and the desired launch
 options to change the owned entry or instruction selection. Update explicitly
