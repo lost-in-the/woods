@@ -101,6 +101,12 @@ framework refreshes do not certify unrelated application inputs. A handled
 extractor error retains an explicit `extractor:<name>` uncertainty even if the
 extractor returns an empty result. Successful consumers keep their own evidence;
 a later full run without that failure can replace the uncertainty.
+In the unreleased reference writer planned for 2.1, successfully returned models
+also retain their individual source evidence when another model fails. An
+optional framework model with a missing table therefore does not prevent
+unrelated incremental work; the model-extractor uncertainty remains visible.
+If an older writer already published a baseline without that individual evidence,
+run one full extraction after upgrading to rebuild it.
 
 With the **unreleased reference writer planned for 2.1**, an edited Ruby service
 retained by an events-only refresh instead prevents publication: its current
