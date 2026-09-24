@@ -492,6 +492,16 @@ batch after resolving boot or extraction failures; do not disable collision
 checks or delete the previous generation to force a move through. Simultaneous
 owners still fail. See [incremental extraction](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md).
 
+### Once-loader naming (unreleased after Woods 2.0.0; #579)
+
+Check the loaded writer revision when a declared library child is misnamed as
+its enclosing wrapper. Writers with this fix use the owning Rails loader,
+including `config.autoload_lib_once` naming rules. Run one full extraction after
+upgrading an affected index before resuming incremental maintenance. This does
+not combine unmanaged files that reopen one namespace or invent a class for a
+VERSION-only file. Preserve collision diagnostics for those cases. See
+[extractor naming](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#identifier-naming-source-derived-units).
+
 ## Compact evidence capability check
 
 Inspect the connected server's installed tool schemas before using `evidence` on
