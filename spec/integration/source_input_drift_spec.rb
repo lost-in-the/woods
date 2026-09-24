@@ -47,6 +47,56 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
     manifest.expanded.transform_values { |paths| paths.keys.sort }
   end
 
+  def install_source_fixture(home, name)
+    spec = Gem::Specification.new do |gem|
+      gem.name = name
+      gem.version = '1.0.0'
+      gem.summary = 'Offline source ownership fixture'
+      gem.authors = ['Woods fixture']
+    end
+    gemspec = File.join(home, 'specifications', "#{spec.full_name}.gemspec")
+    source = File.join(home, 'gems', spec.full_name, 'lib', "#{name}.rb")
+    FileUtils.mkdir_p([File.dirname(gemspec), File.dirname(source)])
+    File.write(gemspec, spec.to_ruby)
+    File.write(source, "module #{name.split('_').map(&:capitalize).join}; end\n")
+    "Gem::Specification.load(#{gemspec.inspect}).activate\nrequire #{name.inspect}\n"
+  end
+
+  it 'keeps freshness current for installed gems inside or outside the application checkout' do
+    Dir.mktmpdir('woods-source-installed') do |parent|
+      app = File.join(parent, 'app')
+      FileUtils.mkdir_p(app)
+      make_source_app(app)
+      inside = install_source_fixture(File.join(app, 'vendor/bundle/ruby/fixture'), 'woods_inside_fixture')
+      outside = install_source_fixture(File.join(parent, 'external_gems'), 'woods_outside_fixture')
+      FileUtils.mkdir_p(File.join(app, 'config/initializers'))
+      File.write(File.join(app, 'config/initializers/source_gems.rb'), inside + outside)
+
+      launch(app, 'full')
+
+      expect(state(app)).to include('state' => 'current', 'recorded_root' => app, 'checked_root' => app)
+      expect(source_manifest(app).data['errors']).to eq([])
+    end
+  end
+
+  it 'checks a copied booted index against the task process checkout while preserving explicit mappings' do
+    Dir.mktmpdir('woods-source-copy') do |parent|
+      app = File.join(parent, 'original')
+      FileUtils.mkdir_p(app)
+      make_source_app(app)
+      launch(app, 'full')
+      copy = File.join(parent, 'copy')
+      FileUtils.cp_r(app, copy)
+      File.write(File.join(copy, 'app/services/copied_probe.rb'), "class CopiedProbe; end\n")
+      encoded = Base64.strict_encode64(JSON.generate(output: output(copy), mode: 'deep'))
+      result = Dir.chdir(copy) { Woods::SourceInputs::Status.from_transport(encoded) }
+
+      expect(result).to include('state' => 'drifted', 'recorded_root' => app, 'checked_root' => copy)
+      expect(result.dig('changes', 'added')).to include('app/services/copied_probe.rb')
+      expect(state(copy)).to include('state' => 'current', 'checked_root' => app, 'root_source' => 'recorded')
+    end
+  end
+
   it 'captures an already-dirty baseline and detects another same-size edit with the same mtime' do
     Dir.mktmpdir('woods-source-rails') do |app|
       make_source_app(app)

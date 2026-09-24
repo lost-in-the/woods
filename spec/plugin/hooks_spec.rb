@@ -515,12 +515,12 @@ RSpec.describe 'plugin hooks (#280)' do
   describe 'woods-session-start.sh' do
     let(:base_env) { { 'WOODS_HOOKS_ENABLED' => '1' } }
 
-    def status_command(dir, state: 'current', exit_code: 0)
+    def status_command(dir, state: 'current', exit_code: 0, **evidence)
       script = File.join(dir, 'source-status.sh')
       File.write(script, <<~SH)
         #!/bin/sh
         printf '%s' "$1" > "#{dir}/status-argument"
-        printf '%s\\n' '#{JSON.generate(state: state)}'
+        printf '%s\\n' '#{JSON.generate(state: state, **evidence)}'
         exit #{exit_code}
       SH
       FileUtils.chmod(0o755, script)
@@ -555,6 +555,37 @@ RSpec.describe 'plugin hooks (#280)' do
           out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
           expect(status).to be_success, err
           expect(out).to include('source freshness is unknown')
+        end
+      end
+    end
+
+    [true, false].each do |with_jq|
+      it "uses reason-specific freshness advice with #{with_jq ? 'jq' : 'Ruby only under C locale'}" do
+        Dir.mktmpdir('woods-hook-advice') do |dir|
+          make_app(dir)
+          environment = if with_jq
+                          {}
+                        else
+                          { 'PATH' => restricted_bin(dir, without: ['jq']), 'LC_ALL' => 'C', 'LANG' => 'C' }
+                        end
+          env = status_command(dir, state: 'unknown', recommendations: ['deep_check']).merge(environment)
+          out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(status).to be_success, err
+          expect(out).to include('source freshness is unknown', 'source_check: deep')
+          expect(out).to include('this check could not verify the current source contents')
+          expect(out).not_to include('woods-extract full')
+
+          env = status_command(dir, state: 'unknown', recommendations: %w[deep_check fresh_capture inspect_source_scan])
+                .merge(environment)
+          out, = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(out).to include('source_check: deep', 'woods-extract full', 'permissions', 'source mapping')
+
+          [nil, 'deep_check', ['unrecognized']].each do |malformed|
+            env = status_command(dir, state: 'unknown', recommendations: malformed).merge(environment)
+            out, = run_hook(session_start, { 'cwd' => dir }, env)
+            expect(out).to include('source freshness is unknown', 'woods-extract full')
+            expect(out).not_to include('source_check: deep')
+          end
         end
       end
     end

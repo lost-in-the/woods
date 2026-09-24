@@ -22,6 +22,13 @@ capture/traversal completion, while boot and consumer qualifications remain in
 `reasons`. `counts` contains total observed added/changed/removed paths; each
 `changes` list contains at most 30 paths and `truncated` marks longer lists.
 
+**Unreleased after 2.0.0:** `comparison_complete` also identifies whether the
+previous consumer baseline can establish additions. A missing or incompatible
+baseline stays unknown; it does not make every visible file an addition. Files
+not reached by an incomplete scan are not reported as deleted. Matching paths
+with different captured identities still prove drift. An unreadable entry leaves
+coverage incomplete while scanning continues through accessible siblings.
+
 ```json
 {"source_check":"deep"}
 ```
@@ -36,6 +43,18 @@ outlast the scan deadline. A limit produces unknown coverage, never current.
 The result is tied to the **served** generation, including a reader holding an
 older generation during a concurrent publication. It is recomputed on each call;
 a source edit does not require an index generation change to become visible.
+
+**Unreleased after 2.0.0:** `recommendations` separates recovery actions:
+
+- `deep_check`: the quick reader reached its time limit; request one deep check.
+- `inspect_source_scan`: inspect `verification_reasons`, permissions, source
+  mapping and scan limits; a deeper scan cannot repair unavailable inputs.
+- `fresh_capture`: the captured baseline, boot or consumer evidence is incomplete;
+  fix the reported cause and run the launcher in a fresh process.
+
+Several recommendations can apply together. `verification_reasons` describes the
+current reader scan; `reasons` also retains capture failures. A quick reader limit
+alone does not require rebuilding the index.
 
 ## Establish a fresh baseline
 
@@ -129,6 +148,12 @@ Custom loader source outside captured roots, missing eager-load coverage and
 uncaptured application-owned unit paths remain unknown. This is application
 source evidence: it does not certify external database schemas/data, remote
 configuration, installed gem bytes, provider state or live runtime services.
+**Unreleased after 2.0.0:** RubyGems installation metadata can establish that
+loaded/unit source inside the application directory belongs to an installed gem,
+including gems installed under `vendor/bundle`. Such files do not create false
+application-coverage errors. A vendor-shaped directory alone is insufficient;
+local path gems and custom loaders still need captured source roots. Explicit
+`--source-root` declarations retain coverage even for installed gem directories.
 
 ## Containers and hooks
 
@@ -140,6 +165,16 @@ same verifier without Rails initialization or provider work. Its optional
 Base64-encoded JSON transport supports `output`, `root` (an explicit reader-side
 source mapping), and `mode` (`quick` or `deep`).
 
+**Unreleased after 2.0.0:** results expose `recorded_root` (writer location),
+`checked_root` (the directory actually scanned), and `root_source` (`recorded`,
+`explicit`, or `working_directory`). `current` applies only to that checked root.
+The MCP IndexReader keeps using the recorded root; it does not infer a checkout
+from the index's location. For a copied index, a current result about the original
+root says nothing about edits in the copy. Run `woods:source_status` in the copy,
+or provide an explicit `root` mapping. The task defaults to its process working
+directory, including inside containers; launch it from the application root, not
+an unrelated directory or a monorepo parent. Missing source remains unknown.
+
 The opt-in SessionStart hook uses `WOODS_HOOK_RAKE` and `WOODS_OUTPUT`, including a
 Docker command prefix without requiring a host application bundle. It prints
 an actionable drift or unknown warning and stays quiet for current evidence.
@@ -147,6 +182,10 @@ Its ten-second process deadline includes command startup; the scan uses quick
 mode. Missing older tasks and failed/timed-out commands report unknown. Cancelling
 Docker exec does not itself prove the process inside the container stopped.
 A quiet session hook does not acknowledge deferred PostToolUse queue entries.
+**Unreleased after 2.0.0:** unknown warnings use the returned recommendations,
+including every applicable recovery action. A quick reader timeout advises a deep
+check without requiring a rebuild. Older tasks without recommendations retain
+the conservative generic unknown warning.
 
 ## Artifact and cost
 
@@ -166,6 +205,15 @@ Flat fallback and older indexes lack verified atomic source evidence.
 `WOODS_PROFILE=1` reports `source capture` and `source verification` separately.
 Capture/recheck each allow up to ten seconds with the same file/byte caps.
 
+**Unreleased after 2.0.0:** both the published manifest and the private launcher
+handoff have a 16 MiB serialized-size limit, matching their readers. Oversized
+evidence refuses publication or child startup with a bounded diagnostic; the
+preceding payload remains active. Narrow unnecessarily broad additional source
+roots or reduce scoped inputs before retrying. There is no silent truncation of
+consumer identities. Version-1 manifests remain readable; the optional
+`comparison_complete` field supplements existing coverage errors, and legacy
+missing-baseline errors remain conservative.
+
 September 2026 fixture measurements: a pinned Writebook source tree (456 visited
 files, 223 hashed, 233KB) completed quick scans in median 36ms native / 45ms on a
 Linux container bind mount. Discourse (26,133 visited, 6,209 hashed, 56.4MB) needed
@@ -173,4 +221,5 @@ about 1.6–2 seconds; quick scans returned unknown, while five-second scans com
 traversal and still reported an opaque directory symlink. Native Ruby 4.0 and
 container Ruby 3.4 differed, so these are a budget envelope, not a filesystem
 speed comparison or a macOS virtiofs benchmark. Measure your own application;
-a large or slow source tree may need a full extraction rather than a longer read.
+a large or slow source tree may need a deep check. Rebuilding a verified baseline
+does not remove the reader's time, file or byte limits.
