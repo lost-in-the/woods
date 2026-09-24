@@ -424,6 +424,17 @@ Return the first failing layer, commands/evidence, root-cause hypothesis, whethe
 
 Canonical guide: [TROUBLESHOOTING.md](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
 
+## SQLite metadata and typed semantic results
+
+If a SQLite-backed index retains deleted units after embedding, or a `:local`
+reader returns no type-filtered semantic matches after restart, record the exact
+embedding and reader revisions. The SQLite reconciliation and metadata hydration
+fix (#572) is unreleased after Woods `2.0.0`. With that fix, a full embed removes
+stale SQLite rows; restarting the reader restores vector type filters from the
+configured SQLite metadata store. Incremental empty-input and bulk-deletion
+guards still apply. See the canonical
+[SQLite metadata configuration](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#sqlite-metadata).
+
 ## Lexical retrieval capability check
 
 Lexical retrieval is available from `2.0.0.beta3`. Before proposing it, verify the installed gem
