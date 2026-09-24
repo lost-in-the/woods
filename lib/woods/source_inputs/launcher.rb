@@ -32,7 +32,7 @@ module Woods
         parse!
       end
 
-      def run # rubocop:disable Metrics/MethodLength -- handoff lifetime encloses the fresh child
+      def run
         return 0 if @help
 
         operation, task = task_for_arguments
@@ -40,12 +40,11 @@ module Woods
         rules = Scopes.new(extra_roots: @extra_roots)
         snapshot = Scanner.new(root: @root, output_dir: @output, key: key, scopes: rules).call
         nonce = SecureRandom.hex(32)
+        bytes = capture_bytes(snapshot, nonce, operation, rules)
         Tempfile.create(['woods-source-capture-', '.json']) do |file|
           file.binmode
           file.chmod(0o600)
-          file.write(JSON.generate(version: 1, nonce: nonce, root: @root, output: @output,
-                                   operation: operation, rules: rules.fingerprint,
-                                   launcher_pid: Process.pid, snapshot: snapshot))
+          file.write(bytes)
           file.flush
           file.fsync
           descriptor = JSON.generate(path: file.path, nonce: nonce, extra_roots: @extra_roots)
@@ -58,6 +57,16 @@ module Woods
       end
 
       private
+
+      def capture_bytes(snapshot, nonce, operation, rules)
+        bytes = JSON.generate(version: 1, nonce: nonce, root: @root, output: @output,
+                              operation: operation, rules: rules.fingerprint,
+                              launcher_pid: Process.pid, snapshot: snapshot)
+        return bytes if bytes.bytesize <= Manifest::MAX_BYTES
+
+        raise ArgumentError, "source capture exceeds #{Manifest::MAX_BYTES} bytes; " \
+                             'narrow additional source roots or reduce scoped inputs before retrying'
+      end
 
       def parse!
         parser.permute!(@arguments)
