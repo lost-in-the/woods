@@ -93,6 +93,9 @@ RSpec.describe 'woods:watch_status root resolution' do
         File.open(File.join(app_root, 'Rakefile'), 'a') do |file|
           file.write(<<~RUBY)
             require 'woods/extractor'
+            module Rails
+              def self.root = Pathname.new(#{app_root.inspect})
+            end
             task :environment
             class Woods::Extractor
               def extract_changed(paths)

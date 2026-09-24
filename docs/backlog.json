@@ -3039,7 +3039,7 @@
       "lib/tasks/woods.rake"
     ],
     "description": "git diff emits repository-relative paths when Rails.root is a subdirectory; task filtering drops relevant changes. CHANGED_FILES also filters before normalization, dropping ./ and contained absolute paths. Empty CI base variables select an invalid range, and the documented workflow lacks a reliable fetched base/cold-cache fallback. Normalize and contain paths before filtering; obtain application-relative Git changes including deletions and renames; ignore blank CI variables; keep unresolved nonempty ranges failing clearly. Verify a real nested-app repo and update CI recipes to fetch the base and use full extraction without a baseline. GitHub: #571.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-223",

@@ -1,0 +1,1 @@
+- Resolve incremental Git changes relative to the Rails application in nested repositories, normalize and contain explicit changed paths before filtering, and ignore blank CI range variables while retaining failures for invalid revisions. Document exact-baseline cache restore and full extraction on CI cold starts (#571).

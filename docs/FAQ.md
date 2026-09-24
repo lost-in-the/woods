@@ -469,28 +469,10 @@ for store construction and review trace retention and access controls before ena
 
 ### How do I keep the index in sync in CI?
 
-Use incremental extraction in your CI pipeline. Fetch enough git history for the incremental diff to work:
-
-```yaml
-# .github/workflows/index.yml
-jobs:
-  index:
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-      - name: Update index
-        run: bundle exec rake woods:incremental
-        env:
-          GITHUB_BASE_REF: ${{ github.base_ref }}
-```
-
-For Docker-based CI:
-
-```yaml
-      - name: Update index
-        run: docker compose exec -T app bundle exec rake woods:incremental
-```
+Restore an index for the exact commit your incremental diff starts from;
+otherwise run full extraction. Fetch the actual pull-request base and its
+history before diffing. Follow the [incremental CI recipe](INCREMENTAL_EXTRACTION.md#github-actions-with-an-exact-baseline)
+for cache selection, cold starts, nested applications, and Docker.
 
 ---
 

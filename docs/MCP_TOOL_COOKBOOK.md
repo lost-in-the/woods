@@ -908,58 +908,10 @@ Trigger extraction, then reload the server's in-memory data:
 
 ### GitHub Actions for Incremental Extraction
 
-Run incremental extraction on every push, cache the index between runs:
-
-```yaml
-# .github/workflows/woods.yml
-name: Update Codebase Index
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-
-jobs:
-  index:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2   # needed for incremental diff
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          bundler-cache: true
-
-      - name: Restore index cache
-        uses: actions/cache@v4
-        with:
-          path: tmp/woods
-          key: woods-${{ github.ref }}-${{ github.sha }}
-          restore-keys: |
-            woods-${{ github.ref }}-
-            woods-
-
-      - name: Run database migrations
-        run: bundle exec rails db:migrate RAILS_ENV=test
-
-      - name: Update codebase index
-        run: bundle exec rake woods:incremental
-        env:
-          RAILS_ENV: test
-          GITHUB_BASE_REF: ${{ github.base_ref }}
-
-      - name: Validate index
-        run: bundle exec rake woods:validate
-```
-
-For Docker-based CI:
-
-```yaml
-      - name: Update codebase index
-        run: docker compose exec -T app bundle exec rake woods:incremental
-```
+Use the [canonical incremental CI recipe](INCREMENTAL_EXTRACTION.md#github-actions-with-an-exact-baseline).
+It fetches the actual base ref, restores an index for the exact baseline commit,
+and runs full extraction when that cache is absent. The same guide covers
+nested Rails applications and forwarding the selected range into Docker.
 
 ---
 

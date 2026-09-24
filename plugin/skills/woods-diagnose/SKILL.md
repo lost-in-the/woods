@@ -141,6 +141,14 @@ bin/rails woods:stats
 
 If missing or stale, run the narrow maintenance path justified by the evidence: `woods:incremental` for known file changes or `woods:extract` for first run, broad change, upgrade, or drift. Woods tasks understand `generation.json`; do not assume `manifest.json` is at the root.
 
+For incremental CI, restore only an index for the selected diff's exact base
+commit; a cold or unrelated cache requires full extraction. Fetch the actual
+PR base ref and sufficient history before running the task. Nested-app Git
+paths, normalization of `./` and contained absolute `CHANGED_FILES`, and blank
+CI-variable handling are unreleased after `2.0.0` (#571); check the installed
+revision before relying on them. Keep nonempty invalid ranges as failures.
+See the [incremental CI contract](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#github-actions-with-an-exact-baseline).
+
 Semantic graph validation (#413) is available in Woods `2.0.0.beta3`; verify the
 installed gem before expecting these errors. Supporting versions check typed
 unit identity, graph/index agreement and forward/reverse/file/type memberships
