@@ -1,0 +1,1 @@
+- Preserve concrete search result types across scoped and unscoped family filters; support encoded slash-bearing unit resources; distinguish missing flow units and snapshots from valid empty answers; and report repeated malformed generation reads without exposing raw exceptions or falling back to unrelated payloads.

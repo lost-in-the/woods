@@ -97,6 +97,8 @@ RSpec.describe 'Snapshot MCP tools' do
           modified: [{ identifier: 'User', unit_type: 'model' }],
           deleted: []
         }
+        allow(snapshot_store).to receive(:find).with('aaa').and_return(git_sha: 'aaa')
+        allow(snapshot_store).to receive(:find).with('bbb').and_return(git_sha: 'bbb')
         allow(snapshot_store).to receive(:diff)
           .with('aaa', 'bbb').and_return(diff_result)
 

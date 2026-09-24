@@ -1112,7 +1112,8 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(snapshot_store).to have_received(:list).with(limit: 20, branch: nil)
     expect(snapshot_store).to have_received(:diff).with('aaa111', 'bbb222')
     expect(snapshot_store).to have_received(:unit_history).with('Post', limit: 20)
-    expect(snapshot_store).to have_received(:find).with('aaa111')
+    expect(snapshot_store).to have_received(:find).with('aaa111').twice
+    expect(snapshot_store).to have_received(:find).with('bbb222').once
     call_tool(full_server, 'pipeline_repair', 'action' => 'reset_cooldowns')
     expect(pipeline_guard.allow?(:extraction)).to be(true)
     expect(pipeline_guard.allow?(:embedding)).to be(true)

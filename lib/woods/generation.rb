@@ -42,6 +42,9 @@ module Woods
   class Generation
     FILENAME = 'generation.json'
 
+    # Raised by strict readers instead of treating corruption as a legacy index.
+    class InvalidMarker < IOError; end
+
     # An immutable snapshot of the generation file.
     #
     # @!attribute number
@@ -104,6 +107,23 @@ module Woods
       UNPUBLISHED
     end
 
+    # Read and validate an existing marker for a long-lived reader. Missing
+    # markers still describe legacy flat indexes; malformed existing files do not.
+    # @return [Marker]
+    # @raise [InvalidMarker] if the existing marker cannot identify a generation
+    def current!
+      data = JSON.parse(AtomicFile.read(@path))
+      raise InvalidMarker, 'Published generation marker has an invalid shape' unless valid_marker_data?(data)
+      raise InvalidMarker, 'Published generation payload path is malformed' if data['payload']&.include?("\0")
+
+      Marker.new(number: data['number'], token: data['token'], updated_at: data['updated_at'],
+                 reason: data['reason'], payload: data['payload'])
+    rescue Errno::ENOENT
+      UNPUBLISHED
+    rescue JSON::ParserError, EncodingError, SystemCallError
+      raise InvalidMarker, 'Published generation marker is unreadable or malformed'
+    end
+
     # Advance to the next generation.
     #
     # Call this *after* the index files are written, never before, and never
@@ -161,6 +181,11 @@ module Woods
     end
 
     private
+
+    def valid_marker_data?(data)
+      data.is_a?(Hash) && data['number'].is_a?(Integer) && data['number'] >= 0 &&
+        %w[token updated_at reason payload].all? { |key| data[key].nil? || data[key].is_a?(String) }
+    end
 
     # Does +candidate+ resolve inside the index root?
     #

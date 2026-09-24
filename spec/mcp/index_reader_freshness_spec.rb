@@ -368,14 +368,16 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
     end
   end
 
-  it 'survives a corrupt generation file rather than failing the read' do
+  it 'refuses repeated reads of a corrupt generation marker and recovers after repair' do
     generation.bump!(reason: 'full')
     reader = described_class.new(dir)
     reader.manifest
 
-    File.write(File.join(dir, Woods::Generation::FILENAME), 'not json')
+    original = File.binread(generation.path)
+    File.write(generation.path, 'not json')
 
-    expect { reader.manifest }.not_to raise_error
+    2.times { expect { reader.manifest }.to raise_error(Woods::Generation::InvalidMarker) }
+    File.binwrite(generation.path, original)
     expect(reader.manifest['total_units']).to eq(1)
   end
 

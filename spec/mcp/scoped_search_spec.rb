@@ -21,7 +21,7 @@ RSpec.describe 'Published scoped discovery and retrieval' do
   after { FileUtils.remove_entry(index_dir) }
 
   def publish(identifier, package:, path: nil, type: 'model', source: 'needle')
-    dir = type == 'gem_source' ? 'rails_source' : Woods::MCP::IndexReader::TYPE_TO_DIR.fetch(type)
+    dir = Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.find { |_, types| types.include?(type) }.first
     directory = File.join(index_dir, dir)
     FileUtils.mkdir_p(directory)
     unit = { identifier: identifier, type: type, file_path: path || "#{package}/app/#{identifier}.rb",
@@ -98,6 +98,47 @@ RSpec.describe 'Published scoped discovery and retrieval' do
       expect(response[:_meta]).to include(error_code: 'unsupported_argument', argument: 'scope')
       response = call_tool(name, query: 'needle', source_paths: ['../outside'])
       expect(response[:isError]).to be(true)
+    end
+  end
+
+  it 'returns a protocol error for unknown search types in both scope modes' do
+    publish('Invoice', package: 'packs/billing')
+    [{}, { packages: ['packs/billing'] }].each do |scope|
+      response = call_tool('search', query: 'needle', types: ['typo_type'], **scope)
+      expect(response[:isError]).to be(true)
+      expect(response[:_meta]).to include(error_code: 'invalid_params', argument: 'types')
+    end
+  end
+
+  [nil, { packages: ['packs/billing'] }, { source_paths: ['packs/billing'] }].each do |scope|
+    it "keeps family and concrete search types consistent with #{scope.inspect}" do
+      publish('NeedleMutation', package: 'packs/billing', type: 'graphql_mutation')
+      publish('NeedleType', package: 'packs/billing', type: 'graphql_type')
+      publish('NeedleMutation', package: 'packs/billing', type: 'model')
+      publish('NeedleGem', package: 'packs/billing', type: 'gem_source')
+      expectations = {
+        ['graphql'] => %w[graphql_mutation graphql_type],
+        ['graphql_mutation'] => ['graphql_mutation'],
+        %w[graphql_mutation model] => %w[graphql_mutation model],
+        ['rails_source'] => ['gem_source'],
+        ['gem_source'] => ['gem_source']
+      }
+      expectations.each do |types, expected|
+        %w[identifier source_code].each do |field|
+          result = reader.search('needle', types: types, fields: [field], **(scope || {}))
+          expect(result.fetch(:results).map { |unit| unit.fetch(:type) }).to match_array(expected)
+          result.fetch(:results).each do |unit|
+            expect(reader.find_unit(unit[:identifier], type: unit[:type]))
+              .to include('identifier' => unit[:identifier], 'type' => unit[:type])
+          end
+        end
+      end
+    end
+
+    it "rejects unknown search types rather than claiming an empty complete result with #{scope.inspect}" do
+      publish('Needle', package: 'packs/billing')
+      expect { reader.search('needle', types: ['typo_type'], **(scope || {})) }
+        .to raise_error(ArgumentError, /unknown.*type/i)
     end
   end
 end
