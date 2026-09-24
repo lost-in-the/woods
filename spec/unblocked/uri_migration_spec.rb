@@ -282,4 +282,10 @@ RSpec.describe 'Unblocked scoped URI migration' do
     expect(remote).to have_key("#{repo}/blob/develop/lib/beta.rb")
     expect(remote).not_to have_key("#{repo}/blob/main/lib/beta.rb")
   end
+  it 'does not retain an empty migration that prevents later source selection' do
+    expect(run_sync(migrate_from_ref: 'absent')[:complete]).to be(true)
+    expect(run_sync(migrate_from_ref: 'another-absent')[:complete]).to be(true)
+    payload = JSON.parse(File.read(File.join(@directory, 'unblocked_sync_manifest.json')))
+    expect(payload.fetch('scopes').values).to all(satisfy { |scope| !scope.key?('migration') })
+  end
 end

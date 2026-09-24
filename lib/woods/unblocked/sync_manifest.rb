@@ -143,10 +143,13 @@ module Woods
 
       # Persist the approved source scope and bounded set of replacement pairs.
       def start_migration(from_ref:, moves:)
+        finish_migration
         current = migration
         if current && current['from_ref'] != from_ref
           raise Woods::ConfigurationError, 'Finish the pending Unblocked migration before selecting another source ref'
         end
+
+        return if current.nil? && moves.empty?
 
         @scopes.fetch(@active_scope)['migration'] ||= { 'from_ref' => from_ref, 'moves' => moves }
       end

@@ -182,7 +182,7 @@ producer/source issue and perform a successful full extraction to recover.
 Woods 2.0.0 can also misidentify Struct/Data classes inside namespace wrappers
 (#559). The fix is unreleased after 2.0.0, planned for 2.1: verify the writer's
 loaded revision before expecting assigned PORO/library child identities. A full
-extraction repairs old identities and establishes reference-cache format 2;
+extraction repairs old identities and establishes reference-cache format 3;
 incremental extraction refuses the older cache. Preserve the last generation
 until the rebuild succeeds. Do not rename valid application constants or disable
 collision checks to bypass an older writer's inference. Follow the
