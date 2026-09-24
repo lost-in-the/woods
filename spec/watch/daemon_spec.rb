@@ -7,6 +7,7 @@ require 'json'
 require 'timeout'
 require 'woods/watch/daemon'
 require 'woods/payload_store'
+require 'woods/extraction_identities'
 
 RSpec.describe Woods::Watch::Daemon do
   let(:root) { Dir.mktmpdir('woods_watch_root') }
@@ -145,6 +146,29 @@ RSpec.describe Woods::Watch::Daemon do
   end
 
   describe 'failure posture' do
+    { incremental: 100, full: 1 }.each do |mode, threshold|
+      it "retains the generation and pending paths after a #{mode} identity collision" do
+        error = Woods::IdentityCollisionError.new('same-type identifier collision')
+        method = mode == :full ? :extract_all : :extract_changed
+        allow(extractor).to receive(method).and_raise(error)
+        paths = [touch('app/models/first.rb'), touch('app/models/second.rb')]
+        daemon = build(full_extraction_threshold: threshold)
+        generation = daemon.generation.current.number
+
+        expect(daemon.process(paths)).to include(state: :degraded)
+        expect(extractor).to have_received(method)
+        expect(status['reason']).to include('same-type identifier collision')
+        expect(daemon.generation.current.number).to eq(generation)
+
+        allow(extractor).to receive(method) { publish_generation('retry') && [] }
+        expect(daemon.process([touch('app/models/third.rb')])[:state]).to eq(:running)
+        if mode == :incremental
+          expect(extractor).to have_received(:extract_changed)
+            .with(array_including(*paths.map { |path| File.join(root, path) }, File.join(root, 'app/models/third.rb')))
+        end
+      end
+    end
+
     it 'degrades rather than crashing when a mid-edit syntax error breaks the reload' do
       # SyntaxError is a ScriptError, not a StandardError — rescuing only the
       # latter would let a half-typed file kill the daemon.

@@ -579,6 +579,15 @@ edit does not establish that a day of commits is below the crossover.
   same type+identifier are not representable; full extraction fails closed
   with both source paths instead of publishing a glob-order tie-break (resolved
   B-063). Same-file re-derivation remains a legitimate deduplication case.
+  **Unreleased after 2.0.0:** incremental extraction and targeted refresh enforce
+  the same collision refusal (#561), preserving the prior published generation.
+  Distinct unit types in separate extractor directories remain independent.
+  A retained source can move when the old file is confirmed absent and the new
+  file exists; two conflicting sources produced within one run always refuse.
+  Complete wholesale replacement can relocate an owner, such as framework
+  source after a gem upgrade. Partial runtime discovery cannot grant that authority.
+  Correct the producer or declarations, then retry the complete failed batch.
+  A watcher retains failed paths and reports degraded status until corrected.
 - **Class-based units are never swept**: see [Deletion](#deletion) above for
   why (the `SchemaMigration`/`InternalMetadata` convention-path case).
   Deleting a class-based unit therefore requires either the caller naming the
