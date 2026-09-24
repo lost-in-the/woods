@@ -7,6 +7,7 @@ require 'fileutils'
 require 'open3'
 require 'pathname'
 require 'stringio'
+require 'woods/path_dispatcher'
 
 # `woods:incremental`'s three git-diff branches used to parse
 # `git diff --name-only` with `output.lines.map(&:strip)`. That corrupts three
@@ -86,6 +87,98 @@ RSpec.describe 'woods:incremental changed-path parsing' do
     end
   end
 
+  it 'returns only application-relative changes for a Rails app nested in a repository' do
+    Dir.mktmpdir('woods_nested_incremental_git') do |dir|
+      init_repo(dir)
+      app = File.join(dir, 'services/shop')
+      originals = %w[old.rb deleted.rb moved_out.rb héllo.rb] + ["line\nbreak.rb"]
+      originals.each do |name|
+        path = File.join(app, 'app/models', name)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.binwrite(path, "class Example; end\n")
+      end
+      FileUtils.mkdir_p(File.join(dir, 'services/other/app/models'))
+      File.write(File.join(dir, 'services/other/app/models/moved_in.rb'), 'class Incoming; end')
+      run(dir, 'git', 'add', '-A')
+      run(dir, 'git', 'commit', '--quiet', '-m', 'initial')
+
+      run(dir, 'git', 'mv', 'services/shop/app/models/old.rb', 'services/shop/app/models/new.rb')
+      run(dir, 'git', 'mv', 'services/shop/app/models/moved_out.rb', 'services/other/app/models/moved_out.rb')
+      run(dir, 'git', 'mv', 'services/other/app/models/moved_in.rb', 'services/shop/app/models/moved_in.rb')
+      File.unlink(File.join(app, 'app/models/deleted.rb'))
+      ['héllo.rb', "line\nbreak.rb"].each { |name| File.binwrite(File.join(app, 'app/models', name), 'changed') }
+      File.write(File.join(dir, 'services/other/app/models/unrelated.rb'), 'class Unrelated; end')
+      run(dir, 'git', 'add', '-A')
+      run(dir, 'git', 'commit', '--quiet', '-m', 'nested changes')
+
+      changed, failure = Woods::RakeHelpers.woods_changed_paths_for_range('HEAD~1..HEAD', root: app)
+
+      expect(failure).to be_nil
+      expect(changed).to match_array((originals + %w[new.rb moved_in.rb]).map { |name| "app/models/#{name}" })
+      expect(changed).to all(satisfy { |path| Woods::PathDispatcher.new.relevant?(path) })
+    end
+  end
+
+  describe 'explicit changed files at the task boundary' do
+    let(:repo_dir) { Dir.mktmpdir('woods_incremental_paths') }
+
+    after { FileUtils.remove_entry(repo_dir) }
+
+    it 'normalizes and contains paths before filtering and preserves missing paths' do
+      require 'woods/extractor'
+      stub_const('Rails', double('Rails', root: Pathname.new("#{repo_dir}//")))
+      paths = ['./app/models/user.rb', "#{repo_dir}/app/models/user.rb", './config//./routes.rb',
+               'app/models/../models/deleted.rb', "#{repo_dir}-other/app/models/outsider.rb",
+               '../other/app/models/outsider.rb', 'app/../../../other/app/models/outsider.rb',
+               './notes/unrelated.txt']
+      stub_const('ENV', ENV.to_h.merge('CHANGED_FILES' => paths.join(','), 'WOODS_OUTPUT' => repo_dir))
+      expect(Woods::RakeHelpers).not_to receive(:woods_changed_paths_for_range)
+      allow(Woods::RakeHelpers).to receive(:woods_daemon_coverage).and_return(:absent)
+      allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock).and_yield
+      extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil)
+      allow(Woods::Extractor).to receive(:new).with(output_dir: repo_dir).and_return(extractor)
+      expect(extractor).to receive(:extract_changed)
+        .with(%w[app/models/user.rb config/routes.rb app/models/deleted.rb]).and_return([])
+
+      # Isolate task loading so another spec's Rake application cannot add
+      # duplicate actions; execute skips the host-only :environment prerequisite.
+      previous = Rake.application
+      Rake.application = Rake::Application.new
+      load File.expand_path('../../lib/tasks/woods.rake', __dir__)
+      expect { Rake::Task['woods:incremental'].execute }.to output(/3 changed files/).to_stdout
+    ensure
+      Rake.application = previous if previous
+    end
+  end
+
+  describe 'CI range selection' do
+    before do
+      values = ENV.to_h.except('CI_COMMIT_BEFORE_SHA', 'CI_COMMIT_SHA', 'GITHUB_BASE_REF')
+      stub_const('ENV', values)
+    end
+
+    it 'ignores empty and whitespace-only CI variables' do
+      ENV.merge!('CI_COMMIT_BEFORE_SHA' => " \t", 'CI_COMMIT_SHA' => '', 'GITHUB_BASE_REF' => "\n ")
+      expect(Woods::RakeHelpers.woods_incremental_range).to eq('HEAD~1')
+    end
+
+    it 'uses a GitHub base when the GitLab before-SHA is blank' do
+      ENV.merge!('CI_COMMIT_BEFORE_SHA' => '', 'GITHUB_BASE_REF' => ' main ')
+      expect(Woods::RakeHelpers.woods_incremental_range).to eq('origin/main...HEAD')
+    end
+
+    it 'uses HEAD when GitLab provides a before-SHA and a blank current SHA' do
+      ENV.merge!('CI_COMMIT_BEFORE_SHA' => 'abc123', 'CI_COMMIT_SHA' => " \t")
+      expect(Woods::RakeHelpers.woods_incremental_range).to eq('abc123..HEAD')
+    end
+
+    it 'retains nonempty ranges for Git to validate rather than falling back' do
+      ENV.merge!('CI_COMMIT_BEFORE_SHA' => 'bad-revision', 'CI_COMMIT_SHA' => 'other-bad-revision',
+                 'GITHUB_BASE_REF' => 'main')
+      expect(Woods::RakeHelpers.woods_incremental_range).to eq('bad-revision..other-bad-revision')
+    end
+  end
+
   # ── Unresolvable ranges fail closed (M1) ──────────────────────────────
   #
   # `woods_changed_paths_for_range` used `Open3.capture2` and discarded the
@@ -146,6 +239,16 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
         .to output(/HEAD~1/).to_stderr
         .and raise_error(SystemExit) { |exit_error| expect(exit_error.status).to eq(1) }
+    end
+
+    %w[CI_COMMIT_BEFORE_SHA GITHUB_BASE_REF].each do |key|
+      it "fails clearly for a nonempty invalid #{key}" do
+        ENV[key] = 'unresolvable-revision'
+
+        expect { Woods::RakeHelpers.woods_incremental_changed_paths(repo_dir) }
+          .to output(/unresolvable-revision/).to_stderr
+          .and raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      end
     end
 
     it 'stands down with exit 0 for a failed range when a running daemon covers the index' do

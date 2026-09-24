@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'woods/atomic_file'
+require 'woods/change_set'
 require 'woods/generation'
 require 'woods/git_command'
 
@@ -235,8 +236,9 @@ module Woods
     # naming both.
     #
     # The diff is rooted at the extracted application (`git -C Rails.root`),
-    # consistent with {Woods::GitProvenance} (#262): extraction launched from
-    # another checkout must not diff that checkout's history.
+    # consistent with {Woods::GitProvenance} (#262). Explicit `--relative` and
+    # the current-directory pathspec keep a nested application's paths relative
+    # to Rails.root and exclude sibling applications in the same repository.
     #
     # The child status is carried out, not discarded (M1): `Open3.capture2`
     # turned an unresolvable range — a GitLab zero-SHA, an unfetched GitHub base
@@ -245,7 +247,7 @@ module Woods
     # never ran.
     #
     # @param range [String] a git diff range/revision expression
-    # @param root [Pathname, String] repository root the diff runs against
+    # @param root [Pathname, String] application root the diff runs against
     # @return [Array(Array<String>, String, nil)] the changed paths (both halves
     #   of any rename included), or nil paths plus a human-readable failure when
     #   the range could not be resolved
@@ -254,7 +256,7 @@ module Woods
       output, error, status = Open3.capture3(
         *Woods::GitCommand.argv(
           root, '-c', 'core.quotePath=false',
-          'diff', '--name-status', '-z', '--no-renames', range
+          'diff', '--relative', '--name-status', '-z', '--no-renames', range, '--', '.'
         )
       )
       return [woods_parse_git_diff_name_status(output), nil] if status.success?
@@ -289,11 +291,11 @@ module Woods
     # @return [Array<String>] changed paths
     def woods_incremental_changed_paths(output_dir)
       explicit = ENV.fetch('CHANGED_FILES', nil)
-      return explicit.split(',').map(&:strip) if explicit
+      return woods_normalize_incremental_paths(explicit.split(',')) if explicit
 
       range = woods_incremental_range
       changed_files, failure = woods_changed_paths_for_range(range)
-      return changed_files unless failure
+      return woods_normalize_incremental_paths(changed_files) unless failure
 
       if woods_daemon_coverage(output_dir) == :running
         puts "Could not resolve the git diff range #{range.inspect} (#{failure})."
@@ -309,17 +311,31 @@ module Woods
       exit 1
     end
 
+    # Normalize before the task filters against application-relative rules.
+    # ChangeSet retains outside-root paths as absolute; exclude those here so
+    # traversal spellings cannot reach extraction as application source. This
+    # is lexical containment, preserving deleted files and symlink spellings.
+    #
+    # @param paths [Array<String>] absolute or application-relative paths
+    # @return [Array<String>] unique, contained application-relative paths
+    def woods_normalize_incremental_paths(paths)
+      ChangeSet.new(paths: paths, root: Rails.root).relative_paths.reject { |path| Pathname.new(path).absolute? }
+    end
+
     # The git range `woods:incremental` diffs, from the CI environment or the
     # last-commit default.
     #
     # @return [String]
     def woods_incremental_range
-      if ENV['CI_COMMIT_BEFORE_SHA']
+      before = ENV['CI_COMMIT_BEFORE_SHA'].to_s.strip
+      current = ENV['CI_COMMIT_SHA'].to_s.strip
+      base = ENV['GITHUB_BASE_REF'].to_s.strip
+      if !before.empty?
         # GitLab CI
-        "#{ENV['CI_COMMIT_BEFORE_SHA']}..#{ENV.fetch('CI_COMMIT_SHA', nil)}"
-      elsif ENV['GITHUB_BASE_REF']
+        "#{before}..#{current.empty? ? 'HEAD' : current}"
+      elsif !base.empty?
         # GitHub Actions PR
-        "origin/#{ENV['GITHUB_BASE_REF']}...HEAD"
+        "origin/#{base}...HEAD"
       else
         # Default: changes since last commit
         'HEAD~1'

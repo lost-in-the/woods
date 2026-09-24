@@ -58,22 +58,27 @@ failure a CI chain cannot afford:
 
 | Situation | Behavior |
 |---|---|
-| `CHANGED_FILES` is set | Used verbatim (comma-separated paths); git is not consulted. |
+| `CHANGED_FILES` is set | Comma-separated application-relative or contained absolute paths; normalized before filtering. Git is not consulted. |
 | The git range resolves | Current behavior: extract the changed paths, or exit 0 with `No relevant files changed` when nothing relevant changed. |
 | The range fails **and** a `:running` watch daemon maintains the index | Stand down with a printed reason, exit 0 — the daemon's start-up catch-up covers whatever changed. |
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
 | There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
 
-Changed paths are normalized lexically before dispatch: trailing root slashes,
-duplicate separators and `.`/`..` segments do not create separate changes or
-bypass matching. Missing files remain representable; symlinks are not resolved.
+Changed paths are normalized lexically before the task's relevance filter:
+trailing root slashes, duplicate separators and `.`/`..` segments do not create
+separate changes or bypass matching. Paths outside `Rails.root` are excluded.
+Missing files remain representable; symlinks are not resolved. The task-boundary
+normalization and nested-application Git paths are unreleased after `2.0.0`;
+check the installed revision before relying on them.
 
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
-`origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default). An
-unresolvable range — a GitLab zero-SHA on a new branch, an unfetched base ref,
-a shallow clone with no `HEAD~1` — reads as "nothing changed" to git, which is
-why a failed range must not be mistaken for an empty one: the sync never ran,
-and CI drift would stay unbounded. A degraded daemon covers nothing, so it
+`origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default).
+Whitespace-only CI variables are ignored; a nonempty GitLab before-SHA with
+no current SHA compares against `HEAD`. Nonempty invalid revisions still fail.
+An unresolvable range — a GitLab zero-SHA on a new branch, an unfetched base ref,
+a shallow clone with no `HEAD~1` — cannot establish which files changed.
+The task must not mistake that failed diff for an empty change set.
+A degraded daemon covers nothing, so it
 does not stand the run down. `WOODS_IGNORE_WATCH=1` removes daemon coverage
 too — with it set, a failed range exits 1. A slim image with no `git` binary
 resolves to the same decision rather than a raw `Errno::ENOENT`: the failure is
@@ -82,14 +87,18 @@ and an uncovered one still gets the remediation text.
 
 Recovery choices, in the order they are worth trying:
 
-1. Repair or provide the range: fetch the base ref (`fetch-depth: 2` or more),
-   or correct the CI environment variables that build it.
+1. Repair or provide the range: fetch the actual base ref and enough history
+   to find its merge base, or correct the CI environment variables that build
+   it. Depth two alone does not fetch a pull request's base branch.
 2. Set `CHANGED_FILES` explicitly from your CI platform, bypassing git range
    resolution entirely.
 3. Run a full `woods:extract` when the range cannot be repaired this run.
 
 The diff itself is rooted at the extracted application (`git -C Rails.root`),
-independently of the process working directory. An explicit `WOODS_GIT_DIR`
+independently of the process working directory. Paths are application-relative
+even when Rails lives below the repository root. Deletions and both sides of
+renames within the application remain in the change set; sibling applications
+are excluded. An explicit `WOODS_GIT_DIR`
 selects that Git directory's HEAD for both the diff and manifest provenance.
 For a linked worktree, use its worktree-specific directory within the complete
 shared layout; selecting the shared root instead reads the primary checkout's
@@ -102,6 +111,101 @@ outside `concerns/` directories. Changing their source refreshes their includers
 including inlined code and callback analysis. Multiple runtime mixins sharing a source
 file retain separate identities and refresh all their includers. Run a full extraction after upgrading
 to populate these previously missing source mappings.
+
+### GitHub Actions with an exact baseline
+
+The restored index must describe the first commit in the selected diff.
+A cache from an unrelated branch or older commit is not a valid baseline for
+`HEAD~1` or a pull request's merge base. The recipe below restores only the
+selected commit's exact cache key and runs full extraction on a cache miss.
+It fetches complete history and the actual pull-request base ref; see
+[checkout's history setting](https://github.com/actions/checkout#usage) and
+[cache restore's exact-hit output](https://github.com/actions/cache/blob/v4/restore/README.md#outputs).
+
+Adapt database setup, Ruby configuration, and the index path to the host app.
+This example runs from a Rails app at the repository root. For a nested app,
+set the run steps' working directory and adjust the cache path, hash paths,
+and cache namespace to identify that app. Include every extraction-affecting
+configuration input in the cache namespace; change it after a Woods upgrade
+that needs a full baseline. An unverified or incomplete prior index needs a
+full extraction even when a cache key matches.
+
+```yaml
+# .github/workflows/woods.yml
+name: Update Codebase Index
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    env:
+      RAILS_ENV: test
+      WOODS_IGNORE_WATCH: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Select the baseline commit
+        id: base
+        env:
+          WOODS_BASE_REF: ${{ github.base_ref }}
+          WOODS_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ -n "$WOODS_BASE_REF" ]; then
+            git fetch --no-tags origin "+refs/heads/$WOODS_BASE_REF:refs/remotes/origin/$WOODS_BASE_REF"
+            base="$(git merge-base "origin/$WOODS_BASE_REF" HEAD)"
+          elif [ -n "$WOODS_BEFORE_SHA" ] && git rev-parse --verify "$WOODS_BEFORE_SHA^{commit}" >/dev/null 2>&1; then
+            base="$WOODS_BEFORE_SHA"
+          else
+            base=""
+          fi
+          printf 'sha=%s\n' "$base" >> "$GITHUB_OUTPUT"
+      - name: Restore exactly that baseline
+        id: index-cache
+        if: steps.base.outputs.sha != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: tmp/woods
+          key: woods-v2-app-${{ runner.os }}-${{ hashFiles('Gemfile.lock', 'config/initializers/woods.rb') }}-${{ steps.base.outputs.sha }}
+      - name: Prepare the application database
+        run: bin/rails db:prepare
+      - name: Update the index
+        env:
+          WOODS_EXACT_BASELINE: ${{ steps.index-cache.outputs.cache-hit }}
+          CI_COMMIT_BEFORE_SHA: ${{ steps.base.outputs.sha }}
+          CI_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          if [ "$WOODS_EXACT_BASELINE" = true ]; then
+            bin/rails woods:incremental
+          else
+            bin/rails woods:extract
+          fi
+      - name: Validate the index
+        run: bin/rails woods:validate
+      - name: Save the validated current index
+        uses: actions/cache/save@v4
+        with:
+          path: tmp/woods
+          key: woods-v2-app-${{ runner.os }}-${{ hashFiles('Gemfile.lock', 'config/initializers/woods.rb') }}-${{ github.sha }}
+```
+
+There are deliberately no `restore-keys`: a partial match selects full
+extraction. A first push, an unavailable before-SHA, or an absent baseline
+cache also selects full extraction. A failed explicit PR-base fetch stops the
+job with its Git error. The validated publication is saved under the current
+checkout's SHA, never under the old baseline key.
+
+For Docker CI, run database preparation and Woods tasks through the application
+service, forward the selected CI variables into that container, and cache the
+host-visible mount of the same index. Fetching the base only on a host whose
+Git object store is absent from the container does not make that range usable
+inside the application.
 
 ## Handled source errors and retry
 
