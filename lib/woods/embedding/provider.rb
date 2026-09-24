@@ -220,7 +220,7 @@ module Woods
       #   provider = Woods::Embedding::Provider::Ollama.new
       #   vector = provider.embed("class User < ApplicationRecord; end")
       #   vectors = provider.embed_batch(["text1", "text2"])
-      class Ollama
+      class Ollama # rubocop:disable Metrics/ClassLength
         include Interface
         include DiscardableClient
         include VectorConfiguration
@@ -330,6 +330,13 @@ module Woods
         # @return [Array]
         def cache_identity
           [self.class.name, @host, @model, @num_ctx, requested_dimensions, configured_dimensions]
+        end
+
+        # Pure constructor settings for ResolvedConfig's allowlisted serialization.
+        # The snapshot layer checks the endpoint before persisting it.
+        def configuration_options
+          { model: @model, host: @host, num_ctx: @num_ctx, read_timeout: @read_timeout,
+            dimensions: requested_dimensions, expected_dimensions: configured_dimensions || @observed_dimensions }
         end
 
         # Return the model name.
