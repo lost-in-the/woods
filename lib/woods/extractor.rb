@@ -693,8 +693,9 @@ module Woods
     # the resident watch daemon can keep its recoverable posture: it detects
     # the unchanged generation, reports degraded, and carries the paths into
     # a later cycle. One-shot callers have no later cycle, so the rake tasks
-    # call this method before reporting success and receive a typed non-zero
-    # failure instead of claiming an unreachable payload was published.
+    # and embedded pipeline tool call this method before reporting success.
+    # They receive a typed failure instead of claiming an unreachable payload
+    # was published.
     #
     # @return [void]
     # @raise [Woods::ExtractionError] when the generation marker could not be
@@ -2799,6 +2800,7 @@ module Woods
 
       @incremental_extractors[key] = EXTRACTORS[key]&.new
     rescue StandardError => e
+      (@failed_consumers ||= Set.new).add(key)
       @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.warn "[Woods] Could not build #{key} extractor: #{e.message}"
       @incremental_extractors[key] = nil
@@ -3197,11 +3199,12 @@ module Woods
     # subject to the same eager-load gate the reconciler applies, see
     # {#remove_replaced_units}.
     #
-    # Fail closed (M8): the rescue exists so a re-run that learned nothing —
-    # `extract_all` itself raising — costs the run nothing. It must not swallow
-    # a failure that lands AFTER the replacement started mutating state a
-    # published generation would carry: {#register_and_write} registers the
-    # graph node before writing the unit file, and {#remove_unit_of_type} rm_f's
+    # A re-run that raises before mutation retains the previous units and
+    # records a failed consumer. The batch guard then refuses publication even
+    # if another extractor succeeded, so callers can retry the complete batch.
+    # Failures AFTER replacement starts mutating state abort immediately:
+    # {#register_and_write} registers the graph node before writing the unit
+    # file, and {#remove_unit_of_type} rm_f's
     # the file before dropping the graph node, so a raise in either window
     # leaves the graph and the payload directory disagreeing. Swallowed, the run
     # went on to publish a generation whose dependency_graph.json held nodes
@@ -3219,9 +3222,10 @@ module Woods
     # then fails before changing anything. And the counter is reset BEFORE
     # `extract_all`, not after: {#register_and_write} is shared with the
     # reconcile paths that run earlier in the same pass, and one of those
-    # leaving the counter positive must not turn a later, mutation-free
-    # wholesale failure into an abort — only the current key's wholesale pass
-    # contributes to the decision.
+    # leaving the counter positive must not misreport a later, mutation-free
+    # failure as a half-written replacement. Only the current key's wholesale
+    # pass contributes to the immediate-abort decision; either failure still
+    # prevents the batch from publishing.
     #
     # @param key [Symbol] extractor key
     # @param affected_types [Set<Symbol>]
@@ -3261,6 +3265,7 @@ module Woods
         MSG
       end
 
+      (@failed_consumers ||= Set.new).add(key)
       @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.error "[Woods] Wholesale re-run of #{key} failed: #{e.message}"
       Set.new

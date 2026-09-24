@@ -759,3 +759,11 @@ A source change during reference analysis or final verification also prevents
 publication. Correct source errors and retry the complete batch against a stable
 tree. Reference-only edge updates do not refresh a retained unit's runtime
 metadata, extraction timestamp or Git history.
+
+Whole-extractor failure reporting (#584) is unreleased after `2.0.0`; verify the
+writer revision before relying on it. If a selected whole-app extractor cannot
+be initialized or raises before replacing any units, incremental extraction and
+targeted refresh fail without advancing the published generation, even when
+other extractors succeeded. Correct the logged cause and retry the complete
+changed-file batch or refresh selection. The existing refusal after a
+replacement has begun writing remains in place.
