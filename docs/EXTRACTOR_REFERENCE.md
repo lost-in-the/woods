@@ -71,11 +71,13 @@ applied to these edges. See [source-reference baseline and upgrades](INCREMENTAL
 
 File-based extractors derive an identifier in three steps, first match wins:
 
-1. **Zeitwerk-governed naming.** For a file under a managed autoload path, the expected constant path is computed — from `Rails.autoloaders.main` when a Rails autoloader is up, from the same path-to-constant convention offline otherwise — and the source must declare exactly that constant: `app/services/domain/container/parser.rb` is expected to define `Domain::Container::Parser`. This is what lets a file whose namespaces are written as *classes* (`module Domain; class Container; class Parser`) name the file's own constant instead of the wrapper `Domain::Container`, which every sibling under the same wrapper would otherwise collide with.
+1. **Zeitwerk-governed naming.** For a file under a managed autoload path, the expected constant path comes from its owning Rails loader (`main` or `once`), including that loader's inflections, root namespace, collapsed directories and ignored paths. Without loader information, the offline path convention applies. The source must declare exactly the expected constant: `app/services/domain/container/parser.rb` is expected to define `Domain::Container::Parser`. This is what lets a file whose namespaces are written as *classes* (`module Domain; class Container; class Parser`) name the file's own constant instead of the wrapper `Domain::Container`, which every sibling under the same wrapper would otherwise collide with.
 2. **Position-aware nesting scan** (`SourceNesting`, the supporting utility above). The first `class` declaration qualified by the namespaces actually open at that position. Compact declarations keep their segments; a helper module nested inside the class and sibling modules that closed earlier do not contribute.
 3. **Path convention.** Camelize the path under `app/<kind>/` (details vary per extractor).
 
-Unmanaged paths (`lib/`, configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide, exactly as before the governed lookup existed.
+Unmanaged paths (`lib/` unless configured for autoloading, and configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide. A namespace file containing only `Acme::VERSION` does not acquire an invented `Acme::Version` declaration.
+
+Once-loader ownership (#579) is an unreleased correction after Woods `2.0.0`; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
 
 ### Eager loading
 

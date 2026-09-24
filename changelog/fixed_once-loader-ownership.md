@@ -1,0 +1,1 @@
+- Honor the owning Rails `main` or `once` autoloader when naming declared source constants, preserving loader-specific inflections, namespaces, collapses, ignored paths and copied-root ambiguity. This prevents once-autoloaded library children from colliding under their shared wrapper identifier. Rebuild affected indexes with one full extraction after upgrading. (#579)

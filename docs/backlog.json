@@ -3094,5 +3094,17 @@
     ],
     "description": "Files such as lib/acme.rb and lib/acme/version.rb can both be assigned the enclosing Acme identity. The collision guard now refuses these ordinary reopened-namespace layouts. Recent Struct/Data wrapper fixes do not define how multiple source files contribute to a single unmanaged library constant. Choose an explicit compatible representation retaining every source fragment and provenance (aggregation or deliberately qualified identities). Do not suppress collisions or keep one file arbitrarily. Test unmanaged libraries, once-autoloaded libraries and multiple core-extension files across full/incremental extraction. Coordinate nonconstant identity consequences with #213. GitHub: #575.",
     "status": "ready"
+  },
+  {
+    "id": "B-227",
+    "title": "Honor the owning once loader when resolving source namespaces",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/source_nesting.rb"
+    ],
+    "description": "Issue #579: SourceNesting only consults the main Zeitwerk loader, so once-owned declared constants miss authoritative naming. Resolve direct ownership across main and once before copied-root fallback; carry the selected loader through expected cpath, namespace, inflection, collapse and nested-root checks. Preserve ignored/ambiguous paths and authoritative nil. Verify fresh Rails 7.2+ autoload_lib_once and unchanged main-loader behavior. Unmanaged multi-source namespaces remain #575; do not invent constants or suppress collisions.",
+    "status": "resolved"
   }
 ]
