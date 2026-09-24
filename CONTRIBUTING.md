@@ -293,8 +293,9 @@ can contain `- Preserve pending work across watch restarts.` Supported types are
 lowercase letter or digit and use lowercase letters, digits, hyphens, or
 underscores. Use one unique file per change; do not copy its entry into
 Unreleased as well. Keep entry files directly inside a real `changelog/`
-directory; symlinks and directories masquerading as entries are refused.
-Other file extensions are left untouched.
+directory; all nested directories and symlinks are refused before preparation,
+including ones whose names do not end in `.md`. Regular files with other
+extensions are left untouched.
 
 `release:prepare` appends entry files in filename order after inline Unreleased
 entries, folds them through the same heading merger, and deletes exactly the
@@ -304,6 +305,10 @@ A prepared release has an empty Unreleased section and no entry files. During
 an ordinary beta cycle, entry files may accumulate even with an empty Unreleased section while
 VERSION stays at the previous beta; the tag validator always rejects entry
 files at the candidate release SHA, regardless of inline notes or the version.
+
+The Bundler tasks `release`, `release:rubygem_push`, and
+`release:source_control_push` are blocked, including their prerequisites.
+Use the preparation tasks below; tagging and publishing remain maintainer steps.
 
 ### Preparing a release
 

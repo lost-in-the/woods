@@ -3106,5 +3106,224 @@
     ],
     "description": "Issue #579: SourceNesting only consults the main Zeitwerk loader, so once-owned declared constants miss authoritative naming. Resolve direct ownership across main and once before copied-root fallback; carry the selected loader through expected cpath, namespace, inflection, collapse and nested-root checks. Preserve ignored/ambiguous paths and authoritative nil. Verify fresh Rails 7.2+ autoload_lib_once and unchanged main-loader behavior. Unmanaged multi-source namespaces remain #575; do not invent constants or suppress collisions.",
     "status": "resolved"
+  },
+  {
+    "id": "B-228",
+    "title": "Report extraction and publication failures accurately",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/woods/mcp/server.rb"
+    ],
+    "description": "Issue #584: Audit R48/R49: a whole-type extractor exception before durable mutation can be logged and swallowed without marking the consumer failed. The optional pipeline_extract tool can mark a task complete without checking raise_on_publication_failure!. Preserve the previous published generation, record failed consumers, propagate non-success through full/incremental/refresh and the embedded pipeline tool, and retain post-mutation abort protections. Regress successful and failing sibling consumers, full/incremental tool execution, background task state and the unchanged publication pointer.",
+    "status": "in-progress"
+  },
+  {
+    "id": "B-229",
+    "title": "Catch source edits made during publication on watcher startup",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "watch",
+    "files": [
+      "lib/woods/watch/daemon.rb",
+      "lib/woods/source_inputs/manifest.rb"
+    ],
+    "description": "Issue #585: Audit R51: startup catch-up compares source mtimes with publication-marker time. In a no-reference index an edit made after source capture but before publication can be missed; current reference publication guards already prevent the common reference-bearing case. Use an evidenced conservative watermark or recorded dirty paths without weakening source verification. Add synchronized full-publication/startup regressions for no-reference and reference-bearing indexes, unchanged files and the final-scan/publication window; avoid timing sleeps and optimistic freshness.",
+    "status": "in-progress"
+  },
+  {
+    "id": "B-230",
+    "title": "Keep embedding requests and caches consistent with vector configuration",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "embedding",
+    "files": [
+      "lib/woods/embedding",
+      "lib/woods/cache",
+      "lib/woods/builder.rb"
+    ],
+    "description": "Issue #586: Audit R29/R57: stored observed width can become an unsupported dimensions request for a fixed-width embedding model, and embedding cache identity depends only on the model label despite configurable dimensions/provider endpoints. Separate observed width from requested reduction; fingerprint relevant provider configuration without network probes on cache hits. Preserve width mismatch refusal and atomic embedding failure. Offline regressions must cover restored fixed-width models, explicit supported reductions, same label/different widths or endpoints, cache hits during provider outage and malformed cached vectors. This is separate from retrieval-context cache isolation.",
+    "status": "in-progress"
+  },
+  {
+    "id": "B-231",
+    "title": "Close release-tooling escape paths and validation gaps",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "release",
+    "files": [
+      "lib/tasks/release.rake",
+      "lib/woods/release",
+      "lib/woods/release_v2/surface_inventory.rb",
+      "script/validate-release"
+    ],
+    "description": "Issue #587: Audit R35/R40/R68-R73: block the still-mutating Bundler release:source_control_push task; reject nested changelog entries before any writes; include check-task registration in surface inventory; make release text handling locale-independent; correct task-specific help and impossible version/fence recovery advice. Repair the malformed changelog fragment boundary. Preserve task-owned VERSION/fences and existing transition policy; do not tag, push, publish, or introduce an unreviewed retarget/restate operation. Use instrumented mutation-refusal tests and scratch release fixtures, then regenerate inventory.",
+    "status": "resolved"
+  },
+  {
+    "id": "B-232",
+    "title": "Preserve full-extraction facts across incremental runtime and configuration changes",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractor.rb",
+      "lib/tasks/woods.rake",
+      "lib/woods/extractors/serializer_extractor.rb"
+    ],
+    "description": "Issue #588: R20/R23/R24: reconcile runtime-discovered nested jobs and serializers, escalate schema/restart-trigger inputs before relevance filtering, refresh BehavioralProfile through its real extractor, and withdraw obsolete flow artifacts when precomputation is disabled. Require booted full/incremental/refresh payload and graph equivalence, including failed or partial discovery controls. Keep this as a tracking issue with separately reviewable fixes.",
+    "status": "ready"
+  },
+  {
+    "id": "B-233",
+    "title": "Make source-freshness evidence bounded and tied to the intended checkout",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "provenance",
+    "files": [
+      "lib/woods/source_inputs",
+      "lib/woods/extractor.rb",
+      "lib/woods/hooks"
+    ],
+    "description": "Issue #589: R36/R38/R75-R79: enforce writer/reader manifest size compatibility; classify positively identified installed gems consistently; expose/bind the source root for copied indexes; keep scanning accessible paths after a bounded per-entry error; distinguish missing comparison baselines and partial scans from actual additions/deletions; give reason-specific quick-scan recovery advice. Preserve unknown status and reference publication refusal when evidence is incomplete. Split these independent regressions into reviewable changes. Root mapping must retain legitimate container/remote-index use.",
+    "status": "ready"
+  },
+  {
+    "id": "B-234",
+    "title": "Make agent and watcher installation portable across bundle settings and checkouts",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "installation",
+    "files": [
+      "lib/woods/agent_configuration",
+      "lib/woods/watch/installation"
+    ],
+    "description": "Issue #590: R32/R33/R34/R61: agent preflight loses BUNDLE_PATH and related intended application settings; committed watcher receipts compare nonportable exact permission modes; documented temporary plan paths can cross a macOS symlink; project-scoped identity unnecessarily includes user config directories. Preserve content/executable ownership and preview/apply race guards. Test real private bundles, umasks, simulated symlinked temp parent, and two user homes against the same project.",
+    "status": "ready"
+  },
+  {
+    "id": "B-235",
+    "title": "Provide consistent watcher configuration and ownership recovery",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "watch",
+    "files": [
+      "lib/woods/watch",
+      "lib/tasks/woods.rake",
+      "lib/tasks/woods_checks.rake"
+    ],
+    "description": "Issue #591: R59/R60/R62/R66/R74: provide explicit ownership-verified recovery for abandoned foreign claims; normalize blank idle timeout consistently; resolve check-task roots through the actual helper; make custom output-directory requirements consistent with verified launch capture; report actionable safe identity-key errors. Never take over solely from claim age, delete a live owner, silently degrade verified capture, or merely remove an output override while leaving its key/handoff bound elsewhere.",
+    "status": "ready"
+  },
+  {
+    "id": "B-236",
+    "title": "Preserve Unicode edit events in Ruby fallback hooks under C locale",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "hooks",
+    "files": [
+      "plugin/hooks/woods-refresh.sh",
+      "plugin/hooks/woods-session-start.sh"
+    ],
+    "description": "Issue #592: R84: the real no-jq refresh hook exits successfully without queuing a Unicode edit under LC_ALL=C because later Ruby JSON snippets use default input encoding. Decode UTF-8 explicitly throughout fallback paths and sanitize errors. Regress actual hook invocation with jq absent, non-ASCII filename/root/output, exact queued paths, valid JSON and no raw backtrace. Update plugin compatibility/version guidance.",
+    "status": "ready"
+  },
+  {
+    "id": "B-237",
+    "title": "Make Index MCP filtering and missing-artifact responses consistent",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "mcp",
+    "files": [
+      "lib/woods/mcp",
+      "lib/woods/generation.rb"
+    ],
+    "description": "Issue #593: R30/R31/R52-R54: allow valid slash-bearing unit identifiers without weakening resource grammar; normalize family aliases and concrete type filters consistently across scoped/unscoped queries; distinguish unknown flow entries and snapshots from valid empty results; handle malformed generation markers across held-open tools/resources and recovery. Preserve path containment and no fallback to unrelated generations. Add real protocol response regressions; split interface changes into focused PRs.",
+    "status": "ready"
+  },
+  {
+    "id": "B-238",
+    "title": "Close reproduced extractor discovery and method-chunk identity gaps",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors",
+      "lib/woods/chunking/semantic_chunker.rb"
+    ],
+    "description": "Issue #594: R19/R21/R22/R44-R46/R58: verify external component ownership policy with real optional gems; consider explicitly documented mailer coverage expansion; recognize actual manager/policy ancestry; support state-machine declaration forms; select the real migration rather than a preceding helper; represent same-named schedules from different formats deliberately; preserve class and instance methods with identical bare names as distinct chunks. Each requires its own regression and compatibility decision. Do not execute historical migrations or silence identity collisions; distinguish new bugs from documented coverage choices.",
+    "status": "needs-triage"
+  },
+  {
+    "id": "B-239",
+    "title": "Define safe export URI identity migration and branch escaping",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "export",
+    "files": [
+      "lib/woods/export",
+      "lib/woods/unblocked"
+    ],
+    "description": "Issue #595: R18: branch-sensitive export URIs change remote keys and purge accounting, and branch delimiters are interpolated unescaped. Design migration from earlier manifest identities, retain remote ownership and separate branches where intended, and report refused cleanup honestly. Test a legacy manifest with non-main and delimiter-bearing branches, an offline fake client, idempotent second sync and purge guards. Coordinate typed identity decisions with #213; no live remote content deletion during qualification.",
+    "status": "needs-triage"
+  },
+  {
+    "id": "B-240",
+    "title": "Measure and improve embedding size bounds and multi-source ranking",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/embedding/text_preparer.rb",
+      "lib/woods/retrieval/ranker.rb"
+    ],
+    "description": "Issue #596: R28/R56: character estimates can understate multilingual model input size, while multiple vector chunks of one unit can dominate rank fusion before source deduplication. These are sizing/scoring mechanisms with unmeasured provider or retrieval-quality impact. Add meaningful offline length-rejection and ranking fixtures before choosing a fix; preserve complete atomic embedding failure and genuine cross-source agreement. Include offending unit identity in safe diagnostics; do not silently skip rejected units.",
+    "status": "needs-triage"
+  },
+  {
+    "id": "B-241",
+    "title": "Align Console transport configuration and ordinary query behavior",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "console",
+    "files": [
+      "lib/woods/console/origin_guard.rb",
+      "lib/woods/console/connection_manager.rb",
+      "lib/woods/console/embedded_executor.rb",
+      "lib/woods/console/rack_middleware.rb"
+    ],
+    "description": "Issue #597: R15/R43/R82/R83: align explicitly configured host/origin allowlists across Woods and the MCP SDK, including IPv6/port semantics; reject or clearly migrate unsupported nested console.yml rather than silently selecting local mode; define singular association counts; give consistent actionable HTTP eager-load failure behavior. Preserve authentication, redaction and table guards. Establish real transport/ActiveRecord regressions and reproduce host boot errors before considering narrow fallback. Coordinate code integration with the pending private patch without publishing its details.",
+    "status": "ready"
+  },
+  {
+    "id": "B-242",
+    "title": "Correct remaining audit migration and capability documentation",
+    "severity": "medium",
+    "category": "docs",
+    "layer": "documentation",
+    "files": [
+      "docs/UPGRADING_TO_2.md",
+      "docs/CONFIGURATION_REFERENCE.md",
+      "docs/CONSOLE_MCP_SETUP.md",
+      "docs/NOTION_INTEGRATION.md",
+      "docs/MCP_TOOL_COOKBOOK.md"
+    ],
+    "description": "Issue #498 follow-up, audit R13/R17/R37/R41/R42/R55/R63-R65/R67: accurately describe legacy HTTP validation, version/baseline refusal, retained runtime provenance, snapshot/SQLite preservation during clean migration, removed no-op configuration, empty-index readiness, removed eval settings, explicit embedding model selection, early placement of middleware/tracer settings, and embedded-only collaborators. Keep intentional safety contracts; do not restore removed eval or equate an empty corpus with failed readiness.",
+    "status": "ready"
+  },
+  {
+    "id": "B-243",
+    "title": "Normalize app-owned nested metadata paths for portable extraction output",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/event_extractor.rb",
+      "lib/woods/extractors/view_component_extractor.rb"
+    ],
+    "description": "Issue #483 follow-up, audit R47: event publisher/subscriber paths and component sidecars retain absolute application roots in metadata or generated annotations, making equivalent checkouts hash differently. Normalize known application-owned paths before source/hash serialization while retaining deliberate external-path semantics. Compare real two-root fixtures without sorting arrays or scrubbing evidence beyond documented volatile fields.",
+    "status": "ready"
   }
 ]

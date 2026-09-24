@@ -123,6 +123,26 @@ RSpec.describe 'changelog entry files' do
     end
   end
 
+  %i[nested symlinked_nested].each do |kind|
+    it "refuses a #{kind} entry directory before preparing or consuming any file" do
+      with_release_repository do |root|
+        fragment(root, 'fixed_valid.md', '- valid entry')
+        Dir.mktmpdir do |nested|
+          File.write(File.join(nested, 'fixed_hidden.md'), '- hidden entry')
+          target = File.join(root, 'changelog/nested')
+          kind == :nested ? FileUtils.cp_r(nested, target) : File.symlink(nested, target)
+          commit_release_repository_changes(root)
+          before = release_repository_digest(root)
+
+          expect { prepare(root) }.to raise_error(Woods::Release::Fragments::InvalidEntry, %r{changelog/nested})
+          expect(release_repository_digest(root)).to eq(before)
+          expect(File.read(File.join(nested, 'fixed_hidden.md'))).to eq('- hidden entry')
+          expect(release_git(root, 'status', '--porcelain')).to eq('')
+        end
+      end
+    end
+  end
+
   it 'refuses a directory with an entry filename without recursively deleting it' do
     with_release_repository do |root|
       FileUtils.mkdir_p(File.join(root, 'changelog/fixed_directory.md'))

@@ -54,7 +54,7 @@ RSpec.describe 'release validation' do
   end
 
   def validate(repository, tag: 'v2.0.0', sha: nil, published_versions: [], trusted_checkout: false,
-               output_path: nil, trusted_sha: nil)
+               output_path: nil, trusted_sha: nil, locale: nil)
     sha ||= git('rev-parse', 'HEAD', chdir: repository)
     env = {
       'RELEASE_TAG' => tag,
@@ -62,6 +62,7 @@ RSpec.describe 'release validation' do
       'RELEASE_MAIN_REF' => 'refs/remotes/origin/main',
       'RUBYGEMS_VERSIONS_JSON' => JSON.generate(published_versions)
     }
+    env.merge!('LC_ALL' => locale, 'LANG' => locale) if locale
     env['GITHUB_OUTPUT'] = output_path if output_path
     env['RELEASE_TRUSTED_SHA'] = trusted_sha || git('rev-parse', 'HEAD', chdir: repository) if trusted_checkout
     arguments = trusted_checkout ? ['--trusted-checkout'] : []
@@ -322,6 +323,26 @@ RSpec.describe 'release validation' do
 
         expect(status).not_to be_success
         expect(stderr).to include('unconsumed changelog entries: changelog/fixed_pending.md')
+      end
+    end
+
+    it "validates UTF-8 release text under C locale with trusted_checkout=#{trusted_checkout}" do
+      changelog = "## [2.0.0] - 2026-08-20\n\n- Preserve café and 日本語 source.\n"
+      build_repository(changelog: changelog) do |repository|
+        add_origin(repository) if trusted_checkout
+        stdout, stderr, status = validate(repository, trusted_checkout: trusted_checkout, locale: 'C')
+        expect(status).to be_success, stderr
+        expect(stdout).to include('Validated v2.0.0')
+      end
+    end
+
+    it "refuses invalid release text cleanly with trusted_checkout=#{trusted_checkout}" do
+      build_repository(changelog: "## [2.0.0] - 2026-08-20\n\xFF".b) do |repository|
+        add_origin(repository) if trusted_checkout
+        _stdout, stderr, status = validate(repository, trusted_checkout: trusted_checkout, locale: 'C')
+        expect(status).not_to be_success
+        expect(stderr).to include('CHANGELOG.md must be valid UTF-8')
+        expect(stderr).not_to include('ArgumentError', 'invalid byte sequence')
       end
     end
   end

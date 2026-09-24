@@ -28,9 +28,20 @@ module Woods
           raise InvalidEntry, 'changelog must be a real directory, not a symlink or file'
         end
 
-        Dir.children(directory).sort.grep(/\.md\z/).to_h do |name|
+        flat_entry_names(directory).grep(/\.md\z/).to_h do |name|
           path = "changelog/#{name}"
           [path, read_entry(root, path, name)]
+        end
+      end
+
+      # @return [Array<String>] direct names after refusing unsupported nested inputs
+      def flat_entry_names(directory)
+        Dir.children(directory).sort.each do |name|
+          entry = File.lstat(File.join(directory, name))
+          next unless entry.directory? || entry.symlink?
+
+          raise InvalidEntry,
+                "changelog/#{name}: changelog entries must be flat; directories and symlinks are refused"
         end
       end
 

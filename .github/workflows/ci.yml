@@ -303,6 +303,8 @@ jobs:
           spec/feedback
           spec/session_tracer
           spec/evaluation
+          spec/release_v2/release_validator_spec.rb
+          spec/release_v2/surface_inventory_spec.rb
 
   # Drives both packaged MCP executables with the official Ruby client and the
   # pinned Inspector CLI, including a real HTTP socket. Its own job because the

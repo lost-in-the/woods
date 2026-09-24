@@ -20,8 +20,21 @@ RSpec.describe 'release-v2 public-surface inventory' do
     expect { Rake::Task['release_v2:verify_surface_inventory'].invoke }.not_to raise_error
   end
 
+  it 'includes the callable published-index check and detects changed task arguments' do
+    Rake.with_application(Rake::Application.new) do
+      task = surface_inventory.inventory.fetch('rake_tasks').find do |entry|
+        entry['name'] == 'woods:check:moved_messages'
+      end
+      expect(task).to eq('name' => 'woods:check:moved_messages', 'arguments' => %w[from to], 'prerequisites' => [])
+
+      Rake::Task['woods:check:moved_messages'].clear
+      Rake::Task['woods:check:moved_messages'].set_arg_names([:changed_contract])
+      expect { surface_inventory.verify! }.to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /stale/)
+    end
+  end
+
   it 'records an allowed disposition for every unresolved release blocker' do
-    findings = JSON.parse(File.read(File.join(root, '.Codex/release-v2/findings.json'))).fetch('findings')
+    findings = JSON.parse(File.read(File.join(root, '.Codex/release-v2/findings.json'), encoding: Encoding::UTF_8)).fetch('findings')
     allowed_dispositions = %w[fixed documented_limitation deferred_with_issue rejected_with_evidence]
 
     findings.each do |finding|
@@ -32,7 +45,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'rejects a drifted count in current public documentation' do
     documentation_path = File.join(root, 'docs/README.md')
-    original = File.read(documentation_path)
+    original = File.read(documentation_path, encoding: Encoding::UTF_8)
     changed = original.sub('35 extractors', '36 extractors')
     expect(changed).not_to eq(original)
 
@@ -44,7 +57,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'rejects a drifted Index MCP count in the current guide' do
     documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
-    original = File.read(documentation_path)
+    original = File.read(documentation_path, encoding: Encoding::UTF_8)
     changed = original.sub('### Tools (29', '### Tools (28')
     expect(changed).not_to eq(original)
 
@@ -56,7 +69,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'rejects a drifted Console MCP heading count in the current guide' do
     documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
-    original = File.read(documentation_path)
+    original = File.read(documentation_path, encoding: Encoding::UTF_8)
     changed = original.sub(
       '### Tool inventory (31 schemas; 9 registered by default)',
       '### Tool inventory (30 schemas; 9 registered by default)'
@@ -71,7 +84,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'rejects a drifted Console MCP default registration count in the current guide' do
     documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
-    original = File.read(documentation_path)
+    original = File.read(documentation_path, encoding: Encoding::UTF_8)
     changed = original.sub(
       '### Tool inventory (31 schemas; 9 registered by default)',
       '### Tool inventory (31 schemas; 8 registered by default)'
@@ -106,7 +119,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'derives a conditional tool registration from the server implementation' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
-    original = File.read(server_path)
+    original = File.read(server_path, encoding: Encoding::UTF_8)
     changed = original.sub('if operator', 'if audit_operator')
     expect(changed).not_to eq(original)
 
@@ -121,7 +134,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'derives predicate logic from the server implementation' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
-    original = File.read(server_path)
+    original = File.read(server_path, encoding: Encoding::UTF_8)
     changed = original.sub('!token.nil? && ids && !ids.empty?', '!token.nil? && ids && ids.any?')
     expect(changed).not_to eq(original)
 
@@ -136,7 +149,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'derives internal registration guards from the server implementation' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
-    original = File.read(server_path)
+    original = File.read(server_path, encoding: Encoding::UTF_8)
     registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)'
     changed = original.sub(registration, "#{registration} if pipeline_enabled?")
     expect(changed).not_to eq(original)
@@ -152,7 +165,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'derives block registration guards from the complete helper source' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
-    original = File.read(server_path)
+    original = File.read(server_path, encoding: Encoding::UTF_8)
     registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)'
     changed = original.sub(registration, "if pipeline_enabled?\n            #{registration}\n          end")
     expect(changed).not_to eq(original)
@@ -168,7 +181,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'captures callable predicate arguments in the registration condition contract' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
-    original = File.read(server_path)
+    original = File.read(server_path, encoding: Encoding::UTF_8)
     changed = original.sub('if notion_wired?', 'if notion_wired?(strict: true)')
     expect(changed).not_to eq(original)
 
@@ -189,7 +202,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'derives vector-store adapters from the builder implementation' do
     builder_path = File.join(root, 'lib/woods/builder.rb')
-    original = File.read(builder_path)
+    original = File.read(builder_path, encoding: Encoding::UTF_8)
     changed = original.sub('when :qdrant', 'when :audit_vector')
     expect(changed).not_to eq(original)
 
@@ -200,7 +213,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
 
   it 'derives exporter availability from exporter implementations' do
     exporter_path = File.join(root, 'lib/woods/obsidian/vault_exporter.rb')
-    original = File.read(exporter_path)
+    original = File.read(exporter_path, encoding: Encoding::UTF_8)
     changed = original.sub('class VaultExporter', 'class AuditVaultExporter')
     expect(changed).not_to eq(original)
 
