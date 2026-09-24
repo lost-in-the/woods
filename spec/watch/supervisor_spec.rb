@@ -99,8 +99,13 @@ RSpec.describe Woods::Watch::Supervisor do
 
   it 'keeps its owner alive when its diagnostic record becomes corrupt' do
     launch("#{handshake}\nchild.call(:startup, state: 'ready', generation: 1, reason: 'reconciled'); sleep 30")
-    eventually { @supervisor.state == 'ready' }
-    path = Dir[File.join(@root, 'index/watch_supervisors/*.json')].first
+    # The in-memory state changes before its forced status write. Wait for that
+    # publication so it cannot overwrite the corruption this test introduces.
+    path = nil
+    eventually do
+      path = Dir[File.join(@root, 'index/watch_supervisors/*.json')].first
+      path && JSON.parse(File.read(path))['state'] == 'ready'
+    end
     File.write(path, '{corrupt')
     @supervisor.send(:heartbeat, force: true)
 
