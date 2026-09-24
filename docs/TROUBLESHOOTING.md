@@ -748,6 +748,15 @@ Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` 
 
 **A dimension mismatch is never silently tolerated.** If you are getting poor results without seeing this error, the cause is something else.
 
+For an unsupported `dimensions` request or a wrong-width cached vector, compare
+the installed embedding and reader revisions as well as the model, endpoint,
+and explicit width configuration. The request/cache consistency fix (#586) is
+unreleased after `2.0.0`: it separates stored widths from requested reductions,
+keeps fixed-width ada requests compatible, and separates embedding cache entries
+by provider configuration. See [embedding options](CONFIGURATION_REFERENCE.md#embedding-options)
+and [cache identity](CONFIGURATION_REFERENCE.md#retrieval-cache-options). Do not
+remove a width guard to accept mismatched vectors.
+
 ---
 
 ### OpenAI API errors during embedding

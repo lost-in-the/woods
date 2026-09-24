@@ -8,8 +8,9 @@ require 'woods/embedding/openai'
 RSpec.describe Woods::Embedding::Provider::OpenAI do
   subject(:provider) { described_class.new(api_key: 'test-key') }
 
-  let(:single_embedding) { [0.1, 0.2, 0.3, 0.4, 0.5] }
-  let(:batch_embeddings) { [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]] }
+  let(:vector_width) { 1536 }
+  let(:single_embedding) { Array.new(vector_width, 0.1) }
+  let(:batch_embeddings) { [Array.new(vector_width, 0.2), Array.new(vector_width, 0.3)] }
 
   let(:single_response_body) do
     { 'data' => [{ 'embedding' => single_embedding, 'index' => 0 }] }.to_json
@@ -169,7 +170,8 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
     it 'falls back to embed call for unknown models' do
       allow(http_double).to receive(:request).and_return(success_response)
       custom_provider = described_class.new(api_key: 'test-key', model: 'custom-model')
-      expect(custom_provider.dimensions).to eq(5)
+      expect(custom_provider.dimensions).to eq(vector_width)
+      expect(http_double).to have_received(:request).once
     end
 
     it 'returns an explicitly requested dimension without probing the API' do
@@ -361,6 +363,7 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
   end
 
   describe 'custom configuration' do
+    let(:vector_width) { 3072 }
     subject(:custom_provider) do
       described_class.new(api_key: 'custom-key', model: 'text-embedding-3-large')
     end
@@ -391,15 +394,19 @@ RSpec.describe Woods::Embedding::Provider::OpenAI do
       end
     end
 
-    it 'sends explicitly configured dimensions in single and batch requests' do
-      dimensioned = described_class.new(api_key: 'custom-key', dimensions: 256)
-      allow(http_double).to receive(:request).and_return(success_response, batch_success_response)
+    context 'with an explicit output width' do
+      let(:vector_width) { 256 }
 
-      dimensioned.embed('text')
-      dimensioned.embed_batch(%w[first second])
+      it 'sends explicitly configured dimensions in single and batch requests' do
+        dimensioned = described_class.new(api_key: 'custom-key', dimensions: 256)
+        allow(http_double).to receive(:request).and_return(success_response, batch_success_response)
 
-      expect(http_double).to have_received(:request).twice do |request|
-        expect(JSON.parse(request.body)['dimensions']).to eq(256)
+        dimensioned.embed('text')
+        dimensioned.embed_batch(%w[first second])
+
+        expect(http_double).to have_received(:request).twice do |request|
+          expect(JSON.parse(request.body)['dimensions']).to eq(256)
+        end
       end
     end
   end

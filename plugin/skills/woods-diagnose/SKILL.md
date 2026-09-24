@@ -385,6 +385,14 @@ Only diagnose this layer when structural tools work and `codebase_retrieve` fail
 - Dimension mismatch: rebuild into a store matching the configured model; do not suppress the preflight.
 - Purge guard: back up and inspect the proposed deletion; never set `WOODS_ALLOW_PURGE` without explicit approval.
 
+For an unsupported OpenAI `dimensions` option or stale vectors after changing
+provider width/endpoint, check the installed revision: the embedding request and
+cache consistency fix (#586) is unreleased after Woods `2.0.0`. It distinguishes
+stored vector width from explicit reduction, omits unsupported width parameters
+for fixed-width ada, and scopes embedding cache entries to provider configuration.
+Follow the installed version's [embedding options and cache guidance](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#embedding-options);
+never bypass a width refusal or infer this capability from the plugin version.
+
 For metadata appearing in another index or worktree, compare `WOODS_OUTPUT`,
 `config.output_dir`, and any explicit `metadata_store_options[:database]`.
 The default SQLite path following `WOODS_OUTPUT` during embedding (B-156) is

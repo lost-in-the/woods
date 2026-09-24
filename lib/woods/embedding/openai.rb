@@ -19,12 +19,14 @@ module Woods
       class OpenAI # rubocop:disable Metrics/ClassLength
         include Interface
         include DiscardableClient
+        include VectorConfiguration
 
         ENDPOINT = URI('https://api.openai.com/v1/embeddings')
         DEFAULT_MODEL = 'text-embedding-3-small'
         DIMENSIONS = {
           'text-embedding-3-small' => 1536,
-          'text-embedding-3-large' => 3072
+          'text-embedding-3-large' => 3072,
+          'text-embedding-ada-002' => 1536
         }.freeze
         # Conservatively chunk below OpenAI's 8192-token input limit across
         # text-embedding-3-small / -3-large / ada-002. The chunker uses
@@ -43,10 +45,12 @@ module Woods
         # @param api_key [String] OpenAI API key
         # @param model [String] OpenAI embedding model name (default: text-embedding-3-small)
         # @param dimensions [Integer, nil] Requested output size for text-embedding-3 models
-        def initialize(api_key:, model: DEFAULT_MODEL, dimensions: nil)
+        # @param expected_dimensions [Integer, nil] Expected width; never sent to the API
+        def initialize(api_key:, model: DEFAULT_MODEL, dimensions: nil, expected_dimensions: nil)
           @api_key = api_key
           @model = model
-          @dimensions = normalize_dimensions(dimensions)
+          configure_dimensions(dimensions: dimensions, expected_dimensions: expected_dimensions)
+          validate_model_dimensions!
         end
 
         # Embed a single text string.
@@ -60,7 +64,7 @@ module Woods
 
           response = post_request(request_body(text))
           vectors = Array(response['data']).map { |item| item['embedding'] }
-          VectorValidation.validate!(vectors, expected_count: 1, provider: 'OpenAI')
+          validate_vectors!(vectors, expected_count: 1, provider: 'OpenAI')
           vectors.first
         end
 
@@ -82,7 +86,7 @@ module Woods
             response = post_request(request_body(slice))
             extract_validated_batch(response, slice.size)
           end
-          VectorValidation.validate!(vectors, expected_count: texts.size, provider: 'OpenAI')
+          validate_vectors!(vectors, expected_count: texts.size, provider: 'OpenAI')
           vectors
         end
 
@@ -93,7 +97,18 @@ module Woods
         #
         # @return [Integer] number of dimensions
         def dimensions
-          @dimensions || DIMENSIONS[@model] || embed('test').length
+          configured_dimensions || @observed_dimensions || embed('test').length
+        end
+
+        # @return [Integer, nil] expected width without a network probe
+        def configured_dimensions
+          super || DIMENSIONS[@model]
+        end
+
+        # API keys do not change embeddings and are deliberately excluded.
+        # @return [Array]
+        def cache_identity
+          [self.class.name, ENDPOINT.to_s, @model, requested_dimensions, configured_dimensions]
         end
 
         # Return the model name.
@@ -121,7 +136,7 @@ module Woods
         # @return [Array<Array<Float>>]
         def extract_validated_batch(response, expected_count)
           data = Array(response['data'])
-          VectorValidation.validate!(
+          validate_vectors!(
             data.map { |item| item['embedding'] },
             expected_count: expected_count,
             provider: 'OpenAI',
@@ -132,17 +147,31 @@ module Woods
 
         def request_body(input)
           { model: @model, input: input }.tap do |body|
-            body[:dimensions] = @dimensions if @dimensions
+            body[:dimensions] = requested_dimensions if requested_dimensions
           end
         end
 
-        def normalize_dimensions(value)
-          return if value.nil?
+        def validate_model_dimensions!
+          native = DIMENSIONS[@model]
+          return unless native
 
-          dimensions = Integer(value)
-          raise ArgumentError, "dimensions must be positive, got #{value.inspect}" unless dimensions.positive?
+          width = configured_dimensions
+          raise ArgumentError, "#{@model} supports at most #{native} dimensions" if width > native
 
-          dimensions
+          return validate_ada_dimensions!(width, native) if @model == 'text-embedding-ada-002'
+
+          return unless !requested_dimensions && width != native
+
+          raise ArgumentError, "expected dimensions #{width} do not match #{@model} output #{native}; " \
+                               'set dimensions explicitly to request a reduction'
+        end
+
+        def validate_ada_dimensions!(width, native)
+          raise ArgumentError, "#{@model} requires dimensions #{native}" unless width == native
+
+          # ada has a fixed width and does not accept the dimensions parameter,
+          # even when a caller explicitly declares the matching native width.
+          @requested_dimensions = nil
         end
 
         # Cap interpolated response bodies so misconfigured API errors
