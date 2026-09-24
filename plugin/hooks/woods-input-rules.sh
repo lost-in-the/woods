@@ -111,6 +111,10 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { { [[ "$path" != */tasks/* ]] && [[ "$path" != */generators/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

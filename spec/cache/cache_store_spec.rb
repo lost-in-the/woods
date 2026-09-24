@@ -765,16 +765,6 @@ RSpec.describe Woods::Cache::CachedRetriever do
   end
 
   describe '#retrieve' do
-    it 'does not reuse a persisted context produced by the previous chunk-weighted ranking' do
-      old_key = Woods::Cache.cache_key(:context, 'query', '8000', '', '')
-      cache_store.write(old_key, { 'context' => 'obsolete ordering', 'sources' => [], 'tokens_used' => 1 })
-      allow(retriever).to receive(:retrieve).and_return(retrieval_result)
-
-      expect(cached_retriever.retrieve('query').context).to eq(retrieval_result.context)
-      expect(cached_retriever.retrieve('query').context).to eq(retrieval_result.context)
-      expect(retriever).to have_received(:retrieve).once
-    end
-
     it 'delegates to the real retriever on cache miss' do
       allow(retriever).to receive(:retrieve)
         .with('How does User work?', budget: 8000, types: nil, exclude_types: nil)

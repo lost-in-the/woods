@@ -147,7 +147,12 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
           File.write(File.join(dir, "#{type}.json"), JSON.generate(data))
           unless index.zero?
             allow(provider).to receive(:embed_batch).and_raise('provider unavailable')
-            expect { indexer.index_incremental }.to raise_error(Woods::Error, /provider unavailable/)
+            expect { indexer.index_incremental }
+              .to raise_error(Woods::Error, /Embedding failed \(RuntimeError/) { |error|
+                    expect(error.message).to include('No failed unit was checkpointed')
+                    expect(error.full_message).not_to include('provider unavailable')
+                    expect(error.cause).to be_nil
+                  }
             expect(store.each_id.to_a).to eq(['reports'])
             allow(provider).to receive(:embed_batch).and_call_original
           end
