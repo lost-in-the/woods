@@ -164,19 +164,15 @@ RSpec.describe Woods::Embedding::TextPreparer do
       ).tap { |u| u.source_code = large_source }
     end
 
-    it 'truncates text exceeding the token limit' do
-      result = preparer.prepare(large_unit)
-      estimated_tokens = (result.length / 4.0).ceil
-      expect(estimated_tokens).to be <= 8192
+    it 'refuses text exceeding the token limit without truncating' do
+      expect { preparer.prepare(large_unit) }.to raise_error(Woods::Embedding::InputLimitError, /limit/)
     end
 
     context 'with a custom token limit' do
       subject(:small_preparer) { described_class.new(max_tokens: 100) }
 
       it 'enforces the custom limit' do
-        result = small_preparer.prepare(large_unit)
-        estimated_tokens = (result.length / 4.0).ceil
-        expect(estimated_tokens).to be <= 100
+        expect { small_preparer.prepare(large_unit) }.to raise_error(Woods::Embedding::InputLimitError, /limit: 100/)
       end
     end
 
@@ -193,9 +189,8 @@ RSpec.describe Woods::Embedding::TextPreparer do
         described_class.new(max_tokens: 8192, chars_per_token: 2.5)
       end
 
-      it 'truncates more aggressively for BERT-style tokenizers' do
-        result = nomic_preparer.prepare(large_unit)
-        expect(result.length).to be <= (8192 * 2.5).floor
+      it 'refuses inputs that exceed the configured estimate' do
+        expect { nomic_preparer.prepare(large_unit) }.to raise_error(Woods::Embedding::InputLimitError, /estimate/)
       end
 
       it 'exposes the configured ratio' do

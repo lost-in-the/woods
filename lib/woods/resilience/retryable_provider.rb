@@ -86,6 +86,10 @@ module Woods
         @provider.cache_identity if @provider.respond_to?(:cache_identity)
       end
 
+      def input_budget
+        @provider.input_budget if @provider.respond_to?(:input_budget)
+      end
+
       def configured_dimensions
         @provider.configured_dimensions if @provider.respond_to?(:configured_dimensions)
       end
@@ -148,7 +152,7 @@ module Woods
         begin
           attempt += 1
           yield
-        rescue CircuitOpenError, ArgumentError
+        rescue CircuitOpenError, ArgumentError, Embedding::InputLimitError
           raise
         rescue StandardError => e
           raise e if attempt > @max_retries || !retryable_error?(e)

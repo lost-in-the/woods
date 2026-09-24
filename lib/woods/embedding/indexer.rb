@@ -5,6 +5,7 @@ require 'digest'
 require 'fileutils'
 require 'set'
 
+require_relative 'input_budget'
 require_relative '../atomic_file'
 require_relative '../storage_identity'
 require_relative '../generation'
@@ -153,6 +154,7 @@ module Woods
         prepare_run(incremental: incremental)
         checkpoint = incremental ? load_checkpoint : {}
         units = assign_storage_identities(units, checkpoint: checkpoint)
+        preflight_inputs(units, checkpoint, incremental: incremental)
         stats = { processed: 0, skipped: 0, errors: 0 }
 
         embed_batches(units, checkpoint, stats, incremental: incremental)
@@ -169,6 +171,15 @@ module Woods
         save_checkpoint(checkpoint)
 
         stats
+      end
+
+      # Reject deterministic input failures before metadata or durable writes.
+      def preflight_inputs(units, checkpoint, incremental:)
+        units.each { |unit| prepared_fingerprint(unit) }
+        return unless reconcilable? && @durable_ids.nil?
+        return if incremental && units.all? { |unit| checkpoint_satisfied?(unit, checkpoint) }
+
+        raise InputLimitError, 'Cannot replace embedding inputs: existing durable vector IDs could not be read'
       end
 
       # Unambiguous existing keys stay stable. A collision uses reversible typed keys.
@@ -475,6 +486,10 @@ module Woods
         @metadata_changed = false
         @vectors_changed = false
         @empty_units = {}
+        @prepared_texts = {}
+        @prepared_inputs = {}
+        @checkpoint_inputs = {}
+        @unknown_reconciliation_warned = false
         @persisted_metadata = nil
         prepare_snapshot_stores(incremental: incremental)
         retain_metadata_identities
@@ -613,11 +628,9 @@ module Woods
 
       # May this unit's embedding be skipped?
       #
-      # Incremental skip uses `source_hash`, which the extractor derives
-      # from the unit's *source_code string only* (see ExtractedUnit#to_h
-      # and Extractor#dump_units). It is NOT a hash of the serialized
-      # unit_data JSON — so key ordering or whitespace in the _index.json
-      # does not invalidate checkpoints across Ruby-minor upgrades.
+      # Incremental skip requires both the source hash and the complete ordered
+      # prepared-input fingerprint. Dependency/path/namespace/chunk changes
+      # invalidate the latter even if source_code did not change.
       #
       # A matching hash is necessary but not sufficient: the vector must also
       # actually exist. On the dump-backed path that means present in what we
@@ -630,17 +643,17 @@ module Woods
       # unit permanently: checkpoint.json said "embedded", the new store held
       # nothing, and no subsequent incremental run ever disagreed.
       def checkpoint_satisfied?(unit_data, checkpoint)
-        return false unless checkpoint[storage_id(unit_data)] == unit_data['source_hash']
+        identifier = storage_id(unit_data)
+        return false unless checkpoint[identifier] == unit_data['source_hash']
+        return false unless @checkpoint_inputs[identifier] == prepared_fingerprint(unit_data)
 
         known_ids = persistable? ? @persisted_ids : @durable_ids
         # No durable view to check against (an adapter with no #each_id, or an
         # enumeration that failed) — fall back to trusting the checkpoint.
         return true if known_ids.nil?
 
-        return true if known_ids[storage_id(unit_data)]&.any?
-        # A source-empty unit intentionally has no vector. Verify that state
-        # again rather than treating a missing nonempty vector as a cache hit.
-        return true if prepare_texts(unit_data).empty?
+        expected = embedding_ids(identifier, prepared_texts(unit_data).size)
+        return true if Array(known_ids[identifier]).sort == expected.sort
 
         @checkpoint_misses += 1
         false
@@ -688,7 +701,7 @@ module Woods
       end
 
       def collect_embed_items(unit_data, items)
-        texts = prepare_texts(unit_data)
+        texts = prepared_texts(unit_data)
         identifier = storage_id(unit_data)
         @empty_units[identifier] = unit_data['source_hash'] if texts.empty?
 
@@ -701,8 +714,8 @@ module Woods
 
       # Defer zero-text deletion until every batch has prepared/embedded
       # successfully. A later provider failure must not retire earlier vectors.
-      # Checkpoints retain their source-hash format; a matching no-vector hash
-      # is trusted only after verifying the current input still prepares empty.
+      # The no-vector checkpoint also records the complete-input fingerprint;
+      # it advances only after obsolete vectors have been reconciled.
       def reconcile_empty_units(checkpoint)
         verify_empty_reconciliation!
         @empty_units.each do |identifier, source_hash|
@@ -710,6 +723,7 @@ module Woods
           prune_identifier(identifier, []) if implements_own?(@vector_store, :delete)
           prune_durable_identifier(identifier, []) if @durable_ids && implements_own?(@vector_store, :delete)
           checkpoint[identifier] = source_hash
+          @checkpoint_inputs[identifier] = @prepared_inputs.fetch(identifier)
         end
       end
 
@@ -719,18 +733,68 @@ module Woods
         raise Woods::Error, 'Cannot reconcile source-empty units: existing vector IDs could not be read'
       end
 
+      def input_budget
+        @input_budget ||= InputBudget.for(
+          @provider, limit: safe_max_input_tokens || preparer_option(:max_tokens, 8192),
+                     chars_per_token: preparer_option(:chars_per_token, 4.0)
+        )
+      end
+
+      def preparer_option(name, fallback)
+        @text_preparer.respond_to?(name) ? @text_preparer.public_send(name) : fallback
+      end
+
+      def prepared_texts(unit_data)
+        @prepared_texts[storage_id(unit_data)] ||= prepare_texts(unit_data)
+      rescue InputLimitError, ArgumentError => e
+        detail = e.is_a?(InputLimitError) ? e.message : 'Cannot split source within the input limit'
+        raise InputLimitError, "#{detail}; #{unit_diagnostic(unit_data)}; #{budget_diagnostic}"
+      end
+
+      def embedding_ids(identifier, count)
+        Array.new(count) { |index| count > 1 ? "#{identifier}#chunk_#{index}" : identifier }
+      end
+
+      def prepared_fingerprint(unit_data)
+        identifier = storage_id(unit_data)
+        @prepared_inputs[identifier] ||= begin
+          texts = prepared_texts(unit_data)
+          Digest::SHA256.hexdigest(JSON.generate(embedding_ids(identifier, texts.size).zip(texts)))
+        end
+      end
+
+      def unit_diagnostic(unit_data)
+        %w[type identifier file_path].map { |key| "#{key}=#{unit_data[key].to_s[0, 160].inspect}" }.join(' ')
+      end
+
+      def budget_diagnostic
+        "model=#{input_budget.model.to_s[0, 100].inspect} counting=#{input_budget.method} limit=#{input_budget.limit}"
+      end
+
       def prepare_texts(unit_data) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         unit = build_unit(unit_data)
+        return [] if unit.chunks.empty? && unit.source_code.to_s.strip.empty?
+
         apply_chunking(unit) if @chunker && unit.chunks.empty? && needs_chunking?(unit)
         # Extraction may have emitted chunks larger than the provider's
         # budget (rails_source in particular). Enforce the ceiling on
         # whatever chunks we have before handing off to the provider.
         @chunker&.enforce_chunk_limits!(unit) if unit.chunks.any?
-        texts = unit.chunks.any? ? @text_preparer.prepare_chunks(unit) : [@text_preparer.prepare(unit)]
+        texts = prepare_unit_texts(unit)
         # Drop empty/whitespace-only texts — embedding providers reject
         # them with 400 and retrying never succeeds. Unit is effectively
         # skipped when every text is empty (zero-source unit).
         texts.reject { |t| t.nil? || t.strip.empty? || content_portion_empty?(t, unit) }
+      end
+
+      def prepare_unit_texts(unit)
+        texts = if @text_preparer.respond_to?(:prepare_for_embedding)
+                  @text_preparer.prepare_for_embedding(unit, budget: input_budget)
+                else
+                  unit.chunks.any? ? @text_preparer.prepare_chunks(unit) : [@text_preparer.prepare(unit)]
+                end
+        texts.compact.each { |text| input_budget.validate!(text) unless text.strip.empty? }
+        texts
       end
 
       # True when a prepared text is just the metadata prefix with no
@@ -781,9 +845,7 @@ module Woods
       # own +max_chars+ safety net is what guarantees each chunk fits,
       # so we pass the same char budget through here.
       def apply_chunking(unit)
-        unit.chunks = @chunker.chunk(unit).map do |chunk|
-          { content: chunk.content, chunk_type: chunk.chunk_type }
-        end
+        unit.chunks = @chunker.chunk(unit).map(&:to_h)
       end
 
       def build_unit(data)
@@ -805,11 +867,40 @@ module Woods
       def embed_and_store(items, checkpoint, stats)
         return if items.empty?
 
-        vectors = @provider.embed_batch(items.map { |i| i[:text] })
+        warn_unreconciled_adapter
+        vectors = @provider.embed_batch(items.map { |item| item[:text] })
         store_vectors(items, vectors, checkpoint, stats)
       rescue StandardError => e
         stats[:errors] += items.size
-        raise Woods::Error, "Embedding failed: #{e.message}"
+        raise if e.is_a?(InputLimitError)
+
+        raise Woods::Error, embedding_failure(e, items), cause: nil
+      end
+
+      def warn_unreconciled_adapter
+        return if persistable? || reconcilable? || @unknown_reconciliation_warned
+
+        warn '[woods] custom vector store cannot enumerate and reconcile obsolete chunk IDs; cleanup is adapter-owned.'
+        @unknown_reconciliation_warned = true
+      end
+
+      def embedding_failure(error, items)
+        labels = items.lazy.map { |item| unit_diagnostic(item[:unit_data]) }.uniq.first(5).join('; ')
+        status = error.respond_to?(:http_status) ? error.http_status : nil
+        "Embedding failed (#{safe_failure_detail(error)}, HTTP #{status || 'unknown'}); " \
+          "#{labels}; #{items.size} input(s), largest=#{items.map { |item| input_budget.count(item[:text]) }.max}; " \
+          "#{budget_diagnostic}. " \
+          'No failed unit was checkpointed; check provider availability and input limits.'
+      end
+
+      def safe_failure_detail(error)
+        # Preserve numeric shape diagnostics, never source-bearing HTTP bodies
+        # or malformed response indexes (which can contain arbitrary strings).
+        if defined?(Provider::InvalidEmbeddingResponse) && error.is_a?(Provider::InvalidEmbeddingResponse)
+          return error.message[/vector at position \d+ has dimension \d+, expected \d+/] || error.class.name
+        end
+
+        error.class.name
       end
 
       def store_vectors(items, vectors, checkpoint, stats)
@@ -825,6 +916,7 @@ module Woods
 
         items.each do |item|
           checkpoint[item[:identifier]] = item[:source_hash]
+          @checkpoint_inputs[item[:identifier]] = @prepared_inputs.fetch(item[:identifier])
           stats[:processed] += 1
         end
       end
@@ -942,79 +1034,43 @@ module Woods
         AtomicFile.write(File.join(@output_dir, 'checkpoint.json'), JSON.generate(checkpoint_payload(checkpoint)))
       end
 
-      # Schema of the on-disk checkpoint payload when {#resolved_config} is
-      # tracked. Bump only alongside a reader change in {#checkpoint_hashes}.
-      CHECKPOINT_SCHEMA_VERSION = 1
+      # v2 adds a preparation-policy stamp and complete-input fingerprints.
+      # Source hashes alone cannot detect path/namespace/dependency/chunk edits.
+      CHECKPOINT_SCHEMA_VERSION = 2
       private_constant :CHECKPOINT_SCHEMA_VERSION
 
-      # The provider/model/dimension triple checkpoint.json is stamped with,
-      # or +nil+ when this indexer was built without a +resolved_config+ (no
-      # identity to stamp or compare against — see {#checkpoint_payload} and
-      # {#checkpoint_hashes}, both of which treat +nil+ as "skip identity
-      # tracking entirely" for full backward compatibility with callers that
-      # never pass one).
-      #
-      # Reads {ResolvedConfig#to_snapshot_json} rather than calling
-      # +#embedding_provider+/+#dimension+ directly so a test double only
-      # needs to stub the one method the WVF1 header path already requires.
-      #
-      # @return [Hash, nil]
       def current_checkpoint_identity
-        return nil unless @resolved_config
-
-        provider = @resolved_config.to_snapshot_json['embedding_provider'] || {}
+        provider = @resolved_config ? @resolved_config.to_snapshot_json['embedding_provider'] || {} : {}
         provider.transform_keys(&:to_s).slice('class', 'model', 'dimension')
       end
 
-      # Wrap the flat identifier=>source_hash map with its identity stamp for
-      # writing, or leave it flat when this run tracks no identity.
+      def preparation_identity
+        { 'version' => 1, 'budget' => input_budget.identity,
+          'preparer' => collaborator_identity(@text_preparer), 'chunker' => collaborator_identity(@chunker) }
+      end
+
+      def collaborator_identity(object)
+        object.respond_to?(:preparation_identity) ? object.preparation_identity : object&.class&.name
+      end
+
       def checkpoint_payload(checkpoint)
-        identity = current_checkpoint_identity
-        return checkpoint if identity.nil?
-
-        { 'schema_version' => CHECKPOINT_SCHEMA_VERSION, 'identity' => identity, 'hashes' => checkpoint }
+        { 'schema_version' => CHECKPOINT_SCHEMA_VERSION, 'identity' => current_checkpoint_identity,
+          'preparation' => preparation_identity, 'hashes' => checkpoint,
+          'prepared_inputs' => @checkpoint_inputs.slice(*checkpoint.keys) }
       end
 
-      # Recover the flat identifier=>source_hash map {#checkpoint_satisfied?}
-      # consumes from whichever on-disk shape was parsed. Two shapes:
-      #
-      # - versioned (carries a top-level "hashes" key): written by this gem
-      #   version, stamped with the provider/model/dimension identity that
-      #   produced it (see #checkpoint_payload). A stamped identity that
-      #   disagrees with {#current_checkpoint_identity} — a same-dimension
-      #   model switch, the P1 finding this exists to close — means nothing
-      #   here can say which individual hits are still good, so the *whole*
-      #   checkpoint is discarded rather than trusted per-unit.
-      # - flat (every checkpoint written before this gem version): carries no
-      #   identity at all. When this run tracks identity (a resolved_config
-      #   was given), "no identity recorded" is indistinguishable from "the
-      #   identity that produced this changed" — so it is discarded the same
-      #   way: one full re-embed, after which every checkpoint this gem
-      #   writes is stamped and can be trusted again. When this run has no
-      #   resolved_config either there is nothing to compare against, and the
-      #   flat map is trusted exactly as every prior gem version did.
       def checkpoint_hashes(data)
-        return data unless data.is_a?(Hash)
+        valid = data.is_a?(Hash) && data['schema_version'] == CHECKPOINT_SCHEMA_VERSION &&
+                data['identity'] == current_checkpoint_identity && data['preparation'] == preparation_identity &&
+                data['hashes'].is_a?(Hash) && data['prepared_inputs'].is_a?(Hash)
+        unless valid
+          warn '[woods] checkpoint.json has no matching embedding identity and preparation policy; ' \
+               'discarding the checkpoint and re-embedding every unit once.'
+          return {}
+        end
 
-        current = current_checkpoint_identity
-        return checkpoint_hashes_versioned(data, current) if data.key?('hashes')
-        return data if current.nil?
-
-        warn '[woods] checkpoint.json predates embedding-identity tracking and cannot be ' \
-             'verified against the current provider/model — discarding it and re-embedding ' \
-             'every unit once so future checkpoints are stamped and can be trusted safely.'
-        {}
-      end
-
-      def checkpoint_hashes_versioned(data, current)
-        stamped = data['identity']
-        return data['hashes'] || {} if current.nil? || stamped == current
-
-        warn '[woods] checkpoint.json was stamped for a different embedding identity ' \
-             "(#{stamped.inspect} vs current #{current.inspect}) — the provider or model " \
-             'changed since the last run. Discarding the checkpoint and re-embedding every ' \
-             'unit so no stale-model vector survives.'
-        {}
+        @checkpoint_inputs = data['prepared_inputs']
+        data['hashes']
       end
 
       # Returns true when the vector store can actually be dumped to

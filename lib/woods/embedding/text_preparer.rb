@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../token_utils'
+require_relative 'input_budget'
 
 module Woods
   module Embedding
@@ -12,8 +13,8 @@ module Woods
     #   file: ...
     #   dependencies: dep1, dep2, ...
     #
-    # Handles token limit enforcement by truncating text that exceeds the
-    # embedding model's context window.
+    # Refuses oversized direct inputs; the indexing path splits complete inputs
+    # without truncation before submitting them to the provider.
     #
     # @example
     #   preparer = Woods::Embedding::TextPreparer.new(max_tokens: 8192)
@@ -29,9 +30,10 @@ module Woods
 
       # @param max_tokens [Integer] maximum token budget for prepared text
       # @param chars_per_token [Float] tokenizer-calibrated char/token ratio
-      def initialize(max_tokens: DEFAULT_MAX_TOKENS, chars_per_token: DEFAULT_CHARS_PER_TOKEN)
+      def initialize(max_tokens: DEFAULT_MAX_TOKENS, chars_per_token: DEFAULT_CHARS_PER_TOKEN, input_budget: nil)
         @max_tokens = max_tokens
         @chars_per_token = chars_per_token
+        @input_budget = input_budget || InputBudget.new(limit: max_tokens, chars_per_token: chars_per_token)
       end
 
       # @return [Float] configured chars-per-token ratio
@@ -43,15 +45,15 @@ module Woods
       # Prepare text for embedding from an ExtractedUnit.
       #
       # Builds a context prefix and appends the unit's source code (or first
-      # chunk content for chunked units). Enforces token limits via truncation.
+      # chunk content for chunked units). Refuses inputs exceeding the configured limit.
       #
       # @param unit [Woods::ExtractedUnit] the unit to prepare
       # @return [String] context-prefixed text ready for embedding
-      def prepare(unit)
+      def prepare(unit, budget: @input_budget)
         prefix = build_prefix(unit)
         content = select_content(unit)
         text = "#{prefix}\n#{content}"
-        enforce_token_limit(text)
+        budget.validate!(text)
       end
 
       # Prepare text for each chunk of an ExtractedUnit.
@@ -62,17 +64,58 @@ module Woods
       #
       # @param unit [Woods::ExtractedUnit] the unit to prepare
       # @return [Array<String>] array of context-prefixed texts
-      def prepare_chunks(unit)
-        return [prepare(unit)] unless unit.chunks&.any?
+      def prepare_chunks(unit, budget: @input_budget)
+        return [prepare(unit, budget: budget)] unless unit.chunks&.any?
 
         prefix = build_prefix(unit)
         unit.chunks.map do |chunk|
           text = "#{prefix}\n#{chunk[:content]}"
-          enforce_token_limit(text)
+          budget.validate!(text)
         end
       end
 
+      # Fit complete prefixed inputs without removing any source characters.
+      # Existing chunk attributes survive; embedding_slice records byte offsets
+      # relative to the original chunk for downstream physical-source attribution.
+      def prepare_for_embedding(unit, budget: @input_budget)
+        prefix = "#{build_prefix(unit)}\n"
+        unless budget.fits?(prefix)
+          raise InputLimitError, "Embedding prefix exceeds input limit (#{budget.method}: #{budget.count(prefix)})"
+        end
+
+        originals = unit.chunks.any? ? unit.chunks : [{ content: unit.source_code || '', chunk_type: :whole }]
+        fitted = originals.flat_map { |chunk| fit_chunk(chunk, prefix, budget) }
+        unit.chunks = fitted if unit.chunks.any? || fitted.size > 1
+        prepare_chunks(unit, budget: budget)
+      end
+
+      def preparation_identity
+        { 'class' => self.class.name, 'version' => 1, 'budget' => @input_budget.identity }
+      end
+
       private
+
+      def fit_chunk(chunk, prefix, budget)
+        content = chunk[:content].to_s
+        return [chunk] if budget.fits?(prefix + content)
+
+        offset = chunk.dig(:embedding_slice, :start_byte) || 0
+        split_content(content, prefix, budget).map do |part|
+          first = offset
+          offset += part.bytesize
+          chunk.merge(content: part, embedding_slice: { start_byte: first, end_byte: offset })
+        end
+      end
+
+      def split_content(content, prefix, budget)
+        return [content] if budget.fits?(prefix + content)
+        if content.length <= 1
+          raise InputLimitError, 'Embedding input limit leaves no room for one source character after the prefix'
+        end
+
+        middle = content.length / 2
+        split_content(content[0...middle], prefix, budget) + split_content(content[middle..], prefix, budget)
+      end
 
       # Build the context prefix for a unit.
       #
@@ -100,7 +143,7 @@ module Woods
         # reads JSON and does not symbolize dependency keys, unlike chunks).
         # Read both forms or the whole "dependencies:" prefix silently
         # vanishes from every embedded document on the indexing path.
-        dep_names = dependencies.filter_map { |d| d[:target] || d['target'] }.first(10)
+        dep_names = dependencies.filter_map { |d| d.is_a?(String) ? d : d[:target] || d['target'] }.first(10)
         lines << "dependencies: #{dep_names.join(', ')}" if dep_names.any?
       end
 
@@ -114,23 +157,6 @@ module Woods
         else
           unit.source_code || ''
         end
-      end
-
-      # Truncate text to fit within the token budget.
-      #
-      # Uses the configured `chars_per_token` ratio to estimate both the
-      # token count and the safe character cap. Truncation is a last
-      # resort — by the time text reaches here the chunker should have
-      # already split oversize units into pieces that fit.
-      #
-      # @param text [String] the text to truncate
-      # @return [String] text within token limits
-      def enforce_token_limit(text)
-        estimated = (text.length / @chars_per_token).ceil
-        return text if estimated <= @max_tokens
-
-        max_chars = (@max_tokens * @chars_per_token).floor
-        text[0...max_chars]
       end
     end
   end

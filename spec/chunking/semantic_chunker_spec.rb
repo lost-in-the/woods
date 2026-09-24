@@ -537,17 +537,15 @@ RSpec.describe Woods::Chunking::SemanticChunker do
       expect(unit.chunks.map { |c| c[:content].length }).to all(be <= 1000)
     end
 
-    it 'stops recursive splitting at the MIN_SLICE_CHARS floor' do
+    it 'refuses a slice that cannot fit even one character' do
       counter = fake_counter.new(lengths_over: [0])
       chunker = described_class.new(
         max_chars: 2000, token_counter: counter, max_tokens: 8192
       )
       unit.chunks = [{ content: ('x' * 3000), chunk_type: :whole }]
 
-      chunker.enforce_chunk_limits!(unit)
-
-      expect(unit.chunks).not_to be_empty
-      expect(unit.chunks.size).to be < 50
+      expect { chunker.enforce_chunk_limits!(unit) }.to raise_error(ArgumentError, /one source character/)
+      expect(unit.chunks.first[:content]).to eq('x' * 3000)
     end
 
     it 'activates enforcement even when max_chars is nil' do

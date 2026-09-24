@@ -181,11 +181,8 @@ module Woods
       # Default token threshold below which units stay whole.
       DEFAULT_THRESHOLD = 200
 
-      # Minimum chars-per-slice budget during tokenizer-driven recursive
-      # splitting. Prevents unbounded halving on pathological content
-      # (e.g., a single 2000-char regex line that tokenizes into 6000
-      # tokens because BERT WordPiece fragments every `\w+` boundary).
-      MIN_SLICE_CHARS = 256
+      # Stop at one Unicode character and refuse if even that cannot fit.
+      MIN_SLICE_CHARS = 1
       private_constant :MIN_SLICE_CHARS
 
       # @param threshold [Integer] Token count threshold for chunking
@@ -222,7 +219,7 @@ module Woods
       # @return [Array<Chunk>] Ordered list of chunks
       def chunk(unit)
         return [] if unit.source_code.nil? || unit.source_code.strip.empty?
-        return [build_whole_chunk(unit)] if unit.estimated_tokens <= @threshold
+        return enforce_char_limit([build_whole_chunk(unit)], unit) if unit.estimated_tokens <= @threshold
 
         enforce_char_limit(chunks_for(unit), unit)
       end
@@ -245,6 +242,11 @@ module Woods
         return if unit.chunks.nil? || unit.chunks.empty?
 
         unit.chunks = unit.chunks.flat_map { |chunk| split_oversize_hash_chunk(chunk) }
+      end
+
+      def preparation_identity
+        { 'class' => self.class.name, 'threshold' => @threshold, 'max_chars' => @max_chars,
+          'max_tokens' => @max_tokens, 'counter' => @token_counter&.class&.name }
       end
 
       private
@@ -270,12 +272,17 @@ module Woods
       # @param chunk [Hash] a unit-chunk hash (symbol or string keys)
       # @return [Array<Hash>]
       def split_oversize_hash_chunk(chunk)
-        content = chunk[:content] || chunk['content']
+        chunk = chunk.transform_keys(&:to_sym)
+        content = chunk[:content]
         return [chunk] if content.nil? || !oversize?(content)
 
-        chunk_type = chunk[:chunk_type] || chunk['chunk_type'] || :whole
+        chunk_type = chunk[:chunk_type] || :whole
+        offset = chunk.dig(:embedding_slice, :start_byte) || 0
         verified_slices(content).each_with_index.map do |slice, idx|
-          { content: slice, chunk_type: :"#{chunk_type}_part_#{idx}" }
+          first = offset
+          offset += slice.bytesize
+          chunk.merge(content: slice, chunk_type: :"#{chunk_type}_part_#{idx}",
+                      embedding_slice: { start_byte: first, end_byte: offset })
         end
       end
 
@@ -337,7 +344,8 @@ module Woods
             content: slice,
             chunk_type: :"#{chunk.chunk_type}_part_#{idx}",
             parent_identifier: unit.identifier,
-            parent_type: unit.type
+            parent_type: unit.type,
+            metadata: chunk.metadata.dup
           )
         end
       end
@@ -359,9 +367,8 @@ module Woods
       end
 
       # Ensure a single post-line-split slice fits the token budget.
-      # Halves the char limit and reslices if it doesn't. Stops at
-      # {MIN_SLICE_CHARS} to avoid unbounded recursion on content that
-      # cannot be split line-wise (minified output, huge regex literals).
+      # Halves the character limit and reslices if necessary. A minimum-sized
+      # slice that still exceeds the counter's limit is refused, never emitted.
       #
       # @param slice [String]
       # @param char_limit [Integer]
@@ -370,7 +377,9 @@ module Woods
         return [slice] unless @token_counter.count(slice) > @max_tokens
 
         smaller = char_limit / 2
-        return [slice] if smaller < MIN_SLICE_CHARS
+        if smaller < MIN_SLICE_CHARS || slice.length <= 1
+          raise ArgumentError, 'Chunk input limit cannot fit one source character'
+        end
 
         slice_by_lines(slice, smaller).flat_map { |sub| verify_slice(sub, smaller) }
       end
@@ -385,13 +394,15 @@ module Woods
       end
 
       # Greedy line-based slicing that respects a supplied `limit`.
-      # Lines longer than `limit` are hard-cut (lossy — but such lines
-      # are already pathological: minified JSON dumps, long regexes).
+      # Lines longer than `limit` are cut at Unicode character boundaries;
+      # concatenating the slices preserves every source character.
       #
       # @param content [String]
       # @param limit [Integer]
       # @return [Array<String>]
       def slice_by_lines(content, limit = @max_chars)
+        raise ArgumentError, 'Chunk size must be positive' unless limit.positive?
+
         slices = []
         current = String.new
         content.each_line do |line|

@@ -103,8 +103,7 @@ Coverage from the default process excludes opt-in Rails, installed-artifact, and
 CI fails when a running example becomes unexpectedly pending, including `skip`,
 `xit`, and pending metadata. `spec/support/pending_policy.rb` records the exact
 file, full description, reason, and unavailable capability for each reviewed
-exception. Current exceptions cover the two optional tiktoken benchmarks, one
-optional Tokenizers example, two Ruby-before-3.2 regexp-timeout examples, one
+exception. Current exceptions cover the two optional tiktoken benchmarks, two Ruby-before-3.2 regexp-timeout examples, one
 procfs example, and three filesystem-permission examples when running as root.
 The Linux CI unit jobs run the real procfs identity example as an unprivileged
 user, so the procfs and root exceptions normally apply only to other environments.

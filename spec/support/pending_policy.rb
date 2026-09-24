@@ -5,11 +5,7 @@
 # copying a skip message into another test must not bypass this gate.
 module PendingPolicy
   ROOT = File.expand_path('../..', __dir__)
-  TOKENIZERS = 'Woods::Embedding::TokenCounter#count when the tokenizers gem is available ' \
-               '(Gemfile test group) returns exact token counts via bert-base-uncased'
   ENTRIES = [
-    ['spec/embedding/token_counter_spec.rb', TOKENIZERS,
-     'tokenizers gem not installed', -> { !defined?(Tokenizers) }],
     *['overestimates by a bounded amount against cl100k_base',
       'never underestimates by more than 5%'].map do |description|
       ['spec/token_estimation_benchmark_spec.rb', "Token estimation accuracy with tiktoken_ruby #{description}",
