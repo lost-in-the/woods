@@ -17,6 +17,12 @@ module Woods
     # process with a direct, Docker, or SSH command.
     class ConnectionManager
       DEFAULT_COMMAND = 'bundle exec rake woods:console'
+      MODE_OPTIONS = {
+        'direct' => %w[mode command directory],
+        'docker' => %w[mode command container],
+        'ssh' => %w[mode command host user]
+      }.freeze
+      CONFIG_KEYS = MODE_OPTIONS.values.flatten.uniq.freeze
 
       # @param config [Hash] Process-launch configuration
       # @option config [String] 'mode' direct, docker, or ssh (default: direct)
@@ -27,6 +33,7 @@ module Woods
       # @option config [String] 'user' Optional SSH user
       def initialize(config:)
         @config = config
+        validate_config!
         @mode = config.fetch('mode', 'direct')
         @embedded_command = config.fetch('command', DEFAULT_COMMAND)
       end
@@ -36,6 +43,7 @@ module Woods
       # @return [Array<String>]
       # @raise [ConnectionError] when the mode is invalid or incomplete
       def command
+        validate_mode_options!
         case @mode
         when 'direct' then embedded_argv
         when 'docker' then docker_command
@@ -63,6 +71,39 @@ module Woods
       end
 
       private
+
+      def validate_config!
+        raise ConnectionError, 'Console configuration must be a YAML mapping' unless @config.is_a?(Hash)
+
+        unknown = @config.keys - CONFIG_KEYS
+        unless unknown.empty?
+          raise ConnectionError,
+                "Unsupported console.yml keys: #{unknown.map(&:inspect).join(', ')}. " \
+                "Use top-level #{CONFIG_KEYS.join(', ')} launch options; " \
+                'configure access controls and redaction in the Rails initializer.'
+        end
+
+        @config.each do |key, value|
+          next if valid_launch_string?(value)
+
+          raise ConnectionError, "Console #{key} must be a non-empty string without NUL bytes"
+        end
+      end
+
+      def valid_launch_string?(value)
+        value.is_a?(String) && !value.strip.empty? && !value.include?("\0")
+      end
+
+      def validate_mode_options!
+        accepted = MODE_OPTIONS[@mode]
+        return unless accepted
+
+        unused = @config.keys - accepted
+        return if unused.empty?
+
+        raise ConnectionError,
+              "Console options #{unused.join(', ')} are not used in #{@mode} mode; select the intended mode"
+      end
 
       def embedded_argv
         argv = @embedded_command.to_s.shellsplit

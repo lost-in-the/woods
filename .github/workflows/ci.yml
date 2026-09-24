@@ -128,9 +128,13 @@ jobs:
         run: bundle exec rspec spec/integration/source_input_drift_spec.rb
 
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
-      # Each example boots its own subprocess with the matrix appraisal.
+      # Isolate booted spec files so fixture applications cannot share state.
       - name: Run Console transport boot contracts
-        run: bin/rspec spec/console/transport_boot_spec.rb spec/console/stdio_e2e_spec.rb
+        run: |
+          bin/rspec spec/console/transport_boot_spec.rb
+          bin/rspec spec/console/stdio_e2e_spec.rb
+          bin/rspec spec/console/association_count_runtime_spec.rb
+          bin/rspec spec/console/http_eager_load_failure_spec.rb
 
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full

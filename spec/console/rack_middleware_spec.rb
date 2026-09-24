@@ -254,6 +254,31 @@ RSpec.describe Woods::Console::RackMiddleware do
 
       expect(sessionful.instance_variable_get(:@stateless_mode)).to be false
     end
+
+    it 'returns stable unavailable responses after a Rails eager-load NameError without building a partial registry' do
+      allow(Woods.configuration).to receive_messages(console_mcp_enabled: true, console_mcp_http_enabled: true)
+      allow(rails_app).to receive(:eager_load!).and_raise(NameError, 'synthetic-private-load-detail')
+      logger = instance_double(Woods::Observability::StructuredLogger, error: nil)
+      middleware.instance_variable_set(:@structured_logger, logger)
+      expect(middleware).not_to receive(:build_embedded_server)
+      expect(MCP::Server::Transports::StreamableHTTPTransport).not_to receive(:new)
+
+      responses = 2.times.map { middleware.call('PATH_INFO' => '/mcp/console') }
+
+      expect(responses.map(&:first)).to eq([503, 503])
+      expect(responses.last).to eq(responses.first)
+      payload = JSON.parse(responses.first.last.join)
+      expect(payload.dig('error', 'message')).to include('eager loading failed', 'restart')
+      expect(responses.first.last.join).not_to include('synthetic-private-load-detail')
+      expect(rails_app).to have_received(:eager_load!).once
+      expect(logger).to have_received(:error).with('console.eager_load.failed',
+                                                   hash_including(error_class: 'NameError')).once
+    end
+
+    it 'does not swallow unrelated eager-load exceptions' do
+      allow(rails_app).to receive(:eager_load!).and_raise(IOError, 'load disk unavailable')
+      expect { middleware.send(:ensure_transport) }.to raise_error(IOError, 'load disk unavailable')
+    end
   end
 
   describe 'deferred embedded_read_tools (#183)' do
