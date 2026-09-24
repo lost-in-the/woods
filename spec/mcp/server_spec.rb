@@ -1081,7 +1081,7 @@ RSpec.describe Woods::MCP::Server do
     end
 
     let(:mock_extractor) do
-      double('Extractor').tap do |e|
+      double('Extractor', raise_on_publication_failure!: nil).tap do |e|
         allow(e).to receive(:extract_all)
         allow(e).to receive(:extract_changed)
       end
@@ -1142,7 +1142,7 @@ RSpec.describe Woods::MCP::Server do
     let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-lock') }
 
     let(:mock_extractor) do
-      double('Extractor').tap { |e| allow(e).to receive(:extract_all) }
+      double('Extractor', raise_on_publication_failure!: nil).tap { |e| allow(e).to receive(:extract_all) }
     end
 
     before do

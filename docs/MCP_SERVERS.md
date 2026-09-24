@@ -394,6 +394,15 @@ The Ruby server builder contains 15 additional schemas for sessions, pipeline op
 
 The normal packaged executable does not wire pipeline-operator or feedback-store collaborators. Do not tell users to call those tools after a standard `woods-mcp` launch. Snapshot, session, and Notion capabilities are specialized configurations; document and test the exact embedded server construction when enabling them.
 
+For an embedded builder that supplies `operator:`, `pipeline_extract` checks
+publication after both full and incremental runs. With the Tasks extension,
+a generation-marker or final source-verification failure marks the task
+`failed`; it cannot report `completed` merely because extraction returned.
+Clients without the extension still receive a background-start acknowledgement,
+which does not establish completion. This correction (#584) is unreleased after
+`2.0.0`; check the loaded server revision. See the
+[publication failure recovery](TROUBLESHOOTING.md#extraction-exits-non-zero-after-could-not-publish-generation).
+
 ### HTTP transport
 
 Use HTTP only for a deliberate shared or remote deployment. It expands the network boundary and requires authentication, origin restrictions, and TLS termination. Follow [MCP HTTP transport](MCP_HTTP_TRANSPORT.md); do not translate the stdio example into an unauthenticated public listener.

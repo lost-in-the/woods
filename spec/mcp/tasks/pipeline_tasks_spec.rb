@@ -59,7 +59,7 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     drain_background_threads
   end
 
-  let(:fake_extractor) { double('Extractor') }
+  let(:fake_extractor) { double('Extractor', raise_on_publication_failure!: nil) }
 
   def call(params, id: 1)
     raw = server.handle_json(

@@ -472,6 +472,22 @@ the unreachable payload. A resident `woods:watch` process handles the same
 failure differently: it reports `degraded`, carries the changed paths, and
 retries after a later filesystem event.
 
+For the optional embedded `pipeline_extract` tool, a client using the Tasks
+extension sees the task become `failed` for this publication refusal on a
+revision containing #584 (unreleased after `2.0.0`). A background-start response
+alone does not mean extraction completed. The packaged Index Server does not
+register this tool.
+
+### Incremental extraction or refresh reports "Extraction failed for ..."
+
+A selected whole-app extractor raised before returning a complete result, or
+its initialization failed. On revisions containing #584 (unreleased after
+`2.0.0`), a successful sibling extractor cannot turn that failed batch into a
+successful publication. Readers retain the prior generation. Inspect the
+earlier log line naming the failed extractor, fix its cause, then retry the
+complete changed-file list or refresh selection. Preserve the published index;
+deleting it does not repair the failing extractor.
+
 ---
 
 ### `manifest.json` shows the wrong branch (or `git_branch: "unknown"`) in a worktree
