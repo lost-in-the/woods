@@ -46,7 +46,7 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
         documents << arguments
         id = remote_documents.dig(arguments[:uri], 'id') || "doc-#{documents.size}"
         remote_documents[arguments[:uri]] = { 'id' => id, 'uri' => arguments[:uri],
-                                             'collectionId' => arguments[:collection_id] }
+                                              'collectionId' => arguments[:collection_id] }
         { 'id' => id }
       end
     end
