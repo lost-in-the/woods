@@ -27,6 +27,7 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
   end
   let(:pages) { [] }
   let(:documents) { [] }
+  let(:remote_documents) { {} }
   let(:notion_client) do
     instance_double(Woods::Notion::Client).tap do |client|
       allow(client).to receive(:find_page_by_title).and_return(nil)
@@ -39,11 +40,14 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
   end
   let(:unblocked_client) do
     instance_double(Woods::Unblocked::Client).tap do |client|
-      allow(client).to receive(:all_documents).and_return([])
+      allow(client).to receive(:all_documents) { remote_documents.values }
       allow(client).to receive(:delete_document).and_return({})
       allow(client).to receive(:put_document) do |**arguments|
         documents << arguments
-        { 'id' => "doc-#{documents.size}" }
+        id = remote_documents.dig(arguments[:uri], 'id') || "doc-#{documents.size}"
+        remote_documents[arguments[:uri]] = { 'id' => id, 'uri' => arguments[:uri],
+                                             'collectionId' => arguments[:collection_id] }
+        { 'id' => id }
       end
     end
   end
