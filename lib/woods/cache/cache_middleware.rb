@@ -519,9 +519,7 @@ module Woods
       # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
       def context_key(query, budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil, evidence: 'full') # rubocop:disable Metrics/ParameterLists
-        # Ranked contexts written before unit-level fusion must not survive
-        # the scoring change through a persistent cache backend.
-        parts = ['unit-rank-fusion-v1', query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
+        parts = [query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
         parts << 'lexical' if mode == :lexical
         parts << JSON.generate(evidence: evidence) unless evidence == 'full'
         if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)

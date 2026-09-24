@@ -28,13 +28,6 @@ query
 
 ### PageRank importance
 
-Unreleased after 2.0.0: rank fusion gives each typed unit one contribution per
-retrieval source, regardless of how many of its chunks match. Unique units receive
-consecutive ranks within each source; repeated chunks cannot displace other units.
-Matching both keyword and vector search still contributes evidence from both.
-Metadata and matched fields from duplicate hits are retained. This scoring change
-invalidates previously cached retrieval contexts and does not require re-embedding.
-
 When a graph store supplies PageRank, ranking converts its scores to ordinal
 percentiles: the highest-ranked unit receives 1.0 and the lowest receives 1/n,
 where n is the number of entries in the PageRank map.
