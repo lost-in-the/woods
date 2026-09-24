@@ -23,6 +23,30 @@ RSpec.describe Woods::AgentConfiguration::Preflight do
       .to raise_error(Woods::AgentConfiguration::Conflict, /lacks required/)
   end
 
+  it 'preserves intended bundle settings while restoring caller activation before a real subprocess' do
+    environment = Bundler.unbundled_env.merge(
+      'BUNDLE_PATH' => '/selected/private bundle', 'BUNDLE_APP_CONFIG' => '/selected/config',
+      'BUNDLE_WITHOUT' => 'development:test', 'BUNDLE_BIN_PATH' => '/caller/bundle',
+      'BUNDLER_VERSION' => '0.0.0', 'BUNDLE_LOCKFILE' => '/caller/Gemfile.lock',
+      'BUNDLER_ORIG_RUBYOPT' => 'BUNDLER_ENVIRONMENT_PRESERVER_INTENTIONALLY_NIL'
+    )
+    before = environment.dup
+    payload = JSON.generate(version: 'fixture', tools: described_class::REQUIRED_TOOLS)
+    script = <<~RUBY
+      require 'json'
+      evidence = JSON.parse(#{payload.inspect})
+      evidence['environment'] = ENV.to_h.select { |key, _| key.start_with?('BUNDLE', 'RUBYOPT') }
+      puts JSON.generate(evidence)
+    RUBY
+    allow(ENV).to receive(:to_h).and_return(environment)
+    observed = described_class.new.call(launcher(script)).fetch('environment')
+    expect(observed).to include('BUNDLE_PATH' => '/selected/private bundle', 'BUNDLE_APP_CONFIG' => '/selected/config',
+                                'BUNDLE_WITHOUT' => 'development:test', 'BUNDLE_FROZEN' => 'true')
+    expect(observed.keys).not_to include('BUNDLE_BIN_PATH', 'BUNDLER_VERSION', 'BUNDLE_LOCKFILE',
+                                         'BUNDLER_ORIG_RUBYOPT', 'RUBYOPT')
+    expect(environment).to eq(before)
+  end
+
   it 'bounds a hanging subprocess and a failed or malformed response' do
     expect { described_class.new(timeout: 0.1).call(launcher('sleep 30')) }
       .to raise_error(Woods::AgentConfiguration::Conflict, /exceeded/)

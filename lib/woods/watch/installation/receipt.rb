@@ -26,7 +26,12 @@ module Woods
         # @param expected [Hash] prior content fingerprint and mode
         # @return [void]
         def self.verify_file!(document, expected)
-          return if document.fingerprint == expected
+          actual = document.fingerprint
+          # Git records the owner's executable bit, not the checkout's umask.
+          # Plan snapshots separately retain exact modes for preview/apply drift.
+          same_content = actual.slice('sha256', 'exists') == expected.slice('sha256', 'exists')
+          same_executable = (actual.fetch('mode') & 0o100) == (expected.fetch('mode') & 0o100)
+          return if same_content && same_executable
 
           raise Conflict, "Owned watcher file was edited or removed: #{document.path}"
         end

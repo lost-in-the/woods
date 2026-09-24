@@ -19,11 +19,13 @@ module Woods
       end
 
       def validate_receipt_identity!
-        valid = @previous['schema_version'] == 1 && @previous['layout'] == @layout.identity &&
+        valid = @previous['schema_version'] == 1 &&
                 @previous['server_name'] == @name && @previous['sections'].is_a?(Hash) &&
                 @previous['created_files'].is_a?(Array)
-        raise Conflict, 'Installation receipt does not match this application/client/scope/server' unless valid
+        message = 'Installation receipt does not match this application/client/scope/server'
+        raise Conflict, message unless valid
 
+        Layout.validate_identity!(@previous['layout'], @layout.identity, message: message)
         validate_receipt_content!
       end
 
