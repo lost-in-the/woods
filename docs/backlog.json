@@ -3214,8 +3214,8 @@
       "lib/tasks/woods.rake",
       "lib/tasks/woods_checks.rake"
     ],
-    "description": "Issue #591: R59/R60/R62/R66/R74: provide explicit ownership-verified recovery for abandoned foreign claims; normalize blank idle timeout consistently; resolve check-task roots through the actual helper; make custom output-directory requirements consistent with verified launch capture; report actionable safe identity-key errors. Never take over solely from claim age, delete a live owner, silently degrade verified capture, or merely remove an output override while leaving its key/handoff bound elsewhere.",
-    "status": "in-progress"
+    "description": "Issue #591: R59/R60/R62/R66/R74: provide explicit ownership-verified recovery for abandoned foreign claims; normalize blank idle timeout consistently; resolve check-task roots through the actual helper; make custom output-directory requirements consistent with verified launch capture; report actionable safe identity-key errors. Never take over solely from claim age, delete a live owner, silently degrade verified capture, or merely remove an output override while leaving its key/handoff bound elsewhere. Completed: lease-verified abandoned-claim recovery, consistent blank TTL/root handling, explicit output ownership and actionable identity-key diagnostics. Reviewed in #609 with focused, full and booted Rails evidence; no age-only takeover.",
+    "status": "resolved"
   },
   {
     "id": "B-236",
@@ -3253,7 +3253,7 @@
       "lib/woods/extractors",
       "lib/woods/chunking/semantic_chunker.rb"
     ],
-    "description": "Issue #594: R19/R21/R22/R44-R46/R58: verify external component ownership policy with real optional gems; consider explicitly documented mailer coverage expansion; recognize actual manager/policy ancestry; support state-machine declaration forms; select the real migration rather than a preceding helper; represent same-named schedules from different formats deliberately; preserve class and instance methods with identical bare names as distinct chunks. Each requires its own regression and compatibility decision. Do not execute historical migrations or silence identity collisions; distinguish new bugs from documented coverage choices.",
+    "description": "Issue #594: R19/R21/R22/R44-R46/R58: verify external component ownership policy with real optional gems; consider explicitly documented mailer coverage expansion; recognize actual manager/policy ancestry; support state-machine declaration forms; select the real migration rather than a preceding helper; represent same-named schedules from different formats deliberately; preserve class and instance methods with identical bare names as distinct chunks. Each requires its own regression and compatibility decision. Do not execute historical migrations or silence identity collisions; distinguish new bugs from documented coverage choices. Completed R22/R45/R58 in #613: selected runtime manager/policy ancestry, structural migration ownership and distinct method chunk identifiers. R44 now also has reviewed default/parenthesized literal declarations, selected-owner isolation and actual state_machines/AASM registry equivalence across full/incremental/refresh. External component ownership (R19), mailer coverage choice (R21) and multi-format schedule identities (R46) remain separately tracked.",
     "status": "in-progress"
   },
   {
@@ -3294,8 +3294,8 @@
       "lib/woods/console/embedded_executor.rb",
       "lib/woods/console/rack_middleware.rb"
     ],
-    "description": "Issue #597: R15/R43/R82/R83: align explicitly configured host/origin allowlists across Woods and the MCP SDK, including IPv6/port semantics; reject or clearly migrate unsupported nested console.yml rather than silently selecting local mode; define singular association counts; give consistent actionable HTTP eager-load failure behavior. Preserve authentication, redaction and table guards. Establish real transport/ActiveRecord regressions and reproduce host boot errors before considering narrow fallback. Coordinate code integration with the pending private patch without publishing its details.",
-    "status": "ready"
+    "description": "Issue #597: R15/R43/R82/R83: align explicitly configured host/origin allowlists across Woods and the MCP SDK, including IPv6/port semantics; reject or clearly migrate unsupported nested console.yml rather than silently selecting local mode; define singular association counts; give consistent actionable HTTP eager-load failure behavior. Preserve authentication, redaction and table guards. Establish real transport/ActiveRecord regressions and reproduce host boot errors before considering narrow fallback. Coordinate code integration with the pending private patch without publishing its details. Completed R43/R82/R83 in #614: strict top-level launcher configuration with safe key diagnostics, guarded singular association counts and stable HTTP 503 after eager-load NameError until restart. Real executable and booted Rails regressions pass. R15 remains: decide and independently review Woods/SDK origin and host ownership; no guard was disabled in these fixes.",
+    "status": "in-progress"
   },
   {
     "id": "B-242",
@@ -3310,8 +3310,8 @@
       "docs/NOTION_INTEGRATION.md",
       "docs/MCP_TOOL_COOKBOOK.md"
     ],
-    "description": "Issue #498 follow-up, audit R13/R17/R37/R41/R42/R55/R63-R65/R67: accurately describe legacy HTTP validation, version/baseline refusal, retained runtime provenance, snapshot/SQLite preservation during clean migration, removed no-op configuration, empty-index readiness, removed eval settings, explicit embedding model selection, early placement of middleware/tracer settings, and embedded-only collaborators. Keep intentional safety contracts; do not restore removed eval or equate an empty corpus with failed readiness.",
-    "status": "ready"
+    "description": "Issue #498 follow-up, audit R13/R17/R37/R41/R42/R55/R63-R65/R67: accurately describe legacy HTTP validation, version/baseline refusal, retained runtime provenance, snapshot/SQLite preservation during clean migration, removed no-op configuration, empty-index readiness, removed eval settings, explicit embedding model selection, early placement of middleware/tracer settings, and embedded-only collaborators. Keep intentional safety contracts; do not restore removed eval or equate an empty corpus with failed readiness. Completed in #612: canonical migration/configuration/process-boundary guidance synchronized and independently reviewed. A real SQLite capture/clean/selective-restore/migrate/new-capture proof preserved historical snapshots. Broader #498 remains open; no removed eval or unconditional graph-version gate added.",
+    "status": "resolved"
   },
   {
     "id": "B-243",
@@ -3323,8 +3323,8 @@
       "lib/woods/extractors/event_extractor.rb",
       "lib/woods/extractors/view_component_extractor.rb"
     ],
-    "description": "Issue #483 follow-up, audit R47: event publisher/subscriber paths and component sidecars retain absolute application roots in metadata or generated annotations, making equivalent checkouts hash differently. Normalize known application-owned paths before source/hash serialization while retaining deliberate external-path semantics. Compare real two-root fixtures without sorting arrays or scrubbing evidence beyond documented volatile fields.",
-    "status": "ready"
+    "description": "Issue #483 follow-up, audit R47: event publisher/subscriber paths and component sidecars retain absolute application roots in metadata or generated annotations, making equivalent checkouts hash differently. Normalize known application-owned paths before source/hash serialization while retaining deliberate external-path semantics. Compare real two-root fixtures without sorting arrays or scrubbing evidence beyond documented volatile fields. Completed in #610: normalize only application-owned event and component-sidecar paths before annotation/hash serialization. Two-root serialized-unit regressions match without array sorting or blanket path scrubbing; external paths remain unchanged. Broader #483 remains open.",
+    "status": "resolved"
   },
   {
     "id": "B-244",

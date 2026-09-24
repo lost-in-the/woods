@@ -111,6 +111,9 @@ jobs:
       - name: Run booted-app extraction
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb
 
+      - name: Run declaration ownership against booted Rails
+        run: bundle exec rspec spec/integration/declaration_identity_spec.rb
+
       - name: Run encrypted Console credential rotation
         run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb
 
@@ -195,6 +198,21 @@ jobs:
         env:
           BUNDLE_GEMFILE: gemfiles/serializers.gemfile
         run: bundle exec rspec spec/integration/incremental_runtime_spec.rb
+
+      # Actual optional state-machine registries, kept out of the base bundle.
+      - name: Install optional state-machine fixture bundle
+        if: matrix.rails == '7.2'
+        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        env:
+          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Run literal state-machine forms against loaded registries
+        if: matrix.rails == '7.2'
+        env:
+          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
+        run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
 
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but

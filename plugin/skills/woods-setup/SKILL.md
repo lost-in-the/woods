@@ -28,6 +28,13 @@ journals contain private configuration bytes. See the canonical
 for host/Compose preflight, actual Claude file locations, conflict recovery,
 and removal. Preserve manual setup for older installed versions.
 
+For v1-to-v2 upgrades, follow the [migration runbook](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md).
+A clean removes snapshot history inside the output directory as well as generated
+index files. Back up consistently and choose whether to retain history before
+cleaning. Remove legacy no-op `log_level` and unsafe-eval settings. Set custom
+Console paths and session-tracer setup in `config/application.rb` before Railtie
+initialization; other Console flags can remain in the normal initializer.
+
 ## Preflight
 
 Read repository instructions and preserve unrelated changes. Record:

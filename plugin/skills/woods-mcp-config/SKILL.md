@@ -13,6 +13,12 @@ a permanent downgrade; never delete a receipt to bypass a conflict. Use a privat
 real directory for plan files when the system temporary path is a symlink. Follow
 the [portability guidance](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
 
+For builds containing #597's launcher repair (unreleased after `2.0.0`),
+`config/console.yml` must be a supported top-level mapping with string keys and
+mode-appropriate options. Nested or unsupported configuration is refused before
+launch rather than silently selecting local mode. Check the installed revision
+and follow the [Console configuration guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md).
+
 ## Managed configuration availability
 
 `woods-agent-config` (#407) is available in Woods `2.0.0.beta3`. First record the
@@ -46,6 +52,14 @@ Keep normal protocol negotiation and use the
 [agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
 when unavailable. See the
 [initialization contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#initialization-guidance).
+
+The packaged Index process does not load Rails initializers. Session and Notion
+tool registration requires an explicitly configured custom/embedded process;
+application configuration alone does not wire them into a separate executable.
+Use `bin/rails woods:notion_sync` for ordinary application export and verify
+`tools/list` for custom capabilities. For a custom Console path, configure it
+before Railtie initialization and restart. See the
+[process boundaries](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#conditional-index-capabilities).
 
 ## Shape 1: Index-only
 
