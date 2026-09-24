@@ -209,7 +209,13 @@ Rails/MCP host. If a browser-based client sends an `Origin` header from a
 different host, include that exact origin too. This allow-list controls both
 DNS-rebinding Host checks and browser CORS; keep Rails' own `config.hosts`, TLS,
 and proxy rules aligned with it. Server-to-server clients normally omit
-`Origin`, but their request `Host` must still be allowed.
+`Origin`, but their request `Host` must still be allowed. In supporting
+builds (unreleased after 2.0.0), the same immutable policy reaches the SDK, so
+preflight acceptance agrees with dispatch. List exact browser ports for
+cross-port traffic, including loopback; a portless origin additionally permits
+same-authority traffic, not arbitrary cross-port access. Console defaults remain
+HTTP loopback, while the Index Server defaults include HTTP and HTTPS loopback.
+Restart after changing the list. See [HTTP origin matching](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
 
 Do not mount `Woods::Console::RackMiddleware` by itself. The Railtie composes
 `OriginGuard`, `BearerAuth`, and the Console middleware in the supported order.

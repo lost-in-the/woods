@@ -86,13 +86,28 @@ Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request
 
 ### Browser origins (DNS rebinding defense)
 
-A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header (curl, MCP stdio clients, server-to-server) pass through, bearer auth still gates them.
+A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header still validate `Host`; bearer authentication remains required when configured.
 
 | Scenario          | `WOODS_MCP_HTTP_ALLOWED_ORIGINS`      | Origins accepted                                                |
 |--------------------|-----------------------------------------|-------------------------------------------------------------------|
-| default            | unset                                    | `http(s)://localhost`, `127.0.0.1`, `::1` (any port)              |
+| default            | unset                                    | loopback HTTP(S) origins matching the request Host authority              |
 | explicit list      | `https://app.example.com`                | exactly `https://app.example.com`, loopback no longer allowed  |
 | multiple origins   | `https://a.example,https://b.example`    | each listed origin                                                |
+
+**Unreleased after 2.0.0:** preflight and SDK dispatch share one immutable policy.
+Explicit cross-origin entries match the complete origin, including its port.
+A portless entry additionally permits same-authority requests on other ports;
+it does not grant arbitrary cross-port CORS. For example, a browser at
+`http://localhost:3000` calling an endpoint on port 9292 must list the browser's
+actual origin. A custom list replaces default browser-origin rules. Configure
+non-loopback endpoint authorities too, and retain the request's real Host through
+any reverse proxy. IPv6 origins use brackets, e.g. `http://[::1]:3000`.
+
+Default-port equivalence follows the SDK's same-authority rules. A genuinely
+absent Origin is allowed after Host validation; blank or malformed headers are
+rejected. Invalid configured origin URLs refuse with a bounded diagnostic.
+Restart after changing origins: the middleware and transport capture the same
+policy. SDK DNS-rebinding checks remain enabled.
 
 `OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin` and `Vary: Origin`. `Access-Control-Expose-Headers: Mcp-Session-Id` appears only in legacy session mode (`WOODS_MCP_HTTP_STATELESS=0`).
 

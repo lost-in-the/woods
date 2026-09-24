@@ -241,3 +241,13 @@ returned typed, SHA-guarded `full_evidence` lookup for verification. Published-u
 coordinates are not physical file offsets; unknown generation remains unknown.
 Keep full-source access available. See the canonical
 [evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
+
+### Origin policy compatibility
+
+For supporting Git revisions after 2.0.0, HTTP preflight and the SDK share one
+captured policy. List the browser's exact origin, including its port, for
+cross-origin requests; portless entries additionally permit same-authority
+traffic. Include a non-loopback MCP endpoint authority and restart after edits.
+Do not disable SDK protection or rewrite Origin/Host to make a request pass.
+Check the installed [HTTP guide](https://github.com/lost-in-the/woods/blob/main/docs/MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
+and verify both preflight and authenticated dispatch.
