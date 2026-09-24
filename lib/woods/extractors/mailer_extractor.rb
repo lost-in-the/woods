@@ -29,9 +29,7 @@ module Woods
       include RouteHelperResolver
 
       def initialize
-        if defined?(ActionMailer::Base)
-          @mailer_base = defined?(ApplicationMailer) ? ApplicationMailer : ActionMailer::Base
-        end
+        @mailer_base = ActionMailer::Base if defined?(ActionMailer::Base)
         build_route_helper_map
       end
 
@@ -90,11 +88,11 @@ module Woods
       # Discovery and direct incremental extraction must agree on ownership;
       # otherwise a gem class with a fabricated path becomes a phantom unit.
       def app_defined_mailer?(mailer)
-        return false unless @mailer_base && mailer.name
+        return false unless @mailer_base && mailer.name && mailer < @mailer_base
         return false if mailer == ActionMailer::Base
 
         path = source_file_for(mailer)
-        path && File.file?(path) && app_source?(path, Rails.root.to_s)
+        app_source_file?(path)
       end
 
       # Locate the source file for a mailer class.

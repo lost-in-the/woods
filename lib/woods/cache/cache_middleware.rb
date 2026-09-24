@@ -188,6 +188,10 @@ module Woods
         @provider.cache_identity if @provider.respond_to?(:cache_identity)
       end
 
+      def input_budget
+        @provider.input_budget if @provider.respond_to?(:input_budget)
+      end
+
       def configured_dimensions
         @provider.configured_dimensions if @provider.respond_to?(:configured_dimensions)
       end
@@ -515,7 +519,8 @@ module Woods
       # @return [String]
       def context_key(query, budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil, evidence: 'full') # rubocop:disable Metrics/ParameterLists
         namespace = @context_mutex.synchronize { @context_namespace }
-        parts = [namespace, query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
+        # Retain per-retriever isolation and invalidate pre-fusion rankings.
+        parts = ['unit-rank-fusion-v1', namespace, query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
         parts << 'lexical' if mode == :lexical
         parts << JSON.generate(evidence: evidence) unless evidence == 'full'
         if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)

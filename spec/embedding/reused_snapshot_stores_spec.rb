@@ -68,7 +68,7 @@ RSpec.describe 'Full embedding with reused snapshot stores' do
     expect(indexer.index_all).to eq(processed: 0, skipped: 0, errors: 0)
     expect(published_ids).to eq([])
     expect(published_metadata_ids).to eq([])
-    expect(JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))).to eq({})
+    expect(JSON.parse(File.read(File.join(output_dir, 'checkpoint.json'))).fetch('hashes')).to eq({})
   end
 
   it 'preserves the promoted dump and checkpoint when a later provider batch fails' do
@@ -87,7 +87,7 @@ RSpec.describe 'Full embedding with reused snapshot stores' do
       texts.map { [0.3, 0.4] }
     end
 
-    expect { indexer.index_all }.to raise_error(Woods::Error, /provider unavailable/)
+    expect { indexer.index_all }.to raise_error(Woods::Error, /Embedding failed.*Second/)
     expect(File.binread(File.join(output_dir, 'dumps/latest'))).to eq(original_dump)
     expect(File.binread(File.join(output_dir, 'checkpoint.json'))).to eq(checkpoint)
     expect(published_ids).to eq(['Gone'])

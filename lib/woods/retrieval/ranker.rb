@@ -169,11 +169,16 @@ module Woods
         matched_fields_map = {}
 
         candidates.group_by(&:source).each_value do |source_candidates|
-          ranked = source_candidates.sort_by { |c| -c.score }
-          ranked.each_with_index do |candidate, idx|
+          ranked = source_candidates.sort_by { |candidate| [-candidate.score, candidate.identifier] }
+          # Rank units, not chunks: skipping duplicate contributions after
+          # assigning ranks would still push every following unit down.
+          ranked.uniq { |candidate| base_identifier(candidate.identifier) }.each_with_index do |candidate, idx|
             base_id = base_identifier(candidate.identifier)
             # RRF is 1-based (Cormack et al., 2009): top-ranked doc uses rank 1, not 0.
             rrf_scores[base_id] += 1.0 / (RRF_K + idx + 1)
+          end
+          ranked.each do |candidate|
+            base_id = base_identifier(candidate.identifier)
             # `||=` alone is wrong here: a graph-expansion candidate's `{}`
             # is truthy, so it would permanently shadow a real metadata hash
             # arriving from a later-processed source. Only lock in a value
@@ -227,7 +232,7 @@ module Woods
       # @return [Array<Candidate>]
       def rebuild_rrf_candidates(candidates, rrf_scores, metadata_map, matched_fields_map)
         original_by_id = pick_merged_source(candidates)
-        rrf_scores.sort_by { |_id, score| -score }.map do |identifier, score|
+        rrf_scores.sort_by { |id, score| [-score, id] }.map do |identifier, score|
           original = original_by_id[identifier]
           build_candidate(
             identifier: identifier,

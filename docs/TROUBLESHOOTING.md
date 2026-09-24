@@ -842,20 +842,16 @@ config.embedding_options = { host: 'http://localhost:11434' }
 
 **Symptom:** `rake woods:embed` fails with `Ollama API error: 400 {"error":"the input length exceeds the context length"}`. Individual chunks may look smaller than the configured `num_ctx`.
 
-**Cause:** Ollama's `/api/embed` endpoint enforces the model's **native** `context_length`, not the `options.num_ctx` override (see [ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)). For `nomic-embed-text` that's 2048 tokens, regardless of what `num_ctx` is set to. Separately, without the `tokenizers` gem, Woods estimates token counts from character length, which under-counts dense Ruby source, so chunks that look safe by char count still trip the 2048-token ceiling.
+**Cause:** the server enforces the selected model's actual context window.
+Character estimates can undercount dense Ruby or multilingual source; a larger
+`num_ctx` setting does not establish that the model accepts a larger input.
 
-**Fix:** Use Woods 2.0 and install the `tokenizers` gem:
-
-```ruby
-# Gemfile
-gem 'woods', '~> 2.0'
-gem 'tokenizers', '~> 0.5'   # exact BERT WordPiece token counting
-```
-
-Woods now:
-
-1. Advertises the native context ceiling per model (2048 for `nomic-embed-text`, 8192 for `bge-m3`/`snowflake-arctic-embed2`, etc.) so the chunker sizes inputs correctly.
-2. Uses the real BERT tokenizer to verify every chunk, catching the 10–20% gap between char-based estimates and Ollama's internal count.
+**Diagnosis:** record the loaded Woods revision, model and configured context.
+In supporting builds after 2.0.0, Woods counts the full metadata prefix plus
+source, splits without truncating source, and requests Ollama `truncate: false`.
+An overflow is a visible refusal; read the unit/model/limit diagnostic rather
+than enabling truncation or installing an unrelated BERT tokenizer. See the
+[input counting contract](EMBEDDING_MODELS.md#why-num_ctx-isnt-enough).
 
 If you want fewer chunks per unit and have the disk space, switch to a larger-context model:
 

@@ -28,6 +28,9 @@ module Woods
         @ref = normalize_ref(ref)
       end
 
+      # @return [String] normalized branch/ref used in citation and ownership identity
+      attr_reader :ref
+
       # Ref used when the index does not say which one it came from.
       DEFAULT_REF = 'main'
 
@@ -60,7 +63,7 @@ module Woods
         file_path = unit_data['file_path']
         return @repo_url unless file_path
 
-        "#{@repo_url}/blob/#{@ref}/#{encode_path(file_path)}"
+        "#{@repo_url}/blob/#{encode_path(@ref)}/#{encode_path(file_path)}"
       end
 
       private

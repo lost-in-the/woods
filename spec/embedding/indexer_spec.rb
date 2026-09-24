@@ -107,7 +107,7 @@ RSpec.describe Woods::Embedding::Indexer do
       indexer.index_all
 
       checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
-      expect(checkpoint['User']).to eq('abc123')
+      expect(checkpoint.fetch('hashes')['User']).to eq('abc123')
     end
 
     context 'with multiple units' do
@@ -196,7 +196,7 @@ RSpec.describe Woods::Embedding::Indexer do
         indexer.index_all
 
         checkpoint = JSON.parse(Woods::AtomicFile.read(File.join(output_dir, 'checkpoint.json')))
-        expect(checkpoint['Café']).to eq('cafe123')
+        expect(checkpoint.fetch('hashes')['Café']).to eq('cafe123')
       end
     end
 
@@ -322,8 +322,9 @@ RSpec.describe Woods::Embedding::Indexer do
           output_dir: output_dir, batch_size: 2
         ).index_all
 
-        File.write(File.join(output_dir, 'checkpoint.json'),
-                   JSON.generate('User' => 'abc123', 'PaymentService' => 'stale'))
+        checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
+        checkpoint['hashes']['PaymentService'] = 'stale'
+        File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
       end
 
       it 'repopulates metadata for units whose embedding is skipped' do
@@ -380,7 +381,8 @@ RSpec.describe Woods::Embedding::Indexer do
 
     context 'when the checkpoint matches but no durable dump holds the vector' do
       before do
-        File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate('User' => 'abc123'))
+        indexer.index_all
+        FileUtils.rm_rf(File.join(output_dir, 'dumps'))
       end
 
       it 'ignores the checkpoint and embeds the unit anyway' do
@@ -491,7 +493,7 @@ RSpec.describe Woods::Embedding::Indexer do
       )
 
       expect { failing_indexer.index_all }.to raise_error(
-        Woods::Error, /Embedding failed: connection refused/
+        Woods::Error, /Embedding failed.*identifier="User"/
       )
     end
 
@@ -511,7 +513,7 @@ RSpec.describe Woods::Embedding::Indexer do
 
       expect do
         failing_indexer.send(:embed_and_store, items, checkpoint, stats)
-      end.to raise_error(Woods::Error, /network timeout/)
+      end.to raise_error(Woods::Error, /Embedding failed.*User/)
 
       expect(stats[:errors]).to eq(1)
     end
@@ -637,7 +639,7 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(recorded_texts).to all(satisfy { |t| t.length <= budget })
     end
 
-    it 'skips chunking when the provider advertises no budget' do
+    it 'uses the preparer budget when the provider advertises no budget' do
       no_budget_provider = stub_provider_class.new # no max_input_tokens method
       small_indexer = described_class.new(
         provider: no_budget_provider,
@@ -648,8 +650,7 @@ RSpec.describe Woods::Embedding::Indexer do
         batch_size: 4
       )
       stats = small_indexer.index_all
-      # Provider without a budget => no auto-chunking, unit goes whole.
-      expect(stats[:processed]).to eq(1)
+      expect(stats[:processed]).to be > 1
     end
 
     # B-108: Provider::Interface *defines* #max_input_tokens (as a
@@ -657,7 +658,7 @@ RSpec.describe Woods::Embedding::Indexer do
     # true for a provider that merely includes the interface without
     # overriding it — the raise reached needs_chunking? instead of the
     # "no budget" fallback.
-    it 'skips chunking when the provider only inherits the interface stub' do
+    it 'uses the preparer budget when the provider only inherits the interface stub' do
       interface_stub_provider_class = Class.new do
         include Woods::Embedding::Provider::Interface
 
@@ -679,7 +680,7 @@ RSpec.describe Woods::Embedding::Indexer do
         batch_size: 4
       )
       stats = small_indexer.index_all
-      expect(stats[:processed]).to eq(1)
+      expect(stats[:processed]).to be > 1
     end
 
     # Regression — `rails_source` units arrive from extraction with
@@ -1117,7 +1118,7 @@ RSpec.describe Woods::Embedding::Indexer do
         updated
       end
 
-      it 'publishes current metadata without calling the embedding provider or changing source checkpoints' do
+      it 're-embeds changed context prefixes while preserving source hashes' do
         updated = update_user_metadata
         original_checkpoint = checkpoint_on_disk
         calls = provider.embed_batch_calls
@@ -1127,8 +1128,8 @@ RSpec.describe Woods::Embedding::Indexer do
         metadata = Woods::Storage::Snapshotter::Metadata.load_or_empty(Woods::IndexArtifact.new(output_dir))
         expect(metadata.find('User')).to eq(updated)
         expect(metadata.find('PaymentService')).to eq(second_unit_data)
-        expect(stats).to eq(processed: 0, skipped: 2, errors: 0)
-        expect(provider.embed_batch_calls).to eq(calls)
+        expect(stats).to eq(processed: 1, skipped: 1, errors: 0)
+        expect(provider.embed_batch_calls).to eq(calls + 1)
         expect(checkpoint_on_disk).to eq(original_checkpoint)
         expect(persisted_vector_ids).to contain_exactly('User', 'PaymentService')
       end
@@ -1153,7 +1154,7 @@ RSpec.describe Woods::Embedding::Indexer do
         expect(chunks.map(&:first)).to contain_exactly('User#chunk_0', 'User#chunk_1')
         expect(chunks.map { |_id, _vector, meta| meta[:file_path] }).to all(eq('app/domain/user.rb'))
         expect(File.binread(artifact.latest_dump_path.join('vectors.bin'))).to eq(original_vectors)
-        expect(provider.embed_batch_calls).to eq(calls)
+        expect(provider.embed_batch_calls).to eq(calls + 1)
       end
 
       it 'retains metadata for units protected by the mass-deletion guard when publishing another change' do
@@ -1276,15 +1277,11 @@ RSpec.describe Woods::Embedding::Indexer do
     end
 
     it 're-embeds a unit the checkpoint claims but the dump does not hold' do
-      # Simulates a checkpoint that ran ahead of the durable artifact for any
-      # reason (an interrupted dump, a store swap, this very bug in an older
-      # gem version). Trusting it would strand the unit forever. Written in
-      # the versioned shape with an identity matching `resolved_config` (its
-      # embedding_provider is {}), so this exercises durable-presence
-      # self-heal rather than the identity-mismatch path below.
-      File.write(File.join(output_dir, 'checkpoint.json'),
-                 JSON.generate('schema_version' => 1, 'identity' => {},
-                               'hashes' => { 'User' => 'abc123', 'PaymentService' => 'def456' }))
+      artifact = Woods::IndexArtifact.new(output_dir)
+      original_dump = artifact.latest_dump_path
+      fresh_indexer.index_incremental
+      # Restore the prior payload, retaining the new complete checkpoint.
+      File.write(File.join(output_dir, 'dumps', 'latest'), File.basename(original_dump))
 
       indexer = fresh_indexer
       allow(indexer).to receive(:warn)
@@ -1419,7 +1416,7 @@ RSpec.describe Woods::Embedding::Indexer do
 
       before_checkpoint = checkpoint_on_disk
 
-      expect { indexer.index_incremental }.to raise_error(Woods::Error, /provider died/)
+      expect { indexer.index_incremental }.to raise_error(Woods::Error, /Embedding failed/)
       expect(checkpoint_on_disk).to eq(before_checkpoint)
     end
   end
@@ -1495,7 +1492,7 @@ RSpec.describe Woods::Embedding::Indexer do
 
       switched.index_incremental
 
-      expect(switched).to have_received(:warn).with(/different embedding identity/)
+      expect(switched).to have_received(:warn).with(/no matching embedding identity/)
     end
 
     it 'loads a pre-identity-tracking (flat) checkpoint without crashing' do
@@ -1533,7 +1530,7 @@ RSpec.describe Woods::Embedding::Indexer do
       )
     end
 
-    it 'skips identity tracking entirely when the indexer carries no resolved_config' do
+    it 'tracks preparation identity even without resolved_config' do
       # Backward compatibility for hosts that never pass resolved_config —
       # the flat shape is written and read exactly as before.
       no_identity_indexer = described_class.new(
@@ -1545,7 +1542,8 @@ RSpec.describe Woods::Embedding::Indexer do
       no_identity_indexer.index_all
 
       checkpoint = JSON.parse(File.read(File.join(output_dir, 'checkpoint.json')))
-      expect(checkpoint).to eq('User' => 'abc123')
+      expect(checkpoint.fetch('hashes')).to eq('User' => 'abc123')
+      expect(checkpoint.fetch('prepared_inputs').fetch('User')).to match(/\A[0-9a-f]{64}\z/)
     end
   end
 
@@ -1788,9 +1786,7 @@ RSpec.describe Woods::Embedding::Indexer do
       it 'keeps units the run only skipped' do
         # Everything unchanged: all four survivors are skipped, not embedded.
         # A skipped unit must never read as vanished.
-        checkpoint = { 'User' => 'abc123' }
-        %w[Keep1 Keep2 Keep3].each { |i| checkpoint[i] = "hash-#{i}" }
-        File.write(File.join(output_dir, 'checkpoint.json'), JSON.generate(checkpoint))
+        indexer.index_all
 
         stats = indexer.index_incremental
 
@@ -1882,10 +1878,8 @@ RSpec.describe Woods::Embedding::Indexer do
       let(:seed) { {} }
 
       before do
-        File.write(
-          File.join(output_dir, 'checkpoint.json'),
-          JSON.generate({ 'User' => unit_data['source_hash'] })
-        )
+        indexer.index_all
+        vector_store.entries.clear
       end
 
       it 're-embeds instead of trusting the checkpoint' do
@@ -1909,11 +1903,12 @@ RSpec.describe Woods::Embedding::Indexer do
         store
       end
 
-      it 'warns and completes the run without reconciling' do
-        expect { indexer.index_all }
-          .to output(/could not read existing ids.*skipping durable-store reconciliation/m).to_stderr
-
+      it 'refuses replacement and checkpoint advancement when enumeration failed' do
+        allow(indexer).to receive(:warn)
+        expect { indexer.index_all }.to raise_error(Woods::Error, /existing durable vector IDs could not be read/)
+        expect(provider.embed_batch_calls).to eq(0)
         expect(vector_store.deleted).to be_empty
+        expect(File).not_to exist(File.join(output_dir, 'checkpoint.json'))
       end
     end
 
@@ -2052,6 +2047,7 @@ RSpec.describe Woods::Embedding::Indexer do
           url: 'http://qdrant.example.com', collection: 'test', dimensions: 2
         )
         allow(store).to receive(:store_batch)
+        allow(store).to receive(:each_id).and_return([].each)
         store
       }
     }.each do |backend, build_store|

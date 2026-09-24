@@ -11,6 +11,7 @@ require_relative '../index_artifact'
 require_relative '../builder'
 require_relative '../resolved_config'
 require_relative '../generation'
+require_relative '../chunking/contributor_chunks'
 require_relative '../storage/snapshotter'
 require_relative '../storage/inapplicable_backend'
 
@@ -873,7 +874,10 @@ module Woods
           meta = metadata_store.find(id.to_s.sub(CHUNK_SUFFIX_PATTERN, ''))
           next if meta.nil? || (meta.respond_to?(:empty?) && meta.empty?)
 
-          vector_store.store(id, vec, vector_filter_metadata(meta))
+          chunk_index = id.to_s[/#chunk_(\d+)\z/, 1].to_i
+          chunk = Array(meta['embedding_chunks'])[chunk_index]
+          facts = vector_filter_metadata(meta).merge(Chunking::ContributorChunks.vector_metadata(meta, chunk))
+          vector_store.store(id, vec, facts)
         end
       end
       private_class_method :populate_vector_metadata

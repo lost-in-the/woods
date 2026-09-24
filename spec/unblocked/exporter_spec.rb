@@ -33,10 +33,16 @@ RSpec.describe Woods::Unblocked::Exporter do
     end
   end
 
+  let(:remote_documents) { {} }
+
   let(:client) do
     instance_double(Woods::Unblocked::Client).tap do |c|
-      allow(c).to receive(:put_document).and_return('id' => 'doc-1')
-      allow(c).to receive(:all_documents).and_return([])
+      allow(c).to receive(:put_document) do |**document|
+        uri = document.fetch(:uri)
+        remote_documents[uri] = { 'id' => "doc-#{remote_documents.size + 1}", 'uri' => uri,
+                                  'collectionId' => document.fetch(:collection_id) }
+      end
+      allow(c).to receive(:all_documents) { remote_documents.values }
       allow(c).to receive(:delete_document).and_return({})
     end
   end
@@ -46,6 +52,8 @@ RSpec.describe Woods::Unblocked::Exporter do
   let(:manifest) { nil }
   let(:force_full) { false }
   let(:force_purge) { false }
+
+  before { manifest }
 
   subject(:exporter) do
     described_class.new(
@@ -69,6 +77,8 @@ RSpec.describe Woods::Unblocked::Exporter do
   def manifest_double # rubocop:disable Metrics/AbcSize
     instance_double(Woods::Unblocked::SyncManifest).tap do |m|
       allow(m).to receive(:empty?).and_return(false)
+      allow(m).to receive(:activate_scope)
+      allow(m).to receive(:migration).and_return(nil)
       allow(m).to receive(:unchanged?).and_return(false)
       allow(m).to receive(:record)
       allow(m).to receive(:document_id_for).and_return(nil)
@@ -77,6 +87,11 @@ RSpec.describe Woods::Unblocked::Exporter do
       allow(m).to receive(:size).and_return(0)
       allow(m).to receive(:save)
       yield m if block_given?
+      allow(client).to receive(:all_documents) do
+        remote_documents.values + m.stale_uris([]).map do |uri|
+          { 'uri' => uri, 'id' => m.document_id_for(uri), 'collectionId' => 'col-1' }
+        end
+      end
     end
   end
 
@@ -249,6 +264,9 @@ RSpec.describe Woods::Unblocked::Exporter do
 
       it 'skips it without calling put_document' do
         stub_single_user
+        uri = uri_for('app/models/user.rb')
+        remote_documents[uri] = { 'uri' => uri, 'id' => 'known', 'collectionId' => 'col-1' }
+        allow(manifest).to receive(:document_id_for).with(uri).and_return('known')
         stats = exporter.sync_all
         expect(client).not_to have_received(:put_document)
         expect(stats[:skipped]).to be >= 1
@@ -433,7 +451,7 @@ RSpec.describe Woods::Unblocked::Exporter do
 
       it 'resolves the id via one all_documents call, then deletes' do
         stub_single_user
-        allow(client).to receive(:all_documents).with(collection_id: 'col-1').and_return(
+        allow(client).to receive(:all_documents).with(collection_id: nil).and_return(
           [{ 'id' => 'resolved-1', 'uri' => gone_uri, 'collectionId' => 'col-1' }]
         )
 
@@ -548,8 +566,10 @@ RSpec.describe Woods::Unblocked::Exporter do
         manifest_double { |m| allow(m).to receive(:document_id_for).and_return('previously-known-id') }
       end
 
-      it 'falls back to the previously recorded document_id' do
+      it 'uses the current remote identity when the write response has no id' do
         stub_single_user
+        uri = uri_for('app/models/user.rb')
+        remote_documents[uri] = { 'uri' => uri, 'id' => 'previously-known-id', 'collectionId' => 'col-1' }
         allow(client).to receive(:put_document).and_return({})
         exporter.sync_all
         expect(manifest).to have_received(:record)
@@ -715,18 +735,18 @@ RSpec.describe Woods::Unblocked::Exporter do
     end
 
     context 'when the manifest is empty (cache miss)' do
-      it 'reconciles document ids from the remote and purges orphans' do
+      it 'preserves remote documents whose ownership cannot be established' do
         # No current units; remote has one orphan in our collection.
         allow(reader).to receive(:list_units).and_return([])
-        allow(client).to receive(:all_documents).with(collection_id: 'col-1').and_return(
+        allow(client).to receive(:all_documents).with(collection_id: nil).and_return(
           [{ 'id' => 'remote-1', 'uri' => uri_for('app/models/orphan.rb'), 'collectionId' => 'col-1' }]
         )
 
         stats = exporter.sync_all
 
-        expect(client).to have_received(:all_documents).with(collection_id: 'col-1')
-        expect(client).to have_received(:delete_document).with(document_id: 'remote-1')
-        expect(stats[:deleted]).to eq(1)
+        expect(client).to have_received(:all_documents).with(collection_id: nil)
+        expect(client).not_to have_received(:delete_document)
+        expect(stats[:deleted]).to eq(0)
       end
     end
   end

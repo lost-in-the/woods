@@ -1,0 +1,1 @@
+- Discover all application-owned `ActionMailer::Base` descendants, including `ApplicationMailer`, direct framework subclasses and application subclasses of external mailer bases. Their defaults, layouts, callbacks and actions remain reflective: extraction does not deliver mail or invoke callback/default procs (#594).

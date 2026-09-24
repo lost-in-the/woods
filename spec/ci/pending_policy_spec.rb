@@ -52,14 +52,14 @@ RSpec.describe PendingPolicy do
   end
 
   it 'accepts only the exact reviewed example and reason while the capability is unavailable' do
-    file, description, reason, = described_class::ENTRIES.first
-    hide_const('Tokenizers')
+    file, description, reason, unavailable = described_class::ENTRIES.first
+    allow(unavailable).to receive(:call).and_return(true)
     expect(described_class.allowed?(pending_example(file: file, description: description, reason: reason))).to be true
     expect(described_class.allowed?(pending_example(file: file, description: description, reason: 'other'))).to be false
     expect(described_class.allowed?(pending_example(file: file, description: 'other', reason: reason))).to be false
     expect(described_class.allowed?(pending_example(file: 'spec/other.rb', description: description,
                                                     reason: reason))).to be false
-    stub_const('Tokenizers', Module.new)
+    allow(unavailable).to receive(:call).and_return(false)
     expect(described_class.allowed?(pending_example(file: file, description: description, reason: reason))).to be false
   end
 end

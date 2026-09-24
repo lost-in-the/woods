@@ -3,6 +3,7 @@
 require 'pathname'
 require_relative 'runtime_lookup'
 require_relative 'value_class'
+require_relative '../source_contributors'
 
 module Woods
   module SourceReferences
@@ -21,7 +22,7 @@ module Woods
         @lookup = RuntimeLookup.new
         @sources = sources.to_h { |path, result| [absolute(path), result] }
         @all_types = units.group_by { |unit| field(unit, :identifier) }
-        @entries = units.filter_map { |unit| entry(unit) }
+        @entries = units.flat_map { |unit| SourceContributors.paths(unit).filter_map { |path| entry(unit, path) } }
         @owners = @entries.group_by { |record| [record[:path], record[:identifier]] }
         @targets = @entries.group_by { |record| record[:identifier] }
       end
@@ -71,12 +72,11 @@ module Woods
         { 'status' => 'resolved', 'target' => target, 'type' => entries.first[:type].to_s }
       end
 
-      def entry(unit)
+      def entry(unit, path)
         type = field(unit, :type)&.to_sym
         return unless TYPES.include?(type)
 
         identifier = field(unit, :identifier)
-        path = field(unit, :file_path)
         return unless eligible_identity?(identifier, path)
 
         path = absolute(path)

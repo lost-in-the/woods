@@ -1,0 +1,1 @@
+- Preserve schedules with the same task name across Solid Queue, Sidekiq-Cron and Whenever. Only conflicting identifiers gain a deterministic format qualifier; unique identifiers stay unchanged. Full, incremental, refresh and file extraction use the same allocation. Ambiguous task keys within one format fail before publication instead of overwriting a schedule (#594).

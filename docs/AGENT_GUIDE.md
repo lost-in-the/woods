@@ -330,3 +330,14 @@ on the evidence. Verify direct and inferred downstream candidates using typed
 lookup and `dependents explain:true`; suggested tests do not prove coverage.
 Silence does not establish no impact. See [bounded context hints](WATCH_DAEMON.md#optional-bounded-context-hints)
 for opt-in, independent refresh controls, limits and repeat suppression.
+
+### Library units with several source files
+
+In supporting builds (unreleased after 2.0.0), `source_contributors` identifies
+all physical files behind an aggregate library unit. Treat `file_path` as the
+primary display path. Use each contributor's own SHA256 and coordinates when
+citing it; the composite source hash is not the hash of the primary file.
+Generated headers and spans crossing contributors have no physical location.
+Per-file Git facts are separate, and a missing aggregate churn count does not
+mean the library has no history. Package/path scope must include all contributors
+to return the aggregate. See [library extraction](EXTRACTOR_REFERENCE.md#libextractor).

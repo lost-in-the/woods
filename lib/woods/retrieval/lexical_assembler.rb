@@ -23,7 +23,7 @@ module Woods
         sources = []
         candidates.each do |candidate|
           unit = candidate.metadata
-          header = "\n\n## #{unit['identifier']} (#{unit['type']})\nFile: #{unit['file_path']}\n" \
+          header = "\n\n## #{unit['identifier']} (#{unit['type']})\n#{SourceContributors.label(unit)}\n" \
                    "Matched: #{candidate.matched_fields.join(', ')}\n\n"
           remaining = (budget * 4) - context.length - header.length
           next unless remaining.positive?
@@ -37,7 +37,7 @@ module Woods
             context += header + selected.text
             sources << { identifier: unit['identifier'], type: unit['type'], file_path: unit['file_path'],
                          score: candidate.score, matched_fields: candidate.matched_fields,
-                         evidence: selected.provenance }
+                         evidence: selected.provenance }.merge(SourceContributors.attribution(unit))
             next
           end
 
@@ -49,6 +49,7 @@ module Woods
           context += header + (truncated ? source[0, remaining - marker.length] + marker : source)
           sources << { identifier: unit['identifier'], type: unit['type'], file_path: unit['file_path'],
                        score: candidate.score, matched_fields: candidate.matched_fields, truncated: truncated }
+                     .merge(SourceContributors.attribution(unit))
           break if truncated
         end
         body = context[notice.length..].to_s

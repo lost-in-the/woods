@@ -1,0 +1,1 @@
+Rank unique typed units within each retrieval source before reciprocal-rank fusion, so repeated vector chunks cannot outvote better matches or displace other units. Preserve all matched-field evidence and genuine cross-source agreement. Previously cached contexts are invalidated; existing embeddings remain usable. (#596)

@@ -20,6 +20,7 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
     stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names_regex: /\b(?:User|Post)\b/))
 
     allow(File).to receive(:exist?) { |path| file_system.key?(path.to_s) }
+    allow(File).to receive(:file?) { |path| file_system.key?(path.to_s) }
     allow(File).to receive(:read) { |path| file_system.fetch(path.to_s, '') }
   end
 
@@ -36,7 +37,8 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
     klass = Class.new
     klass.define_singleton_method(:name) { name }
     klass.define_singleton_method(:public_instance_methods) { |_inherited = true| methods }
-    klass.define_singleton_method(:superclass) { superclass || Object }
+    klass.define_singleton_method(:superclass) { superclass || (Phlex::HTML if defined?(Phlex::HTML)) || Object }
+    klass.define_singleton_method(:<) { |other| self.superclass == other }
     klass.define_singleton_method(:method_defined?) { |m| view_template && m == :view_template }
 
     init_method = double('Method', parameters: params)
@@ -289,16 +291,16 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
     context 'when no source file can be found' do
       let(:component_class) { build_component(name: 'GhostComponent') }
 
-      it 'produces a unit with nil file_path and empty source' do
+      it 'omits a component without an application source file' do
         extractor = described_class.new
         unit = extractor.extract_component(component_class)
 
-        expect(unit.file_path).to be_nil
-        expect(unit.source_code).to eq('')
+        expect(unit).to be_nil
       end
     end
 
     context 'when the component has no view_template' do
+      let(:file_system) { { '/rails/app/components/headless_component.rb' => 'class HeadlessComponent; end' } }
       let(:component_class) do
         build_component(name: 'HeadlessComponent', view_template: false, methods: [:call])
       end
@@ -313,8 +315,9 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
     end
 
     context 'when extraction raises an error' do
+      let(:file_system) { { '/rails/app/components/broken_component.rb' => 'class BrokenComponent; end' } }
       it 'logs the error and returns nil' do
-        klass = Class.new
+        klass = Class.new(Phlex::HTML)
         klass.define_singleton_method(:name) { 'BrokenComponent' }
         klass.define_singleton_method(:superclass) { Object }
         klass.define_singleton_method(:public_instance_methods) { |_ = true| raise StandardError, 'boom' }
@@ -369,6 +372,10 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
   end
 
   describe 'initialize param mapping' do
+    let(:file_system) do
+      { '/rails/app/components/kitchen_sink_component.rb' => 'class KitchenSinkComponent; end',
+        '/rails/app/components/opaque_component.rb' => 'class OpaqueComponent; end' }
+    end
     before do
       stub_const('Phlex::HTML', build_phlex_base)
     end
@@ -595,7 +602,8 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       expect(described_class.new.discoverable_classes).to eq([])
     end
 
-    it 'returns the base class descendants' do
+    it 'returns the app-owned base class descendants' do
+      file_system['/rails/app/components/card_component.rb'] = 'class CardComponent; end'
       component = build_component(name: 'CardComponent')
       stub_const('Phlex::HTML', build_phlex_base(descendants: [component]))
 

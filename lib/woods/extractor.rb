@@ -313,6 +313,7 @@ module Woods
     #
     # @return [Hash{Symbol => Symbol}] extractor key => unit type
     WHOLE_APP_EXTRACTORS = {
+      libs: :lib,
       rake_tasks: :rake_task,
       routes: :route,
       middleware: :middleware,
@@ -832,6 +833,7 @@ module Woods
 
       @dependents_dirty = Set.new
       @incremental_written = {}
+      @library_replacement_touched = nil
       @identity_claims = {}
       # nil = no scope was computed for this run, so every re-extracted
       # controller has its flows reassembled. {#refresh} leaves it that way.
@@ -1860,8 +1862,10 @@ module Woods
         next if %i[rails_source gem_source].include?(type)
 
         units.each do |unit|
-          path = unit.file_path
-          file_paths << path if git_enrichable_path?(path, root)
+          SourceContributors.paths(unit).each do |source|
+            path = File.expand_path(source, Rails.root)
+            file_paths << path if git_enrichable_path?(path, root)
+          end
         end
       end
 
@@ -1875,8 +1879,12 @@ module Woods
         units.each do |unit|
           next unless unit.file_path
 
-          relative = unit.file_path.sub(root, '')
-          unit.metadata[:git] = git_data[relative] if git_data[relative]
+          if SourceContributors.multiple?(unit)
+            SourceContributors.annotate_git(unit, git_data)
+          else
+            relative = unit.file_path.sub(root, '')
+            unit.metadata[:git] = git_data[relative] if git_data[relative]
+          end
         end
       end
     end
@@ -1952,7 +1960,7 @@ module Woods
     def annotate_package(unit)
       return nil if %i[rails_source gem_source].include?(unit.type) || unit.file_path.nil?
 
-      package = package_resolver.package_for(unit.file_path)
+      package = SourceContributors.annotate_package(unit, package_resolver)
       if package
         unit.metadata[:package] = package
       else
@@ -2008,15 +2016,17 @@ module Woods
       relative_path = data['file_path']
       return nil if relative_path.nil? || relative_path.start_with?('/')
 
-      package = package_resolver.package_for(relative_path)
       metadata = (data['metadata'] ||= {})
-      return nil if metadata['package'] == package
+      before = JSON.generate(metadata)
+      package = SourceContributors.annotate_package(data, package_resolver)
 
       if package
         metadata['package'] = package
       else
         metadata.delete('package')
       end
+      return nil if JSON.generate(metadata) == before
+
       AtomicFile.write(file, json_serialize(data), durable: payload_writes_durable?)
 
       identifier = data['identifier']
@@ -2926,6 +2936,7 @@ module Woods
       dispatcher = PathDispatcher.new
       change_set.existing_paths.filter_map do |absolute_path|
         rules = dispatcher.file_rules_for(change_set.relativize(absolute_path))
+        rules = rules.reject { |rule| rule.extractor_key == :libs }
         if @refresh_hybrid_discovery
           rules = rules.reject do |rule|
             HYBRID_DISCOVERY_EXTRACTORS.include?(rule.extractor_key)
@@ -3295,6 +3306,8 @@ module Woods
     # @raise [Woods::ExtractionError] when the replacement failed after
     #   mutating durable state
     def replace_type_wholesale(key, affected_types)
+      return @library_replacement_touched if key == :libs && @library_replacement_touched
+
       extractor = extractor_for(key)
       if extractor.nil?
         source_consumer_failed?(key, extractor)
@@ -3312,6 +3325,7 @@ module Woods
       touched = with_replacement_ownership(key) { register_and_write(key, units, affected_types) }
       touched.merge(remove_replaced_units(key, units, affected_types))
       consume_module_aware_refresh(key, units) unless source_consumer_failed?(key, extractor)
+      @library_replacement_touched = touched if key == :libs
       touched
     rescue IdentityCollisionError
       raise
@@ -3598,7 +3612,9 @@ module Woods
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
-        @source_inputs&.consume_unit(extractor_key, unit.file_path) unless source_consumer_failed?(extractor_key)
+        unless source_consumer_failed?(extractor_key)
+          SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
+        end
         (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
         written.add(unit.identifier)
       end
@@ -3772,7 +3788,10 @@ module Woods
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
-      if git
+      if git_data && SourceContributors.multiple?(data)
+        SourceContributors.annotate_git(data, git_data)
+        @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil)
+      elsif git
         (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
         annotate_node_from_git(identifier, type, git)
       end
@@ -3833,10 +3852,10 @@ module Woods
 
       root = "#{Rails.root}/"
       paths = identifiers.flat_map do |identifier|
-        @dependency_graph.nodes_for(identifier).filter_map do |node|
-          next if %i[rails_source gem_source].include?(node[:type])
+        @dependency_graph.nodes_for(identifier).flat_map do |node|
+          next [] if %i[rails_source gem_source].include?(node[:type])
 
-          node[:file_path] if git_enrichable_path?(node[:file_path], root)
+          (node[:source_paths] || Array(node[:file_path])).select { |path| git_enrichable_path?(path, root) }
         end
       end
 
@@ -3881,6 +3900,11 @@ module Woods
     # @param affected_types [Set<Symbol>, nil]
     # @return [String, nil] the identifier when this type was re-extracted and written
     def re_extract_unit_of_type(unit_id, type, affected_types)
+      if type == :lib
+        touched = replace_type_wholesale(:libs, affected_types)
+        return touched.include?(unit_id) ? unit_id : nil
+      end
+
       node = @dependency_graph.node(unit_id, type: type)
       file_path = node && node[:file_path]
 

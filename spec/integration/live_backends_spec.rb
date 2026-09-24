@@ -128,7 +128,8 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
         expect(store.each_id.to_a).to be_empty
         expect(build.call.index_incremental).to eq(processed: 0, skipped: 1, errors: 0)
         expect(provider.calls.size).to eq(calls)
-        expect(JSON.parse(File.read(File.join(dir, 'checkpoint.json')))).to include('Invoice' => data[:source_hash])
+        checkpoint = JSON.parse(File.read(File.join(dir, 'checkpoint.json')))
+        expect(checkpoint.fetch('hashes')).to include('Invoice' => data[:source_hash])
       end
     end
 

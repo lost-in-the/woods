@@ -95,7 +95,7 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
     let(:new_path) { source('new.rb') }
 
     def reconcile_file_candidates(candidates, order)
-      rule = Woods::PathDispatcher::Rule.new(extractor_key: :libs, method_name: :extract_lib_file)
+      rule = Woods::PathDispatcher::Rule.new(extractor_key: :services, method_name: :extract_service_file)
       dispatcher = double('Dispatcher', file_rules_for: [rule])
       allow(Woods::PathDispatcher).to receive(:new).and_return(dispatcher)
       allow(extractor).to receive(:extract_with_rule) { |_rule, path| candidates.fetch(path) }
@@ -104,52 +104,52 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
 
     [false, true].each do |new_first|
       it "moves a file-derived identity only after collecting both paths, new first=#{new_first}" do
-        extractor.dependency_graph.register(unit(old_path, :lib))
+        extractor.dependency_graph.register(unit(old_path, :service))
         order = new_first ? [new_path, old_path] : [old_path, new_path]
 
-        reconcile_file_candidates({ old_path => [], new_path => [unit(new_path, :lib)] }, order)
+        reconcile_file_candidates({ old_path => [], new_path => [unit(new_path, :service)] }, order)
 
-        expect(extractor.dependency_graph.node('SharedIdentity', type: :lib)[:file_path]).to eq(new_path)
+        expect(extractor.dependency_graph.node('SharedIdentity', type: :service)[:file_path]).to eq(new_path)
         expect(extractor.dependency_graph.units_for_path(old_path)).to be_empty
         expect(File).to exist(old_path)
       end
 
       it "rejects simultaneous owners before any write or prune, new first=#{new_first}" do
-        extractor.dependency_graph.register(unit(old_path, :lib))
-        candidates = { old_path => [unit(old_path, :lib)], new_path => [unit(new_path, :lib)] }
+        extractor.dependency_graph.register(unit(old_path, :service))
+        candidates = { old_path => [unit(old_path, :service)], new_path => [unit(new_path, :service)] }
         order = new_first ? [new_path, old_path] : [old_path, new_path]
         expect(extractor).not_to receive(:write_unit_file)
         expect(extractor).not_to receive(:remove_unit)
 
         expect { reconcile_file_candidates(candidates, order) }.to raise_error(Woods::IdentityCollisionError)
-        expect(extractor.dependency_graph.node('SharedIdentity', type: :lib)[:file_path]).to eq(old_path)
+        expect(extractor.dependency_graph.node('SharedIdentity', type: :service)[:file_path]).to eq(old_path)
       end
     end
 
     it 'does not treat failed prior-path discovery as proof that its identity moved' do
-      extractor.dependency_graph.register(unit(old_path, :lib))
+      extractor.dependency_graph.register(unit(old_path, :service))
       expect(extractor).not_to receive(:write_unit_file)
       expect do
-        reconcile_file_candidates({ old_path => nil, new_path => [unit(new_path, :lib)] }, [old_path, new_path])
+        reconcile_file_candidates({ old_path => nil, new_path => [unit(new_path, :service)] }, [old_path, new_path])
       end.to raise_error(Woods::IdentityCollisionError)
     end
 
     it 'does not release identities when a configured per-file method is unavailable' do
-      extractor.dependency_graph.register(unit(old_path, :lib))
-      extractor.instance_variable_set(:@incremental_extractors, { libs: Object.new })
-      rule = Woods::PathDispatcher::Rule.new(extractor_key: :libs, method_name: :extract_lib_file)
+      extractor.dependency_graph.register(unit(old_path, :service))
+      extractor.instance_variable_set(:@incremental_extractors, { services: Object.new })
+      rule = Woods::PathDispatcher::Rule.new(extractor_key: :services, method_name: :extract_service_file)
       allow(Woods::PathDispatcher).to receive(:new).and_return(double('Dispatcher', file_rules_for: [rule]))
 
       extractor.send(:reconcile_changed_paths, Woods::ChangeSet.new(paths: [old_path], root: root), Set.new)
 
-      expect(extractor.dependency_graph.node('SharedIdentity', type: :lib)[:file_path]).to eq(old_path)
+      expect(extractor.dependency_graph.node('SharedIdentity', type: :service)[:file_path]).to eq(old_path)
     end
 
     it 'does not release file-derived owners during an incomplete eager load' do
-      extractor.dependency_graph.register(unit(old_path, :lib))
+      extractor.dependency_graph.register(unit(old_path, :service))
       extractor.instance_variable_set(:@eager_load_complete, false)
       expect do
-        reconcile_file_candidates({ old_path => [], new_path => [unit(new_path, :lib)] }, [old_path, new_path])
+        reconcile_file_candidates({ old_path => [], new_path => [unit(new_path, :service)] }, [old_path, new_path])
       end.to raise_error(Woods::IdentityCollisionError)
     end
 

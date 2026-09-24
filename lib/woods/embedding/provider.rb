@@ -3,6 +3,7 @@
 require 'net/http'
 require 'json'
 require_relative 'vector_configuration'
+require_relative 'input_budget'
 
 module Woods
   # Standalone-load guard — keeps `require 'woods/embedding/provider'`
@@ -329,7 +330,7 @@ module Woods
         # Pure configuration identity; probes never change request semantics or keys.
         # @return [Array]
         def cache_identity
-          [self.class.name, @host, @model, @num_ctx, requested_dimensions, configured_dimensions]
+          [self.class.name, @host, @model, @num_ctx, requested_dimensions, configured_dimensions, 'truncate:false']
         end
 
         # Pure constructor settings for ResolvedConfig's allowlisted serialization.
@@ -356,6 +357,12 @@ module Woods
           @num_ctx
         end
 
+        # A model-specific tokenizer is not available locally. This is a sizing
+        # estimate; truncate:false makes the server reject an actual overflow.
+        def input_budget
+          @input_budget ||= InputBudget.new(limit: max_input_tokens, model: @model)
+        end
+
         private
 
         # Cap interpolated response bodies so misconfigured Ollama responses
@@ -371,11 +378,10 @@ module Woods
           s.length > 500 ? "#{s[0, 500]}... [truncated]" : s
         end
 
-        # Build the JSON body for an `/api/embed` call. Adds `options.num_ctx`
-        # when configured — without it, Ollama silently truncates to 2048
-        # tokens and returns 400 when the input exceeds that default.
+        # Request the configured context and explicitly refuse server truncation.
+        # Unknown model tokenization remains server-authoritative.
         def build_body(input)
-          body = { model: @model, input: input }
+          body = { model: @model, input: input, truncate: false }
           body[:dimensions] = requested_dimensions if requested_dimensions
           body[:options] = { num_ctx: @num_ctx } if @num_ctx
           body
