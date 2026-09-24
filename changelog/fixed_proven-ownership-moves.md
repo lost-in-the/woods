@@ -1,0 +1,1 @@
+- Accept incremental source-ownership moves out of surviving files when completed discovery proves a unique replacement. Collect changed-file candidates before registration and pruning so file order cannot decide acceptance, while preserving collision and incomplete-loading safeguards (#574).

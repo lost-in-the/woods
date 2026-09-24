@@ -90,6 +90,115 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
     expect { register(unit(source('second.rb'))) }.to raise_error(Woods::ExtractionError, /collision/)
   end
 
+  describe 'moves out of surviving source files' do
+    let(:old_path) { source('old.rb') }
+    let(:new_path) { source('new.rb') }
+
+    def reconcile_file_candidates(candidates, order)
+      rule = Woods::PathDispatcher::Rule.new(extractor_key: :libs, method_name: :extract_lib_file)
+      dispatcher = double('Dispatcher', file_rules_for: [rule])
+      allow(Woods::PathDispatcher).to receive(:new).and_return(dispatcher)
+      allow(extractor).to receive(:extract_with_rule) { |_rule, path| candidates.fetch(path) }
+      extractor.send(:reconcile_changed_paths, Woods::ChangeSet.new(paths: order, root: root), Set.new)
+    end
+
+    [false, true].each do |new_first|
+      it "moves a file-derived identity only after collecting both paths, new first=#{new_first}" do
+        extractor.dependency_graph.register(unit(old_path, :lib))
+        order = new_first ? [new_path, old_path] : [old_path, new_path]
+
+        reconcile_file_candidates({ old_path => [], new_path => [unit(new_path, :lib)] }, order)
+
+        expect(extractor.dependency_graph.node('SharedIdentity', type: :lib)[:file_path]).to eq(new_path)
+        expect(extractor.dependency_graph.units_for_path(old_path)).to be_empty
+        expect(File).to exist(old_path)
+      end
+
+      it "rejects simultaneous owners before any write or prune, new first=#{new_first}" do
+        extractor.dependency_graph.register(unit(old_path, :lib))
+        candidates = { old_path => [unit(old_path, :lib)], new_path => [unit(new_path, :lib)] }
+        order = new_first ? [new_path, old_path] : [old_path, new_path]
+        expect(extractor).not_to receive(:write_unit_file)
+        expect(extractor).not_to receive(:remove_unit)
+
+        expect { reconcile_file_candidates(candidates, order) }.to raise_error(Woods::IdentityCollisionError)
+        expect(extractor.dependency_graph.node('SharedIdentity', type: :lib)[:file_path]).to eq(old_path)
+      end
+    end
+
+    it 'does not treat failed prior-path discovery as proof that its identity moved' do
+      extractor.dependency_graph.register(unit(old_path, :lib))
+      expect(extractor).not_to receive(:write_unit_file)
+      expect do
+        reconcile_file_candidates({ old_path => nil, new_path => [unit(new_path, :lib)] }, [old_path, new_path])
+      end.to raise_error(Woods::IdentityCollisionError)
+    end
+
+    it 'does not release identities when a configured per-file method is unavailable' do
+      extractor.dependency_graph.register(unit(old_path, :lib))
+      extractor.instance_variable_set(:@incremental_extractors, { libs: Object.new })
+      rule = Woods::PathDispatcher::Rule.new(extractor_key: :libs, method_name: :extract_lib_file)
+      allow(Woods::PathDispatcher).to receive(:new).and_return(double('Dispatcher', file_rules_for: [rule]))
+
+      extractor.send(:reconcile_changed_paths, Woods::ChangeSet.new(paths: [old_path], root: root), Set.new)
+
+      expect(extractor.dependency_graph.node('SharedIdentity', type: :lib)[:file_path]).to eq(old_path)
+    end
+
+    it 'does not release file-derived owners during an incomplete eager load' do
+      extractor.dependency_graph.register(unit(old_path, :lib))
+      extractor.instance_variable_set(:@eager_load_complete, false)
+      expect do
+        reconcile_file_candidates({ old_path => [], new_path => [unit(new_path, :lib)] }, [old_path, new_path])
+      end.to raise_error(Woods::IdentityCollisionError)
+    end
+
+    def install_runtime_owner
+      stub_const('SharedIdentity', Class.new)
+      Object.send(:remove_const, :SharedIdentity)
+      File.write(new_path, 'class SharedIdentity; end')
+      load new_path
+      consumer = double('ModelExtractor', discoverable_classes: [SharedIdentity])
+      extractor.instance_variable_set(:@incremental_extractors, { models: consumer })
+      extractor.dependency_graph.register(unit(old_path, :model))
+      consumer
+    end
+
+    it 'accepts the unique canonical owner from complete runtime discovery' do
+      install_runtime_owner
+      expect { register(unit(new_path, :model)) }.not_to raise_error
+      expect(extractor.dependency_graph.node('SharedIdentity', type: :model)[:file_path]).to eq(new_path)
+      expect(File).to exist(old_path)
+    end
+
+    it 'refuses runtime moves after incomplete eager loading' do
+      install_runtime_owner
+      extractor.instance_variable_set(:@eager_load_complete, false)
+      expect { register(unit(new_path, :model)) }.to raise_error(Woods::IdentityCollisionError)
+    end
+
+    it 'refuses a producer path that disagrees with the canonical runtime owner' do
+      install_runtime_owner
+      expect { register(unit(source('third.rb'), :model)) }.to raise_error(Woods::IdentityCollisionError)
+    end
+
+    it 'refuses ambiguity in the completed runtime inventory' do
+      consumer = install_runtime_owner
+      other = double('Other class', name: 'SharedIdentity')
+      allow(consumer).to receive(:discoverable_classes).and_return([SharedIdentity, other])
+      expect { register(unit(new_path, :model)) }.to raise_error(Woods::IdentityCollisionError)
+    end
+
+    it 'does not trust a runtime inventory whose discovery handled an error' do
+      consumer = install_runtime_owner
+      allow(consumer).to receive(:discoverable_classes) do
+        Woods::SourceInputs::ConsumerErrors.record(consumer)
+        [SharedIdentity]
+      end
+      expect { register(unit(new_path, :model)) }.to raise_error(Woods::IdentityCollisionError)
+    end
+  end
+
   it 'propagates a wholesale collision before the first mutation' do
     consumer = double('PoroExtractor', extract_all: [unit(source('first.rb')), unit(source('second.rb'))])
     extractor.instance_variable_set(:@incremental_extractors, { poros: consumer })

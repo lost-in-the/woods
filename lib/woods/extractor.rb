@@ -2836,46 +2836,45 @@ module Woods
     # @param affected_types [Set<Symbol>] out-param of touched extractor keys
     # @return [Set<String>] identifiers written or removed
     def reconcile_changed_paths(change_set, affected_types)
-      dispatcher = PathDispatcher.new
+      batches = collect_changed_path_batches(change_set)
       touched = Set.new
 
-      change_set.existing_paths.each do |absolute_path|
+      with_changed_path_ownership(batches) do
+        batches.each do |absolute_path, rules, entries|
+          produced = Set.new
+          entries.each do |rule, units|
+            next unless units
+
+            produced.merge(units.map { |unit| [unit.identifier, unit.type] })
+            touched.merge(register_and_write(rule.extractor_key, units, affected_types))
+            unless source_consumer_failed?(rule.extractor_key)
+              @source_inputs&.consume_file(rule.extractor_key, absolute_path)
+            end
+          end
+
+          next if entries.any? { |_rule, units| units.nil? }
+
+          touched.merge(prune_path_leftovers(absolute_path, rules, produced, affected_types))
+        end
+      end
+      touched
+    end
+
+    # Collect every path before verifying ownership or mutating the graph.
+    # An empty successful result can release an owner; a failed/skipped rule
+    # provides no such evidence. Keep (identifier, type) pairs independent.
+    def collect_changed_path_batches(change_set)
+      dispatcher = PathDispatcher.new
+      change_set.existing_paths.filter_map do |absolute_path|
         rules = dispatcher.file_rules_for(change_set.relativize(absolute_path))
         next if rules.empty?
 
-        produced = Set.new
-        # A rule whose extraction *raised* tells us nothing about what the path
-        # defines, so it must not license pruning what the path defined before.
-        raised = false
-        rules.each do |rule|
+        entries = rules.map do |rule|
           units = extract_with_rule(rule, absolute_path)
-          if units.nil?
-            raised = true
-            next
-          end
-
-          # (identifier, type) pairs, not bare identifiers: two rules can
-          # claim one path (policies/pundit_policies) and mint the same
-          # identifier for different unit types. When one of them stops
-          # producing, an identifier-keyed set would let the survivor shield
-          # the stale sibling-type node from the prune below (the #225 shape,
-          # one method over — CORE-1).
-          produced.merge(units.map { |unit| [unit.identifier, unit.type] })
-          touched.merge(register_and_write(rule.extractor_key, units, affected_types))
-          unless source_consumer_failed?(rule.extractor_key)
-            @source_inputs&.consume_file(rule.extractor_key,
-                                         absolute_path)
-          end
+          [rule, units && authoritative_module_units(units)]
         end
-
-        next if raised
-
-        touched.merge(
-          prune_path_leftovers(absolute_path, rules, produced, affected_types)
-        )
+        [absolute_path, rules, entries]
       end
-
-      touched
     end
 
     # Run one {PathDispatcher::Rule} against one file.
@@ -2893,12 +2892,12 @@ module Woods
       # broken constructor licensed pruning every previously-registered unit
       # on every changed path of that type, with the generation bumped over
       # the loss. Construction failure tells us nothing about the path; only
-      # a genuinely constructed extractor that lacks the method earns the [].
+      # a completed supported extraction can establish the path's identities.
       if extractor.nil?
         source_consumer_failed?(rule.extractor_key, extractor)
         return nil
       end
-      return [] unless extractor.respond_to?(rule.method_name)
+      return nil unless extractor.respond_to?(rule.method_name)
 
       result = checked_extraction(rule.extractor_key, extractor) do
         if rule.extractor_key == :poros

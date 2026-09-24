@@ -38,8 +38,76 @@ module Woods
 
       prior_path = identity_source(prior[:file_path])
       return if prior_path == path || confirmed_source_move?(prior_path, path)
+      return if confirmed_discovered_move?(unit, prior_path, path)
 
       reject_identity_collision!(unit, prior_path)
+    end
+
+    # A surviving file can release its old identity, but only after completed
+    # discovery proves it absent. Fresh claims are still checked as one batch.
+    def with_changed_path_ownership(batches)
+      previous = @released_identity_owners
+      @released_identity_owners = released_path_owners(batches)
+      candidates = batches.flat_map { |_path, _rules, entries| entries.flat_map(&:last) }.compact
+      verify_identity_claims!(candidates)
+      yield
+    ensure
+      @released_identity_owners = previous
+    end
+
+    def released_path_owners(batches)
+      return Set.new unless @eager_load_complete
+
+      batches.each_with_object(Set.new) do |(path, rules, entries), released|
+        next if entries.any? { |_rule, units| units.nil? }
+
+        produced = entries.flat_map { |_rule, units| units }.to_set { |unit| [unit.identifier, unit.type] }
+        released.merge(released_owners_for_path(path, rules.to_set(&:extractor_key), produced))
+      end
+    end
+
+    def released_owners_for_path(path, covered, produced)
+      @dependency_graph.units_for_path(path).filter_map do |identifier, type|
+        key = self.class::TYPE_TO_EXTRACTOR_KEY[type]
+        next if produced.include?([identifier, type]) || !covered.include?(key)
+        next if @failed_consumers&.include?(key)
+
+        [type, identifier, identity_source(path)]
+      end
+    end
+
+    def confirmed_discovered_move?(unit, prior, current)
+      return false unless @eager_load_complete
+      return false unless prior && current && File.file?(current)
+      return true if @released_identity_owners&.include?([unit.type, unit.identifier, prior])
+
+      canonical_runtime_owner?(unit, current)
+    end
+
+    def canonical_runtime_owner?(unit, current)
+      consumer = authoritative_runtime_consumer(unit.type)
+      return false unless consumer && Object.respond_to?(:const_source_location)
+
+      owners = consumer.discoverable_classes.select { |klass| klass.name == unit.identifier }.uniq
+      return false if source_consumer_failed?(self.class::TYPE_TO_EXTRACTOR_KEY[unit.type], consumer)
+      return false unless owners.size == 1 && owners.first.equal?(constant_for_identifier(unit.identifier))
+
+      identity_source(Array(Object.const_source_location(unit.identifier)).first) == current
+    end
+
+    # GraphQL combines runtime and file discovery, so its runtime inventory
+    # cannot establish sole ownership. Only authoritative class inventories
+    # can prove a move, and the live constant must canonically name this file.
+    def authoritative_runtime_consumer(type)
+      key = self.class::TYPE_TO_EXTRACTOR_KEY[type]
+      spec = self.class::CLASS_BASED_DISCOVERY[key]
+      return unless spec && spec[:reconcile_removals] != false
+
+      consumer = extractor_for(key)
+      return unless consumer.respond_to?(:discoverable_classes)
+      return if @failed_consumers&.include?(key) || source_consumer_failed?(key, consumer)
+
+      consumer
     end
 
     def confirmed_source_move?(prior, current)

@@ -3080,7 +3080,7 @@
       "lib/woods/extractor.rb"
     ],
     "description": "The incremental collision guard accepts relocation only if the old file disappeared. Moving a class out of a still-existing file therefore rejects a valid unique owner. File-derived identities can also accept or reject the same move depending on changed-file order. Collect and reconcile ownership before mutating outputs. Accept a move only when this run proves the former path no longer owns the identity and the replacement is unique. Preserve rejection of genuine simultaneous owners and incomplete discovery. Add booted full/incremental equivalence plus both path orders. Follow-up to #561/#564. GitHub: #574.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-226",
