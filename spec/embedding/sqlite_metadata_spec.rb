@@ -10,6 +10,8 @@ require 'woods/storage/snapshotter'
 require 'woods/mcp/bootstrapper'
 
 RSpec.describe 'SQLite metadata in local embedding' do
+  include_context 'isolated Woods runtime'
+
   around do |example|
     Dir.mktmpdir('woods-sqlite-embedding') do |directory|
       @output_dir = directory
