@@ -1,0 +1,1 @@
+- Store app-owned event publisher/subscriber paths and ViewComponent sidecar paths relative to the application root, including event source annotations, so identical checkouts produce matching metadata and event source hashes while source reads and external paths retain their original locations.
