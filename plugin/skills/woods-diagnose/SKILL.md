@@ -472,6 +472,16 @@ inside the application environment establishes preboot evidence. Never publish
 `.source-inputs.key`, silently change its permissions, or delete queued edits to
 hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
 
+### Source paths with invalid filename bytes (unreleased after Woods 2.0.0; #573)
+
+Check the writer revision before relying on this handling. An
+`undecodable_source_path` diagnostic means Woods could not represent a filename
+as UTF-8; source freshness remains unknown and reference publication preserves
+the previous generation. Inspect the escaped path, correct the filename in the
+application checkout, and retry extraction. Do not fabricate current freshness
+or discard the prior index. Valid Unicode filenames remain supported, including
+under a C locale. See [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
 ## Compact evidence capability check
 
 Inspect the connected server's installed tool schemas before using `evidence` on
