@@ -1,0 +1,1 @@
+- Discover callable standalone modules under `app/models` as `poro` units with `ruby_kind: module` metadata, using verified runtime and source ownership. Namespace-only wrappers and uncertain owners remain excluded; runtime model mixins retain concern ownership. Run a full extraction after upgrading to populate these units and their source references (#552).

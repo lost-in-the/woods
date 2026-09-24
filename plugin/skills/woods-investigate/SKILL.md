@@ -64,6 +64,12 @@ is unreleased and planned for 2.1. Verify the loaded writer revision and full
 baseline before expecting its additional edges. `code_reference` is source
 evidence, not observed execution; the coverage warning remains applicable.
 
+The same planned expansion discovers callable standalone `app/models` modules
+as `poro` units with `metadata.ruby_kind: "module"`. Runtime model mixins retain
+`concern` ownership. Verify the installed writer and run a full extraction before
+expecting those units; namespace-only wrappers and uncertain source ownership
+remain outside discovery.
+
 The response `graph_coverage` notice, `total_is_exact` field, and human label
 `witness types unambiguous` (#470/#471) are included in Woods `2.0.0`.
 Verify the installed server version and actual response fields; this plugin does
