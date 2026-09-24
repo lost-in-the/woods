@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'migration_declaration'
 
 module Woods
   module Extractors
@@ -106,10 +107,10 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a migration
       def extract_migration_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(source)
+        declaration = MigrationDeclaration.new(source: source, file_path: file_path).call
+        return nil unless declaration
 
-        return nil unless class_name
-        return nil unless migration_class?(source)
+        class_name = declaration.fetch(:identifier)
 
         unit = ExtractedUnit.new(
           type: :migration,
@@ -118,7 +119,7 @@ module Woods
         )
 
         unit.namespace = extract_namespace(class_name)
-        unit.metadata = extract_metadata(source, file_path)
+        unit.metadata = extract_metadata(declaration.fetch(:source), file_path)
         unit.source_code = annotate_source(source, class_name, unit.metadata)
         unit.dependencies = extract_dependencies(source, unit.metadata)
 
@@ -129,41 +130,6 @@ module Woods
       end
 
       private
-
-      # ──────────────────────────────────────────────────────────────────────
-      # Class Discovery
-      # ──────────────────────────────────────────────────────────────────────
-
-      # Extract the class name from migration source code.
-      #
-      # @param source [String] Ruby source code
-      # @return [String, nil] The class name or nil
-      def extract_class_name(source)
-        # Match namespaced or plain class declarations
-        namespaces = source.scan(/^\s*module\s+([\w:]+)/).flatten
-        class_match = source.match(/^\s*class\s+([\w:]+)\s*</)
-        return nil unless class_match
-
-        base_class = class_match[1]
-        if namespaces.any? && !base_class.include?('::')
-          "#{namespaces.join('::')}::#{base_class}"
-        else
-          base_class
-        end
-      end
-
-      # Check whether the source defines an ActiveRecord::Migration subclass.
-      #
-      # `[\w:]+`, matching {#extract_class_name}'s class-name pattern — a
-      # compact-form declaration (`class Billing::AddFoo < ...`) satisfies
-      # extract_class_name but failed the plain `\w+` here, so the file was
-      # silently skipped even though it had a resolvable identifier.
-      #
-      # @param source [String] Ruby source code
-      # @return [Boolean]
-      def migration_class?(source)
-        source.match?(/class\s+[\w:]+\s*<\s*ActiveRecord::Migration/)
-      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Metadata Extraction

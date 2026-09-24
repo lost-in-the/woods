@@ -35,6 +35,7 @@ RSpec.describe Woods::Extractors::PunditExtractor do
     end
 
     it 'discovers nested Pundit policies' do
+      stub_const('Admin', Module.new)
       create_file('app/policies/admin/user_policy.rb', <<~RUBY)
         class Admin::UserPolicy < ApplicationPolicy
           def index?

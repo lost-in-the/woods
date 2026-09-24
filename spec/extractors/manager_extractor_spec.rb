@@ -34,6 +34,7 @@ RSpec.describe Woods::Extractors::ManagerExtractor do
     end
 
     it 'discovers files in nested directories' do
+      stub_const('Billing', Module.new)
       create_file('app/managers/billing/invoice_manager.rb', <<~RUBY)
         class Billing::InvoiceManager < SimpleDelegator
           def formatted_total

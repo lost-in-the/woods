@@ -505,6 +505,14 @@ reference cache; updating only the reader does not add them.
 
 **What it captures:** `SimpleDelegator` subclasses that wrap a model. Records the wrapped model class, all public methods, and the delegation chain.
 
+**Unreleased after Woods 2.0.0:** after eager loading, discovery checks the
+selected class's actual delegator ancestry and source ownership. Application
+base classes and leading `::` therefore work without changing the unit identity;
+an unrelated or foreign same-named class cannot supply that proof. When the class
+is unavailable, the extractor retains its limited direct-declaration fallback
+without triggering autoloads. `delegation_type` reflects resolved SimpleDelegator
+ancestry; unknown delegation mechanisms remain `unknown`.
+
 ---
 
 ## API & authorization extractors
@@ -553,14 +561,23 @@ reference cache; updating only the reader does not add them.
 - Pairs policy units with their corresponding model (e.g., `UserPolicy` → `User`)
 - Extracts scope class and `resolve` method when present
 
+**Unreleased after Woods 2.0.0:** a loaded policy's actual ApplicationPolicy
+ancestry, including namespaced and intermediate application bases, establishes
+Pundit inheritance. The selected constant must belong to the source being read;
+aliases and foreign same-named classes do not qualify. Without a loaded class,
+direct ApplicationPolicy declarations and the existing user/record conventions
+remain supported. Woods does not invoke pending autoloads to classify a policy.
+The generic PolicyExtractor retains its existing policy units and applies the
+same ancestry correction to `metadata.is_pundit`.
+
 ---
 
 ### PolicyExtractor
 
-**What it captures:** Domain policy classes (non-Pundit) with decision methods and eligibility rules. Covers plain Ruby objects used for authorization decisions.
+**What it captures:** Policy classes with decision methods and eligibility rules, including plain Ruby objects used for authorization decisions.
 
 **Key details:**
-- Scans `app/policies` for files not identified as Pundit policies
+- Scans `app/policies`; `metadata.is_pundit` identifies recognized Pundit-style classes
 - Extracts public predicate methods and their dependencies
 
 ---
@@ -683,6 +700,29 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 - Extracts: tables created/dropped/modified, columns added/removed, indexes, references
 - Risk indicators: data migrations (manual SQL or bulk updates), irreversible operations (`remove_column` without type), `execute` calls with raw SQL
 - Rails internal tables (`schema_migrations`, `active_storage_blobs`, etc.) are excluded from model dependency links
+
+**Unreleased after Woods 2.0.0:** migration identity comes from the actual Ruby
+declaration, with the filename's conventional class name selecting among eligible
+declarations. Helper classes and closed sibling namespaces cannot rename a
+migration or contribute unrelated DDL metadata. Qualified declaration receivers
+use verified lexical namespace ownership, including an existing outer or root
+namespace; Woods does not prepend the syntactic nesting blindly. A namespace
+established earlier in the same source can supply structural evidence. Unknown
+receivers, pending autoloads, and unavailable lexical constant tables produce an
+explicit ownership diagnostic rather than an invented identity. Leading
+`::ActiveRecord::Migration` remains supported. A custom migration base requires
+already-loaded runtime ancestry or a same-file structural chain to
+ActiveRecord::Migration; unknown custom bases are not guessed. Historical files
+are never required or evaluated for discovery. Ambiguous declarations produce an
+explicit extraction error, and duplicate identities across files retain the
+normal collision guard. Run a full extraction after upgrading to replace any
+previously misidentified migration units.
+
+If a qualified receiver cannot be verified, define its namespace before the
+declaration in the same source, or make that namespace available through normal
+application boot. Use a leading `::` when the receiver intentionally belongs to
+the root namespace. Woods will not load a historical migration to discover its
+namespace.
 
 **Example output (abbreviated):**
 
