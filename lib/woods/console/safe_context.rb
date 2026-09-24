@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'adapter_family'
+
 # Stub for environments that don't load ActiveRecord
 unless defined?(ActiveRecord::Rollback)
   module ActiveRecord
@@ -279,7 +281,7 @@ module Woods
       #   unsupported adapter sets nothing to restore).
       def set_timeout(connection, timeout_ms = @timeout_ms)
         adapter = connection.adapter_name.downcase
-        if adapter.include?('mysql')
+        if AdapterFamily.for(connection) == :mysql
           set_mysql_timeout(connection, timeout_ms)
         else
           connection.execute("SET LOCAL statement_timeout = '#{timeout_ms.to_i}ms'")

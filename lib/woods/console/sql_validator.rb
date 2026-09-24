@@ -115,7 +115,7 @@ module Woods
       # `/*!NNNNN...*/`), capturing the body. Only scanned by
       # {#lock_clause_views} — {SqlNoiseStripper} deliberately leaves these
       # markers in place because their meaning is version-dependent.
-      EXECUTABLE_COMMENT_PATTERN = %r{/\*!(?:\d{5})?(.*?)\*/}m
+      EXECUTABLE_COMMENT_PATTERN = %r{/\*(?:M)?!(?:\d{5,6})?(.*?)\*/}m
 
       # Forbidden statement prefixes (case-insensitive).
       #
@@ -321,6 +321,7 @@ module Woods
 
         SqliteReadGuard.validate!(sql) if dialect == :sqlite
         normalized = sql.strip
+        check_balanced_delimiters!(normalized)
 
         # Reject multiple statements (semicolons not inside string literals)
         if contains_multiple_statements?(normalized)
@@ -372,6 +373,20 @@ module Woods
 
       private
 
+      # A fragment must not escape a later row-limit wrapper. Noise and
+      # quoted identifiers shield their punctuation from the balance check.
+      # This is a structural boundary check, not a complete SQL parser.
+      def check_balanced_delimiters!(sql)
+        stripped = strip_validation_noise(sql)
+        depth = 0
+        stripped.scan(/"(?:[^"]|"")*"|`(?:[^`]|``)*`|''|[()]/).each do |token|
+          depth += 1 if token == '('
+          depth -= 1 if token == ')'
+          raise SqlValidationError, 'Rejected: unbalanced SQL parentheses' if depth.negative?
+        end
+        raise SqlValidationError, 'Rejected: unbalanced SQL parentheses' unless depth.zero?
+      end
+
       def unknown_grammar?
         dialect.nil? || (dialect == :mysql && @mysql_modes.nil?)
       end
@@ -388,7 +403,11 @@ module Woods
       end
 
       def strip_validation_noise(sql)
-        SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect, **(@mysql_modes || {}))
+        SqlNoiseStripper.strip_noise(sql, dialect: validation_dialect, **(@mysql_modes || {})) do |comment|
+          next unless comment.match?(/['"`$\\]/)
+
+          raise SqlValidationError, 'Rejected: quoted executable comments have ambiguous SQL grammar; use ordinary SQL.'
+        end
       end
 
       def validation_dialect

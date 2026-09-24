@@ -35,6 +35,10 @@ RSpec.describe 'Console SQLite read policy', :booted_app do
                                    ))).fetch('result')
   end
 
+  it 'enforces output provenance and statement limits through full Console dispatch' do
+    expect(WoodsConsoleOutputPolicyContract.verify!(@connection)).to eq(:passed)
+  end
+
   ['policy_blocked', '"policy_blocked"', '`policy_blocked`', '[policy_blocked]',
    "'policy_blocked'", '(policy_blocked)', "main.'policy_blocked'",
    'policy_allowed, (policy_blocked)',

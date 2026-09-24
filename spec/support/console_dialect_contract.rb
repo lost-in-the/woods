@@ -10,7 +10,7 @@ module WoodsConsoleDialectContract
       model_validator: Woods::Console::ModelValidator.new(registry: {}), safe_context: context,
       connection: connection, read_tools_enabled: true, table_gate: gate
     )
-    mysql = connection.adapter_name.downcase.include?('mysql')
+    mysql = Woods::Console::AdapterFamily.for(connection) == :mysql
     queries = {
       'SELECT 1 AS harmless' => true,
       'SELECT 1 FROM (SELECT 1) AS permitted, information_schema.tables AS blocked LIMIT 1' => false,

@@ -752,7 +752,7 @@ module Woods
         limit = params.fetch('limit', 10)
 
         @model_validator.validate_column!(params['model'], order_by)
-        refuse_redacted_column!(order_by)
+        refuse_protected_predicate_column!(order_by)
         unless %w[asc desc].include?(direction)
           raise ValidationError, "direction must be asc or desc (got #{direction.inspect})"
         end
@@ -782,12 +782,7 @@ module Woods
         sql = params['sql']
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
-        require_relative 'sql_validator'
-        SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(sql)
-        validate_protected_sql_usage!(sql)
-        # Post-validation, pre-execution TableGate — blocks every configured
-        # table even if the sql is otherwise well-formed.
-        gate_sql!(sql)
+        validate_sql_policy!(sql)
 
         limit = params['limit']
         # EXPLAIN's output is plan rows, not the query's own row set: wrapping
@@ -800,12 +795,21 @@ module Woods
                                  'Resubmit without limit.'
         end
 
-        query_sql = limit ? "SELECT * FROM (#{sql}) AS _limited LIMIT #{limit}" : sql
+        query_sql = limit ? "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{limit}" : sql
+        validate_sql_policy!(query_sql) if limit
         result = active_connection.select_all(query_sql)
 
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       rescue SqlValidationError => e
         raise ValidationError, e.message
+      end
+
+      # A row cap changes the statement. Check both the caller's complete
+      # statement and the exact SQL sent to the adapter, including the cap.
+      def validate_sql_policy!(sql)
+        SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(sql)
+        validate_protected_sql_usage!(sql)
+        gate_sql!(sql)
       end
 
       # @param sql [String] Validated SQL (already passed SqlValidator)
@@ -823,12 +827,7 @@ module Woods
       #
       # @return [Symbol, nil]
       def sql_dialect
-        adapter = active_connection.adapter_name.to_s.downcase
-        return :mysql if adapter.include?('mysql')
-        return :postgres if adapter.include?('postgre')
-        return :sqlite if adapter.include?('sqlite')
-
-        nil
+        AdapterFamily.for(active_connection)
       end
 
       # Keep session reads local to this request and execution context. Restore
@@ -980,17 +979,27 @@ module Woods
         selected = directly_selected_columns(expressions)
 
         @safe_context.redacted_key_values.each do |pattern|
-          next unless selected.include?(pattern['value_column'])
-          next if selected.include?(pattern['key_column'])
+          values = selected.select { |column| base_column_name(column).casecmp?(pattern['value_column']) }
+          next if values.empty?
+
+          keys = selected.select { |column| base_column_name(column).casecmp?(pattern['key_column']) }
+          next if paired_eav_sources?(keys, values)
 
           raise ValidationError,
                 "Rejected: selecting EAV value column '#{pattern['value_column']}' without its paired " \
                 "key column '#{pattern['key_column']}' bypasses redaction; select both columns so the " \
-                'value can be masked.'
+                'value can be masked. Both columns must have the same unambiguous source.'
         end
       end
 
-      # The bare, unaliased columns referenced by a validated select list.
+      def paired_eav_sources?(keys, values)
+        return false unless keys.one? && values.one?
+
+        keys.first.split('.')[0...-1] == values.first.split('.')[0...-1]
+      end
+
+      # Unaliased column references, retaining source qualifiers so a joined
+      # key cannot stand in for the key paired with another source's value.
       # Aggregates and aliases cannot appear here — the per-expression
       # validation refuses them over protected columns before this runs.
       #
@@ -1004,7 +1013,7 @@ module Woods
           fn_arg, bare_col, alias_name = match.captures[1..]
           next if fn_arg || alias_name
 
-          base_column_name(bare_col)
+          bare_col
         end
       end
 
@@ -1513,8 +1522,7 @@ module Woods
         # `SqlNoiseStripper` is the same module SqlValidator uses. The
         # combined single-pass strip_noise resolves comments and literals
         # together so a comment marker inside a literal can't hide a keyword.
-        stripped = SqlNoiseStripper.strip_noise(template, dialect: sql_dialect || :postgres, **mysql_quote_modes)
-        if SCOPE_TEMPLATE_FORBIDDEN.match?(stripped)
+        if sql_security_views(template).any? { |stripped| SCOPE_TEMPLATE_FORBIDDEN.match?(stripped) }
           raise ValidationError,
                 'scope template contains forbidden SQL keywords ' \
                 '(subqueries, UNION, time-based functions, DML/DDL are not allowed). ' \
@@ -1551,11 +1559,24 @@ module Woods
       # predicates, CTEs, and other result shapes can rename a protected
       # value or turn it into an oracle, so they fail closed before execution.
       def validate_protected_sql_usage!(sql)
+        # This exact wrapper only preserves the inner statement's output
+        # headers. SqlValidator has already checked balanced delimiters.
+        limited = /\ASELECT \* FROM \(\n(.*)\n\) AS _limited LIMIT \d+\z/m.match(sql)
+        if limited
+          SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(limited[1])
+          return validate_protected_sql_usage!(limited[1])
+        end
+
+        sql_security_views(sql).each { |stripped| validate_protected_sql_view!(stripped) }
+      end
+
+      def validate_protected_sql_view!(stripped)
+        refuse_composite_sql_projection!(stripped)
+        refuse_ambiguous_eav_sql!(stripped)
         protected = (@safe_context.redacted_columns + redacted_kv_columns).uniq
-        referenced = protected.select { |column| sql_identifier_referenced?(sql, column) }
+        referenced = protected.select { |column| sql_identifier_referenced?(stripped, column) }
         return if referenced.empty?
 
-        stripped = SqlNoiseStripper.strip_noise(sql, dialect: sql_dialect || :postgres, **mysql_quote_modes)
         expressions, tail = protected_sql_projection(stripped)
         selected = expressions.filter_map { |expression| direct_sql_column_name(expression) }
         unsafe = unsafe_protected_sql_column(referenced, expressions, selected, tail)
@@ -1565,6 +1586,61 @@ module Woods
               "Rejected: console_sql uses protected column '#{unsafe}' in an alias, aggregate, predicate, or " \
               'unpaired EAV shape that cannot preserve redaction identity. Select protected columns directly ' \
               'and unaliased, or use a structured Console tool.'
+      end
+
+      # Result metadata provides column names, not their table provenance.
+      # A joined/derived EAV row can supply a key from a different source.
+      # Keep direct single-source SQL reads and qualified structured joins;
+      # refuse ambiguous SQL shapes before fetching their values.
+      def refuse_ambiguous_eav_sql!(stripped)
+        return if @safe_context.redacted_key_values.empty?
+        return if SqlTableScanner.relation_factors(stripped).size <= 1
+        return unless stripped.include?('*') || redacted_eav_value_columns.any? do |column|
+          sql_identifier_referenced?(stripped, column)
+        end
+
+        raise ValidationError,
+              'Rejected: SQL EAV values require one unambiguous source; use a structured Console query.'
+      end
+
+      # PostgreSQL can return a table alias as one composite-valued column.
+      # Its header carries no identities for the protected fields inside it.
+      # Reject source names used as projection values, including nested forms.
+      def refuse_composite_sql_projection!(stripped)
+        return unless [nil, :postgres].include?(sql_dialect)
+        return if @safe_context.redacted_columns.empty? && redacted_kv_columns.empty?
+
+        expressions = sql_select_expressions(stripped)
+        sources = SqlTableScanner.relation_factors(stripped).flat_map { |factor| sql_relation_names(factor) }
+        return unless sources.any? { |source| composite_sql_reference?(expressions, source) }
+
+        raise ValidationError,
+              'Rejected: whole-row SQL projections cannot preserve protected field identity; select columns.'
+      end
+
+      def sql_select_expressions(stripped)
+        stripped.scan(/\bSELECT\s+(.*?)\s+FROM\b/im).flatten.flat_map { |list| sql_projection_expressions(list) }
+      end
+
+      def composite_sql_reference?(expressions, source)
+        identifier = /(?:"#{Regexp.escape(source)}"|#{Regexp.escape(source)})/i
+        token = /(?<![\w.$])#{identifier}(?![\w$]|\s*\.)/
+        wildcard = /(?<![\w.$])#{identifier}\s*\.\s*\*/
+        expressions.any? do |expression|
+          expression.match?(token) || (expression.match?(wildcard) && !expression.match?(/\A#{wildcard}\z/))
+        end
+      end
+
+      def sql_relation_names(factor)
+        identifier = /(?:[[:alpha:]_][[:alnum:]_$]*|"(?:""|[^"])+")/
+        source = /\A\s*(?:ONLY\s*\(?\s*)?(#{identifier})(?:\s*\.\s*(#{identifier}))?/i
+        match = source.match(factor)
+        names = match ? [match[2] || match[1]] : []
+        rest = match ? factor[match.end(0)..] : factor
+        aliases = /(?:\A|\))\s+(?:AS\s+)?(#{identifier})/i
+        names.concat(rest.scan(aliases).flatten)
+
+        names.map { |name| name.delete_prefix('"').delete_suffix('"').gsub('""', '"') }
       end
 
       def unsafe_protected_sql_column(referenced, expressions, selected, tail)
@@ -1621,8 +1697,16 @@ module Woods
       end
 
       def sql_identifier_referenced?(sql, column)
-        stripped = SqlNoiseStripper.strip_noise(sql, dialect: sql_dialect || :postgres, **mysql_quote_modes)
-        stripped.match?(/(?<![A-Za-z0-9_$])#{Regexp.escape(column)}(?![A-Za-z0-9_$])/i)
+        sql_security_views(sql).any? do |stripped|
+          stripped.match?(/(?<![A-Za-z0-9_$])#{Regexp.escape(column)}(?![A-Za-z0-9_$])/i)
+        end
+      end
+
+      def sql_security_views(sql)
+        dialects = sql_dialect ? [sql_dialect] : SqlValidator::KNOWN_DIALECTS
+        dialects.flat_map do |dialect|
+          SqlNoiseStripper.security_views(sql, dialect: dialect, mysql_modes: sql_dialect ? mysql_quote_modes : nil)
+        end.uniq
       end
 
       # Apply column selection to a relation.
@@ -1662,8 +1746,7 @@ module Woods
       #
       # @return [Arel::Nodes::SqlLiteral]
       def random_function
-        adapter = active_connection.adapter_name.downcase
-        func = adapter.include?('mysql') ? 'RAND' : 'RANDOM'
+        func = sql_dialect == :mysql ? 'RAND' : 'RANDOM'
         Arel.sql("#{func}()")
       end
 

@@ -1,0 +1,1 @@
+- Harden Console SQL statement validation, protected result provenance, EAV ordering, and MySQL-family adapter handling while preserving supported read-only queries.

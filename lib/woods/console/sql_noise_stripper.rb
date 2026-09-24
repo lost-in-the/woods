@@ -30,8 +30,8 @@ module Woods
       # newline-separated statement structure is preserved for callers that
       # check for multiple statements.
       #
-      # Block comments are non-nested — real SQL engines do not support nested
-      # block comments, and neither does this stripper.
+      # This legacy helper is not a security scanner. Use strip_noise for
+      # quote-aware and PostgreSQL nested-comment handling.
       #
       # @param sql [String] the SQL string to process
       # @return [String] a new string with all SQL comments removed
@@ -101,9 +101,10 @@ module Woods
       # `:mysql` dialect — PostgreSQL does not treat `#` as a comment, and
       # collapsing it there would hide SQL that a real PostgreSQL server
       # still executes. A MySQL `/*! ... */` executable comment is left
-      # untouched (not treated as a comment at all, under either dialect):
-      # MySQL runs its body, so it must stay visible to every downstream
-      # scan; leaving it visible under `:postgres` too is over-detection at
+      # visible as one span, including MariaDB's `/*M! ... */` spelling:
+      # its body can execute, so it must stay visible to every downstream
+      # scan without changing literal state outside the span. Leaving it
+      # visible under `:postgres` too is over-detection at
       # worst, never under-detection, on a server where it really is inert.
       # An ordinary `/* ... */` block comment is replaced by a single
       # newline rather than vanishing outright, mirroring how a `--`/`#`
@@ -184,8 +185,22 @@ module Woods
           elsif dash_comment?(sql, i, mysql: mysql) || (mysql && ch == '#')
             nl = sql.index("\n", i)
             i = nl || len
-          elsif ch == '/' && sql[i + 1] == '*' && sql[i + 2] != '!'
-            close = sql.index('*/', i + 2)
+          elsif sql[i, 3] == '/*!' || sql[i, 4] == '/*M!'
+            close = block_comment_end(sql, i, nested: dialect == :postgres)
+            if close
+              comment = sql[i...close]
+              yield comment if block_given?
+              # An executable comment is a lexical boundary even when its
+              # version guard makes its body inert. A quote in that body must
+              # never change the scanner's state outside the comment.
+              out << comment
+              i = close
+            else
+              out << ch
+              i += 1
+            end
+          elsif ch == '/' && sql[i + 1] == '*'
+            close = block_comment_end(sql, i, nested: dialect == :postgres)
             if close
               # Preserve a newline in place of the removed comment, mirroring
               # line comments (see class docs): callers that check for
@@ -193,7 +208,7 @@ module Woods
               # need a survivable marker showing a comment sat here, the
               # same way a `--`/`#` comment's own trailing newline does.
               out << "\n"
-              i = close + 2
+              i = close
             else
               # Unterminated block comment: never under-detect. Leave it in
               # place (over-detection is safe; the old regex also required a
@@ -209,6 +224,20 @@ module Woods
 
         out
       end
+
+      def self.block_comment_end(sql, start, nested:)
+        depth = 1
+        position = start + 2
+        while (match = %r{/\*|\*/}.match(sql, position))
+          depth += 1 if nested && match[0] == '/*'
+          depth -= 1 if match[0] == '*/'
+          return match.end(0) if depth.zero?
+
+          position = match.end(0)
+        end
+        nil
+      end
+      private_class_method :block_comment_end
 
       # Session modes change MySQL quoting without changing the adapter name.
       # Security consumers must reject SQL unsafe under any supported combination.

@@ -110,7 +110,7 @@ module Woods
       # deliberately leaves these markers in place because their meaning is
       # version-dependent; .executable_comment_views scans both of their
       # possible semantics.
-      EXECUTABLE_COMMENT_PATTERN = %r{/\*!(?:\d{5})?(.*?)\*/}m
+      EXECUTABLE_COMMENT_PATTERN = %r{/\*(?:M)?!(?:\d{5,6})?(.*?)\*/}m
 
       # Matches the standalone SQL `TABLE name` statement (PostgreSQL, and
       # MySQL 8.0.19+) — shorthand for `SELECT * FROM name`. It appears as a
@@ -172,7 +172,7 @@ module Woods
       # @param sql [String] noise-stripped SQL
       # @return [Array<String>]
       def self.relation_factors(sql)
-        sql.to_enum(:scan, /\b(?:FROM|JOIN)\s+/i).flat_map do
+        sql.to_enum(:scan, /\b(?:FROM|(?:STRAIGHT_)?JOIN)\s+/i).flat_map do
           suffix = sql[Regexp.last_match.end(0)..]
           split_top_level_commas(relation_clause(suffix))
         end
