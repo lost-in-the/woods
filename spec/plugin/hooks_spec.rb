@@ -76,7 +76,7 @@ RSpec.describe 'plugin hooks (#280)' do
   def restricted_bin(dir, without:)
     bin = File.join(dir, 'restricted-bin')
     FileUtils.mkdir_p(bin)
-    %w[cat head mktemp mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
+    %w[cat head tail mktemp mkdir rmdir sed tr git ruby date sleep jq touch stat mv rm wc].each do |tool|
       next if without.include?(tool)
 
       real = `which #{tool}`.strip
@@ -583,6 +583,25 @@ RSpec.describe 'plugin hooks (#280)' do
         expect(out).to include('source freshness is drifted')
         task = File.read(File.join(dir, 'status-argument'))
         expect(task).to start_with('woods:source_status[')
+        options = JSON.parse(Base64.strict_decode64(task.split('[', 2).last.delete_suffix(']')))
+        expect(options).to eq('output' => output, 'mode' => 'quick')
+      end
+    end
+
+    it 'checks a Unicode root and output through the Ruby-only fallback under C locale' do
+      Dir.mktmpdir('woods-hook') do |parent|
+        dir = File.join(parent, 'projet-雪')
+        output = 'tmp/索引'
+        make_app(dir, tmp_subdir: output)
+        bin = restricted_bin(parent, without: %w[jq flock])
+        env = status_command(dir, state: 'drifted').merge(
+          'WOODS_OUTPUT' => output, 'PATH' => bin, 'LC_ALL' => 'C', 'LANG' => 'C'
+        )
+        out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
+        expect(status).to be_success
+        expect(err).to eq('')
+        expect(out).to include('source freshness is drifted')
+        task = File.read(File.join(dir, 'status-argument'))
         options = JSON.parse(Base64.strict_decode64(task.split('[', 2).last.delete_suffix(']')))
         expect(options).to eq('output' => output, 'mode' => 'quick')
       end

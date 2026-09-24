@@ -11,7 +11,7 @@ field() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$1" | jq -r --arg name "$2" '.[$name] // empty' 2>/dev/null
   elif command -v ruby >/dev/null 2>&1; then
-    printf '%s' "$1" | ruby -rjson -e 'print JSON.parse($stdin.read).fetch(ARGV[0], "")' -- "$2" 2>/dev/null
+    printf '%s' "$1" | ruby -EUTF-8:UTF-8 -rjson -e 'print JSON.parse($stdin.read).fetch(ARGV[0], "")' -- "$2" 2>/dev/null
   fi
 }
 cwd="$(field "$payload" cwd)"
@@ -25,7 +25,10 @@ esac
 if command -v jq >/dev/null 2>&1; then
   encoded="$(jq -nr --arg output "$configured_output" '{output:$output,mode:"quick"} | @base64')"
 elif command -v ruby >/dev/null 2>&1; then
-  encoded="$(ruby -rjson -rbase64 -e 'print Base64.strict_encode64(JSON.generate(output: ARGV[0], mode: "quick"))' -- "$configured_output")"
+  encoded="$(ruby -EUTF-8:UTF-8 -rjson -rbase64 -e 'print Base64.strict_encode64(JSON.generate(output: ARGV[0], mode: "quick"))' -- "$configured_output" 2>/dev/null)" || {
+    echo 'Woods source freshness is unknown: hook options could not be encoded. Inspect woods_status.'
+    exit 0
+  }
 else
   exit 0
 fi

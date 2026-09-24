@@ -327,6 +327,13 @@ for source fallback, runtime-only removal and reference-coverage limits.
 
 ## Deferred refresh hooks
 
+For missing Unicode edit events on a host without jq, inspect the locale and
+the installed hook files. The #592 UTF-8 fallback repair is unreleased after
+Woods `2.0.0`; it fixes edit queueing and SessionStart decoding under `LC_ALL=C`.
+Older hooks can use jq or a UTF-8 locale. Confirm the pending queue and published
+generation, since hook exit zero does not establish refresh. See
+[client hook recovery](https://github.com/lost-in-the/woods/blob/main/docs/CLIENT_HOOKS.md#queue-paths-and-recovery).
+
 Expanded hook coverage and `woods:hook_refresh` (#408) are available in Woods
 `2.0.0.beta3`. Verify the installed task through the configured host/container
 command before diagnosing this plugin's queue. Read `<output>/hook.log` and
