@@ -356,6 +356,12 @@ RSpec.describe Woods::Watch::Installation do
     expect { installer(mode: 'external', environment: { 'WOODS_WATCH_IDLE_TIMEOUT' => '10' }).apply }.not_to raise_error
   end
 
+  ['', " \t "].each do |blank|
+    it "accepts a blank managed idle TTL #{blank.inspect}" do
+      expect { installer(environment: { 'WOODS_WATCH_IDLE_TIMEOUT' => blank }).apply }.not_to raise_error
+    end
+  end
+
   it 'does not follow a symlink target outside the application' do
     File.unlink(File.join(@root, 'Procfile.dev'))
     File.symlink(File::NULL, File.join(@root, 'Procfile.dev'))

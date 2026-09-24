@@ -866,6 +866,7 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
     # migration (`class Billing::AddFoo < ...`) was silently skipped even
     # though its identifier resolved fine.
     it 'handles compact-form namespaced class names (Billing::AddFoo)' do
+      stub_const('Billing', Module.new)
       path = create_file('db/migrate/20240101000000_add_foo.rb', <<~RUBY)
         class Billing::AddFoo < ActiveRecord::Migration[7.1]
           def change

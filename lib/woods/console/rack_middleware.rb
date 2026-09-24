@@ -68,6 +68,12 @@ module Woods
     # disabled when the host requires a narrower database capability.
     #
     class RackMiddleware # rubocop:disable Metrics/ClassLength
+      EAGER_LOAD_UNAVAILABLE = JSON.generate(
+        jsonrpc: '2.0', id: nil,
+        error: { code: -32_000,
+                 message: 'Console unavailable: Rails eager loading failed. ' \
+                          'Fix the application load error and restart the server.' }
+      ).freeze
       # @param app [#call] The next Rack app in the middleware stack
       # @param path [String] URL path to mount the MCP endpoint (default: '/mcp/console')
       # @param embedded_read_tools [Boolean, #call] Enable sql/query tools in
@@ -107,6 +113,11 @@ module Woods
         return @app.call(env) unless enabled?
 
         transport = ensure_transport
+        unless transport
+          return [503, { 'content-type' => 'application/json', 'cache-control' => 'no-store' },
+                  [EAGER_LOAD_UNAVAILABLE]]
+        end
+
         request_env = env.dup
         request_env.delete('HTTP_MCP_SESSION_ID') if @stateless_mode
         transport.handle_request(Rack::Request.new(request_env))
@@ -139,14 +150,16 @@ module Woods
       # @return [::MCP::Server::Transports::StreamableHTTPTransport]
       def ensure_transport
         return @transport if @transport
+        return if @eager_load_failed
 
         @mutex.synchronize do
           return @transport if @transport
+          return if @eager_load_failed
 
           check_blocked_tables_config!
 
           require 'woods/console/server'
-          Rails.application.eager_load!
+          return unless eager_load_application
 
           server = build_embedded_server
           @stateless_mode = resolve_deferred(@stateless)
@@ -156,6 +169,21 @@ module Woods
           server.transport = @transport
           @transport
         end
+      end
+
+      # A failed loader may have registered only part of the application.
+      # Keep this worker unavailable rather than retrying against partial state.
+      def eager_load_application
+        Rails.application.eager_load!
+        true
+      rescue NameError => e
+        @eager_load_failed = true
+        structured_logger.error(
+          'console.eager_load.failed', error_class: e.class.name,
+                                       remediation: 'Run Rails.application.eager_load! in the application ' \
+                                                    'environment; fix the error and restart.'
+        )
+        false
       end
 
       # Emit a prominent warning (or raise in production) when the Console MCP

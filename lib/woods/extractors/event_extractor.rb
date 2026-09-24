@@ -187,6 +187,14 @@ module Woods
         all_paths = (data[:publishers] + data[:subscribers]).uniq
         combined_source = load_source_files(all_paths)
 
+        # Keep absolute paths for source reads; emitted paths must not make
+        # metadata or annotation hashes depend on the checkout directory.
+        prefix = File.join(Rails.root.to_s, '')
+        data = data.merge(
+          publishers: data[:publishers].map { |path| path.delete_prefix(prefix) },
+          subscribers: data[:subscribers].map { |path| path.delete_prefix(prefix) }
+        )
+
         unit = ExtractedUnit.new(
           type: :event,
           identifier: event_name,

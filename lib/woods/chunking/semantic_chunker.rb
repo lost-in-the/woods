@@ -658,6 +658,8 @@ module Woods
       include ChunkBuilder
       include LineDepthTracking
 
+      METHOD_NAME = /\A\s*def\s+((?:self\s*\.\s*)?(?:#{OPERATOR_METHOD_NAMES}|[[:word:]]+[?!=]?))/
+
       # @param unit [ExtractedUnit]
       def initialize(unit)
         @unit = unit
@@ -725,7 +727,7 @@ module Woods
       end
 
       def start_method(state, line)
-        method_name = line[/def\s+(?:self\.)?(\w+)/, 1] || operator_def_name(line)
+        method_name = line[METHOD_NAME, 1]&.delete(" \t")
 
         if state[:in_private]
           state[:private_methods] << line

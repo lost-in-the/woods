@@ -121,6 +121,8 @@ RSpec.describe Woods::Extractors::PolicyExtractor, 'fixture specs' do
 
   describe 'deeply nested namespace' do
     it 'extracts policy with multi-level namespace' do
+      stub_const('Billing', Module.new)
+      stub_const('Billing::Subscriptions', Module.new)
       path = create_file('app/policies/billing/subscriptions/renewal_policy.rb', <<~RUBY)
         class Billing::Subscriptions::RenewalPolicy
           def initialize(subscription)

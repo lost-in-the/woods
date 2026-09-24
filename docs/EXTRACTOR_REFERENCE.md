@@ -369,6 +369,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Key details:**
 - Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`)
+- **Unreleased after 2.0.0:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
 **Edge cases:**
@@ -505,6 +506,14 @@ reference cache; updating only the reader does not add them.
 
 **What it captures:** `SimpleDelegator` subclasses that wrap a model. Records the wrapped model class, all public methods, and the delegation chain.
 
+**Unreleased after Woods 2.0.0:** after eager loading, discovery checks the
+selected class's actual delegator ancestry and source ownership. Application
+base classes and leading `::` therefore work without changing the unit identity;
+an unrelated or foreign same-named class cannot supply that proof. When the class
+is unavailable, the extractor retains its limited direct-declaration fallback
+without triggering autoloads. `delegation_type` reflects resolved SimpleDelegator
+ancestry; unknown delegation mechanisms remain `unknown`.
+
 ---
 
 ## API & authorization extractors
@@ -553,14 +562,23 @@ reference cache; updating only the reader does not add them.
 - Pairs policy units with their corresponding model (e.g., `UserPolicy` → `User`)
 - Extracts scope class and `resolve` method when present
 
+**Unreleased after Woods 2.0.0:** a loaded policy's actual ApplicationPolicy
+ancestry, including namespaced and intermediate application bases, establishes
+Pundit inheritance. The selected constant must belong to the source being read;
+aliases and foreign same-named classes do not qualify. Without a loaded class,
+direct ApplicationPolicy declarations and the existing user/record conventions
+remain supported. Woods does not invoke pending autoloads to classify a policy.
+The generic PolicyExtractor retains its existing policy units and applies the
+same ancestry correction to `metadata.is_pundit`.
+
 ---
 
 ### PolicyExtractor
 
-**What it captures:** Domain policy classes (non-Pundit) with decision methods and eligibility rules. Covers plain Ruby objects used for authorization decisions.
+**What it captures:** Policy classes with decision methods and eligibility rules, including plain Ruby objects used for authorization decisions.
 
 **Key details:**
-- Scans `app/policies` for files not identified as Pundit policies
+- Scans `app/policies`; `metadata.is_pundit` identifies recognized Pundit-style classes
 - Extracts public predicate methods and their dependencies
 
 ---
@@ -684,6 +702,29 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 - Risk indicators: data migrations (manual SQL or bulk updates), irreversible operations (`remove_column` without type), `execute` calls with raw SQL
 - Rails internal tables (`schema_migrations`, `active_storage_blobs`, etc.) are excluded from model dependency links
 
+**Unreleased after Woods 2.0.0:** migration identity comes from the actual Ruby
+declaration, with the filename's conventional class name selecting among eligible
+declarations. Helper classes and closed sibling namespaces cannot rename a
+migration or contribute unrelated DDL metadata. Qualified declaration receivers
+use verified lexical namespace ownership, including an existing outer or root
+namespace; Woods does not prepend the syntactic nesting blindly. A namespace
+established earlier in the same source can supply structural evidence. Unknown
+receivers, pending autoloads, and unavailable lexical constant tables produce an
+explicit ownership diagnostic rather than an invented identity. Leading
+`::ActiveRecord::Migration` remains supported. A custom migration base requires
+already-loaded runtime ancestry or a same-file structural chain to
+ActiveRecord::Migration; unknown custom bases are not guessed. Historical files
+are never required or evaluated for discovery. Ambiguous declarations produce an
+explicit extraction error, and duplicate identities across files retain the
+normal collision guard. Run a full extraction after upgrading to replace any
+previously misidentified migration units.
+
+If a qualified receiver cannot be verified, define its namespace before the
+declaration in the same source, or make that namespace available through normal
+application boot. Use a leading `::` when the receiver intentionally belongs to
+the root namespace. Woods will not load a historical migration to discover its
+namespace.
+
 **Example output (abbreviated):**
 
 ```json
@@ -721,8 +762,9 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 **What it captures:** State machine DSL definitions using AASM, Statesman, or the `state_machines` gem.
 
 **Key details:**
-- Detects which library is active by checking `defined?` for each DSL constant
-- Extracts states, events, transitions, guard conditions, and callbacks
+- Detects literal DSL declarations in model source; it does not evaluate the DSL or run callbacks
+- Extracts states, events, transitions, guard conditions, and callbacks from supported source forms; it does not claim complete dynamic or inherited registry coverage
+- **Unreleased after 2.0.0:** directly declared `state_machines` calls in the selected model class support the default `state` attribute (`state_machine initial: :pending do`), explicit attributes, and parenthesized calls, including multiline arguments. The default produces `Model::state_machine_state`; existing named identifiers remain `Model::state_machine_<attribute>`. Each declaration uses its own block and literal initial state, keeping multiple machines separate. Nested/sibling classes, singleton scopes and deferred/receiver blocks cannot supply another model's machine. Dynamic attribute expressions are not guessed, and dynamic initial-state functions are not called.
 - Returns an array from the file method (like `ScheduledJobExtractor`), cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans
 
 ---
@@ -735,6 +777,7 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
 - No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
+- **Unreleased after 2.0.0:** app-owned `metadata.publishers` and `metadata.subscribers` paths, and the same paths in generated source annotations, are relative to `Rails.root`. Their array order, counts and event identifiers stay unchanged. Explicitly scanned paths outside the application remain absolute. Re-extract event units after upgrading: removing the checkout prefix changes existing `source_hash` values once, then identical app sources produce the same annotations and hashes across checkout roots.
 
 ---
 

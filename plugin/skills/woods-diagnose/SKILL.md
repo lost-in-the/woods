@@ -77,6 +77,28 @@ the application's actual `rails woods:watch` or `rake woods:watch` entrypoint,
 with no preceding `environment` task, and check
 whether boot inputs keep changing during initialization or catch-up.
 
+### Managed watcher parks after its owning container disappeared
+
+The explicit lease-based recovery command (#591) is unreleased after `2.0.0`.
+Check the loaded revision and `bundle exec woods-watch --help` before using it.
+Supporting daemons write a claim token and hold a lifetime lease; recovery checks
+the exact selected token and a free matching lease. Use the installed version's
+[claim recovery procedure](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup).
+Never remove a claim or lock sidecar manually, infer death from age alone, or use
+recovery against a live supervisor. Legacy/unverifiable claims cannot use this
+command. Recovery leaves status and pending work intact; remove the reader-only
+foreign-host trust override from owner startup. Blank idle timeouts are also
+normalized by supporting builds; older tasks may reject an empty value.
+
+### Verified extraction selects the wrong output or cannot use its identity key
+
+In supporting #591 builds (unreleased after `2.0.0`), an implicit preboot output
+that disagrees with finalized Rails configuration refuses before publication.
+Pass matching `--output` or `WOODS_OUTPUT` explicitly and retain the same capture,
+key and writer destination. Read the safe key-path/ownership/permissions diagnosis;
+never rotate or print key bytes as a generic fix. Follow
+[source capture setup](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
 ### Watch retains facts from an initializer deleted while stopped
 
 Record the installed revision. In Woods `2.0.0`, startup preserves
@@ -106,6 +128,17 @@ completed extraction. For custom/embedded pipeline tools, acknowledgement only
 means the background task started: inspect its final task state. Those operator
 tools are not registered by the packaged default Index Server. See
 [extraction failures](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
+
+### Manager, policy or migration identity does not match the source
+
+The selected-declaration repairs in #594 are unreleased after `2.0.0`.
+Supporting writers use actual loaded ancestry where available and inspect
+historical migration declarations without executing them. An unresolved qualified
+migration namespace needs the documented source/normal-boot setup; do not load
+historical migrations to force discovery. Full re-extraction repairs previously
+misidentified migration units. Method chunks now distinguish `self.call`, `call`
+and punctuation-bearing names, so rebuild affected embeddings after upgrading.
+See the [extractor contracts](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md).
 
 ### A cleaned index directory still exists
 
@@ -449,6 +482,16 @@ An explicit database path still wins. See the
 [SQLite path contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#sqlite-metadata)
 for isolation and upgrade steps.
 
+### Restored snapshot files are not visible
+
+`woods:clean` deletes history stored inside the output directory. Follow the
+[upgrade backup and selective-restore sequence](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#3-clean-and-re-extract)
+before cleaning; do not restore an old structural baseline over a new one.
+`WOODS_SNAPSHOTS=true` enables store construction, but it still prefers SQLite
+and does not import JSON history. A retained JSON history needs an explicit
+`JsonSnapshotStore` reader if SQLite became available. Preserve the original
+backup and verify an old snapshot before resuming writers.
+
 ## 5. Check Console separately
 
 For repeated missing-token boot warnings on a stdio-only host, check whether
@@ -628,3 +671,22 @@ Check the installed revision before using these unreleased diagnostics:
   installer setup. Keep receipts; use the supporting executable for removal
   before downgrading and real parent directories for temporary plans. See
   [managed configuration](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
+
+### Console HTTP remains unavailable after a Rails boot error
+
+In builds containing #597's HTTP repair (unreleased after `2.0.0`), an eager-load
+`NameError` makes that worker return a stable, non-cacheable HTTP 503. Reproduce
+the application's eager loading, correct its naming or boot failure, and restart
+the worker; do not keep retrying against a partially loaded model registry or
+relax authentication/table rules. A 401 still indicates authentication failure.
+See [Console startup diagnostics](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md).
+
+### Missing default or parenthesized state machines
+
+The #594 literal state-machine repair is unreleased after `2.0.0`; verify the
+writer's revision before relying on it. Supporting builds recognize direct
+`state_machine` calls with the default `state` attribute or an explicit name,
+including multiline parenthesized arguments. They do not infer dynamic or
+inherited machines from missing edges. Re-extract with a supporting writer and
+compare the selected model's actual registry when coverage is uncertain. See the
+[extractor contract](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#statemachineextractor).

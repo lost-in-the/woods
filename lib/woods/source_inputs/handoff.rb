@@ -9,8 +9,34 @@ module Woods
     # existing index manifest nor a user-supplied proof of runtime freshness.
     module Handoff
       ENV_KEY = 'WOODS_SOURCE_CAPTURE'
+      class OutputMismatch < StandardError; end
 
       module_function
+
+      # An implicit preboot default cannot override finalized application config.
+      # Explicit launcher outputs remain intentional overrides. Called before
+      # the writer lock/extraction, while the one-use handoff is still present.
+      # @param root [String, Pathname] finalized application root
+      # @param output_dir [String, Pathname] selected writer output
+      # @return [void]
+      def validate_output!(root:, output_dir:)
+        token = ENV.fetch(ENV_KEY, nil)
+        return if token.to_s.empty?
+
+        descriptor = JSON.parse(token)
+        return unless descriptor.is_a?(Hash) && descriptor['implicit_output'] == true
+
+        expected = File.expand_path('tmp/woods', root.to_s)
+        configured = File.expand_path(Woods.configuration.output_dir.to_s, root.to_s)
+        return if configured == expected && File.expand_path(output_dir.to_s, root.to_s) == expected
+
+        raise OutputMismatch,
+              "woods-extract configured output #{configured.inspect} differs from " \
+              "its preboot default #{expected.inspect}; " \
+              'rerun with matching --output PATH or WOODS_OUTPUT so capture and publication use the same index'
+      rescue JSON::ParserError, TypeError
+        nil # Ordinary handoff validation will refuse unverifiable capture.
+      end
 
       # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       # Every independent handoff binding must match before a token is consumed.

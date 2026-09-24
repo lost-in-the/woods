@@ -26,6 +26,7 @@ RSpec.describe 'woods:watch managed child protocol' do
       class Woods::Watch::Daemon
         def run
           puts "managed=\#{!@lifecycle.nil?}; conservative=\#{@conservative_claims}"
+          puts "idle=\#{@idle_timeout.inspect}"
           @lifecycle&.call(:backend_ready)
           @lifecycle&.call(:startup, state: 'ready', generation: 4, reason: 'reconciled')
           ENV.fetch('TEST_WATCH_REASON', 'stopped').to_sym
@@ -106,6 +107,28 @@ RSpec.describe 'woods:watch managed child protocol' do
 
     expect(status).to be_success, err
     expect(out).to include('managed=false; conservative=false')
+    expect(out).to include('idle=1.0')
+    expect(events).to be_empty
+  end
+
+  ['', " \t "].each do |blank|
+    [true, false].each do |managed|
+      it "treats #{blank.inspect} idle timeout as unset with managed=#{managed}" do
+        out, err, status, events = run_watch(managed: managed, WOODS_WATCH_IDLE_TIMEOUT: blank)
+
+        expect(status).to be_success, err
+        expect(out).to include('idle=nil')
+        expect(events.last['reason']).to eq('stopped') if managed
+      end
+    end
+  end
+
+  it 'reports invalid raw timeout configuration before running the daemon' do
+    out, err, status, events = run_watch(managed: false, WOODS_WATCH_IDLE_TIMEOUT: 'invalid')
+
+    expect(status).not_to be_success
+    expect(err).to include('WOODS_WATCH_IDLE_TIMEOUT')
+    expect(out).not_to include('managed=false')
     expect(events).to be_empty
   end
 

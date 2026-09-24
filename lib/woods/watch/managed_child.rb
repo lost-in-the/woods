@@ -26,7 +26,7 @@ module Woods
         descriptor, launcher, attempt = values
         validate_environment!(descriptor, [launcher, attempt])
 
-        unless env['WOODS_WATCH_IDLE_TIMEOUT'].to_s.empty?
+        unless env['WOODS_WATCH_IDLE_TIMEOUT'].to_s.strip.empty?
           raise ArgumentError, 'WOODS_WATCH_IDLE_TIMEOUT must be unset for managed watching'
         end
 

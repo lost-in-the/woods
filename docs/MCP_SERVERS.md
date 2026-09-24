@@ -147,7 +147,10 @@ than pinning a newer version solely to obtain guidance.
 
 ### Structural and semantic readiness
 
-`ready` describes the published structural index. A reachable embedding provider
+`ready` describes the published structural index, not corpus size or extraction
+coverage. An intentionally empty application can have a valid, ready zero-unit
+index; inspect `structure` counts and extraction diagnostics when zero is
+unexpected. A reachable embedding provider
 and bootstrap state `hydrated` do not establish that semantic stores contain
 data. Supporting readers also report `retriever.corpus`: locally known vector
 and metadata entry counts, counts by type, and whether those stores are empty,
@@ -416,7 +419,23 @@ Partial traversal and pagination metadata retain the budget contract above.
 
 The Ruby server builder contains 15 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, and Notion sync. They register only when their required collaborators or configuration are wired.
 
-The normal packaged executable does not wire pipeline-operator or feedback-store collaborators. Do not tell users to call those tools after a standard `woods-mcp` launch. Snapshot, session, and Notion capabilities are specialized configurations; document and test the exact embedded server construction when enabling them.
+The normal packaged executable does not boot Rails or load application
+initializers. It does not wire pipeline-operator or feedback-store collaborators.
+`session_trace` needs an in-process configured store supporting `read` and
+`sessions`; enabling the Rails middleware alone does not add it to a separate
+Index process. `notion_sync` needs the API token and database IDs configured in
+that process. These require an explicitly configured custom/embedded builder;
+verify `tools/list`. For ordinary application Notion export, use
+`bin/rails woods:notion_sync`.
+
+Snapshots have a supported packaged path: an existing `woods.sqlite3` is
+auto-discovered. `WOODS_SNAPSHOTS=true` enables store construction but does **not**
+force JSON: bootstrap prefers SQLite and falls back to JSON only if SQLite is
+unavailable or fails. It does not import old JSON history into SQLite. To read
+retained JSON history after SQLite becomes available, use a custom builder with
+an explicit `Woods::Temporal::JsonSnapshotStore` passed as `snapshot_store:`, or
+keep a separate historical reader using that store. See the
+[tool wiring table](MCP_TOOL_COOKBOOK.md#conditional-tools--wiring).
 
 For an embedded builder that supplies `operator:`, `pipeline_extract` checks
 publication after both full and incremental runs. With the Tasks extension,

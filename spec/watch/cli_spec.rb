@@ -11,7 +11,17 @@ RSpec.describe Woods::Watch::CLI do
   it 'prints help without booting an application' do
     expect(Woods::Watch::Supervisor).not_to receive(:new)
     expect(cli.run(['--help'])).to eq(0)
-    expect(output.string).to include('--boot-timeout', '--root', '--', 'bin/rails woods:watch')
+    expect(output.string).to include('--boot-timeout', '--root', '--', 'bin/rails woods:watch',
+                                     '--recover-claim', '--claim-token')
+  end
+
+  [%w[--recover-claim /index], %w[--claim-token token],
+   %w[--recover-claim /index --claim-token token -- ruby]].each do |arguments|
+    it "refuses incomplete recovery options #{arguments.inspect} without starting a child" do
+      expect(Woods::Watch::Supervisor).not_to receive(:new)
+      expect(cli.run(arguments)).to eq(2)
+      expect(output.string).to include('without a child command')
+    end
   end
 
   ['0', '-1', 'NaN', 'Infinity', 'oops'].each do |value|

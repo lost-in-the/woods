@@ -174,7 +174,7 @@ namespace :woods do
       # FS events do not propagate and the daemon would sit silent. Nothing
       # exposed it before, which made the advice unfollowable.
       force_polling: ENV['WOODS_WATCH_POLL'] == '1', # container autodetect also applies; see Watcher.containerized?
-      idle_timeout: ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT', nil) && Float(ENV.fetch('WOODS_WATCH_IDLE_TIMEOUT')),
+      idle_timeout: Woods::RakeHelpers.woods_watch_idle_timeout,
       catch_up: ENV['WOODS_WATCH_CATCH_UP'] != '0',
       boot_snapshot: boot_snapshot,
       lifecycle: managed_child,

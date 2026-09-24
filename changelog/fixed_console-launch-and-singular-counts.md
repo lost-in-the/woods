@@ -1,0 +1,1 @@
+- Reject unsupported Console launcher configuration instead of silently ignoring it, count singular associations as zero or one through their guarded relation, and return a stable HTTP 503 after a Rails eager-load naming error until the application is fixed and restarted.

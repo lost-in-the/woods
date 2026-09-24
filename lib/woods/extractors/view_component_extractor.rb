@@ -222,7 +222,7 @@ module Woods
       # Detect sidecar template file (.html.erb next to the .rb file)
       #
       # @param component [Class]
-      # @return [String, nil] Path to sidecar template if found
+      # @return [String, nil] App-relative path to sidecar template if found
       def detect_sidecar_template(component)
         base_path = Rails.root.join("app/components/#{component.name.underscore}")
 
@@ -234,7 +234,7 @@ module Woods
           "#{base_path}/#{component.name.demodulize.underscore}.html.erb"
         ]
 
-        candidates.find { |path| File.exist?(path) }
+        candidates.find { |path| File.exist?(path) }&.delete_prefix(File.join(Rails.root.to_s, ''))
       rescue StandardError
         nil
       end

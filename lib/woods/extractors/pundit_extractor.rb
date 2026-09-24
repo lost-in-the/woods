@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'declaration_ancestry'
 
 module Woods
   module Extractors
@@ -54,7 +55,9 @@ module Woods
         class_name = extract_class_name(file_path, source)
 
         return nil unless class_name
-        return nil unless pundit_policy?(source)
+
+        ancestry = DeclarationAncestry.new(source: source, identifier: class_name, file_path: file_path)
+        return nil unless pundit_policy?(source, ancestry)
 
         unit = ExtractedUnit.new(
           type: :pundit_policy,
@@ -64,7 +67,7 @@ module Woods
 
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
-        unit.metadata = extract_metadata(source, class_name)
+        unit.metadata = extract_metadata(source, class_name, ancestry)
         unit.dependencies = extract_dependencies(source, class_name)
 
         unit
@@ -100,8 +103,10 @@ module Woods
       #
       # @param source [String] Ruby source code
       # @return [Boolean]
-      def pundit_policy?(source)
-        source.match?(/< ApplicationPolicy/) ||
+      def pundit_policy?(source, ancestry)
+        return false if ancestry.foreign?
+
+        ancestry.application_policy? ||
           (source.match?(/attr_reader\s+:user/) && source.match?(/attr_reader.*:record/)) ||
           (source.match?(/def\s+initialize\s*\(\s*user\s*,/) && source.match?(/def\s+\w+\?/))
       end
@@ -135,7 +140,7 @@ module Woods
       # @param source [String]
       # @param class_name [String]
       # @return [Hash]
-      def extract_metadata(source, class_name)
+      def extract_metadata(source, class_name, ancestry)
         actions = detect_authorization_actions(source)
         {
           model: infer_model(class_name),
@@ -143,7 +148,7 @@ module Woods
           standard_actions: actions & PUNDIT_ACTIONS,
           custom_actions: actions - PUNDIT_ACTIONS,
           has_scope_class: source.match?(/class\s+Scope\b/) || false,
-          inherits_application_policy: source.match?(/< ApplicationPolicy/) || false,
+          inherits_application_policy: ancestry.application_policy?,
           public_methods: extract_public_methods(source),
           class_methods: extract_class_methods(source),
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') },
