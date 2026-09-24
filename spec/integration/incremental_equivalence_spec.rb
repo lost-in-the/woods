@@ -417,6 +417,93 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'published source references (#475)' do
+    it 'updates unchanged callers on target creation and deletion through one live MCP reader' do
+      require 'woods/mcp/server'
+      caller_path = write_file('app/models/reference_graph_caller.rb', <<~RUBY)
+        class ReferenceGraphCaller
+          def execute
+            ReferenceGraphTarget.generate
+          end
+        end
+      RUBY
+      load app_path(caller_path)
+      index = full_extraction
+      server = Woods::MCP::Server.build(index_dir: index, response_format: :json, warmup: false)
+      lookup = lambda do
+        request = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                    params: { name: 'lookup', arguments: { identifier: 'ReferenceGraphCaller', type: 'poro' } } }
+        JSON.parse(server.handle_json(JSON.generate(request))).fetch('result').fetch('structuredContent').fetch('data')
+      end
+      before = lookup.call
+      expect(before.fetch('dependencies')).not_to include(hash_including('target' => 'ReferenceGraphTarget'))
+
+      target_path = write_file('lib/reference_graph_target.rb', <<~RUBY)
+        module ReferenceGraphTarget
+          def self.generate
+            raise 'reference analysis must never execute this method'
+          end
+        end
+      RUBY
+      load app_path(target_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([target_path])
+      expect(lookup.call.fetch('dependencies')).to include(
+        'type' => 'lib', 'target' => 'ReferenceGraphTarget', 'via' => 'code_reference'
+      )
+      expect(lookup.call.fetch('extracted_at')).to eq(before.fetch('extracted_at'))
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('reverse').fetch('ReferenceGraphTarget')).to include('ReferenceGraphCaller')
+      expect(differences(index, full_extraction)).to be_empty
+
+      File.unlink(app_path(target_path))
+      Object.send(:remove_const, :ReferenceGraphTarget)
+      Woods::Extractor.new(output_dir: index).extract_changed([target_path])
+      expect(lookup.call.fetch('dependencies')).not_to include(hash_including('target' => 'ReferenceGraphTarget'))
+      expect(read_json(index, 'dependency_graph.json').fetch('reverse').fetch('ReferenceGraphTarget', []))
+        .not_to include('ReferenceGraphCaller')
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      Object.send(:remove_const, :ReferenceGraphCaller) if Object.const_defined?(:ReferenceGraphCaller, false)
+      Object.send(:remove_const, :ReferenceGraphTarget) if Object.const_defined?(:ReferenceGraphTarget, false)
+    end
+
+    it 'refreshes source references after a caller edit and retains its last generation after a parse failure' do
+      caller_path = write_file('app/models/reference_refresh_caller.rb', <<~RUBY)
+        class ReferenceRefreshCaller
+          def execute
+            ReferenceRefreshFirst.new
+          end
+        end
+      RUBY
+      first_path = write_file('lib/reference_refresh_first.rb', 'class ReferenceRefreshFirst; end')
+      second_path = write_file('lib/reference_refresh_second.rb', 'class ReferenceRefreshSecond; end')
+      [caller_path, first_path, second_path].each { |path| load app_path(path) }
+      index = full_extraction
+      write_file(caller_path,
+                 File.read(app_path(caller_path)).sub('ReferenceRefreshFirst.new', 'ReferenceRefreshSecond.new'))
+      load app_path(caller_path)
+      Woods::Extractor.new(output_dir: index).refresh(:poros)
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('reverse').fetch('ReferenceRefreshSecond')).to include('ReferenceRefreshCaller')
+      expect(graph.fetch('reverse').fetch('ReferenceRefreshFirst', [])).not_to include('ReferenceRefreshCaller')
+      expect(differences(index, full_extraction)).to be_empty
+
+      generation = Woods::Generation.new(output_dir: index)
+      token = generation.current.token
+      cache_path = generation.payload_dir.join('source_references.json')
+      cache = File.binread(cache_path)
+      write_file(caller_path, 'class ReferenceRefreshCaller; def')
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([caller_path]) }
+        .to raise_error(Woods::ExtractionError)
+      expect(generation.current.token).to eq(token)
+      expect(File.binread(cache_path)).to eq(cache)
+    ensure
+      %i[ReferenceRefreshCaller ReferenceRefreshFirst ReferenceRefreshSecond].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+  end
+
   # ── Harness driver ───────────────────────────────────────────────────────
 
   # Run a cold full extraction of the current tree into a throwaway directory.

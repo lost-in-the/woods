@@ -8,6 +8,34 @@ require 'woods/source_references/registry'
 RSpec.describe 'Collected source reference resolution' do
   %i[prism parser].each do |backend|
     context "with #{backend}" do
+      it 'resolves ordinary UTF-8 identifiers read as original binary bytes' do
+        stub_const('BinaryCaller', Class.new)
+        stub_const('Café', Class.new)
+        files = {
+          '/app/caller.rb' => 'class BinaryCaller; def call; Café.new; end; end'.b,
+          '/app/cafe.rb' => 'class Café; end'.b
+        }
+        units = [
+          Woods::ExtractedUnit.new(type: :poro, identifier: 'BinaryCaller', file_path: '/app/caller.rb'),
+          Woods::ExtractedUnit.new(type: :poro, identifier: 'Café', file_path: '/app/cafe.rb')
+        ]
+        collector = Woods::SourceReferences::Collector.new(backend: backend)
+        sources = files.transform_values { |source| collector.call(source) }
+        registry = Woods::SourceReferences::Registry.new(units: units, sources: sources, root: '/app')
+        refs = sources.fetch('/app/caller.rb').fetch('references')
+        edges = refs.filter_map { |ref| registry.resolve(ref, file_path: '/app/caller.rb') }
+        expect(edges).to eq([{ type: :poro, target: 'Café', via: :code_reference }])
+        expect(files.values.map(&:encoding)).to eq([Encoding::BINARY, Encoding::BINARY])
+      end
+
+      it 'preserves a Ruby source encoding comment on binary input' do
+        source = "# encoding: ISO-8859-1\nclass BinaryEncoded; def call; Target.new; 'café'; end; end"
+                 .encode(Encoding::ISO_8859_1).b
+        result = Woods::SourceReferences::Collector.new(backend: backend).call(source)
+        expect(result['parse_error']).to be_nil
+        expect(result['references']).to include(hash_including('name' => 'Target', 'owner' => 'BinaryEncoded'))
+      end
+
       it 'resolves the reported PORO and callback shapes without executing their bodies' do
         stub_const('RefDomain', Module.new)
         RefDomain.const_set(:PlanChange, Class.new)

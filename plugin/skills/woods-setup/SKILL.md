@@ -62,6 +62,11 @@ When the preflight records an installed 1.x version, this is an upgrade, not an 
 
 Before changing the Gemfile: back up any shared or durable index and agree on a rollback window — never upgrade one in place. After `bundle update woods`, run a full `bin/rails woods:extract` (not incremental; the old index is not a valid baseline across the major), then `woods:validate`. With embeddings configured, re-embed from scratch into a store matching the configured model; expect identifier-level churn in anything that consumed 1.x identifiers (exports, saved queries, downstream tooling). Verify MCP clients against the new surface rather than assuming 1.x tool behavior.
 
+When adopting a reviewed post-2.0 revision containing the unreleased reference
+expansion, establish its [full source-reference baseline](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades)
+before resuming incremental maintenance. Record the loaded revision; the version
+alone does not identify this planned 2.1 capability.
+
 ## Extract and verify
 
 Structural setup needs no embedding provider:

@@ -77,12 +77,18 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
     end
   end
 
-  it 'retains the preboot identity when a loaded source changes before extraction starts' do
+  it 'preserves the published generation when captured Ruby changes after boot, then recovers on a fresh run' do
     Dir.mktmpdir('woods-source-rails') do |app|
       make_source_app(app)
       path = File.join(app, 'app/services/source_probe.rb')
       before = "class SourceProbe; def call; :before; end; end\n"
       File.write(path, before)
+      launch(app, 'full')
+      pointer = File.binread(File.join(output(app), 'generation.json'))
+      payload = Woods::Generation.new(output_dir: output(app)).payload_dir
+      artifacts = %w[source_inputs.json source_references.json dependency_graph.json].to_h do |name|
+        [name, File.binread(File.join(payload, name))]
+      end
       Open3.popen3({ 'WOODS_SOURCE_BARRIER' => '1' }, *command(app, 'full')) do |input, out, err, child|
         input.close
         stdout = Thread.new { out.read }
@@ -91,8 +97,11 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
         expect(child).to be_alive, "#{stdout.value unless child.alive?} #{stderr.value unless child.alive?}"
         File.write(path, before.sub(':before', ':after'))
         File.write(File.join(app, 'boot-release'), 'continue')
-        expect(child.value).to be_success, "#{stdout.value}\n#{stderr.value}"
+        expect(child.value).not_to be_success, "#{stdout.value}\n#{stderr.value}"
+        expect(stderr.value).to include('source_snapshot_mismatch', 'app/services/source_probe.rb', 'fresh process')
       end
+      expect(File.binread(File.join(output(app), 'generation.json'))).to eq(pointer)
+      artifacts.each { |name, bytes| expect(File.binread(File.join(payload, name))).to eq(bytes) }
       manifest = source_manifest(app)
       key = Woods::SourceInputs::PrivateKey.new(output_dir: output(app))
       expect(manifest.data['boot_verified']).to be(true)
@@ -100,11 +109,14 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
                                                                                          'SHA256', key.bytes, before
                                                                                        ))
       expect(state(app)['state']).to eq('drifted')
-      expect(state(app)['reasons']).to include('source_changed_during_extraction')
+      expect(state(app)['changes']['changed']).to include('app/services/source_probe.rb')
+      launch(app, 'full')
+      expect(state(app)['state']).to eq('current')
+      assert_current_identities(app, 'tmp/woods')
     end
   end
 
-  it 'validates independent full/incremental identities with each private key and keeps omitted inputs stale' do
+  it 'validates independent full/incremental identities and refuses unconsumed Ruby during a partial refresh' do
     Dir.mktmpdir('woods-source-rails') do |app|
       make_source_app(app)
       view = File.join(app, 'app/views/posts/source_probe.html.erb')
@@ -122,10 +134,33 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
       omitted = 'app/services/omitted_source.rb'
       File.write(File.join(app, omitted), "class OmittedSource; def call; :before; end; end\n")
       launch(app, 'full')
+      pointer = File.binread(File.join(output(app), 'generation.json'))
       File.write(File.join(app, omitted), "class OmittedSource; def call; :after; end; end\n")
-      launch(app, 'refresh', 'events')
+      out, err, result = Open3.capture3(*command(app, 'refresh', 'events'))
+      expect(result).not_to be_success, "#{out}\n#{err}"
+      expect(err).to include('Source-reference baseline needs a full extraction', omitted)
+      expect(File.binread(File.join(output(app), 'generation.json'))).to eq(pointer)
       expect(state(app)['state']).to eq('drifted')
       expect(state(app)['changes']['changed']).to include(omitted)
+      launch(app, 'full')
+      expect(state(app)['state']).to eq('current')
+      assert_current_identities(app, 'tmp/woods')
+    end
+  end
+
+  it 'keeps an omitted view stale when no retained reference-bearing Ruby input changed' do
+    Dir.mktmpdir('woods-source-rails') do |app|
+      make_source_app(app)
+      view = 'app/views/posts/source_probe.html.erb'
+      FileUtils.mkdir_p(File.dirname(File.join(app, view)))
+      File.write(File.join(app, view), '<p>before</p>')
+      launch(app, 'full')
+      previous = source_manifest(app).expanded.fetch('unit:view_templates').fetch(view)
+      File.write(File.join(app, view), '<p>after</p>')
+      launch(app, 'refresh', 'events')
+      expect(source_manifest(app).expanded.fetch('unit:view_templates').fetch(view)).to eq(previous)
+      expect(state(app)['state']).to eq('drifted')
+      expect(state(app)['changes']['changed']).to include(view)
     end
   end
 end

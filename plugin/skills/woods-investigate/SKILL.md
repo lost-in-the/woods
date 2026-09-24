@@ -59,6 +59,11 @@ or call coverage. Selective method-body scanning can miss references to generic
 PORO and library targets. No dependents or test-only dependents do not establish
 absence of production callers; check source before making that claim.
 
+The [post-2.0 reference expansion](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#constant-source-references)
+is unreleased and planned for 2.1. Verify the loaded writer revision and full
+baseline before expecting its additional edges. `code_reference` is source
+evidence, not observed execution; the coverage warning remains applicable.
+
 The response `graph_coverage` notice, `total_is_exact` field, and human label
 `witness types unambiguous` (#470/#471) are included in Woods `2.0.0`.
 Verify the installed server version and actual response fields; this plugin does

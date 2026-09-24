@@ -67,6 +67,7 @@ gates below deliberately fail more strictly.
 |---|---|
 | `manifest.json` | Required for a complete structural publication. Counts by extractor directory, totals, extraction timestamp and provenance. Optional fields vary by writer/version; see [writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance). |
 | `source_inputs.json` | Versioned source-input identities and per-consumer provenance for this exact generation; old indexes may omit it. See [source freshness](SOURCE_FRESHNESS.md). |
+| `source_references.json` | Internal, versioned candidate and edge-ownership cache for this generation. Unreleased after 2.0.0; planned for 2.1. Older indexes remain readable without it; supporting incremental writers may require a [full baseline rebuild](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades). Preserve it when copying payloads. Not a public query schema. |
 | `dependency_graph.json` | Required for a complete structural publication. Typed graph data; an empty graph is valid. |
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
 | `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. |

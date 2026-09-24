@@ -60,8 +60,18 @@ The launcher captures source before a **fresh child** evaluates its Gemfile,
 Rakefile, Rails boot and eager loading. A private one-use handoff binds the capture
 to root, output, action, rules, nonce and parent process. It waits for the child
 and removes the handoff when the child exits. Source is checked again before
-publication; edits during boot/extraction retain the earlier identity and are
-reported, rather than being silently adopted as a current baseline.
+publication. In Woods 2.0.0, edits during boot/extraction retain the earlier
+identity and are reported in the new generation, rather than being silently
+adopted as a current baseline.
+
+**Unreleased after 2.0.0; planned for 2.1:** the
+[constant-reference writer](EXTRACTOR_REFERENCE.md#constant-source-references)
+requires verified source for its graph evidence. Source changes after capture,
+during boot or extraction, refuse publication while reference enrichment
+participates. The final verification also checks covered non-Ruby inputs. The
+preceding generation remains active instead of publishing a new drifted
+generation. Retry against stable source in a fresh process. The existing
+generation can still report drift through `woods_status`.
 
 Existing Rake tasks, direct `Extractor` calls and the watch daemon remain usable.
 Their post-boot capture is marked `unverified_boot_boundary`; current bytes alone
@@ -91,6 +101,14 @@ framework refreshes do not certify unrelated application inputs. A handled
 extractor error retains an explicit `extractor:<name>` uncertainty even if the
 extractor returns an empty result. Successful consumers keep their own evidence;
 a later full run without that failure can replace the uncertainty.
+
+With the **unreleased reference writer planned for 2.1**, an edited Ruby service
+retained by an events-only refresh instead prevents publication: its current
+source cannot certify its older runtime facts or cached reference resolution.
+See [reference baseline recovery](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
+Omitted non-reference inputs retain their earlier consumer identity. The watcher
+keeps failed work for retry; it does not expand an incomplete batch or rebuild a
+missing reference baseline automatically.
 
 Custom loader source outside captured roots, missing eager-load coverage and
 uncaptured application-owned unit paths remain unknown. This is application

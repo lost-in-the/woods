@@ -164,6 +164,14 @@ step before it.
    string literal, and an unrelated addition in the same batch do not.
    Idempotent when nothing was pruned.
 
+8. **Reconcile source references** on supporting unreleased writers described in
+   [constant source references](EXTRACTOR_REFERENCE.md#constant-source-references).
+   Resolve cached candidates against the complete current typed unit registry,
+   update callers' forward relationships, and refresh targets' reverse
+   relationships. Unresolved candidates allow an unchanged caller to gain an edge
+   when its target becomes indexed. Parsing is reused only when the captured
+   source identity still matches.
+
 Git enrichment uses the same eligibility checks in full and incremental runs:
 existing app-owned files under `Rails.root`, excluding `vendor/`, `node_modules/`,
 and framework/gem source units. Each typed unit resolves its own file history,
@@ -607,3 +615,32 @@ edit does not establish that a day of commits is below the crossover.
   contract, and multi-worktree operation, all landed alongside this work
   (B-064, resolved). `docs/WATCH_DAEMON.md` covers them, including the parts
   that remain unmeasured.
+
+## Source-reference baseline and upgrades
+
+**Unreleased after 2.0.0; planned for 2.1.** Older indexes remain readable.
+Writers with the [source-reference expansion](EXTRACTOR_REFERENCE.md#constant-source-references)
+require one full `bin/rails woods:extract` before incremental extraction or
+targeted refresh can update an older index without its reference cache. Follow
+with `bin/rails woods:validate` using the application's normal task launcher.
+
+`source_references.json` is internal writer state in the published payload.
+Preserve it with the complete payload when copying an index. Missing/incompatible
+cache state or unverified retained source stops publication with a full-extraction
+diagnostic. Reconstruct it by running a full extraction; do not manufacture a
+cache or delete it to bypass the check. The preceding generation remains active.
+The watcher preserves failed batches but does not automatically repair this
+baseline: establish the full baseline before resuming incremental maintenance.
+
+This also tightens scoped refreshes: if a retained reference-bearing Ruby unit's
+source changed outside the selected batch, the writer refuses to combine its old
+runtime facts with references resolved from the new source. For example,
+`woods:refresh[events]` cannot adopt an edited service unit. The prior generation
+stays active and can report `drifted`; use a full extraction to establish a
+consistent baseline. Omitted non-reference inputs, such as a view changed before
+capture, retain the existing per-consumer freshness behavior.
+
+A source change during reference analysis or final verification also prevents
+publication. Correct source errors and retry the complete batch against a stable
+tree. Reference-only edge updates do not refresh a retained unit's runtime
+metadata, extraction timestamp or Git history.
