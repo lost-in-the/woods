@@ -49,4 +49,22 @@ RSpec.describe 'Console launcher configuration validation' do
       expect(File.exist?(marker)).to be(false)
     end
   end
+
+  it 'refuses complex configuration keys without exposing their contents or replacing the process' do
+    Dir.mktmpdir('woods-console-config-key') do |directory|
+      secret = 'synthetic-key-credential-must-not-be-printed'
+      marker = File.join(directory, 'executed')
+      config = File.join(directory, 'console.yml')
+      command = Shellwords.join([RbConfig.ruby, '-e', "File.write(#{marker.inspect}, 'executed')"])
+      File.write(config, YAML.dump({ { 'credential' => secret } => 'unused', 'command' => command }))
+      out, err, status = Open3.capture3({ 'WOODS_CONSOLE_CONFIG' => config }, RbConfig.ruby,
+                                        File.expand_path('../../exe/woods-console-mcp', __dir__))
+
+      expect(status.exitstatus).to eq(1)
+      expect(out).to eq('')
+      expect(err).not_to include(secret)
+      expect(err).to include('keys must be strings')
+      expect(File.exist?(marker)).to be(false)
+    end
+  end
 end

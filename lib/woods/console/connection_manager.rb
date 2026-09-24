@@ -74,6 +74,7 @@ module Woods
 
       def validate_config!
         raise ConnectionError, 'Console configuration must be a YAML mapping' unless @config.is_a?(Hash)
+        raise ConnectionError, 'Console configuration keys must be strings' unless @config.keys.all?(String)
 
         unknown = @config.keys - CONFIG_KEYS
         unless unknown.empty?
