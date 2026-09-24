@@ -773,8 +773,9 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
       before do
         stub_const('User', user_model)
         allow(user_model).to receive(:find).with(1).and_return(record)
-        allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(double('reflection'))
-        allow(record).to receive(:posts).and_return(assoc_relation)
+        allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(double('reflection',
+                                                                                             collection?: true))
+        allow(record).to receive(:association).with(:posts).and_return(double('Association', scope: assoc_relation))
         allow(assoc_relation).to receive(:count).and_return(5)
       end
 
@@ -844,11 +845,12 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
       before do
         stub_const('User', user_model)
-        allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(double('reflection'))
+        allow(user_model).to receive(:reflect_on_association).with(:posts).and_return(double('reflection',
+                                                                                             collection?: true))
         allow(user_model).to receive(:all).and_return(user_model)
         allow(user_model).to receive(:to_sql).and_return('SELECT users.* FROM users')
         allow(user_model).to receive(:find).with(1).and_return(record)
-        allow(record).to receive(:posts).and_return(assoc_relation)
+        allow(record).to receive(:association).with(:posts).and_return(double('Association', scope: assoc_relation))
       end
 
       it 'refuses when the rendered association SQL reaches a blocked table through a less-obvious join' do

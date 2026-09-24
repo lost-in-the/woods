@@ -5,6 +5,38 @@ require 'woods/console/connection_manager'
 
 RSpec.describe Woods::Console::ConnectionManager do
   describe '#command' do
+    %w[connection console].each do |key|
+      it "rejects unsupported #{key} nesting with migration guidance" do
+        expect do
+          described_class.new(config: { key => { 'mode' => 'ssh', 'host' => 'remote.example' } }).command
+        end.to raise_error(Woods::Console::ConnectionError, /top-level.*mode.*Rails initializer/)
+      end
+    end
+
+    %w[mod redacted_columns blocked_tables].each do |key|
+      it "refuses ignored launcher configuration #{key}" do
+        expect do
+          described_class.new(config: { key => 'synthetic-configuration-value' }).command
+        end.to raise_error(Woods::Console::ConnectionError) { |error|
+          expect(error.message).to include(key)
+          expect(error.message).not_to include('synthetic-configuration-value')
+        }
+      end
+    end
+
+    [{ 'mode' => 'ssh', 'host' => {} }, { 'command' => false }, { 'directory' => '' },
+     { 'mode' => 'direct', 'container' => 'app' }].each do |config|
+      it "rejects invalid launcher fields #{config.keys.join(', ')}" do
+        expect { described_class.new(config: config).command }
+          .to raise_error(Woods::Console::ConnectionError)
+      end
+    end
+
+    it 'preserves direct mode for supported command and directory overrides' do
+      manager = described_class.new(config: { 'command' => 'bin/rake woods:console', 'directory' => '/app' })
+      expect(manager.command).to eq(%w[bin/rake woods:console])
+    end
+
     it 'defaults to the embedded rake server in direct mode' do
       manager = described_class.new(config: {})
 
