@@ -3228,7 +3228,7 @@
       "plugin/hooks/woods-session-start.sh"
     ],
     "description": "Issue #592: R84: the real no-jq refresh hook exits successfully without queuing a Unicode edit under LC_ALL=C because later Ruby JSON snippets use default input encoding. Decode UTF-8 explicitly throughout fallback paths and sanitize errors. Regress actual hook invocation with jq absent, non-ASCII filename/root/output, exact queued paths, valid JSON and no raw backtrace. Update plugin compatibility/version guidance.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-237",
@@ -3241,7 +3241,7 @@
       "lib/woods/generation.rb"
     ],
     "description": "Issue #593: R30/R31/R52-R54: allow valid slash-bearing unit identifiers without weakening resource grammar; normalize family aliases and concrete type filters consistently across scoped/unscoped queries; distinguish unknown flow entries and snapshots from valid empty results; handle malformed generation markers across held-open tools/resources and recovery. Preserve path containment and no fallback to unrelated generations. Add real protocol response regressions; split interface changes into focused PRs.",
-    "status": "ready"
+    "status": "in-progress"
   },
   {
     "id": "B-238",
