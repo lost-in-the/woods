@@ -109,7 +109,8 @@ module MinimumDependencyProbe # rubocop:disable Metrics/ModuleLength
     stack.use(Woods::MCP::OriginGuard, path: '/mcp/console')
     stack.use(Woods::MCP::BearerAuth, token: token, path: '/mcp/console')
     guarded = stack.build(endpoint)
-    env = { 'PATH_INFO' => '/mcp/console', 'HTTP_ORIGIN' => 'http://localhost', 'REQUEST_METHOD' => 'POST' }
+    env = { 'PATH_INFO' => '/mcp/console', 'HTTP_ORIGIN' => 'http://localhost',
+            'HTTP_HOST' => 'localhost', 'REQUEST_METHOD' => 'POST' }
     assert(guarded.call(env).first == 401, 'Rails middleware rejects missing bearer token')
     assert(guarded.call(env.merge('HTTP_AUTHORIZATION' => 'Bearer wrong')).first == 401,
            'Rails middleware rejects bad token')

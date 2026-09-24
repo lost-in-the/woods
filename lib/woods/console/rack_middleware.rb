@@ -155,7 +155,7 @@ module Woods
         authenticated = Woods::MCP::BearerAuth.new(
           method(:handle_request), token: -> { Woods.configuration&.console_mcp_token }
         )
-        Woods::MCP::OriginGuard.new(
+        @origin_guard = Woods::MCP::OriginGuard.new(
           authenticated, allowed_origins: -> { Array(Woods.configuration&.console_mcp_allowed_origins) }
         )
       end
@@ -186,7 +186,7 @@ module Woods
           server = build_embedded_server
           @stateless_mode = resolve_deferred(@stateless)
           @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(
-            server, stateless: @stateless_mode
+            server, stateless: @stateless_mode, **@origin_guard.policy.transport_options
           )
           server.transport = @transport
           @transport

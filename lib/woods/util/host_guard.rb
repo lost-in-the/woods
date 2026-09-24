@@ -2,8 +2,9 @@
 
 module Woods
   module Util
-    # Shared host-header / URL-host canonicalization used by {MCP::OriginGuard}
-    # and the {Storage::VectorStore::Qdrant} URL validator.
+    # Numeric-host checks shared by {MCP::OriginPolicy} and the
+    # {Storage::VectorStore::Qdrant} URL validator. Qdrant also uses the URL
+    # canonicalization helper; HTTP authorities retain SDK matching semantics.
     #
     # Both components need to reject numeric IPv4 notations that `URI` and
     # `getaddrinfo` accept but `IPAddr` does not — hex (`0x7f000001`),

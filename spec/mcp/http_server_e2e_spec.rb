@@ -330,6 +330,22 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
       expect(preflight_response.code).to eq('204')
       expect(allowed_headers).to include('MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name')
     end
+
+    it 'preserves same-authority custom ports but refuses cross-port preflight and dispatch together' do
+      [
+        ['https://allowed.example:4443', 'allowed.example:4443', '200'],
+        ['https://allowed.example:4443', "127.0.0.1:#{port}", '403'],
+        ['http://allowed.example:4443', 'allowed.example:4443', '403']
+      ].each do |origin, host, expected|
+        headers = { 'Authorization' => "Bearer #{token}", 'Origin' => origin, 'Host' => host }
+        response = post({ jsonrpc: '2.0', id: 9, method: 'tools/list', params: {} }, headers: headers)
+        expect(response.code).to eq(expected), response.body
+        preflight = Net::HTTP::Options.new(base)
+        headers.each { |name, value| preflight[name] = value }
+        preflight_response = Net::HTTP.start(base.host, base.port) { |http| http.request(preflight) }
+        expect(preflight_response.code).to eq(expected == '200' ? '204' : expected)
+      end
+    end
   end
 
   describe 'the session-mode escape hatch' do

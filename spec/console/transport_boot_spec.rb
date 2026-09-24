@@ -9,7 +9,7 @@ RSpec.describe 'Console transport boot configuration', :booted_app do
   let(:root) { File.expand_path('../..', __dir__) }
   let(:host) { File.join(root, 'spec/console/support/booted_console_app.rb') }
 
-  def boot(http:, environment:, script: '', input: '', token: '', manual_mount: false)
+  def boot(http:, environment:, script: '', input: '', token: '', manual_mount: false, origins: nil)
     Dir.mktmpdir('woods-console-transport') do |directory|
       env = {
         'RAILS_ENV' => environment,
@@ -17,7 +17,7 @@ RSpec.describe 'Console transport boot configuration', :booted_app do
         'WOODS_CONSOLE_MCP_TOKEN' => token,
         'WOODS_TEST_CONSOLE_HTTP' => http ? '1' : '0',
         'WOODS_TEST_CONSOLE_MANUAL_MOUNT' => manual_mount ? '1' : '0',
-        'WOODS_TEST_CONSOLE_ALLOWED_ORIGINS' => manual_mount ? 'https://trusted.example' : '',
+        'WOODS_TEST_CONSOLE_ALLOWED_ORIGINS' => origins || (manual_mount ? 'https://trusted.example' : ''),
         'WOODS_CONSOLE_READ_TOOLS' => '0'
       }
       Open3.capture3(env, RbConfig.ruby, '-Ilib', '-r', host, '-e', script,
@@ -132,5 +132,52 @@ RSpec.describe 'Console transport boot configuration', :booted_app do
     responses = JSON.parse(out).fetch('responses')
     expect(responses.transform_values { |response| response['status'] })
       .to eq('missing' => 401, 'wrong' => 401, 'authorized' => 401, 'foreign' => 403, 'excluded_loopback' => 403)
+  end
+
+  [false, true].each do |manual_mount|
+    it "shares preflight and SDK policy through the #{manual_mount ? 'manual' : 'automatic'} Rails mount" do
+      script = <<~RUBY
+        require 'rack/mock'
+        require 'json'
+        request = {jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+          protocolVersion: '2025-06-18', capabilities: {}, clientInfo: {name: 'origins', version: '1'}
+        }}.to_json
+        cases = [
+          ['https://trusted.example', 'localhost', 200],
+          ['https://trusted.example:4443', 'trusted.example:4443', 200],
+          ['https://trusted.example:4443', 'localhost', 403],
+          ['http://trusted.example:4443', 'trusted.example:4443', 403],
+          ['https://[2001:db8::1]:4443', '[2001:db8::1]:4443', 200],
+          [nil, 'trusted.example:4443', 200],
+          ['http://localhost', 'localhost', 403],
+          ['https://trusted.example', 'foreign.example', 403]
+        ]
+        results = cases.map do |origin, host, expected|
+          statuses = %w[OPTIONS POST].map do |method|
+            env = Rack::MockRequest.env_for('http://localhost/mcp/console', method: method, input: request)
+            env.update('CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json, text/event-stream',
+                       'HTTP_HOST' => host, 'HTTP_AUTHORIZATION' => "Bearer \#{ENV['WOODS_CONSOLE_MCP_TOKEN']}")
+            env['HTTP_ORIGIN'] = origin if origin
+            status, _, body = Rails.application.call(env)
+            text = +''
+            body.each { |chunk| text << chunk }
+            body.close if body.respond_to?(:close)
+            raise "Not a successful initialization: \#{text}" if method == 'POST' && status == 200 &&
+              !JSON.parse(text).dig('result', 'serverInfo')
+            status
+          end
+          [expected, statuses]
+        end
+        puts JSON.generate(results)
+      RUBY
+      out, err, status = boot(http: true, environment: 'test', manual_mount: manual_mount,
+                              origins: 'https://trusted.example,https://[2001:db8::1]',
+                              token: 'console-origin-policy-token-32-characters', script: script)
+
+      expect(status).to be_success, err
+      expect(JSON.parse(out)).to all(satisfy do |expected, statuses|
+        statuses == [expected == 200 ? 204 : expected, expected]
+      end)
+    end
   end
 end

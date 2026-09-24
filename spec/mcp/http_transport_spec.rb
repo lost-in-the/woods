@@ -53,8 +53,8 @@ RSpec.describe 'MCP HTTP Transport' do
     it 'constructs the transport with stateless and shared rebinding policy' do
       expect(source).to include('StreamableHTTPTransport.new(')
       expect(source).to include('stateless: stateless')
-      expect(source).to include('allowed_origins: allowed_origins')
-      expect(source).to include('allowed_hosts: allowed_hosts')
+      expect(source).to include('**origin_policy.transport_options')
+      expect(source).to include('OriginGuard.new(app, policy: origin_policy)')
     end
 
     it 'defaults to stateless when the env var is unset' do

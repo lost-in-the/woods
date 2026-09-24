@@ -193,8 +193,8 @@ module Woods
         def self.validate_host_visibility!(host, allow_private_hosts:)
           return if allow_private_hosts
 
-          # Canonicalize (strip port, trailing dot, IPv6 brackets) via
-          # the shared helper so Qdrant and OriginGuard stay in sync.
+          # Canonicalize URL hosts before applying the numeric-host checks
+          # also used by the HTTP origin policy.
           canonical = Util::HostGuard.canonicalize(host)
 
           # Non-canonical numeric hosts (hex `0x7f000001`, octal

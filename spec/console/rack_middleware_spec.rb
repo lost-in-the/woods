@@ -284,7 +284,9 @@ RSpec.describe Woods::Console::RackMiddleware do
 
     it 'constructs stateless transport by default' do
       expect(MCP::Server::Transports::StreamableHTTPTransport).to receive(:new)
-        .with(server_double, stateless: true)
+        .with(server_double, stateless: true,
+                             allowed_origins: Woods.configuration.console_mcp_allowed_origins,
+                             allowed_hosts: %w[localhost 127.0.0.1 ::1])
         .and_return(transport)
 
       middleware.send(:ensure_transport)
@@ -297,7 +299,9 @@ RSpec.describe Woods::Console::RackMiddleware do
       allow(sessionful).to receive(:check_blocked_tables_config!)
       allow(sessionful).to receive(:build_embedded_server).and_return(server_double)
       expect(MCP::Server::Transports::StreamableHTTPTransport).to receive(:new)
-        .with(server_double, stateless: false)
+        .with(server_double, stateless: false,
+                             allowed_origins: Woods.configuration.console_mcp_allowed_origins,
+                             allowed_hosts: %w[localhost 127.0.0.1 ::1])
         .and_return(transport)
 
       sessionful.send(:ensure_transport)

@@ -6,7 +6,8 @@ require 'woods/mcp/origin_guard'
 RSpec.describe Woods::MCP::OriginGuard do
   let(:inner_app) { ->(_env) { [200, { 'content-type' => 'text/plain' }, ['ok']] } }
 
-  def call(middleware, origin: nil, method: 'POST', host: nil, path: nil)
+  def call(middleware, origin: nil, method: 'POST', host: :same_authority, path: nil)
+    host = origin&.sub(%r{\Ahttps?://}, '') if host == :same_authority
     env = { 'REQUEST_METHOD' => method }
     env['HTTP_ORIGIN'] = origin if origin
     env['HTTP_HOST'] = host if host
@@ -26,7 +27,7 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(call(middleware, origin: 'http://localhost').first).to eq(200)
     end
 
-    it 'allows http://localhost:5173 (matches host regardless of port)' do
+    it 'allows http://localhost:5173 on the same request authority' do
       expect(call(middleware, origin: 'http://localhost:5173').first).to eq(200)
     end
 
@@ -133,8 +134,8 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(status).to eq(403)
     end
 
-    it 'treats the FQDN trailing-dot form of loopback as loopback' do
-      expect(call(middleware, host: 'localhost.:3000').first).to eq(200)
+    it 'refuses the unconfigured trailing-dot form that the SDK also rejects' do
+      expect(call(middleware, host: 'localhost.:3000').first).to eq(403)
     end
 
     it 'rejects a hex-notation IPv4 Host (0x7f000001 = 127.0.0.1)' do
@@ -192,7 +193,7 @@ RSpec.describe Woods::MCP::OriginGuard do
     end
 
     it 'still allows loopback requests at the scoped path' do
-      status, = call(middleware, origin: 'http://localhost', host: 'localhost:3000', path: '/mcp/console')
+      status, = call(middleware, origin: 'http://localhost:3000', host: 'localhost:3000', path: '/mcp/console')
       expect(status).to eq(200)
     end
   end
