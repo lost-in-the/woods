@@ -3,6 +3,7 @@
 require_relative '../source_inputs/consumer_errors'
 
 require 'yaml'
+require 'set'
 begin
   require 'active_support/configuration_file'
 rescue LoadError
@@ -62,9 +63,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of scheduled job units
       def extract_all
-        @schedule_files.flat_map do |file_path, format|
-          extract_scheduled_job_file(file_path, format)
-        end
+        allocate_identifiers(schedule_units(@schedule_files))
       end
 
       # Extract scheduled job entries from a single schedule file.
@@ -76,6 +75,18 @@ module Woods
       # @param format [Symbol] One of :solid_queue, :sidekiq_cron, :whenever
       # @return [Array<ExtractedUnit>] List of scheduled job units
       def extract_scheduled_job_file(file_path, format)
+        path = File.expand_path(file_path.to_s)
+        files = @schedule_files.merge(path => format)
+        allocate_identifiers(schedule_units(files)).select { |unit| unit.file_path == path }
+      end
+
+      private
+
+      def schedule_units(files)
+        files.flat_map { |path, format| extract_schedule_file(path, format) }
+      end
+
+      def extract_schedule_file(file_path, format)
         case format
         when :solid_queue, :sidekiq_cron
           extract_yaml_schedule(file_path, format)
@@ -89,7 +100,35 @@ module Woods
         []
       end
 
-      private
+      # Keep every unique legacy identifier. Reserve those first, then qualify
+      # conflicting names in deterministic format order without stealing a
+      # literal task name that already looks like one of our generated names.
+      def allocate_identifiers(units)
+        groups = units.group_by(&:identifier)
+        reserved = groups.select { |_identifier, entries| entries.one? }.keys.to_set
+        groups.keys.sort.each do |identifier|
+          entries = groups.fetch(identifier)
+          next if entries.one?
+
+          formats = entries.map { |unit| unit.metadata.fetch(:schedule_format) }
+          if formats.uniq.size != formats.size
+            raise ArgumentError, "Ambiguous same-format schedule name: #{identifier.inspect}"
+          end
+
+          entries.sort_by { |unit| unit.metadata.fetch(:schedule_format).to_s }.each do |unit|
+            base = "scheduled:#{unit.metadata.fetch(:schedule_format)}:#{identifier.delete_prefix('scheduled:')}"
+            candidate = base
+            suffix = 1
+            while reserved.include?(candidate)
+              suffix += 1
+              candidate = "#{base}:#{suffix}"
+            end
+            unit.identifier = candidate
+            reserved.add(candidate)
+          end
+        end
+        units
+      end
 
       # ──────────────────────────────────────────────────────────────────────
       # YAML-based formats (Solid Queue, Sidekiq-Cron)
@@ -190,6 +229,7 @@ module Woods
         unit.source_code = source
         unit.metadata = {
           schedule_format: format,
+          task_name: task_name.to_s,
           job_class: job_class,
           cron_expression: cron,
           queue: config['queue'],
@@ -324,6 +364,7 @@ module Woods
         unit.source_code = source
         unit.metadata = {
           schedule_format: :whenever,
+          task_name: identifier.delete_prefix('scheduled:'),
           job_class: block[:job_class],
           cron_expression: block[:frequency],
           command_type: block[:command_type],
