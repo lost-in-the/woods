@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'json'
 require 'fileutils'
+require 'open3'
 
 # End-to-end daemon behaviour against a real booted app (#164, phase 2).
 #
@@ -123,6 +124,27 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
   end
 
   after { (@scratch || []).each { |dir| FileUtils.rm_rf(dir) } }
+
+  describe 'startup after another writer publishes' do
+    [%w[write_source_inputs no_reference], %w[sync_payload no_reference],
+     %w[write_source_inputs reference], %w[sync_payload reference]].each do |boundary, ownership|
+      it "recovers a source edit at #{boundary} with #{ownership}" do
+        fixture = File.expand_path('../fixtures/watch_publication/boot.rb', __dir__)
+        stdout, stderr, status = Open3.capture3({ 'RAILS_ENV' => 'test', 'WOODS_NO_UPDATE_CHECK' => '1' },
+                                                RbConfig.ruby, '-Ilib', fixture, boundary, ownership)
+        expect(status.success?).to be(true), "#{stdout}\n#{stderr}"
+        data = JSON.parse(stdout.lines.last)
+        refused = boundary == 'write_source_inputs' && ownership == 'reference'
+        expect(data.fetch('error').nil?).to be(!refused)
+        expect(data.fetch('published')).to eq(data.fetch('prior') + (refused ? 0 : 1))
+        expect(data.fetch('recovered')).to eq(data.fetch('published') + 1)
+        expect(data.fetch('after_restart')).to eq(data.fetch('recovered'))
+        expect(data.fetch('result')).to eq('stopped')
+        expect(data.fetch('units').size).to eq(1)
+        expect(data.fetch('units').first.fetch('source_code')).to include('edited during publication')
+      end
+    end
+  end
 
   describe 'a single-file cycle' do
     it 'lands the index in exactly the state a full extraction would' do

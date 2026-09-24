@@ -28,6 +28,7 @@ module Woods
       end
 
       def call
+        @captured_at = Time.now.to_f
         @started = monotonic
         @files = {}
         @scope_paths = {}
@@ -177,6 +178,7 @@ module Woods
 
       def result
         { 'root' => @root, 'key_id' => @key.identifier, 'rules' => @scopes.fingerprint,
+          'captured_at' => @captured_at,
           'extra_roots' => @scopes.extra_roots, 'files' => @files.sort.to_h,
           'scope_paths' => @scope_paths.transform_values(&:sort).sort.to_h,
           'errors' => @errors, 'complete' => @errors.empty?,

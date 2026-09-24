@@ -10,6 +10,7 @@ require_relative 'status'
 require_relative 'tree_scan'
 require_relative 'watcher'
 require_relative 'boot_snapshot'
+require_relative 'catch_up'
 require 'json'
 require 'set'
 require 'securerandom'
@@ -613,24 +614,22 @@ module Woods
 
       # Reconcile changes that predate this daemon.
       #
-      # The generation file is rewritten as the last act of every successful
-      # extraction, so its mtime is "when this index was last known good".
-      # Anything modified since is uncovered, whoever made the change and
-      # whether or not a daemon was watching at the time. With no generation
-      # file at all there is no index, and every file is uncovered — which the
-      # storm threshold correctly turns into one full extraction.
+      # Capture precedes publication. CatchUp keeps edits in that interval
+      # visible, including those after the final source-verification scan.
       #
       # @return [void]
       def catch_up
         return unless @catch_up
 
         carried = restore_pending
-        paths = (uncovered_paths + carried + vanished_restart_paths).uniq
+        scan = catch_up_scan
+        paths = (scan.paths + carried + vanished_restart_paths).uniq
         boot_changes = @boot_snapshot ? @boot_snapshot.changed_paths : []
         enqueue(boot_changes) unless boot_changes.empty?
-        prepare_startup_reconciliation(paths)
+        prepare_startup_reconciliation(paths, rebuild: scan.rebuild?)
         paths |= boot_changes
         if paths.empty?
+          return extract(ChangeSet.new(paths: [], root: @root)) if @startup_full
           return reconcile_deletions if stale_deletions?
 
           return @logger.info('[Woods] watch: index is current at startup')
@@ -641,7 +640,8 @@ module Woods
         drain
       end
 
-      def prepare_startup_reconciliation(paths)
+      def prepare_startup_reconciliation(paths, rebuild: false)
+        @startup_full = rebuild
         return unless @boot_snapshot
 
         restart_paths = paths.select do |path|
@@ -650,7 +650,7 @@ module Woods
         end
         @pending_mutex.synchronize do
           @startup_paths.merge(restart_paths)
-          @startup_full = restart_paths.any?
+          @startup_full ||= restart_paths.any?
         end
       end
 
@@ -721,38 +721,11 @@ module Woods
       end
 
       def uncovered_paths
-        watermark = index_watermark
-        TreeScan.files(root: @root, ignored: ignored_directories)
-                .select { |path| uncovered?(path, watermark) }
+        catch_up_scan.paths
       end
 
-      def uncovered?(path, watermark)
-        return true if watermark.nil?
-
-        File.mtime(path).to_f > watermark
-      rescue SystemCallError
-        false
-      end
-
-      # When this index was last known good, or nil when there is no usable
-      # index — which the storm threshold turns into one full extraction.
-      #
-      # A dangling payload pointer counts as "no index" (INF-10). The marker
-      # can outlive the directory it names (a partial restore from a CI
-      # artifact, an external cleanup targeting the large directories), and
-      # {Generation#payload_dir} deliberately degrades to the index root for
-      # *readers* — so a gutted index would otherwise read "current at
-      # startup", publish `running`, and have every caller stand down over a
-      # directory holding no index at all. "Alive means covered" is the
-      # daemon's contract; here it would have been false.
-      #
-      # @return [Float, nil]
-      def index_watermark
-        return nil if dangling_payload_pointer?
-
-        File.mtime(@generation.path).to_f
-      rescue SystemCallError
-        nil
+      def catch_up_scan
+        CatchUp.new(root: @root, output_dir: @output_dir, ignored: ignored_directories)
       end
 
       # @return [Boolean] true when the marker names a payload directory that
@@ -1037,7 +1010,7 @@ module Woods
 
       def full_extraction?(change_set)
         if @startup_full
-          @logger.info('[Woods] watch: environment boot covers startup changes — full extraction')
+          @logger.info('[Woods] watch: startup coverage requires full extraction')
           return true
         end
 
