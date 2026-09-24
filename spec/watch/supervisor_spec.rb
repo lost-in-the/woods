@@ -45,6 +45,14 @@ RSpec.describe Woods::Watch::Supervisor do
     RUBY
   end
 
+  ['', " \t "].each do |blank|
+    it "accepts a blank idle TTL #{blank.inspect} before starting its child" do
+      expect do
+        described_class.new(command: [Gem.ruby], root: @root, env: { 'WOODS_WATCH_IDLE_TIMEOUT' => blank })
+      end.not_to raise_error
+    end
+  end
+
   it 'absorbs exit 75 and boots a fresh task without ending its owner' do
     launch(<<~RUBY)
       #{handshake}

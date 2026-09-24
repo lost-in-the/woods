@@ -10,29 +10,61 @@ module Woods
     # for ordinary source, so an unrecognized secret-bearing file stays protected.
     class PrivateKey
       FILE_NAME = '.source-inputs.key'
-      class Unavailable < StandardError; end
+      class Unavailable < StandardError
+        def initialize(reason, path: nil, detail: nil)
+          super(reason)
+          @path = path
+          @detail = detail
+        end
+
+        # Keep the machine-readable reason unchanged for freshness readers.
+        # @return [String] safe launcher diagnostic without key bytes
+        def diagnostic
+          "#{message}: #{@path.inspect}: #{@detail}. " \
+            'Verify the owner UID and mount permissions in the application environment; ' \
+            'use an owner-only regular 32-byte key. Woods did not repair or rotate it. ' \
+            'See docs/SOURCE_FRESHNESS.md#identity-key-recovery.'
+        end
+      end
 
       attr_reader :bytes, :identifier
 
       def initialize(output_dir:, create: false)
-        path = File.join(output_dir.to_s, FILE_NAME)
+        path = File.expand_path(File.join(output_dir.to_s, FILE_NAME))
         create_key(path) if create
-        flags = File::RDONLY | File::NONBLOCK
-        flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
-        File.open(path, flags) do |file|
-          stat = file.stat
-          raise Unavailable, 'insecure_identity_key' unless private_regular?(stat)
-
-          @bytes = file.read(33)
+        @bytes = read_key(path)
+        unless @bytes&.bytesize == 32
+          raise Unavailable.new('invalid_identity_key', path: path, detail: 'expected exactly 32 bytes')
         end
-        raise Unavailable, 'invalid_identity_key' unless @bytes&.bytesize == 32
 
         @identifier = Digest::SHA256.hexdigest(@bytes)
-      rescue SystemCallError, IOError
-        raise Unavailable, 'identity_key_unavailable'
+      rescue SystemCallError, IOError => e
+        raise Unavailable.new(
+          'identity_key_unavailable',
+          path: path,
+          detail: "cannot safely open a regular non-symlink key (#{e.class})"
+        )
       end
 
       private
+
+      # @param path [String] private identity-key path
+      # @return [String] bounded key bytes after safe descriptor validation
+      def read_key(path)
+        flags = File::RDONLY | File::NONBLOCK
+        flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
+        File.open(path, flags) do |file|
+          unless private_regular?(file.stat)
+            raise Unavailable.new(
+              'insecure_identity_key',
+              path: path,
+              detail: 'expected a regular file owned by this UID with owner-only permissions'
+            )
+          end
+
+          file.read(33)
+        end
+      end
 
       def private_regular?(stat)
         stat.file? && stat.uid == Process.uid && stat.mode.nobits?(0o077)

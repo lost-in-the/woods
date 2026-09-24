@@ -86,4 +86,42 @@ RSpec.describe Woods::SourceInputs::Launcher do
       expect(File.exist?(child.fetch('descriptor').fetch('path'))).to be(false)
     end
   end
+
+  %i[mode symlink fifo malformed].each do |kind|
+    it "refuses a #{kind} identity key with safe, actionable diagnostics" do
+      FileUtils.mkdir_p(@output)
+      path = File.join(@output, Woods::SourceInputs::PrivateKey::FILE_NAME)
+      case kind
+      when :fifo then File.mkfifo(path, 0o600)
+      when :symlink then File.symlink(@child, path)
+      else
+        File.binwrite(path, 'private-key-bytes'.ljust(kind == :mode ? 32 : 20, '!'))
+        File.chmod(kind == :mode ? 0o644 : 0o600, path)
+      end
+      previous = File.lstat(path)
+      expected = /#{Regexp.escape(path)}.*(?:owner|regular|32 bytes|symlink)/m
+
+      Timeout.timeout(2) do
+        expect { expect(run_launcher('full')).to eq(1) }.to output(expected).to_stderr
+      end
+      expect(File.exist?(@record)).to be(false)
+      expect(File.lstat(path).mode).to eq(previous.mode)
+      expect(File.lstat(path).ino).to eq(previous.ino)
+    end
+  end
+
+  it 'names the key ownership requirement without changing bytes or freshness reason codes' do
+    FileUtils.mkdir_p(@output)
+    path = File.join(@output, Woods::SourceInputs::PrivateKey::FILE_NAME)
+    bytes = 'never-print-private-key-material!'
+    File.binwrite(path, bytes)
+    File.chmod(0o600, path)
+    allow(Process).to receive(:uid).and_return(File.stat(path).uid + 1)
+
+    expect { expect(run_launcher('full')).to eq(1) }
+      .to output(/insecure_identity_key: #{Regexp.escape(path.inspect)}.*owned by this UID/).to_stderr
+    expect(File.binread(path)).to eq(bytes)
+    expect(File.stat(path).mode & 0o777).to eq(0o600)
+    expect(File.exist?(@record)).to be(false)
+  end
 end

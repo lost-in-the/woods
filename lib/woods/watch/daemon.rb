@@ -11,6 +11,7 @@ require_relative 'tree_scan'
 require_relative 'watcher'
 require_relative 'boot_snapshot'
 require_relative 'catch_up'
+require_relative 'claim_lease'
 require 'json'
 require 'set'
 require 'securerandom'
@@ -111,7 +112,7 @@ module Woods
       # daemons that both pass {#another_daemon_alive?} before either has
       # published a status record would otherwise both proceed. See
       # {#claim_startup?}.
-      CLAIM_FILENAME = 'watch_claim.json'
+      CLAIM_FILENAME = ClaimLease::CLAIM
 
       # A daemon cycle is milliseconds; a manual full extraction is seconds to
       # minutes. This bounds how long a crashed writer can block the daemon.
@@ -1161,7 +1162,31 @@ module Woods
       def claim_startup?
         return true if ENV['WOODS_IGNORE_WATCH'] == '1' && !@conservative_claims
 
+        prepare_claim_lease if @conservative_claims
+        acquire_startup_claim
+      rescue ClaimLease::Unavailable, SystemCallError => e
+        raise unless @conservative_claims
+
+        @logger.warn("[Woods] watch: managed claim unavailable: #{e.message}")
+        false
+      ensure
+        close_unclaimed_lease
+      end
+
+      def close_unclaimed_lease
+        return if @claimed
+
+        @claim_lease&.close
+      end
+
+      def prepare_claim_lease
+        FileUtils.mkdir_p(@output_dir)
+        @claim_lease = ClaimLease.new(@output_dir)
+      end
+
+      def acquire_startup_claim
         with_claim_lock do
+          @claim_lease&.acquire
           3.times do
             return true if create_claim
             return false unless reclaim_if_stale
@@ -1176,11 +1201,13 @@ module Woods
       # pauses, B deletes S and publishes its live claim, A resumes and
       # unlinks B's claim, and both return as owners. An `flock` on a
       # sidecar file makes the whole loop one critical section; the kernel
-      # releases it if the holder dies. Where the filesystem refuses the
-      # lock (some network mounts) the loop runs unserialized, as before.
-      def with_claim_lock
+      # releases it if the holder dies. Managed startup refuses unavailable
+      # locks; raw startup retains its earlier unserialized fallback.
+      def with_claim_lock(&block)
+        return @claim_lease.coordinate(&block) if @claim_lease
+
         lock = open_claim_lock
-        yield
+        block.call
       ensure
         lock&.close
       end
@@ -1216,7 +1243,7 @@ module Woods
       # race this method exists to close.
       def create_claim
         FileUtils.mkdir_p(@output_dir)
-        content = JSON.generate(pid: Process.pid, host: Status.host_identity)
+        content = JSON.generate(pid: Process.pid, host: Status.host_identity, **(@claim_lease&.fields || {}))
         tmp_path = "#{claim_path}.tmp.#{Process.pid}.#{SecureRandom.hex(4)}"
         File.write(tmp_path, content)
         begin
@@ -1276,7 +1303,7 @@ module Woods
       # @return [String, nil] the claim file's current bytes, or nil if it
       #   doesn't exist
       def claim_bytes
-        File.read(claim_path)
+        @claim_lease ? @claim_lease.snapshot : File.read(claim_path)
       rescue Errno::ENOENT
         nil
       end
@@ -1286,12 +1313,12 @@ module Woods
       #   or already-vanished claim counts as stale too, since it cannot be a
       #   live daemon's claim
       def stale_claim?
-        record = JSON.parse(File.read(claim_path))
+        record = JSON.parse(claim_bytes)
         return false if @conservative_claims && !verifiable_managed_claim?(record)
         return true unless same_claim_host?(record['host'])
 
         !claim_pid_alive?(record['pid'])
-      rescue JSON::ParserError, SystemCallError
+      rescue JSON::ParserError, SystemCallError, TypeError
         !@conservative_claims
       end
 
@@ -1347,18 +1374,25 @@ module Woods
       def release_claim
         return unless @claimed
 
-        FileUtils.rm_f(claim_path) if own_claim?
+        if @claim_lease
+          @claim_lease.coordinate { FileUtils.rm_f(claim_path) if own_claim? }
+        elsif own_claim?
+          FileUtils.rm_f(claim_path)
+        end
+      ensure
+        @claim_lease&.close
         @claimed = false
       end
 
       # @return [Boolean] whether the claim on disk still records this process
       def own_claim?
-        record = JSON.parse(File.read(claim_path))
+        record = JSON.parse(claim_bytes)
+        return record.is_a?(Hash) && record['token'] == @claim_lease.token if @claim_lease
         return true unless record.is_a?(Hash)
 
         record['pid'] == Process.pid && same_claim_host?(record['host'])
-      rescue JSON::ParserError, SystemCallError
-        true
+      rescue JSON::ParserError, SystemCallError, TypeError, ClaimLease::Unavailable
+        !@claim_lease
       end
 
       def claim_path

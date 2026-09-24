@@ -249,6 +249,12 @@ Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI
 
 `woods:check:moved_messages` opens two retained generations through `Woods::PublishedIndex` (block form, so both readers' retention locks always release) and reports every public method name that looks like it moved from one unit to another while a `:test_coverage` edge did not follow.
 
+The task does not boot Rails. Pass `WOODS_OUTPUT` for a custom index; an explicit
+relative value is relative to the command's working directory. Without it, the
+unreleased #591 fix selects `tmp/woods` beside the loaded Rakefile, including
+`rake -f /app/Rakefile` from another directory. Earlier builds used the invoking
+directory instead; pass an absolute output path on those builds.
+
 Each row is a **candidate move into a unit without mapped tests**, never a proven coverage loss: the check matches on method name and kind alone, so two unrelated methods that happen to share both look identical to a real move. Reported only when the source unit was covered before and the destination is not covered after; a method that was never covered is not a regression this check owns. `WOODS_CHECK_STRICT=1` exits 1 on any finding, but the check stays heuristic either way, strict mode changes the exit code, not the confidence of a row.
 
 ```bash

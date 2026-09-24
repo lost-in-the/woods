@@ -867,6 +867,11 @@ in its finalized development environment. See [startup and installation](WATCH_D
 for the generator's explicit modes, portable receipt, update/removal, and the
 separate supervision status. Raw task settings above remain compatible.
 
+**Unreleased after 2.0.0 (#591):** blank/whitespace-only idle timeouts count as
+unset consistently. `woods-watch --recover-claim INDEX --claim-token TOKEN`
+provides explicit recovery only for a matching abandoned managed lifetime lease;
+see [ownership recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
+
 ### Opt-in plugin refresh hooks
 
 These settings control the plugin shell worker. Check installed
@@ -894,6 +899,11 @@ and checks publication failure before acknowledging work. Use ordinary extractio
 tasks for manual refreshes; hook transport is not a general shell execution API.
 
 ### Extraction rake tasks
+
+The separate `woods-extract` launcher captures before Rails configuration runs:
+custom `output_dir` applications must supply matching `--output` or `WOODS_OUTPUT`.
+Its implicit default is `tmp/woods`; the unreleased #591 guard refuses a finalized
+configuration mismatch before publication. See [launcher output selection](SOURCE_FRESHNESS.md#establish-a-fresh-baseline).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
