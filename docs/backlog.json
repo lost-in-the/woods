@@ -3118,7 +3118,7 @@
       "lib/woods/mcp/server.rb"
     ],
     "description": "Issue #584: Audit R48/R49: a whole-type extractor exception before durable mutation can be logged and swallowed without marking the consumer failed. The optional pipeline_extract tool can mark a task complete without checking raise_on_publication_failure!. Preserve the previous published generation, record failed consumers, propagate non-success through full/incremental/refresh and the embedded pipeline tool, and retain post-mutation abort protections. Regress successful and failing sibling consumers, full/incremental tool execution, background task state and the unchanged publication pointer.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-229",
@@ -3131,7 +3131,7 @@
       "lib/woods/source_inputs/manifest.rb"
     ],
     "description": "Issue #585: Audit R51: startup catch-up compares source mtimes with publication-marker time. In a no-reference index an edit made after source capture but before publication can be missed; current reference publication guards already prevent the common reference-bearing case. Use an evidenced conservative watermark or recorded dirty paths without weakening source verification. Add synchronized full-publication/startup regressions for no-reference and reference-bearing indexes, unchanged files and the final-scan/publication window; avoid timing sleeps and optimistic freshness.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-230",
@@ -3145,7 +3145,7 @@
       "lib/woods/builder.rb"
     ],
     "description": "Issue #586: Audit R29/R57: stored observed width can become an unsupported dimensions request for a fixed-width embedding model, and embedding cache identity depends only on the model label despite configurable dimensions/provider endpoints. Separate observed width from requested reduction; fingerprint relevant provider configuration without network probes on cache hits. Preserve width mismatch refusal and atomic embedding failure. Offline regressions must cover restored fixed-width models, explicit supported reductions, same label/different widths or endpoints, cache hits during provider outage and malformed cached vectors. This is separate from retrieval-context cache isolation.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-231",
@@ -3174,7 +3174,7 @@
       "lib/woods/extractors/serializer_extractor.rb"
     ],
     "description": "Issue #588: R20/R23/R24: reconcile runtime-discovered nested jobs and serializers, escalate schema/restart-trigger inputs before relevance filtering, refresh BehavioralProfile through its real extractor, and withdraw obsolete flow artifacts when precomputation is disabled. Require booted full/incremental/refresh payload and graph equivalence, including failed or partial discovery controls. Keep this as a tracking issue with separately reviewable fixes.",
-    "status": "ready"
+    "status": "in-progress"
   },
   {
     "id": "B-233",
@@ -3188,7 +3188,7 @@
       "lib/woods/hooks"
     ],
     "description": "Issue #589: R36/R38/R75-R79: enforce writer/reader manifest size compatibility; classify positively identified installed gems consistently; expose/bind the source root for copied indexes; keep scanning accessible paths after a bounded per-entry error; distinguish missing comparison baselines and partial scans from actual additions/deletions; give reason-specific quick-scan recovery advice. Preserve unknown status and reference publication refusal when evidence is incomplete. Split these independent regressions into reviewable changes. Root mapping must retain legitimate container/remote-index use.",
-    "status": "ready"
+    "status": "in-progress"
   },
   {
     "id": "B-234",
@@ -3201,7 +3201,7 @@
       "lib/woods/watch/installation"
     ],
     "description": "Issue #590: R32/R33/R34/R61: agent preflight loses BUNDLE_PATH and related intended application settings; committed watcher receipts compare nonportable exact permission modes; documented temporary plan paths can cross a macOS symlink; project-scoped identity unnecessarily includes user config directories. Preserve content/executable ownership and preview/apply race guards. Test real private bundles, umasks, simulated symlinked temp parent, and two user homes against the same project.",
-    "status": "ready"
+    "status": "in-progress"
   },
   {
     "id": "B-235",
@@ -3228,7 +3228,7 @@
       "plugin/hooks/woods-session-start.sh"
     ],
     "description": "Issue #592: R84: the real no-jq refresh hook exits successfully without queuing a Unicode edit under LC_ALL=C because later Ruby JSON snippets use default input encoding. Decode UTF-8 explicitly throughout fallback paths and sanitize errors. Regress actual hook invocation with jq absent, non-ASCII filename/root/output, exact queued paths, valid JSON and no raw backtrace. Update plugin compatibility/version guidance.",
-    "status": "ready"
+    "status": "in-progress"
   },
   {
     "id": "B-237",
@@ -3325,5 +3325,21 @@
     ],
     "description": "Issue #483 follow-up, audit R47: event publisher/subscriber paths and component sidecars retain absolute application roots in metadata or generated annotations, making equivalent checkouts hash differently. Normalize known application-owned paths before source/hash serialization while retaining deliberate external-path semantics. Compare real two-root fixtures without sorting arrays or scrubbing evidence beyond documented volatile fields.",
     "status": "ready"
+  },
+  {
+    "id": "B-244",
+    "title": "Preserve injected embedding provider endpoint and context settings in snapshots",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "retrieval",
+    "files": [
+      "lib/woods/resolved_config.rb",
+      "lib/woods/mcp/config_resolver.rb"
+    ],
+    "description": "Issue #599: an injected Ollama provider with explicit host and num_ctx but empty embedding_options snapshots its model/width yet drops endpoint/context. Restore silently selects localhost and the model default. Reproduced before and after #586 without provider calls. Preserve effective non-secret settings through supported wrappers or report a non-restorable provider explicitly; never persist API keys or endpoint credentials. Cover configured/injected/raw/wrapped snapshot round trips and keep request-vs-observed width semantics.",
+    "status": "ready",
+    "depends_on": [
+      "B-230"
+    ]
   }
 ]

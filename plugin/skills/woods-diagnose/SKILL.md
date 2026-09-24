@@ -96,6 +96,17 @@ Do not infer source freshness from a recent generation marker or remove a
 foreign watch claim. See the installed version's
 [startup catch-up guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md).
 
+### Extraction fails while a sibling extractor succeeds
+
+The #584 publication-reporting repair is unreleased after Woods `2.0.0`.
+Supporting revisions refuse the whole publication after a consumer constructor
+or extraction failure and keep the previous generation active. Fix the logged
+cause and retry the complete batch; do not treat a sibling's success as a
+completed extraction. For custom/embedded pipeline tools, acknowledgement only
+means the background task started: inspect its final task state. Those operator
+tools are not registered by the packaged default Index Server. See
+[extraction failures](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md).
+
 ### A cleaned index directory still exists
 
 In Woods `2.0.0`, `woods:clean` retains the output directory and
