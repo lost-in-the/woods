@@ -183,6 +183,15 @@ it. The `_index.json` manifest under `output_dir` is the durable
 metadata for the index MCP server, so this is a reasonable default
 for hosts that don't bundle `sqlite3`.
 
+### Retrieval context cache isolation
+
+**Unreleased maintenance correction after 1.6.3:** each `CachedRetriever` owns a
+private context namespace, even when instances share a backend. Reload rotates
+that instance's namespace; an older in-flight result cannot become a new cache
+hit. Existing requests may finish using their original corpus. Old entries
+expire through the backend's normal TTL or eviction policy. Context entries are
+not reused across process restarts; embedding-vector caching is unchanged.
+
 ## Deployment Shapes
 
 Woods supports three deployment shapes — pick the preset that matches yours.

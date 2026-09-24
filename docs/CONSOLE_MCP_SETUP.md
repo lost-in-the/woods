@@ -189,6 +189,13 @@ cross-origin (for example `https://console.example.com` and
 allowlisting an origin does not authenticate a request. See
 [HTTP origin and Host checks](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
 
+**Unreleased maintenance correction after 1.6.3:** every enabled middleware
+mount checks the current bearer token and allowed origins before constructing
+its transport. This includes manual mounts earlier in the Rails middleware
+stack. A missing or short token refuses HTTP access; disabled mounts retain
+their existing 410 response. Check the loaded revision when validating a Git
+checkout, since its version can still name the previous release.
+
 ### MCP Client Configuration
 
 **Claude Code** (streamable-http transport):
@@ -543,6 +550,15 @@ Redaction is shape-aware and covers every tool that returns row data:
 Redaction is defense-in-depth — prefer not storing plaintext secrets in database columns in the first place — but it keeps configured credential columns out of the agent's transcript when `console_sample`, `console_find`, or the Tier 4 read tools return matching rows.
 
 ### `console_redacted_key_values`
+
+**Unreleased maintenance correction after 1.6.3:** SQL and structured selections
+must preserve protected column identity. Aliases, aggregates, EAV values without
+the matching key from the same source, and ambiguous multi-source EAV reads can
+be refused. Selecting explicit, unaliased scalar columns is the recovery path.
+PostgreSQL whole-row projections and unknown result types refuse while redaction
+is configured. Protected single-column arrays and hashes are masked as complete
+cells; overlapping credential matches are masked before response rewriting.
+Legacy tool availability and SQL function policy remain unchanged.
 
 Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table — e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
 
