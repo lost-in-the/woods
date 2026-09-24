@@ -54,7 +54,24 @@ module Woods
       def app_source?(path, app_root)
         return false unless path
 
-        path.start_with?(app_root) && !path.include?('/vendor/') && !path.include?('/node_modules/')
+        prefix = File.expand_path(app_root.to_s).delete_suffix(File::SEPARATOR) + File::SEPARATOR
+        absolute = File.expand_path(path.to_s)
+        return false unless absolute.start_with?(prefix)
+
+        relative = absolute.delete_prefix(prefix)
+        relative.split(File::SEPARATOR).none? { |part| %w[vendor node_modules].include?(part) }
+      end
+
+      # Whether a resolved source belongs to this application and is a file.
+      # Framework consumers may still use resolve_source_location's external
+      # fallback; app-only component families apply this narrower final gate.
+      #
+      # @param path [String, nil] resolved source path
+      # @return [Boolean]
+      def app_source_file?(path)
+        return false unless path
+
+        app_source?(path, Rails.root.to_s) && File.file?(path)
       end
 
       # Resolve the source file for a class using reliable introspection,

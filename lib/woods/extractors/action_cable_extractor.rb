@@ -56,6 +56,8 @@ module Woods
       # @param klass [Class] A channel subclass
       # @return [ExtractedUnit, nil]
       def extract_channel(klass)
+        return nil unless app_channel?(klass)
+
         name = klass.name
         file_path = source_file_for(klass, name)
         source = read_source(file_path)
@@ -91,9 +93,12 @@ module Woods
       #
       # @return [Array<Class>]
       def channel_descendants
-        ActionCable::Channel::Base.descendants.reject do |klass|
-          klass.name.nil? || klass.name == 'ApplicationCable::Channel'
-        end
+        ActionCable::Channel::Base.descendants.select { |klass| app_channel?(klass) }
+      end
+
+      def app_channel?(klass)
+        action_cable_available? && klass.name && klass.name != 'ApplicationCable::Channel' &&
+          klass < ActionCable::Channel::Base && app_source_file?(source_file_for(klass, klass.name))
       end
 
       # Locate the source file for a channel class.

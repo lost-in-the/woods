@@ -67,9 +67,7 @@ module Woods
         # "addition", extract it, get nil, and dirty the dependents pass for
         # nothing. Anonymous classes go too: `extract_component` rejects a nil
         # name for the same reason.
-        @component_base.descendants.reject do |component|
-          component.name.nil? || preview_class?(component)
-        end
+        @component_base.descendants.select { |component| app_component?(component) }
       end
 
       # Extract a single ViewComponent component
@@ -77,8 +75,7 @@ module Woods
       # @param component [Class] The component class
       # @return [ExtractedUnit, nil] The extracted unit, or nil on failure
       def extract_component(component)
-        return nil if component.name.nil?
-        return nil if preview_class?(component)
+        return nil unless app_component?(component)
 
         unit = ExtractedUnit.new(
           type: :view_component,
@@ -102,6 +99,11 @@ module Woods
       end
 
       private
+
+      def app_component?(component)
+        @component_base && component.name && component < @component_base &&
+          !preview_class?(component) && app_source_file?(source_file_for(component))
+      end
 
       # Find the ViewComponent::Base class if the gem is loaded
       #
