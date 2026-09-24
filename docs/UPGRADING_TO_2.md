@@ -30,8 +30,9 @@ After this runbook you will have:
 | `mcp >= 1.2, < 2.0` and protocol negotiation | Old lockfiles or manually pinned protocol versions can fail | Bundle update Woods/MCP; normally leave protocol version unset |
 | Index MCP surface aligned to executable wiring | Agents may ask for tools that only exist as conditional schemas | Update agent instructions to the 14-tool default |
 | Console surface tightened to 9 or 11 tools | Agents may ask for Tier 2/3 or eval schemas that do not execute | Use registered default/read tools only |
-| Missing-token behavior changed outside production | An enabled Console HTTP endpoint now stays mounted but returns 401 without a valid token; production still refuses to boot without one | Preserve or configure a secret token of at least 32 characters; send it only to the HTTP transport |
+| Console HTTP validation uses finalized application configuration | Flags set in a 1.x initializer could miss early boot validation; v2 refuses a missing token in production and a configured short token in any environment | Configure a secret token of at least 32 characters, or explicitly disable HTTP for stdio-only use |
 | Durable-store reconciliation and a 30% purge guard | The first v2 embed may refuse a legitimate rename-heavy deletion | Back up, inspect the deletion, then use the one-run override only if correct |
+| Explicit `config.embedding_model` selects the embedding model | An old assignment that embedding ignored can now change the produced vectors; `embedding_options[:model]` takes precedence | Verify the effective model and rebuild embeddings when it changes, even if the dimension stays the same |
 | Embedding dimension preflight | A previously tolerated model/store mismatch now fails before writing | Rebuild into a store with the configured dimension |
 | Export reconciliation guards | Obsidian or Unblocked can refuse a rename-heavy stale-document sweep | Back up and use exporter-specific override only after review |
 | Notion column pages are grouped by physical table | Models sharing a table (STI, a shared `self.table_name`) previously rewrote each other's column pages on every run | Re-sync once after re-extraction; the shared pages settle and the churn stops |
@@ -41,6 +42,8 @@ After this runbook you will have:
 | `woods:embed`, `woods:embed_incremental`, and `woods:notion_sync` exit 1 on reported errors | CI jobs that were green while every unit or page failed now fail | Read the printed errors, fix the cause, re-run; completed work is durable |
 | The Index MCP `reload` tool needs write access to the index directory | A read-only index mount can serve structural reads but cannot reload in place | Grant write access, or restart the MCP process after publishing |
 | `config.extractors` and `config.add_gem` warn as unimplemented | Old config may imply filtering that never occurred | Remove or comment the settings; do not rely on them |
+| Legacy `config.log_level=` removed | The old no-op assignment raises `NoMethodError` | Remove it; configure the application logger instead |
+| Legacy unsafe-eval opt-in removed | `WOODS_CONSOLE_UNSAFE_EVAL=true`, an enabled `console_unsafe_eval_enabled`, or legacy confirmation/audit options refuse Console server construction | Remove these settings; use supported read tools or the application’s normal console for deliberate code execution |
 | New watch, refresh, and evaluation tasks | New operational options become available | Optional; no migration action |
 
 ## Before changing the bundle
@@ -112,7 +115,13 @@ Record the current Woods version, output directory, storage preset/providers, em
 
 ### 2. Back up durable data
 
-The generated structural index can be recreated, but its location may also hold local vector dumps and exporter manifests. Copy or snapshot the complete configured output directory before cleaning it.
+The generated structural index can be recreated, but its location may also hold
+`woods.sqlite3` snapshot history, JSON `snapshots/`, local vector dumps and exporter
+manifests. Stop Woods writers/readers, including the watcher, before taking an
+offline copy or consistent filesystem snapshot of the complete output directory.
+For SQLite, use a database-aware backup or close its users before copying; a live
+main-file-only copy can omit data still in the WAL. Back up explicitly configured
+stores outside the output directory separately.
 
 Back up external vector stores separately:
 
@@ -162,26 +171,67 @@ Pay particular attention to:
 - the configured embedding model/dimension;
 - `console_mcp_enabled`, `console_mcp_http_enabled`, the HTTP `console_mcp_token` secret source, allowed origins, path, and embedded read-tool flags;
 - snapshot, session, Notion, Obsidian, and Unblocked settings;
-- old `config.extractors` or `config.add_gem` calls, which are not implemented selectors.
+- old `config.extractors` or `config.add_gem` calls, which are not implemented selectors;
+- removed `config.log_level=` and unsafe-eval settings;
+- early middleware configuration: a custom `console_mcp_path` and session tracer
+  setup belong in `config/application.rb`, before Railtie initializers run. See
+  [Console configuration](CONSOLE_MCP_SETUP.md#configuration-options) and
+  [session tracer options](CONFIGURATION_REFERENCE.md#session-tracer-options).
 
 Review existing Woods migrations and tables before accepting any newly generated migration. Do not create duplicate `woods_units`, `woods_edges`, or `woods_embeddings` tables.
 
 ### 3. Clean and re-extract
 
-After the backup is verified:
+After the backup is verified and Woods processes are stopped:
 
 ```bash
 bin/rails woods:clean
+```
+
+**Cleaning deletes durable history inside this directory too:** `woods.sqlite3`,
+JSON `snapshots/`, vector dumps and export manifests. Before running extraction,
+choose how to retain history:
+
+- Keep the complete backup as a separate historical/rollback copy and start a new
+  v2 history; or
+- Restore only the closed, consistent `woods.sqlite3` backup and/or `snapshots/`
+  directory into the cleaned output. Woods migrates the snapshot database on
+  its next use. Do not restore the old structural payload, `generation.json`,
+  vector dumps or export manifests into this new baseline.
+
+Restoring JSON files does not import them into SQLite. If SQLite has become
+available since JSON capture, extraction and packaged MCP prefer it; keep an
+explicit JSON historical reader for the restored files. `WOODS_SNAPSHOTS=true`
+enables snapshot construction without forcing that backend. See
+[snapshot store selection](MCP_SERVERS.md#conditional-index-capabilities).
+
+Then run:
+
+```bash
 bin/rails woods:extract
 bin/rails woods:validate
 bin/rails woods:stats
 ```
 
+If you carried history forward, verify an old snapshot remains readable before
+restarting writers. A full capture at an existing Git SHA replaces that SHA's
+snapshot, and configured retention can prune old entries. Keep the untouched
+backup through the rollback window.
+
 Included in Woods `2.0.0`: `woods:clean` removes index artifacts but keeps
 the output directory and its hidden extraction guard. This stable guard lets
 concurrent writers coordinate safely; its presence does not mean an index remains.
 
-The clean extract is required for corrected identifier shapes. Do not use an incremental run as the first v2 extraction: after `woods:clean` there is no baseline, and v2 `woods:incremental` refuses that state rather than publishing a near-empty index as the application's complete truth.
+The clean extract is required for corrected identifier shapes. Do not use
+incremental extraction, targeted refresh or an embedded pipeline's incremental
+operation as the first v2 run. A flat index being readable, a successful
+`woods:validate`, or a newer manifest `woods_version` does not certify that all
+retained v1 units were migrated. After cleaning there is no structural baseline,
+and incremental extraction refuses that state. Supporting source-reference
+writers also refuse incompatible reference caches; that is not a universal
+major-version migration check. CI caches must distinguish Woods major versions
+and restore the exact source baseline described in the
+[incremental CI recipe](INCREMENTAL_EXTRACTION.md#github-actions-with-an-exact-baseline).
 
 An interrupted extraction leaves readers on the last complete generation because Woods publishes `generation.json` only after the payload is complete. Re-run the task; do not delete a partial directory speculatively. A run that completes its payload but cannot publish the marker now fails loudly instead of reporting success, so treat a non-zero exit as work to redo rather than as a partial success.
 
@@ -210,7 +260,13 @@ WOODS_ALLOW_PURGE=1 bin/rails woods:embed
 
 The override permits deletion; it is not a repair command. Do not set it permanently.
 
-If Woods reports a dimension mismatch, verify the configured embedding model. Rebuild into a store created for the new dimension. Vectors cannot be converted in place.
+An explicitly assigned `config.embedding_model` now selects the model used to
+embed, unless `embedding_options[:model]` overrides it. Earlier embedding could
+ignore that assignment even though query configuration recorded it. Verify the
+effective model before the first embed. A model change requires rebuilding vectors
+even when both models have the same width. A dimension mismatch additionally
+requires a store created for the new dimension; vectors cannot be converted in
+place.
 
 An interrupted embed is safe to re-run; durable checkpoints resume or repair the missing unit.
 
@@ -284,7 +340,8 @@ names and count same-named typed variants once, matching name-based ground truth
 Older dumps remain readable; re-embed to recover variants
 that an older writer had already overwritten.
 
-SQLite migration 007 preserves snapshot rows and permits one row per
+SQLite migration 007 preserves rows **in a database that was retained or restored**;
+it cannot recover a database deleted by `woods:clean`. It permits one row per
 `(snapshot_id, identifier, unit_type)`. JSON snapshot readers accept older untyped
 records, while new records preserve both names and types. Lost historical variants
 cannot be reconstructed from old snapshots. Back up `woods.sqlite3` and the whole
@@ -331,8 +388,11 @@ Stdio does not use a bearer token. On versions supporting
 `console_mcp_http_enabled`, set it to `false` for stdio-only use without HTTP
 boot validation, while keeping the master `console_mcp_enabled` flag on.
 The HTTP flag defaults to `true` to preserve existing deployments; choosing a
-stdio client alone does not turn HTTP off. Older versions without this flag
-still require a token at production boot whenever Console is enabled.
+stdio client alone does not turn HTTP off. In some 1.x paths, flags assigned in
+`config/initializers/woods.rb` were read too early to trigger boot validation.
+v2 validates the settled configuration after initializers: the same application
+can now fail boot until its token is corrected or HTTP is explicitly disabled.
+Do not rely on the earlier validation timing as a supported configuration.
 
 Follow [Console MCP setup](CONSOLE_MCP_SETUP.md) for transport-specific setup
 and the [Configuration reference](CONFIGURATION_REFERENCE.md) for defaults.
@@ -351,6 +411,9 @@ Complete every applicable check:
 - [ ] `search`, `lookup`, and `dependents` work with v2 identifiers.
 - [ ] Semantic retrieval works after re-embedding, if enabled.
 - [ ] Console exposes only the authorized 9/11 tools, if enabled.
+- [ ] Legacy `config.log_level=` and unsafe-eval settings were removed.
+- [ ] Custom Console path and session tracing settings are configured before Railtie initialization.
+- [ ] Retained snapshot history is readable, and its untouched backup remains available.
 - [ ] An enabled Console reads a token of at least 32 characters from a secret source; its value was not printed or committed.
 - [ ] Console HTTP rejects a request without the bearer token with 401 and accepts the configured client, if HTTP is used.
 - [ ] Console stdio starts through the application bundle, if stdio is used.

@@ -578,21 +578,34 @@ there is no full population count to publish. Both caps must be a positive Integ
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `session_tracer_enabled` | Boolean | `false` | Enable session tracing middleware |
+| `session_tracer_enabled` | Boolean | `false` | Enable session tracing middleware; set with its store in `config/application.rb` before Railtie initialization |
 | `session_tracer_allow_production` | Boolean | `false` | Explicitly allow session tracing in `Rails.env.production?`. Without this opt-in, the Railtie warns and leaves the tracer disabled even when `session_tracer_enabled` is true. Review trace contents, retention, and access controls before enabling it. |
 | `session_store` | Object | `nil` | Store backend: `FileStore`, `RedisStore`, or `SolidCacheStore` |
 | `session_id_proc` | Proc | `nil` | Custom proc to extract session ID from requests |
 | `session_exclude_paths` | Array&lt;String&gt; | `[]` | Path patterns to exclude from tracing |
 
-```ruby
-require 'woods/session_tracer/file_store' # the stores are not autoloaded
+Configure the complete tracer setup in `config/application.rb`, after Woods is
+required and before Rails initialization. A `config/initializers/woods.rb`
+assignment is too late to mount this middleware; Woods warns and tracing stays
+disabled. Restart the server after changing it.
 
-config.session_tracer_enabled = true
-config.session_store = Woods::SessionTracer::FileStore.new(
-  base_dir: Rails.root.join('tmp/session_traces')
-)
-config.session_exclude_paths = ['/health', '/metrics', '/assets']
+```ruby
+# config/application.rb, after Bundler.require(*Rails.groups)
+require 'woods/session_tracer/file_store'
+
+Woods.configure do |config|
+  config.session_tracer_enabled = true
+  config.session_store = Woods::SessionTracer::FileStore.new(
+    base_dir: File.expand_path('../tmp/session_traces', __dir__)
+  )
+  config.session_exclude_paths = ['/health', '/metrics', '/assets']
+end
 ```
+
+The Rails middleware records traces. Reading them with `session_trace` additionally
+requires a custom Index Server process configured with the same store; the
+packaged Index executable does not load application initializers. See
+[conditional capabilities](MCP_SERVERS.md#conditional-index-capabilities).
 
 ### File session retention
 
@@ -765,7 +778,7 @@ deployment guide including defense layers.
 | `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
-| `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
+| `console_mcp_path` | String | `/mcp/console` | URL path captured when Rack middleware mounts. Set a custom path in `config/application.rb` before Railtie initialization, then restart. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
 | `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses, and which are refused as aggregate, scope, find, and order inputs. |

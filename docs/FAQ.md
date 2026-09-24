@@ -449,7 +449,7 @@ Enable them in your initializer:
 config.enable_snapshots = true
 ```
 
-Snapshots prefer their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database. Extraction falls back to JSON files when the `sqlite3` gem is unavailable; other SQLite open/migration failures are reported and do not capture a snapshot. `Woods::Db::Migrator` runs the internal SQLite migrations automatically during extraction and MCP boot; `bundle exec rails db:migrate` does not touch this store and no manual migration step is needed. The packaged MCP server discovers an existing `woods.sqlite3` automatically. When extraction used the JSON fallback, set `WOODS_SNAPSHOTS=true` on the server so it wires `list_snapshots`, `snapshot_diff`, `unit_history`, and `snapshot_detail`.
+Snapshots prefer their own SQLite database (`woods.sqlite3` in the output directory), separate from your Rails app's database. Extraction falls back to JSON files when the `sqlite3` gem is unavailable; other SQLite open/migration failures are reported and do not capture a snapshot. `Woods::Db::Migrator` runs the internal SQLite migrations automatically during extraction and MCP boot; `bundle exec rails db:migrate` does not touch this store and no manual migration step is needed. The packaged MCP server discovers an existing `woods.sqlite3` automatically. `WOODS_SNAPSHOTS=true` enables snapshot tools but still prefers SQLite; it does not force the JSON store or import its history. If SQLite became available after JSON capture, use an explicitly configured JSON reader for that history. See [snapshot store selection](MCP_SERVERS.md#conditional-index-capabilities).
 
 ---
 
@@ -457,7 +457,11 @@ Snapshots prefer their own SQLite database (`woods.sqlite3` in the output direct
 
 ### What does the session tracer do?
 
-The session tracer is middleware that records which Rails actions are invoked during a browser session, assembles the relevant extracted units, and makes that context available via the `session_trace` MCP tool. It is useful for giving an AI tool accurate context about what code path was active during a specific user interaction.
+The session tracer records which Rails actions run during a browser session.
+A custom/embedded Index Server configured with that store can expose the traces
+through `session_trace`. The packaged Index executable does not load Rails
+initializers, so enabling the application middleware alone does not add this tool.
+See [conditional capabilities](MCP_SERVERS.md#conditional-index-capabilities).
 
 Session tracing is disabled by default and requires an explicit `session_store`.
 Follow the [canonical configuration example](CONFIGURATION_REFERENCE.md#session-tracer-options)

@@ -171,7 +171,13 @@ steps:
 
 ### MCP Server
 
-If using the MCP Index Server, the `notion_sync` tool is available:
+The packaged Index Server does not load Rails initializers and does not register
+`notion_sync` merely because the application has Notion configured. Use
+`bin/rails woods:notion_sync` in the Rails application for the standard workflow.
+
+A custom/embedded Index Server can register the tool when the token and database
+IDs are configured in that server process. Confirm it appears in `tools/list`
+before calling it:
 
 ```json
 {
