@@ -487,6 +487,7 @@ module Woods
         @vectors_changed = false
         @empty_units = {}
         @prepared_texts = {}
+        @prepared_chunks = {}
         @prepared_inputs = {}
         @checkpoint_inputs = {}
         @unknown_reconciliation_warned = false
@@ -671,8 +672,10 @@ module Woods
         return unless @metadata_store
 
         id = storage_id(unit_data)
-        @metadata_changed ||= @persisted_metadata && @persisted_metadata.find(id) != unit_data
-        @metadata_store.store(id, unit_data)
+        chunks = @prepared_chunks[id]
+        data = chunks ? unit_data.merge('embedding_chunks' => JSON.parse(JSON.generate(chunks))) : unit_data
+        @metadata_changed ||= @persisted_metadata && @persisted_metadata.find(id) != data
+        @metadata_store.store(id, data)
       end
 
       # Compare with the promoted artifact, not a fresh metadata store or the
@@ -708,7 +711,8 @@ module Woods
         texts.each_with_index do |text, idx|
           embed_id = texts.length > 1 ? "#{identifier}#chunk_#{idx}" : identifier
           items << { id: embed_id, text: text, unit_data: unit_data,
-                     source_hash: unit_data['source_hash'], identifier: identifier }
+                     source_hash: unit_data['source_hash'], identifier: identifier,
+                     chunk_metadata: @prepared_chunks[identifier]&.[](idx) }
         end
       end
 
@@ -771,10 +775,11 @@ module Woods
         "model=#{input_budget.model.to_s[0, 100].inspect} counting=#{input_budget.method} limit=#{input_budget.limit}"
       end
 
-      def prepare_texts(unit_data) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def prepare_texts(unit_data) # rubocop:disable Metrics/CyclomaticComplexity
         unit = build_unit(unit_data)
         return [] if unit.chunks.empty? && unit.source_code.to_s.strip.empty?
 
+        Chunking::ContributorChunks.ensure!(unit)
         apply_chunking(unit) if @chunker && unit.chunks.empty? && needs_chunking?(unit)
         # Extraction may have emitted chunks larger than the provider's
         # budget (rails_source in particular). Enforce the ceiling on
@@ -784,7 +789,30 @@ module Woods
         # Drop empty/whitespace-only texts — embedding providers reject
         # them with 400 and retrying never succeeds. Unit is effectively
         # skipped when every text is empty (zero-source unit).
-        texts.reject { |t| t.nil? || t.strip.empty? || content_portion_empty?(t, unit) }
+        select_prepared_texts(unit_data, unit, texts)
+      end
+
+      def select_prepared_texts(unit_data, unit, texts)
+        selected = texts.each_index.reject do |index|
+          text = texts[index]
+          text.nil? || text.strip.empty? || content_portion_empty?(text, unit)
+        end
+        if SourceContributors.multiple?(unit)
+          @prepared_chunks[storage_id(unit_data)] = selected.map do |index|
+            prepared_chunk_metadata(unit, texts, index)
+          end
+        end
+        selected.map { |index| texts[index] }
+      end
+
+      def prepared_chunk_metadata(unit, texts, index)
+        return {} unless texts.size == unit.chunks.size
+
+        chunk = unit.chunks.fetch(index)
+        content = chunk.fetch(:content).to_s
+        return {} if content.empty? || !texts[index].to_s.end_with?(content)
+
+        chunk.fetch(:metadata, {})
       end
 
       def prepare_unit_texts(unit)
@@ -853,6 +881,7 @@ module Woods
                                  file_path: data['file_path'])
         unit.namespace = data['namespace']
         unit.source_code = data['source_code']
+        unit.metadata = data['metadata'] || {}
         unit.dependencies = data['dependencies'] || []
         unit.chunks = (data['chunks'] || []).map { |c| c.transform_keys(&:to_sym) }
         unit
@@ -906,8 +935,7 @@ module Woods
       def store_vectors(items, vectors, checkpoint, stats)
         entries = items.each_with_index.map do |item, idx|
           { id: item[:id], vector: vectors[idx],
-            metadata: { type: item[:unit_data]['type'], identifier: item[:unit_data]['identifier'],
-                        file_path: item[:unit_data]['file_path'] } }
+            metadata: vector_metadata(item) }
         end
 
         @vector_store.store_batch(entries)
@@ -919,6 +947,12 @@ module Woods
           @checkpoint_inputs[item[:identifier]] = @prepared_inputs.fetch(item[:identifier])
           stats[:processed] += 1
         end
+      end
+
+      def vector_metadata(item)
+        data = item.fetch(:unit_data)
+        { type: data['type'], identifier: data['identifier'], file_path: data['file_path'] }
+          .merge(Chunking::ContributorChunks.vector_metadata(data, item[:chunk_metadata]))
       end
 
       # Suffix {#collect_embed_items} appends when a unit is split across

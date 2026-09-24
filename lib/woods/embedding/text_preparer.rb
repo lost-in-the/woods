@@ -2,6 +2,7 @@
 
 require_relative '../token_utils'
 require_relative 'input_budget'
+require_relative '../chunking/contributor_chunks'
 
 module Woods
   module Embedding
@@ -50,7 +51,7 @@ module Woods
       # @param unit [Woods::ExtractedUnit] the unit to prepare
       # @return [String] context-prefixed text ready for embedding
       def prepare(unit, budget: @input_budget)
-        prefix = build_prefix(unit)
+        prefix = build_prefix(unit, unit.chunks.first)
         content = select_content(unit)
         text = "#{prefix}\n#{content}"
         budget.validate!(text)
@@ -65,11 +66,11 @@ module Woods
       # @param unit [Woods::ExtractedUnit] the unit to prepare
       # @return [Array<String>] array of context-prefixed texts
       def prepare_chunks(unit, budget: @input_budget)
+        Chunking::ContributorChunks.ensure!(unit)
         return [prepare(unit, budget: budget)] unless unit.chunks&.any?
 
-        prefix = build_prefix(unit)
         unit.chunks.map do |chunk|
-          text = "#{prefix}\n#{chunk[:content]}"
+          text = "#{build_prefix(unit, chunk)}\n#{chunk[:content]}"
           budget.validate!(text)
         end
       end
@@ -78,19 +79,22 @@ module Woods
       # Existing chunk attributes survive; embedding_slice records byte offsets
       # relative to the original chunk for downstream physical-source attribution.
       def prepare_for_embedding(unit, budget: @input_budget)
-        prefix = "#{build_prefix(unit)}\n"
-        unless budget.fits?(prefix)
-          raise InputLimitError, "Embedding prefix exceeds input limit (#{budget.method}: #{budget.count(prefix)})"
-        end
-
+        Chunking::ContributorChunks.ensure!(unit)
         originals = unit.chunks.any? ? unit.chunks : [{ content: unit.source_code || '', chunk_type: :whole }]
-        fitted = originals.flat_map { |chunk| fit_chunk(chunk, prefix, budget) }
+        fitted = originals.flat_map do |chunk|
+          prefix = "#{build_prefix(unit, chunk)}\n"
+          unless budget.fits?(prefix)
+            raise InputLimitError, "Embedding prefix exceeds input limit (#{budget.method}: #{budget.count(prefix)})"
+          end
+
+          fit_chunk(chunk, prefix, budget)
+        end
         unit.chunks = fitted if unit.chunks.any? || fitted.size > 1
         prepare_chunks(unit, budget: budget)
       end
 
       def preparation_identity
-        { 'class' => self.class.name, 'version' => 1, 'budget' => @input_budget.identity }
+        { 'class' => self.class.name, 'version' => 2, 'budget' => @input_budget.identity }
       end
 
       private
@@ -99,11 +103,14 @@ module Woods
         content = chunk[:content].to_s
         return [chunk] if budget.fits?(prefix + content)
 
-        offset = chunk.dig(:embedding_slice, :start_byte) || 0
+        offset = SourceContributors.field(chunk[:embedding_slice], :start_byte) || 0
+        initial_offset = offset
         split_content(content, prefix, budget).map do |part|
           first = offset
           offset += part.bytesize
-          chunk.merge(content: part, embedding_slice: { start_byte: first, end_byte: offset })
+          metadata = Chunking::ContributorChunks.slice_metadata(chunk[:metadata], content, first - initial_offset,
+                                                                offset - initial_offset)
+          chunk.merge(content: part, metadata: metadata, embedding_slice: { start_byte: first, end_byte: offset })
         end
       end
 
@@ -121,13 +128,24 @@ module Woods
       #
       # @param unit [Woods::ExtractedUnit] the unit
       # @return [String] formatted prefix lines
-      def build_prefix(unit)
+      def build_prefix(unit, chunk = nil)
         lines = []
         lines << "[#{unit.type}] #{unit.identifier}"
         lines << "namespace: #{unit.namespace}" if unit.namespace
-        lines << "file: #{unit.file_path}" if unit.file_path
+        path = chunk&.dig(:metadata, :physical_location, :file_path)
+        if SourceContributors.multiple?(unit)
+          lines.concat(contributor_prefix(unit, path))
+        elsif unit.file_path
+          lines << "file: #{unit.file_path}"
+        end
         append_dependency_line(lines, unit.dependencies)
         lines.join("\n")
+      end
+
+      def contributor_prefix(unit, path)
+        return ["file: #{path}"] if path
+
+        ["primary file: #{unit.file_path}", "contributing files: #{SourceContributors.paths(unit).join(', ')}"]
       end
 
       # Append a formatted dependency line if dependencies exist.

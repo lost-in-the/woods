@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'chunk'
+require_relative 'contributor_chunks'
 
 module Woods
   module Chunking
@@ -219,6 +220,7 @@ module Woods
       # @return [Array<Chunk>] Ordered list of chunks
       def chunk(unit)
         return [] if unit.source_code.nil? || unit.source_code.strip.empty?
+        return enforce_char_limit(ContributorChunks.chunks(unit), unit) if SourceContributors.multiple?(unit)
         return enforce_char_limit([build_whole_chunk(unit)], unit) if unit.estimated_tokens <= @threshold
 
         enforce_char_limit(chunks_for(unit), unit)
@@ -245,7 +247,7 @@ module Woods
       end
 
       def preparation_identity
-        { 'class' => self.class.name, 'threshold' => @threshold, 'max_chars' => @max_chars,
+        { 'class' => self.class.name, 'contributors_version' => 1, 'threshold' => @threshold, 'max_chars' => @max_chars,
           'max_tokens' => @max_tokens, 'counter' => @token_counter&.class&.name }
       end
 
@@ -277,11 +279,14 @@ module Woods
         return [chunk] if content.nil? || !oversize?(content)
 
         chunk_type = chunk[:chunk_type] || :whole
-        offset = chunk.dig(:embedding_slice, :start_byte) || 0
+        offset = SourceContributors.field(chunk[:embedding_slice], :start_byte) || 0
+        initial_offset = offset
         verified_slices(content).each_with_index.map do |slice, idx|
           first = offset
           offset += slice.bytesize
-          chunk.merge(content: slice, chunk_type: :"#{chunk_type}_part_#{idx}",
+          metadata = ContributorChunks.slice_metadata(chunk[:metadata], content, first - initial_offset,
+                                                      offset - initial_offset)
+          chunk.merge(content: slice, chunk_type: :"#{chunk_type}_part_#{idx}", metadata: metadata,
                       embedding_slice: { start_byte: first, end_byte: offset })
         end
       end
@@ -339,13 +344,16 @@ module Woods
       def split_oversize_chunk(chunk, unit)
         return [chunk] unless oversize?(chunk.content)
 
+        offset = 0
         verified_slices(chunk.content).each_with_index.map do |slice, idx|
+          first = offset
+          offset += slice.bytesize
           Chunk.new(
             content: slice,
             chunk_type: :"#{chunk.chunk_type}_part_#{idx}",
             parent_identifier: unit.identifier,
             parent_type: unit.type,
-            metadata: chunk.metadata.dup
+            metadata: ContributorChunks.slice_metadata(chunk.metadata, chunk.content, first, offset)
           )
         end
       end
