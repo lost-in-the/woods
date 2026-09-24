@@ -420,9 +420,21 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 
 ## Configuration options
 
-Set these in your Rails initializer:
+Set the request-time flags and protection settings below in your Rails initializer.
+A **custom endpoint path** must be set earlier, after Woods is required in
+`config/application.rb`, because the Railtie captures it while mounting middleware:
 
 ```ruby
+# config/application.rb, after Bundler.require(*Rails.groups)
+Woods.configure { |config| config.console_mcp_path = '/internal/woods-console' }
+```
+
+Restart after changing the path. Leaving the default `/mcp/console` requires no
+path assignment. Session tracing also needs early configuration; follow
+[session tracer options](CONFIGURATION_REFERENCE.md#session-tracer-options).
+
+```ruby
+# config/initializers/woods.rb
 Woods.configure do |config|
   # Master on/off switch for the Console MCP feature (Layer 0). Default: false.
   # Applies to every transport: stdio, launcher wrapper, and Rack.
@@ -431,9 +443,6 @@ Woods.configure do |config|
   # console path is indistinguishable from an unknown route). Set to true only
   # after configuring the layers below that match your threat model.
   config.console_mcp_enabled = true
-
-  # URL path for the Rack middleware endpoint. Default: '/mcp/console'.
-  config.console_mcp_path = '/mcp/console'
 
   # HTTP Origin + Host allow-list. Defaults to loopback only. Non-loopback
   # Rack deployments must include their public MCP host; browser clients from

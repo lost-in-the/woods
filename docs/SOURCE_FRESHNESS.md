@@ -122,8 +122,14 @@ Every consuming scope keeps its own identities. An events scan can reread a
 service file while its service unit remains untouched; refreshing events does
 not certify the retained service unit. Successful file/whole-extractor work
 updates only its scopes, including negative results and confirmed deletion.
-Unchanged scopes keep their earlier baseline. Boot inputs advance only on a full
-run. Partial runtime changes retain an explicit `runtime_consumption` uncertainty
+Unchanged scopes keep their earlier baseline. A file can therefore remain
+`drifted` after an incremental task or hook re-extracts it: its file-extractor
+scope may be current while retained `runtime` evidence still refers to the old
+source. Known differences take precedence over the accompanying uncertainty;
+`unverified_boot_boundary` does not hide them. Inspect the reported scopes and
+use a fresh verified full launcher run when all reflected facts need a new
+baseline. An ordinary unverified full run cannot establish verified freshness.
+Boot inputs advance only on a full run. Partial runtime changes retain an explicit `runtime_consumption` uncertainty
 when Woods cannot prove every retained reflected fact was re-serialized. Named
 framework refreshes do not certify unrelated application inputs. A handled
 extractor error retains an explicit `extractor:<name>` uncertainty even if the

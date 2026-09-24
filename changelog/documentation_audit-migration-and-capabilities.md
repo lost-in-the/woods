@@ -1,0 +1,1 @@
+- Clarify v1-to-v2 configuration changes, snapshot preservation across cleaning, retained runtime freshness evidence, early middleware setup, structural readiness and custom-process MCP capabilities. These notes describe existing behavior; they do not add tools or restore unsafe eval.
