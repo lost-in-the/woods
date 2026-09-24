@@ -482,6 +482,16 @@ application checkout, and retry extraction. Do not fabricate current freshness
 or discard the prior index. Valid Unicode filenames remain supported, including
 under a C locale. See [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
 
+### Surviving-file ownership moves (unreleased after Woods 2.0.0; #574)
+
+Check the writer revision before relying on this correction. A moved class can
+keep its identity when a complete Rails boot proves its unique new owner. For
+file-derived identities, submit both changed paths together so extraction can
+prove that the surviving old file released the identity. Retry the complete
+batch after resolving boot or extraction failures; do not disable collision
+checks or delete the previous generation to force a move through. Simultaneous
+owners still fail. See [incremental extraction](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md).
+
 ## Compact evidence capability check
 
 Inspect the connected server's installed tool schemas before using `evidence` on
