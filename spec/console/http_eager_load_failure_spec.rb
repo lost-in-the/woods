@@ -39,6 +39,11 @@ RSpec.describe 'HTTP Console with a real Rails eager-load failure', :booted_app 
         end
         ConsoleFailureApplication.config.root = ARGV.fetch(0)
         ConsoleFailureApplication.initialize!
+        # Exercise pass-through without depending on Rails' version-specific
+        # rendering of an unrouted request while show_exceptions is disabled.
+        Rails.application.routes.draw do
+          get '/ordinary', to: ->(_env) { [404, { 'content-type' => 'text/plain' }, ['ordinary fixture response']] }
+        end
         direct_failure = begin
           Rails.application.eager_load!
           nil
@@ -68,7 +73,7 @@ RSpec.describe 'HTTP Console with a real Rails eager-load failure', :booted_app 
         unauthorized = request.call('/mcp/console', false)
         ordinary = request.call('/ordinary', true)
         puts JSON.generate(direct_failure: direct_failure, first: first, second: second,
-                           unauthorized: unauthorized.first, ordinary: ordinary.first,
+                           unauthorized: unauthorized.first, ordinary: ordinary,
                            attempts: Rails.application.console_load_attempts)
       RUBY
       root = File.expand_path('../..', __dir__)
@@ -80,7 +85,8 @@ RSpec.describe 'HTTP Console with a real Rails eager-load failure', :booted_app 
       expect(result.fetch('direct_failure')).to eq('NameError')
       expect(result.fetch('first').first).to eq(503)
       expect(result.fetch('second')).to eq(result.fetch('first'))
-      expect(result.values_at('unauthorized', 'ordinary', 'attempts')).to eq([401, 404, 1])
+      expect(result.values_at('unauthorized', 'attempts')).to eq([401, 1])
+      expect(result.fetch('ordinary')).to eq([404, 'ordinary fixture response'])
       expect(result.fetch('first').last).not_to include('MissingApplicationModelBase', directory)
       expect(err.scan('console.eager_load.failed').length).to eq(1)
     end
