@@ -272,7 +272,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       extractor = described_class.new
       unit = extractor.extract_all.first
 
-      expect(unit.metadata[:sidecar_template]).to eq('/rails/app/components/button_component.html.erb')
+      expect(unit.metadata[:sidecar_template]).to eq('app/components/button_component.html.erb')
     end
   end
 

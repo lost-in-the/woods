@@ -369,6 +369,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Key details:**
 - Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`)
+- **Unreleased after 2.0.0:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
 **Edge cases:**
@@ -735,6 +736,7 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
 - No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
+- **Unreleased after 2.0.0:** app-owned `metadata.publishers` and `metadata.subscribers` paths, and the same paths in generated source annotations, are relative to `Rails.root`. Their array order, counts and event identifiers stay unchanged. Explicitly scanned paths outside the application remain absolute. Re-extract event units after upgrading: removing the checkout prefix changes existing `source_hash` values once, then identical app sources produce the same annotations and hashes across checkout roots.
 
 ---
 
