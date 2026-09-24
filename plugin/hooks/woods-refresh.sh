@@ -21,18 +21,26 @@ if command -v jq >/dev/null 2>&1; then
     printf '[Woods hooks] Unsupported or malformed edit event; no refresh queued.\n' >&2; exit 0;
   }
 elif command -v ruby >/dev/null 2>&1; then
-  payload="$(ruby "$hook_dir/adapters/normalize.rb" "$client" <"$input_file")" || exit 0
+  payload="$(ruby -EUTF-8:UTF-8 "$hook_dir/adapters/normalize.rb" "$client" <"$input_file")" || exit 0
 else
   printf '[Woods hooks] jq or Ruby is required; no refresh queued.\n' >&2
   exit 0
 fi
 rm -f "$input_file"
 trap - EXIT TERM INT
+# JSON and client paths are UTF-8 regardless of the host process locale.
+# Keep malformed queue/input diagnostics bounded and free of event contents.
+ruby_json() {
+  ruby -EUTF-8:UTF-8 "$@" 2>/dev/null || {
+    printf '[Woods hooks] Invalid UTF-8 or JSON data; refresh not confirmed.\n' >&2
+    return 1
+  }
+}
 field() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$payload" | jq -ej '.root'
   else
-    printf '%s' "$payload" | ruby -rjson -e 'print JSON.parse($stdin.read).fetch("root")'
+    printf '%s' "$payload" | ruby_json -rjson -e 'print JSON.parse($stdin.read).fetch("root")'
   fi
 }
 cwd="$(field; printf .)"
@@ -50,7 +58,7 @@ event_fields() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$payload" | jq -j '.events[] | .operation,"\u0000",.path,"\u0000"'
   else
-    printf '%s' "$payload" | ruby -rjson -e 'JSON.parse($stdin.read).fetch("events").each { |e| print e.fetch("operation"), "\0", e.fetch("path"), "\0" }'
+    printf '%s' "$payload" | ruby_json -rjson -e 'JSON.parse($stdin.read).fetch("events").each { |e| print e.fetch("operation"), "\0", e.fetch("path"), "\0" }'
   fi
 }
 relevant=0
@@ -83,7 +91,7 @@ enqueue() {
   if command -v jq >/dev/null 2>&1; then
     jq -nc --arg path "$1" '{path:$path,operation:"update"}' >"$event.tmp" || return 1
   else
-    ruby -rjson -e 'puts JSON.generate(path: ARGV[0], operation: "update")' -- "$1" >"$event.tmp" || return 1
+    ruby_json -rjson -e 'puts JSON.generate(path: ARGV[0], operation: "update")' -- "$1" >"$event.tmp" || return 1
   fi
   mv "$event.tmp" "$event.json"
 }
@@ -92,7 +100,7 @@ event="$queue/$$.$RANDOM.$RANDOM"
 if command -v jq >/dev/null 2>&1; then
   printf '%s' "$payload" | jq -c --arg root "$cwd" '.events | map(.path |= (if startswith($root + "/") then ltrimstr($root + "/") else . end))' >"$event.tmp" || exit 0
 else
-  printf '%s' "$payload" | ruby -rjson -e 'v = JSON.parse($stdin.read); puts JSON.generate(v.fetch("events").map { |e| e.merge("path" => e.fetch("path").delete_prefix(ARGV.fetch(0) + "/")) })' -- "$cwd" >"$event.tmp" || exit 0
+  printf '%s' "$payload" | ruby_json -rjson -e 'v = JSON.parse($stdin.read); puts JSON.generate(v.fetch("events").map { |e| e.merge("path" => e.fetch("path").delete_prefix(ARGV.fetch(0) + "/")) })' -- "$cwd" >"$event.tmp" || exit 0
 fi
 mv "$event.tmp" "$event.json" || exit 0
 
@@ -144,7 +152,7 @@ encode_batch() {
   if command -v jq >/dev/null 2>&1; then
     jq -sc --arg output "$configured_output" '{version:1,output:$output,events:(map(if type == "array" then . else [.] end) | add)} | @base64' "${batch[@]}" | tr -d '"\n'
   else
-    ruby -rjson -rbase64 -e '
+    ruby_json -rjson -rbase64 -e '
       output = ARGV.shift
       print Base64.strict_encode64(JSON.generate(version: 1, output: output,
         events: ARGV.flat_map { |path| value = JSON.parse(File.read(path)); value.is_a?(Array) ? value : [value] }))
@@ -237,7 +245,7 @@ while :; do
     if command -v jq >/dev/null 2>&1; then
       event_count="$(jq 'if type == "array" then length else 1 end' "$candidate")" || break
     else
-      event_count="$(ruby -rjson -e 'v = JSON.parse(File.read(ARGV[0])); puts(v.is_a?(Array) ? v.size : 1)' "$candidate")" || break
+      event_count="$(ruby_json -rjson -e 'v = JSON.parse(File.read(ARGV[0])); puts(v.is_a?(Array) ? v.size : 1)' "$candidate")" || break
     fi
     [ "$((batch_events + event_count))" -le 1000 ] || break
     [ "$((batch_bytes + event_bytes))" -le 49152 ] || break
