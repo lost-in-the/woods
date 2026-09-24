@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative 'class_declarations'
 
 module Woods
   module Extractors
@@ -13,7 +14,7 @@ module Woods
     # Supports three state machine gems:
     # - AASM: files that include AASM with +aasm do...end+ blocks
     # - Statesman: files that include Statesman::Machine with state/transition calls
-    # - state_machines: files using the +state_machine :attr do...end+ DSL
+    # - state_machines: literal +state_machine+ declarations, with default or named attributes
     #
     # Produces one ExtractedUnit per state machine definition found.
     # A single model file can produce multiple units (e.g., two state_machine blocks).
@@ -184,7 +185,8 @@ module Woods
 
       # Extract state_machines gem state machine units from source.
       #
-      # Handles multiple state_machine blocks for different attributes.
+      # Handles default/named attributes and parenthesized declarations, with
+      # each machine's metadata restricted to its own block.
       #
       # @param source [String] Ruby source code
       # @param class_name [String] Model class name
@@ -193,16 +195,19 @@ module Woods
       def extract_state_machines_units(source, class_name, file_path)
         return [] unless source.match?(/\bstate_machine\b/)
 
-        units = []
-        source.scan(/state_machine\s+:(\w+)/) do |match|
-          attr_name = match[0]
-          block = extract_block_for_state_machine(source, attr_name)
+        owners = ClassDeclarations.read(source).select { |record| record[:identifier] == class_name }
+        declarations = owners.flat_map { |record| state_machine_declarations(record[:node].body) }
+        declarations.filter_map do |declaration|
+          attr_name = state_machine_attribute(declaration)
+          next unless attr_name
+
+          block = declaration.block&.location&.slice.to_s
           states = block.scan(/^\s*state\s+:(\w+)/).flatten
           events = parse_events_from_source(block, /\Aevent\s+:(\w+)/)
-          initial_state = source.match(/state_machine\s+:#{Regexp.escape(attr_name)}[^#\n]*initial:\s*:(\w+)/)&.[](1)
+          initial_state = state_machine_initial_state(declaration)
           callbacks = parse_state_machine_callbacks(block)
 
-          units << build_unit(
+          build_unit(
             identifier: "#{class_name}::state_machine_#{attr_name}",
             class_name: class_name,
             file_path: file_path,
@@ -215,42 +220,47 @@ module Woods
             callbacks: callbacks
           )
         end
-
-        units
       end
 
-      # Extract the block body for a specific state_machine attribute.
+      # Read only direct calls in the selected class body. Nested classes,
+      # singleton classes and deferred/receiver blocks do not belong to it.
       #
-      # Uses depth tracking (do/end balance) to find the block boundaries.
-      #
-      # @param source [String] Ruby source code
-      # @param attr_name [String] Attribute name (e.g., "status")
-      # @return [String] Block body source
-      def extract_block_for_state_machine(source, attr_name)
-        lines = source.lines
-        result = []
-        depth = 0
-        capturing = false
-
-        lines.each do |line|
-          stripped = line.strip
-
-          unless capturing
-            if stripped.match?(/\Astate_machine\s+:#{Regexp.escape(attr_name)}.*\bdo\b/)
-              capturing = true
-              depth = 1
-            end
-            next
-          end
-
-          depth += 1 if block_opener?(stripped)
-          depth -= 1 if stripped == 'end'
-          break if depth <= 0
-
-          result << line
+      # @param node [Prism::Node, nil] selected class body or direct statement
+      # @return [Array<Prism::CallNode>] state machine declarations in source order
+      def state_machine_declarations(node)
+        if node.is_a?(Prism::StatementsNode)
+          return node.body.flat_map { |statement| state_machine_declarations(statement) }
         end
 
-        result.join
+        if node.is_a?(Prism::CallNode) && node.name == :state_machine &&
+           (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+           (node.block.nil? || node.block.is_a?(Prism::BlockNode))
+          return [node]
+        end
+
+        []
+      end
+
+      # @param declaration [Prism::CallNode] state_machine DSL call
+      # @return [String, nil] literal attribute, defaulting to state for options-only calls
+      def state_machine_attribute(declaration)
+        argument = declaration.arguments&.arguments&.first
+        return 'state' if argument.nil? || argument.is_a?(Prism::KeywordHashNode) || argument.is_a?(Prism::HashNode)
+        return argument.unescaped if argument.is_a?(Prism::SymbolNode) && argument.unescaped.match?(/\A\w+\z/)
+
+        nil
+      end
+
+      # @param declaration [Prism::CallNode] state_machine DSL call
+      # @return [String, nil] literal initial state; dynamic initializers are never called
+      def state_machine_initial_state(declaration)
+        options = declaration.arguments&.arguments&.last
+        return unless options.is_a?(Prism::KeywordHashNode) || options.is_a?(Prism::HashNode)
+
+        initial = options.elements.find do |entry|
+          entry.is_a?(Prism::AssocNode) && entry.key.is_a?(Prism::SymbolNode) && entry.key.unescaped == 'initial'
+        end
+        initial.value.unescaped if initial&.value.is_a?(Prism::SymbolNode)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -346,10 +356,6 @@ module Woods
 
         nil
       end
-
-      # NOTE: block_opener? (the RakeTaskExtractor-style depth-tracking
-      # discipline used by extract_block_for_state_machine above) is provided
-      # by the included SourceNesting module.
 
       # ──────────────────────────────────────────────────────────────────────
       # Unit Construction

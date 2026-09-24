@@ -762,8 +762,9 @@ namespace.
 **What it captures:** State machine DSL definitions using AASM, Statesman, or the `state_machines` gem.
 
 **Key details:**
-- Detects which library is active by checking `defined?` for each DSL constant
-- Extracts states, events, transitions, guard conditions, and callbacks
+- Detects literal DSL declarations in model source; it does not evaluate the DSL or run callbacks
+- Extracts states, events, transitions, guard conditions, and callbacks from supported source forms; it does not claim complete dynamic or inherited registry coverage
+- **Unreleased after 2.0.0:** directly declared `state_machines` calls in the selected model class support the default `state` attribute (`state_machine initial: :pending do`), explicit attributes, and parenthesized calls, including multiline arguments. The default produces `Model::state_machine_state`; existing named identifiers remain `Model::state_machine_<attribute>`. Each declaration uses its own block and literal initial state, keeping multiple machines separate. Nested/sibling classes, singleton scopes and deferred/receiver blocks cannot supply another model's machine. Dynamic attribute expressions are not guessed, and dynamic initial-state functions are not called.
 - Returns an array from the file method (like `ScheduledJobExtractor`), cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans
 
 ---

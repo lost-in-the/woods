@@ -420,6 +420,218 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
   # ── state_machines gem ────────────────────────────────────────────────
 
   describe '#extract_model_file — state_machines gem' do
+    {
+      'state_machine initial: :pending do' => 'state',
+      'state_machine(initial: :pending) do' => 'state',
+      'state_machine(:status, initial: :pending) do' => 'status'
+    }.each do |declaration, attribute|
+      it "extracts the supported declaration #{declaration}" do
+        path = create_file('app/models/order.rb', <<~RUBY)
+          class Order < ApplicationRecord
+            #{declaration}
+              state :pending
+              state :active
+              event :activate do
+                transition pending: :active
+              end
+            end
+          end
+        RUBY
+
+        units = described_class.new.extract_model_file(path)
+
+        expect(units.map(&:identifier)).to eq(["Order::state_machine_#{attribute}"])
+        expect(units.first.metadata).to include(
+          states: %w[pending active], initial_state: 'pending',
+          events: [{ name: 'activate', transitions: [{ from: 'pending', to: 'active', guard: nil }] }]
+        )
+      end
+    end
+
+    ['state_machine do', 'state_machine() do'].each do |declaration|
+      it "uses the default attribute without options in #{declaration}" do
+        path = create_file('app/models/order.rb', <<~RUBY)
+          class Order < ApplicationRecord
+            #{declaration}
+              state :pending
+            end
+          end
+        RUBY
+
+        units = described_class.new.extract_model_file(path)
+
+        expect(units.map(&:identifier)).to eq(['Order::state_machine_state'])
+        expect(units.first.metadata).to include(states: ['pending'], initial_state: nil)
+      end
+    end
+
+    it 'keeps default and parenthesized named machine facts separate' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          state_machine initial: :pending do
+            state :pending
+            state :active
+            event :activate do
+              transition pending: :active
+            end
+          end
+          state_machine(:payment_status, initial: :unpaid) do
+            state :unpaid
+            state :paid
+            event :pay do
+              transition unpaid: :paid
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+
+      expect(units.map(&:identifier)).to eq(%w[Order::state_machine_state Order::state_machine_payment_status])
+      expect(units.map { |unit| unit.metadata[:initial_state] }).to eq(%w[pending unpaid])
+      expect(units.map { |unit| unit.metadata[:states] }).to eq([%w[pending active], %w[unpaid paid]])
+      expect(units.map { |unit| unit.metadata[:events].map { |event| event[:name] } }).to eq([['activate'], ['pay']])
+    end
+
+    it 'uses the matching block for a multiline parenthesized declaration' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          state_machine(
+            :status,
+            initial: :pending
+          ) do
+            state :pending
+            event :activate do
+              transition pending: :active
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_model_file(path).fetch(0)
+
+      expect(unit.identifier).to eq('Order::state_machine_status')
+      expect(unit.metadata[:initial_state]).to eq('pending')
+      expect(unit.metadata[:events].first[:name]).to eq('activate')
+    end
+
+    it 'does not turn comments, strings, unrelated receivers or method calls into declarations' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          # state_machine :comment do
+          EXAMPLE = "state_machine :example do"
+          other.state_machine(:foreign) do
+            state :foreign
+          end
+          def description
+            state_machine :method_call do
+              state :method_call
+            end
+          end
+        end
+      RUBY
+
+      expect(described_class.new.extract_model_file(path)).to eq([])
+    end
+
+    it 'does not guess a dynamic machine attribute or evaluate a dynamic initial state' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          state_machine(attribute_name, initial: :unknown) do
+            state :unknown
+          end
+          state_machine(:status, initial: -> { raise 'initializer must not run' }) do
+            state :pending
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+
+      expect(units.map(&:identifier)).to eq(['Order::state_machine_status'])
+      expect(units.first.metadata).to include(states: ['pending'], initial_state: nil)
+    end
+
+    it 'preserves a callback on the final line of a machine block' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          state_machine :status do
+            state :pending
+            before_transition any => :active, do: :audit
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_model_file(path).fetch(0)
+
+      expect(unit.metadata[:callbacks]).to eq(['before_transition any => :active, do: :audit'])
+    end
+
+    {
+      'nested class' => ["class Order\nclass Inner", "end\nend"],
+      'sibling class' => ["class Order; end\nclass Sibling", 'end'],
+      'singleton class' => ["class Order\nclass << self", "end\nend"],
+      'receiver class_eval' => ["class Order\nOTHER.class_eval do", "end\nend"],
+      'uncalled lambda' => ["class Order\nUNUSED = -> do", "end\nend"]
+    }.each do |scope, (opening, closing)|
+      it "does not attribute a #{scope} machine to the selected outer model" do
+        path = create_file('app/models/order.rb', <<~RUBY)
+          #{opening}
+            state_machine(initial: :pending) do
+              state :pending
+            end
+          #{closing}
+        RUBY
+
+        expect(described_class.new.extract_model_file(path)).to eq([])
+      end
+    end
+
+    it 'extracts the governed selected nested class rather than its outer or sibling class' do
+      path = create_file('app/models/billing/container/order.rb', <<~RUBY)
+        module Billing
+          class Container
+            state_machine(:outer) do
+              state :outer
+            end
+            class Order
+              state_machine(initial: :pending) do
+                state :pending
+              end
+            end
+            class Sibling
+              state_machine(:sibling) do
+                state :sibling
+              end
+            end
+          end
+        end
+      RUBY
+      extractor = described_class.new
+      allow(extractor).to receive(:governed_class_name).with(path, anything).and_return('Billing::Container::Order')
+
+      units = extractor.extract_model_file(path)
+
+      expect(units.map(&:identifier)).to eq(['Billing::Container::Order::state_machine_state'])
+      expect(units.first.metadata[:states]).to eq(['pending'])
+    end
+
+    it 'preserves a qualified model declaration with an available owning namespace' do
+      stub_const('Billing', Module.new)
+      path = create_file('app/models/billing/order.rb', <<~RUBY)
+        class Billing::Order
+          self.state_machine(:status, initial: :pending) do
+            state :pending
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_model_file(path)
+
+      expect(units.map(&:identifier)).to eq(['Billing::Order::state_machine_status'])
+      expect(units.first.metadata[:initial_state]).to eq('pending')
+    end
+
     it 'detects state_machine block' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
