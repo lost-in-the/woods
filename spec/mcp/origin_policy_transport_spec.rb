@@ -6,6 +6,12 @@ require 'rack/mock'
 require 'woods/mcp/origin_guard'
 
 RSpec.describe 'HTTP origin policy with the real MCP transport' do
+  after do
+    # Stateful SDK transports own session-reaper threads. Close this example's
+    # transports so later specs do not wait on their unrelated background work.
+    Array(@transports).each { |transport| transport.close if transport.respond_to?(:close) }
+  end
+
   def request(app, method:, origin: nil, host: 'localhost:9292', rpc_method: 'initialize', session: nil)
     params = if rpc_method == 'initialize'
                { protocolVersion: '2025-06-18', capabilities: {},
@@ -30,6 +36,7 @@ RSpec.describe 'HTTP origin policy with the real MCP transport' do
     transport = MCP::Server::Transports::StreamableHTTPTransport.new(
       server, stateless: stateless, **policy.transport_options
     )
+    (@transports ||= []) << transport
     server.transport = transport
     guarded = Woods::MCP::OriginGuard.new(
       ->(env) { transport.handle_request(Rack::Request.new(env)) }, policy: policy
