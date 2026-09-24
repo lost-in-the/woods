@@ -3174,7 +3174,7 @@
       "lib/woods/extractors/serializer_extractor.rb"
     ],
     "description": "Issue #588: R20/R23/R24: reconcile runtime-discovered nested jobs and serializers, escalate schema/restart-trigger inputs before relevance filtering, refresh BehavioralProfile through its real extractor, and withdraw obsolete flow artifacts when precomputation is disabled. Require booted full/incremental/refresh payload and graph equivalence, including failed or partial discovery controls. Keep this as a tracking issue with separately reviewable fixes.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-233",
@@ -3188,7 +3188,7 @@
       "lib/woods/hooks"
     ],
     "description": "Issue #589: R36/R38/R75-R79: enforce writer/reader manifest size compatibility; classify positively identified installed gems consistently; expose/bind the source root for copied indexes; keep scanning accessible paths after a bounded per-entry error; distinguish missing comparison baselines and partial scans from actual additions/deletions; give reason-specific quick-scan recovery advice. Preserve unknown status and reference publication refusal when evidence is incomplete. Split these independent regressions into reviewable changes. Root mapping must retain legitimate container/remote-index use.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-234",
@@ -3201,7 +3201,7 @@
       "lib/woods/watch/installation"
     ],
     "description": "Issue #590: R32/R33/R34/R61: agent preflight loses BUNDLE_PATH and related intended application settings; committed watcher receipts compare nonportable exact permission modes; documented temporary plan paths can cross a macOS symlink; project-scoped identity unnecessarily includes user config directories. Preserve content/executable ownership and preview/apply race guards. Test real private bundles, umasks, simulated symlinked temp parent, and two user homes against the same project.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-235",
@@ -3215,7 +3215,7 @@
       "lib/tasks/woods_checks.rake"
     ],
     "description": "Issue #591: R59/R60/R62/R66/R74: provide explicit ownership-verified recovery for abandoned foreign claims; normalize blank idle timeout consistently; resolve check-task roots through the actual helper; make custom output-directory requirements consistent with verified launch capture; report actionable safe identity-key errors. Never take over solely from claim age, delete a live owner, silently degrade verified capture, or merely remove an output override while leaving its key/handoff bound elsewhere.",
-    "status": "ready"
+    "status": "in-progress"
   },
   {
     "id": "B-236",
@@ -3241,7 +3241,7 @@
       "lib/woods/generation.rb"
     ],
     "description": "Issue #593: R30/R31/R52-R54: allow valid slash-bearing unit identifiers without weakening resource grammar; normalize family aliases and concrete type filters consistently across scoped/unscoped queries; distinguish unknown flow entries and snapshots from valid empty results; handle malformed generation markers across held-open tools/resources and recovery. Preserve path containment and no fallback to unrelated generations. Add real protocol response regressions; split interface changes into focused PRs.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-238",
@@ -3254,7 +3254,7 @@
       "lib/woods/chunking/semantic_chunker.rb"
     ],
     "description": "Issue #594: R19/R21/R22/R44-R46/R58: verify external component ownership policy with real optional gems; consider explicitly documented mailer coverage expansion; recognize actual manager/policy ancestry; support state-machine declaration forms; select the real migration rather than a preceding helper; represent same-named schedules from different formats deliberately; preserve class and instance methods with identical bare names as distinct chunks. Each requires its own regression and compatibility decision. Do not execute historical migrations or silence identity collisions; distinguish new bugs from documented coverage choices.",
-    "status": "needs-triage"
+    "status": "in-progress"
   },
   {
     "id": "B-239",
@@ -3337,7 +3337,7 @@
       "lib/woods/mcp/config_resolver.rb"
     ],
     "description": "Issue #599: an injected Ollama provider with explicit host and num_ctx but empty embedding_options snapshots its model/width yet drops endpoint/context. Restore silently selects localhost and the model default. Reproduced before and after #586 without provider calls. Preserve effective non-secret settings through supported wrappers or report a non-restorable provider explicitly; never persist API keys or endpoint credentials. Cover configured/injected/raw/wrapped snapshot round trips and keep request-vs-observed width semantics.",
-    "status": "ready",
+    "status": "resolved",
     "depends_on": [
       "B-230"
     ]
