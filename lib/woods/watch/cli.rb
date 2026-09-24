@@ -2,6 +2,7 @@
 
 require 'optparse'
 require_relative 'supervisor'
+require_relative 'claim_lease'
 
 module Woods
   module Watch
@@ -17,12 +18,13 @@ module Woods
       def run(argv)
         options, command = parse(argv.dup)
         return 0 if @help
+        return recover_claim(options, command) if @recovery_index || @claim_token
 
         validate_platform!
         validate_command!(command, options[:root])
         supervisor = Supervisor.new(command: command, logger: @output, **options)
         with_signals(supervisor) { supervisor.run }
-      rescue OptionParser::ParseError, ArgumentError, SystemCallError => e
+      rescue OptionParser::ParseError, ArgumentError, SystemCallError, ClaimLease::Unavailable => e
         @output.puts("[woods-watch] #{e.message}")
         2
       end
@@ -31,6 +33,7 @@ module Woods
 
       def parse(argv)
         @help = false
+        @recovery_index = @claim_token = nil
         options = { root: Dir.pwd, boot_timeout: 300, shutdown_timeout: 10 }
         parser = OptionParser.new do |flags|
           flags.banner = 'Usage: woods-watch [options] -- [bin/rails woods:watch]'
@@ -43,11 +46,32 @@ module Woods
           flags.on('--shutdown-timeout SECONDS', 'Graceful shutdown limit (default: 10)') do |value|
             options[:shutdown_timeout] = positive_seconds(value)
           end
+          recovery_options(flags)
           flags.on('-h', '--help', 'Show help without booting Rails') { @help = true }
         end
         parser.order!(argv)
         @output.puts(parser) if @help
-        [options, argv.empty? ? ['bin/rails', 'woods:watch'] : argv]
+        [options, argv.empty? && !@recovery_index && !@claim_token ? ['bin/rails', 'woods:watch'] : argv]
+      end
+
+      def recovery_options(flags)
+        flags.on('--recover-claim INDEX', 'Recover an abandoned managed claim; requires --claim-token') do |path|
+          @recovery_index = path
+        end
+        flags.on('--claim-token TOKEN', 'Exact claim token; never overrides a live owner lease') do |token|
+          @claim_token = token
+        end
+      end
+
+      def recover_claim(options, command)
+        unless @recovery_index && @claim_token && command.empty?
+          raise ArgumentError, 'use --recover-claim INDEX --claim-token TOKEN without a child command'
+        end
+
+        index = File.expand_path(@recovery_index, options[:root])
+        ClaimLease.new(index).recover(token: @claim_token)
+        @output.puts("[woods-watch] recovered the selected abandoned claim at #{index}; restart its normal owner")
+        0
       end
 
       def positive_seconds(value)

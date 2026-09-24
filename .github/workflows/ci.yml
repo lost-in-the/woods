@@ -125,7 +125,7 @@ jobs:
       - name: Fresh-process source provenance
         env:
           WOODS_RUN_BOOTED_APP: '1'
-        run: bundle exec rspec spec/integration/source_input_drift_spec.rb
+        run: bundle exec rspec spec/integration/source_input_drift_spec.rb spec/integration/source_output_spec.rb
 
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
       # Each example boots its own subprocess with the matrix appraisal.

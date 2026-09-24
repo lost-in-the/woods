@@ -92,7 +92,7 @@ module Woods
 
         def validate_idle!
           value = @environment['WOODS_WATCH_IDLE_TIMEOUT']
-          return if mode == 'external' || value.nil? || value.empty?
+          return if mode == 'external' || value.to_s.strip.empty?
 
           raise Conflict, 'Unset WOODS_WATCH_IDLE_TIMEOUT; managed maintenance needs a resident child'
         end

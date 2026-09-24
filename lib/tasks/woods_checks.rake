@@ -11,6 +11,7 @@
 #   WOODS_CHECK_STRICT=1 ...                             # exit 1 on findings (still heuristic; see below)
 
 require 'json'
+require 'woods/rake_helpers'
 
 namespace :woods do
   namespace :check do
@@ -62,8 +63,7 @@ module Woods
     # @return [String]
     def check_index_dir
       ENV.fetch('WOODS_OUTPUT') do
-        root = respond_to?(:woods_task_root, true) ? woods_task_root : Rake.application.original_dir
-        File.join(root, 'tmp/woods')
+        File.join(Woods::RakeHelpers.woods_task_root, 'tmp/woods')
       end
     end
 

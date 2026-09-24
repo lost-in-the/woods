@@ -10,6 +10,16 @@ module Woods
   module RakeHelpers # rubocop:disable Metrics/ModuleLength -- existing task helpers grouped without changing behavior
     module_function
 
+    # @return [Float, nil] blank values leave the raw task resident
+    def woods_watch_idle_timeout
+      value = ENV['WOODS_WATCH_IDLE_TIMEOUT'].to_s.strip
+      return if value.empty?
+
+      Float(value)
+    rescue ArgumentError, TypeError
+      raise ArgumentError, 'WOODS_WATCH_IDLE_TIMEOUT must be a number of seconds or blank'
+    end
+
     # ── Multi-instance helpers (#164 phase 4) ────────────────────────────────
     #
     # Worktrees are disjoint by construction (each has its own Rails.root and
@@ -60,6 +70,11 @@ module Woods
     end
 
     def woods_with_extraction_lock(output_dir, wait: nil, raise_on_timeout: false, &block)
+      require 'woods/source_inputs/handoff'
+      if ENV[Woods::SourceInputs::Handoff::ENV_KEY]
+        Woods::SourceInputs::Handoff.validate_output!(root: woods_task_root, output_dir: output_dir)
+      end
+
       # Requires first. The default wait reads a constant from the daemon, so
       # resolving it above these lines NameError'd every write task — the same
       # load-order bug as the missing require in `woods:watch`, reintroduced one
@@ -196,7 +211,8 @@ module Woods
     def woods_sweep_index_dir(output_dir, lock_name)
       preserved = [
         output_dir.join("#{lock_name}.lock"),
-        output_dir.join(Woods::Coordination::PipelineLock.guard_filename(lock_name))
+        output_dir.join(Woods::Coordination::PipelineLock.guard_filename(lock_name)),
+        *['', '.lock', '.lease'].map { |suffix| output_dir.join("#{Woods::Watch::ClaimLease::CLAIM}#{suffix}") }
       ]
       output_dir.children.each do |entry|
         FileUtils.rm_rf(entry) unless preserved.include?(entry)

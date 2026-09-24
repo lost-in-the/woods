@@ -78,12 +78,22 @@ the selected owner or installed command and restarting that owner; do not delete
 claim files or kill PIDs taken from status. No index-visible record exists before
 the first boot resolves the application's output directory.
 
+For an abandoned foreign-container claim, follow
+[ownership-verified claim recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
+The unreleased command after 2.0.0 requires the exact token and a free lifetime
+lease; old claims require the documented legacy recovery. Age is not proof of
+abandonment. `woods:clean` preserves ownership sidecars and does not reset them.
+
 Unset `WOODS_WATCH_IDLE_TIMEOUT` in managed modes. If the boot deadline is reached,
 diagnose Bundler/initializer startup before increasing `--boot-timeout`; a valid
 long extraction has a separate readiness state and is not bounded by that clock.
 If setup created a Procfile but normal `bin/dev` still only launches Rails, choose
 Puma or explicitly run the selected Foreman command. The generator never rewrites
 `bin/dev` or starts services during preview.
+
+An empty idle-timeout variable crashes older tasks even though managed validation
+accepts it. Unset it on those builds; the unreleased #591 fix consistently treats
+empty or whitespace-only values as unset.
 
 If installation reports a pending transaction, use `woods:watch --operation
 recover` through the Rails generator, initially with `--pretend`; see
@@ -1082,3 +1092,8 @@ source root/private key, a quick scan limit and an unverified boot boundary are
 different causes. Try `source_check: "deep"` for a budget limit; use the fresh
 launcher for a new verified baseline. Do not delete pending hook events or alter
 key permissions just to suppress a warning. See [source freshness](SOURCE_FRESHNESS.md).
+
+If `woods-extract` refuses an identity key, use
+[identity-key recovery](SOURCE_FRESHNESS.md#identity-key-recovery). If it reports a
+configured-output mismatch, rerun with an explicit matching `--output` or
+`WOODS_OUTPUT`; do not bypass the check or move a capture/key to another index.

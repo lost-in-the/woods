@@ -178,6 +178,56 @@ There is no automatic ownership takeover. Managed duplicate prevention is scoped
 to one host/process namespace; do not mix raw and managed writers across different
 containers sharing an index. Use one external owner for that arrangement.
 
+**Unreleased after 2.0.0 ([#591](https://github.com/lost-in-the/woods/issues/591)):**
+empty and whitespace-only idle-timeout values behave as unset in the task,
+launcher and installer. Earlier builds accepted an empty value in managed
+validation but crashed during task startup; unset it when using those builds.
+
+### Recovering an abandoned managed claim
+
+**Unreleased after 2.0.0; verify `woods-watch --help` before using this command.**
+New managed daemons hold a lifetime filesystem lock in `watch_claim.json.lease`.
+The Rails child holds it throughout startup, extraction and shutdown, independently
+of its launcher. Its `watch_claim.json` records a fresh `token` and lease identity.
+After the original owner/container has stopped, inspect the claim at the exact
+index used by the application, then select its token explicitly:
+
+```bash
+bundle exec woods-watch --recover-claim /app/tmp/woods --claim-token TOKEN_FROM_CLAIM
+```
+
+Run this inside the environment that can access that index and its sidecars.
+Recovery does not boot Rails or start a watcher. It holds both the startup
+coordination lock and lifetime lease, checks the token and lease inode, and
+removes only the selected abandoned claim. Restart the normal Foreman/Puma/external
+owner afterward and verify startup reconciliation. Tokens select a claim; they
+are not credentials. A changed token means another owner claimed the index:
+inspect it rather than repeatedly substituting tokens.
+
+Recovery preserves the old status record. Keep the reader-only
+`WOODS_WATCH_TRUST_FOREIGN_HOST` override unset in the owner startup environment;
+otherwise its existing status precheck can honor the retired container's last
+heartbeat until the normal 15-minute freshness bound expires. Lifetime lease
+protection remains active without that override.
+
+A live local or foreign owner keeps its lease even if its claim is old. Recovery
+refuses a held lock, unknown protocol, missing/replaced lease, malformed record,
+or unavailable locking. Claim age, heartbeat age and a PID in a different container
+never prove abandonment. The filesystem must support cooperative `flock` across
+every process sharing the index; this is not a distributed lease service. Do not
+mix old/raw writers with managed ownership across containers. Never unlink,
+replace or recreate the `.lease` or `.lock` sidecars while writers may exist.
+`woods:clean` preserves these sidecars and the claim, including during forced
+cleanup; it does not reset watcher ownership.
+
+Legacy claims have no lifetime-lease proof and cannot use this command. Stop
+their original owner through its process manager. If the original namespace is
+gone and ownership cannot be verified, choose a new empty output directory,
+configure exactly one writer and its readers to use it, and run a fresh full
+extraction. Keep the old index until the replacement is verified. This recovery
+does not require deleting the unverifiable claim or guessing whether its PID is
+dead. Upgrading Woods alone does not rewrite a live or abandoned legacy claim.
+
 Daemon liveness, completed startup reconciliation, and source freshness remain
 different facts. Managed supervision records under `watch_supervisors/` expose
 starting/retrying/parked state separately in `woods_status`; an alive supervisor
