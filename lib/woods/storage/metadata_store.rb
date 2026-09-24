@@ -115,7 +115,10 @@ module Woods
           raise NotImplementedError
         end
 
-        # Every stored identifier.
+        # Every stored identity, including source-empty records without vectors.
+        # Return internal typed keys unchanged; do not collapse same-name units
+        # to their shared public identifier. Embedding reconciliation uses this
+        # inventory independently of the optional snapshot #each_entry seam.
         #
         # Used by the evaluation harness's {Woods::Evaluation::BaselineRunner}
         # to build naive baselines (grep/random/file-level) to score the real

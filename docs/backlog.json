@@ -3053,7 +3053,7 @@
       "lib/woods/mcp/bootstrapper.rb"
     ],
     "description": "A real offline full embed with SQLite metadata retains a deleted unit because reconciliation requires each_entry, which SQLite does not expose. Separately, standalone bootstrap fills vector metadata before constructing the configured SQLite metadata store, so hydrated vectors lack type-filter metadata. Enumerate durable metadata identities through a supported adapter contract, including vectorless units; preserve purge guards and typed identities. Construct/use the same configured metadata store for vector backfill and retrieval. Cover full/incremental deletion and local-preset dump-to-bootstrap typed retrieval with an offline provider. GitHub: #572.",
-    "status": "ready"
+    "status": "resolved"
   },
   {
     "id": "B-224",

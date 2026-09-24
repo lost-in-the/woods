@@ -64,9 +64,10 @@ module Woods
       #   into semantically coherent chunks before embedding. +nil+ disables
       #   chunking — units go to the provider whole (useful in tests).
       # @param checkpoint_interval [Integer] Save checkpoint every N batches (default: 10)
-      # @param metadata_store [#each_entry, #bulk_load, nil] Optional metadata store.
-      #   When present alongside an in-memory vector store, both are persisted
-      #   at the end of a successful {#index_all} run.
+      # @param metadata_store [Storage::MetadataStore::Interface, nil] Optional metadata store.
+      #   Existing identities participate in snapshot-store reconciliation.
+      #   Stores with #each_entry and #bulk_load are persisted alongside vectors;
+      #   SQLite retains its records in the configured database instead.
       # @param resolved_config [Woods::ResolvedConfig, nil] Captured config for
       #   +woods.json+ — written to +output_dir+ on {#index_all} completion.
       # @param dump_retention_count [Integer] Number of completed dump directories
@@ -492,14 +493,17 @@ module Woods
           entries = []
           @vector_store.each_entry { |id, _vector, _metadata| entries << { id: id } }
           @persisted_ids = index_ids_by_identifier(entries)
-          retain_existing_metadata_identities
         end
+        retain_existing_metadata_identities
       end
 
       def retain_existing_metadata_identities
-        return unless @metadata_store.respond_to?(:each_entry)
-
-        @metadata_store.each_entry { |identifier, _unit| @persisted_ids[identifier] ||= [] }
+        if implements_own?(@metadata_store, :all_identifiers)
+          @metadata_store.all_identifiers.each { |identifier| @persisted_ids[identifier] ||= [] }
+        elsif @metadata_store.respond_to?(:each_entry)
+          # Compatibility for custom snapshot-only stores.
+          @metadata_store.each_entry { |identifier, _unit| @persisted_ids[identifier] ||= [] }
+        end
       end
 
       # Source-empty units retain metadata but intentionally have no vectors.
@@ -1055,16 +1059,18 @@ module Woods
       end
 
       # Does +object+ define +method_name+ itself, rather than inheriting the
-      # vector-store interface's default stub?
+      # storage interfaces' default stubs?
       #
       # @param object [Object] the adapter under test
       # @param method_name [Symbol]
       # @return [Boolean]
       def implements_own?(object, method_name)
         return false unless object.respond_to?(method_name)
-        return true unless defined?(Storage::VectorStore::Interface)
 
-        object.method(method_name).owner != Storage::VectorStore::Interface
+        interfaces = []
+        interfaces << Storage::VectorStore::Interface if defined?(Storage::VectorStore::Interface)
+        interfaces << Storage::MetadataStore::Interface if defined?(Storage::MetadataStore::Interface)
+        !interfaces.include?(object.method(method_name).owner)
       end
 
       # Persist stores to a timestamped dump directory, write +woods.json+,

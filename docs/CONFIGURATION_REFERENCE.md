@@ -264,6 +264,15 @@ worktree when overriding it. Existing databases at the old configured output
 path are not moved or deleted; run `woods:embed` for the selected index after
 upgrading to populate its default metadata database.
 
+**Unreleased after 2.0.0:** embedding with dump-backed vectors reconciles the
+complete SQLite identity inventory, including records without vectors and
+same-name units with distinct types. A full rebuild removes vanished records,
+including when the new corpus is empty. Incremental runs retain the existing
+empty-input and 30% purge guards. Both modes still refuse incomplete extraction
+input before changing stores. Standalone MCP opens the index's SQLite metadata
+before restoring type filters on hydrated vectors, using that same metadata
+store for retrieval. No database migration or embedding format change is required.
+
 Requires the `sqlite3` gem in your host bundle. Rails apps backed by
 MySQL or PostgreSQL won't have it by default, selecting `:sqlite`
 without it raises `Woods::ConfigurationError` with install

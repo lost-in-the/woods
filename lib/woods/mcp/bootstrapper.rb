@@ -736,20 +736,24 @@ module Woods
       private_class_method :build_artifact
 
       def self.build_retriever_from_config(config, resolved, artifact, state = nil)
+        builder = Woods::Builder.new(config)
         vector_store = hydrated_vector_store(config, resolved, artifact, state)
         metadata_store = hydrated_metadata_store(config, resolved, artifact, state)
+        metadata_store ||= builder.build_metadata_store if config.metadata_store == :sqlite
         graph_store = hydrated_graph_store(config, artifact, state)
 
         # Cross-populate the vector store's per-entry metadata cache from
         # the metadata store. The WVF1 binary format stores only id + float
         # blob (no per-vector hash) — it's numeric-only to keep dumps
-        # mmap-friendly. The metadata lives in metadata.msgpack, and
+        # mmap-friendly. The metadata lives in metadata.msgpack or the configured
+        # SQLite store, which must be opened before this back-fill. The same
+        # metadata instance is then handed to the retriever below, and
         # InMemory::VectorStore#search uses its per-entry metadata for
         # filter predicates. Without this back-fill, a type-filtered
         # search returns zero results after a dump/reload.
         populate_vector_metadata(vector_store, metadata_store) if vector_store && metadata_store
 
-        Woods::Builder.new(config).build_retriever(
+        builder.build_retriever(
           vector_store: vector_store, metadata_store: metadata_store,
           graph_store: graph_store
         )
@@ -848,9 +852,10 @@ module Woods
       private_constant :CHUNK_SUFFIX_PATTERN
 
       # Back-fill the vector store's per-entry metadata hashes from the
-      # metadata store. Only makes sense when both are in-memory — durable
-      # backends return nil from the hydration helpers and never reach
-      # this path. Both callers hand over stores they built themselves —
+      # metadata store. Only applies to in-memory vectors; metadata may be an
+      # in-memory snapshot or the configured SQLite store. Durable vector
+      # backends return nil from hydration and never reach this path.
+      # Both callers hand over stores they built themselves —
       # boot's freshly hydrated pair and {.build_reload_candidates}'
       # off-side candidates (the M7 transaction retired the old in-place
       # variant that reached a LIVE store) — but the guard below still has
