@@ -902,3 +902,38 @@ These corrections require `2.0.0.beta4` or a reviewed development revision that
 contains them. Confirm that a patched release is available before selecting it.
 On affected versions, disable Console where these policies are required; Index MCP
 can stay enabled because it reads the published code index separately.
+
+## Unreleased Console corrections after 2.0.0
+
+These corrections require a reviewed revision containing them; verify the loaded
+revision and gem path until a patched release is published. Plugin updates alone
+do not update the Console server.
+
+Every enabled HTTP middleware instance enforces the configured bearer token and
+origin policy before constructing the server, including legacy manual mounts
+placed before the railtie's guards. Prefer the automatic railtie mount and keep
+HTTP disabled for stdio-only setups. Missing or invalid tokens fail closed.
+
+Protected single-column `pluck` values are masked as complete cells even when
+Rails returns an array or JSON object. Exact credential scanning matches longer
+indexed secrets before their shorter prefixes and masks overlapping occurrences
+as one protected span. Both JSON and Markdown responses use these rules.
+
+SQL checks cover the complete caller statement and any row-limit wrapper before
+execution. PostgreSQL nested comments and MySQL/Trilogy session quoting use their
+adapter grammar. Whole-row PostgreSQL projections, ambiguous multi-source EAV
+values, and quote-bearing executable comments are refused because their protected
+field identities cannot be preserved reliably. Select ordinary scalar columns or
+use structured Console queries with the EAV key and value from the same source.
+Ordering `console_recent` by an EAV value column is refused as well.
+
+As an additional output check, PostgreSQL raw SQL results with missing or
+unrecognized column type metadata are refused before rendering when redaction
+policies are active. This also affects legitimate custom or opaque database
+types whose field identities Woods cannot verify. Ordinary scalars and scalar
+arrays remain supported; use structured tools or an explicit scalar projection
+for unsupported values. Blocked-table checks still run before execution.
+
+On an affected release, disable Console when these controls are required. Index
+MCP is separate and can remain enabled. Do not relax policies to make refused
+queries succeed.

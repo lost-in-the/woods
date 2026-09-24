@@ -125,6 +125,11 @@ For HTTP, retain a strong token, allowed origins and TLS. Use installed-version
 tagged documentation; the [canonical Console guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md)
 tracks current source.
 
+Prefer the automatic Rails middleware mount. Per-instance guards for legacy
+manual mounts are unreleased after Woods `2.0.0`; record the loaded revision
+before relying on them. A plugin update does not patch the server. Follow the
+installed version's Console guide and leave HTTP disabled for stdio-only use.
+
 Then add a direct Console process:
 
 ```json
