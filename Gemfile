@@ -32,6 +32,8 @@ group :development, :test do
   gem 'faraday', '~> 2.0'
   # Native watcher acceptance uses a real Foreman owner, never a shell stub.
   gem 'foreman', '~> 0.90'
+  # Real schema/resolver regressions; GraphQL remains optional for gem users.
+  gem 'graphql', '~> 2.6.0', require: false
   # activesupport for specs that don't need full Rails
   gem 'activesupport'
   gem 'rake', '~> 13.0'

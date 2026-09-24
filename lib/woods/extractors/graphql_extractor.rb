@@ -5,19 +5,20 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative '../source_references/runtime_lookup'
 
 module Woods
   module Extractors
-    # GraphQLExtractor handles graphql-ruby type and mutation extraction.
+    # GraphQLExtractor handles graphql-ruby schema, type and mutation extraction.
     #
     # GraphQL schemas are rich in structure — types, fields, arguments,
     # resolvers, and mutations form a typed API layer over the domain.
     # We extract these with runtime introspection when available (via
-    # `GraphQL::Schema.types`) and fall back to file-based discovery
-    # when the schema isn't fully loadable.
+    # `GraphQL::Schema.types`) and retain limited file-based discovery
+    # when graphql-ruby is unavailable.
     #
     # We extract:
-    # - Object types, input types, enum types, interface types, union types, scalar types
+    # - Schema classes and object, input, enum, interface, union and scalar types
     # - Mutations and their arguments/return fields
     # - Query fields and resolvers
     # - Standalone resolver classes
@@ -43,28 +44,38 @@ module Woods
 
       def initialize
         @graphql_dir = defined?(Rails) ? Rails.root.join(GRAPHQL_DIRECTORY) : nil
-        @schema_class = find_schema_class
+        @runtime_lookup = SourceReferences::RuntimeLookup.new
+        @runtime_discovery_complete = true
+        @schema_classes = find_schema_classes
+        @query_roots = []
         @runtime_types = load_runtime_types
       end
 
-      # The type classes runtime introspection can reach.
-      #
-      # Shared with the incremental path's class reconciliation (#167), which
-      # uses it for **additions only**. A runtime-defined type — built by a
-      # schema builder or a DSL rather than a literal `class ... <
-      # Types::BaseObject` — has no source file, so no changed path ever
-      # dispatches to it and `extract_graphql_file` cannot reproduce it. Only a
-      # full extraction emitted such units, which meant an incremental run
-      # could never create them and an index built incrementally from empty
-      # never had them at all.
+      # Current application schemas and the named type classes they expose.
+      # Incremental reconciliation adds runtime-defined units that the file
+      # pass cannot discover and updates known types whose query-root role
+      # changed. It does not infer removals from absence in this inventory.
       #
       # Empty when graphql-ruby is not loaded or the app has no schema, which is
       # why the reconciliation must not read absence here as deletion — see
       # `reconcile_removals: false` in {Extractor::CLASS_BASED_DISCOVERY}.
       #
-      # @return [Array<Class>]
+      # @return [Array<Class, Module>]
       def discoverable_classes
-        @runtime_types.values.reject { |type_class| type_class.name.nil? }
+        (@schema_classes + @runtime_types.values).uniq(&:name)
+      end
+
+      # @return [Boolean] whether every discovered schema exposed its inventory
+      def runtime_discovery_complete?
+        @runtime_discovery_complete
+      end
+
+      # Shared with incremental reconciliation when a schema changes the role
+      # of an unchanged type (ordinary object versus query root).
+      # @param klass [Class, Module] current loaded GraphQL declaration
+      # @return [Symbol, nil] existing public GraphQL unit type
+      def runtime_unit_type(klass)
+        classify_runtime_type(klass) if current_runtime_class?(klass) && graphql_runtime_class?(klass)
       end
 
       # Extract all GraphQL types, mutations, queries, and resolvers
@@ -72,28 +83,23 @@ module Woods
       # Returns an empty array when the app has neither an `app/graphql`
       # directory nor a loadable schema class.
       #
-      # Deliberately **not** gated on graphql-ruby being loaded. The file pass
-      # is static — a regex over source plus a `safe_constantize` that is
-      # allowed to fail — so it works perfectly well without the gem, and
-      # `app/graphql/*.rb` is real source an agent wants indexed either way.
-      # Gating it produced a genuine full-vs-incremental divergence: the
-      # `PathDispatcher` rule routes those paths at `extract_graphql_file`,
-      # which never had the gate, so an app whose GraphQL gem was not loaded at
-      # extraction time got its types indexed incrementally and dropped by a
-      # full run. Runtime introspection stays optional and additive — it makes
-      # the units richer when the gem is there, it does not decide whether they
-      # exist.
+      # Without graphql-ruby, the file pass retains its limited source-form
+      # fallback. With loaded declarations, verified GraphQL ancestry governs
+      # admission; unresolved constants are never autoloaded by this extractor.
       #
       # @return [Array<ExtractedUnit>] List of GraphQL units
       def extract_all
+        unless runtime_discovery_complete?
+          raise Woods::ExtractionError, 'GraphQL runtime discovery incomplete; fix the logged schema error and retry'
+        end
         return [] unless graphql_source_present?
 
         units = []
         seen_identifiers = Set.new
 
         # First pass: runtime introspection (most accurate)
-        if @runtime_types.any?
-          @runtime_types.each_value do |type_class|
+        if discoverable_classes.any?
+          discoverable_classes.each do |type_class|
             unit = extract_from_runtime_type(type_class)
             next unless unit
             next if seen_identifiers.include?(unit.identifier)
@@ -103,7 +109,7 @@ module Woods
           end
         end
 
-        # Second pass: file-based discovery (catches everything)
+        # Second pass: governed declarations, including unattached resolvers.
         if @graphql_dir&.directory?
           Dir[@graphql_dir.join('**/*.rb')].each do |file_path|
             unit = extract_graphql_file(file_path)
@@ -124,13 +130,16 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit, or nil if the file
       #   does not contain a recognizable GraphQL class
       def extract_graphql_file(file_path)
+        SourceInputs::ConsumerErrors.record(self) unless runtime_discovery_complete?
         source = File.read(file_path)
         class_name = extract_class_name(file_path, source)
 
         return nil unless class_name
-        return nil unless graphql_class?(source)
 
-        runtime_class = class_name.safe_constantize
+        runtime_class = loaded_graphql_constant(class_name)
+        return nil if runtime_class && !graphql_runtime_class?(runtime_class)
+        return nil unless runtime_class || graphql_class?(source)
+
         # Classify from the resolved runtime class first, matching
         # {#extract_from_runtime_type}'s classifier. Keeps the two passes
         # from disagreeing on a type's unit_type (a mutation that looks like
@@ -173,9 +182,11 @@ module Woods
       # @param type_class [Class] A graphql-ruby type class
       # @return [ExtractedUnit, nil]
       def extract_from_runtime_type(type_class)
+        SourceInputs::ConsumerErrors.record(self) unless runtime_discovery_complete?
         return nil unless type_class.respond_to?(:name) && type_class.name
         # Skip anonymous or internal graphql-ruby classes
         return nil if type_class.name.start_with?('GraphQL::')
+        return nil unless current_runtime_class?(type_class) && graphql_runtime_class?(type_class)
 
         file_path = source_file_for_class(type_class)
         source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
@@ -216,70 +227,98 @@ module Woods
       def graphql_source_present?
         return true if @graphql_dir&.directory?
 
-        !@schema_class.nil?
+        @schema_classes.any?
       end
 
-      # Find the application's schema class (descendant of GraphQL::Schema)
+      # Find every current, named application schema. Stale reload descendants
+      # and schemas defined in installed gems cannot claim application ownership.
       #
-      # @return [Class, nil]
-      def find_schema_class
-        return nil unless defined?(GraphQL::Schema)
+      # @return [Array<Class>]
+      def find_schema_classes
+        return [] unless defined?(GraphQL::Schema)
 
-        GraphQL::Schema.descendants.find do |klass|
-          klass.name && !klass.name.start_with?('GraphQL::')
-        end
-      rescue StandardError
-        nil
+        GraphQL::Schema.descendants.select do |klass|
+          next false unless klass.name && !klass.name.start_with?('GraphQL::') && current_runtime_class?(klass)
+
+          path = source_file_for_class(klass)
+          path.nil? || (File.expand_path(path).start_with?("#{Rails.root}/") && app_source?(path, Rails.root.to_s))
+        end.sort_by(&:name)
+      rescue StandardError => e
+        log_discovery_failure('schema inventory', e)
+        []
       end
 
       # Load types from the runtime schema for introspection
       #
       # @return [Hash{String => Class}] Map of type name to type class
       def load_runtime_types
-        return {} unless @schema_class
-
         types = {}
-        @schema_class.types.each do |name, type_class|
-          # Skip built-in introspection types
-          next if name.start_with?('__')
-          next unless type_class.respond_to?(:name) && type_class.name
+        @schema_classes.each do |schema|
+          query = schema.query if schema.respond_to?(:query)
+          schema_types = {}
+          schema.types.each do |name, type_class|
+            next if name.start_with?('__') || !current_runtime_class?(type_class)
+            next unless graphql_runtime_class?(type_class)
 
-          types[name] = type_class
+            # GraphQL names are schema-local; two schemas may both have Query.
+            schema_types[type_class.name] = type_class
+          end
+          types.merge!(schema_types)
+          @query_roots << query if query
+        rescue StandardError => e
+          log_discovery_failure(schema.name, e)
         end
-
         types
-      rescue StandardError
-        {}
+      end
+
+      def log_discovery_failure(name, error)
+        @runtime_discovery_complete = false
+        SourceInputs::ConsumerErrors.record(self)
+        return unless defined?(Rails)
+
+        Rails.logger.warn("[Woods] GraphQL runtime discovery incomplete for #{name}: #{error.message}")
+      end
+
+      def loaded_graphql_constant(name)
+        result = @runtime_lookup.call("::#{name}", allow_private: true)
+        result[:value] if result[:status] == :resolved
+      end
+
+      def current_runtime_class?(klass)
+        return false unless @runtime_lookup.module_object?(klass)
+
+        name = @runtime_lookup.reflect(klass, :name)
+        name && SourceReferences::RuntimeLookup::CORE_EQUAL.bind(klass).call(loaded_graphql_constant(name))
+      end
+
+      def graphql_runtime_class?(klass)
+        return false unless defined?(GraphQL::Schema) && @runtime_lookup.module_object?(klass)
+
+        ancestors = @runtime_lookup.reflect(klass, :ancestors)
+        return true if ancestors.include?(GraphQL::Schema) && klass != GraphQL::Schema
+
+        %i[Object InputObject Enum Union Scalar Mutation Resolver Interface].any? do |name|
+          GraphQL::Schema.const_defined?(name, false) && ancestors.include?(GraphQL::Schema.const_get(name, false))
+        end
       end
 
       # Locate the file this type was defined in, or nil when there is none.
       #
-      # nil, not a fabricated convention path. A runtime-defined type
-      # (built by a schema builder or DSL) has no file, and inventing
-      # `app/graphql/<constant>.rb` for it created a unit indistinguishable from a
-      # file-defined one whose file had since been deleted. That ambiguity is
-      # unresolvable downstream: the conventional location of `Types::FooType`
-      # *is* `app/graphql/types/foo_type.rb`, so no path comparison can separate
-      # "never had a file" from "file was deleted".
-      #
-      # Returning nil resolves it at the only point where the answer is known.
-      # `DependencyGraph#register` skips nil paths, so such a unit never enters
-      # `file_map` and the deletion sweep — which walks registered paths — cannot
-      # reach it. No predicate required, and a full extraction produces the same
-      # nil, so the two paths still agree.
-      #
-      # `resolve_source_location` is tried first and has three tiers of real
-      # discovery (`const_source_location`, then instance and singleton method
-      # locations). It reaches its fallback only when Ruby cannot place the class
-      # in app source at all, which is precisely the no-file case.
+      # Prefer the real definition or method location, including classes built
+      # in initializers, over a convention-named file. Fall back only to an
+      # existing convention path. A genuinely fileless type keeps nil and stays
+      # out of the graph's file_map and path-based deletion sweep.
       #
       # @param klass [Class]
       # @return [String, nil]
       def source_file_for_class(klass)
+        actual = resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
+        return actual if actual
+
         convention_path = Rails.root.join("#{GRAPHQL_DIRECTORY}/#{klass.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)
 
-        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
+        nil
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -299,7 +338,7 @@ module Woods
           :graphql_type
         elsif defined?(GraphQL::Schema::Union) && type_class < GraphQL::Schema::Union
           :graphql_type
-        elsif defined?(GraphQL::Schema::Interface) && type_class.is_a?(Module) && type_class.respond_to?(:fields)
+        elsif defined?(GraphQL::Schema::Interface) && type_class.ancestors.include?(GraphQL::Schema::Interface)
           :graphql_type
         elsif defined?(GraphQL::Schema::InputObject) && type_class < GraphQL::Schema::InputObject
           :graphql_type
@@ -307,7 +346,7 @@ module Woods
           :graphql_type
         elsif defined?(GraphQL::Schema::Object) && type_class < GraphQL::Schema::Object
           # Check if this is the Query root type
-          if @schema_class.respond_to?(:query) && @schema_class.query == type_class
+          if @query_roots.include?(type_class)
             :graphql_query
           else
             :graphql_type
@@ -326,9 +365,9 @@ module Woods
         return :graphql_mutation if file_path.include?('/mutations/')
         return :graphql_resolver if file_path.include?('/resolvers/')
 
-        return :graphql_mutation if source.match?(/< (GraphQL::Schema::Mutation|Mutations::Base|BaseMutation)/)
+        return :graphql_mutation if source.match?(/<\s*(?:::)?(GraphQL::Schema::Mutation|Mutations::Base|BaseMutation)/)
 
-        return :graphql_resolver if source.match?(/< (GraphQL::Schema::Resolver|Resolvers::Base|BaseResolver)/)
+        return :graphql_resolver if source.match?(/<\s*(?:::)?(GraphQL::Schema::Resolver|Resolvers::Base|BaseResolver)/)
 
         # Query type is usually the root query object
         return :graphql_query if file_path.match?(/query_type\.rb$/) || source.match?(/class QueryType\b/)
@@ -341,7 +380,7 @@ module Woods
       # @param source [String]
       # @return [Boolean]
       def graphql_class?(source)
-        source.match?(/< GraphQL::Schema::(Object|InputObject|Enum|Union|Scalar|Mutation|Resolver|Interface|RelayClassicMutation)/) ||
+        source.match?(/<\s*(?:::)?GraphQL::Schema(?:\b(?!::)|::(?:Object|InputObject|Enum|Union|Scalar|Mutation|Resolver|Interface|RelayClassicMutation)\b)/) ||
           source.match?(/< (Types::Base\w+|Base(Type|InputObject|Enum|Union|Scalar|Mutation|Resolver|Interface))/) ||
           source.match?(/< (Mutations::Base|Resolvers::Base)/) ||
           source.match?(/include GraphQL::Schema::Interface/) ||
@@ -484,6 +523,7 @@ module Woods
       # @return [Symbol]
       def detect_graphql_kind(source, runtime_class)
         if runtime_class
+          return :schema if defined?(GraphQL::Schema) && runtime_class < GraphQL::Schema
           return :enum if defined?(GraphQL::Schema::Enum) && runtime_class < GraphQL::Schema::Enum
           return :union if defined?(GraphQL::Schema::Union) && runtime_class < GraphQL::Schema::Union
           return :input_object if defined?(GraphQL::Schema::InputObject) && runtime_class < GraphQL::Schema::InputObject
@@ -497,6 +537,7 @@ module Woods
         end
 
         # Fall back to source analysis
+        return :schema if source.match?(/<\s*(?:::)?GraphQL::Schema\b(?!::)/)
         return :enum if source.match?(/< .*Enum\b/) || source.match?(/value\s+["']/)
         return :union if source.match?(/< .*Union\b/) || source.match?(/possible_types\s/)
         return :input_object if source.match?(/< .*InputObject\b/)

@@ -83,6 +83,20 @@ the lost unit: correct the producer/source issue and run a successful full
 extraction, then validate it. Keep the previous generation until the rebuild
 succeeds; do not delete the index to bypass the collision.
 
+### Refresh GraphQL discovery on a supporting writer
+
+**Unreleased after 2.0.0; planned for 2.1:** the discovery fixes for
+[#558](https://github.com/lost-in-the/woods/issues/558),
+[#562](https://github.com/lost-in-the/woods/issues/562) and
+[#563](https://github.com/lost-in-the/woods/issues/563) add schema-class units,
+loaded resolver subclasses and types from every application schema. Schemas use
+the existing `graphql_type` category with `metadata.graphql_kind: "schema"`.
+Verify the loaded writer revision, boot/eager-load the intended application,
+then run a full extraction and validate to fill gaps in older indexes. Readers
+can continue serving the previous generation until publication succeeds.
+See [GraphQL extraction](EXTRACTOR_REFERENCE.md#graphqlextractor) for runtime
+ownership, query-root classification, handled failures and source-fallback limits.
+
 ### 1. Record the current installation
 
 Run in the same environment that boots Rails:

@@ -509,13 +509,20 @@ reference cache; updating only the reader does not add them.
 
 ### GraphQLExtractor
 
-**What it captures:** graphql-ruby types, mutations, queries, and resolvers. Produces four distinct unit types from one extractor.
+**What it captures:** graphql-ruby schemas, types, mutations, queries, and resolvers. Produces four distinct unit types from one extractor.
+
+**Unreleased after Woods 2.0.0; planned for 2.1:** the discovery fixes below require the corresponding Git/path revision; the development version alone does not establish availability.
 
 **Key details:**
-- Scans `app/graphql` with runtime introspection via `GraphQL::Schema.types` when available, falls back to file discovery
-- Produces unit types: `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`
+- Scans every current, named application `GraphQL::Schema` subclass and unions their runtime type inventories by canonical Ruby constant name. Distinct Ruby classes can share a schema-local GraphQL name. A type used as the query root of any schema has one `graphql_query` identity.
+- Produces unit types: `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`. Schema classes use `graphql_type` with `metadata.graphql_kind: "schema"`; their source includes configuration such as `max_complexity` for lookup and source search.
+- Scans governed declarations in `app/graphql`, including unattached resolvers. Loaded declarations qualify through GraphQL ancestry, so application superclass chains, leading `::`, and superclass whitespace do not affect discovery. Reflection reads schema/type metadata without executing field or resolver bodies.
+- When graphql-ruby or a declaration is unavailable, file discovery retains its limited recognized-source-form fallback; it cannot establish arbitrary application superclass ancestry. Woods does not trigger pending declaration autoloads itself.
 - Extracts field metadata (types, descriptions, complexity, arguments), authorization patterns (Pundit, CanCan, `authorized?`), and dependencies on models/services
-- Since all GraphQL units come from one extractor, incremental re-extraction handles them via `extract_graphql_file`
+- Incremental extraction handles changed files and runtime inventory additions, and reclassifies an unchanged type when its query-root role changes. Runtime inventory absence alone does not delete units: unattached file-defined resolvers remain valid, and runtime-only removals still require a full extraction or `woods:refresh[graphql]` after the application reloads.
+- A failed schema inventory logs the schema name and stops full, incremental, or refresh publication; the prior generation remains active. Fix the introspection error and retry the complete extraction batch.
+- If application eager loading is incomplete, incremental extraction and refresh refuse a change to an existing GraphQL unit's kind rather than demoting a query root whose schema might not have loaded. Retry after a complete application boot.
+- Runtime source locations take precedence over convention-named files. Initializer-built `Class.new` schemas/types can be indexed, but this does not add method-body `code_reference` ownership for generated declarations; see [source-reference coverage](#constant-source-references).
 - `parent_class` and summary chunks describe the selected declaration's explicit constant-path superclass, preserving its written qualification. Nested or sibling declarations and literal text cannot supply a parent. Implicit Object, module interfaces, dynamic superclass expressions, unavailable source, and invalid source have no declared parent (`null` metadata; `unknown` in summaries). This is source declaration metadata, not resolved runtime ancestry.
 
 **Example output (abbreviated):**

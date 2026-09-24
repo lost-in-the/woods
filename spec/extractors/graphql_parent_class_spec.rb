@@ -59,6 +59,8 @@ RSpec.describe Woods::Extractors::GraphQLExtractor, 'declared parent ownership' 
     stub_const('ParentTypes::Item', Class.new(GraphQL::Schema::Object))
     source = "class ParentTypes::Item < GraphQL::Schema::Object; class Wrapper < SimpleDelegator; end; end\n"
     path = create_file('app/graphql/parent_types/item.rb', "#{source}# #{'padding ' * 1000}\n")
+    allow(Object).to receive(:const_source_location).and_call_original
+    allow(Object).to receive(:const_source_location).with('ParentTypes::Item').and_return([path, 1])
     extractor = described_class.new
 
     [extractor.extract_from_runtime_type(ParentTypes::Item), extractor.extract_graphql_file(path)].each do |unit|

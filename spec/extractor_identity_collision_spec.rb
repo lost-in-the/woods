@@ -125,4 +125,60 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
     expect { extractor.send(:deduplicate_type_units, :graphql, [a, b]) }
       .to raise_error(Woods::ExtractionError, /collision/)
   end
+
+  it 'does not transfer a GraphQL identity to a conflicting source while changing its kind' do
+    prior = unit(source('first.rb'), :graphql_type)
+    fresh = unit(source('second.rb'), :graphql_query)
+    extractor.dependency_graph.register(prior)
+    klass = double('GraphQL class', name: prior.identifier)
+    consumer = double('GraphQLExtractor', runtime_discovery_complete?: true,
+                                          runtime_unit_type: :graphql_query, extract_from_runtime_type: fresh)
+
+    expect do
+      extractor.send(:reconcile_graphql_classification, consumer, [klass], Set.new, Set.new)
+    end.to raise_error(Woods::ExtractionError, /collision/)
+    expect(extractor.dependency_graph.node_types(prior.identifier)).to eq([:graphql_type])
+  end
+
+  %i[changed_file refresh].each do |operation|
+    it "refuses #{operation} GraphQL role changes after incomplete eager loading without replacing old payloads" do
+      stub_const('GraphQL::Schema', Class.new { def self.descendants = [] })
+      stub_const('GraphQL::Schema::Object', Class.new)
+      stub_const('SharedIdentity', Class.new(GraphQL::Schema::Object))
+      path = File.join(root, 'app/graphql/shared_identity.rb')
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, 'class SharedIdentity < GraphQL::Schema::Object; end')
+      register(unit(path, :graphql_query))
+      filename = extractor.send(:collision_safe_filename, 'SharedIdentity')
+      payload = extractor.send(:payload_dir).join('graphql', filename)
+      previous = File.binread(payload)
+      File.write(path, "#{File.read(path)}\n# changed source\n")
+      extractor.instance_variable_set(:@eager_load_complete, false)
+      consumer = Woods::Extractors::GraphQLExtractor.new
+      extractor.instance_variable_set(:@incremental_extractors, { graphql: consumer })
+      expect(consumer.runtime_discovery_complete?).to be(true)
+
+      expect do
+        if operation == :changed_file
+          changes = Woods::ChangeSet.new(paths: [path], root: root)
+          extractor.send(:reconcile_changed_paths, changes, Set.new)
+        else
+          extractor.send(:replace_type_wholesale, :graphql, Set.new)
+        end
+        extractor.send(:raise_on_handled_extraction_failure!)
+      end.to raise_error(Woods::ExtractionError, /[Gg]raphql|GraphQL/)
+      expect(extractor.dependency_graph.node_types('SharedIdentity')).to eq([:graphql_query])
+      expect(File.binread(payload)).to eq(previous)
+    end
+  end
+
+  it 'does not authorize conflicting fresh GraphQL owners across kinds during wholesale replacement' do
+    register(unit(source('first.rb'), :graphql_type))
+    fresh = unit(source('second.rb'), :graphql_query)
+
+    expect do
+      extractor.send(:with_replacement_ownership, :graphql) { register(fresh) }
+    end.to raise_error(Woods::ExtractionError, /collision/)
+    expect(extractor.dependency_graph.node_types('SharedIdentity')).to eq([:graphql_type])
+  end
 end

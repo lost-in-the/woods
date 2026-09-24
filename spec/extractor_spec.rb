@@ -2967,7 +2967,7 @@ RSpec.describe Woods::Extractor do
     # bumps the generation each cycle.
     it 'treats a unit known under a secondary type as already known' do
       already_known = double('QueryType', name: 'Types::QueryType')
-      fake = double('GraphQLExtractor', discoverable_classes: [already_known])
+      fake = double('GraphQLExtractor', discoverable_classes: [already_known], runtime_discovery_complete?: true)
       stub_const('Woods::Extractor::CLASS_BASED_DISCOVERY',
                  { graphql: { type: :graphql_type, types: %i[graphql_type graphql_query],
                               method: :extract_from_runtime_type, reconcile_removals: false } })

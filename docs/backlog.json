@@ -2964,5 +2964,44 @@
     ],
     "description": "Issue #559: Discover source-owned loaded Struct/Data child classes in PORO and library wrappers without borrowing the parent identity. Preserve top-level assignment and canonical library-module lookup compatibility, reject shadow factories as reference targets, and keep genuine collision guards. Verify full, incremental, refresh and actual watcher reload with custom inflections, unchanged callers and cache-format migration. Full baseline rebuild required; planned for 2.1. Final review and combined testbed acceptance pending.",
     "status": "in-progress"
+  },
+  {
+    "id": "B-217",
+    "title": "Publish application GraphQL schema classes with searchable configuration",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/graphql_extractor.rb",
+      "spec/fixtures/optional_graphql/boot.rb"
+    ],
+    "description": "Issue #558: Publish a verified GraphQL::Schema subclass once as graphql_type with graphql_kind: schema, keeping captured configuration searchable. Replace the invalid type-level complexity fixture with working graphql-ruby schemas and query controls. Cover full, incremental schema edits, targeted refresh and packaged MCP lookup/search. Independent review and combined acceptance pending.",
+    "status": "in-progress"
+  },
+  {
+    "id": "B-218",
+    "title": "Discover loaded GraphQL resolvers through runtime ancestry",
+    "severity": "medium",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/graphql_extractor.rb",
+      "spec/extractors/graphql_discovery_spec.rb"
+    ],
+    "description": "Issue #562: Admit source-owned loaded resolver subclasses through verified runtime ancestry, regardless of application superclass names, root qualification or spacing. Preserve the gem-absent source fallback without autoload or resolver execution. Verify edit/create/delete and formatting-only changes with actual successful GraphQL queries. Independent review and combined acceptance pending.",
+    "status": "in-progress"
+  },
+  {
+    "id": "B-219",
+    "title": "Combine runtime type inventories from all application GraphQL schemas",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/graphql_extractor.rb",
+      "lib/woods/extractor.rb"
+    ],
+    "description": "Issue #563: Union all current application schemas by canonical Ruby identity, preserving schema-local duplicate names and shared types. Reconcile query-root role changes before replacing shared payload files, keep collision protection across kinds, and refuse incomplete introspection or unproven partial-boot demotion. Runtime inventory absence alone remains insufficient for incremental deletion. Booted multi-schema and failure controls plus combined acceptance are required.",
+    "status": "in-progress"
   }
 ]
