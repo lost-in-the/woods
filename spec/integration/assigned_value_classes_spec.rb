@@ -220,22 +220,25 @@ RSpec.describe 'Assigned Struct and Data class ownership', :booted_app do
     end
   end
 
-  it 'refuses an old analysis cache atomically and repairs it with a complete full extraction' do
-    index = full_index
-    generation = Woods::Generation.new(output_dir: index)
-    marker = File.binread(File.join(index, 'generation.json'))
-    path = File.join(generation.payload_dir, Woods::SourceReferences::Cache::FILE_NAME)
-    cache = JSON.parse(File.read(path)).merge('version' => 1)
-    File.write(path, JSON.generate(cache))
-    changed = File.join(@app_root, 'app/models/value_caller.rb')
-    expect { Woods::Extractor.new(output_dir: index).extract_changed([changed]) }
-      .to raise_error(Woods::ExtractionError, /full extraction/i)
-    expect(File.binread(File.join(index, 'generation.json'))).to eq(marker)
-    Woods::Extractor.new(output_dir: index).extract_all
-    path = File.join(generation.payload_dir, Woods::SourceReferences::Cache::FILE_NAME)
-    expect(JSON.parse(File.read(path))['version']).to eq(2)
-    expect(graph(index).fetch('reverse').fetch('ValueAPI::Container::Criteria')).to include('ValueCaller')
+  [1, 2].each do |old_version|
+    it "refuses analysis cache v#{old_version} atomically and repairs it with a complete full extraction" do
+      index = full_index
+      generation = Woods::Generation.new(output_dir: index)
+      marker = File.binread(File.join(index, 'generation.json'))
+      path = File.join(generation.payload_dir, Woods::SourceReferences::Cache::FILE_NAME)
+      cache = JSON.parse(File.read(path)).merge('version' => old_version)
+      File.write(path, JSON.generate(cache))
+      changed = File.join(@app_root, 'app/models/value_caller.rb')
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([changed]) }
+        .to raise_error(Woods::ExtractionError, /full extraction/i)
+      expect(File.binread(File.join(index, 'generation.json'))).to eq(marker)
+      Woods::Extractor.new(output_dir: index).extract_all
+      path = File.join(generation.payload_dir, Woods::SourceReferences::Cache::FILE_NAME)
+      expect(JSON.parse(File.read(path))['version']).to eq(3)
+      expect(graph(index).fetch('reverse').fetch('ValueAPI::Container::Criteria')).to include('ValueCaller')
+    end
   end
+
   it 'reloads a changed value constructor through the real watcher with a held reader' do
     index = full_index
     reader = Woods::MCP::IndexReader.new(index)
