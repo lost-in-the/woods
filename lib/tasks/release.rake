@@ -57,3 +57,8 @@ Woods::Release::RakeSupport.block_task(
   description: 'BLOCKED: aborts, because the dispatch workflow publishes the gem; run release:prepare instead',
   message: 'nothing is published from a laptop. The dispatch workflow pushes the gem bytes CI tested.'
 )
+Woods::Release::RakeSupport.block_task(
+  'release:source_control_push',
+  description: 'BLOCKED: aborts before Bundler tags or pushes; run release:prepare instead',
+  message: 'Bundler must not tag or push from this task. Use release:prepare and the reviewed maintainer release flow.'
+)

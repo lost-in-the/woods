@@ -3160,7 +3160,7 @@
       "script/validate-release"
     ],
     "description": "Issue #587: Audit R35/R40/R68-R73: block the still-mutating Bundler release:source_control_push task; reject nested changelog entries before any writes; include check-task registration in surface inventory; make release text handling locale-independent; correct task-specific help and impossible version/fence recovery advice. Repair the malformed changelog fragment boundary. Preserve task-owned VERSION/fences and existing transition policy; do not tag, push, publish, or introduce an unreviewed retarget/restate operation. Use instrumented mutation-refusal tests and scratch release fixtures, then regenerate inventory.",
-    "status": "in-progress"
+    "status": "resolved"
   },
   {
     "id": "B-232",

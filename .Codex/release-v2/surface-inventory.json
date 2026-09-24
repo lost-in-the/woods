@@ -187,6 +187,14 @@
   ],
   "rake_tasks": [
     {
+      "name": "woods:check:moved_messages",
+      "arguments": [
+        "from",
+        "to"
+      ],
+      "prerequisites": []
+    },
+    {
       "name": "woods:clean",
       "arguments": [],
       "prerequisites": [
@@ -1020,7 +1028,7 @@
     "index_mcp_tools": 29,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 36,
+    "rake_tasks": 37,
     "tasks_methods": 4
   },
   "documentation_claims": {
