@@ -1,0 +1,6 @@
+# frozen_string_literal: true
+
+# Optional DSL validation on the Ruby >= 3.2 / Rails 7.2 lane only.
+eval_gemfile File.expand_path('rails_7.2.gemfile', __dir__)
+gem 'aasm', '~> 6.0'
+gem 'state_machines', '~> 0.202.0'
