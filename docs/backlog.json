@@ -3296,5 +3296,34 @@
     ],
     "description": "Issue #597: R15/R43/R82/R83: align explicitly configured host/origin allowlists across Woods and the MCP SDK, including IPv6/port semantics; reject or clearly migrate unsupported nested console.yml rather than silently selecting local mode; define singular association counts; give consistent actionable HTTP eager-load failure behavior. Preserve authentication, redaction and table guards. Establish real transport/ActiveRecord regressions and reproduce host boot errors before considering narrow fallback. Coordinate code integration with the pending private patch without publishing its details.",
     "status": "ready"
+  },
+  {
+    "id": "B-242",
+    "title": "Correct remaining audit migration and capability documentation",
+    "severity": "medium",
+    "category": "docs",
+    "layer": "documentation",
+    "files": [
+      "docs/UPGRADING_TO_2.md",
+      "docs/CONFIGURATION_REFERENCE.md",
+      "docs/CONSOLE_MCP_SETUP.md",
+      "docs/NOTION_INTEGRATION.md",
+      "docs/MCP_TOOL_COOKBOOK.md"
+    ],
+    "description": "Issue #498 follow-up, audit R13/R17/R37/R41/R42/R55/R63-R65/R67: accurately describe legacy HTTP validation, version/baseline refusal, retained runtime provenance, snapshot/SQLite preservation during clean migration, removed no-op configuration, empty-index readiness, removed eval settings, explicit embedding model selection, early placement of middleware/tracer settings, and embedded-only collaborators. Keep intentional safety contracts; do not restore removed eval or equate an empty corpus with failed readiness.",
+    "status": "ready"
+  },
+  {
+    "id": "B-243",
+    "title": "Normalize app-owned nested metadata paths for portable extraction output",
+    "severity": "low",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/event_extractor.rb",
+      "lib/woods/extractors/view_component_extractor.rb"
+    ],
+    "description": "Issue #483 follow-up, audit R47: event publisher/subscriber paths and component sidecars retain absolute application roots in metadata or generated annotations, making equivalent checkouts hash differently. Normalize known application-owned paths before source/hash serialization while retaining deliberate external-path semantics. Compare real two-root fixtures without sorting arrays or scrubbing evidence beyond documented volatile fields.",
+    "status": "ready"
   }
 ]
