@@ -52,7 +52,7 @@ RSpec.describe Woods::SourceReferences::Cache do
   end
 
   it 'accepts an empty cache and a library source path' do
-    empty = { 'version' => 1, 'files' => {}, 'owners' => [] }
+    empty = { 'version' => described_class::VERSION, 'files' => {}, 'owners' => [] }
     described_class.write(path, empty)
     expect(described_class.read(path)).to eq(empty)
     data['files']['lib/token_codec.rb'] = data['files'].values.first
@@ -99,8 +99,22 @@ RSpec.describe Woods::SourceReferences::Cache do
     end
   end
 
+  it 'refuses the previous cache format so unchanged files gain assigned-class declarations after a full extraction' do
+    data['version'] = 1
+    write_json(data)
+    expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
+  end
+
+  it 'round trips assigned-class evidence and refuses arbitrary constructor claims' do
+    data['files'].values.first['analysis'] = Woods::SourceReferences::Collector.new.call('Value = Struct.new(:item)')
+    described_class.write(path, data)
+    expect(described_class.read(path)).to eq(data)
+    data['files'].values.first['analysis']['declarations'].first['constructor'] = 'Factory'
+    expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /constructor/)
+  end
+
   it 'rejects unsupported cache versions' do
-    data['version'] = 2
+    data['version'] = described_class::VERSION + 1
     write_json(data)
     expect { described_class.read(path) }.to raise_error(described_class::Invalid)
   end

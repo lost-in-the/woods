@@ -6,6 +6,8 @@ module Woods
   module SourceReferences
     # Retains AST context that the general Woods flow AST intentionally omits.
     class PrismAdapter
+      KINDS = { class_node: :declaration, module_node: :declaration, constant_read_node: :constant,
+                constant_path_node: :constant, singleton_class_node: :singleton, def_node: :method }.freeze
       CONSTANT_WRITES = %i[
         constant_write_node constant_path_write_node constant_operator_write_node constant_path_operator_write_node
         constant_and_write_node constant_path_and_write_node constant_or_write_node constant_path_or_write_node
@@ -19,11 +21,10 @@ module Woods
       end
 
       def kind(node)
+        return KINDS[node.type] if KINDS.key?(node.type)
+
         case node.type
-        when :class_node, :module_node then :declaration
-        when :constant_read_node, :constant_path_node then :constant
-        when :singleton_class_node then :singleton
-        when :def_node then :method
+        when :constant_write_node, :constant_path_write_node then value_constructor(node) ? :value_class : :other
         when :call_node then dynamic_scope?(node) ? :dynamic_scope : :other
         else :other
         end
@@ -46,6 +47,18 @@ module Woods
         return [node.parameters, node.body].compact if node.type == :def_node
 
         node.compact_child_nodes
+      end
+
+      def value_constructor(node)
+        call = node.value
+        return unless call&.type == :call_node
+
+        name = constant_name(call.receiver)
+        name if { new: %w[Struct ::Struct], define: %w[Data ::Data] }.fetch(call.name, []).include?(name)
+      end
+
+      def assignment_name(node)
+        node.type == :constant_write_node ? node.name.to_s : constant_name(node.target)
       end
 
       def declaration_name(node)

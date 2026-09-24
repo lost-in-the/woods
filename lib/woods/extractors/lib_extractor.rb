@@ -5,6 +5,8 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative '../source_references/collector'
+require_relative 'assigned_value_discovery'
 
 module Woods
   module Extractors
@@ -135,6 +137,12 @@ module Woods
         # closed before the class opened, no longer pollutes the identifier
         # (#174). lib/ files are typically unmanaged, so the governed lookup
         # returns nil and the source scan decides.
+        analysis = SourceReferences::Collector.new.call(source)
+        expected = managed_constant_path(file_path.to_s) || path_based_class_name(file_path)
+        assigned = AssignedValueDiscovery.new.call(file_path, analysis: analysis, expected: expected,
+                                                              preserve_modules: true)
+        return assigned if assigned
+
         qualified = governed_class_name(file_path, source) || qualified_first_class_name(source)
         return qualified if qualified
 

@@ -424,6 +424,34 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Excludes concerns (those go to ConcernExtractor)
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
 
+#### Assigned value classes
+
+**Unreleased after Woods 2.0.0; planned for 2.1.** Direct assignments such as
+`Criteria = Struct.new(:value)` and `Page = Data.define(:items)` can own a PORO
+unit inside class or module namespace wrappers. Discovery uses the active
+loader's expected constant where available, then verifies the loaded class,
+core factory, ancestry and canonical assignment file. For example, a reopened
+`Products::Search` containing `Criteria = Struct.new(...)` in its child file
+produces `Products::Search::Criteria`, not another `Products::Search` unit.
+
+The same verified naming applies to [library files](#libextractor). Shadowed
+factories, aliases, arbitrary `Class.new` assignments and unloaded nested value
+classes are not promoted by this check. Existing top-level named-Struct lookup
+identities remain compatible, but an alias is not a verified reference target.
+A callable canonical module sharing the file retains its own PORO unit. Library
+extraction preserves its canonical primary module when it matches the file's
+identity or has its own methods defined there; namespace-only child-file wrappers
+do not displace the assigned child. An assigned class can be the target of a
+`code_reference` edge, but references inside its Struct/Data constructor block
+remain unsupported because the block does not establish ordinary lexical class
+nesting. Woods does not execute the constructor or its method bodies.
+
+Run a **full extraction** after upgrading the writer. It repairs older wrapper
+identities and rebuilds the source-reference cache in format 2; incremental
+extraction refuses format 1 even when source files are unchanged. Existing
+readers can continue serving the last published index until the full extraction
+succeeds. Genuine collisions between different files still refuse publication.
+
 **Standalone modules — unreleased after Woods 2.0.0; planned for 2.1.** A named,
 loaded module whose canonical declaration and own methods are defined under
 `app/models` can produce a `poro` unit with `metadata.ruby_kind: "module"` and
@@ -435,7 +463,7 @@ Namespace-only wrappers, aliases, unloaded constants, gem-owned modules and
 methods supplied only by another file do not establish standalone ownership.
 An app module included by a live model belongs to `ConcernExtractor`; a library
 module remains owned by `LibExtractor`. Separate callable modules sharing a
-source file retain their own identities. Class PORO identifiers stay unchanged.
+source file retain their own identities. Ordinary class PORO identifiers stay unchanged.
 
 Incremental extraction and model/PORO/concern refreshes reconcile ownership when
 an includer changes even if the module's file does not. Incomplete eager loading
@@ -746,6 +774,9 @@ Every app-owned unit under a package root carries `metadata[:package]` with the 
 - Excludes `lib/tasks/` (covered by RakeTaskExtractor) and `lib/generators/`
 - File-based scanning; no assumption about class hierarchy
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
+
+Loaded Struct/Data assignments use the [assigned value-class ownership rules](#assigned-value-classes)
+to avoid naming sibling files after their shared namespace wrapper.
 
 ---
 

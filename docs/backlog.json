@@ -2950,5 +2950,19 @@
     ],
     "description": "Issue #561: #564 shares source-ownership collision checks across full, incremental and refresh publication. Conflicting retained/fresh claims and wholesale results refuse while preserving the active generation; same-source updates, independent types, confirmed moves and complete replacements remain supported. Independent review, 9,660 default examples, 227 focused cases, booted collision/move cases on Rails 7.2 and 8.0, and all 31 CI checks passed before merge. Separate #559 producer naming defects remain open.",
     "status": "resolved"
+  },
+  {
+    "id": "B-216",
+    "title": "Preserve assigned Struct and Data identities inside namespace wrappers",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/extractors/assigned_value_discovery.rb",
+      "lib/woods/source_references/value_class.rb",
+      "lib/woods/source_references/cache.rb"
+    ],
+    "description": "Issue #559: Discover source-owned loaded Struct/Data child classes in PORO and library wrappers without borrowing the parent identity. Preserve top-level assignment and canonical library-module lookup compatibility, reject shadow factories as reference targets, and keep genuine collision guards. Verify full, incremental, refresh and actual watcher reload with custom inflections, unchanged callers and cache-format migration. Full baseline rebuild required; planned for 2.1. Final review and combined testbed acceptance pending.",
+    "status": "in-progress"
   }
 ]

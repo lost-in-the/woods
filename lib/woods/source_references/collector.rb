@@ -12,6 +12,8 @@ module Woods
     # References/declarations inside class << self carry singleton_depth; resolving
     # them requires the singleton constant table, not ordinary owner lookup.
     class Collector
+      HANDLERS = { declaration: :declaration, value_class: :value_class, constant: :reference,
+                   singleton: :singleton, method: :method_body }.freeze
       # @param backend [Symbol] :prism (default) or :parser
       # @raise [ArgumentError] for an unsupported backend
       def initialize(backend: :prism)
@@ -41,14 +43,11 @@ module Woods
       def visit(node, nesting, singleton_depth = 0)
         return unless node
 
-        case @adapter.kind(node)
-        when :declaration then declaration(node, nesting, singleton_depth)
-        when :constant then reference(node, nesting, singleton_depth)
-        when :singleton then singleton(node, nesting, singleton_depth)
-        when :method then method_body(node, nesting, singleton_depth)
-        when :dynamic_scope then skip(node, 'dynamic_declaration', nesting)
-        else visit_children(node, nesting, singleton_depth)
-        end
+        kind = @adapter.kind(node)
+        return skip(node, 'dynamic_declaration', nesting) if kind == :dynamic_scope
+
+        handler = HANDLERS[kind]
+        handler ? send(handler, node, nesting, singleton_depth) : visit_children(node, nesting, singleton_depth)
       end
 
       def visit_children(node, nesting, singleton_depth)
@@ -67,6 +66,22 @@ module Woods
         parent = @adapter.superclass(node)
         skip(parent, 'dynamic_superclass', inner) if parent && !@adapter.constant_name(parent)
         visit(@adapter.body(node), inner, singleton_depth)
+      end
+
+      def value_class(node, nesting, singleton_depth)
+        name = @adapter.assignment_name(node)
+        return skip(node, 'dynamic_declaration', nesting) unless name
+
+        owner = name.start_with?('::') ? name.delete_prefix('::') : [nesting.first, name].compact.join('::')
+        record = { 'owner' => owner, 'name' => name, 'kind' => 'class',
+                   'constructor' => @adapter.value_constructor(node), 'nesting' => [owner, *nesting],
+                   'enclosing_nesting' => nesting,
+                   'line' => @adapter.line(node), 'end_line' => @adapter.end_line(node) }
+        record['singleton_depth'] = singleton_depth if singleton_depth.positive?
+        @result['declarations'] << record
+        # Struct/Data blocks execute with a dynamic receiver; assignment does not
+        # establish lexical nesting. Keep their bodies explicitly unsupported.
+        visit_children(node, nesting, singleton_depth)
       end
 
       def declaration_record(node, name, nesting, enclosing)
