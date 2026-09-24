@@ -184,11 +184,16 @@ module Woods
         Woods::Extractors::ViewTemplateExtractor::ENGINES.flat_map { |k| k.new.extensions }.uniq
       end
 
+      def aggregate_source_rules
+        [whole_app_rule(:libs, %w[lib], extensions: %w[.rb], exclude: Woods::Extractors::LibExtractor::EXCLUDED_SEGMENTS),
+         whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
           # deletion must reconcile the complete task set, not its primary file.
-          whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake]),
+          *aggregate_source_rules,
           whole_app_rule(:routes, %w[config/routes], exact_paths: %w[config/routes.rb]),
           whole_app_rule(:engines, %w[config/routes], exact_paths: %w[config/routes.rb Gemfile.lock]),
           whole_app_rule(:middleware, %w[config/initializers config/environments],

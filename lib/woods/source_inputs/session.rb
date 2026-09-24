@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_contributors'
+
 require 'set'
 require 'woods/source_inputs/scanner'
 require 'woods/source_inputs/manifest'
@@ -86,7 +88,7 @@ module Woods
       def consume_extractor(key, units)
         ["file:#{key}", "whole:#{key}"].each { |scope| replace_scope(scope) }
         @identities["unit:#{key}"] = {}
-        Array(units).each { |unit| consume_unit(key, unit.file_path) }
+        Array(units).each { |unit| SourceContributors.paths(unit).each { |path| consume_unit(key, path) } }
       end
 
       def unverified(scope)
@@ -100,7 +102,13 @@ module Woods
             # ModelExtractor's per-model rescue returns nil. Every returned
             # model crossed that boundary successfully, even if a sibling did
             # not. Other extractors may return partial results after a rescue.
-            Array(units).each { |unit| consume_unit(key, unit.file_path) } if key == :models
+            if key == :models
+              Array(units).each do |unit|
+                SourceContributors.paths(unit).each do |path|
+                  consume_unit(key, path)
+                end
+              end
+            end
           else
             consume_extractor(key, units)
           end

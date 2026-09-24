@@ -2,6 +2,7 @@
 
 require 'set'
 require 'json'
+require_relative 'source_contributors'
 
 module Woods
   # DependencyGraph tracks relationships between code units for:
@@ -32,7 +33,7 @@ module Woods
     # enforce_dependencies: package units (Task 7)
     # commit_count, change_frequency: git enrichment (Task 5)
     NODE_ATTRIBUTE_KEYS = %i[
-      database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind
+      database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
     ].freeze
 
     # These extractors describe a whole source file rather than one constant.
@@ -86,7 +87,9 @@ module Woods
 
       (@edges[unit.identifier] ||= {})[unit.type] =
         self.class.normalize_edges(unit.dependencies, strict: true)
-      (@file_map[unit.file_path] ||= Set.new).add(unit.identifier) if unit.file_path
+      node_paths(@nodes[unit.identifier][unit.type]).each do |path|
+        (@file_map[path] ||= Set.new).add(unit.identifier)
+      end
 
       # Type index for filtering (Set-based for O(1) insert)
       (@type_index[unit.type] ||= Set.new).add(unit.identifier)
@@ -126,7 +129,7 @@ module Woods
         old_node = @nodes[identifier]&.[](t)
         next unless old_node
 
-        drop_from_file_map(identifier, old_node[:file_path], withdrawing)
+        node_paths(old_node).each { |path| drop_from_file_map(identifier, path, withdrawing) }
         drop_from_type_index(identifier, old_node[:type])
       end
     end
@@ -187,7 +190,7 @@ module Woods
       return unless path
 
       return if (@nodes[identifier] || {}).any? do |type, node|
-        !withdrawing.include?(type) && node[:file_path] == path
+        !withdrawing.include?(type) && node_paths(node).include?(path)
       end
 
       return unless (ids = @file_map[path])
@@ -425,8 +428,9 @@ module Woods
     def units_for_path(file_path)
       (@file_map[file_path] || []).flat_map do |identifier|
         nodes = sorted_nodes(@nodes[identifier] || {})
-        at_path = nodes.select { |_, node| node[:file_path] == file_path }
-        (at_path.empty? ? nodes : at_path).map { |type, _| [identifier, type] }
+        at_path = nodes.select { |_, node| node_paths(node).include?(file_path) }
+        legacy = at_path.empty? && nodes.none? { |_, node| node.key?(:source_paths) }
+        (legacy ? nodes : at_path).map { |type, _| [identifier, type] }
       end
     end
 
@@ -640,6 +644,13 @@ module Woods
       @suffix_groups = groups
     end
 
+    # @param node [Hash] one typed graph node
+    # @return [Array<String>] every registered physical source
+    def node_paths(node)
+      node[:source_paths] || Array(node[:file_path])
+    end
+    private :node_paths
+
     # Node attributes a unit's metadata supplies at registration time.
     #
     # `table` is taken only from model units and `enforce_dependencies` only
@@ -655,6 +666,11 @@ module Woods
       attrs[:table] = metadata[:table_name] if unit.type == :model && !metadata[:table_name].nil?
       tables = Array(metadata[:foreign_keys]).filter_map { |fk| fk[:to_table] || fk['to_table'] if fk.is_a?(Hash) }
       attrs[:foreign_key_tables] = tables if tables.any?
+      if SourceContributors.multiple?(unit)
+        attrs[:source_paths] = SourceContributors.paths(unit).map do |path|
+          self.class.absolutize(path, self.class.graph_root)
+        end
+      end
       attrs[:package] = metadata[:package] unless metadata[:package].nil?
       if unit.type == :package && !metadata[:enforce_dependencies].nil?
         attrs[:enforce_dependencies] = metadata[:enforce_dependencies]
@@ -928,11 +944,18 @@ module Woods
       File.join(root, path)
     end
 
+    def self.relocate_node_paths(node, &block)
+      result = node.dup
+      result[:file_path] = yield(node[:file_path]) if node[:file_path]
+      result[:source_paths] = node[:source_paths].map(&block) if node[:source_paths]
+      result
+    end
+
     def self.relativize_nodes(nodes, root)
       return nodes if root.nil?
 
       nodes.transform_values do |node|
-        node[:file_path] ? node.merge(file_path: relativize(node[:file_path], root)) : node
+        relocate_node_paths(node) { |path| relativize(path, root) }
       end
     end
 
@@ -940,7 +963,7 @@ module Woods
       return nodes if root.nil?
 
       nodes.transform_values do |node|
-        node[:file_path] ? node.merge(file_path: absolutize(node[:file_path], root)) : node
+        relocate_node_paths(node) { |path| absolutize(path, root) }
       end
     end
 
@@ -950,7 +973,7 @@ module Woods
       return variants if root.nil?
 
       variants.map do |record|
-        record[:file_path] ? record.merge(file_path: relativize(record[:file_path], root)) : record
+        relocate_node_paths(record) { |path| relativize(path, root) }
       end
     end
 
@@ -989,7 +1012,7 @@ module Woods
     # @return [Object]
     def self.normalize_node_attribute(key, value)
       case key
-      when :foreign_key_tables then Array(value).map(&:to_s).uniq.sort
+      when :source_paths, :foreign_key_tables then Array(value).map(&:to_s).uniq.sort
       when :commit_count then value.to_i
       when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
       else value.to_s
@@ -1124,6 +1147,7 @@ module Woods
           file_path: absolutize(record[:file_path] || record['file_path'], root),
           namespace: record[:namespace] || record['namespace']
         }.merge(persisted_node_attributes(record))
+        nodes[identifier][type] = relocate_node_paths(nodes[identifier][type]) { |path| absolutize(path, root) }
         (edges[identifier] ||= {})[type] = normalize_edges(record[:edges] || record['edges'])
       end
     end

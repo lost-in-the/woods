@@ -41,7 +41,7 @@ module Woods
       private_constant :UniqueObject
 
       FILE_NAME = 'source_references.json'
-      VERSION = 2
+      VERSION = 3
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -199,15 +199,26 @@ module Woods
         end
 
         def owner!(owner, files)
-          shape!(owner, %w[type identifier file_path added])
+          shape!(owner, %w[type identifier file_path added], %w[file_paths])
           type!(owner['type'])
           constant!(owner['identifier'])
           path!(owner['file_path'])
           require!(files.key?(owner['file_path']), 'owner source is absent from files')
+          contributor_paths!(owner, files) if owner.key?('file_paths')
           edges = records!(owner['added'])
           edges.each { |edge| edge!(edge) }
           require!(edges.uniq.size == edges.size, 'duplicate pass-owned edge')
           edges.size
+        end
+
+        def contributor_paths!(owner, files)
+          paths = owner['file_paths']
+          require!(paths.is_a?(Array) && paths.size > 1 && paths.uniq == paths &&
+                   paths.first == owner['file_path'], 'invalid owner contributors')
+          paths.each do |path|
+            path!(path)
+            require!(files.key?(path), 'owner contributor is absent from files')
+          end
         end
 
         def edge!(edge)

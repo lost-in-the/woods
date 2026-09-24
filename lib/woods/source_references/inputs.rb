@@ -27,7 +27,7 @@ module Woods
       def call(units:, baseline:, fresh:, extractor_keys:)
         @bytes = 0
         @baseline = baseline
-        grouped = units.select { |unit| eligible?(unit) }.group_by { |unit| relative(unit['file_path']) }
+        grouped = group_sources(units)
         grouped.keys.sort.each_with_object({}) do |path, files|
           identity = captured_identity(path)
           next unless identity
@@ -47,6 +47,19 @@ module Woods
       end
 
       private
+
+      def group_sources(units)
+        grouped = Hash.new { |hash, path| hash[path] = [] }
+        units.select { |unit| eligible?(unit) }.each do |unit|
+          SourceContributors.paths(unit).each do |source_path|
+            path = relative(source_path)
+            raise Woods::ExtractionError, 'Invalid source-reference contributor path' unless eligible_path?(path)
+
+            grouped[path] << unit
+          end
+        end
+        grouped
+      end
 
       def eligible?(unit)
         path = relative(unit['file_path'])

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../../source_contributors'
+
 module Woods
   module MCP
     module Renderers
@@ -16,7 +18,11 @@ module Woods
           lines = []
           lines << "## #{data['identifier']} (#{data['type']})"
           lines << ''
-          lines << "**File:** `#{data['file_path']}`" if data['file_path']
+          if SourceContributors.multiple?(data)
+            lines << SourceContributors.label(data)
+          elsif data['file_path']
+            lines << "**File:** `#{data['file_path']}`"
+          end
           lines << "**Namespace:** #{data['namespace']}" if data['namespace']
           lines << ''
 

@@ -7,6 +7,9 @@ require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
 require_relative '../source_references/collector'
 require_relative 'assigned_value_discovery'
+require_relative '../source_contributors'
+require_relative '../source_references/registry'
+require_relative 'class_declarations'
 
 module Woods
   module Extractors
@@ -53,24 +56,46 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of lib units
       def extract_all
-        return [] unless @lib_dir.directory?
+        library_groups.flat_map { |group| aggregate(group) || group.map { |entry| copy_unit(entry[:unit]) } }
+      end
 
-        Dir[@lib_dir.join('**/*.rb')].filter_map do |file|
-          next if excluded_path?(file)
+      # Extract the complete library owner containing this physical file.
+      #
+      # Returns nil when the file yields no extractable unit. Discovery errors
+      # or incompatible contributors refuse extraction instead of returning a
+      # partial owner. This entry point never loads application source.
+      #
+      # @param file_path [String] Absolute path to the Ruby file
+      # @return [ExtractedUnit, nil] The complete owner or nil when absent
+      # @raise [Woods::ExtractionError] when complete ownership cannot be established
+      def extract_lib_file(file_path)
+        group = library_groups.find { |entries| entries.any? { |entry| entry[:unit].file_path == file_path.to_s } }
+        return unless group
+        return copy_unit(group.first[:unit]) if group.one?
 
-          extract_lib_file(file)
+        aggregate(group) || raise(Woods::ExtractionError, "Ambiguous library owner: #{group.first[:unit].identifier}")
+      end
+
+      private
+
+      def library_groups
+        @library_groups ||= begin
+          files = @lib_dir.directory? ? Dir.glob('**/*.rb', base: @lib_dir).sort : []
+          entries = files.filter_map do |relative|
+            path = @lib_dir.join(relative).to_s
+            next if excluded_path?(path)
+
+            build_file(path)
+          end
+          if SourceInputs::ConsumerErrors.failed?(self)
+            raise Woods::ExtractionError, 'Cannot establish the complete library contributor set after a source failure'
+          end
+
+          entries.group_by { |entry| entry[:unit].identifier }.values
         end
       end
 
-      # Extract a single lib file.
-      #
-      # Returns nil if the file cannot be read or yields no extractable unit.
-      # Module-only files are extracted (unlike some other extractors) since
-      # lib/ commonly contains standalone utility modules.
-      #
-      # @param file_path [String] Absolute path to the Ruby file
-      # @return [ExtractedUnit, nil] The extracted unit or nil on failure
-      def extract_lib_file(file_path)
+      def build_file(file_path)
         source = File.read(file_path)
 
         class_name = infer_class_name(file_path, source)
@@ -89,13 +114,96 @@ module Woods
         unit.metadata     = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
 
-        unit
+        { unit: unit, source: source, analysis: SourceReferences::Collector.new.call(source) }
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract lib file #{file_path}: #{e.message}")
         nil
       end
 
-      private
+      def copy_unit(original)
+        original.dup.tap do |unit|
+          unit.metadata = original.metadata.dup
+          unit.dependencies = original.dependencies.map(&:dup)
+        end
+      end
+
+      def aggregate(group)
+        return copy_unit(group.first[:unit]) if group.one?
+        return unless compatible_contributors?(group)
+
+        primary = group.first[:unit]
+        unit = ExtractedUnit.new(type: :lib, identifier: primary.identifier, file_path: primary.file_path)
+        unit.namespace = primary.namespace
+        unit.source_code = +''
+        records = group.map { |entry| append_contributor(unit, entry) }
+        unit.metadata = common_facts(group)
+        unit.metadata[:source_contributors_version] = SourceContributors::VERSION
+        unit.metadata[:source_contributors] = records
+        unit.metadata[:defined_in] = records.map { |record| record['file_path'] }
+        unit.dependencies = group.flat_map { |entry| entry[:unit].dependencies }.uniq
+        unit
+      end
+
+      def compatible_contributors?(group)
+        units = group.map { |entry| entry[:unit] }
+        sources = group.to_h { |entry| [entry[:unit].file_path, entry[:analysis]] }
+        registry = SourceReferences::Registry.new(units: units, sources: sources, root: Rails.root)
+        kinds = group.map do |entry|
+          unit = entry[:unit]
+          declarations = entry[:analysis].fetch('declarations', []).select { |decl| decl['owner'] == unit.identifier }
+          return false if declarations.empty? || declarations.any? { |decl| decl['constructor'] }
+          return false unless registry.owner?(unit.identifier, file_path: unit.file_path)
+
+          declarations.map { |decl| decl['kind'] }.uniq
+        end
+        kinds.flatten.uniq.one? && compatible_parents?(group)
+      end
+
+      def compatible_parents?(group)
+        parents = group.flat_map do |entry|
+          ClassDeclarations.read(entry[:source]).filter_map do |declaration|
+            next unless declaration[:identifier] == entry[:unit].identifier
+            next unless declaration[:node].superclass
+
+            parent = ClassDeclarations.parent_name(declaration)
+            return false unless parent
+
+            parent.delete_prefix('::')
+          end
+        end
+        parents.uniq.size <= 1
+      rescue ClassDeclarations::Unresolved
+        false
+      end
+
+      def append_contributor(unit, entry)
+        path = entry[:unit].file_path.delete_prefix("#{Rails.root}/")
+        source = entry[:source]
+        unit.source_code << "# Library contributor: #{path}\n"
+        start_byte = unit.source_code.bytesize
+        start_line = unit.source_code.count("\n") + 1
+        unit.source_code << source
+        record = { 'file_path' => path, 'source_sha256' => Digest::SHA256.hexdigest(source),
+                   'source_start_line' => 1, 'source_end_line' => source.lines.size,
+                   'published_start_byte' => start_byte, 'published_end_byte' => unit.source_code.bytesize,
+                   'published_start_line' => start_line, 'published_end_line' => start_line + source.lines.size - 1,
+                   'facts' => entry[:unit].metadata }
+        unit.source_code << "\n\n"
+        record
+      end
+
+      # Conflicting scalar/list facts remain available per contributor; sorted
+      # paths are display order and cannot establish runtime override order.
+      def common_facts(group)
+        facts = group.first[:unit].metadata.select do |key, value|
+          group.all? { |entry| entry[:unit].metadata[key] == value }
+        end
+        %i[public_methods class_methods entry_points].each do |key|
+          facts[key] = group.flat_map { |entry| entry[:unit].metadata.fetch(key) }.uniq
+        end
+        %i[loc method_count].each { |key| facts[key] = group.sum { |entry| entry[:unit].metadata.fetch(key) } }
+        facts
+      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Path Filtering

@@ -342,7 +342,7 @@ module Woods
 
       def append_compact_candidate(parts, sources, candidate, unit, budget, tokens_used)
         header = "## #{unit_field(unit, :identifier)} (#{unit_field(unit, :type)})\n" \
-                 "File: #{unit_field(unit, :file_path)}\n\n"
+                 "#{SourceContributors.label(unit)}\n\n"
         remaining = budget - tokens_used
         return tokens_used unless remaining.positive?
 
@@ -365,12 +365,11 @@ module Woods
       def format_unit(unit, _candidate)
         identifier = unit_field(unit, :identifier)
         type = unit_field(unit, :type)
-        file_path = unit_field(unit, :file_path)
         source = unit_field(unit, :source_code) || ''
 
         <<~UNIT.strip
           ## #{identifier} (#{type})
-          File: #{file_path}
+          #{SourceContributors.label(unit)}
 
           #{source}
         UNIT
@@ -386,6 +385,7 @@ module Woods
           score: candidate.score,
           file_path: unit_field(unit, :file_path)
         }
+        attribution.merge!(SourceContributors.attribution(unit))
         attribution[:truncated] = true if truncated
         attribution
       end
