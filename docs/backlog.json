@@ -3003,5 +3003,17 @@
     ],
     "description": "Issue #563 / PR567: Combine all current application schemas by canonical Ruby identity, preserving shared types and schema-local duplicate names. Query-root role changes withdraw old typed payloads before replacement; incomplete introspection, partial-boot demotion and fresh cross-kind source conflicts refuse publication while retaining the previous generation. Runtime absence alone still does not prove incremental removal. Independent guard review, full/default/booted suites and combined source/artifact testbed checks pass.",
     "status": "resolved"
+  },
+  {
+    "id": "B-220",
+    "title": "Retain successful model source consumption after a sibling failure",
+    "severity": "high",
+    "category": "code-bug",
+    "layer": "extraction",
+    "files": [
+      "lib/woods/source_inputs/session.rb"
+    ],
+    "description": "Issue #568: Preserve individual source consumption for successfully returned models even when an optional framework model fails; failed units and the model family remain unverified, and changed retained source still refuses. Reproduced with ActionText::EncryptedRichText and a missing optional table. Regression failed before the fix; 212 source-input/reference specs, independent review, full lint, and real Rails 7.2/8.0 flow (31 each) and namespace (19 each) checks passed. Final PR CI and combined source/artifact qualification gate the merge. Existing missing-ledger baselines need one full extraction after upgrading.",
+    "status": "resolved"
   }
 ]

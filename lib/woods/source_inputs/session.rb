@@ -95,6 +95,10 @@ module Woods
         results.each do |key, units|
           if ConsumerErrors.failed?(consumers[key])
             unverified("extractor:#{key}")
+            # ModelExtractor's per-model rescue returns nil. Every returned
+            # model crossed that boundary successfully, even if a sibling did
+            # not. Other extractors may return partial results after a rescue.
+            Array(units).each { |unit| consume_unit(key, unit.file_path) } if key == :models
           else
             consume_extractor(key, units)
           end

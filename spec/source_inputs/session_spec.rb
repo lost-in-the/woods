@@ -5,6 +5,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'woods/source_inputs/session'
 require 'woods/source_inputs/verifier'
+require 'woods/source_references/pass'
 
 RSpec.describe Woods::SourceInputs::Session do
   around do |example|
@@ -219,6 +220,49 @@ RSpec.describe Woods::SourceInputs::Session do
     persist(finish(run))
     expect(finish(session('refresh'), 2).data['unverified_scopes']).to include('custom_loader')
     expect(verify(finish(session, 3))['state']).to eq('current')
+  end
+
+  it 'retains successful model consumption while a sibling model fails' do
+    good = 'app/models/credential.rb'
+    failed_path = 'app/models/unavailable.rb'
+    write(good, 'class Credential; end')
+    write(failed_path, 'class Unavailable; end')
+    consumer = Object.new
+    Woods::SourceInputs::ConsumerErrors.record(consumer)
+    run = session
+    run.full_units({ models: [double(file_path: good)] }, consumers: { models: consumer })
+    manifest = finish(run)
+
+    expect(manifest.data['unverified_scopes']).to include('extractor:models')
+    expect(verify(manifest)['state']).to eq('unknown')
+    expect(run.consumed_source?(:models, good)).to be(true)
+    expect(run.consumed_source?(:models, failed_path)).to be(false)
+    units = [{ 'type' => 'model', 'identifier' => 'Credential', 'file_path' => good, 'dependencies' => [] }]
+    args = { root: @root, units: units, extractor_keys: { model: :models } }
+    cache = Woods::SourceReferences::Pass.new(**args, session: run, full: true).call.cache
+    persist(manifest)
+    retained = session('incremental')
+    expect(retained.consumed_source?(:models, good)).to be(true)
+    expect(retained.consumed_source?(:models, failed_path)).to be(false)
+    expect { Woods::SourceReferences::Pass.new(**args, session: retained, baseline: cache).call }.not_to raise_error
+
+    write(good, 'class Credential; def changed; end; end')
+    changed = session('incremental')
+    expect(changed.consumed_source?(:models, good)).to be(false)
+    expect { Woods::SourceReferences::Pass.new(**args, session: changed, baseline: cache).call }
+      .to raise_error(Woods::SourceReferences::RebuildRequired, /unverified source/)
+  end
+
+  it 'does not certify partial output from other failed extractor families' do
+    path = 'app/services/pay.rb'
+    write(path, 'class Pay; end')
+    consumer = Object.new
+    Woods::SourceInputs::ConsumerErrors.record(consumer)
+    run = session
+    run.full_units({ events: [double(file_path: path)] }, consumers: { events: consumer })
+
+    expect(run.consumed_source?(:events, path)).to be(false)
+    expect(finish(run).data['unverified_scopes']).to include('extractor:events')
   end
 
   it 'keeps missing old provenance and insecure keys explicit without repairing the key' do
