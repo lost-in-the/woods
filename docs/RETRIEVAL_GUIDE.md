@@ -174,6 +174,23 @@ unit still prepares no text before accepting a matching no-vector checkpoint.
 Empty-vector reconciliation waits until all batches succeed, so a later provider
 failure does not retire those old vectors.
 
+### Prepared-input checkpoints
+
+**Unreleased after 2.0.0:** checkpoint schema 2 records preparation policy and
+ordered complete input fingerprints, including chunk/storage IDs. A change to a
+prepared prefix or chunks re-embeds even if the source hash is unchanged; metadata
+that does not affect prepared text does not force an embedding. Old checkpoints
+invalidate once, so budget for one re-embed after upgrading. Complete input
+bounds and lossless splitting are described in [Embedding Models](EMBEDDING_MODELS.md).
+
+Successful units advance their checkpoint only after all their inputs are
+embedded, stored and obsolete chunks reconciled. A provider failure can leave
+earlier successful batches committed; it does not mark the failed unit complete.
+Built-in durable stores refuse changed replacements when existing IDs cannot be
+enumerated. Custom stores without enumeration retain adapter-owned cleanup and
+cannot claim exact obsolete-chunk reconciliation. Keep backups for rollback;
+older readers do not understand the new checkpoint policy.
+
 ---
 
 ## Embedding-free lexical retrieval

@@ -690,3 +690,24 @@ including multiline parenthesized arguments. They do not infer dynamic or
 inherited machines from missing edges. Re-extract with a supporting writer and
 compare the selected model's actual registry when coverage is uncertain. See the
 [extractor contract](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#statemachineextractor).
+
+### Unreleased functional audit repairs
+
+Record the loaded revision as well as VERSION before using these post-2.0.0
+behaviors. A supporting exporter offers `UNBLOCKED_DRY_RUN=1` and explicit
+`UNBLOCKED_MIGRATE_FROM_REF`; read the installed
+[Unblocked migration guide](https://github.com/lost-in-the/woods/blob/main/docs/UNBLOCKED_INTEGRATION.md#explicit-ref-migration)
+before moving a scope. Preserve receipts, use one writer, and never use force
+purge to bypass unresolved ownership.
+
+Supporting embedding builds validate complete prefixed inputs, split source
+without truncation, and rebuild old checkpoints once. Ollama counts are estimates
+and requests use `truncate: false`; installing a tokenizer gem no longer selects
+BERT for every model. Read the installed
+[input contract](https://github.com/lost-in-the/woods/blob/main/docs/EMBEDDING_MODELS.md#why-num_ctx-isnt-enough)
+and bounded unit/model/limit diagnostic before changing provider settings.
+
+For reopened `lib/` units, inspect all `source_contributors`; primary `file_path`
+is not complete ownership. Full extraction is required to rebuild the upgraded
+reference cache. Missing dependency-owned components/channels are intentional
+in supporting builds; app-owned mailers include parallel base-class branches.

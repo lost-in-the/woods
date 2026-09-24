@@ -62,6 +62,21 @@ RSpec.describe 'Complete embedding input bounds' do
     expect(contents.join).to eq(unit['source_code'])
   end
 
+  it 'honors a stricter caller input cap while retaining the provider byte bound' do
+    unit['source_code'] = '漢🙂' * 200
+    publish_unit
+    limited = Woods::Embedding::Indexer.new(
+      provider: provider, vector_store: store, output_dir: @dir,
+      text_preparer: Woods::Embedding::TextPreparer.new(max_tokens: 200)
+    )
+    limited.index_all
+    expect(requests.size).to be > 1
+    expect(requests.map(&:bytesize)).to all(be <= 200)
+    expect(requests.map do |text|
+      text.split("file: app/services/example.rb\n", 2).last
+    end.join).to eq(unit['source_code'])
+  end
+
   it 'refuses an oversized prefix before sending or publishing any vectors' do
     unit['dependencies'] = [{ 'target' => 'PrivateDependency' * 1000 }]
     publish_unit

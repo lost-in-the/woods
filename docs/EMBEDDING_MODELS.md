@@ -37,8 +37,8 @@ Woods.configure do |config|
     model: 'bge-m3',
     host: 'http://localhost:11434'
   }
-  # Everything else, chunker sizing, token counting, num_ctx, is picked
-  # up automatically from the model name.
+  # Model context and initial chunk sizing follow the registry.
+  # Local counts are estimates; the server enforces its actual limit.
 end
 ```
 
@@ -64,21 +64,20 @@ override. For `nomic-embed-text` (native 2048) the server rejects inputs above
 that with a `400 "the input length exceeds the context length"` regardless of
 `num_ctx`.
 
-Woods works around this two ways:
+**Unreleased after 2.0.0:** Woods checks complete inputs, including their
+metadata prefixes, and splits source without discarding characters. OpenAI's
+known byte-BPE embedding models use a conservative UTF-8 byte upper bound at
+8191 tokens; this may create more chunks than an exact tokenizer would.
+Ollama and custom models use explicitly labelled estimates. Ollama requests
+set `truncate: false`, so an actual overflow fails instead of losing source.
+A prefix that cannot fit or one unsplittable source character refuses before
+vector/checkpoint writes; inspect the reported unit, model and limit.
 
-1. **Advertise the native ceiling, not the override.** `Provider::Ollama` keeps
-   a model → native-context registry (`MODEL_CONTEXT_LENGTHS`) so the chunker
-   sizes inputs to what Ollama will actually accept. `num_ctx` is still passed
-   through the request body in case the regression is fixed upstream, but
-   nothing relies on it.
-2. **Verify client-side with the real tokenizer.** When the
-   [`tokenizers`](https://github.com/ankane/tokenizers-ruby) gem is installed,
-   `Embedding::TokenCounter` loads the `bert-base-uncased` WordPiece tokenizer
-   (the one every BERT-family embedding model is built on) and the chunker
-   re-verifies every slice. WordPiece fragments CamelCase and `::` separators
-   differently than character-based estimation suggests, this verification is
-   what catches the 10–20 % gap between our estimate and Ollama's internal
-   count.
+Installing `tokenizers` alone no longer downloads or selects BERT for every
+model. Advanced callers can inject a local model-matched tokenizer into
+`Embedding::TokenCounter`; the caller must establish that it matches the server.
+No automatic tokenizer download occurs. These checks do not prove that estimated
+inputs fit an arbitrary tokenizer: the provider remains authoritative.
 
 ## Adding a new model to the registry
 
@@ -112,8 +111,6 @@ If you want Woods to auto-pick `num_ctx` for a model we don't ship support for:
 
 - Indexing a real-world Rails app where concern-inlined models or long service
   objects routinely exceed 2048 tokens.
-- You already pay the `tokenizers` gem install cost and want the tighter
-  coupling between client-side verification and server-side enforcement.
 - Multilingual content (Arctic Embed 2 is BGE M3 with a stronger non-English
   story).
 

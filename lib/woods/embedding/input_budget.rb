@@ -28,7 +28,15 @@ module Woods
 
       def self.for(provider, limit:, chars_per_token:)
         supplied = provider.input_budget if provider.respond_to?(:input_budget)
-        supplied || new(limit: limit, chars_per_token: chars_per_token)
+        return new(limit: limit, chars_per_token: chars_per_token) unless supplied
+        return supplied unless limit < supplied.limit
+
+        supplied.with_limit(limit)
+      end
+
+      # Preserve the provider's counting policy under a stricter caller cap.
+      def with_limit(value)
+        self.class.new(limit: [limit, value].min, model: model, method: method, chars_per_token: @chars_per_token)
       end
 
       def count(text)

@@ -735,7 +735,7 @@ module Woods
 
       def input_budget
         @input_budget ||= InputBudget.for(
-          @provider, limit: safe_max_input_tokens || preparer_option(:max_tokens, 8192),
+          @provider, limit: [safe_max_input_tokens, preparer_option(:max_tokens, 8192)].compact.min,
                      chars_per_token: preparer_option(:chars_per_token, 4.0)
         )
       end
