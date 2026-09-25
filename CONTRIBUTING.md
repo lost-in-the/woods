@@ -128,18 +128,18 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ## Maintenance release
 
-This tree has a one-off, no-publish preparation adapter for the reviewed 1.6.3
-security patch while `main` carries the newer 2.0 prerelease line. It does not
+This tree has a one-off, no-publish preparation adapter for the reviewed 1.6.4
+security patch while `main` carries the newer 2.1 development line. It does not
 establish a permanent stable branch or authorize another maintenance version.
-The approved target is `release/1.6.3`, based on immutable `v1.6.2`. Create that
+The approved target is `release/1.6.4`, based on immutable `v1.6.3`. Create that
 remote target only after the trusted main maintenance policy is reviewed.
 
 From a clean checkout, the only supported transitions are:
 
 ```sh
-bin/rake "release:reopen[1.6.3.alpha]"
+bin/rake "release:reopen[1.6.4.alpha]"
 # Review and commit the generated development-state diff.
-bin/rake "release:prepare[1.6.3]"
+bin/rake "release:prepare[1.6.4]"
 ```
 
 The tasks never commit, tag, push, dispatch or publish. Never edit VERSION or the
@@ -152,12 +152,12 @@ nonempty Markdown without headings; supported types include `fixed`, `security`,
 and missing/duplicate/unknown fences refuse before writes. This legacy profile
 has no v2 migration guide or v2 surface inventory requirement.
 
-CI also runs on pushes to the exact `release/1.6.3` branch, so a private-advisory
+CI also runs on pushes to the exact `release/1.6.4` branch, so a private-advisory
 merge receives upstream validation before the trusted-main SHA pin. Publication
 still requires a separate green tag-push run.
 
 Validate the full suite, lint, booted extraction, real Console credential rotation,
-and installed maintenance package tests. CI builds one gem plus its SHA-256
+installed maintenance package tests, and the real PostgreSQL/MySQL Console policy lane. CI builds one gem plus its SHA-256
 sidecar into `woods-release-<commit SHA>` and tests that artifact on Ruby 3.0/Rails
 6.0 with exactly MCP 0.23.0 and Ruby 4.0/Rails 8.1 with the latest compatible 0.x SDK.
 MCP >=0.23.0 is required for upstream transport security fixes; update Woods and
@@ -170,12 +170,12 @@ ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' -- \
   --options /dev/null spec/integration/maintenance_packaged_gem_spec.rb
 ```
 
-Preparation is not publication; check RubyGems before describing 1.6.3 as released.
+Preparation is not publication; check RubyGems before describing 1.6.4 as released.
 The legacy automatic tag publisher is disabled, and Bundler's `release`,
 `release:rubygem_push`, and `release:source_control_push` tasks abort. Only a
 maintainer may later tag the reviewed merge commit and dispatch the trusted
 **main** workflow. That workflow must explicitly allow the exact tag, protected
-maintenance branch, immutable 1.6.2 base, reviewed final candidate SHA, required
+maintenance branch, immutable 1.6.3 base, reviewed final candidate SHA, required
 CI jobs, and immutable artifact. An unpinned candidate remains blocked. First merge a reviewed trusted-main profile update pinning `approved_sha` to that
 exact maintenance merge SHA; only then may the maintainer tag it. The
 workflow publishes the already tested gem bytes; never rebuild or publish locally.

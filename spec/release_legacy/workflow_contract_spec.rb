@@ -9,9 +9,9 @@ RSpec.describe 'Maintenance CI publication boundary' do
 
   it 'tests maintenance PRs and only the allowlisted maintenance tag' do
     triggers = ci.fetch('on') { ci.fetch(true) }
-    expect(triggers.dig('pull_request', 'branches')).to include('release/1.6.3')
-    expect(triggers.dig('push', 'branches')).to eq(['release/1.6.3'])
-    expect(triggers.dig('push', 'tags')).to eq(['v1.6.3'])
+    expect(triggers.dig('pull_request', 'branches')).to include('release/1.6.4')
+    expect(triggers.dig('push', 'branches')).to eq(['release/1.6.4'])
+    expect(triggers.dig('push', 'tags')).to eq(['v1.6.4'])
   end
 
   it 'retains the real credential rotation gate in every booted Rails row' do
@@ -20,6 +20,18 @@ RSpec.describe 'Maintenance CI publication boundary' do
     expect(job.fetch('steps').map { |step| step['run'] }).to include(
       'bundle exec rspec spec/integration/console_credential_rotation_spec.rb'
     )
+  end
+
+  it 'runs typed policy in every Rails row and real PostgreSQL/MySQL in the maintenance gate' do
+    commands = ci.fetch('jobs').fetch('rails-matrix').fetch('steps').filter_map { |step| step['run'] }
+    expect(commands).to include('bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb')
+    job = ci.fetch('jobs').fetch('maintenance-security-backends')
+    expect(job.fetch('name')).to eq('Maintenance security backends')
+    expect(job.fetch('services').keys).to contain_exactly('postgres', 'mysql')
+    expect(job.dig('env', 'WOODS_RUN_MAINTENANCE_SQL_BACKENDS')).to eq('1')
+    expect(job.dig('env', 'BUNDLE_GEMFILE')).to eq('gemfiles/console_backends.gemfile')
+    expect(job.fetch('steps').last.fetch('run'))
+      .to eq('bundle exec rspec spec/integration/console_sql_dialects_spec.rb')
   end
 
   it 'builds once and reuses the same immutable artifact in both package rows' do

@@ -11,8 +11,8 @@ RSpec.describe Woods::Release::Preparer do
     Dir.mktmpdir('woods-maintenance-task') do |root|
       @root = root
       FileUtils.mkdir_p(File.join(root, 'lib/woods'))
-      File.write(File.join(root, 'lib/woods/version.rb'), "module Woods\n  VERSION = '1.6.2'\nend\n")
-      banner = Woods::Release::Notes.banner(Woods::Release::VersionState.parse('1.6.2'))
+      File.write(File.join(root, 'lib/woods/version.rb'), "module Woods\n  VERSION = '1.6.3'\nend\n")
+      banner = Woods::Release::Notes.banner(Woods::Release::VersionState.parse('1.6.3'))
       File.write(File.join(root, 'README.md'), "# Woods\n\n#{banner}\nLegacy guide.\n")
       File.write(File.join(root, 'CHANGELOG.md'), <<~MARKDOWN)
         # Changelog
@@ -23,7 +23,7 @@ RSpec.describe Woods::Release::Preparer do
 
         - Credential refresh.
 
-        ## [1.6.2] - 2026-07-22
+        ## [1.6.3] - 2026-07-22
 
         ### Fixed
 
@@ -55,17 +55,17 @@ RSpec.describe Woods::Release::Preparer do
   end
 
   def reopen
-    described_class.reopen(root: @root, version: '1.6.3.alpha')
+    described_class.reopen(root: @root, version: '1.6.4.alpha')
     commit
   end
 
   def prepare
-    described_class.prepare(root: @root, version: '1.6.3', date: Date.new(2026, 9, 21))
+    described_class.prepare(root: @root, version: '1.6.4', date: Date.new(2026, 9, 21))
   end
 
   it 'runs the only approved cycle without committing, tagging, or claiming publication' do
     before_log = git('rev-parse', 'HEAD')
-    result = described_class.reopen(root: @root, version: '1.6.3.alpha')
+    result = described_class.reopen(root: @root, version: '1.6.4.alpha')
     expect(result.changed_paths).to contain_exactly('lib/woods/version.rb', 'README.md')
     expect(git('rev-parse', 'HEAD')).to eq(before_log)
     expect(File.read(File.join(@root, 'README.md'))).to include('never tag or publish this alpha')
@@ -73,12 +73,12 @@ RSpec.describe Woods::Release::Preparer do
     before_log = git('rev-parse', 'HEAD')
     result = prepare
 
-    expect(described_class.current_state(@root).to_s).to eq('1.6.3')
-    expect(File.read(File.join(@root, 'CHANGELOG.md'))).to include('## [1.6.3] - 2026-09-21')
+    expect(described_class.current_state(@root).to_s).to eq('1.6.4')
+    expect(File.read(File.join(@root, 'CHANGELOG.md'))).to include('## [1.6.4] - 2026-09-21')
     expect(File.read(File.join(@root, 'README.md'))).to include('prepared maintenance candidate')
-    expect(Woods::Release::Notes.mismatches(root: @root, version: '1.6.3')).to be_empty
-    expect(result.report).to include('release/1.6.3', 'Nothing has been committed', 'git tag v1.6.3 <merge-sha>')
-    expect(result.report.index('pinning approved_sha')).to be < result.report.index('git tag v1.6.3')
+    expect(Woods::Release::Notes.mismatches(root: @root, version: '1.6.4')).to be_empty
+    expect(result.report).to include('release/1.6.4', 'Nothing has been committed', 'git tag v1.6.4 <merge-sha>')
+    expect(result.report.index('pinning approved_sha')).to be < result.report.index('git tag v1.6.4')
     expect(git('rev-parse', 'HEAD')).to eq(before_log)
     expect(git('tag', '--list')).to be_empty
   end
@@ -91,13 +91,13 @@ RSpec.describe Woods::Release::Preparer do
     FileUtils.cp(File.join(source, 'lib/tasks/release.rake'), File.join(@root, 'lib/tasks'))
     File.write(File.join(@root, 'Rakefile'), "load File.expand_path('lib/tasks/release.rake', __dir__)\n")
     commit
-    %w[release:reopen[1.6.3.alpha] release:prepare[1.6.3]].each do |task|
+    %w[release:reopen[1.6.4.alpha] release:prepare[1.6.4]].each do |task|
       output, status = Open3.capture2e(Gem.ruby, '-S', 'rake', task, chdir: @root)
       expect(status).to be_success, output
       expect(output).to include('Nothing has been committed')
       commit
     end
-    expect(described_class.current_state(@root).to_s).to eq('1.6.3')
+    expect(described_class.current_state(@root).to_s).to eq('1.6.4')
     expect(git('tag', '--list')).to be_empty
   end
 
@@ -109,14 +109,14 @@ RSpec.describe Woods::Release::Preparer do
 
   it 'refuses another line, a backwards version, and a beta target without writing' do
     prior = bytes
-    %w[1.7.0.alpha 1.6.2.alpha 1.6.4.alpha 2.0.0.alpha].each do |version|
+    %w[1.7.0.alpha 1.6.3.alpha 1.6.5.alpha 2.0.0.alpha].each do |version|
       expect { described_class.reopen(root: @root, version: version) }
         .to raise_error(Woods::Release::VersionState::InvalidTransition)
     end
     expect(bytes).to eq(prior)
     reopen
     prior = bytes
-    expect { described_class.prepare(root: @root, version: '1.6.3.beta1') }
+    expect { described_class.prepare(root: @root, version: '1.6.4.beta1') }
       .to raise_error(Woods::Release::VersionState::InvalidTransition)
     expect(bytes).to eq(prior)
   end
@@ -124,7 +124,7 @@ RSpec.describe Woods::Release::Preparer do
   it 'refuses tracked or untracked dirty work before any transition writes' do
     File.write(File.join(@root, 'untracked.txt'), 'keep')
     prior = bytes
-    expect { described_class.reopen(root: @root, version: '1.6.3.alpha') }
+    expect { described_class.reopen(root: @root, version: '1.6.4.alpha') }
       .to raise_error(described_class::DirtyWorkingTree)
     expect(bytes).to eq(prior)
     File.unlink(File.join(@root, 'untracked.txt'))
@@ -163,7 +163,7 @@ RSpec.describe Woods::Release::Preparer do
       File.write(File.join(@root, 'README.md'), source)
       commit
       prior = bytes
-      expect { described_class.reopen(root: @root, version: '1.6.3.alpha') }
+      expect { described_class.reopen(root: @root, version: '1.6.4.alpha') }
         .to raise_error(Woods::Release::Notes::MissingFence)
       expect(bytes).to eq(prior)
     end

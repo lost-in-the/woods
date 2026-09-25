@@ -2,10 +2,10 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, 'release/1.6.3']
+    branches: [main, 'release/1.6.4']
   push:
-    branches: ['release/1.6.3']
-    tags: ['v1.6.3']
+    branches: ['release/1.6.4']
+    tags: ['v1.6.4']
 
 # Least-privilege default: CI only needs to read the checkout.
 # Per-job blocks can opt into stronger scopes if they ever need to.
@@ -76,6 +76,9 @@ jobs:
 
       - name: Run Console SQL and resolved relation policy
         run: bundle exec rspec spec/integration/console_sqlite_policy_spec.rb spec/integration/console_resolved_relation_policy_spec.rb
+
+      - name: Verify typed Console policy
+        run: bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb
 
       - name: Run Console serialized credential policy
         run: bundle exec rspec spec/integration/console_credential_serialization_spec.rb
@@ -198,3 +201,40 @@ jobs:
         run: >-
           ruby -rrubygems -e 'load Gem.bin_path("rspec-core", "rspec")' --
           --options /dev/null spec/integration/maintenance_packaged_gem_spec.rb
+
+  maintenance-security-backends:
+    name: Maintenance security backends
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: woods
+          POSTGRES_DB: woods_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: woods
+          MYSQL_DATABASE: woods_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pwoods --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      BUNDLE_GEMFILE: gemfiles/console_backends.gemfile
+      WOODS_RUN_MAINTENANCE_SQL_BACKENDS: '1'
+      WOODS_PG_URL: postgres://postgres:woods@localhost:5432/woods_test
+      WOODS_MYSQL_URL: mysql2://root:woods@127.0.0.1:3306/woods_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up adapter qualification Ruby
+        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Exercise real Console output and dialect policies
+        run: bundle exec rspec spec/integration/console_sql_dialects_spec.rb

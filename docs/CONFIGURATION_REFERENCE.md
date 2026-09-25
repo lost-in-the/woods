@@ -189,7 +189,8 @@ for hosts that don't bundle `sqlite3`.
 private context namespace, even when instances share a backend. Reload rotates
 that instance's namespace; an older in-flight result cannot become a new cache
 hit. Existing requests may finish using their original corpus. Old entries
-expire through the backend's normal TTL or eviction policy. Context entries are
+expire through the backend's normal TTL or eviction policy; disabling both can
+retain unused entries indefinitely. Context entries are
 not reused across process restarts; embedding-vector caching is unchanged.
 
 ## Deployment Shapes
@@ -345,7 +346,7 @@ deployment guide including defense layers.
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
 | `console_credential_defense_enabled` | Boolean | `true` | Layer 5 toggle for the CredentialScanner. Leave on unless you have a specific reason to disable. |
 | `console_credential_rotation_warning` | Boolean | `true` | Emit a structured log warning when any Rails credentials file is modified after process start. |
-| `console_unsafe_eval_enabled` | Boolean | `false` | Gate for `console_eval`. Off by default; no execution path is currently wired. |
+| `console_unsafe_eval_enabled` | Boolean | `false` | Gate for the legacy `console_eval` tool. Off by default; execution requires all [opt-in controls](CONSOLE_MCP_SETUP.md#console_eval-opt-in-woods_console_unsafe_eval). |
 
 ## Environment Variables
 

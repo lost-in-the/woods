@@ -66,8 +66,11 @@ Cross-origin browser requests must include the **actual scheme, hostname and
 port** in the configured origin. In particular, `http://localhost` does not
 permit a browser at `http://localhost:3000` to call a server at port 9292;
 configure `http://localhost:3000` explicitly. This is stricter than the older
-Woods-only port-insensitive Origin check. A successful preflight alone does
-not prove that the SDK will accept the subsequent MCP request.
+Woods-only port-insensitive Origin check. In 1.6.4, preflight and SDK dispatch
+share one immutable normalized policy. Default HTTP(S) ports match their omitted
+form; explicit lists replace default browser origins. Invalid entries fail at
+boot with the offending entry named. Restart after changing allowed origins.
+No allowlist means the existing loopback defaults remain in effect.
 
 `OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin`, `Access-Control-Expose-Headers: Mcp-Session-Id`, and `Vary: Origin`.
 

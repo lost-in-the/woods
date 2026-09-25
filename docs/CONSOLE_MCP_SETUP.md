@@ -852,3 +852,23 @@ console_count(model: "Order", scope: { status: "pending" })
 ```
 
 The timeout is set per-transaction in `SafeContext` and is not currently configurable via `Woods.configure`. To change it, pass `timeout_ms:` to `SafeContext.new` directly if you are constructing the server programmatically.
+
+## 1.6.4 maintenance compatibility
+
+This security patch preserves the legacy tool registry, opt-in evaluation
+controls and existing SQL function policy. It does not add v2 extraction or
+configuration features. No index or database schema migration is required.
+
+Raw SQL refuses genuinely unknown adapter families and ambiguous protected
+results. Adapter ancestry recognizes PostgreSQL subclasses before display names;
+structured Tier-1 reads remain available on other adapters. EAV policy compares
+both stored and cast key spellings and also protects predicates and ordering.
+Use explicit scalar projections or structured reads when a query is refused.
+
+HTTP origins are validated once at startup; malformed explicit entries now name
+the offending value and refuse boot. Correct those entries and restart instead
+of disabling guards. Explicit lists replace default browser origins, while unset
+lists retain the existing loopback defaults. See
+[origin matching](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
+Restart MCP processes after upgrading so their authentication, origin and cache
+state reflects the new code. Rolling back restores the affected behavior.

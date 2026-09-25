@@ -1,0 +1,9 @@
+# frozen_string_literal: true
+
+# Optional real-adapter qualification for the security maintenance patch.
+source 'https://rubygems.org'
+gemspec path: '../'
+gem 'mysql2', '~> 0.5'
+gem 'pg', '~> 1.5'
+gem 'rails', '~> 7.2.0'
+gem 'rspec', '~> 3.13'
