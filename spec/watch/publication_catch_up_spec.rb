@@ -8,10 +8,10 @@ require 'woods/watch/daemon'
 
 RSpec.describe 'Watcher reconciliation across publication' do
   let(:root) { Dir.mktmpdir('woods-publication-root') }
-  let(:output) { Dir.mktmpdir('woods-publication-index') }
+  let(:index_root) { Dir.mktmpdir('woods-publication-index') }
   let(:source) { File.join(root, 'app/views/posts/show.html.erb') }
   let(:clock) { Time.at(1_790_000_000.75) }
-  let(:generation) { Woods::Generation.new(output_dir: output) }
+  let(:generation) { Woods::Generation.new(output_dir: index_root) }
   let(:consumer) { instance_spy(Woods::Extractor) }
 
   before do
@@ -24,14 +24,14 @@ RSpec.describe 'Watcher reconciliation across publication' do
     allow(consumer).to receive(:extract_all) { prepare.send(:publish_generation, 'full') && {} }
   end
 
-  after { FileUtils.rm_rf([root, output]) }
+  after { FileUtils.rm_rf([root, index_root]) }
 
   def stamp_source(seconds)
     File.utime(Time.at(seconds), Time.at(seconds), source)
   end
 
   def prepare
-    extractor = Woods::Extractor.new(output_dir: output)
+    extractor = Woods::Extractor.new(output_dir: index_root)
     extractor.send(:begin_source_inputs, 'full')
     extractor.send(:begin_payload!)
     extractor.instance_variable_set(:@eager_load_complete, true)
@@ -54,7 +54,7 @@ RSpec.describe 'Watcher reconciliation across publication' do
 
   def daemon
     watcher = double(start: nil, stop: nil)
-    Woods::Watch::Daemon.new(root: root, output_dir: output, watcher: watcher, debounce: 0,
+    Woods::Watch::Daemon.new(root: root, output_dir: index_root, watcher: watcher, debounce: 0,
                              extractor_factory: -> { consumer },
                              reloader: double(enabled?: true, reload!: true),
                              boot_snapshot: Woods::Watch::BootSnapshot.new(root: root))
@@ -201,7 +201,7 @@ RSpec.describe 'Watcher reconciliation across publication' do
     prepare.send(:publish_generation, 'full')
     File.write(source, 'changed')
     stamp_source(clock.to_i)
-    scan = Woods::Watch::CatchUp.new(root: root, output_dir: output, ignored: [])
+    scan = Woods::Watch::CatchUp.new(root: root, output_dir: index_root, ignored: [])
     allow(scan).to receive(:current_identities).and_return({})
 
     expect(scan.paths).to include(source)
@@ -213,7 +213,7 @@ RSpec.describe 'Watcher reconciliation across publication' do
     stamp_source(clock.to_i)
     rewrite_manifest do |data|
       data['identities'] << OpenSSL::HMAC.hexdigest('SHA256',
-                                                    Woods::SourceInputs::PrivateKey.new(output_dir: output).bytes,
+                                                    Woods::SourceInputs::PrivateKey.new(output_dir: index_root).bytes,
                                                     'changed')
       data['scopes']['unit:sibling'] = { 'app/views/posts/show.html.erb' => data['identities'].length - 1 }
     end
