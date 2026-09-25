@@ -21,6 +21,11 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(status).to eq(200)
     end
 
+    it 'refuses invalid host encoding with a valid origin instead of raising' do
+      invalid = [255].pack('C').force_encoding(Encoding::UTF_8)
+      expect(call(middleware, origin: 'http://localhost', host: "localhost#{invalid}").first).to eq(403)
+    end
+
     it 'allows http://localhost' do
       expect(call(middleware, origin: 'http://localhost').first).to eq(200)
     end

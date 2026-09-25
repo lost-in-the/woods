@@ -36,7 +36,7 @@ module Woods
 
       def host_allowed?(host)
         return true if host.nil?
-        return false unless host.is_a?(String)
+        return false unless host.is_a?(String) && host.valid_encoding?
 
         parsed = parsed_origin("http://#{host}")
         return false unless parsed
@@ -55,7 +55,7 @@ module Woods
         normalized = normalized_origin(origin)
         return true if @explicit.include?(normalized)
         return false unless @allowed.include?(normalized) || @allowed.include?(normalized.sub(/:\d+\z/, ''))
-        return false unless host.is_a?(String)
+        return false unless host.is_a?(String) && host.valid_encoding?
 
         default_port = normalized.start_with?('https://') ? ':443' : ':80'
         authority(normalized).delete_suffix(default_port) == host.downcase.delete_suffix(default_port)
