@@ -3,7 +3,7 @@
 require_relative 'lib/woods/version'
 
 # Prepared maintenance gems link their own reviewed tag; development stays on its target.
-release_ref = Woods::VERSION.end_with?('.alpha') ? 'release/1.6.3' : "v#{Woods::VERSION}"
+release_ref = Woods::VERSION.end_with?('.alpha') ? 'release/1.6.4' : "v#{Woods::VERSION}"
 
 Gem::Specification.new do |spec|
   spec.name          = 'woods'
