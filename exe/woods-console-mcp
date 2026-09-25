@@ -7,7 +7,7 @@
 # Configuration precedence:
 #   1. WOODS_CONSOLE_CONFIG, when set (the file must exist)
 #   2. ~/.woods/console.yml, when present
-#   3. direct mode with `bundle exec rake woods:console`
+#   3. direct mode with executable app bin/rake, otherwise bundle exec rake
 
 require 'yaml'
 require_relative '../lib/woods/console/connection_manager'

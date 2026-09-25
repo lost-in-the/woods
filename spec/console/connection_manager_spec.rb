@@ -37,10 +37,30 @@ RSpec.describe Woods::Console::ConnectionManager do
       expect(manager.command).to eq(%w[bin/rake woods:console])
     end
 
-    it 'defaults to the embedded rake server in direct mode' do
-      manager = described_class.new(config: {})
+    it 'defaults to the embedded rake server when no app binstub exists' do
+      manager = described_class.new(config: { 'directory' => '/missing-app-for-console-spec' })
 
       expect(manager.command).to eq(%w[bundle exec rake woods:console])
+    end
+
+    it 'prefers an executable app binstub without shell parsing its path' do
+      Dir.mktmpdir('console app ') do |root|
+        FileUtils.mkdir_p(File.join(root, 'bin'))
+        binstub = File.join(root, 'bin/rake')
+        File.write(binstub, "#!/usr/bin/env ruby\n")
+        File.chmod(0o755, binstub)
+        expect(described_class.new(config: { 'directory' => root }).command).to eq([binstub, 'woods:console'])
+        File.chmod(0o644, binstub)
+        expect(described_class.new(config: { 'directory' => root }).command)
+          .to eq(%w[bundle exec rake woods:console])
+      end
+    end
+
+    it 'keeps remote command selection independent of local binstubs' do
+      expect(described_class.new(config: { 'mode' => 'docker', 'container' => 'app' }).command)
+        .to eq(%w[docker exec -i app bundle exec rake woods:console])
+      expect(described_class.new(config: { 'mode' => 'ssh', 'host' => 'app.example' }).command)
+        .to eq(%w[ssh app.example bundle exec rake woods:console])
     end
 
     it 'builds a direct command without invoking a shell' do

@@ -35,7 +35,7 @@ module Woods
         @config = config
         validate_config!
         @mode = config.fetch('mode', 'direct')
-        @embedded_command = config.fetch('command', DEFAULT_COMMAND)
+        @embedded_command = config['command']
       end
 
       # Return the argv used to launch the embedded MCP server.
@@ -107,12 +107,22 @@ module Woods
       end
 
       def embedded_argv
+        return default_argv unless @embedded_command
+
         argv = @embedded_command.to_s.shellsplit
         raise ConnectionError, 'Console command must not be empty' if argv.empty?
 
         argv
       rescue ArgumentError => e
         raise ConnectionError, "Invalid console command: #{e.message}"
+      end
+
+      def default_argv
+        if @mode == 'direct'
+          binstub = File.expand_path('bin/rake', @config.fetch('directory', Dir.pwd))
+          return [binstub, 'woods:console'] if File.file?(binstub) && File.executable?(binstub)
+        end
+        DEFAULT_COMMAND.shellsplit
       end
 
       def docker_command
