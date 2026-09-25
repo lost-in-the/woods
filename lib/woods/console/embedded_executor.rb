@@ -984,8 +984,10 @@ module Woods
       # @return [Hash] normalized, validated query clauses
       def validated_query_clauses(model, params)
         model_name = params['model']
+        # Keep execution and typed source inference on the same validated projection.
+        params['select'] = validated_select(params['select'], model_name) if params['select']
         {
-          select: params['select'] ? validated_select(params['select'], model_name) : nil,
+          select: params['select'],
           joins: validated_query_joins(model, params['joins']),
           scope: params.key?('scope') ? validated_query_scope(params['scope'], model_name, model) : nil,
           group_by: params['group_by']&.any? ? validated_columns(params['group_by'], model_name) : nil,

@@ -922,3 +922,7 @@ SQL dialect detection follows adapter ancestry before adapter names. PostgreSQL
 subclasses, Mysql2, MariaDB, Trilogy and SQLite use their applicable policies.
 Genuinely unknown families are refused only by raw `console_sql`; this restriction
 does not disable structured Tier-1 tools. Existing tool opt-ins remain unchanged.
+
+PostgreSQL Unicode-escaped identifiers are refused by `console_sql` before
+execution. Use ordinary identifiers or standard quoted identifiers instead;
+structured query tools are unaffected by this syntax restriction.
