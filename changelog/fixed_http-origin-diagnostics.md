@@ -1,2 +1,0 @@
-- Report invalidly encoded HTTP origin settings with bounded startup diagnostics; preserve existing origin defaults and access checks.
-- Use the same Console configuration error for malformed origins during automatic and manual middleware construction.
