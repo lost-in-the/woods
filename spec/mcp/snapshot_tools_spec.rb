@@ -90,6 +90,17 @@ RSpec.describe 'Snapshot MCP tools' do
       end
     end
 
+    it 'normalizes uppercase hexadecimal SHAs for detail and diff lookup' do
+      allow(snapshot_store).to receive(:find).and_return(nil)
+      allow(snapshot_store).to receive(:find).with('aaa111').and_return(git_sha: 'aaa111')
+      allow(snapshot_store).to receive(:find).with('bbb222').and_return(git_sha: 'bbb222')
+      allow(snapshot_store).to receive(:diff).with('aaa111', 'bbb222').and_return(added: [], modified: [], deleted: [])
+
+      expect(parse_response(call_tool(server, 'snapshot_detail', git_sha: 'AAA111'))).to include('git_sha' => 'aaa111')
+      expect(parse_response(call_tool(server, 'snapshot_diff', sha_a: 'AAA111', sha_b: 'BBB222')))
+        .to include('sha_a' => 'aaa111', 'sha_b' => 'bbb222', 'added' => 0)
+    end
+
     describe 'tool: snapshot_diff' do
       it 'returns diff with added/modified/deleted' do
         diff_result = {
