@@ -11,9 +11,14 @@ require 'woods/mcp/http_transport_options'
 RSpec.describe Woods::MCP::HttpTransportOptions do
   let(:token) { 'synthetic-http-fixture-token-long-enough' }
 
-  def dispatch(origins:, host: 'mcp.example.invalid', origin: 'https://mcp.example.invalid', bearer: token)
+  after do
+    Array(@transports).each { |transport| transport.close if transport.respond_to?(:close) }
+  end
+
+  def dispatch(origins:, host: 'mcp.example.invalid', origin: 'https://mcp.example.invalid', bearer: token) # rubocop:disable Metrics/AbcSize -- dispatches through both guards and the real SDK
     server = Woods::MCP::Server.build(index_dir: File.expand_path('../fixtures/woods', __dir__), warmup: false)
     transport = MCP::Server::Transports::StreamableHTTPTransport.new(server, **described_class.for(origins))
+    (@transports ||= []) << transport
     server.transport = transport
     inner = ->(env) { transport.handle_request(Rack::Request.new(env)) }
     app = Woods::MCP::OriginGuard.new(Woods::MCP::BearerAuth.new(inner, token: token), allowed_origins: origins)
@@ -39,11 +44,32 @@ RSpec.describe Woods::MCP::HttpTransportOptions do
     expect(dispatch(origins: [])).to eq(403)
   end
 
-  it 'normalizes explicit URLs and derives only their hosts' do
-    expect(described_class.for([' HTTPS://MCP.EXAMPLE.INVALID:8443/ ', 'invalid%', 'file:///tmp/x'])).to eq(
-      allowed_origins: ['https://mcp.example.invalid:8443', 'invalid%', 'file:///tmp/x'],
-      allowed_hosts: ['mcp.example.invalid']
+  it 'normalizes valid URLs while preserving explicit authority ports' do
+    expect(described_class.for([' HTTPS://MCP.EXAMPLE.INVALID:8443/ '])).to eq(
+      allowed_origins: ['https://mcp.example.invalid:8443'],
+      allowed_hosts: ['mcp.example.invalid:8443']
     )
+  end
+
+  %w[invalid-entry https://example.test/path * null file:///tmp/x].each do |entry|
+    it 'refuses malformed configured entries before constructing the transport' do
+      expect { described_class.for([entry]) }.to raise_error(ArgumentError, /Invalid MCP allowed origin/)
+    end
+  end
+
+  it 'bounds and escapes undecodable configuration diagnostics' do
+    entry = ("invalid-\xFF\n" * 30).force_encoding(Encoding::UTF_8)
+    expect { described_class.for([entry]) }.to raise_error(ArgumentError) do |error|
+      expect(error.message).to include('Invalid MCP allowed origin', '\\xFF', '\\n')
+      expect(error.message.lines.length).to eq(1)
+      expect(error.message.bytesize).to be < 450
+    end
+  end
+
+  it 'accepts equivalent default-port origins through both the guard and the legacy SDK' do
+    expect(dispatch(origins: ['https://mcp.example.invalid:443'], host: 'localhost:9292')).to eq(200)
+    expect(dispatch(origins: ['https://mcp.example.invalid'], host: 'localhost:9292',
+                    origin: 'https://mcp.example.invalid:443')).to eq(200)
   end
 
   it 'accepts the configured remote origin through both guards, including non-browser clients' do

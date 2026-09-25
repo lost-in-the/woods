@@ -35,6 +35,12 @@ RSpec.describe 'Console middleware mount policy' do
     end
   end
 
+  it 'validates enabled manual-mount origin configuration during construction' do
+    allow(Woods.configuration).to receive(:console_mcp_allowed_origins).and_return(['invalid-entry'])
+    expect { Woods::Console::RackMiddleware.new(->(_env) { [204, {}, []] }) }
+      .to raise_error(ArgumentError, /Invalid MCP allowed origin/)
+  end
+
   it 'refuses a hostile origin or host before dispatch even with valid authentication' do
     expect(request('HTTP_AUTHORIZATION' => "Bearer #{token}",
                    'HTTP_ORIGIN' => 'https://foreign.invalid').first).to eq(403)

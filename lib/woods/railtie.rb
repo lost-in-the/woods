@@ -34,7 +34,7 @@ module Woods
       )
     end
 
-    initializer 'woods.console_mcp' do |app|
+    initializer 'woods.console_mcp' do |app| # rubocop:disable Metrics/BlockLength -- validates and scopes the legacy HTTP middleware stack
       config = Woods.configuration
       next unless config.console_mcp_enabled
 
@@ -63,15 +63,22 @@ module Woods
         next
       end
 
+      if token.to_s.length < Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH
+        raise Woods::ConfigurationError, '[Woods Console] console_mcp_token must be at least 32 characters.'
+      end
+
       # Origin guard first — rejects cross-origin POSTs before any auth cost.
       # BearerAuth next — requires `Authorization: Bearer <token>` on every request.
-      app.middleware.use(Woods::MCP::OriginGuard, allowed_origins: Array(config.console_mcp_allowed_origins))
-      app.middleware.use(Woods::MCP::BearerAuth, token: token)
+      origin_policy = Woods::MCP::OriginPolicy.new(allowed_origins: config.console_mcp_allowed_origins)
+      app.middleware.use(Woods::MCP::OriginGuard, policy: origin_policy, path: config.console_mcp_path)
+      app.middleware.use(Woods::MCP::BearerAuth,
+                         token: -> { Woods.configuration.console_mcp_token }, path: config.console_mcp_path)
 
       app.middleware.use(
         Woods::Console::RackMiddleware,
         path: config.console_mcp_path,
-        embedded_read_tools: config.console_embedded_read_tools
+        embedded_read_tools: config.console_embedded_read_tools,
+        origin_policy: origin_policy
       )
     end
   end

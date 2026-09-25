@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'uri'
+require_relative 'origin_policy'
 
 module Woods
   module MCP
@@ -8,16 +8,7 @@ module Woods
     # Empty configuration retains the SDK's strict loopback defaults.
     module HttpTransportOptions
       def self.for(origins)
-        normalized = Array(origins).map { |origin| origin.strip.downcase.delete_suffix('/') }.reject(&:empty?)
-        return {} if normalized.empty?
-
-        hosts = normalized.filter_map do |origin|
-          uri = URI.parse(origin)
-          uri.host if %w[http https].include?(uri.scheme)
-        rescue URI::InvalidURIError
-          nil
-        end
-        { allowed_origins: normalized, allowed_hosts: hosts.uniq }
+        OriginPolicy.new(allowed_origins: origins).transport_options
       end
     end
   end

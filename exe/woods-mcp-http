@@ -33,10 +33,16 @@ require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
 begin
+  allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
+  begin
+    origin_policy = Woods::MCP::OriginPolicy.new(allowed_origins: allowed_origins)
+  rescue ArgumentError => e
+    raise Woods::ConfigurationError, e.message
+  end
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
   retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
   snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
-rescue Woods::MCP::BootstrapError => e
+rescue Woods::MCP::BootstrapError, Woods::ConfigurationError => e
   warn "[woods-mcp-http] #{e.class.name.split('::').last}: #{e.message}"
   warn "[woods-mcp-http] details: #{e.details.inspect}" if e.respond_to?(:details) && !e.details.empty?
   exit 2
@@ -64,15 +70,14 @@ server = Woods::MCP::Server.build(
   index_dir: index_dir, retriever: retriever, snapshot_store: snapshot_store,
   bootstrap_state: bootstrap_state, retriever_reloader: retriever_reloader
 )
-allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(
-  server, **Woods::MCP::HttpTransportOptions.for(allowed_origins)
+  server, **origin_policy.transport_options
 )
 server.transport = transport
 
 inner = proc { |env| transport.handle_request(Rack::Request.new(env)) }
 app = token ? Woods::MCP::BearerAuth.new(inner, token: token) : inner
-app = Woods::MCP::OriginGuard.new(app, allowed_origins: allowed_origins)
+app = Woods::MCP::OriginGuard.new(app, policy: origin_policy)
 
 origin_summary = allowed_origins.empty? ? 'loopback' : allowed_origins.join(',')
 auth_mode = token ? 'bearer' : 'none'

@@ -6,7 +6,7 @@ require 'woods/mcp/origin_guard'
 RSpec.describe Woods::MCP::OriginGuard do
   let(:inner_app) { ->(_env) { [200, { 'content-type' => 'text/plain' }, ['ok']] } }
 
-  def call(middleware, origin: nil, method: 'POST', host: nil)
+  def call(middleware, origin: nil, method: 'POST', host: 'localhost')
     env = { 'REQUEST_METHOD' => method }
     env['HTTP_ORIGIN'] = origin if origin
     env['HTTP_HOST'] = host if host
@@ -25,12 +25,12 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(call(middleware, origin: 'http://localhost').first).to eq(200)
     end
 
-    it 'allows http://localhost:5173 (matches host regardless of port)' do
-      expect(call(middleware, origin: 'http://localhost:5173').first).to eq(200)
+    it 'allows a loopback origin with the same authority' do
+      expect(call(middleware, origin: 'http://localhost:5173', host: 'localhost:5173').first).to eq(200)
     end
 
     it 'allows http://127.0.0.1' do
-      expect(call(middleware, origin: 'http://127.0.0.1').first).to eq(200)
+      expect(call(middleware, origin: 'http://127.0.0.1', host: '127.0.0.1').first).to eq(200)
     end
 
     it 'rejects http://evil.example.com' do
@@ -125,8 +125,8 @@ RSpec.describe Woods::MCP::OriginGuard do
       expect(status).to eq(403)
     end
 
-    it 'treats the FQDN trailing-dot form of loopback as loopback' do
-      expect(call(middleware, host: 'localhost.:3000').first).to eq(200)
+    it 'rejects an unlisted authority consistently with the SDK' do
+      expect(call(middleware, host: 'localhost.:3000').first).to eq(403)
     end
 
     it 'rejects a hex-notation IPv4 Host (0x7f000001 = 127.0.0.1)' do

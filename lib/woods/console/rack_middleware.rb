@@ -80,8 +80,14 @@ module Woods
       # @param unsafe_eval_audit_log_path [String, Pathname, nil] JSONL audit log
       #   path for every `console_eval` run. Required on the opt-in path. Takes
       #   precedence over `config.console_unsafe_eval_audit_log_path`.
-      def initialize(app, path: '/mcp/console', embedded_read_tools: false,
-                     unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil)
+      def initialize(app, options = {}, **keywords)
+        raise TypeError, 'middleware options must be a Hash' unless options.is_a?(Hash)
+
+        initialize_options(app, **options, **keywords)
+      end
+
+      def initialize_options(app, path: '/mcp/console', embedded_read_tools: false, origin_policy: nil, # rubocop:disable Metrics/ParameterLists -- preserves legacy eval options alongside the shared HTTP policy
+                             unsafe_eval_confirmation: nil, unsafe_eval_audit_log_path: nil)
         @app = app
         @path = path
         @embedded_read_tools = embedded_read_tools
@@ -89,7 +95,15 @@ module Woods
         @unsafe_eval_audit_log_path = unsafe_eval_audit_log_path
         @mutex = Mutex.new
         @transport = nil
+        @origin_policy = origin_policy || Woods::MCP::OriginPolicy.new(
+          allowed_origins: Woods.configuration.console_mcp_allowed_origins
+        )
+        authenticated = Woods::MCP::BearerAuth.new(
+          method(:handle_request), token: -> { Woods.configuration.console_mcp_token }
+        )
+        @guarded_request = Woods::MCP::OriginGuard.new(authenticated, policy: @origin_policy)
       end
+      private :initialize_options
 
       DISABLED_BODY = JSON.generate(
         error: 'woods_console_disabled',
@@ -111,28 +125,10 @@ module Woods
         return @app.call(env) unless env['PATH_INFO'].start_with?(@path)
         return [410, { 'content-type' => 'application/json' }, [DISABLED_BODY]] unless enabled?
 
-        guarded_request.call(env)
+        @guarded_request.call(env)
       end
 
       private
-
-      # A manual mount may run before the railtie's guards. Resolve current
-      # configuration on every request before constructing a transport.
-      def guarded_request
-        config = Woods.configuration
-        token = config.console_mcp_token.to_s
-        authenticated = if token.length >= Woods::MCP::BearerAuth::MIN_TOKEN_LENGTH
-                          Woods::MCP::BearerAuth.new(method(:handle_request), token: token)
-                        else
-                          ->(_env) { unauthorized_response }
-                        end
-        Woods::MCP::OriginGuard.new(authenticated, allowed_origins: Array(config.console_mcp_allowed_origins))
-      end
-
-      def unauthorized_response
-        [401, { 'content-type' => 'application/json', 'www-authenticate' => 'Bearer realm="woods-mcp-http"' },
-         [Woods::MCP::BearerAuth::UNAUTHORIZED_BODY]]
-      end
 
       def handle_request(env)
         ensure_transport.handle_request(Rack::Request.new(env))
@@ -158,7 +154,7 @@ module Woods
 
           server = build_embedded_server
           @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(
-            server, **Woods::MCP::HttpTransportOptions.for(Woods.configuration.console_mcp_allowed_origins)
+            server, **@origin_policy.transport_options
           )
           server.transport = @transport
           @transport
@@ -204,7 +200,7 @@ module Woods
         config = Woods.configuration
         introspection = build_model_introspection
         Server.build_embedded(
-          model_validator: ModelValidator.new(registry: introspection[:registry]),
+          model_validator: ModelValidator.new(registry: introspection[:registry], table_names: introspection[:tables]),
           safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
           redacted_columns: Array(config&.console_redacted_columns),
           redacted_key_values: Array(config&.console_redacted_key_values),
