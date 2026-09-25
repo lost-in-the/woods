@@ -195,6 +195,8 @@ RSpec.describe 'release validation' do
     )
     expect(outputs.lines(chomp: true)).to contain_exactly(
       'package-spec=spec/integration/packaged_gem_spec.rb',
+      'package-mcp-floor=',
+      'maintenance-release=false',
       "release-sha=#{release_sha}",
       'ci-run-id=12345',
       'tag=v2.0.0',
@@ -457,7 +459,7 @@ RSpec.describe 'release validation' do
 
   it 'rejects a tag that does not exactly match the gem version' do
     build_repository do |repository|
-      _stdout, stderr, status = validate(repository, tag: 'v2.0.1')
+      _stdout, stderr, status = validate(repository, tag: 'v2.0.2')
 
       expect(status).not_to be_success
       expect(stderr).to include('must equal v2.0.0')
