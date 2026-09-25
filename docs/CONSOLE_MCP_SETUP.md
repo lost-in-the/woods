@@ -340,6 +340,7 @@ command: cd /app && bundle exec rake woods:console
 
 **Unreleased after 2.0.0:** direct mode prefers an existing executable `bin/rake`
 in the application's selected directory, falling back to `bundle exec rake`.
+Relative `directory` values resolve from the launcher's initial working directory.
 Explicit `command` settings win. Docker and SSH modes retain their remote default;
 set `command` explicitly when that application uses another task entry point.
 

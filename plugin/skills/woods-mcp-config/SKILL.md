@@ -169,6 +169,11 @@ Then add a direct Console process:
 
 For Docker/SSH, configure `~/.woods/console.yml` or `WOODS_CONSOLE_CONFIG`; the launcher owns process replacement. Direct Docker stdio uses `docker exec -i`, or `docker compose exec -T` to disable Compose's pseudo-TTY while retaining stdin.
 
+Supporting unreleased builds after `2.0.0` prefer the selected app's executable
+`bin/rake` in direct mode. A relative `directory` in `console.yml` is relative to
+the launcher's initial `cwd`. Record the installed revision before relying on
+this preference; explicit commands still win.
+
 Reserve stdout for MCP. Through Woods `2.0.0.beta4`, configure the Console
 process's Rails logger to use stderr or a file, including logs during queries.
 Runtime stdout isolation is included in Woods `2.0.0`; verify the installed

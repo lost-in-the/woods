@@ -7,6 +7,35 @@ require 'yaml'
 require 'shellwords'
 
 RSpec.describe 'Console launcher configuration validation' do
+  %w[relative absolute explicit current].each do |mode|
+    it "launches the app binstub from the selected #{mode} directory" do
+      Dir.mktmpdir('woods-console-directory') do |root|
+        app = File.join(root, 'app with spaces')
+        FileUtils.mkdir_p(File.join(app, 'bin'))
+        binstub = File.join(app, 'bin/rake')
+        File.write(binstub, <<~RUBY)
+          #!#{RbConfig.ruby}
+          require 'json'
+          puts JSON.generate(directory: Dir.pwd, arguments: ARGV)
+        RUBY
+        File.chmod(0o755, binstub)
+        config = { 'mode' => 'direct' }
+        config['directory'] = mode == 'absolute' ? app : 'app with spaces' unless mode == 'current'
+        config['command'] = 'bin/rake woods:console' if mode == 'explicit'
+        config_path = File.join(root, 'console.yml')
+        File.write(config_path, YAML.dump(config))
+        out, err, status = Open3.capture3(
+          { 'WOODS_CONSOLE_CONFIG' => config_path }, RbConfig.ruby,
+          File.expand_path('../../exe/woods-console-mcp', __dir__),
+          chdir: mode == 'current' ? app : root
+        )
+
+        expect(status.exitstatus).to eq(0), err
+        expect(JSON.parse(out)).to eq('directory' => app, 'arguments' => ['woods:console'])
+      end
+    end
+  end
+
   { 'false' => [YAML.dump(false), false], 'array' => [YAML.dump([]), false],
     'scalar' => [YAML.dump('ssh'), false], 'empty file' => ['', true],
     'null' => [YAML.dump(nil), true], 'empty mapping' => [YAML.dump({}), true] }.each do |label, (contents, accepted)|

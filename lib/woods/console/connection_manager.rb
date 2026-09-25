@@ -61,10 +61,11 @@ module Woods
       # @return [void]
       # @raise [ConnectionError] when the process cannot be launched
       def replace_process!
+        argv = command
         if @mode == 'direct' && @config['directory']
-          Dir.chdir(@config['directory']) { exec(*command) }
+          Dir.chdir(@config['directory']) { exec(*argv) }
         else
-          exec(*command)
+          exec(*argv)
         end
       rescue SystemCallError, ArgumentError => e
         raise ConnectionError, "Failed to launch embedded Console MCP (#{@mode}): #{e.message}"
