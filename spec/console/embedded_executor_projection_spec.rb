@@ -57,4 +57,42 @@ RSpec.describe Woods::Console::EmbeddedExecutor, 'projection source types' do
       expect(request).to eq(original)
     end
   end
+
+  it 'attaches types for case-variant joined columns accepted by the legacy query tool' do
+    response = executor.send_request('tool' => 'query', 'params' => {
+                                       'model' => 'Order', 'select' => %w[orders.id LINE_ITEMS.quantity]
+                                     })
+    expect(response).to include('ok' => true)
+    expect(relation).to have_received(:select).with('orders.id', 'LINE_ITEMS.quantity').once
+    expect(safe_context).to have_received(:with_key_value_types).with({ 'quantity' => [quantity_type] }, raw: true)
+  end
+
+  [
+    ['LINE_ITEMS', 'line_items'],
+    ['Line_Items', 'line_items'],
+    ['public.LINE_ITEMS', 'line_items'],
+    ['LINE_ITEMS', 'public.line_items'],
+    ['other.LINE_ITEMS', 'public.line_items']
+  ].each do |source, table_name|
+    it "attaches types conservatively for #{source} and model table #{table_name}" do
+      allow(item_model).to receive(:table_name).and_return(table_name)
+      executor.send(:typed_redaction_context, 'sql', { 'sql' => "SELECT quantity FROM #{source} AS item" })
+      expect(safe_context).to have_received(:with_key_value_types).with({ 'quantity' => [quantity_type] }, raw: true)
+    end
+  end
+
+  it 'retains every matching type when registered tables share a final segment' do
+    registry['ArchivedItem'] = ['quantity']
+    archived_type = double('archived quantity type')
+    stub_const('ArchivedItem', double('ArchivedItem', table_name: 'archive.line_items',
+                                                      type_for_attribute: archived_type))
+    executor.send(:typed_redaction_context, 'sql', { 'sql' => 'SELECT quantity FROM PUBLIC.LINE_ITEMS' })
+    expect(safe_context).to have_received(:with_key_value_types)
+      .with({ 'quantity' => contain_exactly(quantity_type, archived_type) }, raw: true)
+  end
+
+  it 'does not attach a type from an unrelated table' do
+    executor.send(:typed_redaction_context, 'sql', { 'sql' => 'SELECT id FROM orders' })
+    expect(safe_context).to have_received(:with_key_value_types).with({}, raw: true)
+  end
 end

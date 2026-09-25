@@ -20,6 +20,7 @@ RSpec.describe 'Console typed EAV policy', :booted_app do
     @connection = ActiveRecord::Base.connection
     @connection.create_table(:typed_preferences, force: true) do |table|
       table.integer :key
+      table.integer :owner_id
       table.string :value
     end
     @connection.create_table(:other_preferences, force: true) do |table|
@@ -116,6 +117,39 @@ RSpec.describe 'Console typed EAV policy', :booted_app do
         result = request(server, 'sql', sql: "SELECT #{columns} FROM #{table}")
         expect(result.fetch('isError')).to be(false), result.inspect
         expect(result.to_json).to include('[REDACTED]')
+        expect(result.to_json).not_to include('synthetic-private-cell')
+      end
+
+      ['TYPED_PREFERENCES', 'Typed_Preferences', 'TYPED_PREFERENCES AS selected'].each do |source|
+        it "protects typed keys through case-variant SQL source #{source}" do
+          columns = %w[key value].map { |column| @connection.quote_column_name(column) }.join(', ')
+          result = request(server, 'sql', sql: "SELECT #{columns} FROM #{source}")
+          expect(result.fetch('isError')).to be(false), result.inspect
+          expect(result.to_json).to include('[REDACTED]', 'ordinary-cell')
+          expect(result.to_json).not_to include('synthetic-private-cell')
+        end
+      end
+
+      it 'protects typed keys through an unquoted qualified case-variant source' do
+        schema = @connection.adapter_name == 'SQLite' ? 'MAIN' : @connection.current_database
+        schema = 'PUBLIC' if @connection.adapter_name == 'PostgreSQL'
+        columns = %w[key value].map { |column| @connection.quote_column_name(column) }.join(', ')
+        result = request(server, 'sql', sql: "SELECT #{columns} FROM #{schema}.TYPED_PREFERENCES")
+        expect(result.fetch('isError')).to be(false), result.inspect
+        expect(result.to_json).to include('[REDACTED]', 'ordinary-cell')
+        expect(result.to_json).not_to include('synthetic-private-cell')
+      end
+
+      it 'protects joined projections including case-variant sources on SQLite' do
+        OtherPreference.class_eval do
+          has_many :typed_preferences, foreign_key: :owner_id
+        end
+        TypedPreference.update_all(owner_id: OtherPreference.first.id)
+        source = @connection.adapter_name == 'SQLite' ? 'TYPED_PREFERENCES' : 'typed_preferences'
+        result = request(server, 'query', model: 'OtherPreference', joins: ['typed_preferences'],
+                                          select: ["#{source}.key", "#{source}.value"])
+        expect(result.fetch('isError')).to be(false), result.inspect
+        expect(result.to_json).to include('[REDACTED]', 'ordinary-cell')
         expect(result.to_json).not_to include('synthetic-private-cell')
       end
 

@@ -187,6 +187,7 @@ module Woods
       end
 
       def validate_protected_sql_view!(stripped)
+        refuse_sql_column_alias_lists!(stripped)
         refuse_composite_sql_projection!(stripped)
         refuse_ambiguous_eav_sql!(stripped)
         refuse_protected_sql_positions!(stripped)
@@ -203,6 +204,49 @@ module Woods
               "Rejected: console_sql uses protected column '#{unsafe}' in an alias, aggregate, predicate, or " \
               'unpaired EAV shape that cannot preserve redaction identity. Select protected columns directly ' \
               'and unaliased, or use a structured Console tool.'
+      end
+
+      # Relation/CTE column lists rename fields by position, before output
+      # headers are available. Refuse them whenever either policy is active,
+      # independently of protected-name references or function validation.
+      def refuse_sql_column_alias_lists!(stripped)
+        return if redaction_columns.empty? && redacted_kv_columns.empty?
+
+        identifier = /(?:[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_$\u0080-\u{10ffff}]*|"(?:""|[^"])+"|`(?:``|[^`])+`)/u
+        list = /#{identifier}\s*\(\s*#{identifier}(?:\s*,\s*#{identifier})*\s*\)/
+        cte = /#{list}\s*AS\s*(?:(?:NOT\s+)?MATERIALIZED\s*)?\(/i
+        relation = /\A\s*(?:AS\s+)?#{list}/i
+        renamed = stripped.match?(cte) || SqlTableScanner.relation_factors(stripped).any? do |factor|
+          sql_relation_alias_tail(factor).match?(relation)
+        end
+        return unless renamed
+
+        raise ValidationError,
+              'Rejected: SQL relation or CTE column alias lists cannot preserve redaction identity. ' \
+              'Select protected columns directly and unaliased, or use a structured Console tool.'
+      end
+
+      # Consume only the leading source, leaving its optional alias. Balanced
+      # sources include subqueries, ONLY(table), and table-function arguments;
+      # scalar functions elsewhere in the clause are not alias declarations.
+      def sql_relation_alias_tail(factor)
+        tokens = sql_policy_tokens(factor)
+        index = %w[ONLY LATERAL].include?(sql_token_text(tokens, 0)) ? 1 : 0
+        unless sql_token_text(tokens, index) == '('
+          index += 1
+          index += 2 while sql_token_text(tokens, index) == '.'
+        end
+        index = sql_after_parentheses(tokens, index) if sql_token_text(tokens, index) == '('
+        index += 1 if sql_token_text(tokens, index) == '*'
+        tokens[index] ? factor[tokens[index][:start]..] : ''
+      end
+
+      def sql_after_parentheses(tokens, index)
+        depth = tokens[index][:depth]
+        closing = ((index + 1)...tokens.length).find do |offset|
+          tokens[offset][:text] == ')' && tokens[offset][:depth] == depth
+        end
+        closing ? closing + 1 : tokens.length
       end
 
       # Result metadata provides column names, not their table provenance.

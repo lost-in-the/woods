@@ -168,7 +168,10 @@ module Woods
         return true if name == params['model']
         return false unless model.respond_to?(:table_name)
 
-        tables.any? { |table| table.split('.').last == model.table_name.split('.').last }
+        # Match the scanner's unquoted final segment, as the identifier gates
+        # do. Keep all matching models across schemas: every possible type
+        # contributes to masking rather than selecting one ambiguous source.
+        tables.any? { |table| table.split('.').last.casecmp?(model.table_name.split('.').last) }
       end
 
       def selected_source_tables(params)
@@ -695,6 +698,9 @@ module Woods
       end
 
       def validate_sql_policy!(sql)
+        # Alias-list identity is its own policy, even when an alias also
+        # looks like a function name to the SQL validator.
+        sql_security_views(sql).each { |stripped| refuse_sql_column_alias_lists!(stripped) }
         SqlValidator.new(dialect: sql_dialect, mysql_modes: mysql_quote_modes).validate!(sql)
         validate_protected_sql_usage!(sql)
         # Check both submitted and wrapped SQL against blocked tables before

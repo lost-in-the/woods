@@ -12,4 +12,23 @@ RSpec.describe 'Console SQL output policy against database dialects', :maintenan
       ActiveRecord::Base.connection_pool.disconnect! if defined?(ActiveRecord::Base)
     end
   end
+
+  it 'refuses PostgreSQL column alias lists through the redaction identity policy' do
+    require 'active_record'
+    require 'woods'
+    require 'woods/console/server'
+    ActiveRecord::Base.establish_connection(ENV.fetch('WOODS_PG_URL'))
+    connection = ActiveRecord::Base.connection
+    previous = Woods.configuration
+    WoodsConsoleOutputPolicyContract.create_fixture!(connection)
+    server = WoodsConsoleOutputPolicyContract.build_server(connection, redacted_key_values: [])
+    expect { WoodsConsoleOutputPolicyContract.verify_column_alias_lists!(server) }.not_to raise_error
+  ensure
+    Woods.configuration = previous if previous
+    if connection
+      WoodsConsoleOutputPolicyContract::TABLES.each { |table| connection.drop_table(table, if_exists: true) }
+      %i[User Preference].each { |name| WoodsConsoleOutputPolicyContract.send(:remove_const, name) }
+    end
+    ActiveRecord::Base.connection_pool.disconnect! if defined?(ActiveRecord::Base)
+  end
 end
