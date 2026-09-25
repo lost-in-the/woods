@@ -1,0 +1,1 @@
+- Prefer an executable application `bin/rake` in `woods-extract`, retaining `bundle exec rake` as the fallback. Recognize installed Bundler Git gems as external source while keeping local overrides and explicitly scoped roots in application freshness coverage.

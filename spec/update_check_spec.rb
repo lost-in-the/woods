@@ -6,6 +6,11 @@ require 'tmpdir'
 require 'json'
 
 RSpec.describe Woods::UpdateCheck do
+  before do
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with('WOODS_NO_UPDATE_CHECK').and_return(nil)
+  end
+
   let(:cache_path) { File.join(Dir.mktmpdir, 'update_check.json') }
   let(:now) { Time.at(1_700_000_000) }
 

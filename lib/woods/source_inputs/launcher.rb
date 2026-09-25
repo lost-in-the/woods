@@ -25,7 +25,7 @@ module Woods
         1
       end
 
-      def initialize(argv, command: %w[bundle exec rake])
+      def initialize(argv, command: nil)
         @arguments = argv.dup
         @command = command
         @original_directory = Dir.pwd
@@ -34,6 +34,7 @@ module Woods
         @output = ENV.fetch('WOODS_OUTPUT', 'tmp/woods')
         @extra_roots = []
         parse!
+        @command ||= default_command
       end
 
       def run
@@ -58,6 +59,11 @@ module Woods
       end
 
       private
+
+      def default_command
+        binstub = File.join(@root, 'bin/rake')
+        File.file?(binstub) && File.executable?(binstub) ? [binstub] : %w[bundle exec rake]
+      end
 
       def capture_bytes(snapshot, nonce, operation, rules)
         bytes = JSON.generate(version: 1, nonce: nonce, root: @root, output: @output,

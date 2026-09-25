@@ -359,6 +359,11 @@ jobs:
           spec/feedback
           spec/session_tracer
           spec/evaluation
+          spec/extractors
+          spec/embedding
+          spec/plugin
+          spec/source_contributors_spec.rb
+          spec/obsidian/typed_variants_spec.rb
           spec/release_v2/release_validator_spec.rb
           spec/release_v2/surface_inventory_spec.rb
 

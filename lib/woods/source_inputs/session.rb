@@ -229,10 +229,29 @@ module Woods
 
         base = File.expand_path(spec.base_dir)
         path = File.expand_path(spec.full_gem_path)
+        return path if installed_git_gem?(spec, path)
         return unless File.expand_path(spec.loaded_from).start_with?("#{base}/specifications/") &&
                       path.start_with?("#{base}/gems/") && File.directory?(path)
 
         path
+      end
+
+      # Bundler git installations keep their gemspec beside the source rather
+      # than in RubyGems' specifications directory. A local override remains
+      # application source even when it retains a Git source object.
+      def installed_git_gem?(spec, path)
+        return false unless defined?(Bundler::Source::Git) && spec.respond_to?(:source)
+
+        source = spec.source
+        return false unless source.is_a?(Bundler::Source::Git) && !source.local?
+
+        installed = File.expand_path(source.path.to_s)
+        within_installed_source?(path, installed) &&
+          File.expand_path(spec.loaded_from).start_with?("#{path}/") && File.directory?(path)
+      end
+
+      def within_installed_source?(path, installed)
+        path == installed || path.start_with?("#{installed}/")
       end
 
       def replace_scope(scope)

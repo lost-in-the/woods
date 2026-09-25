@@ -6,6 +6,11 @@ require 'woods'
 require 'woods/mcp/server'
 
 RSpec.describe Woods::MCP::VersionAwareToolDispatch do
+  before do
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with('WOODS_NO_UPDATE_CHECK').and_return(nil)
+  end
+
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:server) { Woods::MCP::Server.build(index_dir: fixture_dir, warmup: false) }
 
