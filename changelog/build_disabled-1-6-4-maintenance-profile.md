@@ -1,0 +1,1 @@
+- Add a disabled, exact-candidate 1.6.4 maintenance release profile and select the legacy package SDK floor through trusted release metadata, preserving published 1.6.3 and normal v2 controls.

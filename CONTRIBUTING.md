@@ -425,9 +425,13 @@ on always matches the bytes RubyGems published.
 
 ### One-off 1.6.3 security maintenance release
 
+This section records the published 1.6.3 preparation flow. Its approved SHA,
+base and test profile remain fixed; new 1.6.x work uses the disabled 1.6.4
+profile below rather than changing the published candidate.
+
 The [security policy](SECURITY.md#supported-versions) supports 1.6.x security
-fixes until 2027-02-20. While main develops v2, the sole maintenance exception
-is `v1.6.3` from the short-lived `release/1.6.3` branch, descending from the
+fixes until 2027-02-20. The legacy maintenance exception is `v1.6.3` from the
+short-lived `release/1.6.3` branch, descending from the
 immutable v1.6.2 commit `4b40e17fd68122a70ccf00d9d2ffb8af42171d3d`.
 This is a stable patch, separate from the next v2 prerelease; it does not declare
 v2 final or establish a general-purpose maintenance publishing path.
@@ -488,9 +492,88 @@ fresh tag-push CI run. Updating main's tooling alone never authorizes different
 candidate bytes. Main's v2 release contract remains unchanged. Do not create or
 push tags, dispatch, publish, or claim 1.6.3 is available during preparation.
 
+### One-off 1.6.4 security maintenance release
+
+The next legacy maintenance profile allows only `v1.6.4` from `release/1.6.4`,
+descending from the immutable published v1.6.3 commit
+`60d6b7c4a3ddc421073f1fb57a7249eccb77826e`. It is **disabled**:
+`V1_PATCH_APPROVED_SHA` in trusted main's `script/release_profile.rb` is `nil`.
+The published 1.6.3 pin and the separate 2.0.1 profile are unchanged.
+
+1. Before creating the remote `release/1.6.4` target, require pull requests and
+   prevent force pushes and deletion through its effective branch rules. Create
+   it from the fixed v1.6.3 commit and keep the backport limited to that line.
+2. Use the inherited legacy `release:reopen[1.6.4.alpha]` and
+   `release:prepare[1.6.4]` adapter in clean, separately reviewed commits. Keep
+   the old automatic publisher disabled. Do not hand-edit VERSION or transplant
+   v2 documentation fences. The candidate PR targets `release/1.6.4`.
+3. Review the candidate's own CI definition, branch trigger and package tests.
+   Adding a branch trigger on main does not update the legacy branch. Require
+   every exact legacy matrix row listed in trusted main's maintenance profile:
+   unit, booted Rails, installed package, lint, coverage, security and build,
+   plus the 1.6.4-only `Maintenance security backends` job with real PostgreSQL
+   and MySQL. The published 1.6.3 job list stays unchanged.
+   After upstream branch CI passes, pin its exact prepared SHA through a
+   separate reviewed main PR. Private qualification does not replace this CI.
+4. Only after that pin merges may the maintainer tag the candidate and dispatch
+   its successful **tag-push** CI run. Both package rows test the same immutable
+   artifact using `maintenance_packaged_gem_spec.rb`. The trusted profile emits
+   MCP `0.23.0` for the Ruby 3.0 row; the newer Ruby row resolves the supported
+   SDK range. v2 profiles emit no legacy SDK floor and use normal v2 tests.
+
+All branch/base, exact SHA, tag/VERSION/changelog, unpublished-version,
+immutable-artifact and protected-environment checks apply. Maintenance history
+and publication checks repeat after approval, before RubyGems credentials; the
+remote tag is verified immediately before push. A changed candidate requires a
+new reviewed pin and fresh CI. Keep private qualification and advisory details
+private until the fixed gems are available. Adding this disabled profile does
+not authorize tags, dispatch, publication or changes to live branch rules.
+
+### One-off 2.0.1 security maintenance release
+
+The separate v2 maintenance profile allows only `v2.0.1` from `release/2.0.1`,
+descending from the immutable v2.0.0 commit
+`838252a79b89846937be6dbd21e283fa7cad897f`. It is **disabled**:
+`V2_MAINTENANCE_APPROVED_SHA` in trusted main's `script/release_profile.rb` is
+`nil`. Adding this profile does not approve a candidate or publish a release.
+The legacy 1.6.3 and 1.6.4 profiles, SHA pins, CI rows and SDK floors are independent.
+
+1. Merge the trusted tooling and complete the separately reviewed move of main
+   to the 2.1 development line before a 2.0.1 tag exists. Keep the minimal 2.0.1
+   patch separate from main's accumulated development changes.
+2. Before creating the remote `release/2.0.1` branch, require pull requests and
+   prevent force pushes and deletion through its effective branch rules. Create
+   it from the fixed v2.0.0 commit, then review the narrow backport and release
+   controls on that line.
+3. Use the supported `release:reopen[2.0.1.alpha]` and
+   `release:prepare[2.0.1]` tasks in clean, separately reviewed commits. Never
+   edit VERSION or generated fences by hand. The generic preparation report's
+   instruction to merge into main does **not** apply to this candidate: its PR
+   targets `release/2.0.1`.
+4. Require the normal v2 CI contract, including live backends, MCP transports
+   and minimum dependencies, and review the complete candidate CI and package
+   tests. The maintenance branch needs the reviewed v2 CI definition with its
+   branch trigger; adding that trigger on main alone does not update the branch.
+   After upstream branch CI passes, pin its exact final SHA through a separate
+   reviewed main PR. A private report is not a substitute for upstream CI.
+5. Only after that pin merges may the maintainer tag the exact candidate and
+   dispatch with its successful **tag-push** CI run ID. The release workflow
+   runs normal `spec/integration/packaged_gem_spec.rb` on the same immutable
+   artifact in both Ruby/Rails package rows. It does not select the v1 job set,
+   legacy package spec or MCP 0.23.0 exception.
+
+All maintenance profiles require fresh branch/base and tag checks, exact
+VERSION/changelog agreement, an unpublished version, an immutable CI artifact
+and protected environment approval. They repeat history/publication validation
+after approval, before requesting RubyGems credentials, and verify the remote
+tag immediately before push. A changed candidate needs a new reviewed main pin
+and fresh tag-push CI. Keep the advisory unpublished until fixed gems are
+available. Tags, dispatch, publication and live branch rules remain maintainer
+steps; this runbook does not execute them.
+
 ### Stable branches
 
-A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived `release/1.6.3` security exception above does not establish an `N-M-stable` branch.
+A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived maintenance exceptions above do not establish an `N-M-stable` branch.
 
 ### What coding agents may do
 
