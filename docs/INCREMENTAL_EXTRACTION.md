@@ -75,6 +75,13 @@ Missing files remain representable; symlinks are not resolved. The task-boundary
 normalization and nested-application Git paths are unreleased after `2.0.0`;
 check the installed revision before relying on them.
 
+**Unreleased after 2.0.0:** incremental extraction and targeted refresh refuse
+legacy flat artifacts with a manifest and generations whose manifest records a
+writer major version below 2. Run a full `woods:extract` before resuming partial
+updates. Missing writer provenance in a generation remains compatible with early
+v2 betas. Reading old indexes and rebuilding them fully remain supported; see
+[the v1 upgrade procedure](UPGRADING_TO_2.md).
+
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
 `origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default).
 Whitespace-only CI variables are ignored; a nonempty GitLab before-SHA with

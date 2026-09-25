@@ -812,6 +812,7 @@ module Woods
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run(operation: 'incremental')
+      ensure_supported_incremental_writer!
       profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
@@ -1042,6 +1043,31 @@ module Woods
       @payload_generation = nil
     end
 
+    # Readers retain legacy compatibility, but partial writers cannot migrate
+    # retained v1 units. A missing version in a generation manifest is allowed:
+    # early v2 prereleases published generations before recording provenance.
+    def ensure_supported_incremental_writer!
+      generation = Generation.new(output_dir: @output_dir)
+      directory = generation.payload_dir
+      manifest_path = directory.join('manifest.json')
+      return unless manifest_path.file?
+
+      if directory == generation.root
+        raise Woods::ExtractionError,
+              "Cannot incrementally update a legacy flat index under #{@output_dir}; run a full woods:extract first"
+      end
+
+      manifest = JSON.parse(AtomicFile.read(manifest_path))
+      writer = manifest.fetch('woods_version', nil)
+      return if writer.nil? || Gem::Version.new(writer).segments.first >= 2
+
+      raise Woods::ExtractionError,
+            "Cannot incrementally update an index written by Woods #{writer}; run a full woods:extract first"
+    rescue JSON::ParserError, ArgumentError, TypeError, NoMethodError => e
+      raise Woods::ExtractionError,
+            "Cannot verify the baseline manifest writer (#{e.class}); run a full woods:extract first"
+    end
+
     # Refuse an incremental run that has no baseline to be incremental
     # against (CORE-2). With no published generation and no dependency
     # graph — a failed CI cache restore, a typo'd WOODS_OUTPUT, a first run
@@ -1052,8 +1078,9 @@ module Woods
     # until a full extraction. The watch daemon already enforces this
     # invariant on its side (a missing generation marker means one full
     # extraction); the one-shot entry points must refuse rather than
-    # publish silently. A pre-generation flat index passes: its graph was
-    # seeded into this run's payload directory by {#begin_payload!}.
+    # publish silently. Legacy flat manifests are refused by the writer
+    # compatibility check before seeding; a bare graph can still provide an
+    # embedding caller's baseline without asserting a legacy writer version.
     #
     # @param graph_path [Pathname] the seeded payload's dependency graph
     # @return [void]

@@ -227,9 +227,15 @@ incremental extraction, targeted refresh or an embedded pipeline's incremental
 operation as the first v2 run. A flat index being readable, a successful
 `woods:validate`, or a newer manifest `woods_version` does not certify that all
 retained v1 units were migrated. After cleaning there is no structural baseline,
-and incremental extraction refuses that state. Supporting source-reference
-writers also refuse incompatible reference caches; that is not a universal
-major-version migration check. CI caches must distinguish Woods major versions
+and incremental extraction refuses that state. **Unreleased after 2.0.0:**
+incremental extraction and targeted refresh also refuse a flat index with a
+manifest, or a generation whose manifest names a writer major version below 2,
+before creating a new payload. Run a full `woods:extract` to rebuild it. A
+missing writer field in a generation manifest is allowed for early v2 betas;
+readers retain legacy compatibility. This guard cannot detect v1 units already
+retained by an older incremental writer that relabeled its manifest as v2.
+Supporting source-reference writers also refuse incompatible reference caches.
+CI caches must distinguish Woods major versions
 and restore the exact source baseline described in the
 [incremental CI recipe](INCREMENTAL_EXTRACTION.md#github-actions-with-an-exact-baseline).
 

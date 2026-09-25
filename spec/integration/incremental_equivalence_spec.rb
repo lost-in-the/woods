@@ -749,6 +749,40 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     dir
   end
 
+  %i[flat generation].each do |layout|
+    it "keeps a legacy #{layout} index readable, refuses partial writes and permits a full rebuild" do
+      require 'woods/mcp/index_reader'
+      index = full_extraction
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      if layout == :flat
+        legacy = Dir.mktmpdir('woods_legacy_flat')
+        (@scratch_dirs ||= []) << legacy
+        FileUtils.cp_r(File.join(payload, '.'), legacy)
+        index = legacy
+        payload = Pathname.new(index)
+      end
+      manifest_path = payload.join('manifest.json')
+      manifest = JSON.parse(File.read(manifest_path, encoding: 'UTF-8'))
+      manifest['woods_version'] = '1.6.3'
+      File.write(manifest_path, JSON.generate(manifest))
+      reader = Woods::MCP::IndexReader.new(index)
+      expect(reader.find_unit('Post', type: 'model')).not_to be_nil
+      original = File.binread(manifest_path)
+
+      expect { Woods::Extractor.new(output_dir: index).extract_changed(['app/models/post.rb']) }
+        .to raise_error(Woods::ExtractionError, /woods:extract/)
+      expect { Woods::Extractor.new(output_dir: index).refresh(:models) }
+        .to raise_error(Woods::ExtractionError, /woods:extract/)
+      expect(File.binread(manifest_path)).to eq(original)
+
+      runner = Woods::Extractor.new(output_dir: index)
+      runner.extract_all
+      runner.raise_on_publication_failure!
+      expect(reader.find_unit('Post', type: 'model')).not_to be_nil
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   it 'independently validates full and incremental graph invariants (#413)' do
     require 'woods/resilience/index_validator'
     baseline = full_extraction
