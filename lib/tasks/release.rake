@@ -4,7 +4,7 @@ require_relative '../woods/release/preflight'
 require_relative '../woods/release/preparer'
 require_relative '../woods/release/rake_support'
 
-# The two version-state transitions on `main`, plus the guard that keeps
+# The version-state transitions on `main`, plus the guard that keeps
 # publication in the dispatch workflow. See .claude/skills/release-flow/SKILL.md
 # and the release section of CONTRIBUTING.md.
 namespace :release do
@@ -39,6 +39,13 @@ namespace :release do
   task :reopen, [:version] do |_task, args|
     Woods::Release::RakeSupport.run('release:reopen', args[:version]) do |root, version|
       Woods::Release::Preparer.reopen(root: root, version: version)
+    end
+  end
+
+  desc 'Retarget unpublished alpha development to the next minor X.Y.0.alpha'
+  task :retarget, [:version] do |_task, args|
+    Woods::Release::RakeSupport.run('release:retarget', args[:version]) do |root, version|
+      Woods::Release::Preparer.retarget(root: root, version: version)
     end
   end
 end

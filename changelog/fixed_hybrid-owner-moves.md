@@ -1,0 +1,1 @@
+- Accept uniquely proven runtime job and serializer source moves while preserving complete-discovery and duplicate-source checks. Collision errors now name a fresh full extraction as recovery after an unproven move.

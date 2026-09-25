@@ -328,7 +328,10 @@ module Woods
         end
         resolved = build_resolved_config(config)
 
-        return refresh_reader_only(reader, zero_counts) unless refreshable_stores?(target)
+        unless refreshable_stores?(target)
+          assert_no_snapshot_vector_reload!(target, served)
+          return refresh_reader_only(reader, zero_counts)
+        end
 
         # A captured dump whose embedded config names store types the
         # refreshable live target cannot refresh cannot be turned into
@@ -449,6 +452,20 @@ module Woods
           ms.respond_to?(:clear!) && ms.respond_to?(:bulk_load)
       end
       private_class_method :refreshable_stores?
+
+      # The local preset combines snapshot vectors with live SQLite metadata.
+      # A reader-only reload leaves those vectors stale; report that limitation
+      # explicitly until both stores can participate in an atomic replacement.
+      def self.assert_no_snapshot_vector_reload!(target, served)
+        return unless target.vector_store.respond_to?(:clear!) && target.vector_store.respond_to?(:bulk_load)
+
+        raise ReloadDegraded.new(
+          'reload cannot atomically refresh snapshot vectors with this metadata store; restart woods-mcp ' \
+          'to load the latest vectors after woods:embed',
+          generation: served.number, stores: %w[vector metadata]
+        )
+      end
+      private_class_method :assert_no_snapshot_vector_reload!
 
       # The captured dump's embedded config and the refreshable live target
       # must agree on store types (M2). Each is valid alone: the live target

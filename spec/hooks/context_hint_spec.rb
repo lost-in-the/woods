@@ -41,6 +41,23 @@ RSpec.describe Woods::Hooks::ContextHint do
     expect(text).not_to include(root)
   end
 
+  it 'keeps unavailable source evidence explicit in orientation and edit context' do
+    key = Woods::SourceInputs::PrivateKey.new(output_dir: output, create: true)
+    capture = Woods::SourceInputs::Scanner.new(root: root, output_dir: output, key: key).call
+    capture['metrics']['padding'] = 'x' * 4000
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 2000)
+    manifest = Woods::SourceInputs::Manifest.build(snapshot: capture, scopes: {}, boot_verified: true, generation: 1)
+    payload = Woods::Generation.new(output_dir: output).payload_dir
+    File.write(payload.join('source_inputs.json'), JSON.generate(manifest.data))
+
+    [event, event.merge('hook_event_name' => 'SessionStart')].each do |input|
+      text = hint(input).fetch(:context)
+      expect(text).to include('source freshness: unavailable', 'source_manifest_too_large',
+                              "#{manifest.data.dig('unavailable', 'size_bytes')} bytes", 'limit 2000')
+      expect(text).not_to include('woods-extract full', 'source freshness: current')
+    end
+  end
+
   it 'distinguishes downstream inference and test suggestions from direct relationships' do
     graph['nodes']['CommentSpec'] = { 'type' => 'test_mapping', 'file_path' => 'spec/comment_spec.rb' }
     graph['edges']['CommentSpec'] = [{ 'target' => 'Comment', 'via' => 'test_coverage' }]

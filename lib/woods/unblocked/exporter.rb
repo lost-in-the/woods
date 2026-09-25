@@ -150,6 +150,11 @@ module Woods
                                           replacement_hashes: migration_hashes, remote_documents: @remote_documents,
                                           collection_id: @collection_id)
           end
+          if @manifest.unresolved_legacy_ownership?
+            errors << 'cleanup incomplete: legacy owned documents remain; select their source ref with ' \
+                      'UNBLOCKED_MIGRATE_FROM_REF, or review obsolete remote documents and the legacy manifest ' \
+                      'receipts for manual cleanup'
+          end
           @stats = { synced: synced, skipped: skipped, deleted: deleted, errors: cap_errors(errors),
                      complete: errors.empty? && !@budget_exhausted && @migration.plan.empty? }
         end
@@ -210,7 +215,10 @@ module Woods
                                         replacements: migration_replacements)
           unless @dry_run
             inventory = @client.all_documents(collection_id: nil)
-            @remote_documents = inventory.to_h { |doc| [doc.fetch('uri'), doc] }
+            @remote_documents = inventory.each_with_object({}) do |doc, documents|
+              uri = doc['uri']
+              documents[uri] = doc if uri.is_a?(String) && !uri.empty?
+            end
           end
           @prepared_index = true
           begin

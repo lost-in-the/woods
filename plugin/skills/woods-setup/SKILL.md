@@ -82,6 +82,13 @@ expansion, establish its [full source-reference baseline](https://github.com/los
 before resuming incremental maintenance. Record the loaded revision; the version
 alone does not identify this planned 2.1 capability.
 
+Supporting unreleased writers also refuse incremental extraction and targeted
+refresh of a flat index with a manifest, or a generation manifest naming a
+writer major version below 2. Run a full `woods:extract` as the upgrade baseline.
+A generation with no writer field can be an early v2 beta; absence alone does
+not identify v1. Read compatibility and a successful validation never replace
+the required full migration.
+
 ## Extract and verify
 
 Structural setup needs no embedding provider:
@@ -93,6 +100,13 @@ bin/rails woods:stats
 ```
 
 If extraction fails, reproduce Rails boot and eager loading first. Do not inspect internal payload files when Woods tasks provide the check.
+
+When the installed gem exposes `woods-extract`, use
+`bundle exec woods-extract full` for source capture before Rails boots; follow
+the [source freshness guide](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md#establish-a-fresh-baseline)
+for custom output paths. In supporting unreleased builds after 2.0.0, this
+launcher prefers the application's executable `bin/rake` and otherwise uses
+`bundle exec rake`. Preserve the application's environment and binstub setup.
 
 Writer-version provenance (#323) is available in Woods `2.0.0.beta3`; check the installed
 gem version's release notes before expecting `woods_status.index.woods_version`. When present,
@@ -221,6 +235,14 @@ exposes `woods:source_status` and `woods-extract` before using it. Supporting
 SessionStart hooks check source content and report missing/failed evidence as
 unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
 for transport, retry and custom-root limits.
+
+Supporting unreleased builds after 2.0.0 can publish a usable code index with
+source freshness `unavailable` when evidence exceeds its serialized-size limit.
+Follow `inspect_source_limits` and compare `unavailable.size_bytes` with
+`unavailable.limit_bytes`; an identical full extraction cannot shrink it.
+An oversized launcher handoff still starts a fresh child but cannot establish
+verified preboot capture. Do not label this state current or prescribe repeated
+rebuilds. See the [source evidence limits](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
 
 ## Ask before expanding scope
 

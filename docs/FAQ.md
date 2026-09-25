@@ -143,7 +143,7 @@ bundle exec rake woods:incremental
 docker compose exec app bundle exec rake woods:incremental
 ```
 
-The default Git range is `HEAD~1`; CI variables, an explicit range, or
+The default Git range is `HEAD~1`; supported CI variables or
 `CHANGED_FILES` can select another batch. Incremental extraction also refreshes
 affected concern consumers and re-runs whole-app extractors when their trigger
 paths change. It can reduce work, but has no universal speedup: Rails boot, graph

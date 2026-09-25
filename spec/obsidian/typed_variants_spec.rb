@@ -52,7 +52,7 @@ RSpec.describe 'Obsidian typed graph variants' do
   end
 
   def note(path)
-    File.read(File.join(@vault, path))
+    File.read(File.join(@vault, path), encoding: 'UTF-8')
   end
 
   def manifest

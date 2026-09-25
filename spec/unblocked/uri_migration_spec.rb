@@ -73,6 +73,49 @@ RSpec.describe 'Unblocked scoped URI migration' do
     File.write(manifest_path, JSON.generate('version' => 1, 'collection_id' => 'ours', 'documents' => owned))
   end
 
+  it 'ignores foreign inventory documents without usable URIs' do
+    remote['no-uri'] = { 'id' => 'foreign-1', 'collectionId' => 'theirs' }
+    remote['nil-uri'] = { 'id' => 'foreign-2', 'uri' => nil, 'collectionId' => 'theirs' }
+    remote['blank-uri'] = { 'id' => 'foreign-3', 'uri' => '', 'collectionId' => 'theirs' }
+
+    expect(run_sync).to include(complete: true, synced: 12, errors: [])
+    expect(client).not_to have_received(:delete_document)
+  end
+
+  it 'reports vanished owned v1 receipts as incomplete with a manual-cleanup remedy' do
+    seed_legacy
+    units.pop
+
+    result = run_sync
+    expect(result).to include(complete: false, deleted: 0)
+    expect(result[:errors].join).to include('legacy', 'manual cleanup')
+    expect(remote.size).to eq(12)
+  end
+
+  it 'does not infer legacy ref ownership from an ambiguous slash prefix' do
+    reader.branch = 'feature/topic'
+    seed_legacy
+    reader.branch = 'feature'
+
+    result = run_sync(force_purge: true)
+
+    expect(result).to include(complete: false, deleted: 0)
+    expect(remote.size).to eq(24)
+    expect(client).not_to have_received(:delete_document)
+  end
+
+  it 'reports unresolved legacy ownership on another ref with an explicit migration remedy' do
+    seed_legacy
+    reader.branch = 'develop'
+
+    result = run_sync
+
+    expect(result[:complete]).to be(false)
+    expect(result[:errors].join).to include('UNBLOCKED_MIGRATE_FROM_REF', 'legacy')
+    expect(client).not_to have_received(:delete_document)
+    expect(run_sync(migrate_from_ref: 'main')[:complete]).to be(true)
+  end
+
   it 'keeps independent branch scopes when one manifest is reused' do
     expect(run_sync[:complete]).to be(true)
     reader.branch = 'develop'

@@ -39,6 +39,28 @@ RSpec.describe Woods::SourceInputs::Status do
     File.write(File.join(@output, 'generation.json'), JSON.generate(number: 1, payload: 'payloads/00000001'))
   end
 
+  it 'reports bounded oversized evidence without scanning or recommending another full capture' do
+    publish_source
+    snapshot = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+    snapshot['metrics']['padding'] = 'x' * 4000
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 2000)
+    manifest = Woods::SourceInputs::Manifest.build(snapshot: snapshot, scopes: {}, boot_verified: true, generation: 1)
+    File.write(@manifest_path, JSON.generate(manifest.data))
+    expect(Woods::SourceInputs::Scanner).not_to receive(:new)
+
+    %w[quick deep].each do |mode|
+      result = status(mode: mode)
+      expect(result).to include('state' => 'unavailable', 'complete' => false,
+                                'reasons' => ['source_manifest_too_large'],
+                                'recommendations' => ['inspect_source_limits'])
+      expect(result['unavailable']).to include('limit_bytes' => 2000)
+    end
+    mismatch = status(generation: 2)
+    expect(mismatch).to include('state' => 'unknown', 'reasons' => ['generation_mismatch'])
+    expect(mismatch['recommendations']).to include('inspect_source_scan')
+    expect(mismatch['recommendations']).not_to include('inspect_source_limits')
+  end
+
   it 'binds task transport to the invoking checkout and makes recorded-root reads explicit' do
     publish_source
     Dir.mktmpdir('woods-copied-source') do |copy|

@@ -1237,6 +1237,19 @@ RSpec.describe Woods::MCP::IndexReader do
         .to raise_error(IOError, /disk gone/)
     end
 
+    it 'propagates deep-field matching IOErrors after loading a readable unit' do
+      pattern = Object.new
+      pattern.define_singleton_method(:match?) do |text|
+        raise IOError, 'deep matching failed' if text.include?("\n")
+
+        false
+      end
+      allow(reader).to receive(:compile_search_pattern).and_return(pattern)
+
+      expect { reader.search('Post', fields: %w[source_code]) }
+        .to raise_error(IOError, /deep matching failed/)
+    end
+
     # Review finding: `rescue Regexp::TimeoutError` names a constant that
     # does not exist before Ruby 3.2, and Ruby resolves rescue-class
     # expressions lazily, when an exception actually occurs. On Ruby
@@ -1246,14 +1259,14 @@ RSpec.describe Woods::MCP::IndexReader do
     # on newer Rubies (where it is the standing condition on 3.0/3.1).
     it 'propagates unrelated phase-two failures instead of masking them' do
       failing_reader = described_class.new(fixture_dir)
-      allow(failing_reader).to receive(:load_unit).and_raise(IOError, 'disk gone')
+      allow(failing_reader).to receive(:load_unit).and_raise(RuntimeError, 'unexpected reader failure')
 
       has_timeout_error = Regexp.const_defined?(:TimeoutError, false)
       original = Regexp.const_get(:TimeoutError, false) if has_timeout_error
       Regexp.send(:remove_const, :TimeoutError) if has_timeout_error
       begin
         expect { failing_reader.search('Post', fields: %w[source_code]) }
-          .to raise_error(IOError, /disk gone/)
+          .to raise_error(RuntimeError, /unexpected reader failure/)
       ensure
         Regexp.const_set(:TimeoutError, original) if has_timeout_error
       end

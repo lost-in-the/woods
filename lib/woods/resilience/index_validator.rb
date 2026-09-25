@@ -132,19 +132,24 @@ module Woods
 
         warn_unresolvable_paths(warnings, unresolvable)
         validate_dependency_graph(payload, errors)
-        validate_source_inputs(payload, errors)
+        validate_source_inputs(payload, errors, warnings)
       end
 
       # Optional for old generations; malformed new provenance is an artifact
       # integrity error. Source drift itself is advisory and belongs to status.
-      def validate_source_inputs(payload, errors)
+      def validate_source_inputs(payload, errors, warnings)
         path = File.join(payload, SourceInputs::Manifest::FILE_NAME)
         return unless File.exist?(path)
 
         File.open(path, File::RDONLY | File::NONBLOCK) do |file|
           raise SourceInputs::Manifest::Invalid unless file.stat.file?
 
-          SourceInputs::Manifest.parse(file.read(SourceInputs::Manifest::MAX_BYTES + 1))
+          manifest = SourceInputs::Manifest.parse(file.read(SourceInputs::Manifest::MAX_BYTES + 1))
+          if manifest.unavailable?
+            evidence = manifest.data.fetch('unavailable')
+            warnings << "Source freshness unavailable: #{evidence['reason']} (#{evidence['size_bytes']} bytes, " \
+                        "limit #{evidence['limit_bytes']}); the code index remains usable"
+          end
         end
       rescue SourceInputs::Manifest::Invalid, SystemCallError, IOError
         errors << 'Invalid source_inputs.json provenance artifact'

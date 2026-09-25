@@ -25,7 +25,7 @@ module Woods
         1
       end
 
-      def initialize(argv, command: %w[bundle exec rake])
+      def initialize(argv, command: nil)
         @arguments = argv.dup
         @command = command
         @original_directory = Dir.pwd
@@ -34,6 +34,7 @@ module Woods
         @output = ENV.fetch('WOODS_OUTPUT', 'tmp/woods')
         @extra_roots = []
         parse!
+        @command ||= default_command
       end
 
       def run
@@ -45,6 +46,8 @@ module Woods
         snapshot = Scanner.new(root: @root, output_dir: @output, key: key, scopes: rules).call
         nonce = SecureRandom.hex(32)
         bytes = capture_bytes(snapshot, nonce, operation, rules)
+        return run_without_capture(task) unless bytes
+
         Tempfile.create(['woods-source-capture-', '.json']) do |file|
           file.binmode
           file.chmod(0o600)
@@ -59,14 +62,29 @@ module Woods
 
       private
 
+      def default_command
+        binstub = File.join(@root, 'bin/rake')
+        File.file?(binstub) && File.executable?(binstub) ? [binstub] : %w[bundle exec rake]
+      end
+
+      def run_without_capture(task)
+        descriptor = JSON.generate(extra_roots: @extra_roots, implicit_output: @implicit_output,
+                                   unavailable: @capture_unavailable)
+        run_child(child_environment(descriptor), task)
+      end
+
       def capture_bytes(snapshot, nonce, operation, rules)
         bytes = JSON.generate(version: 1, nonce: nonce, root: @root, output: @output,
                               operation: operation, rules: rules.fingerprint,
                               launcher_pid: Process.pid, snapshot: snapshot)
         return bytes if bytes.bytesize <= Manifest::MAX_BYTES
 
-        raise ArgumentError, "source capture exceeds #{Manifest::MAX_BYTES} bytes; " \
-                             'narrow additional source roots or reduce scoped inputs before retrying'
+        @capture_unavailable = { 'reason' => 'source_manifest_too_large', 'size_bytes' => bytes.bytesize,
+                                 'limit_bytes' => Manifest::MAX_BYTES }
+        warn 'woods-extract: source freshness unavailable (source_manifest_too_large): ' \
+             "capture #{bytes.bytesize} bytes exceeds limit #{Manifest::MAX_BYTES}; " \
+             'continuing without verified preboot evidence.'
+        nil
       end
 
       def child_environment(descriptor)

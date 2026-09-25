@@ -212,6 +212,12 @@ error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
 
+**Unreleased after `2.0.0`:** the `:local` preset combines snapshot vectors with
+SQLite metadata, which cannot be refreshed together atomically in the running
+server. Its `reload` returns a degraded error and retains the previous aligned
+state even when the directory is writable. Restart `woods-mcp` after
+`woods:embed` to load the new vectors. See the [backend matrix](BACKEND_MATRIX.md#persistence-story).
+
 ### Resource identity and damaged generation markers
 
 **Unreleased after `2.0.0` (#593):** unit resource identifiers may contain
@@ -260,6 +266,7 @@ generation. This contract is included in Woods `2.0.0`.
 | `exhausted` | `complete` | `false` | Exact count |
 | `result_limit` | `partial` | `true` | `null` (unknown) |
 | `scan_budget` or `regex_timeout` | `partial` | `null` (unknown) | `null` (unknown) |
+| `unreadable_or_corrupt_source` (unreleased after `2.0.0`) | `partial` | `null` (unknown) | `null` (unknown) |
 
 `matched_lower_bound` counts distinct observed `(type, identifier)` matches,
 including at most one lookahead match beyond `limit`. A result-limit response
@@ -277,6 +284,10 @@ apparently complete empty result. This corrects the older unscoped family
 labels. Retrieval tools continue to use their own documented concrete-type
 filters; search aliases do not change those contracts.
 
+**Unreleased after `2.0.0`:** typed `lookup` also accepts the `graphql` family
+alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
+prefer that concrete type for follow-up identity checks.
+
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the
 returned count, stopping reason, known/unknown remainder, and total explicitly.
@@ -284,8 +295,17 @@ Narrow `types`, literal `exact_prefix`/`exact_suffix`, or deep `fields` before
 using discovery as exhaustive evidence. Completeness applies to this index and
 query domain, not to unindexed application code.
 
-Detected missing, unreadable, or corrupt artifacts remain `isError: true` with
-`_meta.error_code: "corrupt_artifact"`. Their `_meta.completeness` has
+**Unreleased after `2.0.0`:** an individual unit that unscoped search needs but
+cannot decode or open is skipped. Search retains readable matches and returns
+successful partial completeness with reason `unreadable_or_corrupt_source`;
+an empty partial answer does not establish absence. Identifier-only matches can
+use published summaries without opening unit bodies, so search is not an
+artifact-integrity check. Inspect `woods_status` and run `woods:validate`.
+Explicit package/source-path scope first reads the full unit set and still
+returns an error if that preflight encounters a damaged body.
+
+Damaged index-wide artifacts, such as a manifest or type index, remain
+`isError: true` with `_meta.error_code: "corrupt_artifact"`. Their `_meta.completeness` has
 `status: "unknown"`, `reason: "unreadable_or_corrupt_source"`, and `null` for
 `has_more`, `total_matches`, and `matched_lower_bound`; no successful empty
 result is substituted. Inspect `woods_status` and run `woods:validate`.
@@ -559,6 +579,10 @@ root/nested ownership, path normalization, errors, storage support, and cost.
 `"deep"` (five seconds). `index.source_freshness` describes the served generation
 as `current`, `drifted` or `unknown`; missing source/key and incomplete capture
 never count as current. No Rails initialization or provider call is needed.
+**Unreleased after `2.0.0`:** evidence above the serialized-size limit produces
+`unavailable` with `source_manifest_too_large` while the code index remains
+usable. Follow `inspect_source_limits` and inspect the reported byte counts;
+repeating an identical full extraction cannot remove this limitation.
 See [source freshness](SOURCE_FRESHNESS.md) for scope, private-key handling and
 fresh-process extraction. Existing HEAD/dirty fields remain separate diagnostics.
 

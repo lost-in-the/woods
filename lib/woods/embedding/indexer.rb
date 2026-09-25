@@ -513,12 +513,12 @@ module Woods
         retain_existing_metadata_identities
       end
 
-      def retain_existing_metadata_identities
+      def retain_existing_metadata_identities(identities = @persisted_ids)
         if implements_own?(@metadata_store, :all_identifiers)
-          @metadata_store.all_identifiers.each { |identifier| @persisted_ids[identifier] ||= [] }
+          @metadata_store.all_identifiers.each { |identifier| identities[identifier] ||= [] }
         elsif @metadata_store.respond_to?(:each_entry)
           # Compatibility for custom snapshot-only stores.
-          @metadata_store.each_entry { |identifier, _unit| @persisted_ids[identifier] ||= [] }
+          @metadata_store.each_entry { |identifier, _unit| identities[identifier] ||= [] }
         end
       end
 
@@ -544,6 +544,7 @@ module Woods
       def load_durable_store_ids
         @durable_ids = Hash.new { |hash, key| hash[key] = [] }
         @vector_store.each_id { |id| @durable_ids[base_identifier(id)] << id }
+        retain_existing_metadata_identities(@durable_ids)
       rescue StandardError => e
         # A store that cannot be enumerated must not take the embed run down
         # with it. Reconciliation and the presence check both degrade to their

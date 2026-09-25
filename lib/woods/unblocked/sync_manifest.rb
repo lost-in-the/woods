@@ -109,7 +109,8 @@ module Woods
 
       # Select one repository/ref without retiring any other branch's documents.
       # Existing v1 entries are adopted only when they prove a successful write
-      # and correspond to a currently published URI in this exact scope.
+      # and correspond to a currently published URI in this exact scope. A URI
+      # prefix cannot distinguish refs containing slashes from source paths.
       def activate_scope(repo_url:, ref:, current_uris:)
         raise Woods::ConfigurationError, "Unblocked manifest needs recovery: #{@load_error}" if @load_error
 
@@ -125,6 +126,12 @@ module Woods
           @documents[uri] ||= entry
           @legacy_documents.delete(uri)
         end
+      end
+
+      # A remaining v1 receipt has no selected repository/ref scope. Report
+      # the cleanup obligation rather than claiming that synchronization is done.
+      def unresolved_legacy_ownership?
+        @legacy_documents.any? { |uri, entry| uri.start_with?("#{@repo_url}/blob/") && owned?(entry) }
       end
 
       # Local ownership evidence for an explicitly selected migration source.

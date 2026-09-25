@@ -92,7 +92,7 @@ RSpec.describe Woods::Release::VersionState do
 
     it 'refuses to prepare an alpha or to release twice without reopening' do
       expect { prepare('2.0.0.alpha', '2.1.0.alpha') }
-        .to raise_error(described_class::InvalidTransition, /use release:reopen/)
+        .to raise_error(described_class::InvalidTransition, /release:retarget from an unpublished alpha/)
       expect { prepare('2.0.0', '2.0.1') }
         .to raise_error(described_class::InvalidTransition, /already released/)
     end

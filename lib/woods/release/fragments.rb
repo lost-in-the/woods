@@ -54,11 +54,17 @@ module Woods
         end
 
         body = File.read(File.join(root, path), encoding: Encoding::UTF_8)
+        validate_body!(body, path)
+        [heading, body.strip]
+      end
+
+      def validate_body!(body, path)
         unless body.valid_encoding? && !body.strip.empty? && !body.match?(HEADING)
           raise InvalidEntry, "#{path}: entry must be nonempty UTF-8 Markdown without headings"
         end
+        return if body.lstrip.match?(/\A-[ \t]+\S/)
 
-        [heading, body.strip]
+        raise InvalidEntry, "#{path}: entry must begin with a '- ' list item"
       end
     end
   end

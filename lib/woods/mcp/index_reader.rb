@@ -378,14 +378,14 @@ module Woods
       def find_unit(identifier, type: nil)
         if type
           return with_pinned_generation do
-            dir = UNIT_TYPES_BY_DIR.find { |_, types| types.include?(type) }&.first
+            dir = UNIT_TYPE_TO_DIR[type] || TYPE_TO_DIR[type]
             next nil unless dir
             raise IOError, "symlink unit directory: #{dir}" if current_payload_dir.join(dir).symlink?
 
             next nil unless search_index_entries(dir).any? { |entry| entry['identifier'] == identifier }
 
             unit = read_published_unit(dir, identifier)
-            unit if unit['type'] == type
+            unit if unit['type'] == type || !UNIT_TYPE_TO_DIR.key?(type)
           end
         end
         ensure_fresh!
@@ -522,8 +522,10 @@ module Woods
               entries = search_index_entries(dir)
               entries = if scope
                           scoped_search_entries(entries, dir, scope)
+                        elsif types
+                          typed_search_entries(entries, dir, types, results)
                         else
-                          typed_search_entries(entries, dir, types)
+                          entries
                         end
               if entries.size > 1
                 matching_count = entries.count do |entry|
@@ -535,11 +537,13 @@ module Woods
               end
 
               entries.each do |entry|
-                type_name = entry.fetch('scope_type', DIR_TO_TYPE[dir])
                 id = entry['identifier']
                 next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
                 if fields.include?('identifier') && pattern.match?(id)
+                  type_name = search_entry_type(entry, dir, results)
+                  next unless type_name
+
                   results.add(identifier: id, type: type_name, match_field: 'identifier')
                   throw :search_done if results.result_limit_reached?
 
@@ -547,7 +551,7 @@ module Woods
                 end
                 next unless fields.include?('metadata') || fields.include?('source_code')
 
-                (phase2_queues[dir] ||= []) << [type_name, id]
+                (phase2_queues[dir] ||= []) << [entry, dir]
               end
             end
 
@@ -561,10 +565,21 @@ module Woods
                   results.stop('scan_budget')
                   throw :search_done
                 end
-                type_name, id = queue.shift
+                entry, dir = queue.shift
+                id = entry['identifier']
                 progressed = true
                 phase2_scanned += 1
-                unit = scope ? scope.metadata_store.find(StorageIdentity.key(id, type_name)) : load_search_unit(type_name, id)
+                type_name = search_entry_type(entry, dir, results)
+                next unless type_name
+
+                unit = if scope
+                         scope.metadata_store.find(StorageIdentity.key(id, type_name))
+                       else
+                         readable_search_unit(type_name, id, results)
+                       end
+                next unless unit
+
+                type_name = unit['type']
                 field = if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
                           'source_code'
                         elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
@@ -619,15 +634,31 @@ module Woods
       end
       private :normalize_search_types
 
-      # Family directories can contain distinct public types. Legacy summaries
-      # omit type, so inspect the published unit instead of inventing an alias.
-      def typed_search_entries(entries, dir, types)
+      # Modern summaries carry their public type. Resolve legacy family types
+      # only when a type filter or matching candidate needs that identity.
+      def search_entry_type(entry, dir, results)
+        actual = entry['scope_type'] || entry['type']
         possible = UNIT_TYPES_BY_DIR.fetch(dir)
-        entries.filter_map do |entry|
-          actual = possible.one? ? possible.first : load_search_unit(DIR_TO_TYPE.fetch(dir), entry['identifier'])['type']
-          next if types && !types.include?(actual)
+        actual ||= possible.one? ? possible.first : readable_search_unit(DIR_TO_TYPE.fetch(dir), entry['identifier'], results)&.fetch('type')
+        return actual if possible.include?(actual)
 
-          entry.merge('scope_type' => actual)
+        results.stop('unreadable_or_corrupt_source')
+        nil
+      end
+      private :search_entry_type
+
+      def readable_search_unit(type, identifier, results)
+        load_search_unit(type, identifier)
+      rescue JSON::ParserError, IOError, SystemCallError
+        results.stop('unreadable_or_corrupt_source')
+        nil
+      end
+      private :readable_search_unit
+
+      def typed_search_entries(entries, dir, types, results)
+        entries.filter_map do |entry|
+          actual = search_entry_type(entry, dir, results)
+          entry.merge('scope_type' => actual) if types.include?(actual)
         end
       end
       private :typed_search_entries

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
 require 'woods/source_references/pass'
 require 'woods/source_inputs/stable_reader'
 
@@ -47,6 +48,18 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(units.first['dependencies']).to eq([])
     expect(result.cache['owners']).to include(hash_including('identifier' => 'RefCaller', 'added' => [edge]))
     expect(result.cache['files'].keys).to match_array(sources.keys)
+  end
+
+  it 'records target-only typed consumption without adding caller dependency rewrites' do
+    units.last['type'] = 'component'
+    result = run_pass
+    expect(result.cache['owners']).to include(include('identifier' => 'RefTarget', 'type' => 'component',
+                                                      'added' => []))
+    expect(result.dependencies).not_to have_key(%w[component RefTarget])
+    expect(Woods::SourceReferences::Cache).to receive(:write).and_call_original
+    Dir.mktmpdir do |dir|
+      Woods::SourceReferences::Cache.write(File.join(dir, 'cache.json'), result.cache)
+    end
   end
 
   it 'caches unresolved candidates so a new target updates an unchanged caller without parsing it again' do

@@ -25,11 +25,16 @@ module Woods
       # rubocop:enable Metrics/ParameterLists
 
       def call
-        verify.merge('recorded_root' => @manifest.data.fetch('root'), 'checked_root' => @root,
+        result = unavailable_generation? ? unavailable : verify
+        result.merge('recorded_root' => @manifest.data.fetch('root'), 'checked_root' => @root,
                      'root_source' => @root_source)
       end
 
       private
+
+      def unavailable_generation?
+        @manifest.unavailable? && (!@generation || @generation == @manifest.data['generation'])
+      end
 
       def verify # rubocop:disable Metrics/AbcSize -- cheap refusal checks precede the only source scan
         return unknown('generation_mismatch') if @generation && @generation != @manifest.data['generation']
@@ -107,6 +112,13 @@ module Woods
         return 'drifted' if counts.values.any?(&:positive?)
 
         reasons.empty? ? 'current' : 'unknown'
+      end
+
+      def unavailable
+        diagnostic = @manifest.data.fetch('unavailable')
+        { 'state' => 'unavailable', 'mode' => 'content', 'generation' => @manifest.data['generation'],
+          'checked_at' => Time.now.utc.iso8601, 'reasons' => [diagnostic.fetch('reason')],
+          'complete' => false, 'comparison_complete' => false, 'unavailable' => diagnostic }
       end
 
       def unknown(reason)

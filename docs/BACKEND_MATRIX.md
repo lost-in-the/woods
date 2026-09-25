@@ -27,6 +27,13 @@ The shape determines the capability matrix:
 | Cross-machine query | After deploying/copying `output_dir` | Yes, when the filesystem is shared | External vectors are shared; metadata/config still require a shared or deployed `output_dir` |
 | `woods.json` schema-versioned config snapshot | Yes | Yes | Yes |
 
+**Unreleased after `2.0.0`:** `:local` cannot atomically reload snapshot vectors
+alongside its SQLite metadata in a running MCP server. `reload` reports degraded
+and retains the previous aligned state; restart `woods-mcp` after `woods:embed`
+to load the latest vectors. Write access alone does not resolve this limitation.
+The in-memory stores used by `:shared_filesystem` support transactional reload
+under the writer lock. See [MCP reload requirements](MCP_SERVERS.md#index-server).
+
 `Builder#build_vector_store` accepts exactly `:in_memory`, `:pgvector`, `:qdrant`, anything else raises `ArgumentError: Unknown vector_store`. `build_metadata_store` accepts `:in_memory`, `:sqlite`. `build_graph_store` accepts `:in_memory` only. Presets are `:local`, `:shared_filesystem`, `:postgresql`, and `:production`.
 
 ---

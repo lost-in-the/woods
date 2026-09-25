@@ -61,6 +61,14 @@ RSpec.describe 'Published directory type families' do
     expect(reader.each_unit.map { |unit| unit['type'] }).to eq(graphql_types)
   end
 
+  it 'accepts the GraphQL family alias for exact lookup and retains the concrete type' do
+    graphql_types.each_with_index do |type, index|
+      unit = reader.find_unit("Types::Unit#{index}", type: 'graphql')
+      expect(unit).to include('type' => type)
+      expect(reader.find_unit("Types::Unit#{index}", type: 'service')).to be_nil
+    end
+  end
+
   it 'retrieves each GraphQL subtype using actual typed identities without embeddings' do
     retriever = Woods::MCP::PublishedLexicalRetriever.new(index_dir: index_dir)
     graphql_types.each do |type|

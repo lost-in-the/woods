@@ -698,7 +698,7 @@ module Woods
       # @return [Hash]
       def parse_lines(lines)
         state = {
-          summary: [], methods: {}, private_methods: [],
+          summary: [], methods: {}, method_occurrences: Hash.new(0), private_methods: [],
           current_method: nil, depth: 0, in_private: false
         }
         lines.each do |line|
@@ -751,9 +751,11 @@ module Woods
         if state[:in_private]
           state[:private_methods] << line
         else
-          # Preserve insertion order — Hash does this by default, but we
-          # initialize the entry here so `build_chunks` below walks
-          # methods in source order.
+          # Repeated definitions (nested owners, singleton bodies, or inlined
+          # overrides) must never overwrite earlier source. Preserve existing
+          # keys for unique methods and number later occurrences in source order.
+          occurrence = state[:method_occurrences][method_name] += 1
+          method_name = "#{method_name}@#{occurrence}" if occurrence > 1
           state[:methods][method_name] = [line]
         end
 

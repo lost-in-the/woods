@@ -55,4 +55,21 @@ RSpec.describe 'woods:incremental without a baseline index' do
       expect(File.exist?(File.join(dir, 'index', 'generation.json'))).to be(false)
     end
   end
+  it 'refuses a flat v1 cache at the task boundary and leaves its manifest unchanged' do
+    Dir.mktmpdir('woods-legacy-task') do |dir|
+      output = File.join(dir, 'index')
+      FileUtils.mkdir_p(output)
+      manifest = File.join(output, 'manifest.json')
+      File.write(manifest, JSON.generate(woods_version: '1.6.3', total_units: 1))
+      original = File.binread(manifest)
+
+      out, err, status = run_incremental(dir)
+
+      expect(status).not_to be_success
+      expect("#{out}\n#{err}").to include('legacy flat index', 'woods:extract')
+      expect(File.binread(manifest)).to eq(original)
+      expect(File.exist?(File.join(output, 'generation.json'))).to be(false)
+      expect(File.exist?(File.join(output, 'payloads'))).to be(false)
+    end
+  end
 end

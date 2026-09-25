@@ -111,6 +111,17 @@ module Woods
 
       # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
+      # An oversized launcher capture conveys only a downgrade, never proof.
+      def unavailable_evidence
+        descriptor = JSON.parse(ENV.fetch(ENV_KEY, '{}'))
+        value = descriptor.is_a?(Hash) && descriptor['unavailable']
+        return unless Manifest.valid_unavailable_evidence?(value)
+
+        value.slice('reason', 'size_bytes', 'limit_bytes')
+      rescue JSON::ParserError
+        nil
+      end
+
       def extra_roots
         token = ENV.fetch(ENV_KEY, nil)
         return [] if token.nil? || token.empty?

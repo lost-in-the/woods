@@ -52,8 +52,13 @@ module Woods
       end
 
       def source_freshness
-        SourceInputs::Status.new(output_dir: @output, root: @event.root, payload_dir: @reader.payload_dir,
-                                 generation: @reader.loaded_generation).call.fetch('state')
+        status = SourceInputs::Status.new(output_dir: @output, root: @event.root, payload_dir: @reader.payload_dir,
+                                          generation: @reader.loaded_generation).call
+        return status.fetch('state') unless status['state'] == 'unavailable'
+
+        evidence = status.fetch('unavailable')
+        "unavailable (#{evidence.fetch('reason')}; #{evidence.fetch('size_bytes')} bytes; " \
+          "limit #{evidence.fetch('limit_bytes')})"
       end
 
       def orientation(freshness)

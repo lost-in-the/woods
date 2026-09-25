@@ -1,0 +1,1 @@
+- Accept the GraphQL family alias for exact MCP lookup while returning the concrete published type, and normalize uppercase hexadecimal snapshot SHA inputs before detail and diff lookup.

@@ -116,6 +116,46 @@ Dir.mktmpdir('woods_incremental_runtime') do |root|
   runner.raise_on_publication_failure!
   compare.call('full/refresh published JSON and graph equivalence')
 
+  [false, true].each do |new_first|
+    old = write(root, 'app/models/move_container.rb', <<~RUBY)
+      class MoveContainer
+        class NotifyJob < ApplicationJob
+          def perform; :notification; end
+        end
+        class ItemSerializer < ActiveModel::Serializer
+          attributes :id
+        end
+      end
+    RUBY
+    Rails.application.reloader.reload!
+    runner.extract_all
+    write(root, 'app/models/move_container.rb', 'class MoveContainer; end')
+    moved_job = write(root, 'app/jobs/move_container/notify_job.rb', <<~RUBY)
+      class MoveContainer::NotifyJob < ApplicationJob
+        def perform; :notification; end
+      end
+    RUBY
+    moved_serializer = write(root, 'app/serializers/move_container/item_serializer.rb', <<~RUBY)
+      class MoveContainer::ItemSerializer < ActiveModel::Serializer
+        attributes :id
+      end
+    RUBY
+    Rails.application.reloader.reload!
+    paths = [old, moved_job, moved_serializer]
+    runner.extract_changed(new_first ? paths.reverse : paths)
+    runner.raise_on_publication_failure!
+    verify("nested job and serializer moves, new first=#{new_first}") do
+      reader.find_unit('MoveContainer::NotifyJob', type: 'job').fetch('file_path') ==
+        'app/jobs/move_container/notify_job.rb' &&
+        reader.find_unit('MoveContainer::ItemSerializer', type: 'serializer').fetch('file_path') ==
+          'app/serializers/move_container/item_serializer.rb'
+    end
+    compare.call("hybrid move equivalence, new first=#{new_first}")
+    [old, moved_job, moved_serializer].each { |path| File.delete(path) }
+    Rails.application.reloader.reload!
+    runner.extract_all
+  end
+
   # A runtime refresh must reach the synthetic profile's real extractor.
   Rails.application.config.time_zone = 'Hawaii'
   runner.refresh(:configurations)

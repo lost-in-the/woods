@@ -228,8 +228,10 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
     reader = publish(unit('model', file_path: 'shared.rb'), unit('poro', file_path: 'shared.rb'))
     result = unblocked(reader, manifest: existing_manifest, force_purge: true).sync_all
     expect(result).to include(synced: 0, deleted: 0)
-    expect(result[:errors]).to all(include('ambiguous export URI'))
-    expect(result[:errors].size).to eq(2)
+    collisions = result[:errors].select { |error| error.include?('ambiguous export URI') }
+    expect(collisions.size).to eq(2)
+    expect(result[:errors]).to include(include('legacy'))
+    expect(result[:complete]).to be(false)
     expect(documents).to be_empty
     expect(unblocked_client).not_to have_received(:delete_document)
   end

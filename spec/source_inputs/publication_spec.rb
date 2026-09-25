@@ -96,20 +96,23 @@ RSpec.describe 'Source provenance publication' do
     expect(File.binread(source_path)).to eq(bytes)
   end
 
-  it 'preserves the active payload when the new source manifest exceeds its reader limit' do
+  it 'publishes the code generation with explicit unavailable evidence above the source manifest limit' do
     prepare.send(:publish_generation, 'full')
     generation = Woods::Generation.new(output_dir: @output)
     previous = generation.current
-    source_path = File.join(generation.payload_dir, 'source_inputs.json')
-    bytes = File.binread(source_path)
     extractor = prepare
-    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 100)
+    session = extractor.instance_variable_get(:@source_inputs)
+    session.instance_variable_get(:@snapshot)['metrics']['padding'] = 'x' * 4000
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 2000)
 
-    expect(extractor.send(:publish_generation, 'full')).to be_nil
-    expect { extractor.raise_on_publication_failure! }
-      .to raise_error(Woods::ExtractionError, /source_manifest_too_large.*narrow additional source roots/)
-    expect(generation.current.token).to eq(previous.token)
-    expect(File.binread(source_path)).to eq(bytes)
+    expect { extractor.send(:publish_generation, 'full') }
+      .to output(/source_manifest_too_large.*bytes.*2000/).to_stderr
+    expect { extractor.raise_on_publication_failure! }.not_to raise_error
+    expect(generation.current.number).to eq(previous.number + 1)
+    expect(published_manifest.data['state']).to eq('unavailable')
+    status = Woods::SourceInputs::Status.new(output_dir: @output).call
+    expect(status).to include('state' => 'unavailable', 'complete' => false)
+    expect(status['recommendations']).not_to include('fresh_capture')
   end
 
   it 'writes exactly the pretty JSON bytes checked against the publication limit, with no appended newline' do
@@ -143,17 +146,25 @@ RSpec.describe 'Source provenance publication' do
     expect(generation.current.token).to eq(previous.token)
   end
 
-  it 'retains the active generation when an undecodable path prevents reference verification' do
-    prepare.send(:publish_generation, 'full')
-    generation = Woods::Generation.new(output_dir: @output)
-    previous = generation.current
-    File.binwrite(File.join(@root.b, 'unrelated_'.b + "\xFF".b), 'input')
-    extractor = prepare
-    extractor.instance_variable_set(:@source_reference_paths, Set.new([@source]))
+  ["unrelated_\xFF", "app/services/invalid_\xFF.rb", "app/services/invalid_\n\xFF/nested.rb"].each do |relative|
+    it "names the escaped path and retains the active generation for #{relative.b.inspect}" do
+      prepare.send(:publish_generation, 'full')
+      generation = Woods::Generation.new(output_dir: @output)
+      previous = generation.current
+      path = File.join(@root.b, relative.b)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.binwrite(path, 'private fixture contents never belong in a diagnostic')
+      extractor = prepare
+      extractor.instance_variable_set(:@source_reference_paths, Set.new([@source]))
 
-    expect(extractor.send(:publish_generation, 'full')).to be_nil
-    expect { extractor.raise_on_publication_failure! }.to raise_error(Woods::ExtractionError)
-    expect(generation.current.token).to eq(previous.token)
-    expect(Woods::SourceInputs::Status.new(output_dir: @output, mode: 'deep').call['state']).to eq('unknown')
+      expect(extractor.send(:publish_generation, 'full')).to be_nil
+      expect { extractor.raise_on_publication_failure! }.to raise_error(Woods::ExtractionError) { |error|
+        expect(error.message).to include('undecodable_source_path', '\\xFF', relative.b.split('_').first)
+        expect(error.message).not_to include("\n", 'private fixture contents')
+        expect(error.message).to be_ascii_only
+      }
+      expect(generation.current.token).to eq(previous.token)
+      expect(Woods::SourceInputs::Status.new(output_dir: @output, mode: 'deep').call['state']).to eq('unknown')
+    end
   end
 end
