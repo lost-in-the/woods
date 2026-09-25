@@ -79,6 +79,17 @@ Unmanaged paths (`lib/` unless configured for autoloading, and configured non-au
 
 An inline primary module with a body, such as `module Helpers; def self.call; end; end`, keeps its declared name even when an unmanaged directory suggests another namespace. Namespace-only wrappers containing a single nonempty module retain the nested identity; direct behavior, empty inner modules, and `ClassMethods`/`InstanceMethods` plumbing stop that descent. Empty completed modules before the primary declaration remain namespace preludes. This correction is unreleased after `2.0.0`; run a full extraction after upgrading to replace affected path-derived identities and their source-reference edges.
 
+One-line class declarations retain the same nesting as their multiline forms:
+`module Acme; class Error < StandardError; end; end` names `Acme::Error`,
+separately from the `Acme` namespace unit. Complete-source parsing keeps
+declaration-like text inside strings and heredocs out of identifier selection.
+Conditional declarations remain source candidates; this scan does not establish
+which branch ran. Method and singleton-class bodies do not supply ordinary
+owners. Invalid source keeps the tolerant class scan, while module selection
+requires valid syntax. These corrections are also unreleased after `2.0.0`;
+re-extract affected indexes in full to replace wrapper identities and restore
+their source-reference edges.
+
 Once-loader ownership (#579) is an unreleased correction after Woods `2.0.0`; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
 
 ### Eager loading
@@ -265,6 +276,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Scans: `app/jobs`, `app/workers`, `app/sidekiq`
 - Extracts queue name, retry configuration, concurrency options, perform method arguments, and callbacks
+- File-discovered jobs read queue metadata from source. Runtime `queue_name` supplements only class-discovered jobs, such as nested jobs outside the job directories; a file-discovered `queue_as Settings::QUEUE` can therefore retain a `null` queue even after refresh.
 - `perform_params` uses the same syntax-aware signature parsing as service initializers and preserves its `name`, `splat` (`single`/`double`/null), and `has_default` fields. Keyword defaults do not invent additional argument names.
 - Records what triggers this job (reverse lookup via dependency graph after extraction)
 - Supports both ActiveJob and Sidekiq native workers

@@ -25,6 +25,28 @@ RSpec.describe Woods::Extractors::LibExtractor do
   # ── extract_all ──────────────────────────────────────────────────────
 
   describe '#extract_all' do
+    it 'keeps inline nested classes separate from their namespace unit' do
+      create_file('lib/acme.rb', 'module Acme; VERSION = "1"; end')
+      create_file('lib/acme/error.rb', 'module Acme; class Error < StandardError; end; end')
+      create_file('lib/acme/clients.rb', 'module Acme; class Client; def call; :ok; end; end; end')
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to contain_exactly('Acme', 'Acme::Error', 'Acme::Client')
+      expect(units.find { |unit| unit.identifier == 'Acme::Error' }.metadata[:parent_class]).to eq('StandardError')
+      expect(units.find { |unit| unit.identifier == 'Acme' }.source_code).not_to include('class Error', 'class Client')
+    end
+
+    it 'uses the module owning a heredoc rather than declarations in its text' do
+      create_file('lib/extensions/template.rb', <<~RUBY)
+        module Templates; TEXT = <<~TEXT; end
+          module Pretend
+          class Example
+        TEXT
+      RUBY
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['Templates'])
+    end
+
     it 'keeps sibling inline modules distinct through namespace-only wrappers' do
       %w[Refundable Chargeable].each do |name|
         create_file("lib/gateway/#{name.underscore}.rb",

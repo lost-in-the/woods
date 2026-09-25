@@ -16,20 +16,13 @@ module Woods
     # Wrong identifiers collapse cross-namespace same-named classes onto one
     # graph node and leave edges targeting the real constant dangling.
     #
-    # This module scans source line by line tracking nesting *by position*:
-    # a stack of open +module+/+class+ declarations that pops on the matching
-    # +end+, using the same depth-tracking discipline as
-    # RakeTaskExtractor#block_opener? (the house pattern for what counts as a
-    # block opener). Compact declarations (`class Billing::Payment`) keep
-    # their qualified segments.
-    #
-    # The line scanner is regex-based. Completed inline modules use Prism to
-    # distinguish primary owners from namespace-only wrappers. Other constructs
-    # (heredocs containing keywords, keywords inside string literals) can
-    # unbalance the depth count — the accepted house tradeoff, shared with
-    # RakeTaskExtractor: declarations and their +end+s pair up for
-    # conventionally formatted files. Assignment-form conditionals
-    # (`x = if ...`) are counted; see {#block_opener?}.
+    # Prism reads complete source so declarations retain their lexical nesting
+    # on a single line and literal text cannot supply a declaration. Compact
+    # declarations (`class Billing::Payment`) keep their qualified segments.
+    # Conditional declarations remain source candidates, not proof that a
+    # runtime branch executed. Method and singleton-class bodies do not name
+    # ordinary owners. Invalid source retains the legacy line-based class scan;
+    # module ownership requires a successful whole-source parse.
     #
     # @example Qualifying the first class declaration
     #   qualified_first_class_name("module Billing\n  class Payment\n  end\nend")
@@ -123,12 +116,11 @@ module Woods
 
       # Fully-qualified name of the file's primary module.
       #
-      # Follows the initial chain of module declarations — each opening
-      # directly inside the previous one, with only blank/comment lines
-      # between — and returns the chain joined with `::`. Prelude lines
-      # before the first module (requires, magic comments, guards) are
-      # skipped. The chain stops at the first body content (methods,
-      # `extend`, a class, an empty self-terminated inner module) and never descends
+      # Follows namespace-only wrappers, each containing a sole nonempty
+      # module, and returns the chain joined with `::`. Prelude statements
+      # before the first module (requires, magic comments, guards) are skipped.
+      # The chain stops at body content (methods, `extend`, a class, an empty
+      # inner module) and never descends
       # into mixin plumbing modules ({MIXIN_INNER_MODULES}), so `module
       # Trackable; module ClassMethods` names +Trackable+ while `module
       # Gateway; module Stripe; module Refundable` names
@@ -140,52 +132,23 @@ module Woods
       # @return [String, nil] Qualified module name, or nil when the source
       #   opens no module
       def qualified_outer_module_name(source)
-        chain = []
-
-        each_significant_line(source) do |stripped|
-          decl = DECLARATION_PATTERN.match(stripped)
-
-          unless decl
-            next if chain.empty? # prelude before any module (requires, guards)
-
-            break # body content — the chain is complete
-          end
-
-          break unless decl[1] == 'module'
-          break if decl[2].split('::').any? { |seg| MIXIN_INNER_MODULES.include?(seg) }
-
-          unless block_opener?(stripped)
-            # Completed declarations can contain a namespace-only chain on
-            # one line. Keep its primary owner, not merely the first wrapper.
-            # Empty completed modules still act as preludes or stop a chain.
-            completed = completed_module_name(stripped)
-            return (chain + [completed]).join('::') if completed
-
-            break unless chain.empty?
-
-            next
-          end
-
-          chain << decl[2]
-        end
-
-        chain.empty? ? nil : chain.join('::')
-      end
-
-      # Find the primary owner inside a complete inline declaration without
-      # evaluating source. Only a sole nonempty module body is a namespace
-      # wrapper; methods, mixin plumbing and empty inner modules stop descent.
-      # @param source [String] one complete declaration line
-      # @return [String, nil] primary module name, or nil for an empty prelude
-      def completed_module_name(source)
         parsed = Prism.parse(source)
         return unless parsed.success?
 
-        inline_module_chain(parsed.value.statements.body.first)
-      end
-      private :completed_module_name
+        each_syntax_declaration(parsed.value) do |kind, name, _qualified, node|
+          return unless kind == 'module'
+          return if name.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
+          next if !node.body && node.location.start_line == node.location.end_line
 
-      def inline_module_chain(node)
+          return primary_module_chain(node) || name
+        end
+
+        nil
+      end
+
+      # Only a sole nonempty module is a namespace wrapper. Parse the complete
+      # source before calling this so heredoc bodies remain literal text.
+      def primary_module_chain(node)
         return unless node.is_a?(Prism::ModuleNode) && node.body
 
         name = DECLARATION_PATTERN.match(node.location.slice)&.[](2)
@@ -193,10 +156,10 @@ module Woods
         return name unless node.body.is_a?(Prism::StatementsNode) # rescue/ensure belongs to this owner
 
         statements = node.body.body
-        nested = inline_module_chain(statements.first) if statements.one?
+        nested = primary_module_chain(statements.first) if statements.one?
         [name, nested].compact.join('::')
       end
-      private :inline_module_chain
+      private :primary_module_chain
 
       # Check if a line opens a new block (do...end, def...end, etc.).
       #
@@ -216,17 +179,22 @@ module Woods
 
       private
 
-      # Yield every module/class declaration with its position-aware
-      # qualified name. The stack discipline is the one documented on the
-      # module: declarations open frames, {#block_opener?} opens anonymous
-      # (depth-only) frames, and {END_LINE}-matching lines pop them.
+      # Yield named declarations from complete source. Retain the tolerant
+      # line scanner for invalid/incomplete source, where Prism cannot provide
+      # a complete syntax tree.
       #
       # @param source [String] Ruby source code
       # @yieldparam kind [String] 'module' or 'class'
       # @yieldparam name [String] The declared (possibly compact) name
       # @yieldparam qualified [String] Enclosing stack joined with the name
       # @return [void]
-      def each_declaration(source)
+      def each_declaration(source, &block)
+        parsed = Prism.parse(source)
+        if parsed.success?
+          each_syntax_declaration(parsed.value, &block)
+          return
+        end
+
         stack = []
 
         each_significant_line(source) do |stripped|
@@ -241,6 +209,25 @@ module Woods
           elsif block_opener?(stripped)
             stack << nil # anonymous block (do/def/if/...): depth only, no name
           end
+        end
+      end
+
+      # Walk syntactic scopes without evaluating conditionals or interpreting
+      # literal contents as Ruby. Declarations under method/singleton scopes
+      # cannot establish the ordinary constant ownership used by these units.
+      def each_syntax_declaration(node, namespace = [], &block)
+        return unless node
+        return if node.is_a?(Prism::DefNode) || node.is_a?(Prism::SingletonClassNode)
+
+        if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+          declaration = DECLARATION_PATTERN.match(node.location.slice)
+          return unless declaration
+
+          nesting = [*namespace, declaration[2]]
+          yield declaration[1], declaration[2], nesting.join('::'), node
+          each_syntax_declaration(node.body, nesting, &block)
+        else
+          node.compact_child_nodes.each { |child| each_syntax_declaration(child, namespace, &block) }
         end
       end
 

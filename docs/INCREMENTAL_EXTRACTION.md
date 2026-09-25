@@ -271,8 +271,10 @@ step before it.
 
    **Unreleased after 2.0.0:** jobs and serializers reconcile their combined
    file/runtime inventory whenever a Ruby source path changes. Resolved metadata
-   can depend on another file without a recorded graph edge, such as a job's
-   `queue_as Settings::QUEUE`. Non-Ruby batches refresh only hybrid families
+   can depend on another file without a recorded graph edge, such as a nested,
+   class-discovered job's `queue_as Settings::QUEUE`. Runtime queue enrichment
+   applies only to class-discovered jobs; file-discovered jobs keep source-based
+   queue metadata. Non-Ruby batches refresh only hybrid families
    already reached by the pre-change dependency graph. The application must have
    loaded the changed runtime before extraction, through a fresh boot or reload.
 

@@ -18,6 +18,48 @@ RSpec.describe Woods::Extractors::SourceNesting do
   # ── #qualified_first_class_name ──────────────────────────────────────
 
   describe '#qualified_first_class_name' do
+    {
+      'module Acme; class Error < StandardError; end; end' => 'Acme::Error',
+      'module Acme; class Error < StandardError; def message; "failed"; end; end; end' => 'Acme::Error',
+      'module Acme; class Error < StandardError; end; class Client; end; end' => 'Acme::Error',
+      'module Acme; end; class Acme::Error < StandardError; end' => 'Acme::Error',
+      'module Acme; module Errors; class Failure < StandardError; end; end; end' => 'Acme::Errors::Failure'
+    }.each do |source, expected|
+      it "matches multiline class ownership for #{source}" do
+        expect(scanner.qualified_first_class_name(source)).to eq(expected)
+        expect(scanner.qualified_first_class_name(source.gsub('; ', "\n"))).to eq(expected)
+      end
+    end
+
+    it 'ignores class declarations inside a heredoc' do
+      source = <<~RUBY
+        module Acme; TEXT = <<~TEXT; end
+          class Pretend
+        TEXT
+        module Acme; class Error < StandardError; end; end
+      RUBY
+
+      expect(scanner.qualified_first_class_name(source)).to eq('Acme::Error')
+    end
+
+    %w[if unless begin].each do |keyword|
+      it "preserves class declarations inside #{keyword} bodies" do
+        opening = keyword == 'begin' ? keyword : "#{keyword} defined?(Acme)"
+        source = "#{opening}\nmodule Acme; class Error < StandardError; end; end\nend"
+        expect(scanner.qualified_first_class_name(source)).to eq('Acme::Error')
+      end
+    end
+
+    it 'does not promote declarations inside a singleton class to an ordinary owner' do
+      source = 'class << self; class PrivateError; end; end; class Error; end'
+      expect(scanner.qualified_first_class_name(source)).to eq('Error')
+    end
+
+    it 'resolves a governed class after its inline sibling' do
+      source = 'module Acme; class Helper; end; class Error < StandardError; end; end'
+      expect(scanner.governed_class_name('/rails/app/services/acme/error.rb', source)).to eq('Acme::Error')
+    end
+
     it 'returns the bare name for a top-level class' do
       source = <<~RUBY
         class Payment
@@ -718,6 +760,27 @@ RSpec.describe Woods::Extractors::SourceNesting do
   # ── #qualified_outer_module_name ─────────────────────────────────────
 
   describe '#qualified_outer_module_name' do
+    it 'reads the whole source when a completed module owns a heredoc' do
+      source = <<~RUBY
+        module Acme; TEXT = <<~TEXT; end
+          module Pretend
+        TEXT
+      RUBY
+
+      expect(scanner.qualified_outer_module_name(source)).to eq('Acme')
+    end
+
+    it 'ignores heredoc declarations following an empty completed prelude' do
+      source = <<~RUBY
+        module Prelude; end; text = <<~TEXT
+          module Pretend
+        TEXT
+        module Trackable; def self.track; :tracked; end; end
+      RUBY
+
+      expect(scanner.qualified_outer_module_name(source)).to eq('Trackable')
+    end
+
     {
       'module Gateway; module Stripe; module Refundable; def self.call; :ok; end; end; end; end' =>
         'Gateway::Stripe::Refundable',
