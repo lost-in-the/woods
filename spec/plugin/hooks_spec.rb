@@ -590,6 +590,16 @@ RSpec.describe 'plugin hooks (#280)' do
       end
     end
 
+    it 'reports oversized evidence as unavailable without recommending a fruitless full capture' do
+      Dir.mktmpdir('woods-hook-unavailable') do |dir|
+        make_app(dir)
+        out, err, status = run_hook(session_start, { 'cwd' => dir }, status_command(dir, state: 'unavailable'))
+        expect(status).to be_success, err
+        expect(out).to include('freshness is unavailable', 'source_manifest_too_large', 'size and limit')
+        expect(out).not_to include('woods-extract full', 'freshness is current')
+      end
+    end
+
     it 'stays quiet for verified current source or no existing index' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)

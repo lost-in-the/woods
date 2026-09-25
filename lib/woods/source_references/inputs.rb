@@ -27,6 +27,11 @@ module Woods
       def call(units:, baseline:, fresh:, extractor_keys:)
         @bytes = 0
         @baseline = baseline
+        @trusted_baseline = @session.respond_to?(:trusted_reference_baseline?) &&
+                            @session.trusted_reference_baseline?(baseline)
+        @baseline_owners = Array(baseline&.fetch('owners')).to_h do |owner|
+          [owner.values_at('type', 'identifier'), owner]
+        end
         grouped = group_sources(units)
         grouped.keys.sort.each_with_object({}) do |path, files|
           identity = captured_identity(path)
@@ -104,12 +109,22 @@ module Woods
                                       'the previous published generation remains active.'
       end
 
+      def retained_owner?(unit, path)
+        return false unless @trusted_baseline
+
+        prior = @baseline_owners[unit.values_at('type', 'identifier')]
+        return false unless prior
+
+        paths = SourceContributors.paths(unit).map { |source| relative(source) }
+        paths.include?(path) && (prior['file_paths'] || [prior['file_path']]) == paths
+      end
+
       def verify_consumption(unit, path, fresh, extractor_keys)
         return if fresh.call(unit)
 
         consumer = extractor_keys[unit['type'].to_sym]
         unchanged = @baseline&.dig('files', path, 'identity') == @session.source_identity(path)
-        return if unchanged && consumer && @session.consumed_source?(consumer, path)
+        return if unchanged && consumer && (@session.consumed_source?(consumer, path) || retained_owner?(unit, path))
 
         raise RebuildRequired, "Source-reference baseline needs a full extraction: unverified source #{path}. " \
                                'Run bin/rails woods:extract; the previous published generation remains active.'

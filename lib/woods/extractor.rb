@@ -982,6 +982,9 @@ module Woods
 
       manifest = @source_inputs.finish(generation: @payload_generation, eager_load_complete: @eager_load_complete)
       verify_source_reference_publication!(manifest)
+      if manifest.unavailable?
+        manifest.bind_reference_cache!(SourceReferences::Cache.read(payload_dir.join(SourceReferences::Cache::FILE_NAME)))
+      end
       AtomicFile.write(payload_dir.join(SourceInputs::Manifest::FILE_NAME), JSON.pretty_generate(manifest.data))
     end
 

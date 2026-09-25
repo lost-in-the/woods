@@ -22,6 +22,7 @@ module Woods
         @operation = operation.to_s
         @errors = []
         @unverified = []
+        @capture_unavailable = Handoff.unavailable_evidence
         @baseline = read_baseline(baseline_path)
         @rules = Scopes.new(extra_roots: declared_roots)
         @key = PrivateKey.new(output_dir: @output, create: true)
@@ -66,6 +67,16 @@ module Woods
       def consumed_source?(key, path)
         identity = source_identity(path)
         !identity.nil? && @identities.fetch("unit:#{key}", {})[relative_path(path)] == identity
+      end
+
+      # An oversized baseline can omit the comparison ledger while retaining a
+      # cryptographic binding to consumed reference evidence in the same payload.
+      # The caller must still prove exact typed ownership and unchanged HMACs.
+      def trusted_reference_baseline?(cache)
+        return false unless cache && compatible_baseline? && @baseline.unavailable?
+
+        expected = @baseline.data['reference_cache_sha256']
+        expected && expected == Digest::SHA256.hexdigest(JSON.generate(cache))
       end
 
       def consume_file(key, path)
@@ -128,7 +139,8 @@ module Woods
         @unverified << 'incomplete_eager_load' unless eager_load_complete
         Manifest.build(snapshot: @snapshot, scopes: @identities, boot_verified: verified_coverage?,
                        generation: generation, errors: @errors, unverified_scopes: @unverified,
-                       comparison_complete: comparison_complete?)
+                       comparison_complete: comparison_complete?,
+                       unavailable: unavailable_evidence)
       end
 
       private
@@ -138,6 +150,10 @@ module Woods
         # hide a later instability reason or its watcher catch-up paths.
         count = @errors.count { |existing| existing['reason'] == error['reason'] }
         @errors << error if count < MAX_ERRORS && !@errors.include?(error)
+      end
+
+      def unavailable_evidence
+        @capture_unavailable || (@baseline.data['unavailable'] if @operation != 'full' && @baseline&.unavailable?)
       end
 
       def comparison_complete?

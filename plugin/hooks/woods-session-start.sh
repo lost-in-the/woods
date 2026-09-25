@@ -97,6 +97,7 @@ status="$(tail -n 1 "$record")"
 state="$(field "$status" state)"
 case "$state" in
   current) ;;
+  unavailable) echo 'Woods source freshness is unavailable: source_manifest_too_large. The code index is usable; inspect woods_status for evidence size and limit. Repeating a full extraction will not reduce this size.' ;;
   drifted) echo 'Woods source freshness is drifted: indexed application inputs differ from the working tree. Run woods-extract full, or inspect woods_status before choosing a targeted refresh.' ;;
   *) unknown_message "$status" ;;
 esac

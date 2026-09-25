@@ -108,6 +108,26 @@ RSpec.describe 'Watcher reconciliation across publication' do
     expect(consumer).to have_received(:extract_changed).with([source])
   end
 
+  it 'uses an oversized manifest capture boundary without repeating catch-up or forcing full extraction' do
+    stamp_source(clock.to_i)
+    extractor = prepare
+    extractor.instance_variable_get(:@source_inputs).instance_variable_get(:@snapshot)['metrics']['padding'] =
+      'x' * 4000
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 2000)
+    extractor.send(:publish_generation, 'full')
+    expect(manifest['state']).to eq('unavailable')
+
+    2.times { daemon.run }
+    expect(consumer).not_to have_received(:extract_changed)
+    expect(consumer).not_to have_received(:extract_all)
+
+    File.write(source, 'changed after unavailable publication')
+    stamp_source(clock.to_i)
+    2.times { daemon.run }
+    expect(consumer).to have_received(:extract_changed).with([source]).once
+    expect(consumer).not_to have_received(:extract_all)
+  end
+
   it 'does not re-extract unchanged inputs in the capture second' do
     stamp_source(clock.to_i)
     prepare.send(:publish_generation, 'full')
