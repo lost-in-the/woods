@@ -771,3 +771,14 @@ For reopened `lib/` units, inspect all `source_contributors`; primary `file_path
 is not complete ownership. Full extraction is required to rebuild the upgraded
 reference cache. Missing dependency-owned components/channels are intentional
 in supporting builds; app-owned mailers include parallel base-class branches.
+
+### Console read compatibility on security-patch candidates
+
+Verify the loaded revision for corrections after 2.0.0. Active redaction refuses
+SQL relation/CTE column alias lists; typed EAV matching can intentionally mask
+extra values where tables share a final name or differ only by case. Keep the
+policy enabled and use explicit scalar columns or structured tools. Check exact
+sensitive-key spelling and configure binary secret columns for column redaction.
+Read the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+at the installed revision for adapter, timeout and projection limits; a plugin
+update does not patch Woods.

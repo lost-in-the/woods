@@ -34,6 +34,37 @@ keep `console_mcp_http_enabled = false`.
 See [HTTP origins](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
 and [Console setup](CONSOLE_MCP_SETUP.md) for the configuration contract.
 
+### Console read compatibility
+
+For supporting security-patch revisions, any nonempty column or EAV redaction
+policy makes `console_sql` refuse relation and CTE column alias lists, including
+lists on base tables, derived tables, parenthesized `VALUES` sources and table
+functions, regardless of the selected names. Use explicit, unaliased protected
+columns or structured tools.
+Typed EAV lookup includes all registered models with a case-insensitive matching
+final table name, including across schemas. It can therefore mask extra values;
+qualification does not narrow this conservative type set. Sensitive key values
+still require their exact stored or cast spelling.
+
+The 1.6.x function denylist becomes a read-only function allowlist in 2.x.
+Supply one `console_query` expression per `select` array entry: 2.x refuses
+comma-combined entries that 1.6.4 splits. Raw SQL requires a recognized adapter
+family; structured tools remain available on other adapters. Configure binary
+secret columns explicitly for redaction. See the canonical
+[read policy compatibility](CONSOLE_MCP_SETUP.md#read-policy-compatibility) and
+[statement timeouts](CONSOLE_MCP_SETUP.md#statement-timeout) for limits.
+
+Supporting Console HTTP revisions deliberately permit allowlisted non-loopback
+Hosts through the SDK where 2.0.0 could refuse them. Bearer authentication remains
+required. An explicit origin list replaces browser-origin defaults; wildcards
+are not supported. Ruby-configured 2.x origins reject surrounding whitespace
+that 1.6.4 trims; the HTTP executable trims comma-separated environment entries
+on both lines. Review [HTTP origin configuration](MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility).
+
+Context-cache namespace rotation retires entries for normal TTL or backend
+eviction; disabling both can retain them indefinitely. See
+[retrieval cache options](CONFIGURATION_REFERENCE.md#retrieval-cache-options).
+
 ## What changes
 
 | v2 change | What can break | Required response |

@@ -571,6 +571,16 @@ and fresh tag-push CI. Keep the advisory unpublished until fixed gems are
 available. Tags, dispatch, publication and live branch rules remain maintainer
 steps; this runbook does not execute them.
 
+### Maintenance CI compatibility
+
+The 1.6.4 profile intentionally has no C-locale artifact-reader CI lane; its
+legacy matrix and installed maintenance-package contracts define its validation.
+The trusted-main 2.0.1 profile omits `exact_ci_jobs` and `package_spec`, so it
+inherits the normal v2 required-job list and
+`spec/integration/packaged_gem_spec.rb`. An omitted override does not select
+legacy jobs or waive validation. Review candidate CI against trusted-main
+`script/release_profile.rb` and `script/validate-release-run`.
+
 ### Stable branches
 
 A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived maintenance exceptions above do not establish an `N-M-stable` branch.

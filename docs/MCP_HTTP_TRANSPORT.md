@@ -119,6 +119,36 @@ policy. SDK DNS-rebinding checks remain enabled.
 
 `OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin` and `Vary: Origin`. `Access-Control-Expose-Headers: Mcp-Session-Id` appears only in legacy session mode (`WOODS_MCP_HTTP_STATELESS=0`).
 
+### Origin configuration compatibility
+
+These details apply to the supporting security-patch revisions described above.
+
+Configured origins are literal values, with lowercasing, one trailing slash
+removed and HTTP(S) default-port normalization. Wildcard-looking hostnames are
+literal hostnames, not patterns. A nonempty explicit list replaces browser-origin
+defaults, including loopback; add the loopback browser origins you need. Console's
+configured defaults are HTTP loopback; the Index defaults include HTTP and HTTPS
+loopback. Loopback **Host** acceptance is separate from browser-origin acceptance.
+
+Ruby-configured 2.x origin entries reject surrounding whitespace; 1.6.4 trims it.
+The `woods-mcp-http` comma-separated environment setting trims each entry on both
+lines. Use whitespace-free values for portable configuration. The exact-port and
+same-authority rules above still apply; literal matching does not imply wildcard
+or arbitrary cross-port access.
+
+The guards read the actual `Origin` and `Host`; `Forwarded` and
+`X-Forwarded-*` do not replace them. Preserve the public Host through a proxy.
+A genuinely absent Host is accepted by the Host policy, but any supplied Origin
+must still pass its own check. Console requests and token-configured Index
+requests still require bearer authentication before dispatch. The loopback-only
+Index mode without a token retains its documented unauthenticated behavior;
+CORS preflights do not dispatch tools.
+
+Malformed Origin/Host values receive constant `403` responses without reflecting
+the values. Invalid Authorization receives `401` when it reaches the auth guard.
+Malformed HTTP framing can instead receive Puma's `400` before Rack runs. Other
+HTTP servers may reject framing at their own boundary.
+
 ### TLS termination
 
 The server speaks plain HTTP. Any deployment beyond a single trusted host should front it with a reverse proxy that handles TLS, HTTP/2, and connection limits.
