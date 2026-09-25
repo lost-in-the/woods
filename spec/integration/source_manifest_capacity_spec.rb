@@ -13,7 +13,10 @@ RSpec.describe 'Source manifest capacity with booted Rails', :booted_app do
   let(:root) { File.expand_path('../..', __dir__) }
 
   def run_command(app, *command, environment: {})
-    out, err, status = Open3.capture3(environment, *command, chdir: app)
+    # This disposable repository has its own history, not the enclosing CI PR's refs.
+    isolated = %w[GITHUB_BASE_REF CI_COMMIT_BEFORE_SHA CI_COMMIT_SHA WOODS_GIT_DIR GIT_DIR GIT_WORK_TREE]
+               .to_h { |key| [key, nil] }.merge(environment)
+    out, err, status = Open3.capture3(isolated, *command, chdir: app)
     expect(status).to be_success, "#{out}\n#{err}"
     [out, err]
   end
