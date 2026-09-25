@@ -1437,6 +1437,18 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  it 'keeps an unrelated service edit out of hybrid family extraction' do
+    path = 'app/services/signature_service.rb'
+    index = full_extraction
+    write_file(path, "#{File.read(app_path(path), encoding: 'UTF-8')}\n# independent edit\n")
+    expect_any_instance_of(Woods::Extractors::JobExtractor).not_to receive(:extract_all)
+    expect_any_instance_of(Woods::Extractors::SerializerExtractor).not_to receive(:extract_all)
+
+    touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+    expect(touched).to contain_exactly('SignatureService')
+  end
+
   describe 'class-discovered job nested in a model file (N-1)' do
     # spec/dummy/app/models/billing/invoicing/reconciler.rb nests
     # `RefreshJob < ApplicationJob` inside a compact-form PORO. The full path
@@ -1534,6 +1546,58 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         Woods::Extractor.new(output_dir: index).extract_changed([@ownership_old, @ownership_new])
       end.to raise_error(Woods::IdentityCollisionError)
       expect(File.binread(File.join(index, 'generation.json'))).to eq(marker)
+    end
+  end
+
+  it 'discovers a new nested job in a previously ordinary Ruby file' do
+    path = write_file('app/models/new_hybrid_host.rb', 'class NewHybridHost; end')
+    load app_path(path)
+    index = full_extraction
+    write_file(path, <<~RUBY)
+      class NewHybridHost
+        class NotifyJob < ApplicationJob
+          def perform; :notification; end
+        end
+      end
+    RUBY
+    load app_path(path)
+
+    touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+    expect(touched).to include('NewHybridHost::NotifyJob')
+    expect(differences(index, full_extraction)).to be_empty
+  ensure
+    Object.send(:remove_const, :NewHybridHost) if Object.const_defined?(:NewHybridHost, false)
+  end
+
+  describe 'nested hybrid ownership moves out of a surviving model file' do
+    [false, true].each do |new_first|
+      it "moves a nested job in either changed-path order, new first=#{new_first}" do
+        old = write_file('app/models/hybrid_container.rb', <<~RUBY)
+          class HybridContainer
+            class NotifyJob < ApplicationJob
+              def perform; :notification; end
+            end
+          end
+        RUBY
+        load app_path(old)
+        index = full_extraction
+        HybridContainer.send(:remove_const, :NotifyJob)
+        write_file(old, 'class HybridContainer; end')
+        fresh = write_file('app/jobs/hybrid_container/notify_job.rb', <<~RUBY)
+          class HybridContainer::NotifyJob < ApplicationJob
+            def perform; :notification; end
+          end
+        RUBY
+        load app_path(fresh)
+
+        touched = Woods::Extractor.new(output_dir: index).extract_changed(new_first ? [fresh, old] : [old, fresh])
+
+        expect(touched).to include('HybridContainer::NotifyJob')
+        expect(differences(index, full_extraction)).to be_empty
+      ensure
+        Object.send(:remove_const, :HybridContainer) if Object.const_defined?(:HybridContainer, false)
+      end
     end
   end
 

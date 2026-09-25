@@ -62,6 +62,17 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
     expect { register(unit(path)) }.not_to raise_error
   end
 
+  it 'does not mark identical published bytes as touched, written or dependents-dirty' do
+    path = source('same.rb')
+    register(unit(path))
+    extractor.instance_variable_set(:@dependents_dirty, Set.new)
+    extractor.instance_variable_set(:@incremental_written, {})
+
+    expect(register(unit(path))).to be_empty
+    expect(extractor.instance_variable_get(:@dependents_dirty)).to be_empty
+    expect(extractor.instance_variable_get(:@incremental_written)).to be_empty
+  end
+
   it 'keeps different unit types independent' do
     register(unit(source('first.rb')))
     expect { register(unit(source('second.rb'), :service)) }.not_to raise_error
@@ -153,14 +164,16 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
       end.to raise_error(Woods::IdentityCollisionError)
     end
 
-    def install_runtime_owner
+    def install_runtime_owner(type = :model)
       stub_const('SharedIdentity', Class.new)
       Object.send(:remove_const, :SharedIdentity)
       File.write(new_path, 'class SharedIdentity; end')
       load new_path
-      consumer = double('ModelExtractor', discoverable_classes: [SharedIdentity])
-      extractor.instance_variable_set(:@incremental_extractors, { models: consumer })
-      extractor.dependency_graph.register(unit(old_path, :model))
+      consumer = double('Runtime extractor', discoverable_classes: [SharedIdentity],
+                                             extract_all: [unit(new_path, type)])
+      extractor.instance_variable_set(:@incremental_extractors,
+                                      { described_class::TYPE_TO_EXTRACTOR_KEY.fetch(type) => consumer })
+      extractor.dependency_graph.register(unit(old_path, type))
       consumer
     end
 
@@ -169,6 +182,26 @@ RSpec.describe Woods::Extractor, 'identity collisions' do
       expect { register(unit(new_path, :model)) }.not_to raise_error
       expect(extractor.dependency_graph.node('SharedIdentity', type: :model)[:file_path]).to eq(new_path)
       expect(File).to exist(old_path)
+    end
+
+    %i[job serializer].each do |type|
+      it "accepts a canonical #{type} move out of a surviving source" do
+        install_runtime_owner(type)
+        expect { register(unit(new_path, type)) }.not_to raise_error
+        expect(extractor.dependency_graph.node('SharedIdentity', type: type)[:file_path]).to eq(new_path)
+      end
+
+      it "refuses a source-only duplicate of a canonical #{type} owner" do
+        consumer = install_runtime_owner(type)
+        allow(consumer).to receive(:extract_all).and_return([unit(old_path, type), unit(new_path, type)])
+        expect { register(unit(new_path, type)) }.to raise_error(Woods::IdentityCollisionError)
+      end
+
+      it "refuses a #{type} move when runtime discovery is incomplete" do
+        install_runtime_owner(type)
+        extractor.instance_variable_set(:@eager_load_complete, false)
+        expect { register(unit(new_path, type)) }.to raise_error(Woods::IdentityCollisionError)
+      end
     end
 
     it 'refuses runtime moves after incomplete eager loading' do

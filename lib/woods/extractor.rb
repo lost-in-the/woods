@@ -579,12 +579,7 @@ module Woods
       affected_ids = profile_phase('blast radius') do
         @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
       end
-      @refresh_hybrid_discovery = change_set.relative_paths.any? { |path| path.end_with?('.rb') } ||
-                                  affected_ids.any? do |id|
-                                    @dependency_graph.node_types(id).any? do |type|
-                                      CLASS_DISCOVERED_FALLBACK.key?(type)
-                                    end
-                                  end
+      @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids)
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
@@ -599,9 +594,7 @@ module Woods
       end
 
       profile_phase('reconciliation') do
-        if @refresh_hybrid_discovery
-          HYBRID_DISCOVERY_EXTRACTORS.each { |key| touched.merge(replace_type_wholesale(key, affected_types)) }
-        end
+        @hybrid_discovery_keys.each { |key| touched.merge(replace_type_wholesale(key, affected_types)) }
         touched.merge(reconcile_class_based_types(affected_types))
         touched.merge(reconcile_model_mixins(affected_types))
         touched.merge(rerun_whole_app_extractors(change_set, affected_types))
@@ -840,7 +833,7 @@ module Woods
       @flow_scope = nil
       @previous_flow_index_entries = nil
       @incremental_extractors = nil
-      @refresh_hybrid_discovery = false
+      @hybrid_discovery_keys = Set.new
       @active_record_names = nil
       @package_resolver = nil
       @persisted_index_stats = nil
@@ -1509,6 +1502,7 @@ module Woods
         'only one unit could ever be indexed, so extraction aborted. ' \
         'Wrapper-nested class naming requires Zeitwerk mode with Zeitwerk >= 2.6.9; on older loaders or ' \
         'classic-mode hosts, check that support before changing valid namespace wrappers. ' \
+        'After moving a class, run woods:extract in a fresh Rails process if incremental ownership cannot be proven. ' \
         'For a genuine duplicate, merge the declarations into one file or split them into distinct constants'
     end
 
@@ -2073,10 +2067,9 @@ module Woods
     # time, so the fsync is the cost being avoided here; the comparison read is
     # cheaper than the write it replaces.
     #
-    # Only the *write* is skipped. Graph registration, the dependents marking
-    # and `@incremental_written` all still happen for every unit, because those
-    # are what equivalence and the git-enrichment pass depend on — skipping any
-    # of them would make an unchanged unit differ from a full extraction.
+    # This helper skips only the write. Incremental registration separately
+    # checks complete serialized equality before marking dependents or Git work;
+    # differences in those derived fields still require the normal finalization.
     #
     # Compared as bytes: `AtomicFile.write` is binmode, and the encoding a read
     # comes back tagged with depends on the process's default external encoding
@@ -2886,6 +2879,37 @@ module Woods
         end
     end
 
+    # Runtime inventories catch newly nested classes outside the conventional
+    # directories. Their definition locations decide whether a changed Ruby
+    # file needs a full hybrid pass; unrelated edits do not extract the family.
+    # The old graph covers removals and dependency changes after Rails reload.
+    def hybrid_discovery_keys(change_set, affected_ids)
+      keys = affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
+                         .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
+                         .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
+      paths = change_set.absolute_paths.select { |path| path.end_with?('.rb') }.to_set
+      return keys if paths.empty?
+
+      dispatcher = PathDispatcher.new
+      paths.each do |path|
+        keys.merge(dispatcher.file_rules_for(change_set.relativize(path)).map(&:extractor_key)
+                             .intersection(HYBRID_DISCOVERY_EXTRACTORS))
+      end
+      (HYBRID_DISCOVERY_EXTRACTORS - keys.to_a).each do |key|
+        consumer = extractor_for(key)
+        next unless consumer
+
+        classes = checked_extraction(key, consumer) { consumer.discoverable_classes }
+        next unless Array(classes).any? do |klass|
+          location = Object.const_source_location(klass.name)&.first
+          location && paths.include?(File.expand_path(location, Rails.root))
+        end
+
+        keys.add(key)
+      end
+      keys
+    end
+
     # Re-extract every file-based unit defined by the changed paths that still
     # exist on disk, and prune the ones those paths no longer define.
     #
@@ -2937,11 +2961,7 @@ module Woods
       change_set.existing_paths.filter_map do |absolute_path|
         rules = dispatcher.file_rules_for(change_set.relativize(absolute_path))
         rules = rules.reject { |rule| rule.extractor_key == :libs }
-        if @refresh_hybrid_discovery
-          rules = rules.reject do |rule|
-            HYBRID_DISCOVERY_EXTRACTORS.include?(rule.extractor_key)
-          end
-        end
+        rules = rules.reject { |rule| @hybrid_discovery_keys&.include?(rule.extractor_key) }
         next if rules.empty?
 
         entries = rules.map do |rule|
@@ -3589,12 +3609,18 @@ module Woods
 
       verify_identity_claims!(units)
       withdraw_previous_graphql_kinds(units, affected_types) if extractor_key == :graphql
-      affected_types&.add(extractor_key)
       type_dir = payload_dir.join(extractor_key.to_s)
       FileUtils.mkdir_p(type_dir)
 
       units.each_with_object(Set.new) do |unit, written|
         annotate_package(unit)
+        unless source_consumer_failed?(extractor_key)
+          SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
+        end
+        (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
+        next if unchanged_registered_unit?(type_dir, unit)
+
+        affected_types&.add(extractor_key)
         mark_dependents_dirty(unit.identifier)
         # Marked BEFORE registration: DependencyGraph#register inserts the
         # node before it iterates the unit's dependencies, so a malformed
@@ -3612,12 +3638,19 @@ module Woods
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
-        unless source_consumer_failed?(extractor_key)
-          SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
-        end
-        (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
         written.add(unit.identifier)
       end
+    end
+
+    # Only exact serialized equality (apart from the extraction timestamp)
+    # permits skipping graph and enrichment work. Derived metadata or changed
+    # edges keep the ordinary registration path; identity checks already ran.
+    def unchanged_registered_unit?(type_dir, unit)
+      return false unless @dependency_graph.node(unit.identifier, type: unit.type)
+
+      normalized = unit.dup
+      normalized.file_path = normalize_file_path(unit.file_path)
+      identical_on_disk?(type_dir.join(collision_safe_filename(unit.identifier)), json_serialize(normalized.to_h))
     end
 
     # GraphQL kinds share a payload filename. Validate retained source ownership
@@ -3913,7 +3946,7 @@ module Woods
 
       extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
       return nil unless extractor_key
-      return nil if @refresh_hybrid_discovery && HYBRID_DISCOVERY_EXTRACTORS.include?(extractor_key)
+      return nil if @hybrid_discovery_keys&.include?(extractor_key)
 
       extractor = extractor_for(extractor_key)
       if extractor.nil?
@@ -3929,8 +3962,8 @@ module Woods
       units = Array(result).compact
       return nil if units.empty?
 
-      register_and_write(extractor_key, units, affected_types)
-      unit_id
+      written = register_and_write(extractor_key, units, affected_types)
+      unit_id if written.include?(unit_id)
     end
 
     # Dispatch one re-extraction to the right extractor entry point.

@@ -88,26 +88,54 @@ module Woods
       consumer = authoritative_runtime_consumer(unit.type)
       return false unless consumer && Object.respond_to?(:const_source_location)
 
-      owners = consumer.discoverable_classes.select { |klass| klass.name == unit.identifier }.uniq
-      return false if source_consumer_failed?(self.class::TYPE_TO_EXTRACTOR_KEY[unit.type], consumer)
-      return false unless owners.size == 1 && owners.first.equal?(constant_for_identifier(unit.identifier))
+      return false unless unique_runtime_owner?(unit, consumer)
+      return false unless identity_source(Array(Object.const_source_location(unit.identifier)).first) == current
 
-      identity_source(Array(Object.const_source_location(unit.identifier)).first) == current
+      complete_hybrid_owner?(unit, consumer, current)
     end
 
-    # GraphQL combines runtime and file discovery, so its runtime inventory
-    # cannot establish sole ownership. Only authoritative class inventories
-    # can prove a move, and the live constant must canonically name this file.
+    def unique_runtime_owner?(unit, consumer)
+      owners = consumer.discoverable_classes.select { |klass| klass.name == unit.identifier }.uniq
+      return false if source_consumer_failed?(self.class::TYPE_TO_EXTRACTOR_KEY[unit.type], consumer)
+
+      owners.size == 1 && owners.first.equal?(constant_for_identifier(unit.identifier))
+    end
+
+    def complete_hybrid_owner?(unit, consumer, current)
+      return true unless self.class::CLASS_DISCOVERED_FALLBACK.key?(unit.type)
+
+      # Runtime descendants alone cannot rule out a source-only duplicate in a
+      # conventional directory. Require the full hybrid inventory before a
+      # retained owner can move; the usual fresh-claim checks remain in force.
+      key = self.class::TYPE_TO_EXTRACTOR_KEY.fetch(unit.type)
+      units = checked_extraction(key, consumer) { consumer.extract_all }
+      return false if source_consumer_failed?(key, consumer)
+
+      claims = Array(units).select do |candidate|
+        candidate.type == unit.type && candidate.identifier == unit.identifier
+      end
+      claims.any? && claims.all? { |candidate| identity_source(candidate.file_path) == current }
+    end
+
+    # GraphQL's runtime inventory cannot establish sole ownership. Job and
+    # serializer inventories identify current runtime classes; fresh file-based
+    # claims still pass the complete batch collision check before any write.
     def authoritative_runtime_consumer(type)
       key = self.class::TYPE_TO_EXTRACTOR_KEY[type]
-      spec = self.class::CLASS_BASED_DISCOVERY[key]
-      return unless spec && spec[:reconcile_removals] != false
+      return unless authoritative_runtime_type?(type, key)
 
       consumer = extractor_for(key)
       return unless consumer.respond_to?(:discoverable_classes)
       return if @failed_consumers&.include?(key) || source_consumer_failed?(key, consumer)
 
       consumer
+    end
+
+    def authoritative_runtime_type?(type, key)
+      return true if self.class::CLASS_DISCOVERED_FALLBACK.key?(type)
+
+      spec = self.class::CLASS_BASED_DISCOVERY[key]
+      spec && spec[:reconcile_removals] != false
     end
 
     def confirmed_source_move?(prior, current)
