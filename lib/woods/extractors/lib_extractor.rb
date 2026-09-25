@@ -96,7 +96,8 @@ module Woods
       end
 
       def build_file(file_path)
-        source = File.read(file_path)
+        source = File.read(file_path, encoding: 'UTF-8')
+        raise Woods::ExtractionError, 'Source is not valid UTF-8' unless source.valid_encoding?
 
         class_name = infer_class_name(file_path, source)
         return nil unless class_name
