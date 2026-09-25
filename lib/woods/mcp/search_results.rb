@@ -65,7 +65,13 @@ module Woods
           }
         }
         result[:partial] = true unless complete
-        result[:hint] = NARROWING_HINT unless complete
+        unless complete
+          result[:hint] = if @reason == 'unreadable_or_corrupt_source'
+                            'Run woods:validate and repair or republish unreadable unit artifacts.'
+                          else
+                            NARROWING_HINT
+                          end
+        end
         result[:note] = note unless note.nil? || note.empty?
         result
       end

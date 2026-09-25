@@ -1,0 +1,1 @@
+- Avoid reading every GraphQL and framework unit during unscoped identifier searches; use published summary types and resolve legacy types only when needed. Searches retain readable matches and report partial coverage when an individual candidate unit is unreadable or corrupt.

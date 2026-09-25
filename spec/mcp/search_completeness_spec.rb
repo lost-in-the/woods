@@ -27,6 +27,38 @@ RSpec.describe 'Index search completeness' do
     File.write(File.join(directory, '_index.json'), JSON.generate(units.map { |unit| unit.slice(:identifier, :type) }))
   end
 
+  it 'does not read units for unscoped or typed identifier searches with typed summaries' do
+    publish_units('rails_source', [%w[FrameworkOne needle], %w[FrameworkTwo hay]])
+    expect(reader).not_to receive(:load_search_unit)
+
+    [nil, ['rails_source']].each do |types|
+      result = reader.search('Framework', types: types)
+      expect(result[:results].size).to eq(2)
+      expect(result[:completeness]).to include(status: 'complete', total_matches: 2)
+    end
+  end
+
+  it 'does not inspect an unrelated corrupt legacy family unit for identifier search' do
+    publish_units('model', [%w[Needle hay]])
+    publish_units('rails_source', [%w[Framework hay]])
+    File.write(File.join(index_dir, 'rails_source', '_index.json'), JSON.generate([{ identifier: 'Framework' }]))
+    File.write(File.join(index_dir, 'rails_source', collision_safe_filename('Framework')), '{broken')
+
+    result = reader.search('Needle')
+    expect(result[:results].map { |row| row[:identifier] }).to eq(['Needle'])
+    expect(result[:completeness]).to include(status: 'complete', total_matches: 1)
+  end
+
+  it 'retains other deep matches and marks unreadable unit coverage partial' do
+    publish_units('rails_source', [%w[Broken needle], %w[Readable needle]])
+    File.write(File.join(index_dir, 'rails_source', collision_safe_filename('Broken')), '{broken')
+
+    result = reader.search('needle', fields: ['source_code'])
+    expect(result[:results].map { |row| row[:identifier] }).to eq(['Readable'])
+    expect(result[:completeness]).to include(status: 'partial', reason: 'unreadable_or_corrupt_source',
+                                             has_more: nil, total_matches: nil, matched_lower_bound: 1)
+  end
+
   def with_scan_budget(budget)
     original = ENV.fetch('WOODS_SEARCH_MAX_SCAN', nil)
     ENV['WOODS_SEARCH_MAX_SCAN'] = budget.to_s
@@ -148,18 +180,22 @@ RSpec.describe 'Index search completeness' do
     expect(result.fetch(:completeness)).to include(status: 'complete', total_matches: 1)
   end
 
-  it 'raises a detected corrupt source instead of claiming a complete search' do
+  it 'reports a detected corrupt source instead of claiming a complete search' do
     publish_units('model', [%w[First needle]])
     File.write(File.join(index_dir, 'models', collision_safe_filename('First')), '{broken')
 
-    expect { reader.search('needle', fields: ['source_code']) }.to raise_error(JSON::ParserError)
+    expect(reader.search('needle', fields: ['source_code'])[:completeness]).to include(
+      status: 'partial', reason: 'unreadable_or_corrupt_source', total_matches: nil
+    )
   end
 
-  it 'raises a missing source even when the returned page is already full' do
+  it 'reports a missing source even when the returned page is already full' do
     publish_units('model', [%w[First needle], %w[Second needle]])
     File.unlink(File.join(index_dir, 'models', collision_safe_filename('Second')))
 
-    expect { reader.search('needle', fields: ['source_code'], limit: 1) }.to raise_error(Errno::ENOENT)
+    expect(reader.search('needle', fields: ['source_code'], limit: 1)[:completeness]).to include(
+      status: 'partial', reason: 'unreadable_or_corrupt_source', total_matches: nil, matched_lower_bound: 1
+    )
   end
 
   it 'searches real gem-source units sharing the framework directory with their actual typed identities' do
@@ -168,6 +204,7 @@ RSpec.describe 'Index search completeness' do
     unit.source_code = 'module Widget; needle; end'
     publish_units('rails_source', [[unit.identifier, unit.source_code]])
     File.write(File.join(index_dir, 'rails_source', collision_safe_filename(unit.identifier)), JSON.generate(unit.to_h))
+    File.write(File.join(index_dir, 'rails_source', '_index.json'), JSON.generate([{ identifier: unit.identifier }]))
 
     result = reader.search('needle', types: ['rails_source'], fields: ['source_code'])
 
@@ -182,9 +219,9 @@ RSpec.describe 'Index search completeness' do
       path = File.join(index_dir, 'models', collision_safe_filename('Shared'))
       File.write(path, JSON.generate(identifier: 'Shared', type: wrong_type, source_code: 'needle'))
 
-      expect do
-        reader.search('needle', fields: ['source_code'])
-      end.to raise_error(IOError, /typed unit identity mismatch/)
+      expect(reader.search('needle', fields: ['source_code'])[:completeness]).to include(
+        status: 'partial', reason: 'unreadable_or_corrupt_source', total_matches: nil, matched_lower_bound: 0
+      )
     end
   end
 
