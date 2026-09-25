@@ -7,18 +7,8 @@ require 'woods'
 require 'woods/console/rack_middleware'
 require 'woods/console/safe_context'
 require 'woods/console/model_validator'
+require 'woods/console/server'
 require 'woods/observability/structured_logger'
-
-# Stub Server so we don't pull in the full MCP transport stack.
-unless defined?(Woods::Console::Server)
-  module Woods
-    module Console
-      module Server
-        def self.build_embedded(*); end
-      end
-    end
-  end
-end
 
 # Regression: ActiveRecord::Base.connection is deprecated in Rails 7.2 and
 # removed in 8.0. The middleware must hand SafeContext the connection pool
@@ -285,7 +275,8 @@ RSpec.describe Woods::Console::RackMiddleware do
     it 'constructs stateless transport by default' do
       expect(MCP::Server::Transports::StreamableHTTPTransport).to receive(:new)
         .with(server_double, stateless: true,
-                             allowed_origins: Woods.configuration.console_mcp_allowed_origins,
+                             allowed_origins: %w[http://localhost http://localhost:80 http://127.0.0.1
+                                                 http://127.0.0.1:80 http://[::1] http://[::1]:80],
                              allowed_hosts: %w[localhost 127.0.0.1 ::1])
         .and_return(transport)
 
@@ -300,7 +291,8 @@ RSpec.describe Woods::Console::RackMiddleware do
       allow(sessionful).to receive(:build_embedded_server).and_return(server_double)
       expect(MCP::Server::Transports::StreamableHTTPTransport).to receive(:new)
         .with(server_double, stateless: false,
-                             allowed_origins: Woods.configuration.console_mcp_allowed_origins,
+                             allowed_origins: %w[http://localhost http://localhost:80 http://127.0.0.1
+                                                 http://127.0.0.1:80 http://[::1] http://[::1]:80],
                              allowed_hosts: %w[localhost 127.0.0.1 ::1])
         .and_return(transport)
 

@@ -6,6 +6,7 @@ require 'json'
 require 'tmpdir'
 require 'fileutils'
 require 'logger'
+require 'rack/mock'
 require 'rails'
 require 'woods'
 require 'woods/mcp/bootstrapper'
@@ -120,10 +121,57 @@ module MinimumDependencyProbe # rubocop:disable Metrics/ModuleLength
            'Rails middleware refuses forbidden origin even with valid token')
   end
 
+  # Exercise the actual enabled middleware and SDK transport at their floors.
+  # The server has no database tools: Active Record is not a direct gem dependency.
+  def enabled_http_contract # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    token = 'minimum-http-token-' * 4
+    Woods.configure do |config|
+      config.console_mcp_enabled = true
+      config.console_mcp_http_enabled = true
+      config.console_mcp_token = token
+      config.console_mcp_allowed_origins = ['https://client.example:443']
+    end
+    middleware_class = Class.new(Woods::Console::RackMiddleware) do
+      private
+
+      def build_embedded_server
+        ::MCP::Server.new(name: 'minimum-enabled-console', version: '1')
+      end
+    end
+    middleware = middleware_class.new(->(_env) { [404, {}, []] }, path: '/mcp/console')
+    body = JSON.generate(jsonrpc: '2.0', id: 1, method: 'initialize', params: {
+                           protocolVersion: '2025-06-18', capabilities: {},
+                           clientInfo: { name: 'minimum-http', version: '1' }
+                         })
+    request = lambda do |origin, authorization|
+      env = Rack::MockRequest.env_for('/mcp/console', method: 'POST', input: body,
+                                                      'CONTENT_TYPE' => 'application/json',
+                                                      'HTTP_ACCEPT' => 'application/json, text/event-stream',
+                                                      'HTTP_HOST' => 'client.example', 'HTTP_ORIGIN' => origin)
+      env['HTTP_AUTHORIZATION'] = authorization if authorization
+      middleware.call(env)
+    end
+    assert(request.call('https://client.example', nil).first == 401,
+           'enabled Console middleware enforces bearer authentication at SDK floor')
+    assert(request.call('https://unlisted.example', "Bearer #{token}").first == 403,
+           'enabled Console middleware enforces configured origins at SDK floor')
+    response = request.call('https://client.example', "Bearer #{token}")
+    payload = JSON.parse(response.last.each.to_a.join)
+    assert(response.first == 200 && payload.dig('result', 'serverInfo', 'name') == 'minimum-enabled-console',
+           'enabled Console passes OriginPolicy options to SDK and dispatches initialize at floor')
+  ensure
+    transport = middleware&.instance_variable_get(:@transport)
+    transport.close if transport.respond_to?(:close)
+    Woods.configuration = nil
+  end
+
   def run
     installed_versions
     Dir.mktmpdir('woods-floor-index-') { |root| index_contract(root) }
-    Dir.mktmpdir('woods-floor-rails-') { |root| rails_contract(root) }
+    Dir.mktmpdir('woods-floor-rails-') do |root|
+      rails_contract(root)
+      enabled_http_contract
+    end
     expected = "#{ENV.fetch('WOODS_MINIMUM_INSTALLED')}/lib/woods"
     loaded = $LOADED_FEATURES.grep(%r{/lib/woods(?:/|\.rb\z)})
     assert(!loaded.empty? && loaded.all? do |path|

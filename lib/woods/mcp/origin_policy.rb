@@ -6,7 +6,7 @@ require_relative '../util/host_guard'
 module Woods
   module MCP
     # Immutable HTTP policy shared by Woods preflight and the MCP transport.
-    # Explicit cross-origin entries are exact. A portless entry also permits
+    # Explicit cross-origin entries normalize HTTP(S) default ports. A portless entry also permits
     # same-authority requests on another port, which the SDK accepts natively.
     # No request header is rewritten and SDK rebinding protection stays enabled.
     class OriginPolicy
@@ -27,7 +27,7 @@ module Woods
           # them. URI#host alone retains brackets and loses explicit ports.
           (host.end_with?(']') ? host[1...-1] : host).freeze
         end.uniq.freeze
-        @transport_options = { allowed_origins: @explicit_origins, allowed_hosts: @allowed_hosts }.freeze
+        @transport_options = { allowed_origins: transport_origins, allowed_hosts: @allowed_hosts }.freeze
         freeze
       end
 
@@ -57,7 +57,7 @@ module Woods
         return true if origin.nil?
         return false unless parsed_origin(origin)
 
-        normalized = origin.downcase
+        normalized = normalized_origin(origin)
         return true if @explicit_origins.include?(normalized)
         return false unless @allowed.include?(normalized) || @allowed.include?(normalized.sub(/:\d+\z/, ''))
         return false unless host.is_a?(String)
@@ -73,10 +73,26 @@ module Woods
       def configured_origin(entry)
         normalized = entry.to_s.downcase.sub(%r{/\z}, '')
         unless parsed_origin(normalized)
-          raise ArgumentError, 'Invalid MCP allowed origin: expected http(s)://host[:port] without a path'
+          raise ArgumentError, "Invalid MCP allowed origin #{entry.to_s.inspect[0, 160]}: " \
+                               'expected http(s)://host[:port] without a path'
         end
 
-        normalized.freeze
+        normalized_origin(normalized).freeze
+      end
+
+      def normalized_origin(origin)
+        value = origin.downcase
+        value.delete_suffix(value.start_with?('https://') ? ':443' : ':80')
+      end
+
+      # The SDK compares configured origins literally. Include equivalent
+      # default-port spellings without rewriting the incoming request headers.
+      def transport_origins
+        @explicit_origins.flat_map do |origin|
+          parsed = parsed_origin(origin)
+          default = parsed.scheme == 'https' ? 443 : 80
+          parsed.port == default ? [origin, "#{origin}:#{default}"] : [origin]
+        end.uniq.map(&:freeze).freeze
       end
 
       def authority(origin)
@@ -84,8 +100,8 @@ module Woods
       end
 
       # Parse only serialized HTTP origins, never URLs with paths, userinfo,
-      # query strings, fragments or whitespace. Keep explicit default ports
-      # in the original text: URI#to_s removes them but SDK allowlists do not.
+      # query strings, fragments or whitespace. The comparison layer handles
+      # default-port equivalence separately from parsing.
       def parsed_origin(origin)
         return unless origin.is_a?(String) && !origin.match?(/[[:space:][:cntrl:]]/)
 

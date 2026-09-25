@@ -146,6 +146,7 @@ module Woods
         @mutex = Mutex.new
         @transport = nil
         @guarded_request = guarded_request
+        @origin_guard.policy if enabled?
       end
 
       # Every entry point owns its guards; an earlier manual mount cannot rely

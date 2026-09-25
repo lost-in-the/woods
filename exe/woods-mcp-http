@@ -46,6 +46,12 @@ require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
 begin
+  allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
+  begin
+    origin_policy = Woods::MCP::OriginPolicy.new(allowed_origins: allowed_origins)
+  rescue ArgumentError => e
+    raise Woods::ConfigurationError, e.message
+  end
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
   retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
   snapshot_store = Woods::MCP::Bootstrapper.build_snapshot_store(index_dir)
@@ -96,8 +102,6 @@ server = Woods::MCP::Server.build(
 # hatch is transitional — the spec has removed all three. See
 # docs/MCP_HTTP_TRANSPORT.md#statelessness.
 stateless = !%w[0 false no].include?(ENV.fetch('WOODS_MCP_HTTP_STATELESS', '1').strip.downcase)
-allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
-origin_policy = Woods::MCP::OriginPolicy.new(allowed_origins: allowed_origins)
 transport = MCP::Server::Transports::StreamableHTTPTransport.new(
   server,
   stateless: stateless,

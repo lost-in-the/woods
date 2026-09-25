@@ -166,6 +166,7 @@ jobs:
       - name: Console read and response policies
         run: |
           bundle exec rspec spec/integration/console_sqlite_policy_spec.rb
+          bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb
           bundle exec rspec spec/integration/console_sqlite_keyword_functions_spec.rb
           bundle exec rspec spec/integration/console_resolved_relation_policy_spec.rb
           bundle exec rspec spec/integration/console_credential_serialization_spec.rb
@@ -313,6 +314,7 @@ jobs:
           spec/integration/live_backends_spec.rb
           spec/integration/console_sql_dialects_spec.rb
           spec/integration/console_collection_redaction_spec.rb
+          spec/integration/console_mysql_collection_redaction_spec.rb
           spec/integration/solid_cache_compatibility_spec.rb
           spec/cache/redis_cache_store_live_spec.rb
           spec/session_tracer/redis_store_live_spec.rb

@@ -71,7 +71,10 @@ RSpec.describe 'HTTP origin policy with the real MCP transport' do
         [['https://app.example:4443'], 'https://app.example:4443', 'app.example:4443', 200],
         [['https://app.example:4443'], nil, 'app.example:5555', 403],
         [['https://app.example:443'], nil, 'app.example:443', 200],
-        [['https://app.example:443'], nil, 'app.example', 403],
+        [['https://app.example:443'], nil, 'app.example', 200],
+        [['https://app.example:443'], 'https://app.example', 'localhost:9292', 200],
+        [['https://app.example'], 'https://app.example:443', 'localhost:9292', 200],
+        [['http://app.example:80'], 'http://app.example', 'localhost:9292', 200],
         [['https://[2001:db8::1]'], 'https://[2001:db8::1]:4443', '[2001:db8::1]:4443', 200],
         [['https://[2001:db8::1]:4443'], 'https://[2001:db8::1]:4443', 'localhost:9292', 200],
         [['https://APP.example/'], 'https://app.EXAMPLE', 'APP.example', 200],
@@ -129,7 +132,8 @@ RSpec.describe 'HTTP origin policy with the real MCP transport' do
     expect(resolutions.size).to eq(1)
     expect(policies.map(&:object_id).uniq.size).to eq(1)
     expect(policies.first).to be_frozen
-    expect(policies.first.transport_options.fetch(:allowed_origins)).to eq(['https://app.example'])
+    expect(policies.first.transport_options.fetch(:allowed_origins))
+      .to eq(['https://app.example', 'https://app.example:443'])
     expect(policies.first.transport_options.fetch(:allowed_origins)).to be_frozen
   end
 end
