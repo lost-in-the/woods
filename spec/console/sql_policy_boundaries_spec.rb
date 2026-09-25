@@ -81,6 +81,13 @@ RSpec.describe 'Console SQL policy boundaries' do
       .to raise_error(Woods::Console::ValidationError, /protected column/)
   end
 
+  it 'refuses raw SQL for an unknown family while preserving structured status' do
+    allow(connection).to receive(:adapter_name).and_return('OtherAdapter')
+    expect(request('SELECT 1')).to include('ok' => false, 'error_type' => 'validation')
+    result = executor.send_request('tool' => 'status', 'params' => {})
+    expect(result['ok']).to be(true)
+  end
+
   it 'requires structured EAV projections to use a key from the value source' do
     expect do
       executor.send(:validated_select, %w[users.name preferences.value], 'Preference')
@@ -97,8 +104,8 @@ RSpec.describe 'Console SQL policy boundaries' do
     'SELECT users.name, preferences.value FROM preferences STRAIGHT_JOIN users ON users.id = preferences.id',
     'SELECT a.name, b.value FROM preferences a JOIN preferences b ON a.id = b.id',
     'SELECT * FROM preferences JOIN users ON users.id = preferences.id'
-  ].each do |sql|
-    it "refuses ambiguous SQL EAV provenance: #{sql}" do
+  ].each_with_index do |sql, index|
+    it "refuses ambiguous SQL EAV provenance in case #{index + 1}" do
       expect(request(sql)).to include('ok' => false, 'error_type' => 'validation')
       expect(connection).not_to have_received(:select_all)
     end
@@ -114,17 +121,85 @@ RSpec.describe 'Console SQL policy boundaries' do
    'SELECT u$ FROM users AS u$', 'SELECT "ü" FROM users AS "ü"',
    'WITH x AS (SELECT users FROM users) SELECT * FROM x',
    'SELECT array_agg(u.*) FROM users u', 'SELECT u FROM users* u',
-   'SELECT "u" FROM users"u"'].each do |sql|
-    it "refuses composite projections without field provenance: #{sql}" do
+   'SELECT "u" FROM users"u"'].each_with_index do |sql, index|
+    it "refuses a composite projection without field provenance in case #{index + 1}" do
       expect(request(sql)).to include('ok' => false, 'error_type' => 'validation')
       expect(connection).not_to have_received(:select_all)
     end
+  end
+
+  it 'protects relation values with extended unquoted identifier characters' do
+    identifier = "\u{2603}"
+    sql = ['SELECT', "#{identifier}::text", 'FROM users', identifier].join(' ')
+    expect(request(sql)).to include('ok' => false, 'error_type' => 'validation')
+    expect(connection).not_to have_received(:select_all)
   end
 
   it 'keeps scalar qualified projections available' do
     expect(request('SELECT u.id FROM users AS u')['ok']).to be true
     expect(request('SELECT u.* FROM users AS u')['ok']).to be true
     expect(request('SELECT array_agg(u.id) FROM users AS u')['ok']).to be true
+  end
+
+  %w[PostgreSQL SQLite Mysql2].each do |adapter|
+    context "with #{adapter} projection policy" do
+      before { allow(connection).to receive(:adapter_name).and_return(adapter) }
+
+      [
+        ['(SELECT id FROM users LIMIT 1)', 'u::text'],
+        ['(SELECT id FROM users LIMIT 1)', 'CAST(u AS text)'],
+        ['(SELECT (SELECT id FROM users LIMIT 1))', 'CAST(u AS text)']
+      ].each_with_index do |items, index|
+        it "refuses nested composite values in case #{index + 1}" do
+          sql = ['SELECT', items.join(', '), 'FROM users u'].join(' ')
+          result = request(sql)
+          expect(result).to include('ok' => false, 'error_type' => 'validation')
+          expect(result['error']).to include('whole-row')
+          expect(connection).not_to have_received(:select_all)
+        end
+      end
+
+      it 'refuses a whole-row value in a nested predicate' do
+        predicate = ['(SELECT CAST(u AS text))', "LIKE '%fixture%'"].join(' ')
+        result = request("SELECT u.id FROM users u WHERE #{predicate}")
+        expect(result).to include('ok' => false, 'error_type' => 'validation')
+        expect(result['error']).to include('whole-row')
+        expect(connection).not_to have_received(:select_all)
+      end
+
+      %w[ORDER GROUP].each do |clause|
+        it "refuses protected positional #{clause.downcase} inputs" do
+          result = request("SELECT id, secret FROM users #{clause} BY 2")
+          expect(result).to include('ok' => false, 'error_type' => 'validation')
+          expect(connection).not_to have_received(:select_all)
+        end
+
+        it "keeps ordinary positional #{clause.downcase} inputs available" do
+          expect(request("SELECT id, secret FROM users #{clause} BY 1")['ok']).to be(true)
+        end
+      end
+
+      it 'refuses protected EAV positional inputs' do
+        expect(request('SELECT name, value FROM preferences ORDER BY (2)'))
+          .to include('ok' => false, 'error_type' => 'validation')
+      end
+
+      it 'keeps function clause keywords from hiding value expressions' do
+        expression = ["TRIM(BOTH '' FROM", 'CAST(u AS text))'].join(' ')
+        result = request("SELECT #{expression} FROM users u")
+        expect(result).to include('ok' => false, 'error_type' => 'validation')
+        expect(result['error']).to include('whole-row') unless adapter == 'SQLite'
+      end
+
+      it 'keeps ordinary nested projections and joins available' do
+        sql = 'SELECT (SELECT count(*) FROM users), u.id FROM users u JOIN users v ON v.id = u.id'
+        expect(request(sql)['ok']).to be(true)
+      end
+
+      it 'keeps non-EAV wildcard joins available with an EAV policy configured' do
+        expect(request('SELECT u.* FROM users u JOIN users v ON v.id = u.id')['ok']).to be(true)
+      end
+    end
   end
 
   it 'refuses unrecognized PostgreSQL result types before returning their values' do

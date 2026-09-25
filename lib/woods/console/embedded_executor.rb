@@ -10,6 +10,7 @@ require_relative 'eval_guard'
 require_relative 'input_contract'
 require_relative 'model_validator'
 require_relative 'safe_context'
+require_relative 'redactor'
 require_relative 'scope_predicate_parser'
 require_relative 'sql_validator'
 require_relative 'sql_noise_stripper'
@@ -92,7 +93,7 @@ module Woods
 
         normalize_params!(tool, params)
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        result = @safe_context.execute { with_mysql_quote_modes { dispatch(tool, params) } }
+        result = @safe_context.execute { with_mysql_quote_modes { dispatch_with_key_redaction(tool, params) } }
         elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
 
         { 'ok' => true, 'result' => result, 'timing_ms' => elapsed }
@@ -111,6 +112,55 @@ module Woods
       end
 
       private
+
+      def dispatch_with_key_redaction(tool, params)
+        output = dispatch(tool, params)
+        return output if @safe_context.redacted_key_values.empty?
+
+        Redactor.apply(output, typed_redaction_context(tool, params))
+      end
+
+      def typed_redaction_context(tool, params)
+        types = Hash.new { |hash, key| hash[key] = [] }
+        typed_redaction_models(tool, params).each do |name, model|
+          @safe_context.redacted_key_values.each do |pattern|
+            key = pattern['key_column']
+            types[key] << model.type_for_attribute(key) if @model_validator.columns_for(name).include?(key)
+          end
+        end
+        @safe_context.with_key_value_types(types, raw: %w[sql query].include?(tool))
+      end
+
+      def typed_redaction_models(tool, params)
+        tables = if tool == 'sql'
+                   SqlTableScanner.identifiers_in(params['sql'], dialect: sql_dialect, mysql_modes: mysql_quote_modes)
+                 else
+                   selected_source_tables(params)
+                 end
+        @model_validator.model_names.filter_map do |name|
+          model = resolve_model(name)
+          next unless model.respond_to?(:type_for_attribute)
+          next unless typed_model_source?(model, name, params, tables)
+
+          [name, model]
+        rescue NameError
+          # Injectable registries can describe models without loading Rails.
+          next
+        end
+      end
+
+      def typed_model_source?(model, name, params, tables)
+        return true if name == params['model']
+        return false unless model.respond_to?(:table_name)
+
+        tables.any? { |table| table.split('.').last == model.table_name.split('.').last }
+      end
+
+      def selected_source_tables(params)
+        Array(params['select'] || params['columns']).filter_map do |column|
+          column.split('.')[0...-1].join('.') if column.include?('.')
+        end
+      end
 
       def sanitize_execution_error(error)
         klass = error.class.name
@@ -530,7 +580,7 @@ module Woods
         raise ValidationError, 'columns must contain at least one item' if columns && columns.empty?
 
         @model_validator.validate_columns!(params['model'], columns) if columns
-        refuse_orphan_eav_value_selection!(Array(columns)) if columns
+        refuse_orphan_eav_value_selection!(Array(columns), params['model']) if columns
         model = resolve_model(params['model'])
         limit = params.fetch('limit', 100)
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -584,13 +634,32 @@ module Woods
         # association's own model before any database I/O runs (not just
         # before the association is read): `model.find` below is itself a
         # query, and a request with a bad scope should never reach it.
-        validate_scope_columns!(requested_scope, reflection.klass.name) if requested_scope
+        validate_association_scope!(requested_scope, reflection)
 
         record = checked_relation(model).find(params['id'])
-        scope = record.association(association_name).scope
+        association = record.association(association_name)
+        return { 'count' => 0 } if empty_polymorphic_association?(association, reflection)
+
+        scope = association.scope
+        return { 'count' => 0 } unless scope
+
         scope = apply_scope(scope, requested_scope, model_name: reflection.klass.name) if requested_scope
         gate_association_sql!(scope)
         { 'count' => association_count(scope, reflection) }
+      end
+
+      def validate_association_scope!(scope, reflection)
+        return unless scope
+
+        if reflection.respond_to?(:polymorphic?) && reflection.polymorphic?
+          raise ValidationError, 'Rejected: scoped polymorphic association counts require a concrete target model.'
+        end
+
+        validate_scope_columns!(scope, reflection.klass.name)
+      end
+
+      def empty_polymorphic_association?(association, reflection)
+        reflection.respond_to?(:polymorphic?) && reflection.polymorphic? && association.klass.nil?
       end
 
       def association_count(scope, reflection)
@@ -788,6 +857,7 @@ module Woods
         sql = params['sql']
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
+        require_sql_dialect!
         validate_sql_policy!(sql)
 
         limit = params['limit']
@@ -809,6 +879,13 @@ module Woods
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
       rescue SqlValidationError => e
         raise ValidationError, e.message
+      end
+
+      def require_sql_dialect!
+        return if sql_dialect
+
+        raise ValidationError, 'Rejected: console_sql requires a recognized database adapter family; ' \
+                               'use a structured Console tool.'
       end
 
       # A row cap changes the statement. Check both the caller's complete
@@ -857,7 +934,7 @@ module Woods
       # and PostgreSQL quote/comment grammars differ (`\'` escapes, `#`
       # comments); validating with the matching dialect accepts dialect-valid
       # literals and still rejects every known bypass form. Unknown adapters
-      # return nil and get the conservative union of supported dialects.
+      # remain available to structured tools but refuse raw console_sql requests.
       #
       # @return [Symbol, nil]
       def sql_dialect
@@ -994,7 +1071,7 @@ module Woods
         expressions = Array(select).map do |expr|
           validate_select_expression!(expr.strip, model_name)
         end
-        refuse_orphan_eav_value_selection!(expressions)
+        refuse_orphan_eav_value_selection!(expressions, model_name)
         expressions
       end
 
@@ -1009,11 +1086,12 @@ module Woods
       #
       # @param expressions [Array<String>] validated select expressions
       # @raise [ValidationError] when a value column is selected without its key
-      def refuse_orphan_eav_value_selection!(expressions)
+      def refuse_orphan_eav_value_selection!(expressions, model_name = nil)
         selected = directly_selected_columns(expressions)
 
         @safe_context.redacted_key_values.each do |pattern|
           values = selected.select { |column| base_column_name(column).casecmp?(pattern['value_column']) }
+          values.select! { |column| eav_source_has_key?(column, pattern, model_name) }
           next if values.empty?
 
           keys = selected.select { |column| base_column_name(column).casecmp?(pattern['key_column']) }
@@ -1024,6 +1102,15 @@ module Woods
                 "key column '#{pattern['key_column']}' bypasses redaction; select both columns so the " \
                 'value can be masked. Both columns must have the same unambiguous source.'
         end
+      end
+
+      def eav_source_has_key?(column, pattern, model_name)
+        columns = if column.include?('.')
+                    @model_validator.columns_for_table(column.split('.')[0...-1].join('.'))
+                  elsif model_name
+                    @model_validator.columns_for(model_name)
+                  end
+        columns.nil? || columns.include?(pattern['key_column'])
       end
 
       def paired_eav_sources?(keys, values)
@@ -1585,7 +1672,7 @@ module Woods
         return unless params['columns']
 
         @model_validator.validate_columns!(params['model'], params['columns'])
-        refuse_orphan_eav_value_selection!(params['columns'])
+        refuse_orphan_eav_value_selection!(params['columns'], params['model'])
       end
 
       # Raw SQL preserves redaction identity only for direct, unaliased
@@ -1607,13 +1694,14 @@ module Woods
       def validate_protected_sql_view!(stripped)
         refuse_composite_sql_projection!(stripped)
         refuse_ambiguous_eav_sql!(stripped)
+        refuse_protected_sql_positions!(stripped)
         protected = (@safe_context.redacted_columns + redacted_kv_columns).uniq
         referenced = protected.select { |column| sql_identifier_referenced?(stripped, column) }
         return if referenced.empty?
 
         expressions, tail = protected_sql_projection(stripped)
         selected = expressions.filter_map { |expression| direct_sql_column_name(expression) }
-        unsafe = unsafe_protected_sql_column(referenced, expressions, selected, tail)
+        unsafe = unsafe_protected_sql_column(referenced, expressions, selected, tail, stripped)
         return unless unsafe
 
         raise ValidationError,
@@ -1627,7 +1715,7 @@ module Woods
       # Keep direct single-source SQL reads and qualified structured joins;
       # refuse ambiguous SQL shapes before fetching their values.
       def refuse_ambiguous_eav_sql!(stripped)
-        return if @safe_context.redacted_key_values.empty?
+        return if sql_eav_patterns(stripped).empty?
         return if SqlTableScanner.relation_factors(stripped).size <= 1
         return unless stripped.include?('*') || redacted_eav_value_columns.any? do |column|
           sql_identifier_referenced?(stripped, column)
@@ -1641,32 +1729,142 @@ module Woods
       # Its header carries no identities for the protected fields inside it.
       # Reject source names used as projection values, including nested forms.
       def refuse_composite_sql_projection!(stripped)
-        return unless [nil, :postgres].include?(sql_dialect)
         return if @safe_context.redacted_columns.empty? && redacted_kv_columns.empty?
 
-        expressions = sql_select_expressions(stripped)
         sources = SqlTableScanner.relation_factors(stripped).flat_map { |factor| sql_relation_names(factor) }
-        return unless sources.any? { |source| composite_sql_reference?(expressions, source) }
+        tokens = sql_policy_tokens(stripped)
+        return unless whole_row_value?(tokens, sources)
 
         raise ValidationError,
-              'Rejected: whole-row SQL projections cannot preserve protected field identity; select columns.'
+              'Rejected: whole-row SQL values cannot preserve protected field identity; select columns.'
       end
 
-      def sql_select_expressions(stripped)
-        stripped.scan(/\bSELECT\s+(.*?)\s+FROM\b/im).flatten.flat_map { |list| sql_projection_expressions(list) }
+      # Track each query's clause separately, including correlated expressions
+      # without a FROM clause. Relation declarations and qualified columns are
+      # not values; a source token anywhere else may be a composite row.
+      def whole_row_value?(tokens, sources)
+        clauses = {}
+        query_levels = {}
+        tokens.each_with_index.any? do |token, index|
+          clause = sql_clause_at_token(token, clauses, query_levels)
+          next false unless clause && !%w[FROM JOIN STRAIGHT_JOIN].include?(clause)
+          next false unless sources.any? { |source| sql_unquote(token[:text]).casecmp?(source) }
+
+          !sql_nonvalue_reference?(tokens, index)
+        end
       end
 
-      def composite_sql_reference?(expressions, source)
-        identifier = /(?:"#{Regexp.escape(source.gsub('"', '""'))}"|#{Regexp.escape(source)})/i
-        token = /(?<![\w.$])#{identifier}(?![\w$]|\s*\.)/
-        wildcard = /(?<![\w.$])#{identifier}\s*\.\s*\*/
-        expressions.any? do |expression|
-          expression.match?(token) || (expression.match?(wildcard) && !expression.match?(/\A#{wildcard}\z/))
+      def sql_clause_at_token(token, clauses, query_levels)
+        word, depth = token.values_at(:text, :depth)
+        keyword = word.upcase
+        if word == '('
+          clauses[depth + 1] = 'EXPRESSION'
+          query_levels.delete(depth + 1)
+        end
+        if word == ')'
+          clauses.delete(depth + 1)
+          query_levels.delete(depth + 1)
+        end
+        query_levels[depth] = true if keyword == 'SELECT'
+        boundaries = %w[SELECT FROM JOIN STRAIGHT_JOIN ON WHERE HAVING ORDER GROUP LIMIT OFFSET]
+        clauses[depth] = keyword if query_levels[depth] && boundaries.include?(keyword)
+        clauses[depth]
+      end
+
+      def sql_nonvalue_reference?(tokens, index)
+        previous = index.positive? ? tokens[index - 1][:text].upcase : nil
+        return true if ['.', 'AS'].include?(previous)
+        return true if sql_token_text(tokens, index + 1) == '.' && sql_token_text(tokens, index + 2) != '*'
+
+        direct_sql_wildcard?(tokens, index)
+      end
+
+      def sql_token_text(tokens, index)
+        tokens[index]&.fetch(:text)&.upcase
+      end
+
+      def direct_sql_wildcard?(tokens, index)
+        return false unless sql_token_text(tokens, index + 1) == '.' && sql_token_text(tokens, index + 2) == '*'
+
+        previous = index.positive? ? sql_token_text(tokens, index - 1) : nil
+        following = sql_token_text(tokens, index + 3)
+        %w[SELECT ,].include?(previous) && [nil, ',', 'FROM'].include?(following)
+      end
+
+      # Comments and literal bodies have already been removed. Token offsets
+      # let projection and ordinal checks retain complete nested expressions.
+      def sql_policy_tokens(stripped)
+        depth = 0
+        stripped.to_enum(:scan, /"(?:[^"]|"")*"|`(?:[^`]|``)*`|''|
+                                   [A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_$\u0080-\u{10ffff}]*|[0-9]+|::|[^\s]/ux).map do
+          match = Regexp.last_match
+          word = match[0]
+          depth -= 1 if word == ')'
+          token = { text: word, depth: depth, start: match.begin(0), finish: match.end(0) }
+          depth += 1 if word == '('
+          token
+        end
+      end
+
+      def sql_unquote(identifier)
+        identifier.sub(/\A["`]/, '').sub(/["`]\z/, '').gsub('""', '"').gsub('``', '`')
+      end
+
+      def sql_select_lists(stripped)
+        tokens = sql_policy_tokens(stripped)
+        tokens.each_with_index.filter_map do |token, index|
+          next unless token[:text].casecmp?('SELECT')
+
+          finish = tokens[(index + 1)..].find { |candidate| sql_projection_end?(candidate, token) }
+          finish_at = finish ? finish[:start] : stripped.length
+          { expressions: sql_projection_expressions(stripped[token[:finish]...finish_at]),
+            depth: token[:depth], start: token[:start], finish: finish_at }
+        end
+      end
+
+      def sql_projection_end?(candidate, token)
+        candidate[:depth] < token[:depth] ||
+          (candidate[:depth] == token[:depth] &&
+            %w[FROM WHERE GROUP HAVING ORDER LIMIT UNION INTERSECT EXCEPT].include?(candidate[:text].upcase))
+      end
+
+      def refuse_protected_sql_positions!(stripped)
+        lists = sql_select_lists(stripped)
+        sql_policy_tokens(stripped).each_cons(3) do |clause, by, position|
+          next unless %w[ORDER GROUP].include?(clause[:text].upcase) && by[:text].casecmp?('BY')
+
+          list = sql_projection_before(lists, clause)
+          next unless list
+          next unless sql_projection_expressions(stripped[position[:start]..]).any? do |item|
+            protected_sql_ordinal?(item, list[:expressions])
+          end
+
+          raise ValidationError,
+                'Rejected: positional SQL ordering or grouping cannot reference protected output columns.'
+        end
+      end
+
+      def sql_projection_before(lists, clause)
+        lists.reverse.find do |candidate|
+          candidate[:depth] == clause[:depth] && candidate[:start] < clause[:start]
+        end
+      end
+
+      def protected_sql_ordinal?(item, expressions)
+        ordinal = /\A\s*\(*\s*([0-9]+)\s*\)*(?:\s|\z)/.match(item)
+        return false unless ordinal && ordinal[1].to_i.positive?
+
+        expression = expressions[ordinal[1].to_i - 1]
+        return false unless expression
+        return true if expression.include?('*')
+
+        (@safe_context.redacted_columns + redacted_eav_value_columns).any? do |column|
+          sql_identifier_referenced?(expression, column)
         end
       end
 
       def sql_relation_names(factor)
-        identifier = /(?:[[:alpha:]_][[:alnum:]_$]*|"(?:""|[^"])+")/
+        identifier = /(?:[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_$\u0080-\u{10ffff}]*|"(?:""|[^"])+"|`(?:``|[^`])+`)/u
         source = /\A\s*(?:ONLY\b\s*\(?\s*)?(#{identifier})(?:\s*\.\s*(#{identifier}))?/i
         match = source.match(factor)
         names = match ? [match[2] || match[1]] : []
@@ -1674,20 +1872,20 @@ module Woods
         aliases = /(?:\A|\))\s*(?:AS\s+)?(#{identifier})/i
         names.concat(rest.scan(aliases).flatten)
 
-        names.map { |name| name.delete_prefix('"').delete_suffix('"').gsub('""', '"') }
+        names.map { |name| sql_unquote(name) }
       end
 
-      def unsafe_protected_sql_column(referenced, expressions, selected, tail)
+      def unsafe_protected_sql_column(referenced, expressions, selected, tail, stripped)
         referenced.find do |column|
           unsafe_protected_sql_reference?(column, expressions, selected, tail)
-        end || orphan_eav_sql_value(selected)
+        end || orphan_eav_sql_value(selected, stripped)
       end
 
       def protected_sql_projection(stripped)
-        match = /\ASELECT\s+(.*?)\s+FROM\b/im.match(stripped)
-        return [[], stripped] unless match
+        list = sql_select_lists(stripped).first
+        return [[], stripped] unless list && list[:start].zero?
 
-        [sql_projection_expressions(match[1]), stripped[match.end(1)..]]
+        [list[:expressions], stripped[list[:finish]..]]
       end
 
       def unsafe_protected_sql_reference?(column, expressions, selected, tail)
@@ -1702,15 +1900,31 @@ module Woods
         @safe_context.redacted_columns.include?(column) || redacted_eav_value_columns.include?(column)
       end
 
-      def orphan_eav_sql_value(selected)
-        pattern = @safe_context.redacted_key_values.find do |candidate|
+      def orphan_eav_sql_value(selected, stripped)
+        pattern = sql_eav_patterns(stripped).find do |candidate|
           selected.include?(candidate['value_column']) && !selected.include?(candidate['key_column'])
         end
         pattern&.fetch('value_column')
       end
 
+      def sql_eav_patterns(stripped)
+        tables = SqlTableScanner.identifiers_in(stripped, dialect: sql_dialect, mysql_modes: mysql_quote_modes)
+        @safe_context.redacted_key_values.select do |pattern|
+          tables.any? do |table|
+            columns = @model_validator.columns_for_table(table)
+            columns.nil? || [pattern['key_column'], pattern['value_column']].all? { |column| columns.include?(column) }
+          end
+        end
+      end
+
       def sql_projection_expressions(projection)
-        projection.split(',').map(&:strip)
+        commas = sql_policy_tokens(projection).select { |token| token[:text] == ',' && token[:depth].zero? }
+        start = 0
+        commas.map do |token|
+          expression = projection[start...token[:start]].strip
+          start = token[:finish]
+          expression
+        end + [projection[start..].strip]
       end
 
       def direct_sql_column_name(expression)

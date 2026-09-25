@@ -6,6 +6,12 @@ require 'woods/console/sql_table_scanner'
 require 'woods/console/server'
 
 RSpec.describe Woods::Console::SqlTableScanner do
+  it 'retains complete extended table identifiers' do
+    table = ['blocked', "\u{2603}", '$suffix'].join
+    sql = "SELECT * FROM #{table}"
+    expect(described_class.identifiers_in(sql, dialect: :postgres)).to eq([table])
+  end
+
   describe '.identifiers_in' do
     subject(:identifiers) { described_class.identifiers_in(sql) }
 

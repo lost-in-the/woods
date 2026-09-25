@@ -125,19 +125,26 @@ module Woods
         return [] unless columns.is_a?(Array)
 
         names = columns.map(&:to_s)
-        ctx.redacted_key_values.filter_map { |pattern| positional_kv_rule(names, pattern) }
+        ctx.redacted_key_values.filter_map { |pattern| positional_kv_rule(names, pattern, ctx) }
       end
 
       # One resolved rule for one EAV pattern, or nil when the header lacks
       # either column. Unambiguous headers get the key/value index pair;
       # duplicated headers get the unconditional mask list.
-      def positional_kv_rule(names, pattern)
+      def positional_kv_rule(names, pattern, ctx)
         key_idxs = names.each_index.select { |i| names[i] == pattern['key_column'] }
         val_idxs = names.each_index.select { |i| names[i] == pattern['value_column'] }
         return nil if key_idxs.empty? || val_idxs.empty?
         return { mask_idxs: val_idxs } unless key_idxs.one? && val_idxs.one?
 
-        { key_idx: key_idxs.first, val_idx: val_idxs.first, sensitive: pattern['sensitive_keys'] }
+        { key_idx: key_idxs.first, val_idx: val_idxs.first,
+          key_matches: ->(value) { sensitive_key?(ctx, value, pattern) } }
+      end
+
+      def sensitive_key?(ctx, value, pattern)
+        return ctx.sensitive_key?(value, pattern) if ctx.respond_to?(:sensitive_key?)
+
+        pattern['sensitive_keys'].include?(value.to_s)
       end
 
       # Redact positional row data using a precomputed plan. Handles both
@@ -163,7 +170,7 @@ module Woods
           if rule[:mask_idxs]
             # Ambiguous (duplicated) headers: mask every value-named cell.
             rule[:mask_idxs].each { |idx| result[idx] = '[REDACTED]' }
-          elsif rule[:sensitive].include?(row[rule[:key_idx]].to_s)
+          elsif rule[:key_matches].call(row[rule[:key_idx]])
             result[rule[:val_idx]] = '[REDACTED]'
           end
         end

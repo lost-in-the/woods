@@ -260,7 +260,7 @@ module Woods
 
       # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
       # `$tag$`) at the start of the given slice.
-      DOLLAR_TAG = /\A\$\w*\$/
+      DOLLAR_TAG = /\A\$(?:[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_\u0080-\u{10ffff}]*)?\$/u
       private_constant :DOLLAR_TAG
 
       # Return the dollar-quote tag opening at +index+, or nil.
@@ -273,7 +273,7 @@ module Woods
       private_class_method :dollar_tag_at
 
       # Whether the character immediately before +index+ is a word character
-      # (`\w`). PostgreSQL allows `$` inside identifiers (`x$a$`), so a `$`
+      # (including high-bit characters). PostgreSQL allows `$` inside identifiers (`x$a$`), so a `$`
       # is only a candidate dollar-quote opener when it does NOT follow an
       # identifier character — otherwise `x$a$ FROM blocked, (SELECT 1 AS
       # z$a$)` gets misread as one dollar-quoted literal spanning the real
@@ -281,7 +281,7 @@ module Woods
       #
       # @api private
       def self.preceded_by_word_char?(sql, index)
-        index.positive? && sql[index - 1].match?(/\w/)
+        index.positive? && sql[index - 1].match?(/[A-Za-z0-9_$\u0080-\u{10ffff}]/u)
       end
       private_class_method :preceded_by_word_char?
 
@@ -332,7 +332,7 @@ module Woods
       def self.postgres_escape_string?(sql, quote_index)
         return false unless quote_index.positive? && sql[quote_index - 1].match?(/[eE]/)
 
-        quote_index < 2 || !sql[quote_index - 2].match?(/[A-Za-z0-9_$]/)
+        quote_index < 2 || !sql[quote_index - 2].match?(/[A-Za-z0-9_$\u0080-\u{10ffff}]/u)
       end
       private_class_method :postgres_escape_string?
     end # rubocop:enable Metrics/ModuleLength

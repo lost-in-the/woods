@@ -44,14 +44,14 @@ module Woods
           (?:
             `(?<jschema_bt>[^`]+)` |
             "(?<jschema_dq>[^"]+)" |
-            (?<jschema_bare>\w+)
+            (?<jschema_bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+)
           )
           \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
           "(?<double>[^"]+)"   |
-          (?<bare>\w+(?:\.\w+)?)
+          (?<bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+(?:\.[A-Za-z0-9_$\u0080-\u{10ffff}]+)?)
         )
       /xi
 
@@ -87,14 +87,14 @@ module Woods
           (?:
             `(?<schema_bt>[^`]+)` |
             "(?<schema_dq>[^"]+)" |
-            (?<schema_bare>\w+)
+            (?<schema_bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+)
           )
           \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
           "(?<double>[^"]+)"   |
-          (?<bare>\w+(?:\.\w+)?)
+          (?<bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+(?:\.[A-Za-z0-9_$\u0080-\u{10ffff}]+)?)
         )
       /xi
 
@@ -125,14 +125,14 @@ module Woods
           (?:
             `(?<schema_bt>[^`]+)` |
             "(?<schema_dq>[^"]+)" |
-            (?<schema_bare>\w+)
+            (?<schema_bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+)
           )
           \s* \. \s*
         )?
         (?:
           `(?<backtick>[^`]+)` |
           "(?<double>[^"]+)"   |
-          (?<bare>\w+(?:\.\w+)?)
+          (?<bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+(?:\.[A-Za-z0-9_$\u0080-\u{10ffff}]+)?)
         )
       /xi
 
@@ -204,7 +204,7 @@ module Woods
         return false unless token.match?(/\A[A-Za-z]/)
         return false if prefix.strip.empty? || prefix.match?(/(?:,|\bAS)\s*\z/i) || rest.lstrip.start_with?(',')
         return rest.match?(/\A\s+BY\b/i) if %w[GROUP ORDER].include?(token.upcase)
-        return rest.match?(/\A\s+\w+\s+AS\b/i) if token.casecmp?('WINDOW')
+        return rest.match?(/\A\s+[A-Za-z0-9_$\u0080-\u{10ffff}]+\s+AS\b/i) if token.casecmp?('WINDOW')
 
         true
       end

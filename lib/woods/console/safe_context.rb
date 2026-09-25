@@ -205,6 +205,36 @@ module Woods
                         redacted_columns: policy_columns, redacted_key_values: policy_key_values)
       end
 
+      # Add runtime key types to a request-local redaction view. The original
+      # context and its execution policy are unchanged.
+      # @param types [Hash<String, Array<Object>>] Active Record attribute types
+      # @param raw [Boolean] whether keys are raw database cells
+      # @return [SafeContext]
+      def with_key_value_types(types, raw: false)
+        dup.tap do |context|
+          context.instance_variable_set(:@key_value_types, types)
+          context.instance_variable_set(:@raw_key_values, raw)
+        end
+      end
+
+      # Match the database spelling and its application representation. If a
+      # type cannot safely transform a key, protect the value rather than
+      # returning a value whose sensitivity could not be established.
+      # @param value [Object] raw or cast EAV key
+      # @param pattern [Hash] normalized EAV policy
+      # @return [Boolean]
+      def sensitive_key?(value, pattern)
+        sensitive = pattern['sensitive_keys']
+        return true if sensitive.include?(value.to_s)
+
+        Array(@key_value_types&.fetch(pattern['key_column'], nil)).any? do |type|
+          alternate = @raw_key_values ? type.deserialize(value) : type.serialize(value)
+          sensitive.include?(alternate.to_s)
+        rescue StandardError
+          true
+        end
+      end
+
       private
 
       # Wrap one connection in a rolled-back transaction with timeout, and
@@ -251,7 +281,7 @@ module Woods
           key_col = pattern['key_column']
           val_col = pattern['value_column']
           next unless hash.key?(key_col) && hash.key?(val_col)
-          next unless pattern['sensitive_keys'].include?(hash[key_col].to_s)
+          next unless sensitive_key?(hash[key_col], pattern)
 
           hash[val_col] = '[REDACTED]'
         end
@@ -288,7 +318,7 @@ module Woods
           nil
         end
       rescue StandardError => e
-        # Unsupported adapter (SQLite, Trilogy on unsupported version, Oracle) —
+        # Unsupported timeout facility (for example SQLite or older servers) —
         # timeout enforcement is best-effort, but operators need to know their
         # rollback fence is narrower than advertised. Log once per adapter via
         # Rails.logger when available; otherwise swallow as before.
@@ -297,16 +327,21 @@ module Woods
       end
 
       # Read MySQL's current session-scoped `max_execution_time`, override
-      # it, and return a Proc that restores the value read here. There is no
+      # it, and return a Proc that restores the value read here. MariaDB uses
+      # max_statement_time in seconds; MySQL uses milliseconds. There is no
       # per-statement `SET LOCAL` on MySQL, so the override otherwise
       # outlives this transaction's rollback and bleeds onto whatever the
       # pooled connection serves next.
       #
       # @return [Proc] restores the previous session value
       def set_mysql_timeout(connection, timeout_ms)
-        previous_value = connection.select_value('SELECT @@SESSION.max_execution_time').to_i
-        connection.execute("SET max_execution_time = #{timeout_ms.to_i}")
-        -> { connection.execute("SET max_execution_time = #{previous_value}") }
+        maria = connection.respond_to?(:mariadb?) && connection.mariadb?
+        variable = maria ? 'max_statement_time' : 'max_execution_time'
+        timeout = maria ? timeout_ms.to_i / 1000.0 : timeout_ms.to_i
+        previous_value = Float(connection.select_value("SELECT @@SESSION.#{variable}"))
+        connection.execute("SET #{variable} = #{timeout}")
+        previous_value = previous_value.to_i unless maria
+        -> { connection.execute("SET #{variable} = #{previous_value}") }
       end
 
       def warn_timeout_unsupported(adapter, error)
