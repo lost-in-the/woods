@@ -8,6 +8,7 @@ RSpec.describe 'Console SQL against real database dialects', :live_backends do
       require 'active_record'
       ActiveRecord::Base.establish_connection(ENV.fetch(variable))
       expect(WoodsConsoleDialectContract.verify!(ActiveRecord::Base.connection)).to eq(:passed)
+      expect(WoodsConsoleOutputPolicyContract.verify!(ActiveRecord::Base.connection)).to eq(:passed)
     ensure
       ActiveRecord::Base.connection_pool.disconnect! if defined?(ActiveRecord::Base)
     end

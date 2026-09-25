@@ -2,7 +2,7 @@
 
 require 'json'
 
-require_relative '../util/host_guard'
+require_relative 'origin_policy'
 
 module Woods
   module MCP
@@ -21,17 +21,13 @@ module Woods
     # also requiring Host to appear in the allow-list (or to be a loopback
     # address), we close that gap even when Rails is bound to 0.0.0.0.
     #
-    # Port-matching: an allow-list entry WITHOUT a port (`http://localhost`)
-    # matches that host on any port. An entry WITH a port (`http://localhost:3000`)
-    # requires an exact port match. Specify explicit ports when port isolation
-    # matters.
+    # Cross-origin entries match exactly. A portless entry also permits
+    # same-authority requests on other ports; cross-port browser clients need
+    # their actual origin explicitly configured, as required by the SDK.
     #
     # Also answers CORS preflight (OPTIONS) with the matching allow-list.
     class OriginGuard
-      DEFAULT_ALLOWED = %w[
-        http://localhost http://127.0.0.1 http://[::1]
-        https://localhost https://127.0.0.1 https://[::1]
-      ].freeze
+      DEFAULT_ALLOWED = OriginPolicy::DEFAULT_ORIGINS
 
       # Hosts that always pass the Host-header check even without an explicit
       # allow-list entry — they resolve to loopback by definition and cannot
@@ -56,6 +52,7 @@ module Woods
       #   which runs after Rails railtie initializers captured the middleware
       #   arguments — still takes effect (#183). Empty/nil falls back to
       #   {DEFAULT_ALLOWED}.
+      # @param policy [OriginPolicy, nil] Captured policy also passed to the SDK
       # @param path [String, nil] When set, only requests whose PATH_INFO
       #   starts with this prefix are guarded — everything else passes
       #   straight through to the app. Nil (the default) guards every request.
@@ -82,27 +79,35 @@ module Woods
         method = env['REQUEST_METHOD']
         host = env['HTTP_HOST']
 
-        return forbidden if origin && !origin_allowed?(origin)
-        return forbidden_host if host && !host_allowed?(host)
+        return forbidden unless policy.origin_allowed?(origin, host: host)
+        return forbidden_host unless policy.host_allowed?(host)
 
         return preflight(origin) if method == 'OPTIONS'
 
         status, headers, body = @app.call(env)
-        headers = cors_headers(origin).merge(headers) if origin && origin_allowed?(origin)
+        headers = cors_headers(origin).merge(headers) if origin
         [status, headers, body]
+      end
+
+      # The same lazily captured immutable policy is passed to the transport.
+      # @return [OriginPolicy]
+      def policy
+        return @policy if @policy
+
+        @policy_mutex.synchronize do
+          @policy ||= OriginPolicy.new(allowed_origins: @allowed_source.call)
+        end
       end
 
       private
 
-      def initialize_options(app, allowed_origins: nil, path: nil, enabled: nil)
+      def initialize_options(app, allowed_origins: nil, path: nil, enabled: nil, policy: nil)
         @app = app
         @path = path
         @enabled = enabled
-        if allowed_origins.respond_to?(:call)
-          @allowed_source = allowed_origins
-        else
-          build_allow_list(allowed_origins)
-        end
+        @policy = policy
+        @policy_mutex = Mutex.new
+        @allowed_source = allowed_origins.respond_to?(:call) ? allowed_origins : -> { allowed_origins }
       end
 
       # @param env [Hash] Rack environment
@@ -114,66 +119,8 @@ module Woods
         true
       end
 
-      # Normalize a raw allow-list into `@allowed` + `@allowed_hosts`.
-      #
-      # @param origins [Array<String>, nil]
-      # @return [Array<String>] the normalized allow-list
-      def build_allow_list(origins)
-        allowed = Array(origins).compact.reject { |o| o.to_s.strip.empty? }.map { |o| normalize(o) }
-        allowed = DEFAULT_ALLOWED.dup if allowed.empty?
-        @allowed_hosts = allowed.map { |o| extract_host(o) }.compact.uniq
-        @allowed = allowed
-      end
-
-      # The allow-list, resolving a deferred source on first use. Memoized —
-      # configuration is settled by the time the first request arrives.
-      #
-      # @return [Array<String>]
-      def allowed
-        @allowed || build_allow_list(@allowed_source.call)
-      end
-
-      # @return [Array<String>] hosts extracted from the allow-list
-      def allowed_hosts
-        allowed
-        @allowed_hosts
-      end
-
-      def normalize(origin)
-        origin.to_s.sub(%r{/\z}, '').downcase
-      end
-
-      def extract_host(origin)
-        host = origin.to_s.sub(%r{\Ahttps?://}, '').sub(%r{/.*\z}, '').downcase
-        host.empty? ? nil : host
-      end
-
-      def host_allowed?(host)
-        # Canonicalize (strip port, trailing dot, IPv6 brackets) via the
-        # shared helper so Qdrant and OriginGuard stay in sync on bypass
-        # notations. `normalized` keeps the port for literal allow-list
-        # lookups; `bare` drops it for loopback matching.
-        normalized = host.to_s.downcase.sub(/\.\z/, '')
-        bare = Util::HostGuard.canonicalize(host)
-
-        # Reject non-canonical numeric hosts. Net::HTTP / getaddrinfo
-        # would happily resolve `0x7f000001` or `2130706433` to 127.0.0.1,
-        # bypassing the loopback allow-list.
-        return false if Util::HostGuard.suspicious_numeric_host?(bare)
-
-        return true if LOOPBACK_HOSTS.include?(bare)
-
-        allowed_hosts.include?(normalized) || allowed_hosts.include?(bare)
-      end
-
-      def origin_allowed?(origin)
-        return false if origin.match?(/[[:cntrl:]]/)
-
-        allowed.include?(normalize(origin)) || allowed.include?(normalize(origin).sub(/:\d+\z/, ''))
-      end
-
       def preflight(origin)
-        headers = origin && origin_allowed?(origin) ? cors_headers(origin) : {}
+        headers = origin ? cors_headers(origin) : {}
         [204, headers, []]
       end
 

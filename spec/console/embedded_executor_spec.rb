@@ -1369,7 +1369,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
       it 'allows a direct unaliased protected column so response redaction can mask it' do
         allow(connection).to receive(:select_all).and_return(
-          double('result', columns: ['email'], rows: [['a@b.com']])
+          double('result', columns: ['email'], rows: [['a@b.com']],
+                           column_types: { 'email' => double(type: :string) })
         )
         read_executor = described_class.new(
           model_validator: validator,
@@ -1556,7 +1557,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
 
       it 'allows console_sql to select an EAV pair while filtering by its non-secret key' do
         allow(connection).to receive(:select_all).and_return(
-          double('result', columns: %w[email name], rows: [['secret@example.test', 'plaintext']])
+          double('result', columns: %w[email name], rows: [['secret@example.test', 'plaintext']],
+                           column_types: { 'email' => double(type: :string), 'name' => double(type: :string) })
         )
         read_executor = described_class.new(
           model_validator: validator,

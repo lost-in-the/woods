@@ -114,6 +114,7 @@ module Woods
         warn_late_console_path(config)
         return unless config.console_mcp_enabled && config.console_mcp_http_enabled
 
+        verify_console_origins!
         require 'woods/mcp/bearer_auth'
         token = config.console_mcp_token.to_s
         if token.empty?
@@ -146,6 +147,13 @@ module Woods
       end
 
       private
+
+      def verify_console_origins!
+        require 'woods/mcp/origin_policy'
+        Woods::MCP::OriginPolicy.new(allowed_origins: config.console_mcp_allowed_origins)
+      rescue ArgumentError => e
+        raise Woods::ConfigurationError, "[Woods Console] #{e.message}"
+      end
 
       # Warn when the configured console path no longer matches the path the
       # stack was mounted at — the path was set after railtie initializers

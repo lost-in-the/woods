@@ -46,7 +46,7 @@ module Woods
     #   index.redact("token: sk_live_actual_secret_value")
     #     # => "token: [REDACTED:credential]"
     #
-    class CredentialIndex
+    class CredentialIndex # rubocop:disable Metrics/ClassLength
       # Captured at require time so the mtime-check warning has a stable
       # reference point even if the clock skews later. Frozen immediately
       # to prevent accidental mutation.
@@ -187,7 +187,10 @@ module Woods
       def initialize(secrets:)
         filtered = Array(secrets).select { |s| s.is_a?(String) && s.length >= MIN_LENGTH }
         @secrets = filtered.to_set.freeze
-        @pattern = @secrets.empty? ? nil : Regexp.union(@secrets.to_a)
+        # Regexp alternatives match in order: a shorter prefix must not consume
+        # only the start of a longer indexed credential and expose its suffix.
+        longest_first = @secrets.each_with_index.sort_by { |secret, idx| [-secret.length, idx] }.map(&:first)
+        @pattern = @secrets.empty? ? nil : Regexp.union(longest_first)
       end
 
       # @return [Boolean] true when no secrets were collected (missing key,
@@ -212,7 +215,34 @@ module Woods
       def redact(str)
         return str if empty? || !str.is_a?(String) || !@pattern.match?(str)
 
-        str.gsub(@pattern, REDACTED)
+        offset = 0
+        parts = []
+        redaction_spans(str).each do |start, finish|
+          parts << str[offset...start] << REDACTED
+          offset = finish
+        end
+        parts << str[offset..]
+        parts.join
+      end
+
+      private
+
+      # Search from each match's start, rather than its end, so an overlapping
+      # credential cannot expose its suffix after an earlier replacement.
+      # Union the covered spans before changing the original string.
+      def redaction_spans(str)
+        spans = []
+        offset = 0
+        while (match = @pattern.match(str, offset))
+          start, finish = match.offset(0)
+          if spans.last && start < spans.last[1]
+            spans.last[1] = [spans.last[1], finish].max
+          else
+            spans << [start, finish]
+          end
+          offset = start + 1
+        end
+        spans
       end
     end
   end

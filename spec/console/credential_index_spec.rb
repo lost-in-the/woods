@@ -138,6 +138,44 @@ RSpec.describe Woods::Console::CredentialIndex do
       expect(result).to eq('a=[REDACTED:credential] b=[REDACTED:credential]')
     end
 
+    [%w[synthetic_secret synthetic_secret_suffix], %w[synthetic_secret_suffix synthetic_secret]].each do |secrets|
+      it "redacts the longest shared-prefix credential with #{secrets.first} indexed first" do
+        index = described_class.new(secrets: secrets)
+
+        expect(index.redact('synthetic_secret_suffix / synthetic_secret'))
+          .to eq('[REDACTED:credential] / [REDACTED:credential]')
+      end
+    end
+
+    it 'redacts equal-length, duplicate, and contained credentials as complete values' do
+      index = described_class.new(secrets: %w[synthetic_secret different_secret synthetic_secret
+                                              prefix_synthetic_secret_suffix])
+
+      expect(index.redact('prefix_synthetic_secret_suffix different_secret synthetic_secret'))
+        .to eq('[REDACTED:credential] [REDACTED:credential] [REDACTED:credential]')
+    end
+
+    it 'masks the union of secrets that overlap at different starting positions' do
+      index = described_class.new(secrets: %w[short_overlap overlap_unrelated_long_synthetic_credential])
+      source = 'before short_overlap_unrelated_long_synthetic_credential after'
+
+      expect(index.redact(source)).to eq('before [REDACTED:credential] after')
+    end
+
+    it 'masks a chain of overlapping matches without losing surrounding Unicode text' do
+      index = described_class.new(secrets: %w[first_shared shared_middle middle_last_secret])
+
+      expect(index.redact('é first_shared_middle_last_secret 雨'))
+        .to eq('é [REDACTED:credential] 雨')
+    end
+
+    it 'keeps adjacent non-overlapping secrets as two replacements' do
+      index = described_class.new(secrets: %w[first_secret second_secret])
+
+      expect(index.redact('first_secretsecond_secret'))
+        .to eq('[REDACTED:credential][REDACTED:credential]')
+    end
+
     it 'returns the input unchanged when no secret appears' do
       expect(index.redact('hello world')).to eq('hello world')
     end

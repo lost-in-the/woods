@@ -188,31 +188,31 @@ module ConsoleContractMatrixRuntime
       schema_case(:limit_maximum, { sql: 'SELECT 1', limit: 10_001 }, 'maximum', '/limit'),
       execution_case(
         :write_statement, { sql: 'DELETE FROM posts' },
-        'Rejected: DELETE statements are not allowed', public_prefix: ''
+        'Rejected: DELETE statements are not allowed'
       ),
       execution_case(
         :multiple_statements, { sql: 'SELECT 1; SELECT 2' },
-        'Rejected: multiple statements are not allowed', public_prefix: ''
+        'Rejected: multiple statements are not allowed'
       ),
       execution_case(
         :writable_cte, { sql: 'WITH gone AS (DELETE FROM posts RETURNING *) SELECT * FROM gone' },
-        'Rejected: writable CTEs are not allowed', public_prefix: ''
+        'Rejected: writable CTEs are not allowed'
       ),
       execution_case(
         :set_operator, { sql: 'SELECT 1 UNION SELECT 2' },
-        'Rejected: UNION is not allowed', public_prefix: ''
+        'Rejected: UNION is not allowed'
       ),
       execution_case(
         :dangerous_function, { sql: 'SELECT pg_sleep(1)' },
-        'Rejected: dangerous function pg_sleep is not allowed', public_prefix: ''
+        'Rejected: dangerous function pg_sleep is not allowed'
       ),
       execution_case(
         :write_keyword_in_body, { sql: 'SELECT 1 UPDATE posts SET status = 10' },
-        'Rejected: UPDATE statements are not allowed (found in SQL body)', public_prefix: ''
+        'Rejected: UPDATE statements are not allowed (found in SQL body)'
       ),
       execution_case(
         :non_read_prefix, { sql: 'VALUES (1)' },
-        'Rejected: SQL must start with SELECT, WITH, or EXPLAIN', public_prefix: ''
+        'Rejected: SQL must start with SELECT, WITH, or EXPLAIN'
       )
     ],
     'console_query' => [
@@ -764,9 +764,10 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
               ), failure_message
             end
 
-            expect(tool_error(tools_call(server, name, arguments))).to eq(
+            actual_error = tool_error(tools_call(server, name, arguments))
+            expect(actual_error).to eq(
               "#{expected.fetch(:public_prefix)}#{expected.fetch(:message)}"
-            ), failure_message
+            ), "#{failure_message}; received #{actual_error.inspect}"
           end
         end
       end
@@ -1084,7 +1085,7 @@ RSpec.describe 'Console MCP transport wiring applies a caller-carried redaction 
 
   it 'masks a direct unaliased protected-column select through the shared context' do
     allow(stub_connection).to receive(:select_all).and_return(
-      double('result', columns: %w[status], rows: [[10]])
+      double('result', columns: %w[status], rows: [[10]], column_types: { 'status' => double(type: :integer) })
     )
 
     response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT status FROM posts')
@@ -1096,7 +1097,8 @@ RSpec.describe 'Console MCP transport wiring applies a caller-carried redaction 
 
   it 'masks a paired EAV selection through the shared context' do
     allow(stub_connection).to receive(:select_all).and_return(
-      double('result', columns: %w[key value], rows: [%w[legacy_api_token tok_plain_secret]])
+      double('result', columns: %w[key value], rows: [%w[legacy_api_token tok_plain_secret]],
+                       column_types: { 'key' => double(type: :string), 'value' => double(type: :string) })
     )
 
     response = tools_call(build_with_carried_lists, 'console_sql', sql: 'SELECT key, value FROM settings')

@@ -87,6 +87,14 @@ module Woods
         validate_column!(model_name, column_name)
       end
 
+      # Return known table columns without guessing an unknown table's shape.
+      # @param table_name [String]
+      # @return [Array<String>, nil] nil when this table is not registered
+      def columns_for_table(table_name)
+        model = @model_by_table[table_name.to_s]
+        @registry[model] if model
+      end
+
       # List all known model names.
       #
       # @return [Array<String>]

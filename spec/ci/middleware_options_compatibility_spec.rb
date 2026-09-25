@@ -38,7 +38,7 @@ RSpec.describe 'Rails positional middleware options' do
       allowed_origins: nil, path: nil, enabled: nil
     )
     expect(middleware.call('HTTP_ORIGIN' => 'https://example.com', 'PATH_INFO' => '/new').first).to eq(403)
-    expect(middleware.call('HTTP_ORIGIN' => 'http://localhost').first).to eq(200)
+    expect(middleware.call('HTTP_ORIGIN' => 'http://localhost', 'HTTP_HOST' => 'localhost').first).to eq(200)
   end
 
   it 'preserves explicit false and nil Console keyword values through server construction' do

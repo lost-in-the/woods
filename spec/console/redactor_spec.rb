@@ -198,6 +198,33 @@ RSpec.describe Woods::Console::Redactor do
         expect(result['values']).to eq(%w[[REDACTED] [REDACTED]])
       end
 
+      it 'redacts entire single-column cells containing arrays, hashes, empty arrays, or nil' do
+        values = [%w[first second third], { 'nested' => ['secret'] }, [], nil]
+        result = described_class.apply({ columns: ['password'], values: values }, ctx)
+
+        expect(result['values']).to eq(Array.new(4, '[REDACTED]'))
+        expect(values.first).to eq(%w[first second third])
+      end
+
+      it 'preserves collection cells under an unprotected single column' do
+        values = [%w[first second], { 'nested' => ['public'] }, [], nil]
+        result = described_class.apply({ columns: ['tags'], values: values }, ctx)
+
+        expect(result['values']).to eq(values)
+      end
+
+      it 'preserves positional rows when the single column is returned in rows' do
+        result = described_class.apply({ columns: ['password'], rows: [[%w[first second]]] }, ctx)
+
+        expect(result['rows']).to eq([['[REDACTED]']])
+      end
+
+      it 'redacts entire collection cells within multi-column pluck rows' do
+        result = described_class.apply({ columns: %w[id password], values: [[1, %w[first second]]] }, ctx)
+
+        expect(result['values']).to eq([[1, '[REDACTED]']])
+      end
+
       it 'does not redact scalars in a flat array when the column is not redacted' do
         ctx_other = build_ctx(redacted_columns: ['ssn'])
         result = described_class.apply(

@@ -6,6 +6,34 @@ require 'woods/console/sql_table_scanner'
 require 'woods/console/server'
 
 RSpec.describe Woods::Console::SqlTableScanner do
+  it 'retains complete extended table identifiers' do
+    table = ['blocked', "\u{2603}", '$suffix'].join
+    sql = "SELECT * FROM #{table}"
+    expect(described_class.identifiers_in(sql, dialect: :postgres)).to eq([table])
+  end
+
+  it 'recognizes relation keywords separated by punctuation instead of spaces' do
+    sources = ['FROM"blocked"', 'FROM`blocked`', 'FROM ONLY(blocked)',
+               'FROM (blocked CROSS JOIN users)', 'FROM users JOIN"blocked" ON 1=1',
+               'FROM users JOIN ONLY(blocked) ON 1=1', 'FROM(TABLE"blocked") b']
+    sources.each do |source|
+      expect(described_class.identifiers_in("SELECT * #{source}")).to include('blocked'), source
+    end
+  end
+
+  it 'preserves compact derived relation aliases for output policy' do
+    source = '(SELECT * FROM users) d'
+    expect(described_class.relation_factors("SELECT d FROM#{source}")).to include(source)
+  end
+
+  it 'decodes doubled delimiters in quoted table and schema identities' do
+    [['"block""ed"', 'block"ed'], ['`block``ed`', 'block`ed']].each do |quoted, actual|
+      expect(described_class.identifiers_in("SELECT * FROM #{quoted}")).to include(actual)
+      expect(described_class.identifiers_in("SELECT * FROM #{quoted}.#{quoted}"))
+        .to include("#{actual}.#{actual}")
+    end
+  end
+
   describe '.identifiers_in' do
     subject(:identifiers) { described_class.identifiers_in(sql) }
 
