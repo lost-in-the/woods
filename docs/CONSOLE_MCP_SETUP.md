@@ -215,6 +215,9 @@ preflight acceptance agrees with dispatch. List exact browser ports for
 cross-port traffic, including loopback; a portless origin additionally permits
 same-authority traffic, not arbitrary cross-port access. Console defaults remain
 HTTP loopback, while the Index Server defaults include HTTP and HTTPS loopback.
+Default HTTP(S) ports are equivalent to their omitted form. An explicit list
+replaces default browser origins, including loopback origins; add loopback entries
+if those clients are needed. Invalid entries fail at boot naming the entry.
 Restart after changing the list. See [HTTP origin matching](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
 
 Do not mount `Woods::Console::RackMiddleware` by itself. The Railtie composes
@@ -334,6 +337,11 @@ host: app.example.com
 user: deploy
 command: cd /app && bundle exec rake woods:console
 ```
+
+**Unreleased after 2.0.0:** direct mode prefers an existing executable `bin/rake`
+in the application's selected directory, falling back to `bundle exec rake`.
+Explicit `command` settings win. Docker and SSH modes retain their remote default;
+set `command` explicitly when that application uses another task entry point.
 
 **Unreleased after 2.0.0:** the launcher rejects unknown keys, nested
 `connection:`/`console:` sections, blank or non-string values, and options that
@@ -955,33 +963,16 @@ can stay enabled because it reads the published code index separately.
 
 These corrections require a reviewed revision containing them; verify the loaded
 revision and gem path until a patched release is published. Plugin updates alone
-do not update the Console server.
+do not update the Console server. Security details will be published in the
+[repository security advisories](https://github.com/lost-in-the/woods/security/advisories).
 
-Every enabled HTTP middleware instance enforces the configured bearer token and
-origin policy before constructing the server, including legacy manual mounts
-placed before the railtie's guards. Prefer the automatic railtie mount and keep
-HTTP disabled for stdio-only setups. Missing or invalid tokens fail closed.
+The patch tightens SQL policy for adapter-specific comment and quoting forms,
+whole-row and multi-source redaction, typed key-value records, and per-mount HTTP
+guards. Supported structured reads remain available. Raw `console_sql` requires
+a recognized PostgreSQL, MySQL-family, or SQLite adapter; compatible subclasses
+are recognized by ancestry. Unsupported raw SQL receives a clear refusal without
+disabling structured tools.
 
-Protected single-column `pluck` values are masked as complete cells even when
-Rails returns an array or JSON object. Exact credential scanning matches longer
-indexed secrets before their shorter prefixes and masks overlapping occurrences
-as one protected span. Both JSON and Markdown responses use these rules.
-
-SQL checks cover the complete caller statement and any row-limit wrapper before
-execution. PostgreSQL nested comments and MySQL/Trilogy session quoting use their
-adapter grammar. Whole-row PostgreSQL projections, ambiguous multi-source EAV
-values, and quote-bearing executable comments are refused because their protected
-field identities cannot be preserved reliably. Select ordinary scalar columns or
-use structured Console queries with the EAV key and value from the same source.
-Ordering `console_recent` by an EAV value column is refused as well.
-
-As an additional output check, PostgreSQL raw SQL results with missing or
-unrecognized column type metadata are refused before rendering when redaction
-policies are active. This also affects legitimate custom or opaque database
-types whose field identities Woods cannot verify. Ordinary scalars and scalar
-arrays remain supported; use structured tools or an explicit scalar projection
-for unsupported values. Blocked-table checks still run before execution.
-
-On an affected release, disable Console when these controls are required. Index
-MCP is separate and can remain enabled. Do not relax policies to make refused
-queries succeed.
+Malformed HTTP origin configuration now refuses at boot with the offending entry.
+Fix the allowlist and restart; do not relax authentication or redaction to make a
+refused request succeed. For stdio-only use, keep HTTP disabled.

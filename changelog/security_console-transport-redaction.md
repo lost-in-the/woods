@@ -1,1 +1,1 @@
-- Enforce Console HTTP authentication and origin checks for every middleware mount, including legacy manual mounts. Redact complete collection-valued single-column pluck results and prefer the longest indexed credential when values share a prefix. Exact credential redaction also covers overlapping matches as one protected span.
+- Strengthen per-mount Console transport guards and protected-value rendering. See the repository security advisories for release details.

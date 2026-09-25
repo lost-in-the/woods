@@ -19,6 +19,19 @@ After this runbook you will have:
 - an MCP client connected to the v2 packaged tool surface;
 - a documented way back to v1 if verification fails.
 
+### Pending HTTP configuration checks
+
+Supporting revisions after 2.0.0 validate HTTP origin allowlists at boot. An invalid
+entry now prevents enabled HTTP startup and the diagnostic names that entry.
+Use `http(s)://host[:port]` entries without paths, credentials, or query strings,
+then restart. With no explicit Index allowlist, the default policy is unchanged.
+An explicit list replaces browser-origin defaults, including loopback. HTTP(S)
+default ports are equivalent to their omitted form. Stdio-only Console users can
+keep `console_mcp_http_enabled = false`.
+
+See [HTTP origins](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
+and [Console setup](CONSOLE_MCP_SETUP.md) for the configuration contract.
+
 ## What changes
 
 | v2 change | What can break | Required response |

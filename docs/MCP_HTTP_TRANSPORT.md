@@ -95,7 +95,8 @@ A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` 
 | multiple origins   | `https://a.example,https://b.example`    | each listed origin                                                |
 
 **Unreleased after 2.0.0:** preflight and SDK dispatch share one immutable policy.
-Explicit cross-origin entries match the complete origin, including its port.
+Explicit cross-origin entries match the complete origin; default HTTP(S) ports
+(`:80` and `:443`) are equivalent to their omitted form.
 A portless entry additionally permits same-authority requests on other ports;
 it does not grant arbitrary cross-port CORS. For example, a browser at
 `http://localhost:3000` calling an endpoint on port 9292 must list the browser's
@@ -103,9 +104,10 @@ actual origin. A custom list replaces default browser-origin rules. Configure
 non-loopback endpoint authorities too, and retain the request's real Host through
 any reverse proxy. IPv6 origins use brackets, e.g. `http://[::1]:3000`.
 
-Default-port equivalence follows the SDK's same-authority rules. A genuinely
+Both the preflight and SDK transport use this default-port equivalence. A genuinely
 absent Origin is allowed after Host validation; blank or malformed headers are
-rejected. Invalid configured origin URLs refuse with a bounded diagnostic.
+rejected. Invalid configured origin URLs refuse once at boot with a bounded diagnostic
+naming the offending entry; this is stricter than 2.0.0 startup behavior.
 Restart after changing origins: the middleware and transport capture the same
 policy. SDK DNS-rebinding checks remain enabled.
 
