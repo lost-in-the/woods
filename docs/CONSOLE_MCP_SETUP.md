@@ -902,3 +902,23 @@ These corrections require `2.0.0.beta4` or a reviewed development revision that
 contains them. Confirm that a patched release is available before selecting it.
 On affected versions, disable Console where these policies are required; Index MCP
 can stay enabled because it reads the published code index separately.
+
+
+## Maintenance policy corrections
+
+The 2.0.1 maintenance patch applies authentication and origin policy to each
+Console HTTP mount. Keep the normal Railtie setup: these additional checks do not
+make an unreviewed manual mount the recommended installation path. Configure
+allowed origins before boot and restart after changes; malformed entries fail
+once at boot with the offending entry identified.
+
+Protected collection values are masked as complete cells. EAV key policy checks
+both stored and cast keys, including in predicates and ordering. Raw SQL refuses
+ambiguous protected source identity, protected whole-row projections, positional
+ordering that could expose protected values, and unsupported result types.
+Explicit unaliased scalar columns and the structured tools are the recovery path.
+
+SQL dialect detection follows adapter ancestry before adapter names. PostgreSQL
+subclasses, Mysql2, MariaDB, Trilogy and SQLite use their applicable policies.
+Genuinely unknown families are refused only by raw `console_sql`; this restriction
+does not disable structured Tier-1 tools. Existing tool opt-ins remain unchanged.

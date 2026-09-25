@@ -3,6 +3,13 @@
 require 'spec_helper'
 require 'json'
 
+# The Rails 6 matrix has enums but not Active Record attribute encryption.
+# Register encrypted-attribute examples only where that API exists.
+if ENV['WOODS_RUN_BOOTED_APP']
+  require 'logger'
+  require 'active_record'
+end
+
 RSpec.describe 'Console typed EAV policy', :booted_app do
   before do
     require 'active_record'
@@ -20,7 +27,11 @@ RSpec.describe 'Console typed EAV policy', :booted_app do
     end
     stub_const('TypedPreference', Class.new(ActiveRecord::Base) do
       self.table_name = 'typed_preferences'
-      enum :key, { api_token: 0, visible: 1 }
+      if ActiveRecord::VERSION::MAJOR < 7
+        enum key: { api_token: 0, visible: 1 }
+      else
+        enum :key, { api_token: 0, visible: 1 }
+      end
     end)
     stub_const('OtherPreference', Class.new(ActiveRecord::Base) { self.table_name = 'other_preferences' })
     TypedPreference.create!(key: :api_token, value: 'synthetic-private-cell')
@@ -113,46 +124,48 @@ RSpec.describe 'Console typed EAV policy', :booted_app do
     end
   end
 
-  context 'with an encrypted key attribute' do
-    around do |example|
-      require 'active_record'
-      config = ActiveRecord::Encryption.config
-      attributes = %i[primary_key deterministic_key key_derivation_salt]
-      previous = attributes.to_h { |name| [name, config.instance_variable_get("@#{name}")] }
-      attributes.each { |name| config.public_send("#{name}=", 'synthetic-encryption-fixture-key') }
-      example.run
-    ensure
-      previous&.each { |name, value| config.public_send("#{name}=", value) }
-    end
-
-    before do
-      @connection.create_table(:encrypted_preferences, force: true) do |table|
-        table.string :key
-        table.string :value
+  if defined?(ActiveRecord::Encryption)
+    context 'with an encrypted key attribute' do
+      around do |example|
+        require 'active_record'
+        config = ActiveRecord::Encryption.config
+        attributes = %i[primary_key deterministic_key key_derivation_salt]
+        previous = attributes.to_h { |name| [name, config.instance_variable_get("@#{name}")] }
+        attributes.each { |name| config.public_send("#{name}=", 'synthetic-encryption-fixture-key') }
+        example.run
+      ensure
+        previous&.each { |name, value| config.public_send("#{name}=", value) }
       end
-      stub_const('EncryptedPreference', Class.new(ActiveRecord::Base) do
-        self.table_name = 'encrypted_preferences'
-        encrypts :key
-      end)
-      EncryptedPreference.create!(key: 'api_token', value: 'synthetic-private-cell')
-      EncryptedPreference.create!(key: 'visible', value: 'ordinary-cell')
-    end
 
-    %w[find sample recent pluck query sql].each do |tool|
-      it "protects the encrypted key representation through #{tool}" do
-        params = { model: 'EncryptedPreference', columns: %w[key value] }
-        params[:id] = 1 if tool == 'find'
-        params[:order_by] = 'id' if tool == 'recent'
-        params = { model: 'EncryptedPreference', select: %w[key value] } if tool == 'query'
-        if tool == 'sql'
-          columns = %w[key value].map { |column| @connection.quote_column_name(column) }.join(', ')
-          params = { sql: "SELECT #{columns} FROM encrypted_preferences" }
+      before do
+        @connection.create_table(:encrypted_preferences, force: true) do |table|
+          table.string :key
+          table.string :value
         end
-        result = request(build_server('api_token'), tool, params)
-        expect(result.fetch('isError')).to be(false), result.inspect
-        expect(result.to_json).to include('[REDACTED]')
-        expect(result.to_json).not_to include('synthetic-private-cell')
-        expect(result.to_json).to include('ordinary-cell') unless tool == 'find'
+        stub_const('EncryptedPreference', Class.new(ActiveRecord::Base) do
+          self.table_name = 'encrypted_preferences'
+          encrypts :key
+        end)
+        EncryptedPreference.create!(key: 'api_token', value: 'synthetic-private-cell')
+        EncryptedPreference.create!(key: 'visible', value: 'ordinary-cell')
+      end
+
+      %w[find sample recent pluck query sql].each do |tool|
+        it "protects the encrypted key representation through #{tool}" do
+          params = { model: 'EncryptedPreference', columns: %w[key value] }
+          params[:id] = 1 if tool == 'find'
+          params[:order_by] = 'id' if tool == 'recent'
+          params = { model: 'EncryptedPreference', select: %w[key value] } if tool == 'query'
+          if tool == 'sql'
+            columns = %w[key value].map { |column| @connection.quote_column_name(column) }.join(', ')
+            params = { sql: "SELECT #{columns} FROM encrypted_preferences" }
+          end
+          result = request(build_server('api_token'), tool, params)
+          expect(result.fetch('isError')).to be(false), result.inspect
+          expect(result.to_json).to include('[REDACTED]')
+          expect(result.to_json).not_to include('synthetic-private-cell')
+          expect(result.to_json).to include('ordinary-cell') unless tool == 'find'
+        end
       end
     end
   end

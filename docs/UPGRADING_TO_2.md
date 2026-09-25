@@ -8,6 +8,27 @@ published 1.6.x security patch as the rollback version.
 <!-- release-state:upgrade-availability -->
 <!-- release-state:end -->
 
+## 2.0.1 security maintenance update
+
+This maintenance line adds Console request/output policy corrections and isolates
+retrieval contexts between retriever instances. It does not add the graph or
+extraction features under development for 2.1. Confirm the installed package
+version and use its matching tag documentation.
+
+No index or database schema migration is required. Restart Console/MCP processes
+after upgrading. Explicit malformed HTTP origin entries now fail at boot with the
+offending entry named; fix the entry rather than weakening authentication. With
+no allowlist configured, the existing loopback defaults remain unchanged. See
+[HTTP origin matching](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
+
+Raw `console_sql` now refuses ambiguous protected results and genuinely unknown
+adapter families. PostgreSQL-subclass adapters retain PostgreSQL handling;
+structured Console tools remain available with other adapters. Prefer explicit
+unaliased scalar projections or structured reads when a query is refused.
+[Console setup](CONSOLE_MCP_SETUP.md#maintenance-policy-corrections) describes the
+compatibility boundary. Context caches refill after restart; old entries expire
+under their existing TTLs. Rolling back restores the affected behavior.
+
 ## Upgrade outcome
 
 After this runbook you will have:

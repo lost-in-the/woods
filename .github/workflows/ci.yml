@@ -2,12 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, release/2.0.1]
   # Also run on the merged state of the default branch. Triggering on
   # `pull_request` alone meant `main` itself was never tested: a bad merge
   # resolution, or a direct push, went green purely by absence of a run (#220).
   push:
-    branches: [main]
+    branches: [main, release/2.0.1]
     tags: ['v*']
 
 # Least-privilege default: CI only needs to read the checkout.
@@ -130,7 +130,10 @@ jobs:
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
       # Each example boots its own subprocess with the matrix appraisal.
       - name: Run Console transport boot contracts
-        run: bin/rspec spec/console/transport_boot_spec.rb spec/console/stdio_e2e_spec.rb
+        run: |
+          bin/rspec spec/console/transport_boot_spec.rb
+          bin/rspec spec/console/stdio_e2e_spec.rb
+          bin/rspec spec/console/collection_redaction_spec.rb
 
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full
@@ -158,6 +161,7 @@ jobs:
       - name: Console read and response policies
         run: |
           bundle exec rspec spec/integration/console_sqlite_policy_spec.rb
+          bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb
           bundle exec rspec spec/integration/console_sqlite_keyword_functions_spec.rb
           bundle exec rspec spec/integration/console_resolved_relation_policy_spec.rb
           bundle exec rspec spec/integration/console_credential_serialization_spec.rb
@@ -251,6 +255,8 @@ jobs:
           bundle exec rspec
           spec/integration/live_backends_spec.rb
           spec/integration/console_sql_dialects_spec.rb
+          spec/integration/console_collection_redaction_spec.rb
+          spec/integration/console_mysql_collection_redaction_spec.rb
           spec/integration/solid_cache_compatibility_spec.rb
           spec/cache/redis_cache_store_live_spec.rb
           spec/session_tracer/redis_store_live_spec.rb

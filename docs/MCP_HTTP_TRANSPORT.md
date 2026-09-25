@@ -86,11 +86,20 @@ Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request
 
 ### Browser origins (DNS rebinding defense)
 
+In the 2.0.1 maintenance patch, preflight and SDK dispatch share an immutable
+normalized policy. A configured list replaces the default browser origins;
+include loopback explicitly if needed. Cross-origin ports must match an entry,
+while omitted default HTTP(S) ports match their explicit 80/443 forms. A portless
+entry permits same-authority traffic rather than every cross-port browser origin.
+Console defaults remain HTTP loopback; Index HTTP defaults include HTTP and HTTPS
+loopback. When no list is set, these defaults are unchanged. Invalid entries fail
+at boot, naming the offending entry. Restart after changing the configuration.
+
 A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header (curl, MCP stdio clients, server-to-server) pass through, bearer auth still gates them.
 
 | Scenario          | `WOODS_MCP_HTTP_ALLOWED_ORIGINS`      | Origins accepted                                                |
 |--------------------|-----------------------------------------|-------------------------------------------------------------------|
-| default            | unset                                    | `http(s)://localhost`, `127.0.0.1`, `::1` (any port)              |
+| default            | unset                                    | HTTP(S) loopback, matching request authority; explicit entries for cross-port origins              |
 | explicit list      | `https://app.example.com`                | exactly `https://app.example.com`, loopback no longer allowed  |
 | multiple origins   | `https://a.example,https://b.example`    | each listed origin                                                |
 

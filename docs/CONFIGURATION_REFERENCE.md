@@ -291,6 +291,13 @@ unchanged. This is a reasonable default for hosts that don't bundle `sqlite3`.
 
 ## Retrieval cache options
 
+The 2.0.1 maintenance patch scopes retrieval contexts to one retriever instance.
+Reload retires only that instance's namespace, including results still in flight;
+already-running requests may finish against the previous corpus. Restarting starts
+a fresh context namespace. Retired entries expire under their configured TTL or
+backend eviction; disabling both can retain unused entries indefinitely. Embedding
+caches remain separate and are not cleared by context invalidation.
+
 The optional cache wraps both embedding-provider calls and assembled retrieval
 contexts. It is disabled by default and is separate from the Index Server's
 tool-result `_meta` cache hint.
@@ -682,7 +689,7 @@ deployment guide including defense layers.
 | `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, stdio exits and the mounted Console middleware passes requests through to Rails. |
 | `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
-| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist. Port is stripped before comparison, so `http://localhost` matches any localhost port. Override for tunneled / internal-dashboard access. |
+| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | `OriginGuard` allowlist shared with SDK dispatch. Portless entries permit same-authority requests; cross-origin ports must be listed explicitly. Default HTTP(S) ports normalize to their omitted form. Invalid entries fail at boot. |
 | `console_mcp_path` | String | `/mcp/console` | URL path the Rack middleware responds on. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
