@@ -425,7 +425,7 @@ module Woods
         paths = paths.reject { |path| startup_covered?(path) } if startup
         relative = ChangeSet.new(paths: paths, root: @root).relative_paths
         action = @policy.classify_all(relative)
-        action = :reextract if action == :ignore && @startup_full
+        action = :reextract if action == :ignore && reconciliation_required?
         return :restart if action == :reload && !@reloader.enabled?
 
         action
@@ -450,6 +450,7 @@ module Woods
         @startup_paths = Set.new
         @live_paths = Set.new
         @startup_full = false
+        @reconciliation_pending = false
         @pending_mutex = Mutex.new
         @stop_reason = nil
         @drain_mutex = Mutex.new
@@ -494,7 +495,12 @@ module Woods
       end
 
       def carry_forward(change_set)
-        @pending_mutex.synchronize { @pending.merge(change_set.absolute_paths) }
+        @pending_mutex.synchronize do
+          @pending.merge(change_set.absolute_paths)
+          # Deletion-only startup intentionally names no paths: its bounded
+          # sweep must not treat nominal framework paths as deleted sources.
+          @reconciliation_pending = true if change_set.empty?
+        end
       end
 
       # Run cycles until the pending set is empty. One call per watcher batch;
@@ -544,7 +550,11 @@ module Woods
       end
 
       def pending_empty?
-        @pending_mutex.synchronize { @pending.empty? }
+        @pending_mutex.synchronize { @pending.empty? && !@reconciliation_pending }
+      end
+
+      def reconciliation_required?
+        @pending_mutex.synchronize { @startup_full || @reconciliation_pending }
       end
 
       # Only a drained startup boundary (or a later recovery) can establish
@@ -992,6 +1002,7 @@ module Woods
                   else
                     extractor.extract_changed(change_set.absolute_paths)
                   end
+        extractor.raise_on_publication_failure! if extractor.respond_to?(:raise_on_publication_failure!)
 
         action = full ? :full : :incremental
         return unpublished(action, change_set, started) if wrote_without_publishing?(touched, before)
@@ -1024,6 +1035,7 @@ module Woods
 
       def finish_extraction(action, change_set, touched, started)
         result = publish(action, change_set, touched, started)
+        @pending_mutex.synchronize { @reconciliation_pending = false }
         if action == :full
           @startup_full = false
           @pending_mutex.synchronize { @startup_paths.clear }
@@ -1045,8 +1057,10 @@ module Woods
       # previous index while the daemon says `running`. Not raising was right;
       # not noticing was not.
       #
-      # A no-op incremental deliberately does not bump, so this only fires when
-      # units were actually written.
+      # The extractor's explicit publication-error check above also covers
+      # payload changes with no touched units, such as withdrawing flows. Keep
+      # this fallback for injected extractors without that reporting method.
+      # A genuine no-op deliberately does not bump.
       def wrote_without_publishing?(touched, before)
         return false if touched != :all && Array(touched).empty?
 
