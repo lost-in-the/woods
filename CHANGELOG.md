@@ -7,12 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-09-25
+
 ### Security
 
 - Enforce configured bearer authentication and allowed origins on every enabled Console HTTP mount before constructing its transport, including manually mounted endpoints.
 - Mask protected collection-valued cells completely and redact overlapping credential matches before rewriting response text.
 - Preserve configured SQL redaction and blocked-table boundaries for supported read queries. Ambiguous protected expressions and unsupported result types refuse clearly. Apply MySQL timeout handling to compatible adapters while retaining the legacy tool API and SQL function policy.
 - Isolate retrieval-context cache entries by retriever instance and rotate only that instance's namespace on reload, preventing shared-backend and stale in-flight cache reuse.
+- Refuse unsupported PostgreSQL escaped identifiers in raw Console SQL before query execution. Ordinary quoted identifiers, literal contents, and comments retain their existing behavior.
+- Share validated Console query projections between execution and typed EAV redaction context, including whitespace normalization and legacy comma-separated selections.
+- Preserve configured Console data protections across database adapters, typed attributes, and SQL result shapes.
+- Refuse SQL relation and CTE column alias lists while output redaction is configured, with an explicit redaction-identity error before execution. Direct unaliased projections remain supported.
+- Apply typed key/value redaction consistently to case-variant and schema-qualified source table names, retaining all matching model types when source schemas are ambiguous.
+
+### Documentation
+
+- Clarify supported Console redaction, SQL projection, adapter timeout and HTTP origin behavior, including maintenance-line differences.
+
+### Fixed
+
+- Allow Console middleware construction before Woods configuration is initialized, and run each booted Console contract in its own process across the supported Rails CI matrix.
+- Report invalidly encoded HTTP origin settings with bounded startup diagnostics; preserve existing origin defaults and access checks.
+- Point development package links for `1.6.4.alpha` at the `release/1.6.4` branch, matching the maintenance preparation flow. Prepared `1.6.4` links remain unchanged.
 
 ## [1.6.3] - 2026-09-22
 
