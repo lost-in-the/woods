@@ -214,3 +214,11 @@ returned typed, SHA-guarded `full_evidence` lookup for verification. Published-u
 coordinates are not physical file offsets; unknown generation remains unknown.
 Keep full-source access available. See the canonical
 [evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
+
+### HTTP configuration diagnostics on security-patch candidates
+
+Check the installed revision before expecting this unreleased correction. Invalid
+origin settings, including invalidly encoded entries, refuse at boot. The HTTP
+executable reports one configuration diagnostic and exits 2. Correct the named
+entry and restart; keep authentication and origin checks enabled. Follow the
+installed revision's canonical `docs/MCP_HTTP_TRANSPORT.md` for accepted origins.

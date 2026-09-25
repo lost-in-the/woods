@@ -17,7 +17,9 @@ version and use its matching tag documentation.
 
 No index or database schema migration is required. Restart Console/MCP processes
 after upgrading. Explicit malformed HTTP origin entries now fail at boot with the
-offending entry named; fix the entry rather than weakening authentication. With
+offending entry named; fix the entry rather than weakening authentication.
+Automatic and manual Console mounts raise `Woods::ConfigurationError` for these
+settings, including invalidly encoded entries. With
 no allowlist configured, the existing loopback defaults remain unchanged. See
 [HTTP origin matching](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
 

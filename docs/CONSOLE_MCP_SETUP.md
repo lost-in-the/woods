@@ -636,6 +636,13 @@ Redaction is defense-in-depth, prefer not storing plaintext secrets in database 
 
 ### `console_redacted_key_values`
 
+**Unreleased security correction:** when column redaction or key-value patterns
+are configured, raw SQL must not rename source columns through a relation or CTE
+column-name list. Use explicit, unaliased source columns or the structured Console
+tools. Typed key matching retains model information when source table spelling
+varies in case, including qualified table names. The configured sensitive key
+*values* still match exactly; configure their raw or cast spelling as appropriate.
+
 Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table, e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
 
 `console_redacted_key_values` takes one or more patterns that describe "when a row has `key_column` set to one of these names, redact its `value_column`":
