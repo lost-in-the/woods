@@ -131,8 +131,10 @@ when the process locale is `C`. A filename with invalid UTF-8 bytes produces
 `undecodable_source_path` and incomplete coverage; directory entries with those
 names are pruned. Diagnostic labels escape the original bytes and are bounded.
 The watcher skips these entries, and reference verification retains the preceding
-generation. Rename the affected entries to valid UTF-8 names before a fresh
-capture. Explicit root/output paths with invalid UTF-8 bytes are rejected as
+generation. **Unreleased after 2.0.0:** the publication refusal names the reason
+and up to three escaped, bounded path labels, including entries outside source
+consumer scopes; it never includes file contents. Rename the affected entries to
+valid UTF-8 names before a fresh capture. Explicit root/output paths with invalid UTF-8 bytes are rejected as
 configuration errors.
 
 Every consuming scope keeps its own identities. An events scan can reread a

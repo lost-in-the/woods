@@ -1,0 +1,1 @@
+- Name bounded, escaped paths and verification reasons when source-reference publication refuses undecodable filenames, while keeping the preceding generation active.
