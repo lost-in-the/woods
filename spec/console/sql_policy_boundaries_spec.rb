@@ -135,6 +135,21 @@ RSpec.describe 'Console SQL policy boundaries' do
     expect(connection).not_to have_received(:select_all)
   end
 
+  it 'refuses compact derived relation values before executing SQL' do
+    derived = '(SELECT * FROM users) d'
+    projection = ['CAST(', 'd', ' AS text)'].join
+    sql = ["SELECT #{projection}", "FROM#{derived}"].join(' ')
+    expect(request(sql)).to include('ok' => false, 'error_type' => 'validation')
+    expect(connection).not_to have_received(:select_all)
+  end
+
+  it 'checks quoted and parenthesized relation targets before reading rows' do
+    ['FROM"blocked"', 'FROM ONLY(blocked)', 'FROM (blocked CROSS JOIN users)'].each do |source|
+      expect(request("SELECT 1 #{source}")).to include('ok' => false, 'error_type' => 'validation')
+    end
+    expect(connection).not_to have_received(:select_all)
+  end
+
   it 'keeps scalar qualified projections available' do
     expect(request('SELECT u.id FROM users AS u')['ok']).to be true
     expect(request('SELECT u.* FROM users AS u')['ok']).to be true

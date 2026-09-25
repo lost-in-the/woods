@@ -55,9 +55,9 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     end)
   end
 
-  def self.build_server(connection)
+  def self.build_server(connection, blocked_tables: [TABLES[2]])
     Woods.configuration = Woods::Configuration.new
-    Woods.configuration.console_blocked_tables = [TABLES[2]]
+    Woods.configuration.console_blocked_tables = blocked_tables
     Woods.configuration.context_format = :json
     models = [User, Preference]
     tables = models.to_h { |model| [model.name, model.table_name] }
@@ -131,9 +131,29 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
       assert_request!(server, 'console_sql', { sql: sql }, refused: true)
     end
     assert_request!(server, 'console_sql', { sql: "SELECT u.id FROM #{TABLES[0]} u" })
+    verify_postgres_relation_boundaries!(connection, server)
     verify_postgres_types!(server)
     verify_postgres_nested_values!(connection, server)
     verify_postgres_identifiers!(connection, server)
+    verify_quoted_table_identities!(connection)
+  end
+
+  def self.verify_postgres_relation_boundaries!(connection, server)
+    projection = ['CAST(', 'd', ' AS text)'].join
+    source = "(SELECT * FROM #{TABLES[0]}) d"
+    sql = "SELECT #{projection} FROM#{source}"
+    raise 'Compact relation fixture missing value' unless connection.select_all(sql).to_json.include?(SECRET)
+
+    assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    ["FROM\"#{TABLES[2]}\"", "FROM ONLY(#{TABLES[2]})",
+     "FROM (#{TABLES[2]} CROSS JOIN #{TABLES[0]})"].each do |relation|
+      sql = "SELECT message #{relation}"
+      raise 'Compact table fixture missing value' unless connection.select_all(sql).to_json.include?(BLOCKED)
+
+      assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    end
+    sql = "SELECT d.id FROM(SELECT id FROM #{TABLES[0]}) d"
+    assert_request!(server, 'console_sql', { sql: sql })
   end
 
   def self.verify_postgres_nested_values!(connection, server)
@@ -168,6 +188,21 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     raise 'Extended-identifier fixture returned no rows' if connection.select_all(sql).rows.empty?
 
     assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+  end
+
+  def self.verify_quoted_table_identities!(connection)
+    ['woods_policy_escaped"table', 'woods_policy.literal_table'].each do |table|
+      quoted = connection.quote_column_name(table)
+      connection.execute("CREATE TEMPORARY TABLE #{quoted} (message text)")
+      connection.execute("INSERT INTO #{quoted} (message) VALUES ('#{BLOCKED}')")
+      sql = "SELECT message FROM #{quoted}"
+      raise 'Quoted table fixture missing value' unless connection.select_value(sql) == BLOCKED
+
+      server = build_server(connection, blocked_tables: [table])
+      assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    ensure
+      connection.execute("DROP TABLE IF EXISTS #{quoted}") if quoted
+    end
   end
 
   def self.verify_postgres_types!(server)
