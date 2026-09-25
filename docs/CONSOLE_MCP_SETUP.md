@@ -193,8 +193,15 @@ allowlisting an origin does not authenticate a request. See
 mount checks the current bearer token and allowed origins before constructing
 its transport. This includes manual mounts earlier in the Rails middleware
 stack. A missing or short token refuses HTTP access; disabled mounts retain
-their existing 410 response. Check the loaded revision when validating a Git
-checkout, since its version can still name the previous release.
+their existing 410 response. A manually constructed middleware validates its
+origin configuration immediately, even when Console is disabled; invalid entries
+prevent construction. Check the loaded revision when validating a Git checkout,
+since its version can still name the previous release.
+
+The 1.6.4 Railtie scopes authentication and origin guards to the
+`console_mcp_path` prefix. Other application paths pass through unchanged. If
+application-wide access control is required, configure it separately; Console
+configuration no longer applies these guards to every application request.
 
 ### MCP Client Configuration
 
@@ -551,12 +558,8 @@ Redaction is defense-in-depth — prefer not storing plaintext secrets in databa
 
 ### `console_redacted_key_values`
 
-**Unreleased security correction:** when column redaction or key-value patterns
-are configured, raw SQL must not rename source columns through a relation or CTE
-column-name list. Use explicit, unaliased source columns or the structured Console
-tools. Typed key matching retains model information when source table spelling
-varies in case, including qualified table names. The configured sensitive key
-*values* still match exactly; configure their raw or cast spelling as appropriate.
+See [read policy compatibility](#read-policy-compatibility) for SQL column-list
+restrictions, conservative typed masking, exact key spelling and binary columns.
 
 **Unreleased maintenance correction after 1.6.3:** SQL and structured selections
 must preserve protected column identity. Aliases, aggregates, EAV values without
@@ -726,13 +729,20 @@ This means:
 
 ### Statement Timeout
 
-Each transaction sets a statement timeout before any query runs. The default is **5000ms** (5 seconds). Timeout enforcement is adapter-specific:
+SafeContext attempts a **5000ms** (5-second) timeout. Support depends on the
+adapter and server; an unsupported setting is skipped and logged when a Rails
+logger is available.
 
 | Adapter | Mechanism | Scope |
 |---------|-----------|-------|
-| PostgreSQL | `SET statement_timeout = '5000ms'` | All statement types |
-| MySQL | `SET max_execution_time = 5000` | SELECT only (MySQL limitation) |
-| Other | Best-effort (skipped gracefully) | — |
+| PostgreSQL | `SET LOCAL statement_timeout = '5000ms'` | Transaction-local; discarded on rollback |
+| MySQL | `SET max_execution_time = 5000` | SELECT only; previous session value restored in `ensure` |
+| MariaDB | `SET max_statement_time = 5.0` | Seconds; previous session value restored in `ensure` |
+| SQLite / unrecognized family | No supported per-statement timeout | Do not rely on a query time limit |
+
+Rollback remains active when a timeout setting is unsupported. Recognition of a
+MySQL-family adapter alone does not establish that its server supports the
+corresponding timeout variable.
 
 ### SQL Validation (Tier 4 `console_sql`)
 
@@ -883,3 +893,49 @@ lists retain the existing loopback defaults. See
 [origin matching](MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense).
 Restart MCP processes after upgrading so their authentication, origin and cache
 state reflects the new code. Rolling back restores the affected behavior.
+
+### Read policy compatibility
+
+These rules describe the security-patch source; verify the installed revision
+and loaded gem path until its release is published.
+
+- **Column alias lists:** when either `console_redacted_columns` or
+  `console_redacted_key_values` is nonempty, `console_sql` refuses relation
+  and CTE column alias lists before execution, including lists on base tables,
+  derived tables, parenthesized `VALUES` sources and table functions. This applies
+  even when the selected names are not protected and independently of function
+  validation. Ordinary relation
+  aliases, CTEs without column lists and allowed scalar functions remain subject
+  to the normal SQL policy. Use explicit, unaliased protected columns or a
+  structured Console tool.
+- **Conservative typed masking:** EAV type lookup matches the final source-table
+  name case-insensitively and includes every matching registered model, even
+  across schemas. Any matching type can cause masking. This deliberately may
+  mask extra values when table names differ only by case or share that final
+  name; qualifying the table does not narrow that type set.
+- **Exact sensitive values:** `sensitive_keys` compares the stored and cast key
+  values with exact case after string conversion. Configure their actual raw or
+  cast spelling. `CredentialIndex` also matches credential substrings with exact
+  case; it does not decode hexadecimal binary output such as PostgreSQL `bytea`.
+  Binary cells have no general text-scanning guarantee: non-UTF-8 data can fail
+  JSON normalization before scanning. Put binary secret columns in
+  `console_redacted_columns` so they are masked before serialization.
+- **Adapter boundary:** raw `console_sql` requires PostgreSQL, MySQL-family
+  (including Mysql2, MariaDB and Trilogy), or SQLite classification. Compatible
+  subclasses are recognized by ancestry. Unknown families receive a validation
+  refusal for raw SQL; structured tools remain available under their normal
+  gates. See [statement timeouts](#statement-timeout) for adapter limits.
+- **Legacy SQL functions:** 1.6.4 retains `DANGEROUS_FUNCTIONS`, a denylist;
+  it does not adopt the 2.x read-only function allowlist. Table, projection and
+  output controls enforce their own policies independently of function checks.
+- **Select entries:** 1.6.4 splits comma-combined `console_query` select entries
+  before validation. 2.x refuses combined entries; use one expression per array
+  entry for compatibility with both lines. Execution and typed redaction use
+  the same validated projection on all patched lines.
+- **Association counts:** polymorphic `belongs_to` counts remain unsupported
+  on this maintenance line and fail closed with a generic execution error.
+  The 2.1 functional correction is not included in this backport.
+
+Retrieval context namespace rotation retires entries for normal TTL or backend
+eviction; disabling both can retain them indefinitely. See
+[context cache isolation](CONFIGURATION_REFERENCE.md#retrieval-context-cache-isolation).

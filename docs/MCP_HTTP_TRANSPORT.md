@@ -56,7 +56,7 @@ are literal origins, not wildcard patterns. Retain the actual request Host throu
 a reverse proxy; forwarded headers do not replace it. When authentication is
 configured, requests without Host still pass through bearer authentication.
 
-A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header (curl or server-to-server clients) still require an allowed Host and valid bearer token when authentication is enabled.
+A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header still pass through Host validation and configured bearer authentication.
 
 | Scenario                         | `WOODS_MCP_HTTP_ALLOWED_ORIGINS`  | Origins accepted                                         |
 |----------------------------------|------------------------------------|----------------------------------------------------------|
@@ -81,6 +81,36 @@ boot with the offending entry named. Restart after changing allowed origins.
 No allowlist means the existing loopback defaults remain in effect.
 
 `OPTIONS` preflights are answered with the matching `Access-Control-Allow-*` headers; successful responses carry `Access-Control-Allow-Origin`, `Access-Control-Expose-Headers: Mcp-Session-Id`, and `Vary: Origin`.
+
+### Origin configuration compatibility
+
+These details apply to the supporting security-patch revisions described above.
+
+Configured origins are literal values, with lowercasing, one trailing slash
+removed and HTTP(S) default-port normalization. Wildcard-looking hostnames are
+literal hostnames, not patterns. A nonempty explicit list replaces browser-origin
+defaults, including loopback; add the loopback browser origins you need. Console's
+configured defaults are HTTP loopback; the Index defaults include HTTP and HTTPS
+loopback. Loopback **Host** acceptance is separate from browser-origin acceptance.
+
+Ruby-configured 2.x origin entries reject surrounding whitespace; 1.6.4 trims it.
+The `woods-mcp-http` comma-separated environment setting trims each entry on both
+lines. Use whitespace-free values for portable configuration. The exact-port and
+same-authority rules above still apply; literal matching does not imply wildcard
+or arbitrary cross-port access.
+
+The guards read the actual `Origin` and `Host`; `Forwarded` and
+`X-Forwarded-*` do not replace them. Preserve the public Host through a proxy.
+A genuinely absent Host is accepted by the Host policy, but any supplied Origin
+must still pass its own check. Console requests and token-configured Index
+requests still require bearer authentication before dispatch. The loopback-only
+Index mode without a token retains its documented unauthenticated behavior;
+CORS preflights do not dispatch tools.
+
+Malformed Origin/Host values receive constant `403` responses without reflecting
+the values. Invalid Authorization receives `401` when it reaches the auth guard.
+Malformed HTTP framing can instead receive Puma's `400` before Rack runs. Other
+HTTP servers may reject framing at their own boundary.
 
 ### TLS termination
 

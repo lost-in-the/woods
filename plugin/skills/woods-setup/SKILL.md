@@ -225,3 +225,11 @@ This should output the tool list and then hang (waiting for more input). Press C
 - Set up CI extraction: see the GitHub Actions example in [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_TOOL_COOKBOOK.md)
 - Enable Tier 2–4 console tools (diagnostics, SQL, Ruby eval): see [CONSOLE_MCP_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md) Option D
 - Enable temporal snapshots for change tracking: set `enable_snapshots: true` in your initializer
+
+### Security-patch compatibility preflight
+
+For security-patch candidates after 1.6.3, record the loaded revision and gem
+path as well as the version. Review the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+and HTTP origin compatibility at that revision before upgrading an authorized
+Console installation. The plugin does not install these fixes or establish that
+a release is published.

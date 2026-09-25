@@ -87,7 +87,8 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
   def self.verify_column_alias_lists!(server)
     %w[selected count].each do |name|
       sources = ["#{TABLES[0]} AS #{name}(row_id, label, detail)",
-                 "(SELECT * FROM #{TABLES[0]}) AS #{name}(row_id, label, detail)"]
+                 "(SELECT * FROM #{TABLES[0]}) AS #{name}(row_id, label, detail)",
+                 "(VALUES (1, 2, 3)) AS #{name}(row_id, label, detail)"]
       statements = sources.map { |source| "SELECT label FROM #{source}" }
       statements << "WITH #{name}(row_id, label, detail) AS (SELECT * FROM #{TABLES[0]}) " \
                     "SELECT label FROM #{name}"

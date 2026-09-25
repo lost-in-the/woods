@@ -197,3 +197,14 @@ Default statement timeout is 5000ms. For large tables, narrow the query with `sc
 ```
 
 If `pipeline_extract` or `pipeline_embed` are rate-limited, wait 5 minutes (the cooldown period) or use `pipeline_repair` with `action: "reset_cooldowns"`.
+
+### Console read compatibility on security-patch candidates
+
+Verify the loaded revision for corrections after 1.6.3. Active redaction refuses
+SQL relation/CTE column alias lists; typed EAV matching can intentionally mask
+extra values where tables share a final name or differ only by case. Keep the
+policy enabled and use explicit scalar columns or structured tools. Check exact
+sensitive-key spelling and configure binary secret columns for column redaction.
+Read the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+at the installed revision for adapter, timeout and projection limits; a plugin
+update does not patch Woods.

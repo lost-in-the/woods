@@ -154,7 +154,10 @@ has no v2 migration guide or v2 surface inventory requirement.
 
 CI also runs on pushes to the exact `release/1.6.4` branch, so a private-advisory
 merge receives upstream validation before the trusted-main SHA pin. Publication
-still requires a separate green tag-push run.
+still requires a separate green tag-push run. This legacy matrix intentionally
+has no C-locale artifact-reader lane. Its installed maintenance-package and
+backend contracts remain required; do not claim v2 artifact-reader CI coverage
+for this branch.
 
 Validate the full suite, lint, booted extraction, real Console credential rotation,
 installed maintenance package tests, and the real PostgreSQL/MySQL Console policy lane. CI builds one gem plus its SHA-256
