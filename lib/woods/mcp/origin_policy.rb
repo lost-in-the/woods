@@ -38,7 +38,7 @@ module Woods
       # @return [Boolean] Whether the request authority is allowed
       def host_allowed?(host)
         return true if host.nil?
-        return false unless host.is_a?(String)
+        return false unless host.is_a?(String) && host.valid_encoding?
 
         parsed = parsed_origin("http://#{host}")
         return false unless parsed
@@ -60,7 +60,7 @@ module Woods
         normalized = normalized_origin(origin)
         return true if @explicit_origins.include?(normalized)
         return false unless @allowed.include?(normalized) || @allowed.include?(normalized.sub(/:\d+\z/, ''))
-        return false unless host.is_a?(String)
+        return false unless host.is_a?(String) && host.valid_encoding?
 
         # Matches the SDK's same-authority rule. The origin's scheme selects
         # its default port; request.scheme is unreliable behind reverse proxies.
