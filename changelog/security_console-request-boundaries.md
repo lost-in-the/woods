@@ -1,1 +1,0 @@
-- Harden Console request validation, protected result handling, and HTTP authentication and origin enforcement.

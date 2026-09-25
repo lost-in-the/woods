@@ -1,1 +1,0 @@
-- Share validated Console query projections between execution and typed EAV redaction context, including whitespace normalization.
