@@ -1234,7 +1234,7 @@ RSpec.describe Woods::MCP::IndexReader do
       allow(reader).to receive(:compile_search_pattern).and_return(pattern)
 
       expect { reader.search('Post', fields: %w[identifier source_code]) }
-        .to raise_error(IOError, /disk gone/)
+        .to raise_error(RuntimeError, /unexpected reader failure/)
     end
 
     # Review finding: `rescue Regexp::TimeoutError` names a constant that
@@ -1246,14 +1246,14 @@ RSpec.describe Woods::MCP::IndexReader do
     # on newer Rubies (where it is the standing condition on 3.0/3.1).
     it 'propagates unrelated phase-two failures instead of masking them' do
       failing_reader = described_class.new(fixture_dir)
-      allow(failing_reader).to receive(:load_unit).and_raise(IOError, 'disk gone')
+      allow(failing_reader).to receive(:load_unit).and_raise(RuntimeError, 'unexpected reader failure')
 
       has_timeout_error = Regexp.const_defined?(:TimeoutError, false)
       original = Regexp.const_get(:TimeoutError, false) if has_timeout_error
       Regexp.send(:remove_const, :TimeoutError) if has_timeout_error
       begin
         expect { failing_reader.search('Post', fields: %w[source_code]) }
-          .to raise_error(IOError, /disk gone/)
+          .to raise_error(RuntimeError, /unexpected reader failure/)
       ensure
         Regexp.const_set(:TimeoutError, original) if has_timeout_error
       end
