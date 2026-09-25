@@ -70,6 +70,27 @@ RSpec.describe 'Index MCP transactional store reload' do
 
   after { FileUtils.rm_rf(index_dir) }
 
+  it 'reports a restart requirement when local SQLite metadata prevents a vector reload' do
+    Woods.configuration.metadata_store = :sqlite
+    Woods.configuration.metadata_store_options = { database: File.join(index_dir, 'metadata.sqlite3') }
+    write_artifact(identifier: 'AlphaUnit', type: 'model', vector: [1.0, 0.0, 0.0, 0.0],
+                   file_path: 'app/models/alpha_unit.rb')
+    server
+    expect(retriever.metadata_store).to be_a(Woods::Storage::MetadataStore::SQLite)
+    old_vectors = retriever.vector_store
+    write_artifact(identifier: 'BetaUnit', type: 'model', vector: [0.0, 1.0, 0.0, 0.0],
+                   file_path: 'app/models/beta_unit.rb')
+
+    response = call_tool('reload')
+
+    expect(response.error?).to be(true)
+    expect(response.meta).to include(error_code: :degraded_index, phase: 'reload', stores: %w[vector metadata])
+    expect(response.meta[:reason]).to include('restart woods-mcp')
+    expect(state.reload_failed?).to be(true)
+    expect(retriever.vector_store).to be(old_vectors)
+    expect(retriever.vector_store.each_entry.map { |id, _vector, _metadata| id }).to eq(['AlphaUnit'])
+  end
+
   describe 'failed reload preservation' do
     it 'keeps the old stores and reader and records a reload-phase degraded condition' do
       server
