@@ -589,7 +589,7 @@ RSpec.describe 'plugin hooks (#280)' do
         end
       end
 
-    it "reports unavailable evidence size with #{with_jq ? 'jq' : 'Ruby fallback'}" do
+      it "reports unavailable evidence size with #{with_jq ? 'jq' : 'Ruby fallback'}" do
         Dir.mktmpdir('woods-hook-unavailable') do |dir|
           make_app(dir)
           evidence = { reason: 'source_manifest_too_large', size_bytes: 20_000_000, limit_bytes: 16_777_216 }
