@@ -636,6 +636,10 @@ Direct, unaliased selection of a redacted column stays allowed: the output heade
 
 `console_sql` applies a stricter form of the same rule because arbitrary SQL can rename output headers. A protected identifier is accepted only as a direct, unaliased outer `SELECT` column; aliases, aggregates, predicates, CTE shapes, ordering/grouping uses, and an EAV value without its paired key are refused before adapter execution. Use `console_query` when a protected column must participate in a more complex structured query.
 
+The security correction refuses PostgreSQL Unicode-escaped identifiers in
+`console_sql` before execution. Use ordinary identifiers or standard quoted
+identifiers instead. This restriction does not change the structured query tools.
+
 `console_query`'s `having` is covered by the same oracle rule: an aggregate over a protected column (`MAX(amount) > ?`), a bare predicate on a redacted column (`salary > ?`), or a predicate on an EAV value column is refused, since repeated guesses reveal the protected value from whether a row is returned. EAV key predicates stay allowed so callers can select the rows whose paired values need redaction.
 
 **Ships with a curated credential default list** (`Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS`, 31 columns) covering Devise, Doorkeeper, Rodauth, has_secure_password, devise-two-factor, and common hand-rolled auth shapes: `password`, `password_digest`, `password_salt`, `encrypted_password`, `crypted_password`, `salt`, `otp_secret`, `encrypted_otp_secret`, `two_factor_secret`, `backup_codes`, `consumed_timestep`, `reset_password_token`, `confirmation_token`, `unlock_token`, `remember_token`, `invitation_token`, `access_token`, `refresh_token`, `auth_token`, `api_token`, `api_key`, `bearer_token`, `client_secret`, `webhook_secret`, `signing_secret`, `session_secret`, `private_key`, `encrypted_private_key`, `key_hash`, `token`, `secret`.

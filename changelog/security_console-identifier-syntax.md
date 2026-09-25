@@ -1,0 +1,1 @@
+- Refuse unsupported PostgreSQL escaped identifiers in raw Console SQL before query execution. Ordinary quoted identifiers, literal contents, and comments retain their existing behavior.
