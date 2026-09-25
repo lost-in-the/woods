@@ -19,6 +19,25 @@ RSpec.describe 'incremental runtime inputs' do
 
   let(:extractor) { Woods::Extractor.new(output_dir: @root.join('index')) }
 
+  describe 'hybrid runtime refresh selection' do
+    %w[app/models/queue_settings.rb lib/runtime_settings.rb].each do |path|
+      it "refreshes both runtime families after changing #{path} without recorded dependencies" do
+        changes = Woods::ChangeSet.new(paths: [path], root: @root)
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs, :serializers])
+      end
+    end
+
+    %w[config/locales/en.yml app/views/posts/index.html.erb config/queue.yml].each do |path|
+      it "keeps #{path} scoped to hybrid units already in its blast radius" do
+        changes = Woods::ChangeSet.new(paths: [path], root: @root)
+        job = Woods::ExtractedUnit.new(type: :job, identifier: 'NestedJob', file_path: 'app/models/container.rb')
+        extractor.dependency_graph.register(job)
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to be_empty
+        expect(extractor.send(:hybrid_discovery_keys, changes, ['NestedJob'])).to eq(Set[:jobs])
+      end
+    end
+  end
+
   %w[db/schema.rb db/structure.sql config/application.rb config/initializers/runtime.rb].each do |path|
     it "refuses #{path} before preparing an incremental payload in an unverified runtime" do
       expect(extractor).not_to receive(:prepare_incremental_run)

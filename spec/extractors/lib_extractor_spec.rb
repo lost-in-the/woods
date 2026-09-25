@@ -25,6 +25,11 @@ RSpec.describe Woods::Extractors::LibExtractor do
   # ── extract_all ──────────────────────────────────────────────────────
 
   describe '#extract_all' do
+    it 'names a behaviorful inline module from its declaration rather than its unmanaged directory' do
+      create_file('lib/extensions/trackable.rb', 'module Trackable; def self.track; :tracked; end; end')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['Trackable'])
+    end
+
     it 'discovers files in lib/' do
       create_file('lib/theme_upgrader.rb', <<~RUBY)
         class ThemeUpgrader

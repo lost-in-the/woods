@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'line_neutralizer'
+require 'prism'
 
 module Woods
   module Extractors
@@ -153,9 +154,11 @@ module Woods
           break if decl[2].split('::').any? { |seg| MIXIN_INNER_MODULES.include?(seg) }
 
           unless block_opener?(stripped)
-            # Self-terminated one-liner (`module Foo; end`): encloses nothing.
-            # Before the chain starts it is a sibling prelude (skip it);
-            # afterwards it is body content (chain complete).
+            # A completed module with a body owns its declaration even though
+            # it does not enclose the following lines. Only an empty completed
+            # module is a sibling prelude before the primary module starts.
+            return decl[2] if chain.empty? && completed_module_body?(stripped)
+
             break unless chain.empty?
 
             next
@@ -166,6 +169,19 @@ module Woods
 
         chain.empty? ? nil : chain.join('::')
       end
+
+      # Distinguish `module Foo; def call; end; end` from an empty namespace
+      # prelude without evaluating source or guessing from body text.
+      # @param source [String] one complete declaration line
+      # @return [Boolean] whether its module contains statements
+      def completed_module_body?(source)
+        parsed = Prism.parse(source)
+        return false unless parsed.success?
+
+        node = parsed.value.statements.body.first
+        node.is_a?(Prism::ModuleNode) && !node.body.nil?
+      end
+      private :completed_module_body?
 
       # Check if a line opens a new block (do...end, def...end, etc.).
       #

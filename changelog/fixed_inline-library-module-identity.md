@@ -1,0 +1,1 @@
+- Preserve the declared identity of behaviorful inline modules in unmanaged library directories, restoring typed lookup and source-reference edges. Empty namespace preludes remain ignored. Run a full extraction after upgrading to replace affected path-derived identities. (#639)
