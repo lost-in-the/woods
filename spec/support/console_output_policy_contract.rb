@@ -15,6 +15,8 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     create_fixture!(connection)
     server = build_server(connection)
     verify_common!(server)
+    verify_column_alias_lists!(server)
+    verify_column_alias_lists!(build_server(connection, redacted_key_values: []))
     dialect = Woods::Console::AdapterFamily.for(connection)
     verify_postgres!(connection, server) if dialect == :postgres
     verify_mysql!(connection, server) if dialect == :mysql
@@ -55,7 +57,7 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     end)
   end
 
-  def self.build_server(connection, blocked_tables: [TABLES[2]])
+  def self.build_server(connection, blocked_tables: [TABLES[2]], redacted_key_values: EAV)
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.console_blocked_tables = blocked_tables
     Woods.configuration.context_format = :json
@@ -65,7 +67,7 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
       model_validator: Woods::Console::ModelValidator.new(
         registry: models.to_h { |model| [model.name, model.column_names] }, table_names: tables
       ), connection: connection, safe_context: Woods::Console::SafeContext.new(connection: connection),
-      redacted_columns: ['secret'], redacted_key_values: EAV, read_tools_enabled: true,
+      redacted_columns: ['secret'], redacted_key_values: redacted_key_values, read_tools_enabled: true,
       model_tables: tables, model_reflections: { Preference.name => { 'user' => TABLES[0] } }
     )
   end
@@ -80,6 +82,25 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     assert_request!(server, 'console_sample', { model: User.name, columns: %w[id name secret], limit: 1 })
     assert_request!(server, 'console_recent', { model: Preference.name, order_by: 'name' })
     assert_request!(server, 'console_recent', { model: Preference.name, order_by: 'value' }, refused: true)
+  end
+
+  def self.verify_column_alias_lists!(server)
+    %w[selected count].each do |name|
+      sources = ["#{TABLES[0]} AS #{name}(row_id, label, detail)",
+                 "(SELECT * FROM #{TABLES[0]}) AS #{name}(row_id, label, detail)"]
+      statements = sources.map { |source| "SELECT label FROM #{source}" }
+      statements << "WITH #{name}(row_id, label, detail) AS (SELECT * FROM #{TABLES[0]}) " \
+                    "SELECT label FROM #{name}"
+      statements << "SELECT detail FROM #{TABLES[1]} #{name}(row_id, label, detail)"
+      statements << "SELECT label, detail FROM #{TABLES[1]} #{name}(row_id, label, detail)"
+      statements << "SELECT row_id FROM #{sources.first} WHERE label = 'ordinary'"
+      statements.each do |sql|
+        result = assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+        next if result.to_json.include?('cannot preserve redaction identity')
+
+        raise 'Column aliases were not refused by the redaction identity policy'
+      end
+    end
   end
 
   def self.verify_ordering!(server)

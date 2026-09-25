@@ -107,6 +107,26 @@ RSpec.describe 'Console typed EAV policy', :booted_app do
         expect(result.to_json).not_to include('synthetic-private-cell')
       end
 
+      ['TYPED_PREFERENCES', 'Typed_Preferences', 'TYPED_PREFERENCES AS selected'].each do |source|
+        it "protects typed keys through case-variant SQL source #{source}" do
+          columns = %w[key value].map { |column| @connection.quote_column_name(column) }.join(', ')
+          result = request(server, 'sql', sql: "SELECT #{columns} FROM #{source}")
+          expect(result.fetch('isError')).to be(false), result.inspect
+          expect(result.to_json).to include('[REDACTED]', 'ordinary-cell')
+          expect(result.to_json).not_to include('synthetic-private-cell')
+        end
+      end
+
+      it 'protects typed keys through an unquoted qualified case-variant source' do
+        schema = @connection.adapter_name == 'SQLite' ? 'MAIN' : @connection.current_database
+        schema = 'PUBLIC' if @connection.adapter_name == 'PostgreSQL'
+        columns = %w[key value].map { |column| @connection.quote_column_name(column) }.join(', ')
+        result = request(server, 'sql', sql: "SELECT #{columns} FROM #{schema}.TYPED_PREFERENCES")
+        expect(result.fetch('isError')).to be(false), result.inspect
+        expect(result.to_json).to include('[REDACTED]', 'ordinary-cell')
+        expect(result.to_json).not_to include('synthetic-private-cell')
+      end
+
       it 'keeps stacked table-specific patterns independent' do
         result = request(build_server(spelling, stacked: true), 'query', model: 'OtherPreference',
                                                                          select: %w[name value])
