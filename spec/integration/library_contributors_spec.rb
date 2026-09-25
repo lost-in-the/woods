@@ -19,3 +19,18 @@ RSpec.describe 'Library contributor publication', :booted_app do
     end
   end
 end
+
+RSpec.describe 'Library declaration identity', :booted_app do
+  %w[inline multiline].each do |format|
+    it "publishes distinct #{format} nested classes and their source-reference edges" do
+      out, err, status = Open3.capture3(RbConfig.ruby, '-Ilib', 'spec/fixtures/library_identity/boot.rb', format)
+      expect(status).to be_success, "#{out}\n#{err}"
+      result = JSON.parse(out.lines.last)
+      expect(result.fetch('identifiers')).to contain_exactly('Acme', 'Acme::Error', 'Templates')
+      expect(result.fetch('error_parent')).to eq('StandardError')
+      expect(result.fetch('dependencies')).to include(
+        include('type' => 'lib', 'target' => 'Acme::Error', 'via' => 'code_reference')
+      )
+    end
+  end
+end
