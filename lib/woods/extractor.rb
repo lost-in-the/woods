@@ -2909,35 +2909,16 @@ module Woods
         end
     end
 
-    # Runtime inventories catch newly nested classes outside the conventional
-    # directories. Their definition locations decide whether a changed Ruby
-    # file needs a full hybrid pass; unrelated edits do not extract the family.
-    # The old graph covers removals and dependency changes after Rails reload.
+    # Runtime metadata can depend on Ruby outside a class's definition or its
+    # recorded graph edges (for example, queue_as Settings::QUEUE). A Ruby edit
+    # therefore refreshes both complete hybrid inventories after Rails reload.
+    # Non-Ruby batches retain the narrower pre-change graph selection.
     def hybrid_discovery_keys(change_set, affected_ids)
-      keys = affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
-                         .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
-                         .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
-      paths = change_set.absolute_paths.select { |path| path.end_with?('.rb') }.to_set
-      return keys if paths.empty?
+      return HYBRID_DISCOVERY_EXTRACTORS.to_set if change_set.absolute_paths.any? { |path| path.end_with?('.rb') }
 
-      dispatcher = PathDispatcher.new
-      paths.each do |path|
-        keys.merge(dispatcher.file_rules_for(change_set.relativize(path)).map(&:extractor_key)
-                             .intersection(HYBRID_DISCOVERY_EXTRACTORS))
-      end
-      (HYBRID_DISCOVERY_EXTRACTORS - keys.to_a).each do |key|
-        consumer = extractor_for(key)
-        next unless consumer
-
-        classes = checked_extraction(key, consumer) { consumer.discoverable_classes }
-        next unless Array(classes).any? do |klass|
-          location = Object.const_source_location(klass.name)&.first
-          location && paths.include?(File.expand_path(location, Rails.root))
-        end
-
-        keys.add(key)
-      end
-      keys
+      affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
+                  .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
+                  .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
     end
 
     # Re-extract every file-based unit defined by the changed paths that still

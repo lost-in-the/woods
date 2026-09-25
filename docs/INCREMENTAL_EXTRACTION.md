@@ -270,10 +270,11 @@ step before it.
    there is no path-to-constant guessing.
 
    **Unreleased after 2.0.0:** jobs and serializers reconcile their combined
-   file/runtime inventory only when their conventional paths change, their units
-   are in the blast radius, or a changed Ruby file defines one of their current
-   runtime classes. This catches nested classes created outside the conventional
-   directories without re-extracting both families for unrelated Ruby edits.
+   file/runtime inventory whenever a Ruby source path changes. Resolved metadata
+   can depend on another file without a recorded graph edge, such as a job's
+   `queue_as Settings::QUEUE`. Non-Ruby batches refresh only hybrid families
+   already reached by the pre-change dependency graph. The application must have
+   loaded the changed runtime before extraction, through a fresh boot or reload.
 
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.

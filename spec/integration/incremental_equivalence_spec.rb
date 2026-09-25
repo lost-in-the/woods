@@ -1471,16 +1471,93 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
-  it 'keeps an unrelated service edit out of hybrid family extraction' do
-    path = 'app/services/signature_service.rb'
+  it 'keeps an unrelated locale edit out of hybrid family extraction' do
+    path = 'config/locales/hybrid_control.yml'
     index = full_extraction
-    write_file(path, "#{File.read(app_path(path), encoding: 'UTF-8')}\n# independent edit\n")
+    write_file(path, "en:\n  hybrid_control: independent edit\n")
     expect_any_instance_of(Woods::Extractors::JobExtractor).not_to receive(:extract_all)
     expect_any_instance_of(Woods::Extractors::SerializerExtractor).not_to receive(:extract_all)
 
     touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
 
-    expect(touched).to contain_exactly('SignatureService')
+    expect(touched).not_to be_empty
+  end
+
+  it 'publishes behaviorful inline library identities and source references in every extraction mode' do
+    require 'woods/mcp/index_reader'
+    caller_path = write_file('app/models/inline_library_caller.rb', <<~RUBY)
+      class InlineLibraryCaller
+        def call; InlineLibrary.perform; end
+      end
+    RUBY
+    path = write_file('lib/extensions/inline_library.rb', 'module InlineLibrary; def self.perform; :full; end; end')
+    [caller_path, path].each { |relative| load app_path(relative) }
+    expect(Woods::Extractors::LibExtractor.new.send(:managed_constant_path, app_path(path))).to be_nil
+    index = full_extraction
+    reader = Woods::MCP::IndexReader.new(index)
+    writer = Woods::Extractor.new(output_dir: index)
+
+    %i[full incremental refresh].each do |mode|
+      unless mode == :full
+        write_file(path, "module InlineLibrary; def self.perform; :#{mode}; end; end")
+        load app_path(path)
+        mode == :incremental ? writer.extract_changed([path]) : writer.refresh(:libs)
+        writer.raise_on_publication_failure!
+      end
+      expect(reader.find_unit('InlineLibrary', type: 'lib').fetch('source_code')).to include(":#{mode}")
+      expect(reader.find_unit('Extensions::InlineLibrary', type: 'lib')).to be_nil
+      expect(reader.find_unit('InlineLibraryCaller', type: 'poro').fetch('dependencies')).to include(
+        'type' => 'lib', 'target' => 'InlineLibrary', 'via' => 'code_reference'
+      )
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  ensure
+    %i[InlineLibrary InlineLibraryCaller].each do |name|
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+    end
+  end
+
+  it 'keeps inline namespace siblings and their source references distinct in every extraction mode' do
+    require 'woods/mcp/index_reader'
+    caller_path = write_file('app/models/inline_gateway_caller.rb', <<~RUBY)
+      class InlineGatewayCaller
+        def call; [InlineGateway::Refundable.call, InlineGateway::Chargeable.call]; end
+      end
+    RUBY
+    paths = %w[Refundable Chargeable].to_h do |name|
+      path = write_file("lib/inline_gateway/#{name.underscore}.rb",
+                        "module InlineGateway; module #{name}; def self.call; :full; end; end; end")
+      load app_path(path)
+      [name, path]
+    end
+    load app_path(caller_path)
+    index = full_extraction
+    reader = Woods::MCP::IndexReader.new(index)
+    writer = Woods::Extractor.new(output_dir: index)
+
+    %i[full incremental refresh].each do |mode|
+      unless mode == :full
+        paths.each do |name, path|
+          write_file(path, "module InlineGateway; module #{name}; def self.call; :#{mode}; end; end; end")
+          load app_path(path)
+        end
+        mode == :incremental ? writer.extract_changed(paths.values) : writer.refresh(:libs)
+        writer.raise_on_publication_failure!
+      end
+      expect(reader.find_unit('InlineGateway', type: 'lib')).to be_nil
+      paths.each_key do |name|
+        identifier = "InlineGateway::#{name}"
+        expect(reader.find_unit(identifier, type: 'lib').fetch('source_code')).to include(":#{mode}")
+        expect(reader.find_unit('InlineGatewayCaller', type: 'poro').fetch('dependencies')).to include(
+          'type' => 'lib', 'target' => identifier, 'via' => 'code_reference'
+        )
+      end
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  ensure
+    %i[InlineGateway InlineGatewayCaller].each do |name|
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+    end
   end
 
   describe 'class-discovered job nested in a model file (N-1)' do

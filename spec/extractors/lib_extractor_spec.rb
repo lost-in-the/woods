@@ -25,6 +25,33 @@ RSpec.describe Woods::Extractors::LibExtractor do
   # ── extract_all ──────────────────────────────────────────────────────
 
   describe '#extract_all' do
+    it 'keeps sibling inline modules distinct through namespace-only wrappers' do
+      %w[Refundable Chargeable].each do |name|
+        create_file("lib/gateway/#{name.underscore}.rb",
+                    "module Gateway; module #{name}; def self.call; :ok; end; end; end")
+      end
+      expect(described_class.new.extract_all.map(&:identifier)).to contain_exactly(
+        'Gateway::Refundable', 'Gateway::Chargeable'
+      )
+    end
+
+    it 'keeps an inline owner with its own behavior and mixin plumbing' do
+      create_file('lib/extensions/trackable.rb', <<~RUBY)
+        module Trackable; module ClassMethods; def track; end; end; def self.call; :ok; end; end
+      RUBY
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['Trackable'])
+    end
+
+    it 'keeps an inline module owner with a rescue body' do
+      create_file('lib/extensions/owner.rb', 'module Owner; :ready; rescue; :fallback; end')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['Owner'])
+    end
+
+    it 'names a behaviorful inline module from its declaration rather than its unmanaged directory' do
+      create_file('lib/extensions/trackable.rb', 'module Trackable; def self.track; :tracked; end; end')
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['Trackable'])
+    end
+
     it 'discovers files in lib/' do
       create_file('lib/theme_upgrader.rb', <<~RUBY)
         class ThemeUpgrader
