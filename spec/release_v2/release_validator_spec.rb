@@ -195,6 +195,7 @@ RSpec.describe 'release validation' do
     )
     expect(outputs.lines(chomp: true)).to contain_exactly(
       'package-spec=spec/integration/packaged_gem_spec.rb',
+      'package-mcp-floor=',
       'maintenance-release=false',
       "release-sha=#{release_sha}",
       'ci-run-id=12345',

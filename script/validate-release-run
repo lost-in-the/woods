@@ -198,6 +198,7 @@ begin
 
   File.open(output_path, 'a') do |output|
     output.puts "package-spec=#{ReleaseProfile.package_spec(tag)}"
+    output.puts "package-mcp-floor=#{ReleaseProfile.package_mcp_floor(tag)}"
     output.puts "maintenance-release=#{ReleaseProfile.maintenance?(tag)}"
     output.puts "release-sha=#{release_sha}"
     output.puts "ci-run-id=#{run_id}"

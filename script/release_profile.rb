@@ -30,6 +30,13 @@ module ReleaseProfile
     'lint', 'coverage', 'security', 'build'
   ].freeze
 
+  V1_PATCH_TAG = 'v1.6.4'
+  V1_PATCH_BRANCH = 'release/1.6.4'
+  V1_PATCH_BASE = '60d6b7c4a3ddc421073f1fb57a7249eccb77826e'
+  # Disabled until a separate reviewed main change pins the prepared candidate.
+  V1_PATCH_APPROVED_SHA = nil
+  V1_PATCH_JOBS = (MAINTENANCE_JOBS + ['Maintenance security backends']).freeze
+
   V2_MAINTENANCE_TAG = 'v2.0.1'
   V2_MAINTENANCE_BRANCH = 'release/2.0.1'
   V2_MAINTENANCE_BASE = '838252a79b89846937be6dbd21e283fa7cad897f'
@@ -47,7 +54,11 @@ module ReleaseProfile
     when MAINTENANCE_TAG
       { branch: MAINTENANCE_BRANCH, base: MAINTENANCE_BASE, base_tag: 'v1.6.2',
         approved_sha: MAINTENANCE_APPROVED_SHA, exact_ci_jobs: MAINTENANCE_JOBS,
-        package_spec: 'spec/integration/maintenance_packaged_gem_spec.rb' }
+        package_spec: 'spec/integration/maintenance_packaged_gem_spec.rb', package_mcp_floor: '0.23.0' }
+    when V1_PATCH_TAG
+      { branch: V1_PATCH_BRANCH, base: V1_PATCH_BASE, base_tag: 'v1.6.3',
+        approved_sha: V1_PATCH_APPROVED_SHA, exact_ci_jobs: V1_PATCH_JOBS,
+        package_spec: 'spec/integration/maintenance_packaged_gem_spec.rb', package_mcp_floor: '0.23.0' }
     when V2_MAINTENANCE_TAG
       { branch: V2_MAINTENANCE_BRANCH, base: V2_MAINTENANCE_BASE, base_tag: 'v2.0.0',
         approved_sha: V2_MAINTENANCE_APPROVED_SHA }
@@ -85,5 +96,9 @@ module ReleaseProfile
 
   def package_spec(tag)
     maintenance_profile(tag)&.fetch(:package_spec, nil) || 'spec/integration/packaged_gem_spec.rb'
+  end
+
+  def package_mcp_floor(tag)
+    maintenance_profile(tag)&.fetch(:package_mcp_floor, '') || ''
   end
 end

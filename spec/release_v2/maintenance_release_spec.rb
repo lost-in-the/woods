@@ -12,6 +12,7 @@ RSpec.describe 'trusted maintenance release profile' do
   let(:release_tag) { 'v1.6.3' }
   let(:base_version) { '1.6.2' }
   let(:profile_prefix) { 'MAINTENANCE' }
+  let(:maintenance_jobs) { ReleaseProfile::MAINTENANCE_JOBS }
 
   def git(repository, *args)
     output, status = Open3.capture2e('git', *args, chdir: repository)
@@ -94,10 +95,11 @@ RSpec.describe 'trusted maintenance release profile' do
   end
 
   it 'does not select maintenance requirements for any other tag or caller environment' do
-    %w[v1.6.2 v1.6.4 v2.0.0.beta3].each do |tag|
+    %w[v1.6.2 v1.6.5 v2.0.0.beta3].each do |tag|
       expect(ReleaseProfile.maintenance?(tag)).to be(false)
       expect(ReleaseProfile.branch(tag)).to eq('main')
       expect(ReleaseProfile.package_spec(tag)).to eq('spec/integration/packaged_gem_spec.rb')
+      expect(ReleaseProfile.package_mcp_floor(tag)).to eq('')
     end
     expect(ReleaseProfile.package_spec('v1.6.3')).to eq('spec/integration/maintenance_packaged_gem_spec.rb')
   end
@@ -226,7 +228,7 @@ RSpec.describe 'trusted maintenance release profile' do
   end
 
   def validate_run(repository, candidate, jobs: nil, sha: candidate, artifact: true)
-    jobs ||= ReleaseProfile::MAINTENANCE_JOBS.map { |name| { 'name' => name, 'conclusion' => 'success' } }
+    jobs ||= maintenance_jobs.map { |name| { 'name' => name, 'conclusion' => 'success' } }
     responses = run_responses(sha, jobs, artifact)
     fake_bin = write_fake_api(repository)
     output = File.join(repository, '.git/output')
@@ -245,6 +247,7 @@ RSpec.describe 'trusted maintenance release profile' do
       expect(status).to be_success, stderr
       expect(outputs).to include('package-spec=spec/integration/maintenance_packaged_gem_spec.rb')
       expect(outputs).to include('maintenance-release=true')
+      expect(outputs).to include('package-mcp-floor=0.23.0')
       expect(outputs).to include("release-sha=#{candidate}", 'artifact-id=900')
     end
   end
@@ -294,6 +297,120 @@ RSpec.describe 'trusted maintenance release profile' do
     end
   end
 
+  context 'with the disabled 1.6.4 maintenance profile' do
+    let(:release_tag) { 'v1.6.4' }
+    let(:base_version) { '1.6.3' }
+    let(:profile_prefix) { 'V1_PATCH' }
+    let(:maintenance_jobs) { ReleaseProfile::MAINTENANCE_JOBS + ['Maintenance security backends'] }
+
+    it 'binds only the final 1.6.4 tag to its branch and immutable published 1.6.3 base' do
+      expect(ReleaseProfile.branch(release_tag)).to eq('release/1.6.4')
+      expect(ReleaseProfile.base(release_tag)).to eq('60d6b7c4a3ddc421073f1fb57a7249eccb77826e')
+      expect(ReleaseProfile.base_tag(release_tag)).to eq('v1.6.3')
+      expect(ReleaseProfile::V1_PATCH_APPROVED_SHA).to be_nil
+      expect(ReleaseProfile.exact_ci_jobs(release_tag)).to eq(maintenance_jobs)
+      expect(ReleaseProfile.exact_ci_jobs('v1.6.3')).not_to include('Maintenance security backends')
+      expect(ReleaseProfile.package_mcp_floor(release_tag)).to eq('0.23.0')
+      %w[v1.6.4.alpha v1.6.4.rc1 v1.6.5].each do |tag|
+        expect(ReleaseProfile.maintenance?(tag)).to be(false)
+        expect(ReleaseProfile.branch(tag)).to eq('main')
+      end
+    end
+
+    it 'accepts only a pinned candidate and emits the trusted legacy package spec and SDK floor' do
+      fixture do |repository, _remote, candidate, base|
+        %w[validate-release verify-release-tag].each do |script|
+          _stdout, stderr, status = validate(repository, candidate, script: script)
+          expect(status).to be_success, stderr
+          _stdout, stderr, status = validate(repository, base, script: script)
+          expect(status).not_to be_success
+          expect(stderr).to include('differs from the approved maintenance SHA')
+        end
+        _stdout, stderr, status, outputs = validate_run(repository, candidate)
+        expect(status).to be_success, stderr
+        expect(outputs).to include('package-spec=spec/integration/maintenance_packaged_gem_spec.rb',
+                                   'package-mcp-floor=0.23.0', 'maintenance-release=true')
+        FileUtils.rm_f(File.join(repository, '.git/output'))
+        _stdout, stderr, status, outputs = validate_run(repository, candidate, sha: base)
+        expect(status).not_to be_success
+        expect(stderr).to include('differs from the approved maintenance SHA')
+        expect(outputs).to be_empty
+      end
+    end
+
+    it 'keeps all three validators disabled until its own SHA is approved' do
+      fixture do |repository, _remote, candidate, _base|
+        path = File.join(repository, 'script/release_profile.rb')
+        File.write(path, File.read(path).sub(/V1_PATCH_APPROVED_SHA = '[0-9a-f]{40}'/,
+                                             'V1_PATCH_APPROVED_SHA = nil'))
+        git(repository, 'add', '.')
+        git(repository, 'commit', '-m', 'disable 1.6.4 fixture profile')
+        %w[validate-release verify-release-tag].each do |script|
+          _stdout, stderr, status = validate(repository, candidate, script: script)
+          expect(status).not_to be_success
+          expect(stderr).to include('disabled until its prepared SHA is approved')
+        end
+        _stdout, stderr, status, outputs = validate_run(repository, candidate)
+        expect(status).not_to be_success
+        expect(stderr).to include('disabled until its prepared SHA is approved')
+        expect(outputs).to be_empty
+      end
+    end
+
+    it 'requires every legacy CI row and refuses a moved branch or tag after validation' do
+      fixture do |repository, remote, candidate, base|
+        jobs = maintenance_jobs.drop(1).map { |name| { 'name' => name, 'conclusion' => 'success' } }
+        _stdout, stderr, status, outputs = validate_run(repository, candidate, jobs: jobs)
+        expect(status).not_to be_success
+        expect(stderr).to include('exactly one successful maintenance job')
+        expect(outputs).to be_empty
+        _stdout, stderr, status = validate(repository, candidate)
+        expect(status).to be_success, stderr
+        git(remote, 'update-ref', 'refs/heads/release/1.6.4', base)
+        _stdout, stderr, status = validate(repository, candidate, extra: { 'RELEASE_MAIN_REF' => 'HEAD' })
+        expect(status).not_to be_success
+        expect(stderr).to include('not reachable')
+        git(remote, 'update-ref', 'refs/heads/release/1.6.4', candidate)
+        git(remote, 'update-ref', 'refs/tags/v1.6.4', base)
+        %w[validate-release verify-release-tag].each do |script|
+          _stdout, stderr, status = validate(repository, candidate, script: script)
+          expect(status).not_to be_success
+          expect(stderr).to include('not release SHA')
+        end
+      end
+    end
+
+    it 'requires exactly one successful 1.6.4 backend job beyond the unchanged legacy rows' do
+      fixture do |repository, _remote, candidate, _base|
+        %w[missing skipped failure duplicate].each do |condition|
+          jobs = ReleaseProfile::MAINTENANCE_JOBS.map { |name| { 'name' => name, 'conclusion' => 'success' } }
+          backend = { 'name' => 'Maintenance security backends', 'conclusion' => 'success' }
+          case condition
+          when 'duplicate' then jobs.push(backend, backend.dup)
+          when 'skipped', 'failure' then jobs << backend.merge('conclusion' => condition)
+          end
+          _stdout, stderr, status, outputs = validate_run(repository, candidate, jobs: jobs)
+          expect(status).not_to be_success
+          expect(stderr).to include('exactly one successful maintenance job "Maintenance security backends"')
+          expect(outputs).to be_empty
+        end
+      end
+    end
+
+    it 'refuses ancestry outside the fixed 1.6.3 base' do
+      fixture do |repository, _remote, candidate, _base|
+        path = File.join(repository, 'script/release_profile.rb')
+        File.write(path, File.read(path).sub(/V1_PATCH_BASE = '[0-9a-f]{40}'/,
+                                             "V1_PATCH_BASE = '#{git(repository, 'rev-parse', 'HEAD')}'"))
+        git(repository, 'add', '.')
+        git(repository, 'commit', '-m', 'invalid 1.6.4 base fixture')
+        _stdout, stderr, status = validate(repository, candidate)
+        expect(status).not_to be_success
+        expect(stderr).to include('does not descend from approved v1.6.3 base')
+      end
+    end
+  end
+
   context 'with the disabled 2.0.1 maintenance profile' do
     let(:release_tag) { 'v2.0.1' }
     let(:base_version) { '2.0.0' }
@@ -326,6 +443,7 @@ RSpec.describe 'trusted maintenance release profile' do
         _stdout, stderr, status, outputs = validate_run(repository, candidate, jobs: v2_jobs)
         expect(status).to be_success, stderr
         expect(outputs).to include('package-spec=spec/integration/packaged_gem_spec.rb', 'maintenance-release=true')
+        expect(outputs.lines(chomp: true)).to include('package-mcp-floor=')
       end
     end
 

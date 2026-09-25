@@ -2,12 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, release/2.0.1]
+    branches: [main, release/1.6.4, release/2.0.1]
   # Also run on the merged state of the default branch. Triggering on
   # `pull_request` alone meant `main` itself was never tested: a bad merge
   # resolution, or a direct push, went green purely by absence of a run (#220).
   push:
-    branches: [main, release/2.0.1]
+    branches: [main, release/1.6.4, release/2.0.1]
     tags: ['v*']
 
 # Least-privilege default: CI only needs to read the checkout.
