@@ -33,7 +33,15 @@ require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
 begin
-  allowed_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '').split(',').map(&:strip).reject(&:empty?)
+  raw_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '')
+  unless raw_origins.valid_encoding?
+    invalid_entry = raw_origins.b.split(',').find do |entry|
+      !entry.dup.force_encoding(raw_origins.encoding).valid_encoding?
+    end
+    label = invalid_entry.to_s.b.byteslice(0, 160).inspect
+    raise Woods::ConfigurationError, "Invalid WOODS_MCP_HTTP_ALLOWED_ORIGINS entry #{label}: invalid encoding"
+  end
+  allowed_origins = raw_origins.split(',').map(&:strip).reject(&:empty?)
   begin
     origin_policy = Woods::MCP::OriginPolicy.new(allowed_origins: allowed_origins)
   rescue ArgumentError => e

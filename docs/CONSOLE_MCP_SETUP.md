@@ -551,6 +551,13 @@ Redaction is defense-in-depth — prefer not storing plaintext secrets in databa
 
 ### `console_redacted_key_values`
 
+**Unreleased security correction:** when column redaction or key-value patterns
+are configured, raw SQL must not rename source columns through a relation or CTE
+column-name list. Use explicit, unaliased source columns or the structured Console
+tools. Typed key matching retains model information when source table spelling
+varies in case, including qualified table names. The configured sensitive key
+*values* still match exactly; configure their raw or cast spelling as appropriate.
+
 **Unreleased maintenance correction after 1.6.3:** SQL and structured selections
 must preserve protected column identity. Aliases, aggregates, EAV values without
 the matching key from the same source, and ambiguous multi-source EAV reads can

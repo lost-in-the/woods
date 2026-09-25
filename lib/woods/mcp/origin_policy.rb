@@ -95,7 +95,8 @@ module Woods
       end
 
       def parsed_origin(origin)
-        return unless origin.is_a?(String) && !origin.match?(/[[:space:][:cntrl:]]/)
+        return unless origin.is_a?(String) && origin.valid_encoding? && origin.ascii_only?
+        return if origin.match?(/[[:space:][:cntrl:]]/)
 
         parsed = URI.parse(origin)
         return unless %w[http https].include?(parsed.scheme&.downcase)

@@ -48,6 +48,14 @@ Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request
 
 ### Browser origins (DNS rebinding defense)
 
+**Unreleased diagnostic correction:** invalid origin encodings also refuse before
+binding HTTP. `woods-mcp-http` exits 2 with one bounded `ConfigurationError`
+message naming the invalid entry; re-enter that origin using an ASCII hostname
+(or its Punycode form). No allowlist keeps the existing defaults. Explicit entries
+are literal origins, not wildcard patterns. Retain the actual request Host through
+a reverse proxy; forwarded headers do not replace it. When authentication is
+configured, requests without Host still pass through bearer authentication.
+
 A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` header is outside an allow-list. Requests without an `Origin` header (curl or server-to-server clients) still require an allowed Host and valid bearer token when authentication is enabled.
 
 | Scenario                         | `WOODS_MCP_HTTP_ALLOWED_ORIGINS`  | Origins accepted                                         |

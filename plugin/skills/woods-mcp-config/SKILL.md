@@ -274,3 +274,11 @@ The `cwd` field in MCP config requires an absolute path on most clients:
 **Container name mismatch**
 
 Docker Compose container names include the project name and replica index. Check with `docker ps --format '{{.Names}}'` and copy the exact name shown.
+
+### HTTP configuration diagnostics on security-patch candidates
+
+Check the installed revision before expecting this unreleased correction. Invalid
+origin settings, including invalidly encoded entries, refuse at boot. The HTTP
+executable reports one configuration diagnostic and exits 2. Correct the named
+entry and restart; keep authentication and origin checks enabled. Follow the
+installed revision's canonical `docs/MCP_HTTP_TRANSPORT.md` for accepted origins.
