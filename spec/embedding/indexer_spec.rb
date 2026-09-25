@@ -1747,6 +1747,33 @@ RSpec.describe Woods::Embedding::Indexer do
       File.write(File.join(output_dir, 'user.json'), JSON.generate(unit_data))
     end
 
+    [false, true].each do |incremental|
+      it "purges deleted vectorless SQLite metadata, incremental=#{incremental}" do
+        require 'woods/storage/metadata_store'
+        metadata = Woods::Storage::MetadataStore::SQLite.new(database: File.join(output_dir, 'metadata.sqlite3'))
+        build = lambda do
+          described_class.new(provider: provider, text_preparer: text_preparer, vector_store: vector_store,
+                              metadata_store: metadata, output_dir: output_dir)
+        end
+        %w[Keep1 Keep2 Keep3].each do |id|
+          File.write(File.join(output_dir, "#{id}.json"), JSON.generate(unit_data.merge('identifier' => id)))
+        end
+        hollow = File.join(output_dir, 'hollow.json')
+        File.write(hollow,
+                   JSON.generate(unit_data.merge('identifier' => 'Hollow', 'source_code' => '',
+                                                 'source_hash' => 'empty')))
+        build.call.index_all
+        expect(metadata.find('Hollow')).not_to be_nil
+        expect(vector_store.entries).not_to have_key('Hollow')
+        File.unlink(hollow)
+
+        incremental ? build.call.index_incremental : build.call.index_all
+
+        expect(metadata.find('Hollow')).to be_nil
+        expect(metadata.all_identifiers).to contain_exactly('User', 'Keep1', 'Keep2', 'Keep3')
+      end
+    end
+
     it 'is reconcilable but not persistable' do
       expect(indexer.send(:reconcilable?)).to be(true)
       expect(indexer.send(:persistable?)).to be(false)
