@@ -110,6 +110,7 @@ module Woods
 
         normalized = sql.strip
         check_balanced_delimiters!(normalized)
+        check_supported_identifier_syntax!(normalized)
         SqliteReadGuard.validate!(normalized) if @dialect == :sqlite
 
         # Reject multiple statements (semicolons not inside string literals)
@@ -168,6 +169,21 @@ module Woods
             end
           end
         end
+      end
+
+      # The policy scanners retain ordinary quoted identifiers but do not
+      # decode PostgreSQL Unicode escapes. Refuse that grammar before the
+      # adapter can resolve an identifier differently from the policy gates.
+      def check_supported_identifier_syntax!(sql)
+        return if @dialect && @dialect != :postgres
+
+        stripped = SqlNoiseStripper.strip_noise(sql, dialect: :postgres)
+        tokens = stripped.scan(/"(?:[^"]|"")*"|(?<![A-Za-z0-9_$\u0080-\u{10ffff}])[uU]&"/)
+        return unless tokens.any? { |token| token.start_with?('U&"', 'u&"') }
+
+        raise SqlValidationError,
+              'Rejected: PostgreSQL escaped identifiers are unsupported; use ordinary quoted identifiers ' \
+              'or a structured Console tool.'
       end
 
       def check_balanced_delimiters!(sql)

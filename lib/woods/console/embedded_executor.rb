@@ -761,7 +761,9 @@ module Woods
         model_name = params['model']
         relation = model.all
 
-        relation = relation.select(*validated_select(params['select'], model_name)) if params['select']
+        # Keep execution and typed source inference on the same validated projection.
+        params['select'] = validated_select(params['select'], model_name) if params['select']
+        relation = relation.select(*params['select']) if params['select']
         relation = relation.joins(params['joins'].map(&:to_sym)) if params['joins']&.any?
         relation = apply_scope(relation, params['scope'], model_name: model_name)
         relation = relation.group(*validated_columns(params['group_by'], model_name)) if params['group_by']&.any?

@@ -865,6 +865,10 @@ structured Tier-1 reads remain available on other adapters. EAV policy compares
 both stored and cast key spellings and also protects predicates and ordering.
 Use explicit scalar projections or structured reads when a query is refused.
 
+PostgreSQL Unicode-escaped identifiers are refused by `console_sql` before
+execution. Use ordinary identifiers or standard quoted identifiers instead;
+structured query tools are unaffected by this syntax restriction.
+
 HTTP origins are validated once at startup; malformed explicit entries now name
 the offending value and refuse boot. Correct those entries and restart instead
 of disabling guards. Explicit lists replace default browser origins, while unset
