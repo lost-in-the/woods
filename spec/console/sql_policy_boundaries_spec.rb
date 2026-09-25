@@ -217,6 +217,55 @@ RSpec.describe 'Console SQL policy boundaries' do
     end
   end
 
+  context 'with relation column alias lists' do
+    [
+      'SELECT label FROM users AS selected(row_id, label, detail)',
+      'SELECT label FROM users AS count(row_id, label, detail)',
+      'SELECT label FROM users count(row_id, label, detail)',
+      'SELECT label FROM "public"."users" AS "selected"("row_id", "label", "detail")',
+      'SELECT label FROM ONLY(users) AS count(row_id, label, detail)',
+      'WITH count(row_id, label, detail)AS(SELECT * FROM users) SELECT label FROM count',
+      'SELECT label FROM (SELECT * FROM users) AS count(row_id, label, detail)',
+      'WITH selected(row_id, label, detail) AS (SELECT * FROM users) SELECT label FROM selected',
+      'WITH count(row_id, label, detail) AS (SELECT * FROM users) SELECT label FROM count',
+      'SELECT row_id FROM users count(row_id, label, detail) WHERE label = \'ordinary\'',
+      'SELECT detail FROM preferences count(row_id, label, detail)',
+      'SELECT label, detail FROM preferences count(row_id, label, detail)'
+    ].each_with_index do |sql, index|
+      it "refuses renamed relation columns through the identity policy in case #{index + 1}" do
+        result = request(sql)
+        expect(result).to include('ok' => false, 'error_type' => 'validation')
+        expect(result['error']).to include('cannot preserve redaction identity')
+        expect(connection).not_to have_received(:select_all)
+      end
+    end
+
+    it 'enforces column-only redaction without relying on an EAV rule' do
+      allow(context).to receive(:redacted_key_values).and_return([])
+      result = request('WITH count(row_id, label, detail) AS (SELECT * FROM users) SELECT label FROM count')
+      expect(result['error']).to include('cannot preserve redaction identity')
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'enforces EAV-only redaction without relying on a protected column name' do
+      allow(context).to receive(:redacted_columns).and_return([])
+      result = request('SELECT label, detail FROM preferences count(row_id, label, detail)')
+      expect(result['error']).to include('cannot preserve redaction identity')
+      expect(connection).not_to have_received(:select_all)
+    end
+
+    it 'leaves alias lists to the SQL validator when no redaction is configured' do
+      allow(context).to receive(:redacted_columns).and_return([])
+      allow(context).to receive(:redacted_key_values).and_return([])
+      expect(request('SELECT label FROM users count(row_id, label, detail)')['ok']).to be(true)
+    end
+
+    it 'preserves ordinary scalar functions and CTEs without column alias lists' do
+      expect(request('SELECT id, coalesce(id) AS label FROM users')['ok']).to be(true)
+      expect(request('WITH selected AS (SELECT id FROM users) SELECT id FROM selected')['ok']).to be(true)
+    end
+  end
+
   it 'refuses unrecognized PostgreSQL result types before returning their values' do
     allow(connection).to receive(:select_all).and_return(
       double(columns: ['opaque'], rows: [['synthetic opaque']], column_types: { 'opaque' => double(type: nil) })
