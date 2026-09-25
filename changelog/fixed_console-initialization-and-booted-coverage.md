@@ -1,1 +1,0 @@
-- Allow Console middleware construction before Woods configuration is initialized, and run each booted Console contract in its own process across the supported Rails CI matrix.

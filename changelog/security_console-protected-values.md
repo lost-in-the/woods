@@ -1,1 +1,0 @@
-- Preserve configured Console data protections across database adapters, typed attributes, and SQL result shapes.
