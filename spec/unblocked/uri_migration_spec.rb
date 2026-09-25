@@ -73,6 +73,41 @@ RSpec.describe 'Unblocked scoped URI migration' do
     File.write(manifest_path, JSON.generate('version' => 1, 'collection_id' => 'ours', 'documents' => owned))
   end
 
+  it 'ignores foreign inventory documents without usable URIs' do
+    remote['no-uri'] = { 'id' => 'foreign-1', 'collectionId' => 'theirs' }
+    remote['nil-uri'] = { 'id' => 'foreign-2', 'uri' => nil, 'collectionId' => 'theirs' }
+    remote['blank-uri'] = { 'id' => 'foreign-3', 'uri' => '', 'collectionId' => 'theirs' }
+
+    expect(run_sync).to include(complete: true, synced: 12, errors: [])
+    expect(client).not_to have_received(:delete_document)
+  end
+
+  it 'purges vanished owned v1 entries in the active ref while keeping the mass-delete guard' do
+    seed_legacy
+    units.pop
+
+    expect(run_sync).to include(complete: true, deleted: 1, errors: [])
+    expect(remote.size).to eq(11)
+    seed_legacy
+    units.slice!(0, 5)
+    result = run_sync
+    expect(result[:complete]).to be(false)
+    expect(result[:errors].join).to include('mass-deletion guard')
+    expect(remote.size).to eq(11)
+  end
+
+  it 'reports unresolved legacy ownership on another ref with an explicit migration remedy' do
+    seed_legacy
+    reader.branch = 'develop'
+
+    result = run_sync
+
+    expect(result[:complete]).to be(false)
+    expect(result[:errors].join).to include('UNBLOCKED_MIGRATE_FROM_REF', 'legacy')
+    expect(client).not_to have_received(:delete_document)
+    expect(run_sync(migrate_from_ref: 'main')[:complete]).to be(true)
+  end
+
   it 'keeps independent branch scopes when one manifest is reused' do
     expect(run_sync[:complete]).to be(true)
     reader.branch = 'develop'

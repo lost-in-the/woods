@@ -1,0 +1,1 @@
+- Skip Unblocked inventory documents without a usable URI. Adopt successful legacy receipts for the active repository/ref into guarded stale-document cleanup, and report incomplete synchronization with a migration or manual-cleanup remedy when legacy ownership remains unresolved.
