@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-09-25
+
+### Security
+
+- Harden Console request validation, protected result handling, and HTTP authentication and origin enforcement.
+- Isolate cached retrieval contexts between application instances sharing a cache backend.
+
 ## [2.0.0] - 2026-09-23
 
 ### Added
