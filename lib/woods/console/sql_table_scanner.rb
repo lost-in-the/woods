@@ -38,20 +38,20 @@ module Woods
       # identifier so it does not hide the table name. ANSI-89 comma joins
       # are handled separately — see FROM_CLAUSE.
       JOIN_REFERENCE = /
-        \b(?:STRAIGHT_)?JOIN\s+
-        (?:ONLY\s+)?
+        \b(?:STRAIGHT_)?JOIN(?=[\s("`])\s*
+        (?:ONLY(?=[\s("`])\s*\(?\s*)?
         (?:
           (?:
-            `(?<jschema_bt>[^`]+)` |
-            "(?<jschema_dq>[^"]+)" |
-            (?<jschema_bare>\w+)
+            `(?<jschema_bt>(?:``|[^`])+)` |
+            "(?<jschema_dq>(?:""|[^"])+)" |
+            (?<jschema_bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+)
           )
           \s* \. \s*
         )?
         (?:
-          `(?<backtick>[^`]+)` |
-          "(?<double>[^"]+)"   |
-          (?<bare>\w+(?:\.\w+)?)
+          `(?<backtick>(?:``|[^`])+)` |
+          "(?<double>(?:""|[^"])+)"   |
+          (?<bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+(?:\.[A-Za-z0-9_$\u0080-\u{10ffff}]+)?)
         )
       /xi
 
@@ -66,7 +66,7 @@ module Woods
       # every `FROM` as its own independent scan match is what keeps CTEs,
       # UNIONs, and nested subqueries in coverage.
       FROM_CLAUSE = /
-        \bFROM\s+
+        \bFROM(?=[\s("`])\s*
         (?<clause>.+?)
         (?=
           \b(?:WHERE|GROUP|HAVING|ORDER|LIMIT|OFFSET|UNION|INTERSECT|EXCEPT|
@@ -85,16 +85,16 @@ module Woods
         \A
         (?:
           (?:
-            `(?<schema_bt>[^`]+)` |
-            "(?<schema_dq>[^"]+)" |
-            (?<schema_bare>\w+)
+            `(?<schema_bt>(?:``|[^`])+)` |
+            "(?<schema_dq>(?:""|[^"])+)" |
+            (?<schema_bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+)
           )
           \s* \. \s*
         )?
         (?:
-          `(?<backtick>[^`]+)` |
-          "(?<double>[^"]+)"   |
-          (?<bare>\w+(?:\.\w+)?)
+          `(?<backtick>(?:``|[^`])+)` |
+          "(?<double>(?:""|[^"])+)"   |
+          (?<bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+(?:\.[A-Za-z0-9_$\u0080-\u{10ffff}]+)?)
         )
       /xi
 
@@ -102,7 +102,7 @@ module Woods
       # identifier. Strip it so the lead-identifier regex sees the table
       # directly. Anchored with `\A` because callers strip leading whitespace
       # first via #strip.
-      ONLY_PREFIX = /\AONLY\s+/i
+      ONLY_PREFIX = /\AONLY(?=[\s("`])\s*/i
 
       # Matches a MySQL executable comment (`/*!...*/` or the version-guarded
       # `/*!NNNNN...*/`), capturing the body. Mirrors
@@ -119,20 +119,20 @@ module Woods
       # scanned independently of FROM_CLAUSE/JOIN_REFERENCE rather than as
       # part of either. The identifier grammar mirrors LEAD_IDENT.
       TABLE_STATEMENT = /
-        \bTABLE\s+
-        (?:ONLY\s+)?
+        \bTABLE(?=[\s("`])\s*
+        (?:ONLY(?=[\s("`])\s*\(?\s*)?
         (?:
           (?:
-            `(?<schema_bt>[^`]+)` |
-            "(?<schema_dq>[^"]+)" |
-            (?<schema_bare>\w+)
+            `(?<schema_bt>(?:``|[^`])+)` |
+            "(?<schema_dq>(?:""|[^"])+)" |
+            (?<schema_bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+)
           )
           \s* \. \s*
         )?
         (?:
-          `(?<backtick>[^`]+)` |
-          "(?<double>[^"]+)"   |
-          (?<bare>\w+(?:\.\w+)?)
+          `(?<backtick>(?:``|[^`])+)` |
+          "(?<double>(?:""|[^"])+)"   |
+          (?<bare>[A-Za-z0-9_$\u0080-\u{10ffff}]+(?:\.[A-Za-z0-9_$\u0080-\u{10ffff}]+)?)
         )
       /xi
 
@@ -169,10 +169,12 @@ module Woods
 
       # Table-factor prefixes, retaining commas after balanced subqueries and
       # JOIN predicates. Each nested FROM/JOIN is also scanned independently.
+      # SQL punctuation separates tokens without mandatory whitespace. Keep
+      # compact quoted targets and parenthesized relations in the same policy.
       # @param sql [String] noise-stripped SQL
       # @return [Array<String>]
       def self.relation_factors(sql)
-        sql.to_enum(:scan, /\b(?:FROM|(?:STRAIGHT_)?JOIN)\s+/i).flat_map do
+        sql.to_enum(:scan, /\b(?:FROM|(?:STRAIGHT_)?JOIN)(?=[\s("`])\s*/i).flat_map do
           suffix = sql[Regexp.last_match.end(0)..]
           split_top_level_commas(relation_clause(suffix))
         end
@@ -204,7 +206,7 @@ module Woods
         return false unless token.match?(/\A[A-Za-z]/)
         return false if prefix.strip.empty? || prefix.match?(/(?:,|\bAS)\s*\z/i) || rest.lstrip.start_with?(',')
         return rest.match?(/\A\s+BY\b/i) if %w[GROUP ORDER].include?(token.upcase)
-        return rest.match?(/\A\s+\w+\s+AS\b/i) if token.casecmp?('WINDOW')
+        return rest.match?(/\A\s+[A-Za-z0-9_$\u0080-\u{10ffff}]+\s+AS\b/i) if token.casecmp?('WINDOW')
 
         true
       end
@@ -299,8 +301,9 @@ module Woods
       # PostgreSQL `ONLY` inheritance keyword is stripped first so it does
       # not hide the table.
       def self.lead_identifier(chunk)
-        stripped = chunk.to_s.strip.sub(ONLY_PREFIX, '')
-        return nil if stripped.empty?
+        stripped = chunk.to_s.strip.sub(/\A(?:\(\s*)+/, '').sub(ONLY_PREFIX, '')
+        stripped = stripped.sub(/\A(?:\(\s*)+/, '')
+        return nil if stripped.empty? || stripped.match?(/\A(?:SELECT|WITH|TABLE)\b/i)
 
         match = LEAD_IDENT.match(stripped)
         return nil unless match
@@ -313,14 +316,22 @@ module Woods
       # Combine a schema prefix with the table identifier captured by
       # JOIN_REFERENCE / LEAD_IDENT into a single `schema.table` string.
       def self.qualified_identifier(match)
-        table = match[:backtick] || match[:double] || match[:bare]
-        schema = match.named_captures.values_at(
-          'schema_bt', 'schema_dq', 'schema_bare',
-          'jschema_bt', 'jschema_dq', 'jschema_bare'
-        ).compact.first
+        captures = match.named_captures
+        table = decoded_identifier(*captures.values_at('backtick', 'double', 'bare'))
+        schema = decoded_identifier(captures['schema_bt'] || captures['jschema_bt'],
+                                    captures['schema_dq'] || captures['jschema_dq'],
+                                    captures['schema_bare'] || captures['jschema_bare'])
         schema ? "#{schema}.#{table}" : table
       end
       private_class_method :qualified_identifier
+
+      def self.decoded_identifier(backtick, double, bare)
+        return backtick.gsub('``', '`') if backtick
+        return double.gsub('""', '"') if double
+
+        bare
+      end
+      private_class_method :decoded_identifier
     end
   end
 end

@@ -59,6 +59,15 @@ RSpec.describe Woods::Console::SafeContext do
         end
       end
 
+      it 'sets and restores the MariaDB timeout in seconds' do
+        allow(mysql_connection).to receive(:mariadb?).and_return(true)
+        allow(mysql_connection).to receive(:select_value).with('SELECT @@SESSION.max_statement_time').and_return(1.25)
+        ctx = described_class.new(connection: mysql_connection, timeout_ms: 50)
+        ctx.execute { nil }
+        expect(mysql_connection).to have_received(:execute).with('SET max_statement_time = 0.05').ordered
+        expect(mysql_connection).to have_received(:execute).with('SET max_statement_time = 1.25').ordered
+      end
+
       it 'uses max_execution_time syntax' do
         ctx = described_class.new(connection: mysql_connection, timeout_ms: 5000)
         expect(mysql_connection).to receive(:execute).with('SET max_execution_time = 5000')

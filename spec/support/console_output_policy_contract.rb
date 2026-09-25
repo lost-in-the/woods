@@ -44,22 +44,26 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
   end
 
   def self.define_models!
-    const_set(:User, Class.new(ActiveRecord::Base) { self.table_name = TABLES[0] })
+    const_set(:User, Class.new(ActiveRecord::Base) do
+      self.table_name = TABLES[0]
+      self.primary_key = 'id'
+    end)
     const_set(:Preference, Class.new(ActiveRecord::Base) do
       self.table_name = TABLES[1]
+      self.primary_key = 'id'
       belongs_to :user, class_name: 'WoodsConsoleOutputPolicyContract::User'
     end)
   end
 
-  def self.build_server(connection)
+  def self.build_server(connection, blocked_tables: [TABLES[2]])
     Woods.configuration = Woods::Configuration.new
-    Woods.configuration.console_blocked_tables = [TABLES[2]]
+    Woods.configuration.console_blocked_tables = blocked_tables
     Woods.configuration.context_format = :json
     models = [User, Preference]
     tables = models.to_h { |model| [model.name, model.table_name] }
     Woods::Console::Server.build_embedded(
       model_validator: Woods::Console::ModelValidator.new(
-        registry: models.to_h { |model| [model.name, model.column_names] }
+        registry: models.to_h { |model| [model.name, model.column_names] }, table_names: tables
       ), connection: connection, safe_context: Woods::Console::SafeContext.new(connection: connection),
       redacted_columns: ['secret'], redacted_key_values: EAV, read_tools_enabled: true,
       model_tables: tables, model_reflections: { Preference.name => { 'user' => TABLES[0] } }
@@ -69,12 +73,26 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
   def self.verify_common!(server)
     verify_limits!(server)
     verify_eav!(server)
+    verify_ordering!(server)
     result = assert_request!(server, 'console_sql', { sql: "SELECT secret FROM #{TABLES[0]}", limit: 1 })
     raise 'Protected scalar was not masked' unless result.to_json.include?('[REDACTED]')
 
     assert_request!(server, 'console_sample', { model: User.name, columns: %w[id name secret], limit: 1 })
     assert_request!(server, 'console_recent', { model: Preference.name, order_by: 'name' })
     assert_request!(server, 'console_recent', { model: Preference.name, order_by: 'value' }, refused: true)
+  end
+
+  def self.verify_ordering!(server)
+    %w[ORDER GROUP].each do |clause|
+      ['2', '(2)', '((2))'].each do |position|
+        sql = "SELECT id, secret FROM #{TABLES[0]} #{clause} BY #{position}"
+        assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+      end
+    end
+    sql = "SELECT id, secret FROM #{TABLES[0]} ORDER BY 1"
+    assert_request!(server, 'console_sql', { sql: sql })
+    sql = "SELECT u.* FROM #{TABLES[0]} u JOIN (SELECT 1 AS id) v ON u.id = v.id"
+    assert_request!(server, 'console_sql', { sql: sql })
   end
 
   def self.verify_limits!(server)
@@ -113,7 +131,78 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
       assert_request!(server, 'console_sql', { sql: sql }, refused: true)
     end
     assert_request!(server, 'console_sql', { sql: "SELECT u.id FROM #{TABLES[0]} u" })
+    verify_postgres_relation_boundaries!(connection, server)
     verify_postgres_types!(server)
+    verify_postgres_nested_values!(connection, server)
+    verify_postgres_identifiers!(connection, server)
+    verify_quoted_table_identities!(connection)
+  end
+
+  def self.verify_postgres_relation_boundaries!(connection, server)
+    projection = ['CAST(', 'd', ' AS text)'].join
+    source = "(SELECT * FROM #{TABLES[0]}) d"
+    sql = "SELECT #{projection} FROM#{source}"
+    raise 'Compact relation fixture missing value' unless connection.select_all(sql).to_json.include?(SECRET)
+
+    assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    ["FROM\"#{TABLES[2]}\"", "FROM ONLY(#{TABLES[2]})",
+     "FROM (#{TABLES[2]} CROSS JOIN #{TABLES[0]})"].each do |relation|
+      sql = "SELECT message #{relation}"
+      raise 'Compact table fixture missing value' unless connection.select_all(sql).to_json.include?(BLOCKED)
+
+      assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    end
+    sql = "SELECT d.id FROM(SELECT id FROM #{TABLES[0]}) d"
+    assert_request!(server, 'console_sql', { sql: sql })
+  end
+
+  def self.verify_postgres_nested_values!(connection, server)
+    scalar = "(SELECT id FROM #{TABLES[0]} LIMIT 1)"
+    casts = ['u', 'CAST(u AS text)', ['u', '::text'].join]
+    statements = casts.map { |value| "SELECT #{scalar}, #{value} FROM #{TABLES[0]} u" }
+    statements << "WITH rows AS (#{statements.last}) SELECT * FROM rows"
+    identifier = "\u{2603}"
+    statements << "SELECT #{identifier}::text FROM #{TABLES[0]} #{identifier}"
+    statements << "SELECT u.id FROM #{TABLES[0]} u WHERE (SELECT CAST(u AS text)) LIKE '%synthetic%'"
+    statements.each do |sql|
+      raise 'Nested-value fixture returned no rows' if connection.select_all(sql).rows.empty?
+
+      assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    end
+    verify_postgres_adapter_alias!(connection, server, statements)
+  end
+
+  def self.verify_postgres_adapter_alias!(connection, server, statements)
+    singleton = connection.singleton_class
+    original = connection.method(:adapter_name)
+    singleton.define_method(:adapter_name) { 'PostGIS' }
+    statements.each { |sql| assert_request!(server, 'console_sql', { sql: sql }, refused: true) }
+    assert_request!(server, 'console_sql', { sql: 'SELECT ARRAY[1,2] AS ids' })
+  ensure
+    singleton&.define_method(:adapter_name, original) if original
+  end
+
+  def self.verify_postgres_identifiers!(connection, server)
+    identifier = ['é', '$a$'].join
+    sql = ["SELECT #{identifier} FROM #{TABLES[2]},", "(SELECT 1 AS #{identifier}) source"].join(' ')
+    raise 'Extended-identifier fixture returned no rows' if connection.select_all(sql).rows.empty?
+
+    assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+  end
+
+  def self.verify_quoted_table_identities!(connection)
+    ['woods_policy_escaped"table', 'woods_policy.literal_table'].each do |table|
+      quoted = connection.quote_column_name(table)
+      connection.execute("CREATE TEMPORARY TABLE #{quoted} (message text)")
+      connection.execute("INSERT INTO #{quoted} (message) VALUES ('#{BLOCKED}')")
+      sql = "SELECT message FROM #{quoted}"
+      raise 'Quoted table fixture missing value' unless connection.select_value(sql) == BLOCKED
+
+      server = build_server(connection, blocked_tables: [table])
+      assert_request!(server, 'console_sql', { sql: sql }, refused: true)
+    ensure
+      connection.execute("DROP TABLE IF EXISTS #{quoted}") if quoted
+    end
   end
 
   def self.verify_postgres_types!(server)
@@ -136,9 +225,10 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     literal = mode.include?('NO_BACKSLASH_ESCAPES') ? %q('a\') : %q('a\'b')
     alias_sql = "SELECT #{literal} AS note, secret AS visible FROM #{TABLES[0]} WHERE name = 'ordinary'"
     assert_request!(server, 'console_sql', { sql: alias_sql }, refused: true)
-    previous = connection.select_value('SELECT @@SESSION.max_execution_time')
+    variable = connection.respond_to?(:mariadb?) && connection.mariadb? ? 'max_statement_time' : 'max_execution_time'
+    previous = connection.select_value("SELECT @@SESSION.#{variable}")
     assert_request!(server, 'console_sample', { model: User.name, columns: ['id'], limit: 1 })
-    restored = connection.select_value('SELECT @@SESSION.max_execution_time')
+    restored = connection.select_value("SELECT @@SESSION.#{variable}")
     raise 'MySQL timeout leaked across the request' unless restored == previous
   end
 

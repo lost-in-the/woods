@@ -8,6 +8,7 @@ require_relative 'confirmation'
 require_relative 'eval_guard'
 require_relative 'model_validator'
 require_relative 'safe_context'
+require_relative 'redactor'
 require_relative 'scope_predicate_parser'
 require_relative 'sql_noise_stripper'
 require_relative 'sql_validator'
@@ -105,7 +106,7 @@ module Woods
         return refusal if refusal
 
         start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        result = @safe_context.execute { dispatch(tool, params) }
+        result = @safe_context.execute { dispatch_with_key_redaction(tool, params) }
         elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - start_time) * 1000).round(1)
 
         { 'ok' => true, 'result' => result, 'timing_ms' => elapsed }
@@ -124,6 +125,57 @@ module Woods
       end
 
       private
+
+      def dispatch_with_key_redaction(tool, params)
+        refuse_protected_scope!(params['scope'])
+        refuse_protected_scope!(params['by']) if tool == 'find'
+        output = dispatch(tool, params)
+        return output if redaction_key_values.empty?
+
+        Redactor.apply(output, typed_redaction_context(tool, params))
+      end
+
+      def typed_redaction_context(tool, params)
+        types = Hash.new { |hash, key| hash[key] = [] }
+        typed_redaction_models(tool, params).each do |name, model|
+          redaction_key_values.each do |pattern|
+            key = pattern['key_column']
+            types[key] << model.type_for_attribute(key) if @model_validator.columns_for(name).include?(key)
+          end
+        end
+        @redaction_context.with_key_value_types(types, raw: %w[sql query].include?(tool))
+      end
+
+      def typed_redaction_models(tool, params)
+        tables = if tool == 'sql'
+                   SqlTableScanner.identifiers_in(params['sql'], dialect: sql_dialect, mysql_modes: mysql_quote_modes)
+                 else
+                   selected_source_tables(params)
+                 end
+        @model_validator.model_names.filter_map do |name|
+          model = resolve_model(name)
+          next unless model.respond_to?(:type_for_attribute)
+          next unless typed_model_source?(model, name, params, tables)
+
+          [name, model]
+        rescue NameError
+          # Injectable registries can describe models without loading Rails.
+          next
+        end
+      end
+
+      def typed_model_source?(model, name, params, tables)
+        return true if name == params['model']
+        return false unless model.respond_to?(:table_name)
+
+        tables.any? { |table| table.split('.').last == model.table_name.split('.').last }
+      end
+
+      def selected_source_tables(params)
+        Array(params['select'] || params['columns']).filter_map do |column|
+          column.split('.')[0...-1].join('.') if column.include?('.')
+        end
+      end
 
       def sanitize_execution_error(error)
         klass = error.class.name
@@ -476,6 +528,7 @@ module Woods
       end
 
       def handle_find(params)
+        validate_select_columns!(params)
         model = resolve_model(params['model'])
         scope = checked_relation(model)
         record = if params['id']
@@ -488,7 +541,7 @@ module Woods
 
       def handle_pluck(params)
         columns = params['columns']
-        @model_validator.validate_columns!(params['model'], columns) if columns
+        validate_select_columns!(params)
         model = resolve_model(params['model'])
         limit = [params.fetch('limit', 100).to_i, 1000].min
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -501,6 +554,7 @@ module Woods
         column = params['column']
         function = params['function']
         @model_validator.validate_column!(params['model'], column) if column
+        refuse_redacted_aggregate_expression!(column)
 
         unless AGGREGATE_FUNCTIONS.include?(function)
           raise ValidationError, "Invalid aggregate function: #{function}. " \
@@ -624,6 +678,8 @@ module Woods
         sql = params['sql']
         raise ValidationError, 'Missing required parameter: sql' unless sql
 
+        raise ValidationError, 'Rejected: console_sql requires a recognized database adapter family.' unless sql_dialect
+
         require_relative 'sql_validator'
         validate_sql_policy!(sql)
 
@@ -725,7 +781,7 @@ module Woods
         expressions = Array(select).flat_map { |s| s.to_s.split(',') }.map do |expr|
           validate_select_expression!(expr.strip, model_name)
         end
-        refuse_orphan_eav_value_selection!(expressions)
+        refuse_orphan_eav_value_selection!(expressions, model_name)
         expressions
       end
 
@@ -746,6 +802,7 @@ module Woods
         Array(columns).flat_map { |c| c.to_s.split(',') }.map do |col|
           col = col.strip
           validate_column_reference!(col, model_name)
+          refuse_protected_predicate_column!(col)
           col
         end
       end
@@ -770,12 +827,12 @@ module Woods
       /ix
       private_constant :HAVING_AGG_TEMPLATE
 
-      def validated_having(having, model_name) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def validated_having(having, model_name)
         case having
         when Hash
           raise ValidationError, 'having: empty hash' if having.empty?
 
-          having.each_key { |k| validate_column_reference!(k.to_s, model_name) }
+          having.each_key { |key| validate_predicate_column_reference!(key.to_s, model_name) }
           [having]
         when Array
           raise ValidationError, 'having: array must be [sql_with_placeholders, *binds]' if having.empty?
@@ -786,8 +843,7 @@ module Woods
 
           # Validate any referenced columns through ModelValidator so
           # aggregate args can't reach the db without a column check.
-          col = match[:col] || match[:arg]
-          validate_column_reference!(col, model_name) if col && col != '*'
+          validate_having_input!(match, model_name)
 
           having
         else
@@ -795,11 +851,22 @@ module Woods
         end
       end
 
+      def validate_having_input!(match, model_name)
+        column = match[:col] || match[:arg]
+        validate_predicate_column_reference!(column, model_name) if column && column != '*'
+        refuse_redacted_aggregate_expression!(column) if match[:agg]
+      end
+
+      def validate_predicate_column_reference!(column, model_name)
+        validate_column_reference!(column, model_name)
+        refuse_protected_predicate_column!(column)
+      end
+
       # Validate `order:` — only Hash `{col => :asc|:desc}` or bare column name.
       def validated_order(order, model_name)
         case order
         when Hash
-          order.each_key { |k| validate_column_reference!(k.to_s, model_name) }
+          order.each_key { |key| validate_predicate_column_reference!(key.to_s, model_name) }
           order.transform_values do |dir|
             dir_sym = dir.to_s.downcase.to_sym
             unless %i[asc desc].include?(dir_sym)
@@ -810,7 +877,7 @@ module Woods
           end
         when String, Symbol
           col = order.to_s.strip
-          validate_column_reference!(col, model_name)
+          validate_predicate_column_reference!(col, model_name)
           col
         else
           raise ValidationError, "order: unsupported type #{order.class}"
@@ -977,6 +1044,7 @@ module Woods
         return unless params['columns']
 
         @model_validator.validate_columns!(params['model'], params['columns'])
+        refuse_orphan_eav_value_selection!(params['columns'], params['model'])
       end
 
       # Apply column selection to a relation.

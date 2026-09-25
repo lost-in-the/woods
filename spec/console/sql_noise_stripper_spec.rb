@@ -4,6 +4,18 @@ require 'spec_helper'
 require 'woods/console/sql_noise_stripper'
 
 RSpec.describe Woods::Console::SqlNoiseStripper do
+  it 'preserves relation boundaries adjacent to extended identifier characters' do
+    identifier = ['é', '$a$'].join
+    sql = ["SELECT #{identifier} FROM blocked,", "(SELECT 1 AS #{identifier}) source"].join(' ')
+    expect(described_class.strip_noise(sql, dialect: :postgres)).to eq(sql)
+  end
+
+  it 'recognizes extended dollar quote tags without treating their contents as SQL' do
+    tag = ['$', 'é', '$'].join
+    sql = "SELECT #{tag}ordinary ' content#{tag} FROM allowed"
+    expect(described_class.strip_noise(sql, dialect: :postgres)).to eq("SELECT '' FROM allowed")
+  end
+
   describe '.strip_comments' do
     it 'strips a line comment to end of line' do
       expect(described_class.strip_comments("SELECT 1 -- pick a number\nFROM t"))

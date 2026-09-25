@@ -20,8 +20,10 @@ module Woods
     #
     class ModelValidator
       # @param registry [Hash<String, Array<String>>] Model name => column names mapping
-      def initialize(registry:)
+      # @param table_names [Hash<String, String>] Optional table mapping for EAV provenance
+      def initialize(registry:, table_names: {})
         @registry = registry
+        @model_by_table = table_names.each_with_object({}) { |(model, table), acc| acc[table.to_s] = model }
       end
 
       # Validate that a model name is known.
@@ -57,6 +59,14 @@ module Woods
       # @raise [ValidationError] if any column is unknown
       def validate_columns!(model_name, column_names)
         column_names.each { |col| validate_column!(model_name, col) }
+      end
+
+      # Return known table columns without guessing an unknown table's shape.
+      # @param table_name [String]
+      # @return [Array<String>, nil] nil when this table is not registered
+      def columns_for_table(table_name)
+        model = @model_by_table[table_name.to_s]
+        @registry[model] if model
       end
 
       # List all known model names.

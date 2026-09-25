@@ -38,6 +38,7 @@ RSpec.configure do |config|
   # against a predictable box.
   config.filter_run_excluding(perf: true) unless ENV['WOODS_RUN_PERF_SPECS']
   config.filter_run_excluding(maintenance_package: true) unless ENV['WOODS_RUN_MAINTENANCE_PACKAGE']
+  config.filter_run_excluding(maintenance_sql_backends: true) unless ENV['WOODS_RUN_MAINTENANCE_SQL_BACKENDS']
 
   # Booted-app specs (spec/integration/booted_extraction_spec.rb) boot a real
   # Rails app in-process and require full Rails (activerecord + actionpack),
