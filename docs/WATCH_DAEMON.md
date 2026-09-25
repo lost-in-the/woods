@@ -436,6 +436,19 @@ convention path no app has), which authoritative deletion would wrongly remove.
 The sweep carries the bounds that make reconciliation safe; the daemon only
 supplies the trigger.
 
+**Unreleased after 2.0.0:** if that deletion-only cycle fails or cannot take the
+extraction lock, the daemon keeps a reconciliation obligation even though its
+path list is empty. The next event or heartbeat retries the bounded sweep;
+successful reconciliation clears the obligation, including a genuine no-op
+for a nominal framework path. A restart rediscovers outstanding deletions from
+the unchanged published graph.
+
+The daemon also checks the extractor's publication error before accepting an
+empty touched-unit list. Removing disabled precomputed flow artifacts changes
+the payload without necessarily changing any units. If publication fails, the
+previous generation remains active, status stays degraded, and the event is
+retained for retry.
+
 This is what makes the documented hook pattern safe:
 
 ```bash
