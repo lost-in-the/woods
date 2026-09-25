@@ -118,6 +118,17 @@ Do not infer source freshness from a recent generation marker or remove a
 foreign watch claim. See the installed version's
 [startup catch-up guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md).
 
+### Watch does not recover after a failed reconciliation
+
+The deletion-only startup retry repair (#640) and empty-touch publication error
+repair (#641) are unreleased after Woods `2.0.0`; verify the loaded revision.
+Supporting revisions retain pathless deletion reconciliation for heartbeat
+retry and report failed flow withdrawal as degraded even when no units changed.
+On older builds, fix the logged cause and restart watch to reconcile again.
+An empty touched-unit list is not proof that publication succeeded. Inspect
+the generation and publication errors; see the installed version's
+[startup recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#startup-is-not-a-clean-slate).
+
 ### Extraction fails while a sibling extractor succeeds
 
 The #584 publication-reporting repair is unreleased after Woods `2.0.0`.

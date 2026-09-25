@@ -1,0 +1,1 @@
+- Keep deletion-only watcher startup reconciliation queued after extraction, lock, or publication failures, including when no source paths can safely be named (#640). Check publication errors before accepting empty-touch incremental runs, so failed withdrawal of disabled flow artifacts reports degraded status and retries the original event (#641).
