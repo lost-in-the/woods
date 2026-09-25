@@ -7,15 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.6.4] - 2026-09-25
-
 ### Security
 
 - Enforce configured bearer authentication and allowed origins on every enabled Console HTTP mount before constructing its transport, including manually mounted endpoints.
 - Mask protected collection-valued cells completely and redact overlapping credential matches before rewriting response text.
 - Preserve configured SQL redaction and blocked-table boundaries across statement wrapping, database-specific comments, EAV column pairing and PostgreSQL whole-row results. Ambiguous protected expressions and unknown PostgreSQL result types now refuse clearly. Apply MySQL timeout and grammar handling to Trilogy while retaining the legacy tool API and SQL function policy.
 - Isolate retrieval-context cache entries by retriever instance and rotate only that instance's namespace on reload, preventing shared-backend and stale in-flight cache reuse.
-- Preserve configured Console data protections across database adapters, typed attributes, and SQL result shapes.
 
 ## [1.6.3] - 2026-09-22
 
