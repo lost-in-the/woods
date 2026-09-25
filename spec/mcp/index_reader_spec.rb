@@ -1234,7 +1234,20 @@ RSpec.describe Woods::MCP::IndexReader do
       allow(reader).to receive(:compile_search_pattern).and_return(pattern)
 
       expect { reader.search('Post', fields: %w[identifier source_code]) }
-        .to raise_error(RuntimeError, /unexpected reader failure/)
+        .to raise_error(IOError, /disk gone/)
+    end
+
+    it 'propagates deep-field matching IOErrors after loading a readable unit' do
+      pattern = Object.new
+      pattern.define_singleton_method(:match?) do |text|
+        raise IOError, 'deep matching failed' if text.include?("\n")
+
+        false
+      end
+      allow(reader).to receive(:compile_search_pattern).and_return(pattern)
+
+      expect { reader.search('Post', fields: %w[source_code]) }
+        .to raise_error(IOError, /deep matching failed/)
     end
 
     # Review finding: `rescue Regexp::TimeoutError` names a constant that
