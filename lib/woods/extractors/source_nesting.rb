@@ -23,7 +23,8 @@ module Woods
     # block opener). Compact declarations (`class Billing::Payment`) keep
     # their qualified segments.
     #
-    # The heuristic is regex-based, not an AST. Pathological constructs
+    # The line scanner is regex-based. Completed inline modules use Prism to
+    # distinguish primary owners from namespace-only wrappers. Other constructs
     # (heredocs containing keywords, keywords inside string literals) can
     # unbalance the depth count — the accepted house tradeoff, shared with
     # RakeTaskExtractor: declarations and their +end+s pair up for
@@ -127,7 +128,7 @@ module Woods
       # between — and returns the chain joined with `::`. Prelude lines
       # before the first module (requires, magic comments, guards) are
       # skipped. The chain stops at the first body content (methods,
-      # `extend`, a class, a self-terminated inner module) and never descends
+      # `extend`, a class, an empty self-terminated inner module) and never descends
       # into mixin plumbing modules ({MIXIN_INNER_MODULES}), so `module
       # Trackable; module ClassMethods` names +Trackable+ while `module
       # Gateway; module Stripe; module Refundable` names
@@ -154,10 +155,11 @@ module Woods
           break if decl[2].split('::').any? { |seg| MIXIN_INNER_MODULES.include?(seg) }
 
           unless block_opener?(stripped)
-            # A completed module with a body owns its declaration even though
-            # it does not enclose the following lines. Only an empty completed
-            # module is a sibling prelude before the primary module starts.
-            return decl[2] if chain.empty? && completed_module_body?(stripped)
+            # Completed declarations can contain a namespace-only chain on
+            # one line. Keep its primary owner, not merely the first wrapper.
+            # Empty completed modules still act as preludes or stop a chain.
+            completed = completed_module_name(stripped)
+            return (chain + [completed]).join('::') if completed
 
             break unless chain.empty?
 
@@ -170,18 +172,31 @@ module Woods
         chain.empty? ? nil : chain.join('::')
       end
 
-      # Distinguish `module Foo; def call; end; end` from an empty namespace
-      # prelude without evaluating source or guessing from body text.
+      # Find the primary owner inside a complete inline declaration without
+      # evaluating source. Only a sole nonempty module body is a namespace
+      # wrapper; methods, mixin plumbing and empty inner modules stop descent.
       # @param source [String] one complete declaration line
-      # @return [Boolean] whether its module contains statements
-      def completed_module_body?(source)
+      # @return [String, nil] primary module name, or nil for an empty prelude
+      def completed_module_name(source)
         parsed = Prism.parse(source)
-        return false unless parsed.success?
+        return unless parsed.success?
 
-        node = parsed.value.statements.body.first
-        node.is_a?(Prism::ModuleNode) && !node.body.nil?
+        inline_module_chain(parsed.value.statements.body.first)
       end
-      private :completed_module_body?
+      private :completed_module_name
+
+      def inline_module_chain(node)
+        return unless node.is_a?(Prism::ModuleNode) && node.body
+
+        name = DECLARATION_PATTERN.match(node.location.slice)&.[](2)
+        return if !name || name.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
+        return name unless node.body.is_a?(Prism::StatementsNode) # rescue/ensure belongs to this owner
+
+        statements = node.body.body
+        nested = inline_module_chain(statements.first) if statements.one?
+        [name, nested].compact.join('::')
+      end
+      private :inline_module_chain
 
       # Check if a line opens a new block (do...end, def...end, etc.).
       #

@@ -718,6 +718,28 @@ RSpec.describe Woods::Extractors::SourceNesting do
   # ── #qualified_outer_module_name ─────────────────────────────────────
 
   describe '#qualified_outer_module_name' do
+    {
+      'module Gateway; module Stripe; module Refundable; def self.call; :ok; end; end; end; end' =>
+        'Gateway::Stripe::Refundable',
+      'module Gateway::Stripe; module Refundable; def self.call; :ok; end; end; end' =>
+        'Gateway::Stripe::Refundable',
+      'module Gateway; module Refundable; def self.call; :ok; end; end; def self.call; :own; end; end' => 'Gateway',
+      'module Trackable; module ClassMethods; def track; end; end; end' => 'Trackable',
+      'module Trackable; module InstanceMethods; def track; end; end; end' => 'Trackable',
+      'module JsonApi; module Errors; end; module Utils; def self.call; end; end; end' => 'JsonApi',
+      'module Owner; :ready; rescue; :fallback; end' => 'Owner',
+      'module Owner; :ready; ensure; :finished; end' => 'Owner'
+    }.each do |source, identifier|
+      it "preserves the primary inline owner for #{source}" do
+        expect(scanner.qualified_outer_module_name(source)).to eq(identifier)
+      end
+    end
+
+    it 'joins an inline behaviorful module inside an open namespace' do
+      source = "module Gateway\n  module Refundable; def self.call; :ok; end; end\nend\n"
+      expect(scanner.qualified_outer_module_name(source)).to eq('Gateway::Refundable')
+    end
+
     it 'keeps a completed module containing behavior as the primary declaration' do
       source = 'module Billing::Trackable; def self.track; :tracked; end; end'
       expect(scanner.qualified_outer_module_name(source)).to eq('Billing::Trackable')
