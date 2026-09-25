@@ -1517,6 +1517,49 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  it 'keeps inline namespace siblings and their source references distinct in every extraction mode' do
+    require 'woods/mcp/index_reader'
+    caller_path = write_file('app/models/inline_gateway_caller.rb', <<~RUBY)
+      class InlineGatewayCaller
+        def call; [InlineGateway::Refundable.call, InlineGateway::Chargeable.call]; end
+      end
+    RUBY
+    paths = %w[Refundable Chargeable].to_h do |name|
+      path = write_file("lib/inline_gateway/#{name.underscore}.rb",
+                        "module InlineGateway; module #{name}; def self.call; :full; end; end; end")
+      load app_path(path)
+      [name, path]
+    end
+    load app_path(caller_path)
+    index = full_extraction
+    reader = Woods::MCP::IndexReader.new(index)
+    writer = Woods::Extractor.new(output_dir: index)
+
+    %i[full incremental refresh].each do |mode|
+      unless mode == :full
+        paths.each do |name, path|
+          write_file(path, "module InlineGateway; module #{name}; def self.call; :#{mode}; end; end; end")
+          load app_path(path)
+        end
+        mode == :incremental ? writer.extract_changed(paths.values) : writer.refresh(:libs)
+        writer.raise_on_publication_failure!
+      end
+      expect(reader.find_unit('InlineGateway', type: 'lib')).to be_nil
+      paths.each_key do |name|
+        identifier = "InlineGateway::#{name}"
+        expect(reader.find_unit(identifier, type: 'lib').fetch('source_code')).to include(":#{mode}")
+        expect(reader.find_unit('InlineGatewayCaller', type: 'poro').fetch('dependencies')).to include(
+          'type' => 'lib', 'target' => identifier, 'via' => 'code_reference'
+        )
+      end
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  ensure
+    %i[InlineGateway InlineGatewayCaller].each do |name|
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+    end
+  end
+
   describe 'class-discovered job nested in a model file (N-1)' do
     # spec/dummy/app/models/billing/invoicing/reconciler.rb nests
     # `RefreshJob < ApplicationJob` inside a compact-form PORO. The full path
