@@ -82,18 +82,26 @@ RSpec.describe 'Unblocked scoped URI migration' do
     expect(client).not_to have_received(:delete_document)
   end
 
-  it 'purges vanished owned v1 entries in the active ref while keeping the mass-delete guard' do
+  it 'reports vanished owned v1 receipts as incomplete with a manual-cleanup remedy' do
     seed_legacy
     units.pop
 
-    expect(run_sync).to include(complete: true, deleted: 1, errors: [])
-    expect(remote.size).to eq(11)
-    seed_legacy
-    units.slice!(0, 5)
     result = run_sync
-    expect(result[:complete]).to be(false)
-    expect(result[:errors].join).to include('mass-deletion guard')
-    expect(remote.size).to eq(11)
+    expect(result).to include(complete: false, deleted: 0)
+    expect(result[:errors].join).to include('legacy', 'manual cleanup')
+    expect(remote.size).to eq(12)
+  end
+
+  it 'does not infer legacy ref ownership from an ambiguous slash prefix' do
+    reader.branch = 'feature/topic'
+    seed_legacy
+    reader.branch = 'feature'
+
+    result = run_sync(force_purge: true)
+
+    expect(result).to include(complete: false, deleted: 0)
+    expect(remote.size).to eq(24)
+    expect(client).not_to have_received(:delete_document)
   end
 
   it 'reports unresolved legacy ownership on another ref with an explicit migration remedy' do

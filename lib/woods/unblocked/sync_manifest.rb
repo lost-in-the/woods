@@ -108,9 +108,9 @@ module Woods
       end
 
       # Select one repository/ref without retiring any other branch's documents.
-      # Existing v1 entries need a successful write receipt and a URI in this
-      # exact scope. Include vanished units so ordinary guarded pruning can
-      # retire them instead of silently stranding their legacy receipts.
+      # Existing v1 entries are adopted only when they prove a successful write
+      # and correspond to a currently published URI in this exact scope. A URI
+      # prefix cannot distinguish refs containing slashes from source paths.
       def activate_scope(repo_url:, ref:, current_uris:)
         raise Woods::ConfigurationError, "Unblocked manifest needs recovery: #{@load_error}" if @load_error
 
@@ -119,11 +119,9 @@ module Woods
         @active_scope = scope_key(@repo_url, ref)
         @scopes[@active_scope] ||= { 'repo_url' => @repo_url, 'ref' => ref, 'documents' => {} }
         @documents = @scopes.fetch(@active_scope).fetch('documents')
-        prefixes = [ref, encode_ref(ref)].uniq.map { |value| "#{@repo_url}/blob/#{value}/" }
-        @legacy_documents.each_key do |uri|
+        current_uris.each do |uri|
           entry = @legacy_documents[uri]
-          next unless owned?(entry)
-          next unless current_uris.include?(uri) || prefixes.any? { |prefix| uri.start_with?(prefix) }
+          next unless entry && owned?(entry)
 
           @documents[uri] ||= entry
           @legacy_documents.delete(uri)
