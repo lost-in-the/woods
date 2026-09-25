@@ -135,6 +135,14 @@ RSpec.describe 'Console transport boot configuration', :booted_app do
   end
 
   [false, true].each do |manual_mount|
+    it "names malformed origins during #{manual_mount ? 'manual' : 'automatic'} mount boot" do
+      _out, err, status = boot(http: true, environment: 'test', manual_mount: manual_mount,
+                                origins: 'invalid-entry', token: 'console-origin-policy-token-32-characters')
+
+      expect(status).not_to be_success
+      expect(err).to include('Woods::ConfigurationError', '[Woods Console]', 'invalid-entry')
+    end
+
     it "shares preflight and SDK policy through the #{manual_mount ? 'manual' : 'automatic'} Rails mount" do
       script = <<~RUBY
         require 'rack/mock'

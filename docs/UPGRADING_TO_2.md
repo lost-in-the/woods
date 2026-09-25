@@ -21,7 +21,9 @@ After this runbook you will have:
 
 ### Pending HTTP configuration checks
 
-Supporting revisions after 2.0.0 validate HTTP origin allowlists at boot. An invalid
+Supporting revisions after 2.0.0 validate HTTP origin allowlists at boot.
+Enabled automatic and manual Console mounts use the same
+`Woods::ConfigurationError` diagnostic for malformed origin entries. An invalid
 entry now prevents enabled HTTP startup and the diagnostic names that entry.
 Use `http(s)://host[:port]` entries without paths, credentials, or query strings,
 then restart. With no explicit Index allowlist, the default policy is unchanged.

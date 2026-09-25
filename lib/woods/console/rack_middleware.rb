@@ -146,7 +146,13 @@ module Woods
         @mutex = Mutex.new
         @transport = nil
         @guarded_request = guarded_request
-        @origin_guard.policy if enabled?
+        validate_origin_configuration! if enabled?
+      end
+
+      def validate_origin_configuration!
+        @origin_guard.policy
+      rescue ArgumentError => e
+        raise Woods::ConfigurationError, "[Woods Console] #{e.message}"
       end
 
       # Every entry point owns its guards; an earlier manual mount cannot rely

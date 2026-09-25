@@ -45,7 +45,7 @@ RSpec.describe 'Origin configuration diagnostics' do
       config.console_mcp_allowed_origins = ['invalid-entry']
     end
     expect { Woods::Console::RackMiddleware.new(->(_env) { [200, {}, []] }) }
-      .to raise_error(ArgumentError, /invalid-entry/)
+      .to raise_error(Woods::ConfigurationError, /\[Woods Console\].*invalid-entry/)
   end
 
   it 'prints a bounded executable boot diagnostic instead of a backtrace' do

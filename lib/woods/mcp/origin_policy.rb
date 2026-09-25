@@ -18,7 +18,9 @@ module Woods
 
       # @param allowed_origins [Array<String>, nil] Explicit browser origins
       def initialize(allowed_origins: nil)
-        entries = Array(allowed_origins).compact.reject { |entry| entry.to_s.strip.empty? }
+        entries = Array(allowed_origins).compact.reject do |entry|
+          entry.to_s.valid_encoding? && entry.to_s.strip.empty?
+        end
         @explicit_origins = entries.map { |entry| configured_origin(entry) }.uniq.freeze
         @allowed = (@explicit_origins.empty? ? DEFAULT_ORIGINS : @explicit_origins).freeze
         @allowed_hosts = @explicit_origins.map do |origin|
@@ -71,10 +73,11 @@ module Woods
       private
 
       def configured_origin(entry)
-        normalized = entry.to_s.downcase.sub(%r{/\z}, '')
+        raw = entry.to_s
+        normalized = raw.downcase.sub(%r{/\z}, '') if raw.valid_encoding?
         unless parsed_origin(normalized)
-          raise ArgumentError, "Invalid MCP allowed origin #{entry.to_s.inspect[0, 160]}: " \
-                               'expected http(s)://host[:port] without a path'
+          label = raw.b.byteslice(0, 160).inspect
+          raise ArgumentError, "Invalid MCP allowed origin #{label}: expected http(s)://host[:port] without a path"
         end
 
         normalized_origin(normalized).freeze
@@ -103,7 +106,8 @@ module Woods
       # query strings, fragments or whitespace. The comparison layer handles
       # default-port equivalence separately from parsing.
       def parsed_origin(origin)
-        return unless origin.is_a?(String) && !origin.match?(/[[:space:][:cntrl:]]/)
+        return unless origin.is_a?(String) && origin.valid_encoding? && origin.ascii_only?
+        return if origin.match?(/[[:space:][:cntrl:]]/)
 
         parsed = URI.parse(origin)
         return unless %w[http https].include?(parsed.scheme&.downcase)

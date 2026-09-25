@@ -281,3 +281,11 @@ traffic. Include a non-loopback MCP endpoint authority and restart after edits.
 Do not disable SDK protection or rewrite Origin/Host to make a request pass.
 Check the installed [HTTP guide](https://github.com/lost-in-the/woods/blob/main/docs/MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
 and verify both preflight and authenticated dispatch.
+
+### HTTP configuration diagnostics on security-patch candidates
+
+Check the installed revision before expecting this unreleased correction. Invalid
+origin settings, including invalidly encoded entries, refuse at boot. The HTTP
+executable reports one configuration diagnostic and exits 2. Correct the named
+entry and restart; keep authentication and origin checks enabled. Follow the
+installed revision's canonical `docs/MCP_HTTP_TRANSPORT.md` for accepted origins.
