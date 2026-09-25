@@ -613,7 +613,7 @@ RSpec.describe 'Middleware extraction across Rails processes', :booted_app do
     output, error, status = Open3.capture3({ 'MIDDLEWARE_SETTING' => setting },
                                            RbConfig.ruby, '-Ilib', script)
     expect(status.success?).to be(true), error
-    JSON.parse(output.lines.last)
+    JSON.parse(output.lines.last.force_encoding('UTF-8'))
   end
 
   it 'preserves the complete metadata, source and hash across independent boots' do
@@ -633,7 +633,7 @@ RSpec.describe 'Optional ActionMailer extraction', :booted_app do
       script = File.expand_path('../fixtures/optional_mailer/boot.rb', __dir__)
       output, error, status = Open3.capture3({ 'MAILER_MODE' => mode }, RbConfig.ruby, '-Ilib', script)
       expect(status.success?).to be(true), error
-      result = JSON.parse(output.lines.last)
+      result = JSON.parse(output.lines.last.force_encoding('UTF-8'))
 
       expect(result).to include('valid' => true, 'errors' => [], 'discoverable' => expected,
                                 'extracted' => expected, 'published' => expected)
@@ -647,7 +647,7 @@ RSpec.describe 'Optional GraphQL extraction', :booted_app do
     script = File.expand_path('../fixtures/optional_graphql/boot.rb', __dir__)
     output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
     expect(status.success?).to be(true), "#{error}\n#{output}"
-    result = JSON.parse(output.lines.last)
+    result = JSON.parse(output.lines.last.force_encoding('UTF-8'))
     expect(result.fetch('checks')).to include('three working schemas', 'schema source and metadata',
                                               'packaged MCP typed lookup and source search',
                                               'root promotion full/incremental equivalence',
@@ -661,7 +661,7 @@ RSpec.describe 'Once-loader extraction across Rails processes', :booted_app do
     script = File.expand_path('../fixtures/once_loader/boot.rb', __dir__)
     output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
     expect(status.success?).to be(true), "#{error}\n#{output}"
-    result = JSON.parse(output.lines.last)
+    result = JSON.parse(output.lines.last.force_encoding('UTF-8'))
 
     expect(result).to include('valid' => true, 'incremental_equivalent' => true)
     if Gem::Version.new(result.fetch('rails')) >= Gem::Version.new('7.1')
@@ -679,7 +679,7 @@ RSpec.describe 'Model callbacks across Rails processes', :booted_app do
       script = File.expand_path('../fixtures/model_callbacks/boot.rb', __dir__)
       output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
       expect(status.success?).to be(true), error
-      JSON.parse(output.lines.last)
+      JSON.parse(output.lines.last.force_encoding('UTF-8'))
     end
 
     expect(results.last).to eq(results.first)
@@ -706,7 +706,7 @@ RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
     script = File.expand_path('../fixtures/controller_callbacks/boot.rb', __dir__)
     output, error, status = Open3.capture3({ 'CALLBACK_KIND' => kind }, RbConfig.ruby, '-Ilib', script)
     expect(status.success?).to be(true), error
-    JSON.parse(output.lines.last)
+    JSON.parse(output.lines.last.force_encoding('UTF-8'))
   end
 
   it 'keeps filter metadata, source hashes and action chunks stable across independent roots and boots' do

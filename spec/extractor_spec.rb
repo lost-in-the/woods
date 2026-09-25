@@ -1807,10 +1807,13 @@ RSpec.describe Woods::Extractor do
     # the change set (prune_vanished_units, remove_replaced_units), and it
     # must not inherit the sweep.
     it 'does not sweep on the incremental path' do
-      seed_unit_file(models_dir, filename_for('Ghost'), 'Ghost')
-      original_manifest = JSON.generate('woods_version' => '1.0.0', 'counts' => {})
-      File.write(File.join(output_dir, 'manifest.json'), original_manifest)
-      # Baseline for the CORE-2 guard: an incremental run needs an index.
+      directory = Woods::PayloadStore.new(output_dir).create(1)
+      seed_unit_file(directory.join('models'), filename_for('Ghost'), 'Ghost')
+      original_manifest = JSON.generate('woods_version' => '2.0.0', 'counts' => {})
+      File.write(directory.join('manifest.json'), original_manifest)
+      Woods::Generation.new(output_dir: output_dir)
+                       .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
+      # A current generation provides the baseline; legacy partial writes refuse.
       extractor.dependency_graph.register(
         Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
       )
@@ -1820,7 +1823,7 @@ RSpec.describe Woods::Extractor do
 
       expect(File.exist?(File.join(published_models_dir, filename_for('Ghost')))).to be(true)
       expect(File.binread(File.join(payload_root, 'manifest.json'))).to eq(original_manifest)
-      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(0)
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(1)
     end
   end
 
@@ -3214,7 +3217,7 @@ RSpec.describe Woods::Extractor do
       expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
     end
 
-    it 'proceeds for an unpublished marker when a flat-root graph exists (pre-generation index)' do
+    it 'proceeds for a bare graph without a manifest or writer provenance' do
       FileUtils.mkdir_p(output_dir)
       File.write(File.join(output_dir, 'dependency_graph.json'),
                  JSON.generate(nodes: {}, edges: {}, reverse: {}, file_map: {}))

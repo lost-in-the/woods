@@ -1943,6 +1943,8 @@ module Woods
               next respond_err.call('Snapshot SHAs must be hexadecimal identifiers from list_snapshots.',
                                     code: :invalid_params, tool: 'snapshot_diff')
             end
+            sha_a = sha_a.downcase
+            sha_b = sha_b.downcase
             unless snapshot_store.find(sha_a) && snapshot_store.find(sha_b)
               next respond_err.call('One or both snapshots were not found; use list_snapshots for available SHAs.',
                                     code: :not_found, tool: 'snapshot_diff')
@@ -1997,6 +1999,7 @@ module Woods
           ) do |git_sha:, server_context:|
             next snap_missing.call('snapshot_detail') unless snapshot_store
 
+            git_sha = git_sha.downcase
             snapshot = snapshot_store.find(git_sha)
             if snapshot
               respond.call(JSON.pretty_generate(snapshot))

@@ -25,7 +25,7 @@ RSpec.describe 'Booted declaration identity contracts', :booted_app do
   def units(app, type)
     payload = Woods::Generation.new(output_dir: File.join(app, 'tmp/woods')).payload_dir
     Dir[File.join(payload, type, '*.json')].filter_map do |path|
-      JSON.parse(File.read(path)) unless File.basename(path) == '_index.json'
+      JSON.parse(File.read(path, encoding: 'UTF-8')) unless File.basename(path) == '_index.json'
     end
   end
 

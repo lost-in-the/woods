@@ -23,8 +23,21 @@ RSpec.describe 'Library contributors' do
     records = unit.metadata.fetch(:source_contributors)
     records.zip(paths).each do |record, path|
       fragment = unit.source_code.byteslice(record.fetch('published_start_byte')...record.fetch('published_end_byte'))
-      expect(fragment).to eq(File.read(path))
+      expect(fragment).to eq(File.read(path, encoding: 'UTF-8'))
       expect(record.fetch('source_sha256')).to eq(Digest::SHA256.hexdigest(fragment))
+    end
+  end
+
+  it 'decodes Unicode contributors independently of the process external encoding' do
+    fragments
+    original = Encoding.default_external
+    begin
+      Encoding.default_external = Encoding::US_ASCII
+      unit = Woods::Extractors::LibExtractor.new.extract_all.fetch(0)
+      expect(unit.source_code.encoding).to eq(Encoding::UTF_8)
+      expect(unit.source_code).to include("VERSION = 'é'")
+    ensure
+      Encoding.default_external = original
     end
   end
 
@@ -116,7 +129,16 @@ RSpec.describe 'Library contributors' do
   it 'refuses the contributor set if one physical source cannot be read' do
     paths = fragments
     allow(File).to receive(:read).and_call_original
-    allow(File).to receive(:read).with(paths.last).and_raise(Errno::EACCES)
+    allow(File).to receive(:read).with(paths.last, encoding: 'UTF-8').and_raise(Errno::EACCES)
+    expect { Woods::Extractors::LibExtractor.new.extract_all }
+      .to raise_error(Woods::ExtractionError, /complete library contributor set/)
+  end
+
+  it 'names an invalid UTF-8 contributor in the log and refuses a partial aggregate' do
+    paths = fragments
+    File.binwrite(paths.last, "module SharedLibrary; VALUE = '\xFF'; end".b)
+    expect(Rails.logger).to receive(:error).with(include(paths.last, 'Source is not valid UTF-8'))
+
     expect { Woods::Extractors::LibExtractor.new.extract_all }
       .to raise_error(Woods::ExtractionError, /complete library contributor set/)
   end

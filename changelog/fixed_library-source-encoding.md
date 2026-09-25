@@ -1,0 +1,1 @@
+- Decode library contributors as UTF-8 independently of the process locale, retaining publication refusal and per-file diagnostics for invalid source bytes.

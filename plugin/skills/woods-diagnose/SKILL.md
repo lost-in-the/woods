@@ -168,6 +168,15 @@ extraction will remove a legitimate cross-type collision. See the canonical
 
 ## 2. Check the published index
 
+In supporting unreleased writers after 2.0.0, incremental extraction and
+targeted refresh refuse a flat index with a manifest or a generation whose
+manifest writer major version is below 2. Run full `woods:extract` using the
+[upgrade sequence](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md#3-clean-and-re-extract).
+Do not relabel the manifest or delete its writer field. A generation that
+already lacks this field can be an early v2 beta and is allowed; an empty
+output directory still needs a full baseline. Legacy read support does not
+make partial writes a valid migration.
+
 For a `same-type identifier collision`, inspect both named source files and the
 Rails loader before suggesting source edits. Wrapper-nested class naming needs
 Zeitwerk mode and Zeitwerk >= 2.6.9; an older loader or classic mode can produce
@@ -362,6 +371,11 @@ Check the installed version before attempting it and follow the
 [corrupt cooldown recovery guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#corrupt-pipeline-cooldown-state).
 
 ## Missing GraphQL units
+
+In supporting unreleased readers after 2.0.0, `lookup` accepts the directory
+family alias `type: "graphql"` and returns the actual subtype. Prefer the
+concrete type from `search` for follow-up checks. On older readers, retry with
+that concrete type before concluding that a published GraphQL unit is absent.
 
 Woods 2.0.0 can omit schema classes, resolvers inherited through application
 superclasses, and runtime types owned by additional schemas (#558, #562, #563).
@@ -666,9 +680,28 @@ Check the installed revision before using these unreleased diagnostics:
   for a quick-reader timeout, `inspect_source_scan` for mapping/permission/limit
   problems, and `fresh_capture` for incomplete capture or boot evidence. Preserve
   mixed recommendations. Missing evidence cannot prove all files were added or
-  unreadable files deleted. A size refusal preserves the previous publication;
-  narrow configured extra roots before retrying. See
+  unreadable files deleted. See
   [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+- Supporting builds publish a usable code index with freshness `unavailable`
+  and reason `source_manifest_too_large` when evidence alone exceeds its
+  serialized-size limit. Follow `inspect_source_limits` and inspect
+  `unavailable.size_bytes` / `unavailable.limit_bytes`; repeating an identical
+  full capture cannot fix this. Changed-file and Git-based incremental work
+  remain usable with validated source-reference proof. An oversized launcher
+  handoff starts a fresh child without verified preboot capture. Actual invalid
+  evidence, failed writes and source instability retain publication safeguards.
+- Supporting readers retain readable unscoped search matches when an individual
+  needed unit cannot be decoded or opened, with partial reason
+  `unreadable_or_corrupt_source`. Empty partial results do not prove absence;
+  identifier-only summary hits do not validate bodies. Run `woods:validate`.
+  Explicit package/source-path scope still validates the full unit set before
+  matching; corrupt index-wide artifacts also retain typed errors. See
+  [search completeness](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#search-completeness).
+- With `:local`, supporting readers return degraded reload because snapshot
+  vectors and SQLite metadata cannot refresh atomically together. The old
+  aligned state remains served. Restart `woods-mcp` after `woods:embed`; granting
+  write access alone cannot fix this case. See the
+  [backend matrix](https://github.com/lost-in-the/woods/blob/main/docs/BACKEND_MATRIX.md#persistence-story).
 - Builds containing #593 return actual types from family-filtered search and
   reject unknown type names. An unknown flow unit or snapshot is `not_found`,
   while a valid empty answer remains successful. Repeated `corrupt_artifact`
@@ -708,6 +741,13 @@ behaviors. A supporting exporter offers `UNBLOCKED_DRY_RUN=1` and explicit
 [Unblocked migration guide](https://github.com/lost-in-the/woods/blob/main/docs/UNBLOCKED_INTEGRATION.md#explicit-ref-migration)
 before moving a scope. Preserve receipts, use one writer, and never use force
 purge to bypass unresolved ownership.
+
+Unresolved legacy owned receipts leave Unblocked sync incomplete. Select the
+known old ref explicitly; refs containing slashes cannot be inferred from URI
+prefixes. Obsolete documents without current replacements require review and
+manual remote and receipt cleanup. Do not remove receipts merely to clear the
+diagnostic. Inventory entries without a non-empty string URI are skipped and
+provide no ownership evidence.
 
 Supporting embedding builds validate complete prefixed inputs, split source
 without truncation, and rebuild old checkpoints once. Ollama counts are estimates

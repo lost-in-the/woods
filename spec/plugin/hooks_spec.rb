@@ -588,6 +588,20 @@ RSpec.describe 'plugin hooks (#280)' do
           end
         end
       end
+
+    it "reports unavailable evidence size with #{with_jq ? 'jq' : 'Ruby fallback'}" do
+        Dir.mktmpdir('woods-hook-unavailable') do |dir|
+          make_app(dir)
+          evidence = { reason: 'source_manifest_too_large', size_bytes: 20_000_000, limit_bytes: 16_777_216 }
+          env = status_command(dir, state: 'unavailable', unavailable: evidence)
+          env['PATH'] = restricted_bin(dir, without: ['jq']) unless with_jq
+          out, err, status = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(status).to be_success, err
+          expect(out).to include('freshness is unavailable', 'source_manifest_too_large',
+                                 '20000000 bytes', 'limit 16777216')
+          expect(out).not_to include('woods-extract full', 'freshness is current')
+        end
+      end
     end
 
     it 'stays quiet for verified current source or no existing index' do

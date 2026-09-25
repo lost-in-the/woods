@@ -247,7 +247,9 @@ documents. Ref segments are URL-encoded, including `#`, `?`, and `%`.
 
 Every sync first inventories remote documents through all pages. A short page
 is not proof of completion; malformed pages or repeated cursors stop before
-writes. This adds listing calls even when all local documents are unchanged.
+writes. Individual remote documents without a non-empty string URI are skipped;
+they provide no URI ownership evidence. This adds listing calls even when all
+local documents are unchanged.
 URIs are unique across the remote organization: Woods refuses a URI already
 assigned to another collection instead of moving it.
 
@@ -258,6 +260,14 @@ from a known-good copy; setting force flags cannot recover ownership. Historical
 entries adopted remotely with a null content hash are not deletion authority.
 
 ### Explicit ref migration
+
+**Unreleased after 2.0.0:** unresolved owned receipts from a legacy manifest
+leave sync incomplete. A URI prefix cannot prove the old ref: a slash can belong
+to either a ref name or a source path. Woods never adopts or purges those
+receipts by prefix. Select the known source ref with
+`UNBLOCKED_MIGRATE_FROM_REF`, or review obsolete remote documents and their
+legacy receipts for manual cleanup when there is no current replacement.
+`UNBLOCKED_FORCE_PURGE` cannot bypass this ownership requirement.
 
 Use migration only when retiring the old export scope, rather than publishing
 two branches independently. Keep one writer per local manifest **and** remote

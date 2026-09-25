@@ -36,11 +36,11 @@ release-state links still describe the prepared version.
 
 ## 2. Rules during ordinary feature work
 
-- **Never edit `lib/woods/version.rb` by hand.** Only `release:prepare` and
-  `release:reopen` write it.
+- **Never edit `lib/woods/version.rb` by hand.** Only `release:prepare`,
+  `release:reopen`, and `release:retarget` write it.
 - **Changelog entries go under `## [Unreleased]`**, beneath one of its
   `###` headings, **or in `changelog/<type>_<slug>.md`** (format and supported
-  types in CONTRIBUTING.md). Entry files contain Markdown without headings. An entry directly under `## [Unreleased]` with no heading
+  types in CONTRIBUTING.md). Entry files begin with a Markdown list item and contain no headings. An entry directly under `## [Unreleased]` with no heading
   blocks the next release. Duplicate headings are fine; they merge at release
   time, in the order they first appear.
 - **Never hand-edit a `release-state` fence.** The four fences (README version
@@ -60,6 +60,13 @@ or publishes.
 | Beta to the next beta or a release candidate | `bin/rake "release:prepare[2.0.0.rc1]"` |
 | Release candidate to the release | `bin/rake "release:prepare[2.0.0]"` |
 | After a final release publishes, reopen development | `bin/rake "release:reopen[2.1.0.alpha]"` |
+| Retarget an unpublished alpha to the next minor line | `bin/rake "release:retarget[2.1.0.alpha]"` |
+
+`release:retarget` accepts only an alpha and the next minor `X.Y.0.alpha`.
+For example, it moves `2.0.1.alpha` to `2.1.0.alpha`. Fetch release tags first:
+it refuses local tags for either version line, as well as dirty trees, beta/RC
+inputs and final inputs. It does not fold notes, commit, tag or publish. Retarget
+main before tagging a separate maintenance release from its previous line.
 
 `release:prepare` bumps VERSION, folds `## [Unreleased]` and optional entry files into
 `## [<version>] - <date>` with one block per `###` heading, leaves an empty
@@ -101,7 +108,7 @@ It refuses a version that moves backwards, a version whose base is not the line
 
 ## 4. What an agent may and may not do
 
-**May**: run either task when asked; review and report the diff; run the
+**May**: run the appropriate transition task when asked; review and report the diff; run the
 checks below; write the commit and pull request; quote the tag and dispatch
 commands the task printed.
 
@@ -140,7 +147,7 @@ stays independent.
 |---|---|---|
 | `release:prepare refused: the working tree has uncommitted changes` | uncommitted work | commit or discard first |
 | `does not come after the current version` | target moves backwards | pick a later version |
-| `main is developing X.Y.Z` | target base does not match the alpha | prepare within the current base; reopening requires a completed final release and cannot retarget an alpha/beta/RC |
+| `main is developing X.Y.Z` | target base does not match the alpha | prepare within the current base, or use the reviewed retarget task for an unpublished alpha; beta/RC lines cannot retarget |
 | `the Unreleased section is empty; nothing to release` | a beta or rc with no entries since the last one | there is nothing new to publish |
 | `the Unreleased section is empty and no X.Y.Z prerelease section exists` | a final release with nothing to ship | there is nothing to release |
 | `entries sit outside a ### heading in Unreleased` | an entry with no `###` block | file it under a heading |

@@ -4,6 +4,57 @@ require 'spec_helper'
 require 'woods/chunking/semantic_chunker'
 
 RSpec.describe Woods::Chunking::MethodChunker do
+  {
+    singleton_body: <<~RUBY,
+      class Callable
+        def call
+          :instance_marker
+        end
+        class << self
+          def call
+            :class_marker
+          end
+        end
+      end
+    RUBY
+    nested_class: <<~RUBY,
+      class Callable
+        def call
+          :outer_marker
+        end
+        class Nested
+          def call
+            :nested_marker
+          end
+        end
+      end
+    RUBY
+    inlined_override: <<~RUBY
+      class Callable
+        def call
+          :concern_marker
+        end
+        def call
+          :override_marker
+        end
+      end
+    RUBY
+  }.each do |shape, source|
+    it "retains each repeated method in #{shape} with distinct deterministic keys" do
+      unit = Woods::ExtractedUnit.new(type: :service, identifier: 'Callable', file_path: 'app/services/callable.rb')
+      unit.source_code = source
+      chunks = described_class.new(unit).chunk
+      markers = source.scan(/:(\w+_marker)/).flatten
+
+      markers.each do |marker|
+        expect(chunks.count { |chunk| chunk.content.include?(marker) }).to eq(1)
+      end
+      expect(chunks.map(&:identifier).uniq.size).to eq(chunks.size)
+      expect(chunks.map(&:identifier)).to eq(described_class.new(unit).chunk.map(&:identifier))
+      expect(chunks.map(&:identifier)).to include('Callable#method_call', 'Callable#method_call@2')
+    end
+  end
+
   [false, true].each do |reversed|
     %w[call call? call! value= == [] []=].each do |name|
       it "retains #{name} and self.#{name} with stable distinct identities, reverse=#{reversed}" do

@@ -159,15 +159,26 @@ module Woods
         return if @source_reference_paths.nil? || @source_reference_paths.empty?
 
         errors = manifest.data.fetch('errors')
-        unstable = errors.any? do |error|
+        unstable = errors.select do |error|
           %w[source_changed_during_extraction source_changed_during_read source_file_unreadable
              source_tree_unavailable external_source_path nonregular_source unverified_symlink_directory
              undecodable_source_path
              scan_time_budget scan_file_budget scan_byte_budget].include?(error['reason'])
         end
-        return unless unstable
+        return if unstable.empty?
 
-        raise Woods::ExtractionError, 'Source-reference source changed or could not be verified before publication'
+        raise Woods::ExtractionError,
+              'Source-reference source changed or could not be verified before publication ' \
+              "(#{source_verification_details(unstable)})"
+      end
+
+      def source_verification_details(errors)
+        details = errors.first(3).map do |error|
+          path = error['path']
+          path ? "#{error['reason']}: #{SourcePathEncoding.diagnostic(path)}" : error['reason']
+        end
+        details << "#{errors.size - 3} more source verification errors" if errors.size > 3
+        details.join('; ')
       end
     end
   end

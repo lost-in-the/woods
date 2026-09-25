@@ -108,6 +108,29 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
   end
 
   shared_examples 'typed embedding persistence' do
+    it 'removes deleted vectorless SQLite metadata alongside durable vectors' do
+      Dir.mktmpdir do |dir|
+        metadata = Woods::Storage::MetadataStore::SQLite.new(database: File.join(dir, 'metadata.sqlite3'))
+        build = lambda do
+          Woods::Embedding::Indexer.new(provider: Woods::Embedding::Provider::Fake.new(dims: 3),
+                                        text_preparer: Woods::Embedding::TextPreparer.new, vector_store: store,
+                                        metadata_store: metadata, output_dir: dir)
+        end
+        %w[Keep1 Keep2 Keep3 Keep4 Hollow].each do |id|
+          source = id == 'Hollow' ? '' : "class #{id}; end"
+          File.write(File.join(dir, "#{id}.json"), JSON.generate(type: 'model', identifier: id,
+                                                                 source_code: source, source_hash: Digest::SHA256.hexdigest(source)))
+        end
+        build.call.index_all
+        expect(metadata.find('Hollow')).not_to be_nil
+        expect(store.each_id.to_a).not_to include('Hollow')
+        File.unlink(File.join(dir, 'Hollow.json'))
+        build.call.index_incremental
+        expect(metadata.find('Hollow')).to be_nil
+        expect(metadata.all_identifiers).to contain_exactly('Keep1', 'Keep2', 'Keep3', 'Keep4')
+      end
+    end
+
     it 'retires zero-text vectors without calling the provider and checkpoints the empty state' do
       Dir.mktmpdir do |dir|
         provider = Woods::Embedding::Provider::Fake.new(dims: 3)

@@ -240,9 +240,15 @@ incremental extraction, targeted refresh or an embedded pipeline's incremental
 operation as the first v2 run. A flat index being readable, a successful
 `woods:validate`, or a newer manifest `woods_version` does not certify that all
 retained v1 units were migrated. After cleaning there is no structural baseline,
-and incremental extraction refuses that state. Supporting source-reference
-writers also refuse incompatible reference caches; that is not a universal
-major-version migration check. CI caches must distinguish Woods major versions
+and incremental extraction refuses that state. **Unreleased after 2.0.0:**
+incremental extraction and targeted refresh also refuse a flat index with a
+manifest, or a generation whose manifest names a writer major version below 2,
+before creating a new payload. Run a full `woods:extract` to rebuild it. A
+missing writer field in a generation manifest is allowed for early v2 betas;
+readers retain legacy compatibility. This guard cannot detect v1 units already
+retained by an older incremental writer that relabeled its manifest as v2.
+Supporting source-reference writers also refuse incompatible reference caches.
+CI caches must distinguish Woods major versions
 and restore the exact source baseline described in the
 [incremental CI recipe](INCREMENTAL_EXTRACTION.md#github-actions-with-an-exact-baseline).
 
@@ -294,6 +300,14 @@ Re-run every export after extraction and embeddings are verified. Renamed identi
 | Unblocked | Reconciles its sync manifest; for manifests with 10+ documents, refuses deletion beyond 30% unless `UNBLOCKED_FORCE_PURGE` is explicitly set |
 
 Review the target and backup before any force-purge override. Use `WOODS_NOTION_FORCE=1` only when you intentionally want Notion to re-check unchanged content hashes.
+
+**Unreleased after 2.0.0:** Unblocked keeps separate repository/ref scopes.
+Legacy receipts that cannot be assigned safely leave sync incomplete, including
+old exports from a non-`main` ref. Preview an explicit
+`UNBLOCKED_MIGRATE_FROM_REF=<old-ref>` migration; review obsolete documents with
+no current replacement for manual remote and receipt cleanup. Woods does not
+infer ownership from a URI prefix, and `UNBLOCKED_FORCE_PURGE` cannot resolve it.
+Follow [explicit ref migration](UNBLOCKED_INTEGRATION.md#explicit-ref-migration).
 
 **Notion needs one settling re-sync.** v2 groups column pages by physical table instead of by model, so models that share a table write one page per physical column, with the `Table` relation listing every owning model and their validations unioned. The page titles, and therefore the manifest keys, are unchanged, but the content hash of every shared-table column changes once. Expect the first post-upgrade `woods:notion_sync` to update those pages; subsequent runs skip them. This also ends the v1 behavior where two models sharing a table rewrote the same column page back and forth on every run. See [Notion integration](NOTION_INTEGRATION.md).
 
@@ -388,6 +402,10 @@ Normally leave `MCP_PROTOCOL_VERSION` unset. The SDK negotiates with legacy clie
 Update agent prompts that refer to the old inventory. Standard Index launch provides 14 tools. Standard Console launch provides nine, or eleven with explicitly enabled embedded read tools. See [MCP servers](MCP_SERVERS.md).
 
 Structural reads still work from a read-only index mount, but the `reload` tool does not: its transactional refresh takes the same on-disk writer lock as extraction and embedding, so the MCP process needs write access to the index directory. Without it, `reload` returns a typed degraded error and keeps serving the previous aligned generation rather than swapping in a partial one. Grant write access, or restart the MCP process after publishing. [MCP servers](MCP_SERVERS.md) owns the detail.
+
+**Unreleased after 2.0.0:** `:local` snapshot vectors and SQLite metadata cannot
+reload atomically in the running server, even with write access. Restart
+`woods-mcp` after `woods:embed` when using that preset.
 
 ### Console users: preserve or configure the HTTP token
 

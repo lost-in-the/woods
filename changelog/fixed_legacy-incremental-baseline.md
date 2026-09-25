@@ -1,0 +1,1 @@
+- Refuse incremental extraction and targeted refresh over legacy flat manifests or generations written by Woods 1.x before creating a payload. Full extraction remains the migration path, and generation indexes without writer provenance remain compatible with early v2 betas.

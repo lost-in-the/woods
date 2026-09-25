@@ -61,13 +61,16 @@ module Woods
       def build_result
         dependencies = {}
         owners = @units.filter_map do |unit|
-          next unless CALLER_TYPES.include?(unit['type'])
-
           key = [unit['type'], unit['identifier']]
           path = @inputs.relative(unit['file_path'])
-          base = original_dependencies(unit, key)
-          additions = all_resolved_dependencies(unit) - base
-          dependencies[key] = base + additions
+          additions = []
+          if CALLER_TYPES.include?(unit['type'])
+            base = original_dependencies(unit, key)
+            additions = all_resolved_dependencies(unit) - base
+            dependencies[key] = base + additions
+          end
+          # Target-only units also crossed Inputs' consumption gate. Retain
+          # their exact ownership so bounded freshness can reuse that proof.
           owner_record(unit, path, additions)
         end
         owners.sort_by! { |owner| [owner['type'], owner['identifier']] }
@@ -76,6 +79,7 @@ module Woods
       end
 
       def owner_record(unit, path, additions)
+        return unless Registry::TYPES.include?(unit['type']&.to_sym)
         return unless @files.key?(path) && RuntimeLookup::CONSTANT.match?(unit['identifier'].to_s)
 
         record = { 'type' => unit['type'], 'identifier' => unit['identifier'], 'file_path' => path,

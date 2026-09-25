@@ -1,0 +1,1 @@
+- Preserve every repeated method definition when chunking singleton class bodies, nested classes, and inlined overrides. Later definitions receive deterministic occurrence suffixes instead of overwriting earlier source.

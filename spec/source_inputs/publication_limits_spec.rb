@@ -21,19 +21,38 @@ RSpec.describe 'Source evidence serialization budgets' do
     Woods::SourceInputs::Manifest.build(snapshot: @snapshot, scopes: {}, boot_verified: true, generation: 1)
   end
 
-  it 'uses the actual published pretty JSON size for the reader and writer limit' do
-    bytes = JSON.pretty_generate(build.data).bytesize
-    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', bytes)
-    expect(Woods::SourceInputs::Manifest.parse(JSON.pretty_generate(build.data)).data).to eq(build.data)
-    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', bytes - 1)
-    expect { build }.to raise_error(Woods::SourceInputs::Manifest::Invalid, /source_manifest_too_large/)
+  it 'bounds oversized freshness evidence without refusing code publication' do
+    @snapshot['metrics']['padding'] = 'x' * 4000
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 2000)
+
+    manifest = build
+
+    expect(manifest.data).to include('state' => 'unavailable', 'complete' => false, 'comparison_complete' => false)
+    expect(manifest.data['unavailable']).to include('reason' => 'source_manifest_too_large', 'limit_bytes' => 2000)
+    expect(manifest.data['unavailable']['size_bytes']).to be > 4000
+    expect(JSON.pretty_generate(manifest.data).bytesize).to be <= 2000
+    expect(Woods::SourceInputs::Manifest.parse(JSON.pretty_generate(manifest.data)).data).to eq(manifest.data)
   end
 
-  it 'refuses an oversized private handoff before starting the Rails child' do
+  it 'refuses malformed unavailable evidence instead of treating it as an exemption' do
+    @snapshot['metrics']['padding'] = 'x' * 4000
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 2000)
+    data = build.data
+    [{ 'complete' => true }, { 'state' => 'current' }, { 'reference_cache_sha256' => 'invalid' },
+     { 'unavailable' => { 'reason' => 'other_failure', 'size_bytes' => 4000, 'limit_bytes' => 2000 } }].each do |change|
+      expect { Woods::SourceInputs::Manifest.new(data.merge(change)) }
+        .to raise_error(Woods::SourceInputs::Manifest::Invalid, /invalid_unavailable_source_manifest/)
+    end
+  end
+
+  it 'continues a fresh child with an explicit unavailable marker when private capture exceeds the limit' do
     stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 100)
-    expect(Process).not_to receive(:spawn)
+    script = "record = JSON.parse(ENV.fetch('WOODS_SOURCE_CAPTURE')); " \
+             "exit(record.dig('unavailable', 'reason') == 'source_manifest_too_large' && !record.key?('path') ? 0 : 1)"
     expect do
-      expect(Woods::SourceInputs::Launcher.run(['--root', @root, '--output', @output, 'full'])).to eq(1)
-    end.to output(/source capture exceeds .* narrow .*source roots/).to_stderr
+      result = Woods::SourceInputs::Launcher.run(['--root', @root, '--output', @output, 'full'],
+                                                 command: [RbConfig.ruby, '-rjson', '-e', script])
+      expect(result).to eq(0)
+    end.to output(/source_manifest_too_large.*bytes.*limit 100/).to_stderr
   end
 end

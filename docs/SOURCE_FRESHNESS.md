@@ -14,6 +14,7 @@ before using it; upgrading the plugin alone does not upgrade Woods.
 |---|---|---|
 | `current` | All covered inputs match their consumer baselines, with a verified fresh boot boundary and complete checks. A dirty checkout can be current. | Use the indexed facts within the coverage below. |
 | `drifted` | At least one captured input differs, was removed, or a relevant input was added. | Inspect the changed paths; choose a full run or a justified targeted refresh. |
+| `unavailable` | **Unreleased after 2.0.0:** source evidence exceeded its serialized-size limit; the code index was published successfully. | Inspect `unavailable.size_bytes` and `unavailable.limit_bytes`; another full extraction will not reduce this size. |
 | `unknown` | Evidence is incomplete: for example an old index, missing source/key, scan limit, opaque symlink directory, or unproved boot/consumer boundary. | Inspect `reasons`; use a deep check or fresh full capture as appropriate. |
 
 Drift can coexist with incomplete coverage. `reasons` reports both; absence of a
@@ -49,6 +50,7 @@ a source edit does not require an index generation change to become visible.
 - `deep_check`: the quick reader reached its time limit; request one deep check.
 - `inspect_source_scan`: inspect `verification_reasons`, permissions, source
   mapping and scan limits; a deeper scan cannot repair unavailable inputs.
+- `inspect_source_limits`: source freshness is unavailable because evidence exceeds its size limit; the code index remains usable.
 - `fresh_capture`: the captured baseline, boot or consumer evidence is incomplete;
   fix the reported cause and run the launcher in a fresh process.
 
@@ -129,8 +131,10 @@ when the process locale is `C`. A filename with invalid UTF-8 bytes produces
 `undecodable_source_path` and incomplete coverage; directory entries with those
 names are pruned. Diagnostic labels escape the original bytes and are bounded.
 The watcher skips these entries, and reference verification retains the preceding
-generation. Rename the affected entries to valid UTF-8 names before a fresh
-capture. Explicit root/output paths with invalid UTF-8 bytes are rejected as
+generation. **Unreleased after 2.0.0:** the publication refusal names the reason
+and up to three escaped, bounded path labels, including entries outside source
+consumer scopes; it never includes file contents. Rename the affected entries to
+valid UTF-8 names before a fresh capture. Explicit root/output paths with invalid UTF-8 bytes are rejected as
 configuration errors.
 
 Every consuming scope keeps its own identities. An events scan can reread a
@@ -246,14 +250,27 @@ Flat fallback and older indexes lack verified atomic source evidence.
 `WOODS_PROFILE=1` reports `source capture` and `source verification` separately.
 Capture/recheck each allow up to ten seconds with the same file/byte caps.
 
-**Unreleased after 2.0.0:** both the published manifest and the private launcher
-handoff have a 16 MiB serialized-size limit, matching their readers. Oversized
-evidence refuses publication or child startup with a bounded diagnostic; the
-preceding payload remains active. Narrow unnecessarily broad additional source
-roots or reduce scoped inputs before retrying. There is no silent truncation of
-consumer identities. Version-1 manifests remain readable; the optional
-`comparison_complete` field supplements existing coverage errors, and legacy
-missing-baseline errors remain conservative.
+**Unreleased after 2.0.0:** the published manifest and private launcher handoff
+have a 16 MiB serialized-size limit. If size alone exceeds that limit, extraction
+continues and publishes the code index successfully with a loud warning and
+bounded evidence: `state: "unavailable"`, reason `source_manifest_too_large`, and
+`unavailable.size_bytes` / `unavailable.limit_bytes`. A launcher handoff above the
+limit continues in a fresh child without claiming verified preboot capture.
+Status, validation and hooks retain this limitation; they do not recommend an
+identical full rebuild. Source freshness remains unavailable on subsequent
+incremental runs until a full capture fits the limit.
+
+Normal changed-file and Git-based incremental work continues. Unchanged
+source-reference facts require both unchanged keyed source identities and exact
+typed ownership in the validated, hash-bound reference cache from the same
+published generation. Missing, corrupt or mismatched proof still refuses reuse.
+The watcher retains a compact captured-tree fingerprint for catch-up only; that
+fingerprint never establishes runtime freshness. Invalid evidence, failed writes
+and source instability retain their existing publication safeguards.
+
+Version-1 manifests remain readable. The optional `comparison_complete` field
+supplements existing coverage errors; an unavailable manifest never claims
+complete comparison coverage.
 
 September 2026 fixture measurements: a pinned Writebook source tree (456 visited
 files, 223 hashed, 233KB) completed quick scans in median 36ms native / 45ms on a

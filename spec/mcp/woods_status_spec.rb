@@ -10,6 +10,11 @@ require 'tmpdir'
 require 'fileutils'
 
 RSpec.describe 'woods_status tool' do
+  before do
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with('WOODS_NO_UPDATE_CHECK').and_return(nil)
+  end
+
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:reader) { Woods::MCP::IndexReader.new(fixture_dir) }
 

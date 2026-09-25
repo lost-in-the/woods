@@ -79,6 +79,7 @@ RSpec.describe Woods::Unblocked::Exporter do
       allow(m).to receive(:empty?).and_return(false)
       allow(m).to receive(:activate_scope)
       allow(m).to receive(:migration).and_return(nil)
+      allow(m).to receive(:unresolved_legacy_ownership?).and_return(false)
       allow(m).to receive(:unchanged?).and_return(false)
       allow(m).to receive(:record)
       allow(m).to receive(:document_id_for).and_return(nil)

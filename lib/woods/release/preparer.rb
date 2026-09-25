@@ -10,11 +10,12 @@ require_relative 'version_state'
 
 module Woods
   module Release
-    # Performs the two version-state transitions on a checkout.
+    # Performs the supported version-state transitions on a checkout.
     #
     # `prepare` builds a release commit: it bumps VERSION, folds the changelog
     # into a dated heading, and restates the `release-state` fences. `reopen`
-    # moves a released tree back to the next `.alpha`. Neither commits, tags,
+    # moves a released tree back to the next `.alpha`; `retarget` moves an
+    # unpublished alpha to the next minor line. None commits, tags,
     # pushes, or publishes anything: the reviewed pull request and the dispatch
     # workflow stay the only path to RubyGems.
     class Preparer # rubocop:disable Metrics/ClassLength
@@ -86,6 +87,25 @@ module Woods
           result(previous, target, write(root, rewrites)) { |changed| reopen_report(previous, target, changed) }
         end
 
+        # Retargets an unpublished alpha without consuming changelog entries.
+        # @param root [String] Repository root
+        # @param version [String] Next minor alpha version
+        # @return [Result]
+        def retarget(root:, version:)
+          target = VersionState.parse(version)
+          previous = current_state(root)
+          VersionState.validate_retarget!(previous, target)
+          assert_clean!(root)
+          [previous, target].each { |state| assert_untagged_line!(root, state) }
+
+          rewrites = { VERSION_PATH => version_source(root, target) }
+          rewrites.merge!(Notes.rewrites(root: root, version: target.to_s))
+          result(previous, target, write(root, rewrites)) do |changed|
+            "Retargeted development from #{previous} to #{target}.\n\n#{changed_summary(changed)}\n\n" \
+              'Nothing has been committed, tagged, or published. Review the diff and open a pull request.'
+          end
+        end
+
         # @return [VersionState] the state the checkout is currently in
         def current_state(root)
           source = File.read(File.join(root, VERSION_PATH), encoding: Encoding::UTF_8)
@@ -96,6 +116,14 @@ module Woods
         end
 
         private
+
+        def assert_untagged_line!(root, state)
+          tags, status = Open3.capture2e('git', 'tag', '--list', "v#{state.base}", "v#{state.base}.*", chdir: root)
+          raise VersionState::InvalidTransition, "Could not inspect release tags: #{tags.strip}" unless status.success?
+          return if tags.strip.empty?
+
+          raise VersionState::InvalidTransition, "#{state.base} already has release tags: #{tags.split.join(', ')}"
+        end
 
         def assert_clean!(root)
           output, status = Open3.capture2e('git', 'status', '--porcelain', chdir: root)

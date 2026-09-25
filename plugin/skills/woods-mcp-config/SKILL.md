@@ -121,6 +121,11 @@ override; the shared root selects the primary checkout's HEAD. Follow the
 
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
 
+In supporting unreleased builds after 2.0.0, the `:local` preset also returns
+degraded on reload because snapshot vectors and SQLite metadata cannot refresh
+atomically together. Restart `woods-mcp` after `woods:embed`; write access alone
+does not resolve this case. See the [backend matrix](https://github.com/lost-in-the/woods/blob/main/docs/BACKEND_MATRIX.md#persistence-story).
+
 For host MCP reading a container daemon's shared index, foreign heartbeat trust
 (#321) is available in Woods `2.0.0.beta3`. Verify the installed gem version's release notes before
 offering `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in the MCP environment. It makes
@@ -230,6 +235,26 @@ unproved boot/consumer coverage remain unknown. A fresh `bundle exec woods-extra
 inside the application environment establishes preboot evidence. Never publish
 `.source-inputs.key`, silently change its permissions, or delete queued edits to
 hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+
+Supporting unreleased builds after 2.0.0 report `unavailable` with
+`source_manifest_too_large` when source evidence exceeds its serialized-size
+limit. The code index remains usable. Follow `inspect_source_limits`, inspect
+`unavailable.size_bytes` / `unavailable.limit_bytes`, and retain the limitation;
+an identical full extraction or a deeper scan cannot fix oversized evidence.
+An oversized launcher handoff cannot establish verified preboot capture.
+
+## Partial search and GraphQL lookup (unreleased after 2.0.0)
+
+Check the installed reader revision before relying on these repairs. Unscoped
+search skips an individual unit it needs but cannot read, retains readable matches,
+and reports successful partial completeness with
+`reason: "unreadable_or_corrupt_source"`. Empty partial results do not prove
+absence. Identifier-only search can use summaries without validating unit
+bodies; run `woods:validate` for damage. Explicit package/source-path scope
+still requires readable bodies across its full-unit preflight. Corrupt
+index-wide artifacts return a typed error. Supporting `lookup` also accepts
+`type: "graphql"`, but returns the unit's concrete type; use that type for follow-up checks.
+See the [search contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#search-completeness).
 
 ## Compact evidence capability check
 

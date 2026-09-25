@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'digest'
 
 module Woods
   module SourceInputs
@@ -46,7 +47,7 @@ module Woods
       # Explicit wire fields keep incomplete coverage separate from boot provenance.
       # rubocop:disable Metrics/AbcSize, Metrics/ParameterLists
       def self.build(snapshot:, scopes:, boot_verified:, generation:, errors: [], unverified_scopes: [],
-                     comparison_complete: true)
+                     comparison_complete: true, unavailable: nil)
         identities = scopes.values.flat_map(&:values).uniq.sort
         indices = identities.each_with_index.to_h
         new('version' => VERSION, 'generation' => generation, 'root' => snapshot.fetch('root'),
@@ -59,18 +60,48 @@ module Woods
             'identities' => identities, 'metrics' => snapshot.fetch('metrics'),
             'scopes' => scopes.sort.to_h.transform_values do |paths|
               paths.sort.to_h.transform_values { |digest| indices.fetch(digest) }
-            end).tap(&:validate_publication_size!)
+            end).tap { |manifest| manifest.bound_publication!(snapshot: snapshot, unavailable: unavailable) }
       end
 
       # rubocop:enable Metrics/AbcSize, Metrics/ParameterLists
 
-      # Match the bytes written by the atomic publisher, including indentation.
-      # Refusal happens before the generation marker can replace its predecessor.
-      def validate_publication_size!
-        return if JSON.pretty_generate(@data).bytesize <= MAX_BYTES
+      # Compact watch boundary only: this never certifies runtime freshness.
+      def self.capture_digest(files)
+        Digest::SHA256.hexdigest(JSON.generate(files.sort.to_h))
+      end
 
-        raise Invalid, "source_manifest_too_large: source evidence exceeds #{MAX_BYTES} bytes; " \
-                       'narrow additional source roots or reduce scoped inputs before retrying'
+      def self.valid_unavailable_evidence?(value)
+        value.is_a?(Hash) && value['reason'] == 'source_manifest_too_large' &&
+          value.values_at('size_bytes', 'limit_bytes').all?(Integer) &&
+          value['limit_bytes'].positive? && value['size_bytes'] > value['limit_bytes']
+      end
+
+      def unavailable?
+        @data['state'] == 'unavailable'
+      end
+
+      # Bind only an already validated, generation-local reference cache. This
+      # preserves its consumed-source proof without publishing the large ledger.
+      def bind_reference_cache!(cache)
+        @data['reference_cache_sha256'] = Digest::SHA256.hexdigest(JSON.generate(cache)) if unavailable? && cache
+      end
+
+      # Source evidence is advisory. Its size limit must not withhold a valid
+      # code index. Keep errors so final publication still refuses unstable input.
+      def bound_publication!(snapshot:, unavailable: nil)
+        size = JSON.pretty_generate(@data).bytesize
+        return unless unavailable || size > MAX_BYTES
+
+        diagnostic = unavailable || { 'reason' => 'source_manifest_too_large',
+                                      'size_bytes' => size, 'limit_bytes' => MAX_BYTES }
+        @data['capture_sha256'] = self.class.capture_digest(snapshot.fetch('files')) if snapshot['complete']
+        @data.merge!('state' => 'unavailable', 'unavailable' => diagnostic,
+                     'complete' => false, 'comparison_complete' => false,
+                     'identities' => [], 'scopes' => {}, 'metrics' => {})
+        warn "[woods] source freshness unavailable: #{diagnostic['reason']}; " \
+             "#{diagnostic['size_bytes']} bytes exceeds limit #{diagnostic['limit_bytes']}. " \
+             'Publishing the code index without freshness comparison evidence; ' \
+             'another full extraction will not reduce this size.'
       end
 
       private
@@ -80,9 +111,26 @@ module Woods
         raise Invalid, 'invalid_source_manifest_header' unless valid_header?
 
         validate_tables!
+        validate_unavailable!
         return if @data['extra_roots'].all? { |path| valid_path?(path) }
 
         raise Invalid, 'invalid_source_roots'
+      end
+
+      def validate_unavailable!
+        return if (%w[state unavailable reference_cache_sha256 capture_sha256] & @data.keys).empty?
+
+        valid = unavailable? && self.class.valid_unavailable_evidence?(@data['unavailable']) && empty_comparison?
+        valid &&= valid_optional_digests?
+        raise Invalid, 'invalid_unavailable_source_manifest' unless valid
+      end
+
+      def valid_optional_digests?
+        %w[reference_cache_sha256 capture_sha256].all? { |key| !@data.key?(key) || digest?(@data[key]) }
+      end
+
+      def empty_comparison?
+        !@data['complete'] && !@data['comparison_complete'] && @data['scopes'].empty? && @data['identities'].empty?
       end
 
       def validate_tables!

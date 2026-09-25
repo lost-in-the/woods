@@ -40,7 +40,7 @@ RSpec.describe 'Source-reference extraction integration' do
     unit
   end
 
-  def full(target: true)
+  def full(target: true, oversized: false)
     extractor = Woods::Extractor.new(output_dir: @output)
     extractor.send(:begin_source_inputs, 'full')
     extractor.send(:begin_payload!)
@@ -52,15 +52,19 @@ RSpec.describe 'Source-reference extraction integration' do
     units.each { |value| graph.register(value) }
     extractor.instance_variable_set(:@dependency_graph, graph)
     extractor.send(:resolve_dependents)
-    units.each do |value|
-      extractor.send(:write_unit_file, unit_path(extractor, value.identifier), value)
-    end
+    units.each { |value| extractor.send(:write_unit_file, unit_path(extractor, value.identifier), value) }
     extractor.send(:write_dependency_graph)
     extractor.instance_variable_get(:@source_inputs).consume_extractor(:poros, units)
     extractor.instance_variable_set(:@eager_load_complete, true)
+    pad_manifest(extractor) if oversized
     extractor.send(:publish_generation, 'full')
     extractor.raise_on_publication_failure!
     extractor
+  end
+
+  def pad_manifest(extractor)
+    session = extractor.instance_variable_get(:@source_inputs)
+    session.instance_variable_get(:@snapshot)['metrics']['padding'] = 'x' * 6000
   end
 
   def incremental
@@ -93,6 +97,68 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(extractor.dependency_graph.to_h[:reverse_via]['RefIntegrationTarget']).to include(
       source: 'RefIntegrationCaller', source_type: :poro, via: :code_reference
     )
+  end
+
+  it 'keeps repeated incrementals usable with hash-bound overflow provenance and retained source references' do
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 4000)
+    previous = full(oversized: true)
+    evidence_path = previous.payload_dir.join('source_inputs.json')
+    evidence = JSON.parse(File.read(evidence_path))
+    expect(evidence).to include('state' => 'unavailable', 'scopes' => {})
+    expect(evidence['reference_cache_sha256']).to match(/\A[0-9a-f]{64}\z/)
+
+    2.times do
+      extractor = incremental
+      expect(extractor.send(:enrich_source_references_incremental, Set.new)).to be_empty
+      expect(read_unit(extractor, 'RefIntegrationCaller')['dependencies']).to eq([expected_edge])
+      extractor.send(:publish_generation, 'incremental')
+      expect { extractor.raise_on_publication_failure! }.not_to raise_error
+      expect(JSON.parse(File.read(extractor.payload_dir.join('source_inputs.json')))['state']).to eq('unavailable')
+    end
+  end
+
+  %w[missing corrupt hash_mismatch owner_mismatch source_changed].each do |failure|
+    it "refuses retained reference reuse for an unavailable baseline with #{failure}" do
+      stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 4000)
+      previous = full(oversized: true)
+      token = Woods::Generation.new(output_dir: @output).current.token
+      path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
+      cache = Woods::SourceReferences::Cache.read(path)
+      case failure
+      when 'missing' then File.unlink(path)
+      when 'corrupt' then File.write(path, 'not json')
+      when 'hash_mismatch'
+        cache['files'].values.first['analysis']['references'] = []
+        Woods::SourceReferences::Cache.write(path, cache)
+      when 'owner_mismatch'
+        cache['owners'].first['identifier'] = 'DifferentOwner'
+        Woods::SourceReferences::Cache.write(path, cache)
+        evidence_path = previous.payload_dir.join('source_inputs.json')
+        evidence = JSON.parse(File.read(evidence_path))
+        evidence['reference_cache_sha256'] = Digest::SHA256.hexdigest(JSON.generate(cache))
+        File.write(evidence_path, JSON.generate(evidence))
+      when 'source_changed' then write_source('caller', 'class RefIntegrationCaller; end')
+      end
+
+      expect { incremental.send(:enrich_source_references_incremental, Set.new) }
+        .to raise_error(Woods::SourceReferences::RebuildRequired)
+      expect(Woods::Generation.new(output_dir: @output).current.token).to eq(token)
+    end
+  end
+
+  it 'still refuses unstable source when the candidate freshness manifest is oversized' do
+    previous = full
+    token = Woods::Generation.new(output_dir: @output).current.token
+    extractor = incremental
+    extractor.send(:enrich_source_references_incremental, Set.new)
+    pad_manifest(extractor)
+    stub_const('Woods::SourceInputs::Manifest::MAX_BYTES', 4000)
+    write_source('caller', 'class RefIntegrationCaller; def changed; end; end')
+
+    expect(extractor.send(:publish_generation, 'incremental')).to be_nil
+    expect { extractor.raise_on_publication_failure! }.to raise_error(Woods::ExtractionError, /source.*changed/i)
+    expect(Woods::Generation.new(output_dir: @output).current.token).to eq(token)
+    expect(read_unit(previous, 'RefIntegrationCaller')['dependencies']).to eq([expected_edge])
   end
 
   it 'connects an unchanged caller when a target arrives while preserving metadata and git graph facts' do

@@ -19,6 +19,7 @@ module Woods
         @generation = Generation.new(output_dir: output_dir)
         @marker = @generation.current
         @manifest = read_manifest
+        report_unavailable if @manifest&.unavailable?
       end
 
       # A full run records the missing boundary even when incremental discovery
@@ -35,11 +36,25 @@ module Woods
         return [] if candidates.empty?
 
         current = current_identities
+        return [] if captured_tree_matches?(current)
+
         expected = recorded_identities
         candidates.reject { |path| covered?(path, current, expected) }
       end
 
       private
+
+      def report_unavailable
+        evidence = @manifest.data.fetch('unavailable')
+        warn "[Woods] Watch source freshness unavailable: #{evidence.fetch('reason')}; " \
+             "#{evidence.fetch('size_bytes')} bytes; limit #{evidence.fetch('limit_bytes')}. " \
+             'Continuing source-change catch-up without a freshness comparison ledger.'
+      end
+
+      def captured_tree_matches?(current)
+        @manifest.unavailable? && @current_complete &&
+          @manifest.data['capture_sha256'] == SourceInputs::Manifest.capture_digest(current)
+      end
 
       def covered?(path, current, expected)
         relative = path.delete_prefix("#{@root}/")
@@ -112,7 +127,9 @@ module Woods
       end
 
       def current_identities
-        SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key, scopes: @scopes).call.fetch('files')
+        snapshot = SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key, scopes: @scopes).call
+        @current_complete = snapshot['complete']
+        snapshot.fetch('files')
       rescue SystemCallError, IOError
         {}
       end

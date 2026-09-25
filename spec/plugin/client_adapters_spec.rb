@@ -74,7 +74,8 @@ RSpec.describe 'explicit edit client adapters' do
               { path: 'app/services/new.rb', operation: 'add' }]
     _, err, status = invoke(envelope(events))
     expect(status).to be_success, err
-    expect(JSON.parse(File.read(@record))['events']).to match_array(JSON.parse(JSON.generate(events)))
+    batch = JSON.parse(File.read(@record, encoding: 'UTF-8'))
+    expect(batch['events']).to match_array(JSON.parse(JSON.generate(events)))
     expect(Dir[File.join(@output, 'hook-pending/*.json')]).to eq([])
   end
 
@@ -111,14 +112,14 @@ RSpec.describe 'explicit edit client adapters' do
     _, err, status = run_plugin(raw)
     expect(status).to be_success, err
     Timeout.timeout(10) { sleep 0.02 until File.exist?(@record) }
-    actual = JSON.parse(File.read(@record))['events']
+    actual = JSON.parse(File.read(@record, encoding: 'UTF-8'))['events']
     expect(actual.map { |event| event['path'] }).to contain_exactly(
       'app/services/add.rb', 'app/services/update.rb', 'app/services/delete.rb',
       'app/services/move.rb', 'app/services/moved.rb'
     )
     expect(actual).to include('path' => 'app/services/move.rb', 'operation' => 'delete')
     expect(actual).to include('path' => 'app/services/moved.rb', 'operation' => 'add')
-    expect(File.read(@record)).not_to include('patchText', 'diagnostics', 'sessionID', 'oldString')
+    expect(File.read(@record, encoding: 'UTF-8')).not_to include('patchText', 'diagnostics', 'sessionID', 'oldString')
   end
 
   it 'uses the pinned write and edit metadata contracts without carrying source text' do
@@ -132,10 +133,10 @@ RSpec.describe 'explicit edit client adapters' do
       _, err, status = run_plugin(input: { tool: tool }, output: { metadata: metadata, output: 'PRIVATE FIXTURE' })
       expect(status).to be_success, err
       Timeout.timeout(10) { sleep 0.02 until File.exist?(@record) }
-      expect(JSON.parse(File.read(@record))['events']).to eq(
+      expect(JSON.parse(File.read(@record, encoding: 'UTF-8'))['events']).to eq(
         [{ 'path' => "app/services/#{name}", 'operation' => operation }]
       )
-      expect(File.read(@record)).not_to include('PRIVATE FIXTURE', 'before')
+      expect(File.read(@record, encoding: 'UTF-8')).not_to include('PRIVATE FIXTURE', 'before')
     end
   end
 
@@ -161,7 +162,7 @@ RSpec.describe 'explicit edit client adapters' do
     _, err, status = Open3.capture3({ 'WOODS_HOOKS_ENABLED' => '1', 'WOODS_HOOK_RAKE' => @rake },
                                     'bash', File.join(hooks, 'woods-post-edit.sh'), stdin_data: JSON.generate(data))
     expect(status).to be_success, err
-    expect(JSON.parse(File.read(@record))['events']).to eq(
+    expect(JSON.parse(File.read(@record, encoding: 'UTF-8'))['events']).to eq(
       [{ 'path' => 'app/services/added.rb', 'operation' => 'update' }]
     )
   end
@@ -176,8 +177,9 @@ RSpec.describe 'explicit edit client adapters' do
                                                File.join(hooks, 'adapters/normalize.jq'), stdin_data: input)
     expect(ruby_status).to be_success, ruby_err
     expect(jq_status).to be_success, jq_err
-    expect(JSON.parse(ruby_out)).to eq(JSON.parse(jq_out))
-    expect(JSON.parse(ruby_out)['events'].size).to eq(2)
+    normalized = JSON.parse(ruby_out.force_encoding('UTF-8'))
+    expect(normalized).to eq(JSON.parse(jq_out.force_encoding('UTF-8')))
+    expect(normalized['events'].size).to eq(2)
   end
 
   it 'keeps a malformed or unsupported event out of an already pending queue' do
@@ -248,7 +250,8 @@ RSpec.describe 'explicit edit client adapters' do
     _, err, status = Open3.capture3(environment, bash, File.join(hooks, 'woods-refresh.sh'), 'opencode',
                                     stdin_data: JSON.generate(payload))
     expect(status).to be_success, err
-    expect(JSON.parse(File.read(@record))['events']).to eq([{ 'path' => relative, 'operation' => 'add' }])
+    batch = JSON.parse(File.read(@record, encoding: 'UTF-8'))
+    expect(batch['events']).to eq([{ 'path' => relative, 'operation' => 'add' }])
   end
 
   %w[C C.UTF-8].each do |locale|
@@ -274,11 +277,11 @@ RSpec.describe 'explicit edit client adapters' do
       expect(stderr).to eq('')
       events = [{ 'path' => relative, 'operation' => 'add' },
                 { 'path' => 'app/services/ancien-é.rb', 'operation' => 'update' }]
-      batch = JSON.parse(File.read(@record))
+      batch = JSON.parse(File.read(@record, encoding: 'UTF-8'))
       expect(batch).to include('output' => output, 'version' => 1)
       expect(batch.fetch('events')).to match_array(events)
       queued = Dir[File.join(@output, 'hook-pending/*.json')].flat_map do |path|
-        value = JSON.parse(File.read(path))
+        value = JSON.parse(File.read(path, encoding: 'UTF-8'))
         value.is_a?(Array) ? value : [value]
       end
       expect(queued).to match_array(events)

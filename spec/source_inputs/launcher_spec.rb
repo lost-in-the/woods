@@ -34,6 +34,29 @@ RSpec.describe Woods::SourceInputs::Launcher do
     JSON.parse(File.read(@record))
   end
 
+  it 'uses an executable application rake binstub from the selected root' do
+    binstub = File.join(@app, 'bin/rake')
+    FileUtils.mkdir_p(File.dirname(binstub))
+    File.write(binstub, "#!#{RbConfig.ruby}\n#{File.read(@child)}")
+    File.chmod(0o755, binstub)
+    expect(described_class.run(['--root', @app, '--output', @output, 'full'])).to eq(0)
+    expect(child.fetch('arguments')).to eq(['woods:extract'])
+  end
+
+  [false, true].each do |exists|
+    it "uses bundle exec rake when the application binstub is #{exists ? 'not executable' : 'absent'}" do
+      if exists
+        FileUtils.mkdir_p(File.join(@app, 'bin'))
+        File.write(File.join(@app, 'bin/rake'), 'not executable')
+      end
+      status = double('process status', exitstatus: 0)
+      expect(Process).to receive(:spawn).with(kind_of(Hash), 'bundle', 'exec', 'rake', 'woods:extract',
+                                              chdir: @app, pgroup: true).and_return(12_345)
+      allow(Process).to receive(:wait2).with(12_345).and_return([12_345, status])
+      expect(described_class.run(['--root', @app, '--output', @output, 'full'])).to eq(0)
+    end
+  end
+
   it 'captures before a fresh child and cleans the private handoff after success' do
     FileUtils.mkdir_p(File.join(@app, 'app/services'))
     File.write(File.join(@app, 'app/services/pay.rb'), 'before boot')

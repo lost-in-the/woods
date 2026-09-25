@@ -45,6 +45,33 @@ RSpec.describe 'Installed source ownership' do
     $LOADED_FEATURES.delete(path)
   end
 
+  def installed_git_gem(local: false)
+    home = File.join(@root, 'vendor/bundle/ruby/example/bundler/gems/git_fixture-0123456789ab')
+    spec = Gem::Specification.new do |gem|
+      gem.name = 'git_fixture'
+      gem.version = '1.0.0'
+    end
+    spec.loaded_from = write(File.join(home, 'git_fixture.gemspec'))
+    spec.full_gem_path = home
+    source = Bundler::Source::Git.new('uri' => 'https://example.invalid/fixture.git')
+    allow(source).to receive_messages(path: Pathname.new(home), local?: local)
+    spec.source = source
+    allow(Gem).to receive(:loaded_specs).and_return(Gem.loaded_specs.merge(spec.name => spec))
+    write(File.join(home, 'lib/source_fixture.rb'))
+  end
+
+  it 'excludes installed Bundler git gems while retaining explicitly scoped source' do
+    path = installed_git_gem
+    expect(finish(path).data['errors']).to eq([])
+    manifest = finish(path, extra_roots: ['vendor/bundle'])
+    expect(manifest.expanded.fetch('unit:fixture')).to have_key(path.delete_prefix("#{@root}/"))
+  end
+
+  it 'keeps local overrides of Bundler git gems in application-source coverage' do
+    expect(finish(installed_git_gem(local: true)).data['errors'])
+      .to include(include('reason' => 'loaded_source_outside_coverage'))
+  end
+
   it 'excludes a positively identified installed gem under the app from unit and loaded-feature errors' do
     manifest = finish(installed_gem)
 

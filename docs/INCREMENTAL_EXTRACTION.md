@@ -30,7 +30,10 @@ Three differences are tolerated, and nothing else:
 
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
 A nested metadata field with the same name is application data: changing it
-rewrites the unit in both compact and pretty JSON output.
+rewrites the unit in both compact and pretty JSON output. On supporting
+unreleased writers, an already registered unit whose complete serialized bytes
+match also stays out of the touched set, Git enrichment and dependents updates.
+Derived metadata or dependency differences still use normal registration.
 
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
@@ -71,6 +74,13 @@ separate changes or bypass matching. Paths outside `Rails.root` are excluded.
 Missing files remain representable; symlinks are not resolved. The task-boundary
 normalization and nested-application Git paths are unreleased after `2.0.0`;
 check the installed revision before relying on them.
+
+**Unreleased after 2.0.0:** incremental extraction and targeted refresh refuse
+legacy flat artifacts with a manifest and generations whose manifest records a
+writer major version below 2. Run a full `woods:extract` before resuming partial
+updates. Missing writer provenance in a generation remains compatible with early
+v2 betas. Reading old indexes and rebuilding them fully remain supported; see
+[the v1 upgrade procedure](UPGRADING_TO_2.md).
 
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
 `origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default).
@@ -246,7 +256,9 @@ step before it.
    unsupported extraction cannot release an owner. For runtime classes, a
    complete eager load, an authoritative discovery inventory with one current
    class, and that class's canonical source location can establish the move.
-   GraphQL's mixed runtime/file inventory does not grant this authority.
+   Jobs and serializers additionally require their complete file/runtime
+   inventory to rule out a source-only duplicate. GraphQL's mixed runtime/file
+   inventory does not grant this authority.
    Incomplete eager loading cannot establish a surviving-file ownership move;
    genuine simultaneous source owners still abort before publication.
 3. **Re-extract the rest of the blast radius**: units whose own file did not
@@ -256,6 +268,13 @@ step before it.
    classes the graph still holds that the set no longer contains. Exact by
    construction: it is the same discovery code a full extraction uses, so
    there is no path-to-constant guessing.
+
+   **Unreleased after 2.0.0:** jobs and serializers reconcile their combined
+   file/runtime inventory only when their conventional paths change, their units
+   are in the blast radius, or a changed Ruby file defines one of their current
+   runtime classes. This catches nested classes created outside the conventional
+   directories without re-extracting both families for unrelated Ruby edits.
+
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.
 6. **Prune vanished units**, so anything steps 2–5 resurrected against a

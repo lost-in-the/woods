@@ -858,7 +858,10 @@ The graph maps every contributor to the typed owner. Any relevant library edit,
 deletion or dependency-triggered refresh reconciles the complete library family
 once per batch; direct file extraction also returns the aggregate. This costs
 more than re-reading only the primary file, and preserves full/incremental facts.
-A contributor read failure prevents publishing a partial aggregate.
+A contributor read failure prevents publishing a partial aggregate. Supporting
+unreleased writers read library source explicitly as UTF-8 regardless of the
+process locale; invalid UTF-8 is logged with the physical source path and still
+prevents a partial aggregate.
 
 Git facts remain per contributor: Woods does not fabricate a summed aggregate
 commit count or churn rank. A unit-level package is emitted only when every

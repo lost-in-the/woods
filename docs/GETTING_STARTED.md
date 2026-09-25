@@ -65,6 +65,12 @@ bin/rails woods:extract
 
 Woods boots and eager-loads the Rails application, runs its extractors, builds dependency edges, and publishes one complete generation under `tmp/woods/`. A reader stays on the previous complete generation until the new one is published.
 
+For verified source capture before Rails boots, use the installed
+`bundle exec woods-extract full` launcher; see [source freshness](SOURCE_FRESHNESS.md#establish-a-fresh-baseline)
+for custom roots and output paths. **Unreleased after 2.0.0:** the launcher
+prefers the application's executable `bin/rake`, falling back to
+`bundle exec rake` when it is absent or not executable.
+
 If Rails only boots with environment variables, provide the same variables here. Do not work around a boot failure inside Woods configuration. First confirm that the application can boot and eager-load with the same environment:
 
 ```bash
