@@ -68,7 +68,7 @@ module Woods
       private
 
       def recommendations(result, manifest)
-        return ['inspect_source_limits'] if manifest.unavailable?
+        return ['inspect_source_limits'] if result['state'] == 'unavailable'
 
         advice = []
         reader_reasons = result.fetch('verification_reasons', result.fetch('reasons'))

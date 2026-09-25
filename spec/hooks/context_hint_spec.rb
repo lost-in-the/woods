@@ -52,7 +52,8 @@ RSpec.describe Woods::Hooks::ContextHint do
 
     [event, event.merge('hook_event_name' => 'SessionStart')].each do |input|
       text = hint(input).fetch(:context)
-      expect(text).to include('source freshness: unavailable')
+      expect(text).to include('source freshness: unavailable', 'source_manifest_too_large',
+                              "#{manifest.data.dig('unavailable', 'size_bytes')} bytes", 'limit 2000')
       expect(text).not_to include('woods-extract full', 'source freshness: current')
     end
   end

@@ -14,6 +14,25 @@ field() {
     printf '%s' "$1" | ruby -EUTF-8:UTF-8 -rjson -e 'print JSON.parse($stdin.read).fetch(ARGV[0], "")' -- "$2" 2>/dev/null
   fi
 }
+unavailable_summary() {
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$1" | jq -r '.unavailable | select(type == "object") |
+      select(.reason == "source_manifest_too_large" and (.size_bytes | type) == "number" and
+             (.limit_bytes | type) == "number") |
+      select(.size_bytes > .limit_bytes and .limit_bytes > 0) |
+      "source_manifest_too_large; \(.size_bytes) bytes; limit \(.limit_bytes)"' 2>/dev/null
+  elif command -v ruby >/dev/null 2>&1; then
+    printf '%s' "$1" | ruby -EUTF-8:UTF-8 -rjson -e '
+      value = JSON.parse($stdin.read)["unavailable"]
+      if value.is_a?(Hash) && value["reason"] == "source_manifest_too_large"
+        size, limit = value.values_at("size_bytes", "limit_bytes")
+        if [size, limit].all?(Integer) && size > limit && limit > 0
+          print "source_manifest_too_large; #{size} bytes; limit #{limit}"
+        end
+      end
+    ' 2>/dev/null
+  fi
+}
 source_advice() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$1" | jq -r 'if (.recommendations | type) == "array" then
@@ -97,7 +116,10 @@ status="$(tail -n 1 "$record")"
 state="$(field "$status" state)"
 case "$state" in
   current) ;;
-  unavailable) echo 'Woods source freshness is unavailable: source_manifest_too_large. The code index is usable; inspect woods_status for evidence size and limit. Repeating a full extraction will not reduce this size.' ;;
+  unavailable)
+    detail="$(unavailable_summary "$status")"
+    printf 'Woods source freshness is unavailable: %s. The code index is usable; inspect woods_status. Repeating a full extraction will not reduce this size.\n' "${detail:-inspect woods_status for the unavailable evidence reason}"
+    ;;
   drifted) echo 'Woods source freshness is drifted: indexed application inputs differ from the working tree. Run woods-extract full, or inspect woods_status before choosing a targeted refresh.' ;;
   *) unknown_message "$status" ;;
 esac

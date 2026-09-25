@@ -55,6 +55,10 @@ RSpec.describe Woods::SourceInputs::Status do
                                 'recommendations' => ['inspect_source_limits'])
       expect(result['unavailable']).to include('limit_bytes' => 2000)
     end
+    mismatch = status(generation: 2)
+    expect(mismatch).to include('state' => 'unknown', 'reasons' => ['generation_mismatch'])
+    expect(mismatch['recommendations']).to include('inspect_source_scan')
+    expect(mismatch['recommendations']).not_to include('inspect_source_limits')
   end
 
   it 'binds task transport to the invoking checkout and makes recorded-root reads explicit' do

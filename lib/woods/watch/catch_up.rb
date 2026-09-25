@@ -19,6 +19,7 @@ module Woods
         @generation = Generation.new(output_dir: output_dir)
         @marker = @generation.current
         @manifest = read_manifest
+        report_unavailable if @manifest&.unavailable?
       end
 
       # A full run records the missing boundary even when incremental discovery
@@ -42,6 +43,13 @@ module Woods
       end
 
       private
+
+      def report_unavailable
+        evidence = @manifest.data.fetch('unavailable')
+        warn "[Woods] Watch source freshness unavailable: #{evidence.fetch('reason')}; " \
+             "#{evidence.fetch('size_bytes')} bytes; limit #{evidence.fetch('limit_bytes')}. " \
+             'Continuing source-change catch-up without a freshness comparison ledger.'
+      end
 
       def captured_tree_matches?(current)
         @manifest.unavailable? && @current_complete &&

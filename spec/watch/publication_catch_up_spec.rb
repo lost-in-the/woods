@@ -117,7 +117,8 @@ RSpec.describe 'Watcher reconciliation across publication' do
     extractor.send(:publish_generation, 'full')
     expect(manifest['state']).to eq('unavailable')
 
-    2.times { daemon.run }
+    expect { 2.times { daemon.run } }
+      .to output(/source freshness unavailable.*source_manifest_too_large.*bytes.*limit 2000/).to_stderr
     expect(consumer).not_to have_received(:extract_changed)
     expect(consumer).not_to have_received(:extract_all)
 
