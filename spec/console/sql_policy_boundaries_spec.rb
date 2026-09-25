@@ -46,12 +46,15 @@ RSpec.describe 'Console SQL policy boundaries' do
   end
 
   it 'validates the exact limited statement before execution' do
-    validator = instance_spy(Woods::Console::SqlValidator)
-    allow(Woods::Console::SqlValidator).to receive(:new).and_return(validator)
-    expect(request('SELECT id FROM users', limit: 5)['ok']).to be true
-    expect(connection).to have_received(:select_all) do |sql|
-      expect(validator).to have_received(:validate!).with(sql)
+    submitted_sql = 'SELECT id FROM users'
+    allow(executor).to receive(:validate_sql_policy!).and_call_original
+    allow(connection).to receive(:select_all) do |executed_sql|
+      expect(executor).to have_received(:validate_sql_policy!).with(submitted_sql)
+      expect(executor).to have_received(:validate_sql_policy!).with(executed_sql)
+      expect(executed_sql).to end_with('AS _limited LIMIT 5')
+      double(columns: ['id'], rows: [[1]], column_types: { 'id' => double(type: :integer) })
     end
+    expect(request(submitted_sql, limit: 5)['ok']).to be true
   end
 
   it 'keeps trailing line comments inside the limited subquery' do
@@ -226,6 +229,7 @@ RSpec.describe 'Console SQL policy boundaries' do
       'SELECT label FROM ONLY(users) AS count(row_id, label, detail)',
       'WITH count(row_id, label, detail)AS(SELECT * FROM users) SELECT label FROM count',
       'SELECT label FROM (SELECT * FROM users) AS count(row_id, label, detail)',
+      'SELECT label FROM (VALUES (1, 2, 3)) AS count(row_id, label, detail)',
       'WITH selected(row_id, label, detail) AS (SELECT * FROM users) SELECT label FROM selected',
       'WITH count(row_id, label, detail) AS (SELECT * FROM users) SELECT label FROM count',
       'SELECT row_id FROM users count(row_id, label, detail) WHERE label = \'ordinary\'',

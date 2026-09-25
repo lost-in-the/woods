@@ -28,8 +28,14 @@ adapter families. PostgreSQL-subclass adapters retain PostgreSQL handling;
 structured Console tools remain available with other adapters. Prefer explicit
 unaliased scalar projections or structured reads when a query is refused.
 [Console setup](CONSOLE_MCP_SETUP.md#maintenance-policy-corrections) describes the
-compatibility boundary. Context caches refill after restart; old entries expire
-under their existing TTLs. Rolling back restores the affected behavior.
+compatibility boundary. Context caches refill after restart; retired entries
+follow the configured TTL or backend eviction. See
+[retrieval cache options](CONFIGURATION_REFERENCE.md#retrieval-cache-options).
+Rolling back restores the affected behavior.
+
+Polymorphic `belongs_to` association counts remain unsupported in 2.0.1 and
+1.6.4 and return a generic execution error; the 2.1 functional correction is
+not backported.
 
 ## Upgrade outcome
 
@@ -41,6 +47,37 @@ After this runbook you will have:
 - rebuilt embeddings and exports if you use them;
 - an MCP client connected to the v2 packaged tool surface;
 - a documented way back to v1 if verification fails.
+
+### Console read compatibility
+
+For supporting security-patch revisions, any nonempty column or EAV redaction
+policy makes `console_sql` refuse relation and CTE column alias lists, including
+lists on base tables, derived tables, parenthesized `VALUES` sources and table
+functions, regardless of the selected names. Use explicit, unaliased protected
+columns or structured tools.
+Typed EAV lookup includes all registered models with a case-insensitive matching
+final table name, including across schemas. It can therefore mask extra values;
+qualification does not narrow this conservative type set. Sensitive key values
+still require their exact stored or cast spelling.
+
+The 1.6.x function denylist becomes a read-only function allowlist in 2.x.
+Supply one `console_query` expression per `select` array entry: 2.x refuses
+comma-combined entries that 1.6.4 splits. Raw SQL requires a recognized adapter
+family; structured tools remain available on other adapters. Configure binary
+secret columns explicitly for redaction. See the canonical
+[read policy compatibility](CONSOLE_MCP_SETUP.md#read-policy-compatibility) and
+[statement timeouts](CONSOLE_MCP_SETUP.md#statement-timeout) for limits.
+
+Supporting Console HTTP revisions deliberately permit allowlisted non-loopback
+Hosts through the SDK where 2.0.0 could refuse them. Bearer authentication remains
+required. An explicit origin list replaces browser-origin defaults; wildcards
+are not supported. Ruby-configured 2.x origins reject surrounding whitespace
+that 1.6.4 trims; the HTTP executable trims comma-separated environment entries
+on both lines. Review [HTTP origin configuration](MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility).
+
+Context-cache namespace rotation retires entries for normal TTL or backend
+eviction; disabling both can retain them indefinitely. See
+[retrieval cache options](CONFIGURATION_REFERENCE.md#retrieval-cache-options).
 
 ## What changes
 

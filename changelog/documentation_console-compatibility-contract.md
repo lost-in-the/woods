@@ -1,0 +1,1 @@
+- Clarify supported Console redaction, SQL projection, adapter timeout and HTTP origin behavior, including maintenance-line differences.

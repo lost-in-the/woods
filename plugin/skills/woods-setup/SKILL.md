@@ -255,3 +255,11 @@ dependents and suggested tests manually; silence is not no impact. Do not clear
 refresh queues when optional hints time out. See the canonical
 [context guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
 for output/time limits, container root mapping and emitted-hint suppression.
+
+### Security-patch compatibility preflight
+
+For security-patch candidates after 2.0.0, record the loaded revision and gem
+path as well as the version. Review the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+and HTTP origin compatibility at that revision before upgrading an authorized
+Console installation. The plugin does not install these fixes or establish that
+a release is published.

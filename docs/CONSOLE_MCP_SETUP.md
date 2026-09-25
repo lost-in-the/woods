@@ -209,7 +209,10 @@ Rails/MCP host. If a browser-based client sends an `Origin` header from a
 different host, include that exact origin too. This allow-list controls both
 DNS-rebinding Host checks and browser CORS; keep Rails' own `config.hosts`, TLS,
 and proxy rules aligned with it. Server-to-server clients normally omit
-`Origin`, but their request `Host` must still be allowed.
+`Origin`, but a present request `Host` must still be allowed. Supporting security
+revisions deliberately allow configured non-loopback Hosts through the SDK too;
+2.0.0 could refuse them at that inner layer despite the Woods allowlist. This
+widening is limited to the configured authorities and retains bearer auth.
 
 Do not mount `Woods::Console::RackMiddleware` by itself. The Railtie composes
 `OriginGuard`, `BearerAuth`, and the Console middleware in the supported order.
@@ -636,12 +639,8 @@ Redaction is defense-in-depth, prefer not storing plaintext secrets in database 
 
 ### `console_redacted_key_values`
 
-**Unreleased security correction:** when column redaction or key-value patterns
-are configured, raw SQL must not rename source columns through a relation or CTE
-column-name list. Use explicit, unaliased source columns or the structured Console
-tools. Typed key matching retains model information when source table spelling
-varies in case, including qualified table names. The configured sensitive key
-*values* still match exactly; configure their raw or cast spelling as appropriate.
+See [read policy compatibility](#read-policy-compatibility) for SQL column-list
+restrictions, conservative typed masking, exact key spelling and binary columns.
 
 Column-name redaction falls short when credentials are stored in a **key-value (EAV)** table, e.g. a Stripe Connect `authorizations` row of `{key: "stripe_access_token", value: "sk_live_..."}`. The column holding the secret is called `value`, which is generic: adding `value` to `console_redacted_columns` would over-redact every unrelated row in the table.
 
@@ -707,7 +706,7 @@ these controls, in order:
 
 1. `SqlValidator` rejects DML/DDL (`INSERT`/`UPDATE`/`DELETE`/`MERGE`/`DROP`/`TRUNCATE`/`ALTER`/`CREATE`/`REPLACE`), row-lock clauses (`FOR UPDATE`, `FOR SHARE`, `LOCK IN SHARE MODE`), writable CTEs (every `AS (...)` body, not just the first), `UNION`/`INTO`/`COPY`, multi-statement and comment-hidden injections, and most administrative keywords (`DO`, `SET`, `LISTEN`, `NOTIFY`, `CALL`, `LOAD`, `VACUUM`, `PREPARE`, transaction control, `EXPLAIN ANALYZE`) at the string level. Enforces a read-only **function allowlist** (`ALLOWED_FUNCTIONS`), anything not on it is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. Only `SELECT`, `WITH…SELECT`, and plain `EXPLAIN` pass.
 2. `TableGate` refuses any SQL, model, or join that touches a `console_blocked_tables` entry.
-3. `SafeContext` wraps every request in a rolled-back transaction with a short statement timeout. **It does NOT cover async side effects**: ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP egress, `Thread.new`-spawned work, `after_rollback` callbacks, and writes through a different shard all execute as live. Treat the Console MCP as an admin-trust boundary, not a sandbox.
+3. `SafeContext` wraps every request in a rolled-back transaction with an adapter-dependent statement timeout. **It does NOT cover async side effects**: ActiveJob `perform_later`, ActionMailer `deliver_later`, direct HTTP egress, `Thread.new`-spawned work, `after_rollback` callbacks, and writes through a different shard all execute as live. Treat the Console MCP as an admin-trust boundary, not a sandbox.
 4. `CredentialScanner` + column/EAV redaction scrub results.
 
 Keep the flag off when the host requires a narrower database capability.
@@ -725,7 +724,7 @@ supported transport (stdio, Docker/SSH launcher, and HTTP).
 | 1 | Blocked tables | `console_blocked_tables` | Tool dispatch, before executor | Reject any tool call that touches a named table (model, table, or sql arg) |
 | 2 | Credential scanner | `console_disabled_scanner_patterns` (`[:all]` to disable entirely) | After executor, before render | Content-shape redaction of credential-shaped strings anywhere in the response tree |
 | 3 | Column + EAV redaction | `console_redacted_columns`, `console_redacted_key_values` | After executor, before Layer 2 | Identity-based redaction by column name and by key/value row shape |
-| 4 | SqlValidator + SafeContext | built-in | Inside executor | SQL deny-list for `console_sql`; transaction-rollback for every request |
+| 4 | SqlValidator + SafeContext | built-in | Inside executor | SQL validation and function allowlist for `console_sql`; transaction rollback for every request |
 
 Layers 0–3 are configured via `Woods.configure`. Layer 4 is always on and has no knobs. Observability hooks, `console.table_gate.rejected` for Layer 1, `console.credential_scan.hits` for Layer 2, emit structured log lines via `Woods::Observability::StructuredLogger` so operators can audit enforcement without scraping MCP wire traffic.
 
@@ -761,13 +760,20 @@ boundary remain necessary.
 
 ### Statement timeout
 
-Each transaction sets a statement timeout before any query runs. The default is **5000ms** (5 seconds). Timeout enforcement is adapter-specific:
+SafeContext attempts a **5000ms** (5-second) timeout. Support depends on the
+adapter and server; an unsupported setting is skipped and logged when a Rails
+logger is available.
 
 | Adapter | Mechanism | Scope |
 |---------|-----------|-------|
-| PostgreSQL | `SET statement_timeout = '5000ms'` | All statement types |
-| MySQL | `SET max_execution_time = 5000` (session scope; the prior value is restored after the transaction) | SELECT only (MySQL limitation) |
-| Other | Best-effort (skipped gracefully) | n/a |
+| PostgreSQL | `SET LOCAL statement_timeout = '5000ms'` | Transaction-local; discarded on rollback |
+| MySQL | `SET max_execution_time = 5000` | SELECT only; previous session value restored in `ensure` |
+| MariaDB | `SET max_statement_time = 5.0` | Seconds; previous session value restored in `ensure` |
+| SQLite / unrecognized family | No supported per-statement timeout | Do not rely on a query time limit |
+
+Rollback remains active when a timeout setting is unsupported. Recognition of a
+MySQL-family adapter alone does not establish that its server supports the
+corresponding timeout variable.
 
 ### SQL validation (tier 4 `console_sql`)
 
@@ -778,7 +784,7 @@ Validation runs **once**, inside the executor, with the dialect of the live adap
 
 - **Allowed prefixes:** `SELECT`, `WITH...SELECT`, and plain `EXPLAIN`. `EXPLAIN ANALYZE` is rejected, it executes the query rather than just planning it (both the whitespace and `EXPLAIN (ANALYZE, …)` option-list spellings).
 - **Rejected prefixes:** `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`
-- **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`; row-lock clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `FOR UPDATE NOWAIT`/`SKIP LOCKED`, MySQL `LOCK IN SHARE MODE`) — these take live row locks even inside the rolled-back transaction. The lock check is adapter-aware: `console_sql` validates with the active adapter's dialect, including MySQL double-quoted strings/backtick identifiers and PostgreSQL quoted identifiers/E-strings. Unknown adapters conservatively scan all supported normalizations. Every view is scanned under both MySQL executable-comment (`/*!...*/`) semantics, so `#` comments and version-guarded comments cannot split a clause apart.
+- **Rejected anywhere in query:** `UNION`, `INTO`, `COPY`; row-lock clauses (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`, `FOR UPDATE NOWAIT`/`SKIP LOCKED`, MySQL `LOCK IN SHARE MODE`) — these take live row locks even inside the rolled-back transaction. The lock check is adapter-aware: `console_sql` validates with the active adapter's dialect, including MySQL double-quoted strings/backtick identifiers and PostgreSQL quoted identifiers/E-strings. Direct validator calls without a dialect conservatively scan all supported normalizations; packaged `console_sql` refuses unrecognized adapter families. Every view is scanned under both MySQL executable-comment (`/*!...*/`) semantics, so `#` comments and version-guarded comments cannot split a clause apart.
 - **Function allowlist (the authoritative function control):** every function-call-shaped identifier must appear in `ALLOWED_FUNCTIONS`, a conservative set of pure read-only functions (aggregates, window functions, string/number/date/JSON readers) kept portable across MySQL, PostgreSQL, and SQLite. Anything else is rejected by name, quoted forms (`"pg_terminate_backend"(…)`) included. This is an allowlist because a denylist cannot enumerate every side-effecting function (`nextval`, `pg_advisory_lock`, `pg_terminate_backend`, …). A legacy `DANGEROUS_FUNCTIONS` denylist (`pg_sleep`, `lo_import`, `lo_export`, `pg_read_file`, `pg_write_file`, `load_file`, `sleep`, `benchmark`) still runs first as belt-and-suspenders.
 - **Rejected patterns:** multiple statements (semicolons), writable CTEs (every `AS (...)` body is checked, so a writable CTE in any WITH position is refused — `WITH a AS (SELECT 1), b AS (DELETE FROM users RETURNING *) SELECT * FROM b`), a CTE list attached to top-level DML (`WITH a AS (SELECT 1) DELETE FROM users RETURNING *`), comment-hidden injections
 
@@ -933,3 +939,43 @@ does not disable structured Tier-1 tools. Existing tool opt-ins remain unchanged
 PostgreSQL Unicode-escaped identifiers are refused by `console_sql` before
 execution. Use ordinary identifiers or standard quoted identifiers instead;
 structured query tools are unaffected by this syntax restriction.
+
+### Read policy compatibility
+
+These rules describe the security-patch source; verify the installed revision
+and loaded gem path until its release is published.
+
+- **Column alias lists:** when either `console_redacted_columns` or
+  `console_redacted_key_values` is nonempty, `console_sql` refuses relation
+  and CTE column alias lists before execution, including lists on base tables,
+  derived tables, parenthesized `VALUES` sources and table functions. This applies
+  even when the selected names are not protected and independently of function
+  validation. Ordinary relation
+  aliases, CTEs without column lists and allowed scalar functions remain subject
+  to the normal SQL policy. Use explicit, unaliased protected columns or a
+  structured Console tool.
+- **Conservative typed masking:** EAV type lookup matches the final source-table
+  name case-insensitively and includes every matching registered model, even
+  across schemas. Any matching type can cause masking. This deliberately may
+  mask extra values when table names differ only by case or share that final
+  name; qualifying the table does not narrow that type set.
+- **Exact sensitive values:** `sensitive_keys` compares the stored and cast key
+  values with exact case after string conversion. Configure their actual raw or
+  cast spelling. `CredentialIndex` also matches credential substrings with exact
+  case; it does not decode hexadecimal binary output such as PostgreSQL `bytea`.
+  Binary cells have no general text-scanning guarantee: non-UTF-8 data can fail
+  JSON normalization before scanning. Put binary secret columns in
+  `console_redacted_columns` so they are masked before serialization.
+- **Adapter boundary:** raw `console_sql` requires PostgreSQL, MySQL-family
+  (including Mysql2, MariaDB and Trilogy), or SQLite classification. Compatible
+  subclasses are recognized by ancestry. Unknown families receive a validation
+  refusal for raw SQL; structured tools remain available under their normal
+  gates. See [statement timeouts](#statement-timeout) for adapter limits.
+- **SQL functions and select entries:** 2.x enforces a read-only function
+  allowlist; 1.6.x retains a function denylist. For `console_query`, provide one
+  expression per `select` array entry. 2.x refuses comma-combined entries that
+  1.6.4 splits before validation. Execution and typed redaction use the same
+  validated projection on all patched lines.
+- **Association counts:** polymorphic `belongs_to` counts remain unsupported
+  on this maintenance line and fail closed with a generic execution error.
+  The 2.1 functional correction is not included in this backport.

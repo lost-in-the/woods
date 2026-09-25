@@ -222,3 +222,10 @@ origin settings, including invalidly encoded entries, refuse at boot. The HTTP
 executable reports one configuration diagnostic and exits 2. Correct the named
 entry and restart; keep authentication and origin checks enabled. Follow the
 installed revision's canonical `docs/MCP_HTTP_TRANSPORT.md` for accepted origins.
+
+Use whitespace-free literal origin entries; explicit lists replace browser
+defaults, and wildcard patterns are unsupported. Preserve the real Host behind
+proxies. Verify both preflight and bearer-authenticated dispatch against the
+[HTTP compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility)
+at the installed revision; configured non-loopback Hosts are passed to the SDK
+in supporting patches.

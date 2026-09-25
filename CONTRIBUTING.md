@@ -460,6 +460,16 @@ fresh tag-push CI run. Updating main's tooling alone never authorizes different
 candidate bytes. Main's v2 release contract remains unchanged. Do not create or
 push tags, dispatch, publish, or claim 1.6.3 is available during preparation.
 
+### 2.0.1 maintenance CI contract
+
+The 2.0.1 candidate uses trusted main's reviewed maintenance profile, not this
+candidate's copy of the release tooling. That profile intentionally omits
+`exact_ci_jobs` and `package_spec`: validation uses the normal v2 required-job
+list and `spec/integration/packaged_gem_spec.rb`, rather than the legacy matrix
+or package spec. The 1.6.4 profile is separate and has no C-locale artifact-reader
+CI lane. Candidate evidence must identify the actual jobs and artifacts tested;
+profile approval and publication remain maintainer steps.
+
 ### Stable branches
 
 A stable branch is `N-M-stable`, cut from the release tag. Create one only when a released line needs a patch after a newer major has shipped on `main`; until then, `main` is the development branch. The explicitly approved short-lived `release/1.6.3` security exception above does not establish an `N-M-stable` branch.

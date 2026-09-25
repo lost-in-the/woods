@@ -460,3 +460,14 @@ the named file before moving it aside, or choose a new export directory. Older v
 byte-identical generated assets into `_woods/ownership.json`; changed legacy sidecars may need this
 manual recovery. Never fabricate ownership receipts or remove personal files to silence the error.
 See the installed version's `docs/OBSIDIAN_INTEGRATION.md` for the exact safety contract.
+
+### Console read compatibility on security-patch candidates
+
+Verify the loaded revision for corrections after 2.0.0. Active redaction refuses
+SQL relation/CTE column alias lists; typed EAV matching can intentionally mask
+extra values where tables share a final name or differ only by case. Keep the
+policy enabled and use explicit scalar columns or structured tools. Check exact
+sensitive-key spelling and configure binary secret columns for column redaction.
+Read the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+at the installed revision for adapter, timeout and projection limits; a plugin
+update does not patch Woods.
