@@ -1,0 +1,1 @@
+- Isolate cached retrieval contexts between application instances sharing a cache backend.
