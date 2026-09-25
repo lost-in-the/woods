@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'securerandom'
 require_relative 'cache_store'
 # CachedEmbeddingProvider includes Embedding::Provider::Interface at load
 # time, so the interface must be defined before this file's class bodies run
@@ -408,6 +409,8 @@ module Woods
         @retriever = retriever
         @cache_store = cache_store
         @context_ttl = context_ttl
+        @context_namespace = SecureRandom.hex(16)
+        @context_mutex = Mutex.new
       end
 
       # Expose the wrapped stores so the MCP +reload+ tool and
@@ -427,20 +430,17 @@ module Woods
         @retriever.corpus_status(include_types: include_types) if @retriever.respond_to?(:corpus_status)
       end
 
-      # Invalidate every cached context result. Called from the MCP +reload+
-      # tool after the retriever's stores have been re-hydrated from a fresh
-      # embed — otherwise cached results from the old embedding run would
-      # linger until their TTL expires and contradict the new stores.
+      # Retire this retriever's cached contexts after its corpus reloads.
       #
-      # Embedding caches (query → vector) are NOT cleared: the query-vector
-      # mapping is deterministic for a given provider+model and survives any
-      # index reload. Only context results (query → ranked units) go stale.
+      # Each retriever has its own unpredictable namespace, even when several
+      # applications share a backend. Rotating it also prevents an in-flight
+      # request from repopulating the active cache with a pre-reload result.
+      # Old entries expire by their configured TTL; no global backend deletion
+      # is needed. Embedding caches are independent and remain available.
       #
       # @return [void]
       def invalidate_context_cache!
-        @cache_store.clear(namespace: :context)
-      rescue StandardError => e
-        warn("[Woods] CachedRetriever context-cache invalidation failed: #{e.message}")
+        @context_mutex.synchronize { @context_namespace = SecureRandom.hex(16) }
       end
 
       # Execute the retrieval pipeline with context-level caching.
@@ -492,7 +492,8 @@ module Woods
       # @param exclude_types [Array<String, Symbol>, nil]
       # @return [String]
       def context_key(query, budget, types: nil, exclude_types: nil, packages: nil, source_paths: nil, evidence: 'full') # rubocop:disable Metrics/ParameterLists
-        parts = [query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
+        namespace = @context_mutex.synchronize { @context_namespace }
+        parts = [namespace, query, budget.to_s, fingerprint(types), fingerprint(exclude_types)]
         parts << 'lexical' if mode == :lexical
         parts << JSON.generate(evidence: evidence) unless evidence == 'full'
         if Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)

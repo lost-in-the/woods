@@ -921,24 +921,67 @@ RSpec.describe Woods::Cache::CachedRetriever do
     end
   end
 
-  # Regression — if reload refreshes the retriever's stores but leaves the
-  # context cache alone, codebase_retrieve returns cached results from the
-  # previous embed run until their TTL expires. Drop the :context namespace
-  # entries on reload so the next retrieve goes through the fresh pipeline.
-  describe '#invalidate_context_cache!' do
-    it 'clears only the :context cache namespace' do
-      allow(cache_store).to receive(:clear)
+  describe 'context ownership' do
+    it 'isolates different retrievers sharing the same backend' do
+      other = instance_double(Woods::Retriever)
+      other_result = retrieval_result.dup
+      other_result.context = 'different application source'
+      allow(retriever).to receive(:retrieve).and_return(retrieval_result)
+      allow(other).to receive(:retrieve).and_return(other_result)
+      other_cached = described_class.new(retriever: other, cache_store: cache_store)
 
-      cached_retriever.invalidate_context_cache!
-
-      expect(cache_store).to have_received(:clear).with(namespace: :context)
+      expect(cached_retriever.retrieve('same query').context).to eq(retrieval_result.context)
+      2.times { expect(other_cached.retrieve('same query').context).to eq(other_result.context) }
+      expect(other).to have_received(:retrieve).once
+      expect(retriever).to have_received(:retrieve).once
     end
 
-    it 'rescues and warns instead of propagating cache backend errors' do
-      allow(cache_store).to receive(:clear).and_raise(StandardError, 'redis down')
+    it 'invalidates only its own results without requiring backend deletion' do
+      other = instance_double(Woods::Retriever)
+      allow(retriever).to receive(:retrieve).and_return(retrieval_result)
+      allow(other).to receive(:retrieve).and_return(retrieval_result)
+      other_cached = described_class.new(retriever: other, cache_store: cache_store)
+      cached_retriever.retrieve('same query')
+      other_cached.retrieve('same query')
+      allow(cache_store).to receive(:clear).and_raise('backend deletion unavailable')
 
-      expect { cached_retriever.invalidate_context_cache! }
-        .to output(/context-cache invalidation failed/).to_stderr
+      cached_retriever.invalidate_context_cache!
+      cached_retriever.retrieve('same query')
+      other_cached.retrieve('same query')
+
+      expect(retriever).to have_received(:retrieve).twice
+      expect(other).to have_received(:retrieve).once
+      expect(cache_store).not_to have_received(:clear)
+    end
+
+    it 'does not reuse a result completed after its namespace was invalidated' do
+      entered = Queue.new
+      resume = Queue.new
+      refreshed = retrieval_result.dup
+      refreshed.context = 'refreshed source'
+      first = true
+      allow(retriever).to receive(:retrieve) do
+        if first
+          first = false
+          entered << true
+          resume.pop
+          retrieval_result
+        else
+          refreshed
+        end
+      end
+
+      thread = Thread.new { cached_retriever.retrieve('same query') }
+      entered.pop
+      cached_retriever.invalidate_context_cache!
+      resume << true
+      expect(thread.value.context).to eq(retrieval_result.context)
+      expect(cached_retriever.retrieve('same query').context).to eq(refreshed.context)
+      expect(cached_retriever.retrieve('same query').context).to eq(refreshed.context)
+      expect(retriever).to have_received(:retrieve).twice
+    ensure
+      thread&.kill
+      thread&.join
     end
   end
 end
