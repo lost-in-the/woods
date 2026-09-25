@@ -117,8 +117,8 @@ begin
 
   ReleaseProfile.validate_candidate!(tag, release_sha)
   run_jobs = github_api("/repos/#{repository}/actions/runs/#{run_id}/jobs").fetch('jobs', [])
-  if ReleaseProfile.maintenance?(tag)
-    ReleaseProfile::MAINTENANCE_JOBS.each do |name|
+  if (exact_jobs = ReleaseProfile.exact_ci_jobs(tag))
+    exact_jobs.each do |name|
       matches = run_jobs.select { |job| job['name'] == name }
       unless matches.one? && matches.first['conclusion'] == 'success'
         fail_validation("CI run #{run_id} requires exactly one successful maintenance job #{name.inspect}")
@@ -198,6 +198,7 @@ begin
 
   File.open(output_path, 'a') do |output|
     output.puts "package-spec=#{ReleaseProfile.package_spec(tag)}"
+    output.puts "maintenance-release=#{ReleaseProfile.maintenance?(tag)}"
     output.puts "release-sha=#{release_sha}"
     output.puts "ci-run-id=#{run_id}"
     output.puts "tag=#{tag}"

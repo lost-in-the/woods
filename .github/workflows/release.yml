@@ -27,6 +27,7 @@ jobs:
       artifact-digest: ${{ steps.run.outputs.artifact-digest }}
       gem-name: ${{ steps.release.outputs.gem-name }}
       package-spec: ${{ steps.run.outputs.package-spec }}
+      maintenance-release: ${{ steps.run.outputs.maintenance-release }}
     steps:
       - name: Check out trusted default-branch SHA
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -192,7 +193,7 @@ jobs:
       # The maintenance profile pins the entire reviewed candidate tree in
       # trusted main. Repeat publication/history checks after environment approval.
       - name: Revalidate maintenance release after approval
-        if: needs.release-context.outputs.tag == 'v1.6.3'
+        if: needs.release-context.outputs.maintenance-release == 'true'
         env:
           RELEASE_SHA: ${{ needs.release-context.outputs.release-sha }}
           RELEASE_TAG: ${{ needs.release-context.outputs.tag }}

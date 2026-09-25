@@ -201,6 +201,28 @@ transplant v2 documentation fences. This is a security patch for the supported
 1.6.x line, not a final v2 release or an indefinite stable branch. The usual
 maintainer-only tag, dispatch and publication restrictions still apply.
 
+## 11. Disabled 2.0.1 maintenance profile
+
+Follow CONTRIBUTING's **One-off 2.0.1 security maintenance release** runbook.
+Only `v2.0.1` from `release/2.0.1`, descending from fixed v2.0.0 commit
+`838252a79b89846937be6dbd21e283fa7cad897f`, can use this profile.
+`V2_MAINTENANCE_APPROVED_SHA = nil` disables publication until a separate
+reviewed main PR pins the complete prepared candidate. No tag or environment
+parameter can enable it.
+
+Use the normal v2 CI contract and `packaged_gem_spec.rb`; the v1 matrix,
+maintenance package spec and SDK floor apply only to 1.6.3. Every maintenance
+profile repeats history/publication validation after environment approval.
+Review the maintenance candidate's own CI definition and branch trigger, not
+only trusted main's workflow.
+
+Main's separate move to 2.1 must precede the 2.0.1 maintenance tag. Prepare the
+patch from v2.0.0 through supported reopen/prepare tasks and target its PR at
+`release/2.0.1`, overriding the generic preparation report's main destination.
+Do not create the remote target before its effective branch protections are
+configured. Tagging, dispatch, publication and live rules remain maintainer
+steps. Adding the disabled profile does not perform or authorize those steps.
+
 ## Anti-patterns
 
 - Do not "fix" the enforcement spec to match a hand-edited tree. It describes
@@ -208,5 +230,5 @@ maintainer-only tag, dispatch and publication restrictions still apply.
 - Do not cut a release to make a check pass.
 - Do not create a stable branch speculatively. `N-M-stable` exists only when a
   released line needs a patch after a newer major has shipped. The one-off
-  `release/1.6.3` exception above is explicitly approved security maintenance,
+  maintenance exceptions above are explicitly approved security maintenance,
   not speculative branch creation.

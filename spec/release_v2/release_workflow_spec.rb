@@ -57,6 +57,8 @@ RSpec.describe 'release workflow contract' do
     dispatch = release_trigger['repository_dispatch']
 
     expect(ci_trigger.dig('push', 'tags')).to contain_exactly('v*')
+    expect(ci_trigger.dig('push', 'branches')).to contain_exactly('main', 'release/2.0.1')
+    expect(ci_trigger.dig('pull_request', 'branches')).to contain_exactly('main', 'release/2.0.1')
     expect(release_trigger.keys).to contain_exactly('repository_dispatch')
     expect(dispatch.fetch('types')).to contain_exactly('release')
     expect(release_source).not_to include('workflow_dispatch:')
@@ -232,7 +234,9 @@ RSpec.describe 'release workflow contract' do
     publish_steps = steps(release.fetch('jobs').fetch('publish'))
     revalidation = publish_steps.find { |step| step['name'] == 'Revalidate maintenance release after approval' }
     credentials = publish_steps.find { |step| step['name'] == 'Configure RubyGems credentials' }
-    expect(revalidation.fetch('if')).to eq("needs.release-context.outputs.tag == 'v1.6.3'")
+    expect(revalidation.fetch('if')).to eq("needs.release-context.outputs.maintenance-release == 'true'")
+    expect(release.dig('jobs', 'release-context', 'outputs', 'maintenance-release'))
+      .to eq('${{ steps.run.outputs.maintenance-release }}')
     expect(revalidation.fetch('run')).to eq('script/validate-release --trusted-checkout')
     expect(revalidation.fetch('env')).to include(
       'RELEASE_SHA' => '${{ needs.release-context.outputs.release-sha }}',
