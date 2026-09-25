@@ -96,7 +96,7 @@ module Woods
         @mutex = Mutex.new
         @transport = nil
         @origin_policy = origin_policy || Woods::MCP::OriginPolicy.new(
-          allowed_origins: Woods.configuration.console_mcp_allowed_origins
+          allowed_origins: Woods.configuration&.console_mcp_allowed_origins
         )
         authenticated = Woods::MCP::BearerAuth.new(
           method(:handle_request), token: -> { Woods.configuration.console_mcp_token }

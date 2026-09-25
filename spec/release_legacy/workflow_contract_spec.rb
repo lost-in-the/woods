@@ -22,6 +22,22 @@ RSpec.describe 'Maintenance CI publication boundary' do
     )
   end
 
+  it 'runs every booted Console and integration contract in its own process in every Rails row' do
+    job = ci.fetch('jobs').fetch('rails-matrix')
+    expect(job.dig('env', 'WOODS_RUN_BOOTED_APP')).to eq('1')
+    expect(job.dig('env', 'BUNDLE_GEMFILE')).to eq('gemfiles/rails_${{ matrix.rails }}.gemfile')
+    booted_specs = Dir.chdir(root) do
+      Dir['spec/{console,integration}/**/*_spec.rb'].select do |path|
+        File.read(path).match?(/^RSpec\.describe.*:booted_app/)
+      end
+    end
+    booted_specs.each do |path|
+      step = job.fetch('steps').find { |entry| entry['run'] == "bundle exec rspec #{path}" }
+      expect(step).not_to be_nil, "#{path} must run alone in the Rails matrix"
+      expect(step).not_to have_key('if')
+    end
+  end
+
   it 'runs typed policy in every Rails row and real PostgreSQL/MySQL in the maintenance gate' do
     commands = ci.fetch('jobs').fetch('rails-matrix').fetch('steps').filter_map { |step| step['run'] }
     expect(commands).to include('bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb')

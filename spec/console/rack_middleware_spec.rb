@@ -39,6 +39,15 @@ RSpec.describe Woods::Console::RackMiddleware do
     allow(Woods::Console::Server).to receive(:build_embedded).and_return(server_double)
   end
 
+  describe '#initialize' do
+    it 'uses the default origin policy before Woods configuration exists' do
+      allow(Woods).to receive(:configuration).and_return(nil)
+
+      expect { middleware }.not_to raise_error
+      expect(middleware.call('PATH_INFO' => '/ordinary')).to eq([200, {}, []])
+    end
+  end
+
   describe '#build_embedded_server' do
     it 'never invokes the deprecated ActiveRecord::Base.connection' do
       expect(ar_base).not_to receive(:connection)

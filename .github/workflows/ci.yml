@@ -74,8 +74,11 @@ jobs:
       - name: Run encrypted Console credential rotation
         run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb
 
-      - name: Run Console SQL and resolved relation policy
-        run: bundle exec rspec spec/integration/console_sqlite_policy_spec.rb spec/integration/console_resolved_relation_policy_spec.rb
+      - name: Run Console SQL policy
+        run: bundle exec rspec spec/integration/console_sqlite_policy_spec.rb
+
+      - name: Run Console resolved relation policy
+        run: bundle exec rspec spec/integration/console_resolved_relation_policy_spec.rb
 
       - name: Verify typed Console policy
         run: bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb
@@ -85,6 +88,12 @@ jobs:
 
       - name: Run Console HTTP origin integration
         run: bundle exec rspec spec/integration/console_http_origins_spec.rb
+
+      - name: Run Console HTTP mount integration
+        run: bundle exec rspec spec/integration/console_http_mount_spec.rb
+
+      - name: Run Console collection redaction
+        run: bundle exec rspec spec/console/collection_redaction_spec.rb
 
   # Lint once, in its own job — style is Ruby-version-independent, and running
   # it inside every matrix row turned one offense into four red checks with
