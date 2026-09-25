@@ -45,6 +45,8 @@ RSpec.describe 'changelog entry files' do
     'unknown_entry.md' => '- a fix',
     'fixed_.md' => '- a fix',
     'fixed_empty.md' => "\n",
+    'fixed_missing-marker.md' => "A fix without a list marker\n",
+    'fixed_indented-prose.md' => "\n  Plain paragraph\n",
     'fixed_encoding.md' => "- invalid \xFF".b,
     'fixed_heading.md' => "- a fix\n## [9.0.0] - 2026-01-01\n",
     'fixed_subheading.md' => "### Added\n- a fix\n",
@@ -58,7 +60,7 @@ RSpec.describe 'changelog entry files' do
         fragment(root, name, body)
         commit_release_repository_changes(root)
         before = release_repository_digest(root)
-        expect { prepare(root) }.to raise_error(Woods::Release::Error, /changelog/)
+        expect { prepare(root) }.to raise_error(Woods::Release::Error, /#{Regexp.escape("changelog/#{name}")}/)
         expect(release_repository_digest(root)).to eq(before)
         expect(release_git(root, 'status', '--porcelain')).to eq('')
       end

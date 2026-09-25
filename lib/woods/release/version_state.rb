@@ -43,7 +43,8 @@ module Woods
         def validate_prepare!(current, target)
           if target.alpha?
             raise InvalidTransition,
-                  "#{target} is an alpha development marker; use release:reopen to move main to the next alpha"
+                  "#{target} is an alpha development marker; prepare accepts only beta, rc, or final. " \
+                  'Use release:reopen only after a final release, or release:retarget from an unpublished alpha'
           end
           if current.final?
             raise InvalidTransition,
@@ -66,6 +67,17 @@ module Woods
           end
 
           validate_forward!(current, target)
+        end
+
+        # Retarget only an unpublished alpha to the next minor development line.
+        # Repository tag checks belong to Preparer, before any rewrite.
+        def validate_retarget!(current, target)
+          major, minor, = current.base.split('.').map(&:to_i)
+          expected = "#{major}.#{minor + 1}.0"
+          return if current.alpha? && target.alpha? && target.base == expected
+
+          raise InvalidTransition,
+                'release:retarget requires an unpublished alpha and the next minor X.Y.0.alpha target'
         end
 
         private

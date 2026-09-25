@@ -300,7 +300,7 @@ For Git-sourced candidates, record the locked Git revision, loaded gem path, and
 - Put changelog entries under `## [Unreleased]`, beneath one of its `###` headings, or in an optional `changelog/<type>_<slug>.md` file. Entry files avoid conflicts between parallel branches; inline entries remain supported. Duplicate headings merge at release time, in the order they first appear.
 
 Entry files contain nonempty UTF-8 Markdown without ATX (`#`) or setext
-(underlined) headings, usually a bullet
+(underlined) headings, starting with a `- ` list item
 and indented continuation lines. For example, `changelog/fixed_watch-restart.md`
 can contain `- Preserve pending work across watch restarts.` Supported types are
 `added`, `build`, `changed`, `dependencies`, `documentation`, `fixed`,
@@ -339,6 +339,14 @@ One command per transition. It never commits, tags, pushes, or publishes.
 `release:prepare` refuses a dirty working tree, a version that moves backwards, a version whose base is not the line `main` is developing, and an alpha target. It then bumps VERSION, folds `## [Unreleased]` and optional entry files into `## [<version>] - <date>` with one block per `###` heading, restates the fences, regenerates the surface inventory, and prints the tag and dispatch commands. Every rewrite is computed before any of it is written, so a refusal leaves the working tree untouched.
 
 `release:reopen` accepts only a final release and a strictly later alpha. It does not reopen a beta/RC or move the same version line backwards to alpha. Continue prerelease development with Unreleased notes or changelog fragments, then use `release:prepare` for the next forward beta, RC, or final when authorized.
+
+When an unpublished alpha needs a minor release instead of a patch, use
+`bin/rake "release:retarget[2.1.0.alpha]"` from `2.0.1.alpha`. Retarget accepts
+only the next minor `X.Y.0.alpha`, refuses a dirty checkout or any local release
+tag for the current or target line, and leaves changelog entries untouched.
+Fetch release tags before using it. It updates VERSION and the generated fences
+without committing, tagging or publishing. Retarget main before tagging a
+separate maintenance release from its previous development line.
 
 A final release also absorbs every prerelease section of its own base version. Cutting `2.0.0` folds `## [2.0.0.beta1]` and `## [2.0.0.rc1]` into `## [2.0.0] - <date>` and removes their headings, prerelease entries first and anything written after them second, so the notes a user reads for 2.0.0 are the whole story rather than three fragments. An empty `## [Unreleased]` is therefore legitimate for a final release cut straight from a release candidate. A beta or a release candidate has nothing to absorb, so an empty Unreleased section without entry files refuses: there is nothing new to publish.
 

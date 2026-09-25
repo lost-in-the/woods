@@ -19,7 +19,7 @@ module Woods
       # into a clean abort rather than a backtrace.
       def run(task_name, version)
         if version.nil? || version.to_s.strip.empty?
-          target = task_name == 'release:reopen' ? 'X.Y.Z.alpha' : '<version>'
+          target = %w[release:reopen release:retarget].include?(task_name) ? 'X.Y.Z.alpha' : '<version>'
           abort %(usage: bin/rake "#{task_name}[#{target}]")
         end
 

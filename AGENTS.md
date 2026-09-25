@@ -130,7 +130,7 @@ Summarize and link from secondary pages; do not copy full setup blocks into FAQ 
 
 - Never edit `lib/woods/version.rb` or a `release-state` documentation fence by hand.
 - Changelog entries go under `## [Unreleased]`, beneath one of its `###` headings, or in `changelog/<type>_<slug>.md` (format in CONTRIBUTING.md).
-- One command per transition: `bin/rake "release:prepare[<version>]"`, `bin/rake "release:reopen[<next>.alpha]"`.
+- One command per transition: `bin/rake "release:prepare[<version>]"`, `bin/rake "release:reopen[<next>.alpha]"`, or `bin/rake "release:retarget[<next-minor>.alpha]"` for an unpublished alpha with no release tags on either line.
 - Never create or push a tag, run `gem push`, or trigger the release workflow. Those are maintainer steps.
 
 ## Plugin pairing

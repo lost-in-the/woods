@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'rake'
 require 'woods/release/preparer'
+require 'woods/release/preflight'
 require 'woods/release/rake_support'
 
 RSpec.describe 'release rake tasks' do
@@ -56,6 +57,7 @@ RSpec.describe 'release rake tasks' do
     with_release_tasks do |application|
       expect(application['release:prepare'].arg_names).to eq([:version])
       expect(application['release:reopen'].arg_names).to eq([:version])
+      expect(application['release:retarget'].arg_names).to eq([:version])
       expect(application['release:prepare'].comment).to include('release')
       expect(application['release:reopen'].comment).to include('development')
     end
@@ -152,6 +154,21 @@ RSpec.describe 'release rake tasks' do
       expect { application['release:reopen'].invoke('2.1.0.alpha') }
         .to output(/Reopened: README\.md/).to_stdout
     end
+  end
+
+  it 'delegates retargeting to the release machinery' do
+    result = Woods::Release::Preparer::Result.new(
+      previous: Woods::Release::VersionState.parse('2.0.1.alpha'),
+      target: Woods::Release::VersionState.parse('2.1.0.alpha'),
+      changed_paths: ['README.md'], render: ->(changed) { "Retargeted: #{changed.join(', ')}" }
+    )
+    allow(Woods::Release::Preparer).to receive(:retarget)
+      .with(root: root, version: '2.1.0.alpha').and_return(result)
+    with_release_tasks do |application|
+      expect { application['release:retarget'].invoke('2.1.0.alpha') }
+        .to output(/Retargeted: README\.md/).to_stdout
+    end
+    expect(inventory_runs).to be_empty
   end
 
   it 'turns a refusal into a clean abort instead of a backtrace' do
