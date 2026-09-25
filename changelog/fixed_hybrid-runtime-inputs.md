@@ -1,0 +1,1 @@
+- Refresh the complete job and serializer inventories after Ruby source changes so indirect runtime inputs, such as a job queue read from another constant, cannot leave incremental metadata stale. Non-Ruby batches retain graph-scoped selection. (#638)

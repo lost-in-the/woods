@@ -718,6 +718,16 @@ RSpec.describe Woods::Extractors::SourceNesting do
   # ── #qualified_outer_module_name ─────────────────────────────────────
 
   describe '#qualified_outer_module_name' do
+    it 'keeps a completed module containing behavior as the primary declaration' do
+      source = 'module Billing::Trackable; def self.track; :tracked; end; end'
+      expect(scanner.qualified_outer_module_name(source)).to eq('Billing::Trackable')
+    end
+
+    it 'skips an empty completed namespace before a behaviorful completed module' do
+      source = "module Prelude; end\nmodule Trackable; def self.track; :tracked; end; end\n"
+      expect(scanner.qualified_outer_module_name(source)).to eq('Trackable')
+    end
+
     it 'returns the module name for a simple module file' do
       source = <<~RUBY
         module Trackable
