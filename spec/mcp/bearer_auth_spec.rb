@@ -47,6 +47,13 @@ RSpec.describe Woods::MCP::BearerAuth do
     end
   end
 
+  it 'refuses malformed header bytes without an encoding exception' do
+    invalid = [255].pack('C').force_encoding(Encoding::UTF_8)
+    [invalid + "Bearer #{token}", "Bearer #{invalid}", "bEaReR #{token}#{invalid}"].each do |header|
+      expect(call(header).first).to eq(401)
+    end
+  end
+
   it 'returns 401 when the scheme is not Bearer' do
     status, = call("Basic #{token}")
     expect(status).to eq(401)
