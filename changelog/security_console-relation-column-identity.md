@@ -1,0 +1,1 @@
+- Refuse SQL relation and CTE column alias lists while output redaction is configured, with an explicit redaction-identity error before execution. Direct unaliased projections remain supported.
