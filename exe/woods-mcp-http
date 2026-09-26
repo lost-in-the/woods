@@ -58,7 +58,7 @@ begin
   begin
     origin_policy = Woods::MCP::OriginPolicy.new(allowed_origins: allowed_origins)
   rescue ArgumentError => e
-    raise Woods::ConfigurationError, e.message
+    raise Woods::ConfigurationError, "#{e.message} (WOODS_MCP_HTTP_ALLOWED_ORIGINS)"
   end
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
   retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
