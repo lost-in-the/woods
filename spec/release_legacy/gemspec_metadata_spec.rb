@@ -9,7 +9,7 @@ RSpec.describe 'Maintenance package metadata' do
       root = File.expand_path('../..', __dir__)
       script = <<~RUBY
         require 'json'
-        require_relative 'lib/woods/version'
+        require File.expand_path('lib/woods/version', Dir.pwd)
         Woods.send(:remove_const, :VERSION)
         Woods.const_set(:VERSION, ARGV.fetch(0))
         puts JSON.generate(Gem::Specification.load('woods.gemspec').metadata)

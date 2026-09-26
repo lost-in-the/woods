@@ -86,6 +86,10 @@ No allowlist means the existing loopback defaults remain in effect.
 
 These details apply to the supporting security-patch revisions described above.
 
+The Index HTTP launcher names `WOODS_MCP_HTTP_ALLOWED_ORIGINS` and the offending
+entry when refusing malformed origin configuration, including under a POSIX
+(`C`) locale. It emits one diagnostic before index resolution or HTTP binding.
+
 Configured origins are literal values, with lowercasing, one trailing slash
 removed and HTTP(S) default-port normalization. Wildcard-looking hostnames are
 literal hostnames, not patterns. A nonempty explicit list replaces browser-origin

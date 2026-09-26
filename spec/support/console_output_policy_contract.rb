@@ -238,7 +238,9 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
   end
 
   def self.verify_mysql!(connection, server)
-    sql = "SELECT * /*!99999 ' */ FROM #{TABLES[2]} WHERE 'a'='a' -- '"
+    # MySQL 26.x executes five-digit version guards; this fixture must remain
+    # an inactive guarded comment on current servers.
+    sql = "SELECT * /*!999999 ' */ FROM #{TABLES[2]} WHERE 'a'='a' -- '"
     raise 'Guarded-comment fixture did not read its table' unless connection.select_all(sql).to_json.include?(BLOCKED)
 
     assert_request!(server, 'console_sql', { sql: sql }, refused: true)

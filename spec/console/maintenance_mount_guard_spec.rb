@@ -7,11 +7,13 @@ require 'rack/request'
 require 'woods/console/rack_middleware'
 
 RSpec.describe 'Console middleware mount policy' do
+  let(:configuration) { Woods::Configuration.new }
   let(:token) { 'synthetic-local-token-' * 3 }
   let(:middleware) { Woods::Console::RackMiddleware.new(->(_env) { [204, {}, []] }, path: '/custom/console') }
   let(:transport) { double(handle_request: [200, {}, ['fixture']]) }
 
   before do
+    allow(Woods).to receive(:configuration).and_return(configuration)
     allow(Woods.configuration).to receive(:console_mcp_enabled).and_return(true)
     allow(Woods.configuration).to receive(:console_mcp_token).and_return(token)
     allow(Woods.configuration).to receive(:console_mcp_allowed_origins).and_return([])
