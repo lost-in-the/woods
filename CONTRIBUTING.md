@@ -426,7 +426,7 @@ on always matches the bytes RubyGems published.
 ### One-off 1.6.3 security maintenance release
 
 This section records the published 1.6.3 preparation flow. Its approved SHA,
-base and test profile remain fixed; new 1.6.x work uses the disabled 1.6.4
+base and test profile remain fixed; new 1.6.x work uses the separate 1.6.4
 profile below rather than changing the published candidate.
 
 The [security policy](SECURITY.md#supported-versions) supports 1.6.x security
@@ -496,9 +496,11 @@ push tags, dispatch, publish, or claim 1.6.3 is available during preparation.
 
 The next legacy maintenance profile allows only `v1.6.4` from `release/1.6.4`,
 descending from the immutable published v1.6.3 commit
-`60d6b7c4a3ddc421073f1fb57a7249eccb77826e`. It is **disabled**:
-`V1_PATCH_APPROVED_SHA` in trusted main's `script/release_profile.rb` is `nil`.
-The published 1.6.3 pin and the separate 2.0.1 profile are unchanged.
+`60d6b7c4a3ddc421073f1fb57a7249eccb77826e`. Its approved candidate is
+`11672856b09d30b9fb3ac40c17aa336e795b91e7`, pinned by `V1_PATCH_APPROVED_SHA`
+in trusted main's `script/release_profile.rb`. All 19 required jobs passed in
+[protected-branch CI run 36205164768](https://github.com/lost-in-the/woods/actions/runs/36205164768).
+The published 1.6.3 pin and the separate 2.0.1 profile remain independent.
 
 1. Before creating the remote `release/1.6.4` target, require pull requests and
    prevent force pushes and deletion through its effective branch rules. Create
@@ -526,16 +528,18 @@ immutable-artifact and protected-environment checks apply. Maintenance history
 and publication checks repeat after approval, before RubyGems credentials; the
 remote tag is verified immediately before push. A changed candidate requires a
 new reviewed pin and fresh CI. Keep private qualification and advisory details
-private until the fixed gems are available. Adding this disabled profile does
-not authorize tags, dispatch, publication or changes to live branch rules.
+private until the fixed gems are available. The approved pin does not itself
+publish a release or change live branch rules; the remaining gates still apply.
 
 ### One-off 2.0.1 security maintenance release
 
 The separate v2 maintenance profile allows only `v2.0.1` from `release/2.0.1`,
 descending from the immutable v2.0.0 commit
-`838252a79b89846937be6dbd21e283fa7cad897f`. It is **disabled**:
-`V2_MAINTENANCE_APPROVED_SHA` in trusted main's `script/release_profile.rb` is
-`nil`. Adding this profile does not approve a candidate or publish a release.
+`838252a79b89846937be6dbd21e283fa7cad897f`. Its approved candidate is
+`07442a730c3d8f305711d81b3242bcb136433bd3`, pinned by `V2_MAINTENANCE_APPROVED_SHA`
+in trusted main's `script/release_profile.rb`. All 24 required jobs passed in
+[protected-branch CI run 36205538304](https://github.com/lost-in-the/woods/actions/runs/36205538304).
+The pin does not publish a release; fresh tag CI and artifact checks still apply.
 The legacy 1.6.3 and 1.6.4 profiles, SHA pins, CI rows and SDK floors are independent.
 
 1. Merge the trusted tooling and complete the separately reviewed move of main

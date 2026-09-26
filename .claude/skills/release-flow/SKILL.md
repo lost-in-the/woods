@@ -194,7 +194,7 @@ that version's dated heading. Agents may draft `<file>`'s contents; running
 ## 10. Approved 1.6.3 maintenance exception
 
 The published 1.6.3 profile is retained unchanged. New legacy maintenance work
-uses the disabled 1.6.4 profile below; do not repin a published candidate.
+uses the separate 1.6.4 profile below; do not repin a published candidate.
 
 Follow CONTRIBUTING's **One-off 1.6.3 security maintenance release** runbook.
 Only `v1.6.3` from `release/1.6.3`, descending from the fixed v1.6.2 commit,
@@ -211,14 +211,15 @@ transplant v2 documentation fences. This is a security patch for the supported
 1.6.x line, not a final v2 release or an indefinite stable branch. The usual
 maintainer-only tag, dispatch and publication restrictions still apply.
 
-## 11. Disabled 2.0.1 maintenance profile
+## 11. Approved 2.0.1 maintenance profile
 
 Follow CONTRIBUTING's **One-off 2.0.1 security maintenance release** runbook.
 Only `v2.0.1` from `release/2.0.1`, descending from fixed v2.0.0 commit
 `838252a79b89846937be6dbd21e283fa7cad897f`, can use this profile.
-`V2_MAINTENANCE_APPROVED_SHA = nil` disables publication until a separate
-reviewed main PR pins the complete prepared candidate. No tag or environment
-parameter can enable it.
+The reviewed `V2_MAINTENANCE_APPROVED_SHA` pin is
+`07442a730c3d8f305711d81b3242bcb136433bd3` after all 24 jobs passed in protected-branch
+CI run `36205538304`. No tag or environment parameter can substitute another
+candidate. The missing-pin refusal remains enforced.
 
 Use the normal v2 CI contract and `packaged_gem_spec.rb`; the v1 matrix,
 maintenance package spec and SDK floor apply only to the legacy profiles. Every maintenance
@@ -231,15 +232,17 @@ patch from v2.0.0 through supported reopen/prepare tasks and target its PR at
 `release/2.0.1`, overriding the generic preparation report's main destination.
 Do not create the remote target before its effective branch protections are
 configured. Tagging, dispatch, publication and live rules remain maintainer
-steps. Adding the disabled profile does not perform or authorize those steps.
+steps. The approved pin does not perform those steps or skip their remaining gates.
 
-## 12. Disabled 1.6.4 maintenance profile
+## 12. Approved 1.6.4 maintenance profile
 
 Follow CONTRIBUTING's **One-off 1.6.4 security maintenance release** runbook.
 Only `v1.6.4` from `release/1.6.4`, descending from published v1.6.3 commit
 `60d6b7c4a3ddc421073f1fb57a7249eccb77826e`, selects this profile.
-`V1_PATCH_APPROVED_SHA = nil` refuses publication until a separate reviewed main
-change pins the exact prepared candidate. Published 1.6.3 controls stay fixed.
+The reviewed `V1_PATCH_APPROVED_SHA` pin is
+`11672856b09d30b9fb3ac40c17aa336e795b91e7` after all 19 jobs passed in protected-branch
+CI run `36205164768`. A missing or mismatched pin still refuses publication.
+Published 1.6.3 controls stay fixed.
 
 Protect the remote target before creation. Use the inherited legacy
 `release:reopen[1.6.4.alpha]` / `release:prepare[1.6.4]` adapter, keep the old
@@ -255,7 +258,7 @@ Require upstream branch CI before the reviewed pin and successful tag-push CI
 for dispatch. All maintenance profiles retain fresh post-approval checks and
 the immediate pre-push tag check. Keep advisory details private until fixed
 gems are available. Tags, dispatch, publication and live rules remain maintainer
-steps; adding this disabled profile does not perform or authorize them.
+steps; the approved pin does not perform them or skip their remaining gates.
 
 ## Anti-patterns
 

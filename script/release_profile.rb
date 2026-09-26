@@ -33,15 +33,15 @@ module ReleaseProfile
   V1_PATCH_TAG = 'v1.6.4'
   V1_PATCH_BRANCH = 'release/1.6.4'
   V1_PATCH_BASE = '60d6b7c4a3ddc421073f1fb57a7249eccb77826e'
-  # Disabled until a separate reviewed main change pins the prepared candidate.
-  V1_PATCH_APPROVED_SHA = nil
+  # Protected-branch CI run 36205164768 passed all 19 required jobs.
+  V1_PATCH_APPROVED_SHA = '11672856b09d30b9fb3ac40c17aa336e795b91e7'
   V1_PATCH_JOBS = (MAINTENANCE_JOBS + ['Maintenance security backends']).freeze
 
   V2_MAINTENANCE_TAG = 'v2.0.1'
   V2_MAINTENANCE_BRANCH = 'release/2.0.1'
   V2_MAINTENANCE_BASE = '838252a79b89846937be6dbd21e283fa7cad897f'
-  # Disabled until a separate reviewed main change pins the prepared candidate.
-  V2_MAINTENANCE_APPROVED_SHA = nil
+  # Protected-branch CI run 36205538304 passed all 24 required jobs.
+  V2_MAINTENANCE_APPROVED_SHA = '07442a730c3d8f305711d81b3242bcb136433bd3'
 
   module_function
 

@@ -297,7 +297,7 @@ RSpec.describe 'trusted maintenance release profile' do
     end
   end
 
-  context 'with the disabled 1.6.4 maintenance profile' do
+  context 'with the approved 1.6.4 maintenance profile' do
     let(:release_tag) { 'v1.6.4' }
     let(:base_version) { '1.6.3' }
     let(:profile_prefix) { 'V1_PATCH' }
@@ -307,7 +307,10 @@ RSpec.describe 'trusted maintenance release profile' do
       expect(ReleaseProfile.branch(release_tag)).to eq('release/1.6.4')
       expect(ReleaseProfile.base(release_tag)).to eq('60d6b7c4a3ddc421073f1fb57a7249eccb77826e')
       expect(ReleaseProfile.base_tag(release_tag)).to eq('v1.6.3')
-      expect(ReleaseProfile::V1_PATCH_APPROVED_SHA).to be_nil
+      expect(ReleaseProfile::V1_PATCH_APPROVED_SHA).to eq('11672856b09d30b9fb3ac40c17aa336e795b91e7')
+      expect do
+        ReleaseProfile.validate_candidate!(release_tag, '11672856b09d30b9fb3ac40c17aa336e795b91e7')
+      end.not_to raise_error
       expect(ReleaseProfile.exact_ci_jobs(release_tag)).to eq(maintenance_jobs)
       expect(ReleaseProfile.exact_ci_jobs('v1.6.3')).not_to include('Maintenance security backends')
       expect(ReleaseProfile.package_mcp_floor(release_tag)).to eq('0.23.0')
@@ -411,7 +414,7 @@ RSpec.describe 'trusted maintenance release profile' do
     end
   end
 
-  context 'with the disabled 2.0.1 maintenance profile' do
+  context 'with the approved 2.0.1 maintenance profile' do
     let(:release_tag) { 'v2.0.1' }
     let(:base_version) { '2.0.0' }
     let(:profile_prefix) { 'V2_MAINTENANCE' }
@@ -425,9 +428,12 @@ RSpec.describe 'trusted maintenance release profile' do
       expect(ReleaseProfile.maintenance?(release_tag)).to be(true)
       expect(ReleaseProfile.branch(release_tag)).to eq('release/2.0.1')
       expect(ReleaseProfile.base(release_tag)).to eq('838252a79b89846937be6dbd21e283fa7cad897f')
-      expect(ReleaseProfile::V2_MAINTENANCE_APPROVED_SHA).to be_nil
+      expect(ReleaseProfile::V2_MAINTENANCE_APPROVED_SHA).to eq('07442a730c3d8f305711d81b3242bcb136433bd3')
+      expect do
+        ReleaseProfile.validate_candidate!(release_tag, '07442a730c3d8f305711d81b3242bcb136433bd3')
+      end.not_to raise_error
       expect { ReleaseProfile.validate_candidate!(release_tag, 'a' * 40) }
-        .to raise_error(ReleaseProfile::Error, /disabled until/)
+        .to raise_error(ReleaseProfile::Error, /differs from the approved maintenance SHA/)
       %w[v2.0.1.alpha v2.0.1.rc1 v2.0.2].each do |tag|
         expect(ReleaseProfile.maintenance?(tag)).to be(false)
         expect(ReleaseProfile.branch(tag)).to eq('main')

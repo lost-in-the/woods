@@ -1,0 +1,1 @@
+- Pin the reviewed 1.6.4 and 2.0.1 maintenance candidates after complete protected-branch CI; retain exact-artifact, fresh tag CI, and protected publication gates.
