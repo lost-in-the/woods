@@ -17,16 +17,20 @@ RSpec.describe 'HTTP origin encoding diagnostics' do
       .to raise_error(ArgumentError, /Invalid MCP allowed origin.*example\.test/)
   end
 
-  it 'prints one configuration diagnostic before resolving the index or binding HTTP' do
-    executable = File.expand_path('../../exe/woods-mcp-http', __dir__)
-    stdout, stderr, status = Open3.capture3(
-      { 'WOODS_MCP_HTTP_ALLOWED_ORIGINS' => invalid_origin },
-      RbConfig.ruby, '-rbundler/setup', executable, '/unused-index-for-invalid-configuration'
-    )
+  %w[C C.UTF-8].each do |locale|
+    it "prints one configuration diagnostic before resolving the index or binding HTTP under #{locale}" do
+      executable = File.expand_path('../../exe/woods-mcp-http', __dir__)
+      stdout, stderr, status = Open3.capture3(
+        { 'WOODS_MCP_HTTP_ALLOWED_ORIGINS' => invalid_origin, 'LANG' => locale, 'LC_ALL' => locale },
+        RbConfig.ruby, '-rbundler/setup', executable, '/unused-index-for-invalid-configuration'
+      )
 
-    expect(status.exitstatus).to eq(2)
-    expect(stdout).to be_empty
-    expect(stderr.lines.size).to eq(1)
-    expect(stderr).to include('[woods-mcp-http] ConfigurationError:', 'WOODS_MCP_HTTP_ALLOWED_ORIGINS', 'example.test')
+      expect(status.exitstatus).to eq(2)
+      expect(stdout).to be_empty
+      expect(stderr.lines.size).to eq(1)
+      expect(stderr).to include(
+        '[woods-mcp-http] ConfigurationError:', 'WOODS_MCP_HTTP_ALLOWED_ORIGINS', 'example.test'
+      )
+    end
   end
 end

@@ -155,7 +155,9 @@ RSpec.describe 'Console typed EAV policy', :booted_app do
         attributes = %i[primary_key deterministic_key key_derivation_salt]
         previous = attributes.to_h { |name| [name, config.instance_variable_get("@#{name}")] }
         attributes.each { |name| config.public_send("#{name}=", 'synthetic-encryption-fixture-key') }
-        example.run
+        # Rails 7.0 requires a provider as well as the configured key strings.
+        provider = ActiveRecord::Encryption::DerivedSecretKeyProvider.new(config.primary_key)
+        ActiveRecord::Encryption.with_encryption_context(key_provider: provider) { example.run }
       ensure
         previous&.each { |name, value| config.public_send("#{name}=", value) }
       end
