@@ -1,1 +1,0 @@
-- HTTP startup diagnostics consistently name `WOODS_MCP_HTTP_ALLOWED_ORIGINS` for malformed origins, including under a POSIX (`C`) locale.

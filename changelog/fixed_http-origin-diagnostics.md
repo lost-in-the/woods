@@ -1,1 +1,0 @@
-- Report invalidly encoded HTTP origin settings with bounded startup diagnostics; preserve existing origin defaults and access checks.
