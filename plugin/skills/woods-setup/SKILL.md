@@ -300,8 +300,13 @@ for output/time limits, container root mapping and emitted-hint suppression.
 
 ### Security-patch compatibility preflight
 
-For security-patch candidates after 2.0.0, record the loaded revision and gem
-path as well as the version. Review the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
-and HTTP origin compatibility at that revision before upgrading an authorized
-Console installation. The plugin does not install these fixes or establish that
-a release is published.
+For an authorized Console installation on the 2.0 line, use Woods `2.0.1` or
+later and review the [2.0.1 Console compatibility guide](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+before upgrading. Applications remaining on 1.6 should use `1.6.4` and its
+[tagged Console guide](https://github.com/lost-in-the/woods/blob/v1.6.4/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility),
+rather than applying this skill's 2.x setup instructions.
+
+Record the installed version and loaded gem path; also record the locked revision
+for Git-sourced builds. Updating the plugin does not update the gem. The 2.0.1
+maintenance patch does not include the planned 2.1 features marked unreleased
+elsewhere in this skill; continue checking each installed capability.

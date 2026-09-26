@@ -13,7 +13,8 @@ a permanent downgrade; never delete a receipt to bypass a conflict. Use a privat
 real directory for plan files when the system temporary path is a symlink. Follow
 the [portability guidance](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
 
-For builds containing #597's launcher repair (unreleased after `2.0.0`),
+For builds containing #597's launcher repair (planned for 2.1; not included in
+`2.0.1`),
 `config/console.yml` must be a supported top-level mapping with string keys and
 mode-appropriate options. Nested or unsupported configuration is refused before
 launch rather than silently selecting local mode. Check the installed revision
@@ -153,9 +154,10 @@ tagged documentation; the [canonical Console guide](https://github.com/lost-in-t
 tracks current source.
 
 Prefer the automatic Rails middleware mount. Per-instance guards for legacy
-manual mounts are unreleased after Woods `2.0.0`; record the loaded revision
-before relying on them. A plugin update does not patch the server. Follow the
-installed version's Console guide and leave HTTP disabled for stdio-only use.
+manual mounts are included in Woods `2.0.1` and `1.6.4`; verify the installed
+version, loaded gem path and any Git revision before relying on them. A plugin
+update does not patch the server. Follow the installed version's Console guide
+and leave HTTP disabled for stdio-only use.
 
 Then add a direct Console process:
 
@@ -274,25 +276,27 @@ Keep full-source access available. See the canonical
 
 ### Origin policy compatibility
 
-For supporting Git revisions after 2.0.0, HTTP preflight and the SDK share one
-captured policy. List the browser's exact origin, including its port, for
-cross-origin requests; portless entries additionally permit same-authority
+In Woods `2.0.1`, HTTP preflight and the SDK share one captured policy. List the
+browser's exact origin, including its port, for cross-origin requests; portless
+entries additionally permit same-authority
 traffic. Include a non-loopback MCP endpoint authority and restart after edits.
 Do not disable SDK protection or rewrite Origin/Host to make a request pass.
-Check the installed [HTTP guide](https://github.com/lost-in-the/woods/blob/main/docs/MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
+Follow the [2.0.1 HTTP guide](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/MCP_HTTP_TRANSPORT.md#browser-origins-dns-rebinding-defense)
 and verify both preflight and authenticated dispatch.
 
-### HTTP configuration diagnostics on security-patch candidates
+### HTTP configuration diagnostics in 2.0.1
 
-Check the installed revision before expecting this unreleased correction. Invalid
-origin settings, including invalidly encoded entries, refuse at boot. The HTTP
-executable reports one configuration diagnostic and exits 2. Correct the named
-entry and restart; keep authentication and origin checks enabled. Follow the
+Verify the installed version, loaded gem path and any Git revision. In Woods
+`2.0.1`, invalid origin settings, including invalidly encoded entries, refuse at
+boot. The HTTP executable reports one configuration diagnostic and exits 2.
+Correct the named entry and restart; keep authentication and origin checks enabled. Follow the
 installed revision's canonical `docs/MCP_HTTP_TRANSPORT.md` for accepted origins.
 
 Use whitespace-free literal origin entries; explicit lists replace browser
 defaults, and wildcard patterns are unsupported. Preserve the real Host behind
 proxies. Verify both preflight and bearer-authenticated dispatch against the
-[HTTP compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility)
-at the installed revision; configured non-loopback Hosts are passed to the SDK
-in supporting patches.
+[2.0.1 HTTP compatibility guide](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility).
+For applications staying on 1.6, use `1.6.4` and its
+[HTTP compatibility guide](https://github.com/lost-in-the/woods/blob/v1.6.4/docs/MCP_HTTP_TRANSPORT.md#origin-configuration-compatibility);
+configuration normalization differs between the two lines. A plugin update does
+not update either server's installed gem.

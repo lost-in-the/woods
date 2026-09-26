@@ -540,14 +540,14 @@ For MySQL SQL refusals, inspect the executing session's `sql_mode` and the insta
 
 For SQLite SQL refusals on `2.0.0.beta4` or a reviewed revision containing its Console corrections, consult the installed Console guide for supported identifier and table-reference syntax. Simplify the query to supported syntax; never relax the blocked-table or function policy. These builds also check resolved default scopes and scan normalized response values. Confirm a patched gem is published before recommending it, and check the installed version’s canonical Console guide; do not infer release availability from this plugin.
 
-Additional Console policy corrections are unreleased after `2.0.0`: per-mount
-HTTP guards, complete collection-cell redaction, longest exact-credential
-matching, and stricter SQL provenance/grammar checks. Verify the installed
-revision before assuming those protections. Keep automatic mounting, configured
-policies, and credential checks intact; use scalar projections or a structured
-query when SQL cannot preserve field identity. On an affected version, disable
-Console if those controls are required. See the
-[correction notes](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#unreleased-console-corrections-after-200).
+Woods `2.0.1` includes per-mount HTTP guards, complete collection-cell redaction,
+longest exact-credential matching, and stricter SQL provenance/grammar checks.
+Verify the installed version, loaded gem path and any Git revision before relying
+on those protections. Keep automatic mounting, configured policies, and credential
+checks intact; use scalar projections or a structured query when SQL cannot
+preserve field identity. On an affected version, disable Console if those controls
+are required. See the
+[2.0.1 correction notes](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/CONSOLE_MCP_SETUP.md#maintenance-policy-corrections).
 
 Nine tools are normal. Eleven appear only with `console_embedded_read_tools`. Do not chase Tier 2/3 or `console_eval`; they do not register in supported packaged modes. Never work around redaction, credential scanning, SQL validation, or a block.
 
@@ -772,13 +772,15 @@ is not complete ownership. Full extraction is required to rebuild the upgraded
 reference cache. Missing dependency-owned components/channels are intentional
 in supporting builds; app-owned mailers include parallel base-class branches.
 
-### Console read compatibility on security-patch candidates
+### Console read compatibility in 2.0.1 and 1.6.4
 
-Verify the loaded revision for corrections after 2.0.0. Active redaction refuses
-SQL relation/CTE column alias lists; typed EAV matching can intentionally mask
-extra values where tables share a final name or differ only by case. Keep the
-policy enabled and use explicit scalar columns or structured tools. Check exact
+Verify the installed version and loaded gem path, plus the locked revision for
+Git-sourced builds. Woods `2.0.1` and `1.6.4` refuse SQL relation/CTE column alias
+lists while redaction is active; typed EAV matching can intentionally mask extra
+values where tables share a final name or differ only by case. Keep the policy
+enabled and use explicit scalar columns or structured tools. Check exact
 sensitive-key spelling and configure binary secret columns for column redaction.
-Read the [Console compatibility guide](https://github.com/lost-in-the/woods/blob/main/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
-at the installed revision for adapter, timeout and projection limits; a plugin
-update does not patch Woods.
+Use the installed line's guide for adapter, timeout and projection limits:
+[2.0.1](https://github.com/lost-in-the/woods/blob/v2.0.1/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility)
+or [1.6.4](https://github.com/lost-in-the/woods/blob/v1.6.4/docs/CONSOLE_MCP_SETUP.md#read-policy-compatibility).
+A plugin update does not patch Woods or make planned 2.1 features available.

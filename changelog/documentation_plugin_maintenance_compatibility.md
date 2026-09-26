@@ -1,0 +1,1 @@
+- Update plugin setup, MCP configuration, and diagnosis guidance for Woods 2.0.1 and the 1.6.4 maintenance patch, with version-specific Console compatibility links and separate checks for unreleased 2.1 capabilities.
