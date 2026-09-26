@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-09-26
+
+### Documentation
+
+- Clarify supported Console redaction, SQL projection, adapter timeout and HTTP origin behavior, including maintenance-line differences.
+
+### Fixed
+
+- Report invalidly encoded HTTP origin settings with bounded startup diagnostics; preserve existing origin defaults and access checks.
+- Use the same Console configuration error for malformed origins during automatic and manual middleware construction.
+- HTTP startup diagnostics consistently name `WOODS_MCP_HTTP_ALLOWED_ORIGINS` for malformed origins, including under a POSIX (`C`) locale.
+
+### Security
+
+- Refuse unsupported PostgreSQL escaped identifiers in raw Console SQL before query execution. Ordinary quoted identifiers, literal contents, and comments retain their existing behavior.
+- Share validated Console query projections between execution and typed EAV redaction context, including whitespace normalization.
+- Refuse SQL relation and CTE column alias lists while output redaction is configured, with an explicit redaction-identity error before execution. Direct unaliased projections remain supported.
+- Harden Console request validation, protected result handling, and HTTP authentication and origin enforcement.
+- Apply typed key/value redaction consistently to case-variant and schema-qualified source table names, retaining all matching model types when source schemas are ambiguous.
+- Isolate cached retrieval contexts between application instances sharing a cache backend.
+
 ## [2.0.0] - 2026-09-23
 
 ### Added
