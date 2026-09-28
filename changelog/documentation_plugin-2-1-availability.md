@@ -1,0 +1,1 @@
+- Update the independent Woods plugin to 2.3.72 with tagged 2.1 guidance, a full-reference-baseline upgrade path, and explicit version checks for the newly released capabilities. Preserve the base workflow floor and the 2.0.1/1.6.4 Console compatibility guidance; installing the plugin does not upgrade the gem.

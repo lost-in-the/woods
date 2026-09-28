@@ -12,7 +12,7 @@ Woods is runtime evidence: resolved routes, schema, associations, callbacks, inl
 Supporting servers include concise MCP initialization/discovery guidance without
 this plugin. That feature (#402) is available in Woods `2.0.0.beta3`; check the
 installed server version, and do not require it from protocol `2024-11-05`.
-Follow the [agent guide](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md)
+Follow the [agent guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md)
 when instructions are absent. A registered tool does not establish retrieval
 readiness or authorize maintenance or live Console access.
 
@@ -31,7 +31,7 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 - **Code review / change impact**: `lookup` the changed unit, then `dependents` at depth 1 before going deeper. Group results by relationship type and layer; report direct dependents separately from inferred downstream impact. A graph edge is not test coverage — select tests from mappings and repository search.
 - **Audit / architecture assessment**: `graph_analysis` for orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, and undeclared package edges; `domain_clusters` for architectural domains; `pagerank` for high-impact units worth reading first.
-- **Investigating behavior / debugging**: find the exact indexed unit with `search` and `lookup`, then use `trace_flow` with `UnitIdentifier` or `UnitIdentifier#method` (for example, `CheckoutService#order`). Bare `order` names a unit, potentially a factory, rather than locating an application method. Receiverless local calls may remain unexpanded; inspect their source or trace the owning unit's method explicitly. Flow output is not proof of runtime execution or exhaustive call coverage. See the [flow workflow](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md#trace-a-feature-flow).
+- **Investigating behavior / debugging**: find the exact indexed unit with `search` and `lookup`, then use `trace_flow` with `UnitIdentifier` or `UnitIdentifier#method` (for example, `CheckoutService#order`). Bare `order` names a unit, potentially a factory, rather than locating an application method. Receiverless local calls may remain unexpanded; inspect their source or trace the owning unit's method explicitly. Flow output is not proof of runtime execution or exhaustive call coverage. See the [flow workflow](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md#trace-a-feature-flow).
 - **Onboarding**: `structure` for the codebase overview, `lookup` and `dependencies`/`dependents` for a unit's neighborhood, and `domain_clusters` for the domain map, then the default loop on the units that matter.
 - **Conceptual questions**: check retrieval mode and data before `codebase_retrieve`; structural `ready` alone does not establish semantic availability. On readers supporting #549, inspect `retriever.corpus`; missing or unknown counts require checking embedding artifacts. Govern with `budget` (never `limit`), then verify key units with `lookup`.
 
@@ -50,7 +50,7 @@ index/query domain. `result_limit` proves at least one additional match;
 types, literal prefix/suffix filters, or deep fields when `partial` is true.
 Artifact errors have unknown completeness. Missing metadata on older servers,
 a full page, and an empty partial result never establish exhaustive absence.
-See the [search contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#search-completeness).
+See the [search contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#search-completeness).
 
 ## Graph coverage
 
@@ -59,12 +59,12 @@ or call coverage. Selective method-body scanning can miss references to generic
 PORO and library targets. No dependents or test-only dependents do not establish
 absence of production callers; check source before making that claim.
 
-The [post-2.0 reference expansion](https://github.com/lost-in-the/woods/blob/main/docs/EXTRACTOR_REFERENCE.md#constant-source-references)
-is unreleased and planned for 2.1. Verify the loaded writer revision and full
+The [post-2.0 reference expansion](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/EXTRACTOR_REFERENCE.md#constant-source-references)
+is included in Woods 2.1. Verify the loaded writer revision and full
 baseline before expecting its additional edges. `code_reference` is source
 evidence, not observed execution; the coverage warning remains applicable.
 
-The same planned expansion discovers callable standalone `app/models` modules
+The same Woods 2.1 expansion discovers callable standalone `app/models` modules
 as `poro` units with `metadata.ruby_kind: "module"`. Runtime model mixins retain
 `concern` ownership. Verify the installed writer and run a full extraction before
 expecting those units; namespace-only wrappers and uncertain source ownership
@@ -84,7 +84,7 @@ the requested root, depth, filters and published generation. Pagination alone
 does not change exactness. On older responses inspect `partial` directly.
 Treat partial `nodes_total` as a root-inclusive lower bound, including on the
 last page, an empty page or an unpaged answer. See the
-[coverage contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-graph-coverage).
+[coverage contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#dependency-graph-coverage).
 
 ## Partial dependency answers
 
@@ -95,7 +95,7 @@ server, `partial`/`partial_reason` means the walk stopped early, independently
 of page truncation. Do not claim an exhaustive blast radius or treat empty
 deps as proof of a leaf. Narrow depth/types/via or increase a supported budget;
 paging alone only visits the discovered prefix. See the
-[budget contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#dependency-traversal-budgets).
+[budget contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#dependency-traversal-budgets).
 
 ## Explain recorded relationships
 
@@ -111,7 +111,7 @@ only that witness identities have unambiguous types, not complete source coverag
 Budget
 cutoffs still apply. Verify important conclusions in source and tests, since
 recorded reachability does not establish observed execution. See the
-[explanation contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#traversal-explanations).
+[explanation contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#traversal-explanations).
 
 ## Graph-analysis pages
 
@@ -122,7 +122,7 @@ response rather than inferring support from the plugin version. On supporting
 servers, read `<section>_total` and `<section>_offset` in JSON, or the human
 pagination notice. An empty later page does not mean no findings. Totals count
 the published report array, which may already be bounded during extraction.
-See the [page contract](https://github.com/lost-in-the/woods/blob/main/docs/MCP_SERVERS.md#graph-analysis-pages).
+See the [page contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#graph-analysis-pages).
 
 ## Volatile dependency reports
 
@@ -135,13 +135,13 @@ can cap each typed target before selecting the global top 20 and expose the
 cap plus `volatile_dependency_reported_count` in stats. Re-extract after
 configuration changes. Treat the report as candidates for source review, never
 an automatic gate. See the
-[configuration reference](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pipeline-options).
+[configuration reference](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONFIGURATION_REFERENCE.md#pipeline-options).
 
 ## Report evidence
 
 Name the tools and exact identifiers used, cite the source paths Woods returned, separate direct Woods evidence from inference, and state generation/staleness caveats. Say when a claim still needs source or test verification.
 
-Canonical guides: [AGENT_GUIDE.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md), [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/main/docs/MCP_TOOL_COOKBOOK.md).
+Canonical guides: [AGENT_GUIDE.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md), [MCP_TOOL_COOKBOOK.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_TOOL_COOKBOOK.md).
 
 ## Lexical retrieval capability check
 
@@ -156,7 +156,7 @@ candidates are considered; fewer source entries may fit the budget. This is not
 exhaustive, and no lexical match does not establish absence. When the installed
 server reports considered/included counts, compare them; older versions may
 only describe the shortlist limit. Continue using `budget`, not `limit`.
-See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
 for the supported contract, checked against the installed gem version.
 
 ## Explicit package or path scope
@@ -169,7 +169,7 @@ then inspect `applied_scope` and search completeness. Unknown packages are argum
 errors; unsupported custom vector adapters degrade instead of running a global
 query. Scoping can hide relevant cross-boundary relationships, so broaden the
 request deliberately when the task needs them. See the
-[scope contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).
+[scope contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/RETRIEVAL_GUIDE.md#explicit-package-and-source-path-scopes).
 
 ## Compact evidence capability check
 
@@ -180,7 +180,7 @@ When available, explicit `compact` selects complete published source spans and
 returned typed, SHA-guarded `full_evidence` lookup for verification. Published-unit
 coordinates are not physical file offsets; unknown generation remains unknown.
 Keep full-source access available. See the canonical
-[evidence contract](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
+[evidence contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/RETRIEVAL_GUIDE.md#compact-published-evidence-and-api-outlines).
 
 ## Optional context hints
 
@@ -191,5 +191,5 @@ plugin does not upgrade the gem. Context and refresh opt-ins are independent;
 bounded, with served-generation and pre-refresh/unknown labels. Verify candidate
 dependents and suggested tests manually; silence is not no impact. Do not clear
 refresh queues when optional hints time out. See the canonical
-[context guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
+[context guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
 for output/time limits, container root mapping and emitted-hint suppression.

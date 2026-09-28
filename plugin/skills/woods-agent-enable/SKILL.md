@@ -16,7 +16,7 @@ plan and explicit client/scope/root selection; apply the reviewed plan within
 the user's existing authorization. Do not infer ownership from a server name
 or repair edited managed sections by overwriting them. Plans and recovery
 journals contain private configuration bytes. See the canonical
-[managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
+[managed configuration runbook](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md#managed-claude-code-configuration)
 for host/Compose preflight, actual Claude file locations, conflict recovery,
 and removal. Preserve manual setup for older installed versions.
 
@@ -67,4 +67,4 @@ When the team wants stronger triggering than standing instructions provide, crea
 
 Report the files changed, the MCP entry added, and one verified end-to-end call (`woods_status` through the configured client, not a raw JSON-RPC probe). Remind the owner that agent sessions pick up the changes on their next start, and that the index only stays useful if extraction stays current.
 
-Canonical guides: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md), [AGENT_GUIDE.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_GUIDE.md).
+Canonical guides: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md), [AGENT_GUIDE.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md).

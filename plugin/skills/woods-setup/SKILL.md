@@ -7,13 +7,13 @@ description: Install, upgrade, and first-run-configure the Woods Rails code-inte
 
 Install a structural Index Server first. Embeddings and Console MCP are separate opt-ins.
 
-For builds containing #590 (unreleased after `2.0.0`), managed preflight retains
+For builds containing #590 (included in Woods 2.1), managed preflight retains
 intended bundle settings, project receipts omit the unused user config directory,
 and watcher ownership tolerates Git checkout umasks. Check the installed revision
 before relying on this. Keep the supporting executable for update/removal before
 a permanent downgrade; never delete a receipt to bypass a conflict. Use a private
 real directory for plan files when the system temporary path is a symlink. Follow
-the [portability guidance](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration).
+the [portability guidance](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md#managed-claude-code-configuration).
 
 ## Managed configuration availability
 
@@ -24,11 +24,11 @@ plan and explicit client/scope/root selection; apply the reviewed plan within
 the user's existing authorization. Do not infer ownership from a server name
 or repair edited managed sections by overwriting them. Plans and recovery
 journals contain private configuration bytes. See the canonical
-[managed configuration runbook](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md#managed-claude-code-configuration)
+[managed configuration runbook](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md#managed-claude-code-configuration)
 for host/Compose preflight, actual Claude file locations, conflict recovery,
 and removal. Preserve manual setup for older installed versions.
 
-For v1-to-v2 upgrades, follow the [migration runbook](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md).
+For v1-to-v2 upgrades, follow the [migration runbook](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/UPGRADING_TO_2.md).
 A clean removes snapshot history inside the output directory as well as generated
 index files. Back up consistently and choose whether to retain history before
 cleaning. Remove legacy no-op `log_level` and unsafe-eval settings. Set custom
@@ -52,13 +52,12 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 ## Install and inspect
 
 Choose the published version using the canonical
-[installation guide](https://github.com/lost-in-the/woods/blob/main/docs/GETTING_STARTED.md#1-install-the-gem)
-and confirm the selected version on RubyGems. When only prereleases are published for
-2.x, add the exact published beta/RC constraint shown there to the development
-group; `~> 2.0` does not select prereleases. Use `gem "woods", "~> 2.0"` only after
-a stable 2.x release is published. Follow the selected version's tag docs and
-verify installed capabilities; installing this plugin does not install `main`
-features. Then run:
+[installation guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/GETTING_STARTED.md#1-install-the-gem)
+and confirm the selected version on RubyGems. For the 2.1 line, use
+`gem "woods", "~> 2.1"` in the development group. Older releases and prereleases
+need their matching tag docs; a stable constraint does not select prereleases.
+Verify installed capabilities: installing this plugin does not update the gem.
+Then run:
 
 ```bash
 bundle install
@@ -73,16 +72,20 @@ Do not broadly update gems or overwrite existing configuration.
 
 ## Upgrading from 1.x
 
-When the preflight records an installed 1.x version, this is an upgrade, not an install. Woods 2.0 changes observable index identifiers, the publication layout, vector-store reconciliation, and the supported MCP surface, so plan a clean re-index and follow the canonical runbook: [UPGRADING_TO_2.md](https://github.com/lost-in-the/woods/blob/main/docs/UPGRADING_TO_2.md).
+When the preflight records an installed 1.x version, this is an upgrade, not an install. Woods 2.0 changes observable index identifiers, the publication layout, vector-store reconciliation, and the supported MCP surface, so plan a clean re-index and follow the canonical runbook: [UPGRADING_TO_2.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/UPGRADING_TO_2.md).
 
 Before changing the Gemfile: back up any shared or durable index and agree on a rollback window — never upgrade one in place. After `bundle update woods`, run a full `bin/rails woods:extract` (not incremental; the old index is not a valid baseline across the major), then `woods:validate`. With embeddings configured, re-embed from scratch into a store matching the configured model; expect identifier-level churn in anything that consumed 1.x identifiers (exports, saved queries, downstream tooling). Verify MCP clients against the new surface rather than assuming 1.x tool behavior.
 
-When adopting a reviewed post-2.0 revision containing the unreleased reference
-expansion, establish its [full source-reference baseline](https://github.com/lost-in-the/woods/blob/main/docs/INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades)
-before resuming incremental maintenance. Record the loaded revision; the version
-alone does not identify this planned 2.1 capability.
+## Upgrading from 2.0 to 2.1
 
-Supporting unreleased writers also refuse incremental extraction and targeted
+Keep the last good generation and establish a [full source-reference baseline](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades)
+with `bin/rails woods:extract` and `bin/rails woods:validate` before resuming
+incremental maintenance. Woods 2.1 uses reference-cache format 3. Rebuild
+embeddings and exports if stored identifiers changed, then restart MCP to load
+the new gem. A reader-only update cannot add edges to an old index. For Git/path
+installs, also record the exact revision and loaded gem path.
+
+Woods 2.1 writers also refuse incremental extraction and targeted
 refresh of a flat index with a manifest, or a generation manifest naming a
 writer major version below 2. Run a full `woods:extract` as the upgrade baseline.
 A generation with no writer field can be an early v2 beta; absence alone does
@@ -103,8 +106,8 @@ If extraction fails, reproduce Rails boot and eager loading first. Do not inspec
 
 When the installed gem exposes `woods-extract`, use
 `bundle exec woods-extract full` for source capture before Rails boots; follow
-the [source freshness guide](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md#establish-a-fresh-baseline)
-for custom output paths. In supporting unreleased builds after 2.0.0, this
+the [source freshness guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/SOURCE_FRESHNESS.md#establish-a-fresh-baseline)
+for custom output paths. In Woods 2.1, this
 launcher prefers the application's executable `bin/rake` and otherwise uses
 `bundle exec rake`. Preserve the application's environment and binstub setup.
 
@@ -112,7 +115,7 @@ Writer-version provenance (#323) is available in Woods `2.0.0.beta3`; check the 
 gem version's release notes before expecting `woods_status.index.woods_version`. When present,
 it names the last manifest publisher; `server.version` names the MCP reader.
 Missing/null means unknown. A matching version after an incremental run never
-replaces a required full upgrade extraction. See [writer provenance](https://github.com/lost-in-the/woods/blob/main/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
+replaces a required full upgrade extraction. See [writer provenance](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/PUBLISHED_INDEX.md#manifest-writer-provenance).
 
 Configure the Index Server with the application bundle, absolute app `cwd`, and an index path visible to that process. For a host-installed bundle:
 
@@ -146,7 +149,7 @@ For linked worktrees, verify source/index alignment and the extraction's Git
 branch and exact SHA. Preserve the complete shared Git layout and select the
 worktree-specific directory when using the installed version's `WOODS_GIT_DIR`
 override; the shared root selects the primary checkout's HEAD. Follow the
-[worktree mount guide](https://github.com/lost-in-the/woods/blob/main/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
+[worktree mount guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
 Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 14 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
 
@@ -155,13 +158,13 @@ requested, confirm an embedding run and a useful retrieval result. Readers with
 #549 expose `retriever.corpus` counts; check the installed capability before
 expecting them. Unknown counts are not zero, and positive counts do not certify
 complete embedding coverage. See
-[corpus diagnostics](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
+[corpus diagnostics](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
 Offer one automatic-maintenance owner within the setup scope. The managed launcher,
 watcher generator, and Puma adapter (#538) are **included in Woods `2.0.0`**.
 Record the loaded gem path and revision, then verify `bundle exec woods-watch
 --help` and `bin/rails generate woods:watch --help` before using them. Follow the
-[managed startup runbook](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#managed-development-startup):
+[managed startup runbook](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#managed-development-startup):
 Puma for simple Rails startup, an explicit verified Foreman command/Procfile, or
 the existing external Docker/Grove supervisor. Preview before applying within
 existing authorization. Preserve `bin/dev`; never claim an unused Procfile is
@@ -199,7 +202,7 @@ Foreign-host heartbeat trust (`WOODS_WATCH_TRUST_FOREIGN_HOST=1`, #321) is avail
 Woods `2.0.0.beta3`.
 Check the installed gem version against its release notes before offering it;
 do not assume installing this plugin upgrades the gem. For a supporting version,
-follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#cross-host-liveness)
+follow [cross-host liveness](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#cross-host-liveness)
 and set the opt-in in each task/MCP reader of a shared container index. Explain
 the 15-minute crash-detection delay and preserve one supervisor per daemon.
 
@@ -207,8 +210,8 @@ For slow bind mounts, check whether the installed version documents
 `WOODS_WATCH_POLL_INTERVAL` before suggesting it; this setting is available in Woods
 `2.0.0.beta3`. Where supported, a positive value such as `2.5` reduces
 polling frequency at the cost of detection latency. Use the installed preflight version to select tagged documentation; the
-[canonical watch guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md)
-tracks current source and may describe unreleased behavior.
+[canonical watch guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md)
+is pinned to Woods 2.1; use the installed version's tag when it differs.
 
 The plugin ships opt-in refresh and session-start hooks. The expanded refresh
 contract (#408) is available in Woods `2.0.0.beta3`: first verify the installed
@@ -229,24 +232,24 @@ index. The host needs Bash and either jq or Ruby, not the application bundle.
 The refresh worker's deadline starts after the complete event input has been
 collected, validated, and queued; it does not bound input collection. It includes
 subsequent batches, but cancelling Docker exec does not prove its container
-process stopped. See the [hook deadline and retry contract](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
+process stopped. See the [hook deadline and retry contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#hooks-for-agent-sessions).
 Source freshness (#405) is available in Woods `2.0.0.beta3`: verify the installed command
 exposes `woods:source_status` and `woods-extract` before using it. Supporting
 SessionStart hooks check source content and report missing/failed evidence as
-unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
+unknown; silence does not acknowledge queued refresh work. Follow the [hook guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#hooks-for-agent-sessions)
 for transport, retry and custom-root limits.
 
-Supporting unreleased builds after 2.0.0 can publish a usable code index with
+Woods 2.1 can publish a usable code index with
 source freshness `unavailable` when evidence exceeds its serialized-size limit.
 Follow `inspect_source_limits` and compare `unavailable.size_bytes` with
 `unavailable.limit_bytes`; an identical full extraction cannot shrink it.
 An oversized launcher handoff still starts a fresh child but cannot establish
 verified preboot capture. Do not label this state current or prescribe repeated
-rebuilds. See the [source evidence limits](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
+rebuilds. See the [source evidence limits](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/SOURCE_FRESHNESS.md).
 
 ## Ask before expanding scope
 
-For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is included in Woods `2.0.0`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/main/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
+For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is included in Woods `2.0.0`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
 
 Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, Console MCP/live-data access, HTTP transport, or purge overrides. The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama. Do not claim that installing a tokenizer gem establishes exact counts for every model. Supporting builds after 2.0.0 split complete prefixed inputs and request Ollama `truncate: false`; consult the installed embedding guide and its model-specific limits.
 
@@ -259,7 +262,7 @@ completed catch-up, observed edit/restart, and worktree verification. Report
 refresh hooks, session checks, and context hints separately. Never infer
 availability from source schemas or a live process alone.
 
-Canonical runbook: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/main/docs/AGENT_SETUP.md).
+Canonical runbook: [AGENT_SETUP.md](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_SETUP.md).
 
 ## Lexical retrieval capability check
 
@@ -271,7 +274,7 @@ from the plugin version or an unreleased checkout.
 When supported and authorized, offer explicit lexical mode for ranked discovery
 over extraction output without provider credentials or vectors. Semantic mode
 remains the default; setting up embeddings is a separate choice.
-See the [retrieval guide](https://github.com/lost-in-the/woods/blob/main/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
+See the [retrieval guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval)
 for the supported contract, checked against the installed gem version.
 
 ## Explicit edit adapters (Woods 2.0.0.beta3; #409)
@@ -284,7 +287,7 @@ paths. Keep the complete plugin directory available, preserve opt-in/disable
 settings and pending events, and inspect the generation and hook log before
 claiming refresh. Unsupported tool shapes and symlink paths need watch or an
 explicit extraction. Do not install native client registration without the
-user's setup request. Follow [client hooks](https://github.com/lost-in-the/woods/blob/main/docs/CLIENT_HOOKS.md).
+user's setup request. Follow [client hooks](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CLIENT_HOOKS.md).
 
 ## Optional context hints
 
@@ -295,7 +298,7 @@ plugin does not upgrade the gem. Context and refresh opt-ins are independent;
 bounded, with served-generation and pre-refresh/unknown labels. Verify candidate
 dependents and suggested tests manually; silence is not no impact. Do not clear
 refresh queues when optional hints time out. See the canonical
-[context guide](https://github.com/lost-in-the/woods/blob/main/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
+[context guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
 for output/time limits, container root mapping and emitted-hint suppression.
 
 ### Security-patch compatibility preflight
@@ -308,5 +311,5 @@ rather than applying this skill's 2.x setup instructions.
 
 Record the installed version and loaded gem path; also record the locked revision
 for Git-sourced builds. Updating the plugin does not update the gem. The 2.0.1
-maintenance patch does not include the planned 2.1 features marked unreleased
-elsewhere in this skill; continue checking each installed capability.
+maintenance patch does not include the 2.1 features described in this skill;
+continue checking each installed capability.
