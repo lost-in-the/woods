@@ -1,0 +1,1 @@
+- Resolve constant references to indexed library declarations on autoload-only paths when the exact registered constant and absolute source path match. Reference lookup still never executes autoloads or application methods; uncertain paths, namespaces, scopes, private access and typed collisions remain unresolved. Run a full extraction after upgrading to rebuild missing edges.

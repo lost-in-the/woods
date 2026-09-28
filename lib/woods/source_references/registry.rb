@@ -9,7 +9,7 @@ module Woods
   module SourceReferences
     # Maps verified source declarations to extracted constant-owned units.
     # File-profile and other non-constant identities are never resolution targets.
-    class Registry
+    class Registry # rubocop:disable Metrics/ClassLength -- keep runtime, source and autoload ownership checks together
       TYPES = %i[model controller service poro lib concern job mailer component view_component
                  graphql_type graphql_mutation graphql_resolver graphql_query serializer manager
                  policy validator pundit_policy decorator action_cable_channel].freeze
@@ -46,7 +46,7 @@ module Woods
         return unresolved('unsupported_singleton_scope') if reference.fetch('singleton_depth', 0).positive?
 
         result = @lookup.call(reference['name'], nesting: reference.fetch('nesting', []))
-        target = result[:target] || source_only_target(reference, result)
+        target = result[:target] || autoload_target(result) || source_only_target(reference, result)
         return unresolved(result[:reason] || 'constant_missing') unless target
 
         target_result(target, owner: reference['owner'])
@@ -106,8 +106,14 @@ module Woods
                                                    allow_private: true)
         return runtime_declaration?(declaration, identifier, result) if result[:status] == :resolved
 
-        type == :lib && @lookup.call("::#{identifier}")[:status] == :missing &&
-          static_declaration?(declaration, identifier)
+        source_declaration?(declaration, identifier, type, path)
+      end
+
+      def source_declaration?(declaration, identifier, type, path)
+        return false unless type == :lib && static_declaration?(declaration, identifier)
+
+        root_result = @lookup.call("::#{identifier}", allow_private: true)
+        root_result[:status] == :missing || autoload_declaration?(root_result, identifier, path)
       end
 
       def runtime_declaration?(declaration, identifier, result)
@@ -124,6 +130,20 @@ module Woods
         return name == identifier if nesting.empty?
 
         !name.include?('::') && [nesting.first, name].join('::') == identifier
+      end
+
+      def autoload_declaration?(result, identifier, path)
+        registered = result[:autoload_path]
+        result[:pending_target] == identifier && registered.is_a?(String) &&
+          Pathname.new(registered).absolute? && absolute(registered) == path
+      end
+
+      def autoload_target(result)
+        name = result[:pending_target]
+        candidates = @targets[name]
+        return unless candidates&.any?
+
+        name if candidates.all? { |entry| entry[:type] == :lib && autoload_declaration?(result, name, entry[:path]) }
       end
 
       def source_only_target(reference, result)

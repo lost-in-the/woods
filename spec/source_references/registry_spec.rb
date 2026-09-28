@@ -105,6 +105,73 @@ RSpec.describe Woods::SourceReferences::Registry do
     expect(RefCaller.autoload?(:RefToken)).to eq('/does/not/exist/never_load.rb')
   end
 
+  context 'captured libraries with pending autoloads' do
+    before do
+      stub_const('RefLibraries', Module.new)
+      RefLibraries.autoload(:Token, '/application/lib/ref_libraries/token.rb')
+      add_unit('RefLibraries::Token', type: :lib, path: '/application/lib/ref_libraries/token.rb')
+    end
+
+    it 'uses the exact registered file and declaration without loading a library' do
+      expect(registry.resolve(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb'))
+        .to eq(type: :lib, target: 'RefLibraries::Token', via: :code_reference)
+      expect(RefLibraries.autoload?(:Token)).to eq('/application/lib/ref_libraries/token.rb')
+    end
+
+    it 'does not mistake a pending namespace prefix for the requested target' do
+      expect(registry.resolve(reference('RefLibraries::Token::Child'), file_path: '/application/RefCaller.rb'))
+        .to be_nil
+    end
+
+    it 'declines a registered file different from the captured declaration' do
+      RefLibraries.send(:remove_const, :Token)
+      RefLibraries.autoload(:Token, '/application/lib/different.rb')
+      expect(registry.explain(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb'))
+        .to include('reason' => 'autoload_pending')
+    end
+
+    it 'does not guess how a relative autoload path resolves through the load path' do
+      RefLibraries.send(:remove_const, :Token)
+      RefLibraries.autoload(:Token, 'lib/ref_libraries/token.rb')
+      expect(registry.resolve(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb')).to be_nil
+    end
+
+    it 'requires a matching declaration and library type' do
+      units.last.type = :poro
+      expect(registry.resolve(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb')).to be_nil
+      units.last.type = :lib
+      sources['/application/lib/ref_libraries/token.rb']['declarations'].clear
+      expect(registry.resolve(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb')).to be_nil
+    end
+
+    it 'keeps qualified private autoloads unresolved' do
+      RefLibraries.private_constant(:Token)
+      expect(registry.explain(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb'))
+        .to include('reason' => 'private_constant')
+    end
+
+    it 'does not fall back past an unverified lexical autoload shadow' do
+      RefCaller.autoload(:RefLibraries, '/application/lib/other.rb')
+      expect(registry.resolve(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb')).to be_nil
+    end
+
+    it 'declines ambiguous typed targets even with a matching autoload path' do
+      add_unit('RefLibraries::Token', type: :poro, path: '/application/lib/ref_libraries/token.rb')
+      expect(registry.explain(reference('RefLibraries::Token'), file_path: '/application/RefCaller.rb'))
+        .to include('reason' => 'ambiguous_target')
+    end
+
+    it 'resolves a bare top-level registered library through the loaded caller scope' do
+      Object.autoload(:RefOffline, '/application/lib/ref_offline.rb')
+      add_unit('RefOffline', type: :lib, path: '/application/lib/ref_offline.rb')
+      expect(registry.resolve(reference('RefOffline'), file_path: '/application/RefCaller.rb'))
+        .to include(type: :lib, target: 'RefOffline')
+      expect(Object.autoload?(:RefOffline)).to eq('/application/lib/ref_offline.rb')
+    ensure
+      Object.send(:remove_const, :RefOffline) if Object.const_defined?(:RefOffline, false)
+    end
+  end
+
   it 'bypasses application overrides of constant reflection' do
     RefCaller.define_singleton_method(:const_get) { |*| raise 'must not call application code' }
     RefCaller.define_singleton_method(:const_defined?) { |*| raise 'must not call application code' }

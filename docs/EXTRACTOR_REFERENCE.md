@@ -54,6 +54,10 @@ blocks participate. Comments, plain strings and declaration names do not establi
 references. Rails relationships derived through runtime reflection stay intact.
 
 Resolution respects qualified names and supported lexical/runtime context.
+A pending library autoload can supply a target only when its exact registered
+constant and absolute file path match the captured library declaration. Woods
+does not execute the autoload. Pending namespaces, unverified owner scopes,
+mismatched registration paths and non-library autoload targets remain unresolved.
 Dynamic constant lookup, uncertain aliases, ambiguous typed identities and
 unsupported scopes remain unresolved. In particular, references inside
 `class << self` are recorded as candidates but currently skipped during resolution;
