@@ -6,6 +6,7 @@ require 'fileutils'
 require 'open3'
 require 'timeout'
 require 'woods/source_inputs/status'
+require 'woods/mcp/index_reader'
 require_relative '../support/source_input_app'
 
 RSpec.describe 'Fresh-process source provenance', :booted_app do
@@ -60,6 +61,32 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
     File.write(gemspec, spec.to_ruby)
     File.write(source, "module #{name.split('_').map(&:capitalize).join}; end\n")
     "Gem::Specification.load(#{gemspec.inspect}).activate\nrequire #{name.inspect}\n"
+  end
+
+  it 'publishes through stable directory links and detects edits under their logical source paths' do
+    Dir.mktmpdir('woods-source-links') do |app|
+      make_source_app(app)
+      shared = File.join(app, 'shared_services')
+      FileUtils.mv(File.join(app, 'app/services'), shared)
+      FileUtils.mkdir_p(File.join(app, 'public/shared'))
+      source = File.join(shared, 'linked_probe.rb')
+      File.write(source, 'class LinkedProbe; def call; :before; end; end')
+      File.symlink(shared, File.join(app, 'app/services'))
+      File.symlink('shared', File.join(app, 'public/static'))
+      File.write(File.join(app, 'public/shared/logo.svg'), '<svg/>')
+
+      launch(app, 'full')
+      expect(state(app)['state']).to eq('current')
+      reader = Woods::MCP::IndexReader.new(output(app))
+      expect(reader.find_unit('LinkedProbe', type: 'service')).not_to be_nil
+      expect(source_manifest(app).expanded.fetch('file:services')).to have_key('app/services/linked_probe.rb')
+
+      File.write(source, 'class LinkedProbe; def call; :after; end; end')
+      expect(state(app).dig('changes', 'changed')).to include('app/services/linked_probe.rb')
+      launch(app, 'full')
+      expect(state(app)['state']).to eq('current')
+      expect(reader.find_unit('LinkedProbe', type: 'service').fetch('source_code')).to include(':after')
+    end
   end
 
   it 'keeps freshness current for installed gems inside or outside the application checkout' do

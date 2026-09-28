@@ -615,6 +615,16 @@ application checkout, and retry extraction. Do not fabricate current freshness
 or discard the prior index. Valid Unicode filenames remain supported, including
 under a C locale. See [source freshness](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md).
 
+### Directory symlinks prevent the first extraction (#653)
+
+The directory-link capture repair is unreleased after Woods `2.0.1`; check the
+writer revision. Older writers can refuse `unverified_symlink_directory` even
+for valid static-assets links. Supporting writers retain logical source aliases
+and verify scoped files inside the app root; cycles, changing links and external
+source still refuse verification. Do not replace valid application links or
+disable publication safeguards. Upgrade the writer and run one fresh full
+extraction. See [source scope](https://github.com/lost-in-the/woods/blob/main/docs/SOURCE_FRESHNESS.md#scope-and-partial-extraction).
+
 ### Surviving-file ownership moves (unreleased after Woods 2.0.0; #574)
 
 Check the writer revision before relying on this correction. A moved class can

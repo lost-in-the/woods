@@ -50,7 +50,7 @@ module Woods
                 PathDispatcher.runtime_rules.map(&:to_h),
                 ReloadPolicy.constants(false).sort.to_h { |name| [name, ReloadPolicy.const_get(name)] },
                 Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES, Watch::TreeScan::NOT_IGNORED_DOTFILES,
-                Watch::TreeScan::NOT_IGNORED_DOTFILE_PREFIXES, 'bounded_no_symlink_dirs_v1',
+                Watch::TreeScan::NOT_IGNORED_DOTFILE_PREFIXES, 'bounded_logical_directory_links_v2',
                 'config_ruby_and_root_gemspecs_v1', BOOT_FILES, @extra_roots]
         Digest::SHA256.hexdigest(JSON.generate(data))
       end

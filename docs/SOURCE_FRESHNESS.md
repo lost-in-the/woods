@@ -126,6 +126,18 @@ scanner's exclusions. Explicit source roots override generic exclusions; the
 index output is always excluded. Contained file symlinks are checked for stable
 resolution; directory symlinks and escaping/unreadable inputs leave uncertainty.
 
+**Unreleased after 2.0.1; planned for 2.1 (#653):** supporting writers scan
+directory links under their logical application paths, preserving independent
+aliases. Static files with no input consumer do not prevent publication merely
+because a parent directory is a symlink. Entries in an external linked directory
+may be enumerated to determine scope, but an input file must resolve inside the
+application root before Woods opens its contents. Package files are inputs even
+outside `app/` and `lib/`; an external package file still refuses verification.
+Directory cycles, links that change during scanning, unreadable entries and scan
+limits keep evidence incomplete. Output-directory aliases are pruned. Run a fresh
+full extraction after upgrading to establish the updated capture rules; do not
+replace valid links or disable source verification to work around an older writer.
+
 **Unreleased after 2.0.0; planned for 2.1:** source paths use UTF-8 bytes even
 when the process locale is `C`. A filename with invalid UTF-8 bytes produces
 `undecodable_source_path` and incomplete coverage; directory entries with those

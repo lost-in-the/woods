@@ -34,7 +34,9 @@ module Woods
         @errors = []
         @bytes = 0
         @visited = 0
+        @directory_links = {}
         walk
+        verify_directory_links
         result
       rescue BudgetExceeded => e
         error(e.message)
@@ -53,11 +55,15 @@ module Woods
         raise Errno::ENOENT, @root unless File.directory?(@root)
 
         @resolved_root = SourcePathEncoding.utf8!(File.realpath(@root))
-        pending = children(@root)
-        scan_entry(pending.pop, pending) until pending.empty?
+        @resolved_output = File.directory?(@output_dir) ? resolved_path(@output_dir) : nil
+        pending = children(@root).map { |path| [path, [@resolved_root]] }
+        until pending.empty?
+          path, ancestors = pending.pop
+          scan_entry(path, pending, ancestors)
+        end
       end
 
-      def scan_entry(path, pending)
+      def scan_entry(path, pending, ancestors)
         check_budget!
         path = decoded_entry(path)
         return unless path
@@ -66,13 +72,51 @@ module Woods
         return if ignored_directory?(path, relative)
 
         stat = File.lstat(path)
-        return pending.concat(children(path)) if stat.directory?
+        if directory_entry?(path, stat)
+          @visited += 1 if stat.symlink?
+          check_budget!
+          descend(path, relative, pending, ancestors, symlink: stat.symlink?)
+          return
+        end
 
         @visited += 1
         check_budget!
-        visit(path, relative, stat)
+        visit(path, relative)
       rescue SystemCallError, IOError
         error('source_tree_unavailable', relative)
+      end
+
+      def directory_entry?(path, stat)
+        stat.directory? || (stat.symlink? && File.directory?(path))
+      end
+
+      # Scope each logical descendant independently. Directory names do not
+      # establish whether their children are inputs (package.yml can occur
+      # outside app/lib). External entries may be enumerated, but visit refuses
+      # any consumed file outside the root before opening its contents.
+      def descend(path, relative, pending, ancestors, symlink:)
+        real = SourcePathEncoding.utf8!(File.realpath(path))
+        return if @resolved_output && (real == @resolved_output || real.start_with?("#{@resolved_output}/"))
+
+        if ancestors.include?(real)
+          error('source_directory_cycle', relative)
+          return
+        end
+
+        @directory_links[path] = real if symlink
+        branch = ancestors + [real]
+        pending.concat(children(path).map { |child| [child, branch] })
+      end
+
+      def verify_directory_links
+        @directory_links.each do |path, target|
+          check_budget!
+          next if File.symlink?(path) && File.directory?(path) && resolved_path(path) == target
+
+          error('source_changed_during_read', path.delete_prefix("#{@root}/"))
+        rescue SystemCallError, IOError
+          error('source_changed_during_read', path.delete_prefix("#{@root}/"))
+        end
       end
 
       # An unreadable entry cannot certify completeness, but must not hide
@@ -109,13 +153,8 @@ module Woods
         end
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-      # Refuse opaque directories, external paths and unreadable inputs separately.
-      def visit(path, relative, stat)
-        if stat.symlink? && File.directory?(path)
-          error('unverified_symlink_directory', relative)
-          return
-        end
+      # Refuse external paths and unreadable inputs without hashing their bytes.
+      def visit(path, relative)
         consumers = @scopes.for_path(relative)
         return if consumers.empty?
 
@@ -134,8 +173,6 @@ module Woods
       rescue EncodingError, SourcePathEncoding::Invalid
         error('undecodable_source_path', SourcePathEncoding.diagnostic(relative))
       end
-
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       def read_identity(path, resolved, expected) # rubocop:disable Metrics/CyclomaticComplexity -- stable descriptor and original resolution checks
         flags = File::RDONLY | File::NONBLOCK

@@ -92,12 +92,92 @@ RSpec.describe Woods::SourceInputs::Scanner do
     expect(result['metrics']['visited_files']).to eq(1)
   end
 
-  it 'reports incomplete coverage instead of following a symlink directory blindly' do
+  it 'captures contained directory aliases under their logical input paths' do
     write('app/services/pay.rb', 'input')
     File.symlink(File.join(@root, 'app/services'), File.join(@root, 'app/linked'))
     result = scan
+    expect(result['complete']).to be(true)
+    expect(result['files'].keys).to eq(%w[app/linked/pay.rb app/services/pay.rb])
+    expect(result['files'].values.uniq.size).to eq(1)
+    expect(result['scope_paths']['runtime']).to eq(%w[app/linked/pay.rb app/services/pay.rb])
+  end
+
+  it 'does not treat unconsumed static files in directory links as source inputs' do
+    write('public/shared/logo.svg', '<svg/>')
+    File.symlink('shared', File.join(@root, 'public/static'))
+    Dir.mktmpdir('woods-public-static') do |outside|
+      File.write(File.join(outside, 'photo.jpg'), 'not source')
+      File.symlink(outside, File.join(@root, 'public/uploads'))
+      allow(File).to receive(:open).and_call_original
+
+      expect(scan).to include('complete' => true, 'files' => {}, 'errors' => [])
+      expect(File).not_to have_received(:open).with(File.join(outside, 'photo.jpg'), any_args)
+    end
+  end
+
+  it 'rejects consumed external files without reading their contents' do
+    FileUtils.mkdir_p(File.join(@root, 'app/services'))
+    Dir.mktmpdir('woods-external-source') do |outside|
+      source = File.join(outside, 'pay.rb')
+      File.write(source, 'external source')
+      File.symlink(outside, File.join(@root, 'app/services/shared'))
+      allow(File).to receive(:open).and_call_original
+
+      result = scan
+      expect(result).to include('complete' => false, 'files' => {})
+      expect(result['errors']).to include('reason' => 'external_source_path', 'path' => 'app/services/shared/pay.rb')
+      expect(File).not_to have_received(:open).with(source, any_args)
+    end
+  end
+
+  it 'still scopes package files found through a static directory alias' do
+    write('public/shared/package.yml', 'enforce_dependencies: true')
+    File.symlink('shared', File.join(@root, 'public/static'))
+
+    expect(scan['scope_paths']['whole:packages']).to eq(%w[public/shared/package.yml public/static/package.yml])
+  end
+
+  it 'bounds cycles without suppressing independent aliases of the same directory' do
+    write('app/services/pay.rb', 'input')
+    File.symlink(File.join(@root, 'app'), File.join(@root, 'app/services/loop'))
+    File.symlink(File.join(@root, 'app/services'), File.join(@root, 'app/alias'))
+
+    result = Timeout.timeout(2) { scan }
     expect(result['complete']).to be(false)
-    expect(result['errors']).to include('reason' => 'unverified_symlink_directory', 'path' => 'app/linked')
+    expect(result['files'].keys).to eq(%w[app/alias/pay.rb app/services/pay.rb])
+    expect(result['errors']).to include('reason' => 'source_directory_cycle', 'path' => 'app/services/loop')
+  end
+
+  it 'refuses a directory link that changes after its entries were enumerated' do
+    write('public/first/logo.svg', 'first')
+    write('public/second/logo.svg', 'second')
+    link = File.join(@root, 'public/static')
+    File.symlink('first', link)
+    allow(Dir).to receive(:children).and_wrap_original do |method, path, **options|
+      names = method.call(path, **options)
+      if path == link
+        File.unlink(link)
+        File.symlink('second', link)
+      end
+      names
+    end
+
+    expect(scan['errors']).to include('reason' => 'source_changed_during_read', 'path' => 'public/static')
+  end
+
+  it 'keeps directory-link traversal under the existing file budget' do
+    write('app/services/pay.rb', 'input')
+    File.symlink(File.join(@root, 'app/services'), File.join(@root, 'app/alias'))
+
+    expect(scan(max_files: 1)['errors']).to include('reason' => 'scan_file_budget')
+  end
+
+  it 'prunes aliases of the output directory before visiting generated contents' do
+    write('index/app/services/generated.rb', 'not input')
+    FileUtils.mkdir_p(File.join(@root, 'app/services'))
+    File.symlink(@output, File.join(@root, 'app/services/generated'))
+
+    expect(scan).to include('complete' => true, 'files' => {}, 'errors' => [])
   end
 
   it 'does not accept an external target swapped in after containment was checked' do
