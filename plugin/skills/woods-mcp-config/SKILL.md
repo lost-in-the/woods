@@ -151,7 +151,7 @@ stdio-only hosts can set it to `false` and omit the HTTP token; older
 versions require the token at production boot whenever Console is enabled.
 For HTTP, retain a strong token, allowed origins and TLS. Use installed-version
 tagged documentation; the [canonical Console guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md)
-tracks current source.
+is pinned to Woods 2.1; use the installed version's tag when it differs.
 
 Prefer the automatic Rails middleware mount. Per-instance guards for legacy
 manual mounts are included in Woods `2.0.1` and `1.6.4`; verify the installed

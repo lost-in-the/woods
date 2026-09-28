@@ -179,7 +179,7 @@ extraction will remove a legitimate cross-type collision. See the canonical
 
 ## 2. Check the published index
 
-In Woods 2.1 writers after 2.0.0, incremental extraction and
+In Woods 2.1 writers, incremental extraction and
 targeted refresh refuse a flat index with a manifest or a generation whose
 manifest writer major version is below 2. Run full `woods:extract` using the
 [upgrade sequence](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/UPGRADING_TO_2.md#3-clean-and-re-extract).
@@ -283,7 +283,7 @@ reports disjoint phases and a separate `[profile total]` line. Do not add
 whole-run totals to phase durations or promise the new lines on an older gem.
 Use the installed version's tagged guide; the
 [canonical profiling guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/INCREMENTAL_EXTRACTION.md#profiling-fixed-costs)
-tracks current source.
+is pinned to Woods 2.1; use the installed version's tag when it differs.
 
 For volatile-dependency reports dominated by one target, compare the full
 `stats.volatile_dependency_count` with the persisted array and use the
