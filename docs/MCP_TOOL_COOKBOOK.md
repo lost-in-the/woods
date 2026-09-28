@@ -887,7 +887,7 @@ Trigger extraction, then reload the server's in-memory data:
 
 **What you'll get:** Lists of added, modified, and deleted units between the two git SHAs. Use `list_snapshots` first to find valid SHA values.
 
-**Unreleased after `2.0.0` (#593):** use the exact stored SHAs returned by
+**Included in Woods 2.1 (#593):** use the exact stored SHAs returned by
 `list_snapshots`; prefixes are not expanded automatically. `snapshot_diff`
 returns `not_found` if either snapshot is absent and `invalid_params` for a
 malformed SHA. Two available snapshots with no differences still return a

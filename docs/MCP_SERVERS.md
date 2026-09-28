@@ -212,7 +212,7 @@ error and continues serving the previous aligned generation; it never swaps in a
 partial or empty replacement. Grant write access for live reloads, or restart the MCP
 process after publishing a new embedded index.
 
-**Unreleased after `2.0.0`:** the `:local` preset combines snapshot vectors with
+**Included in Woods 2.1:** the `:local` preset combines snapshot vectors with
 SQLite metadata, which cannot be refreshed together atomically in the running
 server. Its `reload` returns a degraded error and retains the previous aligned
 state even when the directory is writable. Restart `woods-mcp` after
@@ -220,7 +220,7 @@ state even when the directory is writable. Restart `woods-mcp` after
 
 ### Resource identity and damaged generation markers
 
-**Unreleased after `2.0.0` (#593):** unit resource identifiers may contain
+**Included in Woods 2.1 (#593):** unit resource identifiers may contain
 slashes, such as `views/posts/show.html.erb` or `GET /posts/:id`. Encode the
 whole identifier as one URI segment (`%2F` for `/`) in
 `codebase://unit/{identifier}`. Raw multi-segment paths, dot traversal segments,
@@ -266,7 +266,7 @@ generation. This contract is included in Woods `2.0.0`.
 | `exhausted` | `complete` | `false` | Exact count |
 | `result_limit` | `partial` | `true` | `null` (unknown) |
 | `scan_budget` or `regex_timeout` | `partial` | `null` (unknown) | `null` (unknown) |
-| `unreadable_or_corrupt_source` (unreleased after `2.0.0`) | `partial` | `null` (unknown) | `null` (unknown) |
+| `unreadable_or_corrupt_source` (included in Woods 2.1) | `partial` | `null` (unknown) | `null` (unknown) |
 
 `matched_lower_bound` counts distinct observed `(type, identifier)` matches,
 including at most one lookahead match beyond `limit`. A result-limit response
@@ -274,7 +274,7 @@ therefore establishes another match; an exactly full page can instead be
 complete if the requested domain is exhausted. Deep lookahead shares
 `WOODS_SEARCH_MAX_SCAN` with the initial scan and retains round-robin scanning
 across types. Search does not count the entire omitted tail or offer pagination.
-**Unreleased after `2.0.0` (#593):** `search.types` accepts concrete unit types
+**Included in Woods 2.1 (#593):** `search.types` accepts concrete unit types
 such as `graphql_mutation` and `gem_source`, plus the directory-family aliases
 `graphql` (all four GraphQL types) and `rails_source` (Rails and gem sources).
 Aliases expand the same way with or without a package/source-path scope.
@@ -284,7 +284,7 @@ apparently complete empty result. This corrects the older unscoped family
 labels. Retrieval tools continue to use their own documented concrete-type
 filters; search aliases do not change those contracts.
 
-**Unreleased after `2.0.0`:** typed `lookup` also accepts the `graphql` family
+**Included in Woods 2.1:** typed `lookup` also accepts the `graphql` family
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
 prefer that concrete type for follow-up identity checks.
 
@@ -295,7 +295,7 @@ Narrow `types`, literal `exact_prefix`/`exact_suffix`, or deep `fields` before
 using discovery as exhaustive evidence. Completeness applies to this index and
 query domain, not to unindexed application code.
 
-**Unreleased after `2.0.0`:** an individual unit that unscoped search needs but
+**Included in Woods 2.1:** an individual unit that unscoped search needs but
 cannot decode or open is skipped. Search retains readable matches and returns
 successful partial completeness with reason `unreadable_or_corrupt_source`;
 an empty partial answer does not establish absence. Identifier-only matches can
@@ -320,7 +320,7 @@ edge. No dependents, a test-only dependent, or a completed traversal does not pr
 there are no production callers. Verify important absence claims in source.
 
 A supporting post-2.0 writer recovers additional [constant source references](EXTRACTOR_REFERENCE.md#constant-source-references)
-(unreleased; planned for 2.1). Upgrading the reader alone cannot add relationships
+(included in Woods 2.1). Upgrading the reader alone cannot add relationships
 to an old index. The coverage warning still applies.
 
 Supporting servers expose the annotated, paginated traversal result in
@@ -462,8 +462,7 @@ publication after both full and incremental runs. With the Tasks extension,
 a generation-marker or final source-verification failure marks the task
 `failed`; it cannot report `completed` merely because extraction returned.
 Clients without the extension still receive a background-start acknowledgement,
-which does not establish completion. This correction (#584) is unreleased after
-`2.0.0`; check the loaded server revision. See the
+which does not establish completion. This correction (#584) is included in Woods 2.1; check the loaded server revision. See the
 [publication failure recovery](TROUBLESHOOTING.md#extraction-exits-non-zero-after-could-not-publish-generation).
 
 ### HTTP transport
@@ -579,7 +578,7 @@ root/nested ownership, path normalization, errors, storage support, and cost.
 `"deep"` (five seconds). `index.source_freshness` describes the served generation
 as `current`, `drifted` or `unknown`; missing source/key and incomplete capture
 never count as current. No Rails initialization or provider call is needed.
-**Unreleased after `2.0.0`:** evidence above the serialized-size limit produces
+**Included in Woods 2.1:** evidence above the serialized-size limit produces
 `unavailable` with `source_manifest_too_large` while the code index remains
 usable. Follow `inspect_source_limits` and inspect the reported byte counts;
 repeating an identical full extraction cannot remove this limitation.

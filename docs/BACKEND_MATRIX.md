@@ -27,7 +27,7 @@ The shape determines the capability matrix:
 | Cross-machine query | After deploying/copying `output_dir` | Yes, when the filesystem is shared | External vectors are shared; metadata/config still require a shared or deployed `output_dir` |
 | `woods.json` schema-versioned config snapshot | Yes | Yes | Yes |
 
-**Unreleased after `2.0.0`:** `:local` cannot atomically reload snapshot vectors
+**Included in Woods 2.1:** `:local` cannot atomically reload snapshot vectors
 alongside its SQLite metadata in a running MCP server. `reload` reports degraded
 and retains the previous aligned state; restart `woods-mcp` after `woods:embed`
 to load the latest vectors. Write access alone does not resolve this limitation.

@@ -1,1 +1,0 @@
-- Add a disabled 2.0.1 maintenance release profile bound to its exact branch and 2.0.0 base, retaining normal v2 CI and package tests and revalidating every maintenance profile after release approval.

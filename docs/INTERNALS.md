@@ -388,7 +388,7 @@ All Console Server queries run inside a **rolled-back transaction** (`SafeContex
 
 Large units are split into semantic chunks before embedding. The `SemanticChunker` is type-aware, it doesn't split on arbitrary token counts.
 
-**Unreleased after Woods 2.0.0:** class-like method chunks retain their full
+**Included in Woods 2.1:** class-like method chunks retain their full
 method name, including `self.`, `?`, `!`, setters and operators. For example,
 `Callable#method_call` and `Callable#method_self.call` contain the instance and
 class implementations separately, in source order. Plain instance-method chunk

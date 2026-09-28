@@ -1,1 +1,0 @@
-- Include metadata-only units in durable-store reconciliation, so deleting an empty-source unit removes its SQLite metadata under the existing mass-deletion safeguards.

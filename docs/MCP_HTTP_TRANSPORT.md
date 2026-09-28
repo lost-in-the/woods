@@ -86,7 +86,7 @@ Clients must send `Authorization: Bearer $WOODS_MCP_HTTP_TOKEN` on every request
 
 ### Browser origins (DNS rebinding defense)
 
-**Unreleased diagnostic correction:** invalid origin encodings also refuse before
+**Included in Woods 2.1:** invalid origin encodings also refuse before
 binding HTTP. `woods-mcp-http` exits 2 with one bounded `ConfigurationError`
 message naming the invalid entry; re-enter that origin using an ASCII hostname
 (or its Punycode form). No allowlist keeps the existing defaults. Explicit entries
@@ -100,7 +100,7 @@ A second middleware, `Woods::MCP::OriginGuard`, rejects requests whose `Origin` 
 | explicit list      | `https://app.example.com`                | exactly `https://app.example.com`, loopback no longer allowed  |
 | multiple origins   | `https://a.example,https://b.example`    | each listed origin                                                |
 
-**Unreleased after 2.0.0:** preflight and SDK dispatch share one immutable policy.
+**Included in Woods 2.1:** preflight and SDK dispatch share one immutable policy.
 Explicit cross-origin entries match the complete origin; default HTTP(S) ports
 (`:80` and `:443`) are equivalent to their omitted form.
 A portless entry additionally permits same-authority requests on other ports;

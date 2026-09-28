@@ -1,1 +1,0 @@
-- Return zero for missing polymorphic association targets in Console association counts, and give a clear validation error for scoped polymorphic counts.

@@ -121,7 +121,7 @@ executable bit cause a conflict rather than an overwrite. Review the conflict
 and restore or adapt the owned setup explicitly; do not delete the receipt to
 force an overwrite.
 
-Unreleased after `2.0.0`: ownership compares the executable bit Git records,
+Included in Woods 2.1: ownership compares the executable bit Git records,
 so ordinary checkout permissions such as `0755` and `0775` both retain ownership.
 Older builds compare the entire mode and can refuse setup in a clone made under
 a different umask. Record the loaded revision before relying on this fix.
@@ -186,14 +186,14 @@ There is no automatic ownership takeover. Managed duplicate prevention is scoped
 to one host/process namespace; do not mix raw and managed writers across different
 containers sharing an index. Use one external owner for that arrangement.
 
-**Unreleased after 2.0.0 ([#591](https://github.com/lost-in-the/woods/issues/591)):**
+**Included in Woods 2.1 ([#591](https://github.com/lost-in-the/woods/issues/591)):**
 empty and whitespace-only idle-timeout values behave as unset in the task,
 launcher and installer. Earlier builds accepted an empty value in managed
 validation but crashed during task startup; unset it when using those builds.
 
 ### Recovering an abandoned managed claim
 
-**Unreleased after 2.0.0; verify `woods-watch --help` before using this command.**
+**Included in Woods 2.1; verify `woods-watch --help` before using this command.**
 New managed daemons hold a lifetime filesystem lock in `watch_claim.json.lease`.
 The Rails child holds it throughout startup, extraction and shutdown, independently
 of its launcher. Its `watch_claim.json` records a fresh `token` and lease identity.
@@ -436,7 +436,7 @@ convention path no app has), which authoritative deletion would wrongly remove.
 The sweep carries the bounds that make reconciliation safe; the daemon only
 supplies the trigger.
 
-**Unreleased after 2.0.0:** if that deletion-only cycle fails or cannot take the
+**Included in Woods 2.1:** if that deletion-only cycle fails or cannot take the
 extraction lock, the daemon keeps a reconciliation obligation even though its
 path list is empty. The next event or heartbeat retries the bounded sweep;
 successful reconciliation clears the obligation, including a genuine no-op

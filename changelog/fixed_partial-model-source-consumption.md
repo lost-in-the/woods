@@ -1,1 +1,0 @@
-- Preserve source-consumption evidence for successfully extracted models when another model fails, so an optional framework model with a missing table does not prevent unrelated incremental extraction or refresh. The failed extractor remains explicitly unverified; failed models and changed retained source are not certified (#568).

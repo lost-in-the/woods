@@ -241,7 +241,7 @@ document id of everything last pushed. On each run the exporter:
 - **pushes** only new or changed documents,
 - **deletes** documents whose source unit has disappeared.
 
-Documents are upserted by URI. **Unreleased after 2.0.0:** the manifest keeps
+Documents are upserted by URI. **Included in Woods 2.1:** the manifest keeps
 separate repository/ref scopes; switching branches preserves the other branch's
 documents. Ref segments are URL-encoded, including `#`, `?`, and `%`.
 
@@ -261,7 +261,7 @@ entries adopted remotely with a null content hash are not deletion authority.
 
 ### Explicit ref migration
 
-**Unreleased after 2.0.0:** unresolved owned receipts from a legacy manifest
+**Included in Woods 2.1:** unresolved owned receipts from a legacy manifest
 leave sync incomplete. A URI prefix cannot prove the old ref: a slash can belong
 to either a ref name or a source path. Woods never adopts or purges those
 receipts by prefix. Select the known source ref with

@@ -251,7 +251,7 @@ Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI
 
 The task does not boot Rails. Pass `WOODS_OUTPUT` for a custom index; an explicit
 relative value is relative to the command's working directory. Without it, the
-unreleased #591 fix selects `tmp/woods` beside the loaded Rakefile, including
+Woods 2.1 #591 fix selects `tmp/woods` beside the loaded Rakefile, including
 `rake -f /app/Rakefile` from another directory. Earlier builds used the invoking
 directory instead; pass an absolute output path on those builds.
 

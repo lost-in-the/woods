@@ -1,1 +1,0 @@
-- Read typed and bulk published units as UTF-8 regardless of the process locale, restoring typed lookup, scoped search, exports, and lexical MCP startup for indexes with non-ASCII identifiers or source (#570). Reject malformed UTF-8 without replacing source bytes.

@@ -1,2 +1,0 @@
-- Strengthen Console SQL result provenance and protected query-input checks across supported database families. Preserve EAV redaction for typed keys and keep independent table patterns compatible.
-- Apply and restore the supported MariaDB statement timeout through MySQL-family adapters.

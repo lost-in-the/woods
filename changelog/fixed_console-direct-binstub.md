@@ -1,1 +1,0 @@
-- Prefer an executable application bin/rake for the direct Console launcher, including a relative application directory; preserve explicit commands, remote defaults, and bundle exec rake fallback.

@@ -2,7 +2,7 @@
 
 > **Historical sizing evidence, not an input-limit guarantee.**
 > `Woods::TokenUtils.chars_per_token_for(provider)` supplies character estimates
-> for retrieval assembly and initial sizing. Unreleased builds after 2.0.0 use
+> for retrieval assembly and initial sizing. Woods 2.1 uses
 > a conservative UTF-8 byte bound for known OpenAI embedding models and honest
 > estimates for Ollama/custom models. Prefixes count toward admission; oversized
 > inputs are split without dropping source. The optional tokenizer gem no longer

@@ -79,7 +79,7 @@ deadline, locks and active-daemon behavior described in
 inside the application container. The host needs Bash 3.2 or later, Unix tools,
 and either jq or Ruby; OpenCode supplies its own JavaScript runtime.
 
-The Unicode Ruby-fallback repair (#592, unreleased after `2.0.0`) explicitly
+The Unicode Ruby-fallback repair (#592, included in Woods 2.1) explicitly
 decodes hook JSON and paths as UTF-8, including under `LC_ALL=C`. It covers edit
 queues, legacy queue import and Claude SessionStart checks. With older plugin
 hooks, install jq or use a UTF-8 locale; a zero hook exit status alone does not

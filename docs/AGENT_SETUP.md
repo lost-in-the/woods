@@ -170,7 +170,7 @@ With `CLAUDE_CONFIG_DIR`, user scope uses that directory's `.claude.json`,
 configures the Index Server. Client trust and project approval remain Claude
 Code settings; apply does not change them.
 
-Unreleased after `2.0.0`: project ownership ignores the user's home and
+Included in Woods 2.1: project ownership ignores the user's home and
 `CLAUDE_CONFIG_DIR`, including that unused field in older receipts and plans.
 The application root, client, scope, target paths, and original file snapshots
 must still match. User-scoped ownership remains tied to its user configuration
@@ -189,7 +189,7 @@ to the selected root. For Compose, also select `--mode compose --service web
 access that project. Preflight verifies the index and installed gem inside that
 service. Both host and container subprocesses have time limits.
 
-Unreleased after `2.0.0`: host preflight preserves intended `BUNDLE_PATH`,
+Included in Woods 2.1: host preflight preserves intended `BUNDLE_PATH`,
 `BUNDLE_APP_CONFIG`, and `BUNDLE_WITHOUT` settings while clearing activation of
 the caller's bundle and selecting the application's Gemfile. Older builds can
 report missing gems that the application already has; check the loaded revision

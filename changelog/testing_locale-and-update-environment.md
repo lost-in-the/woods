@@ -1,1 +1,0 @@
-- Extend the POSIX-locale CI lane to extractor, embedding and plugin regressions, and isolate update-check specs from the caller's `WOODS_NO_UPDATE_CHECK` setting.

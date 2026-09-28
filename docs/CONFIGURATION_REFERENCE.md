@@ -187,7 +187,7 @@ Discovering a width through a probe never adds `dimensions` to later requests.
 
 **Why `num_ctx` is capped at the native context.** Ollama has an open regression ([ollama/ollama#14186](https://github.com/ollama/ollama/issues/14186)) where `options.num_ctx` does not lift the effective ceiling on `/api/embed` for models whose native context is smaller than the override. Woods advertises the native ceiling so the chunker sizes inputs to what Ollama will actually accept.
 
-**Input counting (unreleased after 2.0.0).** Complete inputs include metadata
+**Input counting (included in Woods 2.1).** Complete inputs include metadata
 prefixes. Known OpenAI embedding models use a conservative byte upper bound;
 Ollama/custom model counts remain estimates. Woods requests `truncate: false`
 from Ollama and refuses/splits oversized inputs without dropping source.
@@ -214,7 +214,7 @@ Anything responding to `#embed` and `#embed_batch` can be assigned directly, it 
 config.embedding_provider = MyCompany::CustomEmbedder.new(endpoint: internal_url)
 ```
 
-Unreleased after `2.0.0`: snapshots capture the effective settings of injected
+Included in Woods 2.1: snapshots capture the effective settings of injected
 Ollama, OpenAI, and Fake instances, including through Woods' retry and embedding
 cache wrappers. An injected instance takes precedence over unused
 `embedding_options`. Ollama retains its model, host, context size, read timeout,
@@ -323,7 +323,7 @@ worktree when overriding it. Existing databases at the old configured output
 path are not moved or deleted; run `woods:embed` for the selected index after
 upgrading to populate its default metadata database.
 
-**Unreleased after 2.0.0:** embedding with dump-backed vectors reconciles the
+**Included in Woods 2.1:** embedding with dump-backed vectors reconciles the
 complete SQLite identity inventory, including records without vectors and
 same-name units with distinct types. A full rebuild removes vanished records,
 including when the new corpus is empty. Incremental runs retain the existing
@@ -394,7 +394,7 @@ overrides the wrapper defaults for `:embeddings` (24 hours) and `:context`
 (15 minutes). `:memory` accepts `max_entries` (default 500); it ignores
 `default_ttl` because each wrapper write supplies its domain TTL.
 
-**Unreleased after 2.0.0:** retrieval contexts are scoped to one retriever
+**Included in Woods 2.1:** retrieval contexts are scoped to one retriever
 instance, including when Redis or Solid Cache is shared by applications or
 worktrees. Restarting the retriever starts a fresh context namespace. Reload
 retires only that instance's namespace, including results still in flight;
@@ -787,7 +787,7 @@ deployment guide including defense layers.
 | `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, stdio exits and the mounted Console middleware passes requests through to Rails. |
 | `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
-| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | Shared guard/SDK allowlist (unreleased after 2.0.0). Exact cross-origin entries include the port; portless entries also permit same-authority traffic. Include the actual browser origin and non-loopback endpoint authority. Restart after changes. |
+| `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | Shared guard/SDK allowlist (included in Woods 2.1). Exact cross-origin entries include the port; portless entries also permit same-authority traffic. Include the actual browser origin and non-loopback endpoint authority. Restart after changes. |
 | `console_mcp_path` | String | `/mcp/console` | URL path captured when Rack middleware mounts. Set a custom path in `config/application.rb` before Railtie initialization, then restart. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
@@ -890,7 +890,7 @@ in its finalized development environment. See [startup and installation](WATCH_D
 for the generator's explicit modes, portable receipt, update/removal, and the
 separate supervision status. Raw task settings above remain compatible.
 
-**Unreleased after 2.0.0 (#591):** blank/whitespace-only idle timeouts count as
+**Included in Woods 2.1 (#591):** blank/whitespace-only idle timeouts count as
 unset consistently. `woods-watch --recover-claim INDEX --claim-token TOKEN`
 provides explicit recovery only for a matching abandoned managed lifetime lease;
 see [ownership recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
@@ -925,7 +925,7 @@ tasks for manual refreshes; hook transport is not a general shell execution API.
 
 The separate `woods-extract` launcher captures before Rails configuration runs:
 custom `output_dir` applications must supply matching `--output` or `WOODS_OUTPUT`.
-Its implicit default is `tmp/woods`; the unreleased #591 guard refuses a finalized
+Its implicit default is `tmp/woods`; the Woods 2.1 #591 guard refuses a finalized
 configuration mismatch before publication. See [launcher output selection](SOURCE_FRESHNESS.md#establish-a-fresh-baseline).
 
 | Variable | Default | Purpose |

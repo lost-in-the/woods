@@ -340,13 +340,13 @@ user: deploy
 command: cd /app && bundle exec rake woods:console
 ```
 
-**Unreleased after 2.0.0:** direct mode prefers an existing executable `bin/rake`
+**Included in Woods 2.1:** direct mode prefers an existing executable `bin/rake`
 in the application's selected directory, falling back to `bundle exec rake`.
 Relative `directory` values resolve from the launcher's initial working directory.
 Explicit `command` settings win. Docker and SSH modes retain their remote default;
 set `command` explicitly when that application uses another task entry point.
 
-**Unreleased after 2.0.0:** the launcher rejects unknown keys, nested
+**Included in Woods 2.1:** the launcher rejects unknown keys, nested
 `connection:`/`console:` sections, blank or non-string values, and options that
 do not apply to the selected mode. Keep `mode` and `command` at the top level;
 use `directory` for direct mode, `container` for Docker, and `host`/`user` for SSH.
@@ -402,7 +402,7 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
 
-**Unreleased after 2.0.0:** `console_association_count` returns `0` or `1` for
+**Included in Woods 2.1:** `console_association_count` returns `0` or `1` for
 `belongs_to` and `has_one`, including missing targets. It counts the association's
 relation, applying `scope` to the target model; collection associations retain
 their ordinary count. Target-table and scope-column checks still apply before
@@ -899,7 +899,7 @@ fail closed with `Woods::ConfigurationError`.
 
 The middleware lazy-initializes the MCP server on the first request, which includes `Rails.application.eager_load!`. This can take several seconds on large apps. Subsequent requests are fast. If you want to pre-warm, call a health check endpoint that touches the middleware path at app startup.
 
-**Unreleased after 2.0.0:** if that eager load raises `NameError` (including a
+**Included in Woods 2.1:** if that eager load raises `NameError` (including a
 Zeitwerk naming error), HTTP Console returns a stable `503` and records one
 `console.eager_load.failed` diagnostic. That worker remains unavailable until
 restart; it does not serve a partially populated model registry or repeatedly
@@ -976,12 +976,12 @@ contains them. Confirm that a patched release is available before selecting it.
 On affected versions, disable Console where these policies are required; Index MCP
 can stay enabled because it reads the published code index separately.
 
-## Unreleased Console corrections after 2.0.0
+## Console corrections included in 2.1
 
-These corrections require a reviewed revision containing them; verify the loaded
-revision and gem path until a patched release is published. Plugin updates alone
-do not update the Console server. Security details will be published in the
-[repository security advisories](https://github.com/lost-in-the/woods/security/advisories).
+Woods 2.1 includes the reviewed Console corrections also released in the
+2.0.1 and 1.6.4 security patches. For Git/path installations, verify the loaded
+revision and gem path. Plugin updates alone do not update the Console server.
+See the published [security advisory](https://github.com/lost-in-the/woods/security/advisories/GHSA-wxxx-6hqc-qm8g).
 
 The patch tightens SQL policy for adapter-specific comment and quoting forms,
 whole-row and multi-source redaction, typed key-value records, and per-mount HTTP
@@ -996,8 +996,9 @@ refused request succeed. For stdio-only use, keep HTTP disabled.
 
 ### Read policy compatibility
 
-These rules describe the security-patch source; verify the installed revision
-and loaded gem path until its release is published.
+These rules describe Woods 2.1 and the 2.0.1 security patch. Differences from
+the 1.6.4 backport are called out below. Verify the installed version and, for
+Git/path installations, the revision and loaded gem path.
 
 - **Column alias lists:** when either `console_redacted_columns` or
   `console_redacted_key_values` is nonempty, `console_sql` refuses relation

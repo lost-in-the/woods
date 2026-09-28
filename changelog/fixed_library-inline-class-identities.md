@@ -1,1 +1,0 @@
-- Preserve nested class identities in one-line library namespaces, keeping namespace and class units distinct and restoring their source-reference edges. Read complete source when selecting module owners so heredoc text cannot become a declaration. Run a full extraction after upgrading to replace affected identifiers.

@@ -34,7 +34,7 @@ This guide covers the most common problems encountered when installing, extracti
 
 ### Source-reference baseline needs a full extraction
 
-**Unreleased after 2.0.0; planned for 2.1.** The related initial diagnostic is
+**Included in Woods 2.1.** The related initial diagnostic is
 `Source-reference baseline is missing or incompatible`. Both mean the writer
 cannot safely reuse its reference cache or verify the source consumed by retained
 units. It can follow an older-index upgrade, missing cache artifacts, or source
@@ -80,7 +80,7 @@ the first boot resolves the application's output directory.
 
 For an abandoned foreign-container claim, follow
 [ownership-verified claim recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
-The unreleased command after 2.0.0 requires the exact token and a free lifetime
+The Woods 2.1 command requires the exact token and a free lifetime
 lease; old claims require the documented legacy recovery. Age is not proof of
 abandonment. `woods:clean` preserves ownership sidecars and does not reset them.
 
@@ -92,7 +92,7 @@ Puma or explicitly run the selected Foreman command. The generator never rewrite
 `bin/dev` or starts services during preview.
 
 An empty idle-timeout variable crashes older tasks even though managed validation
-accepts it. Unset it on those builds; the unreleased #591 fix consistently treats
+accepts it. Unset it on those builds; the Woods 2.1 #591 fix consistently treats
 empty or whitespace-only values as unset.
 
 If installation reports a pending transaction, use `woods:watch --operation
@@ -484,23 +484,22 @@ retries after a later filesystem event.
 
 For the optional embedded `pipeline_extract` tool, a client using the Tasks
 extension sees the task become `failed` for this publication refusal on a
-revision containing #584 (unreleased after `2.0.0`). A background-start response
+revision containing #584 (included in Woods 2.1). A background-start response
 alone does not mean extraction completed. The packaged Index Server does not
 register this tool.
 
 ### Incremental extraction or refresh reports "Extraction failed for ..."
 
 A selected whole-app extractor raised before returning a complete result, or
-its initialization failed. On revisions containing #584 (unreleased after
-`2.0.0`), a successful sibling extractor cannot turn that failed batch into a
-successful publication. Readers retain the prior generation. Inspect the
+its initialization failed. In Woods 2.1, a successful sibling extractor cannot
+turn that failed batch into a successful publication (#584). Readers retain the prior generation. Inspect the
 earlier log line naming the failed extractor, fix its cause, then retry the
 complete changed-file list or refresh selection. Preserve the published index;
 deleting it does not repair the failing extractor.
 
 ### Incremental extraction reports "Restart-sensitive inputs"
 
-On revisions containing #588 (unreleased after `2.0.0`), the direct incremental
+On revisions containing #588 (included in Woods 2.1), the direct incremental
 API and optional embedded pipeline refuse schema or boot-configuration inputs.
 Apply required migrations, then run `bin/rails woods:extract` in a fresh Rails
 process. Reusing an embedded server's old Rails configuration or schema cache
@@ -787,7 +786,7 @@ Woods detects the dimension mismatch and raises `Woods::MCP::DimensionMismatch` 
 For an unsupported `dimensions` request or a wrong-width cached vector, compare
 the installed embedding and reader revisions as well as the model, endpoint,
 and explicit width configuration. The request/cache consistency fix (#586) is
-unreleased after `2.0.0`: it separates stored widths from requested reductions,
+included in Woods 2.1: it separates stored widths from requested reductions,
 keeps fixed-width ada requests compatible, and separates embedding cache entries
 by provider configuration. See [embedding options](CONFIGURATION_REFERENCE.md#embedding-options)
 and [cache identity](CONFIGURATION_REFERENCE.md#retrieval-cache-options). Do not
