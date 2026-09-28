@@ -171,7 +171,7 @@ Then add a direct Console process:
 
 For Docker/SSH, configure `~/.woods/console.yml` or `WOODS_CONSOLE_CONFIG`; the launcher owns process replacement. Direct Docker stdio uses `docker exec -i`, or `docker compose exec -T` to disable Compose's pseudo-TTY while retaining stdin.
 
-Woods 2.1 prefer the selected app's executable
+Woods 2.1 prefers the selected app's executable
 `bin/rake` in direct mode. A relative `directory` in `console.yml` is relative to
 the launcher's initial `cwd`. Record the installed revision before relying on
 this preference; explicit commands still win.
@@ -243,7 +243,7 @@ inside the application environment establishes preboot evidence. Never publish
 `.source-inputs.key`, silently change its permissions, or delete queued edits to
 hide diagnostics. Follow [source freshness](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/SOURCE_FRESHNESS.md).
 
-Woods 2.1 report `unavailable` with
+Woods 2.1 reports `unavailable` with
 `source_manifest_too_large` when source evidence exceeds its serialized-size
 limit. The code index remains usable. Follow `inspect_source_limits`, inspect
 `unavailable.size_bytes` / `unavailable.limit_bytes`, and retain the limitation;
