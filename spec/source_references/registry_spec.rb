@@ -161,6 +161,16 @@ RSpec.describe Woods::SourceReferences::Registry do
         .to include('reason' => 'ambiguous_target')
     end
 
+    it 'does not treat an autoload on an anonymous ancestor as a root binding' do
+      anonymous = Module.new
+      anonymous.autoload(:RefOffline, '/application/lib/ref_offline.rb')
+      RefCaller.include(anonymous)
+      add_unit('RefOffline', type: :lib, path: '/application/lib/ref_offline.rb')
+
+      expect(registry.explain(reference('RefOffline'), file_path: '/application/RefCaller.rb'))
+        .to include('status' => 'unresolved', 'reason' => 'autoload_pending')
+    end
+
     it 'resolves a bare top-level registered library through the loaded caller scope' do
       Object.autoload(:RefOffline, '/application/lib/ref_offline.rb')
       add_unit('RefOffline', type: :lib, path: '/application/lib/ref_offline.rb')

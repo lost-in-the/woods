@@ -98,6 +98,8 @@ module Woods
       # Registry may promote it, after matching a captured library declaration.
       def pending_autoload(scope, name, path)
         namespace = identical?(scope, Object) ? nil : reflect(scope, :name)
+        return unknown('autoload_pending') if namespace.nil? && !identical?(scope, Object)
+
         unknown('autoload_pending').merge(pending_target: [namespace, name].compact.join('::'), autoload_path: path)
       end
 
