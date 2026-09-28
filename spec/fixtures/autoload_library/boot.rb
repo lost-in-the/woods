@@ -47,6 +47,7 @@ Dir.mktmpdir('woods_autoload_library') do |root|
   app = Class.new(Rails::Application)
   Object.const_set(:AutoloadLibraryApplication, app)
   app.config.root = root
+  app.config.autoloader = :zeitwerk if app.config.respond_to?(:autoloader=)
   app.config.api_only = true
   app.config.eager_load = false
   app.config.cache_classes = false
