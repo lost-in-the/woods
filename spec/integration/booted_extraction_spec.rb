@@ -652,7 +652,9 @@ RSpec.describe 'Optional GraphQL extraction', :booted_app do
                                               'packaged MCP typed lookup and source search',
                                               'root promotion full/incremental equivalence',
                                               'root demotion full/incremental equivalence',
-                                              'GraphQL refresh full equivalence')
+                                              'GraphQL refresh full equivalence',
+                                              'plain Ruby resolver helper retains historical identity and source',
+                                              'helper edit full/incremental equivalence')
   end
 end
 
@@ -749,5 +751,19 @@ RSpec.describe 'Pgvector generator dimension boundaries', :booted_app do
       migration = Dir[File.join(root, 'db/migrate/*_add_pgvector_to_woods.rb')].fetch(0)
       expect(File.read(migration)).to include('vector(2000)', 'USING hnsw', 'vector_cosine_ops')
     end
+  end
+end
+
+RSpec.describe 'Autoload-only library references', :booted_app do
+  it 'publishes verified library edges without loading their registered source during any extraction mode' do
+    script = File.expand_path('../fixtures/autoload_library/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), "#{error}\n#{output}"
+    result = JSON.parse(output.lines.last.force_encoding('UTF-8'))
+    expect(result.fetch('checks')).to include('forward reference to an unexecuted registered library',
+                                              'reverse reference agrees with typed forward edge',
+                                              'target removal full/incremental equivalence',
+                                              'target creation full/incremental equivalence',
+                                              'library refresh full equivalence', 'autoload never executed')
   end
 end

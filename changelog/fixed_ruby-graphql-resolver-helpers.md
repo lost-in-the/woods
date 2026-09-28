@@ -1,0 +1,1 @@
+- Restore ordinary Ruby `Resolvers::Base` subclasses omitted by runtime GraphQL discovery. Verify loaded ancestry and preserve their historical `graphql_type` identities during full extraction, incremental updates, and refresh. Run a full extraction to recover helpers missing from an earlier 2.1 development index.

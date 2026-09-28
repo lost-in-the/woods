@@ -24,7 +24,7 @@ module Woods
 
         result = first_constant(scopes[:scopes], parts.shift, public_only: name.start_with?('::') && !allow_private)
         parts.each do |part|
-          return result unless module_object?(result[:value])
+          return result.except(:pending_target, :autoload_path) unless module_object?(result[:value])
 
           result = first_constant(qualified_scopes(result[:value]), part, public_only: !allow_private)
         end
@@ -83,13 +83,24 @@ module Woods
         scopes.each do |scope|
           next unless reflect(scope, :const_defined?, name, false)
           return unknown('private_constant') if private_access?(scope, name, public_only)
-          return unknown('autoload_pending') if reflect(scope, :autoload?, name, false)
+
+          autoload_path = reflect(scope, :autoload?, name, false)
+          return pending_autoload(scope, name, autoload_path) if autoload_path
 
           return constant_value(scope, name)
         end
         { status: :missing, reason: 'constant_missing', root_lookup: scopes.any? { |scope| identical?(scope, Object) } }
       rescue NameError
         unknown('constant_changed')
+      end
+
+      # Expose registration evidence without evaluating the source file. Only
+      # Registry may promote it, after matching a captured library declaration.
+      def pending_autoload(scope, name, path)
+        namespace = identical?(scope, Object) ? nil : reflect(scope, :name)
+        return unknown('autoload_pending') if namespace.nil? && !identical?(scope, Object)
+
+        unknown('autoload_pending').merge(pending_target: [namespace, name].compact.join('::'), autoload_path: path)
       end
 
       def private_access?(scope, name, public_only)

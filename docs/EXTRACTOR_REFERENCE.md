@@ -54,6 +54,10 @@ blocks participate. Comments, plain strings and declaration names do not establi
 references. Rails relationships derived through runtime reflection stay intact.
 
 Resolution respects qualified names and supported lexical/runtime context.
+A pending library autoload can supply a target only when its exact registered
+constant and absolute file path match the captured library declaration. Woods
+does not execute the autoload. Pending namespaces, unverified owner scopes,
+mismatched registration paths and non-library autoload targets remain unresolved.
 Dynamic constant lookup, uncertain aliases, ambiguous typed identities and
 unsupported scopes remain unresolved. In particular, references inside
 `class << self` are recorded as candidates but currently skipped during resolution;
@@ -546,6 +550,7 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 - Scans every current, named application `GraphQL::Schema` subclass and unions their runtime type inventories by canonical Ruby constant name. Distinct Ruby classes can share a schema-local GraphQL name. A type used as the query root of any schema has one `graphql_query` identity.
 - Produces unit types: `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`. Schema classes use `graphql_type` with `metadata.graphql_kind: "schema"`; their source includes configuration such as `max_complexity` for lookup and source search.
 - Scans governed declarations in `app/graphql`, including unattached resolvers. Loaded declarations qualify through GraphQL ancestry, so application superclass chains, leading `::`, and superclass whitespace do not affect discovery. Reflection reads schema/type metadata without executing field or resolver bodies.
+- File discovery also retains ordinary Ruby subclasses of the loaded `Resolvers::Base` class, including application inheritance chains. These helpers keep their historical `graphql_type` identity even when mutations call them with `new(...).call` rather than registering them as graphql-ruby resolvers. Woods verifies actual ancestry; placing an unrelated class in a `resolvers/` directory does not qualify it.
 - When graphql-ruby or a declaration is unavailable, file discovery retains its limited recognized-source-form fallback; it cannot establish arbitrary application superclass ancestry. Woods does not trigger pending declaration autoloads itself.
 - Extracts field metadata (types, descriptions, complexity, arguments), authorization patterns (Pundit, CanCan, `authorized?`), and dependencies on models/services
 - Incremental extraction handles changed files and runtime inventory additions, and reclassifies an unchanged type when its query-root role changes. Runtime inventory absence alone does not delete units: unattached file-defined resolvers remain valid, and runtime-only removals still require a full extraction or `woods:refresh[graphql]` after the application reloads.

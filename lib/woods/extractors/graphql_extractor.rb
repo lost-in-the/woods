@@ -85,7 +85,8 @@ module Woods
       #
       # Without graphql-ruby, the file pass retains its limited source-form
       # fallback. With loaded declarations, verified GraphQL ancestry governs
-      # admission; unresolved constants are never autoloaded by this extractor.
+      # admission, alongside legacy Ruby Resolvers::Base helpers; unresolved
+      # constants are never autoloaded by this extractor.
       #
       # @return [Array<ExtractedUnit>] List of GraphQL units
       def extract_all
@@ -137,7 +138,7 @@ module Woods
         return nil unless class_name
 
         runtime_class = loaded_graphql_constant(class_name)
-        return nil if runtime_class && !graphql_runtime_class?(runtime_class)
+        return nil if runtime_class && !graphql_runtime_class?(runtime_class) && !ruby_resolver_helper?(runtime_class)
         return nil unless runtime_class || graphql_class?(source)
 
         # Classify from the resolved runtime class first, matching
@@ -299,6 +300,21 @@ module Woods
 
         %i[Object InputObject Enum Union Scalar Mutation Resolver Interface].any? do |name|
           GraphQL::Schema.const_defined?(name, false) && ancestors.include?(GraphQL::Schema.const_get(name, false))
+        end
+      end
+
+      # Older file discovery admitted ordinary Resolvers::Base subclasses.
+      # Keep those application helpers under their historical graphql_type
+      # identity even though schema introspection cannot discover them. Verify
+      # real inheritance; directory names and example strings are not evidence.
+      def ruby_resolver_helper?(klass)
+        return false unless @runtime_lookup.class_object?(klass)
+
+        base = loaded_graphql_constant('Resolvers::Base')
+        return false unless @runtime_lookup.class_object?(base)
+
+        @runtime_lookup.reflect(klass, :ancestors).drop(1).any? do |ancestor|
+          SourceReferences::RuntimeLookup::CORE_EQUAL.bind(ancestor).call(base)
         end
       end
 

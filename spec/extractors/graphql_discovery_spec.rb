@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods'
+require 'active_support/core_ext/object/blank'
 require 'woods/extractors/graphql_extractor'
 
 RSpec.describe Woods::Extractors::GraphQLExtractor, 'runtime discovery' do
@@ -86,6 +88,45 @@ RSpec.describe Woods::Extractors::GraphQLExtractor, 'runtime discovery' do
         EXAMPLE = 'class Example < GraphQL::Schema::Object'
       end
     RUBY
+    expect(described_class.new.extract_graphql_file(path)).to be_nil
+  end
+
+  it 'retains ordinary Ruby resolver helpers with their historical typed identity' do
+    stub_const('Resolvers::Base', Class.new)
+    stub_const('Resolvers::Account::Create', Class.new(Resolvers::Base))
+    Resolvers::Account::Create.class_eval { def call = raise('must not execute helper') }
+    path = create_file('app/graphql/resolvers/account/create.rb', <<~RUBY)
+      class Resolvers::Account::Create < Resolvers::Base
+        def call = :created
+      end
+    RUBY
+
+    unit = described_class.new.extract_all.find { |entry| entry.identifier == 'Resolvers::Account::Create' }
+    expect(unit).not_to be_nil
+    expect(unit.type).to eq(:graphql_type)
+    expect(unit.file_path).to eq(path)
+    expect(unit.metadata[:parent_class]).to eq('Resolvers::Base')
+    expect(unit.source_code).to include('def call = :created')
+  end
+
+  it 'retains a helper through application inheritance without using its directory name' do
+    stub_const('Resolvers::Base', Class.new)
+    stub_const('HelperIntermediate', Class.new(Resolvers::Base))
+    stub_const('CallableHelper', Class.new(HelperIntermediate))
+    path = create_file('app/graphql/callable_helper.rb', 'class CallableHelper < HelperIntermediate; end')
+
+    expect(described_class.new.extract_graphql_file(path)&.type).to eq(:graphql_type)
+  end
+
+  it 'does not admit an unrelated resolver-directory class from a helper example string' do
+    stub_const('Resolvers::Base', Class.new)
+    stub_const('Resolvers::Example', Class.new)
+    path = create_file('app/graphql/resolvers/example.rb', <<~RUBY)
+      class Resolvers::Example
+        EXAMPLE = 'class Helper < Resolvers::Base'
+      end
+    RUBY
+
     expect(described_class.new.extract_graphql_file(path)).to be_nil
   end
 
