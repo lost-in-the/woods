@@ -1,1 +1,0 @@
-- Remove vanished SQLite metadata during full and incremental embedding with dump-backed vectors, including source-empty and typed records, while retaining incremental purge guards. Restore vector type filters from the same SQLite metadata store used by standalone retrieval (#572).

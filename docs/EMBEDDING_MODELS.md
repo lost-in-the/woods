@@ -64,7 +64,7 @@ override. For `nomic-embed-text` (native 2048) the server rejects inputs above
 that with a `400 "the input length exceeds the context length"` regardless of
 `num_ctx`.
 
-**Unreleased after 2.0.0:** Woods checks complete inputs, including their
+**Included in Woods 2.1:** Woods checks complete inputs, including their
 metadata prefixes, and splits source without discarding characters. OpenAI's
 known byte-BPE embedding models use a conservative UTF-8 byte upper bound at
 8191 tokens; this may create more chunks than an exact tokenizer would.

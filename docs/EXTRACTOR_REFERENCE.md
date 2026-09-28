@@ -33,7 +33,7 @@ Extractors discover code one of two ways:
 Some extractors combine both (e.g., `JobExtractor` scans directories first, then supplements with `ApplicationJob.descendants`).
 
 Discovery is not exhaustive. Woods 2.0.0 does not discover callable standalone
-modules under `app/models` through its model/PORO paths. The unreleased
+modules under `app/models` through its model/PORO paths. Woods 2.1
 [standalone-module support](#poroextractor) addresses that case; conventional
 concerns and app modules included by live models retain concern ownership.
 Dependency scanning also remains partial, including with the source-reference
@@ -42,7 +42,7 @@ application source.
 
 ### Constant source references
 
-**Unreleased after Woods 2.0.0; planned for 2.1.** For Git/path installations,
+**Included in Woods 2.1.** For Git/path installations,
 record the loaded gem path and exact revision; the development version alone
 does not establish that this change is installed.
 
@@ -81,7 +81,7 @@ File-based extractors derive an identifier in three steps, first match wins:
 
 Unmanaged paths (`lib/` unless configured for autoloading, and configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide. A namespace file containing only `Acme::VERSION` does not acquire an invented `Acme::Version` declaration.
 
-An inline primary module with a body, such as `module Helpers; def self.call; end; end`, keeps its declared name even when an unmanaged directory suggests another namespace. Namespace-only wrappers containing a single nonempty module retain the nested identity; direct behavior, empty inner modules, and `ClassMethods`/`InstanceMethods` plumbing stop that descent. Empty completed modules before the primary declaration remain namespace preludes. This correction is unreleased after `2.0.0`; run a full extraction after upgrading to replace affected path-derived identities and their source-reference edges.
+An inline primary module with a body, such as `module Helpers; def self.call; end; end`, keeps its declared name even when an unmanaged directory suggests another namespace. Namespace-only wrappers containing a single nonempty module retain the nested identity; direct behavior, empty inner modules, and `ClassMethods`/`InstanceMethods` plumbing stop that descent. Empty completed modules before the primary declaration remain namespace preludes. This correction is included in Woods 2.1; run a full extraction after upgrading to replace affected path-derived identities and their source-reference edges.
 
 One-line class declarations retain the same nesting as their multiline forms:
 `module Acme; class Error < StandardError; end; end` names `Acme::Error`,
@@ -90,11 +90,11 @@ declaration-like text inside strings and heredocs out of identifier selection.
 Conditional declarations remain source candidates; this scan does not establish
 which branch ran. Method and singleton-class bodies do not supply ordinary
 owners. Invalid source keeps the tolerant class scan, while module selection
-requires valid syntax. These corrections are also unreleased after `2.0.0`;
+requires valid syntax. These corrections are also included in Woods 2.1;
 re-extract affected indexes in full to replace wrapper identities and restore
 their source-reference edges.
 
-Once-loader ownership (#579) is an unreleased correction after Woods `2.0.0`; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
+Once-loader ownership (#579) is included in Woods 2.1; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
 
 ### Eager loading
 
@@ -307,7 +307,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **What it captures:** ActionMailer classes with their mailer actions, defaults, template paths, callbacks, and helper usage.
 
 **Key details:**
-- **Unreleased after 2.0.0:** discovers all app-owned `ActionMailer::Base.descendants`, including parallel abstract bases and direct subclasses even when `ApplicationMailer` exists. An app without ActionMailer contributes no mailer units.
+- **Included in Woods 2.1:** discovers all app-owned `ActionMailer::Base.descendants`, including parallel abstract bases and direct subclasses even when `ApplicationMailer` exists. An app without ActionMailer contributes no mailer units.
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata
 - Extracts `default from:`, `layout`, and per-action subject patterns
@@ -373,7 +373,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### PhlexExtractor
 
-**Unreleased after 2.0.0:** discovery and direct extraction require an existing app-owned source file; dependency components are excluded.
+**Included in Woods 2.1:** discovery and direct extraction require an existing app-owned source file; dependency components are excluded.
 
 **What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, Stimulus controller names, and route helper usage.
 
@@ -385,13 +385,13 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### ViewComponentExtractor
 
-**Unreleased after 2.0.0:** discovery and direct extraction require an existing app-owned source file and runtime ancestry; dependency components are excluded.
+**Included in Woods 2.1:** discovery and direct extraction require an existing app-owned source file and runtime ancestry; dependency components are excluded.
 
 **What it captures:** ViewComponent classes from `app/components`. Extracts slots, template paths, preview class references, and collection rendering support.
 
 **Key details:**
 - Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`)
-- **Unreleased after 2.0.0:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
+- **Included in Woods 2.1:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
 **Edge cases:**
@@ -441,7 +441,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### PoroExtractor
 
-**What it captures:** Plain Ruby objects in `app/models` that are not ActiveRecord (non-AR classes, excluding concerns). Supporting unreleased writers also discover callable standalone modules as described below.
+**What it captures:** Plain Ruby objects in `app/models` that are not ActiveRecord (non-AR classes, excluding concerns). Woods 2.1 writers also discover callable standalone modules as described below.
 
 **Key details:**
 - Scans `app/models` for files that don't define an `ActiveRecord::Base` descendant
@@ -451,7 +451,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 #### Assigned value classes
 
-**Unreleased after Woods 2.0.0; planned for 2.1.** Direct assignments such as
+**Included in Woods 2.1.** Direct assignments such as
 `Criteria = Struct.new(:value)` and `Page = Data.define(:items)` can own a PORO
 unit inside class or module namespace wrappers. Discovery uses the active
 loader's expected constant where available, then verifies the loaded class,
@@ -477,7 +477,7 @@ extraction refuses format 1 even when source files are unchanged. Existing
 readers can continue serving the last published index until the full extraction
 succeeds. Genuine collisions between different files still refuse publication.
 
-**Standalone modules — unreleased after Woods 2.0.0; planned for 2.1.** A named,
+**Standalone modules — included in Woods 2.1.** A named,
 loaded module whose canonical declaration and own methods are defined under
 `app/models` can produce a `poro` unit with `metadata.ruby_kind: "module"` and
 `parent_class: null`. This includes `def self.method`, `module_function`,
@@ -528,7 +528,7 @@ reference cache; updating only the reader does not add them.
 
 **What it captures:** `SimpleDelegator` subclasses that wrap a model. Records the wrapped model class, all public methods, and the delegation chain.
 
-**Unreleased after Woods 2.0.0:** after eager loading, discovery checks the
+**Included in Woods 2.1:** after eager loading, discovery checks the
 selected class's actual delegator ancestry and source ownership. Application
 base classes and leading `::` therefore work without changing the unit identity;
 an unrelated or foreign same-named class cannot supply that proof. When the class
@@ -544,7 +544,7 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 
 **What it captures:** graphql-ruby schemas, types, mutations, queries, and resolvers. Produces four distinct unit types from one extractor.
 
-**Unreleased after Woods 2.0.0; planned for 2.1:** the discovery fixes below require the corresponding Git/path revision; the development version alone does not establish availability.
+**Included in Woods 2.1:** install 2.1.0 or later for the discovery fixes below. For Git/path installs, verify the exact revision and loaded gem path; the declared development version alone does not establish availability.
 
 **Key details:**
 - Scans every current, named application `GraphQL::Schema` subclass and unions their runtime type inventories by canonical Ruby constant name. Distinct Ruby classes can share a schema-local GraphQL name. A type used as the query root of any schema has one `graphql_query` identity.
@@ -585,7 +585,7 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 - Pairs policy units with their corresponding model (e.g., `UserPolicy` → `User`)
 - Extracts scope class and `resolve` method when present
 
-**Unreleased after Woods 2.0.0:** a loaded policy's actual ApplicationPolicy
+**Included in Woods 2.1:** a loaded policy's actual ApplicationPolicy
 ancestry, including namespaced and intermediate application bases, establishes
 Pundit inheritance. The selected constant must belong to the source being read;
 aliases and foreign same-named classes do not qualify. Without a loaded class,
@@ -676,14 +676,14 @@ Every single-file app-owned unit under a package root carries `metadata[:package
 **What it captures:** ActionCable channel classes with stream subscriptions, subscribed/unsubscribed hooks, broadcast patterns, and action methods.
 
 **Key details:**
-- Discovers via `ActionCable::Channel::Base.descendants`. **Unreleased after 2.0.0:** discovery and direct extraction exclude dependency-owned source files.
+- Discovers via `ActionCable::Channel::Base.descendants`. **Included in Woods 2.1:** discovery and direct extraction exclude dependency-owned source files.
 - Records stream names, authentication checks in `subscribed`, and any `broadcast_to` calls
 
 ---
 
 ### ScheduledJobExtractor
 
-**Unreleased after 2.0.0:** unique schedule names retain `scheduled:<name>`.
+**Included in Woods 2.1:** unique schedule names retain `scheduled:<name>`.
 Names shared across scheduler formats become `scheduled:<format>:<name>`, with
 a deterministic suffix if that identifier is already a literal task name.
 `metadata.task_name` preserves the original name. Ambiguous names within one
@@ -734,7 +734,7 @@ expanded mailer and schedule identities in an existing index.
 - Risk indicators: data migrations (manual SQL or bulk updates), irreversible operations (`remove_column` without type), `execute` calls with raw SQL
 - Rails internal tables (`schema_migrations`, `active_storage_blobs`, etc.) are excluded from model dependency links
 
-**Unreleased after Woods 2.0.0:** migration identity comes from the actual Ruby
+**Included in Woods 2.1:** migration identity comes from the actual Ruby
 declaration, with the filename's conventional class name selecting among eligible
 declarations. Helper classes and closed sibling namespaces cannot rename a
 migration or contribute unrelated DDL metadata. Qualified declaration receivers
@@ -796,7 +796,7 @@ namespace.
 **Key details:**
 - Detects literal DSL declarations in model source; it does not evaluate the DSL or run callbacks
 - Extracts states, events, transitions, guard conditions, and callbacks from supported source forms; it does not claim complete dynamic or inherited registry coverage
-- **Unreleased after 2.0.0:** directly declared `state_machines` calls in the selected model class support the default `state` attribute (`state_machine initial: :pending do`), explicit attributes, and parenthesized calls, including multiline arguments. The default produces `Model::state_machine_state`; existing named identifiers remain `Model::state_machine_<attribute>`. Each declaration uses its own block and literal initial state, keeping multiple machines separate. Nested/sibling classes, singleton scopes and deferred/receiver blocks cannot supply another model's machine. Dynamic attribute expressions are not guessed, and dynamic initial-state functions are not called.
+- **Included in Woods 2.1:** directly declared `state_machines` calls in the selected model class support the default `state` attribute (`state_machine initial: :pending do`), explicit attributes, and parenthesized calls, including multiline arguments. The default produces `Model::state_machine_state`; existing named identifiers remain `Model::state_machine_<attribute>`. Each declaration uses its own block and literal initial state, keeping multiple machines separate. Nested/sibling classes, singleton scopes and deferred/receiver blocks cannot supply another model's machine. Dynamic attribute expressions are not guessed, and dynamic initial-state functions are not called.
 - Returns an array from the file method (like `ScheduledJobExtractor`), cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans
 
 ---
@@ -809,7 +809,7 @@ namespace.
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
 - No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
-- **Unreleased after 2.0.0:** app-owned `metadata.publishers` and `metadata.subscribers` paths, and the same paths in generated source annotations, are relative to `Rails.root`. Their array order, counts and event identifiers stay unchanged. Explicitly scanned paths outside the application remain absolute. Re-extract event units after upgrading: removing the checkout prefix changes existing `source_hash` values once, then identical app sources produce the same annotations and hashes across checkout roots.
+- **Included in Woods 2.1:** app-owned `metadata.publishers` and `metadata.subscribers` paths, and the same paths in generated source annotations, are relative to `Rails.root`. Their array order, counts and event identifiers stay unchanged. Explicitly scanned paths outside the application remain absolute. Re-extract event units after upgrading: removing the checkout prefix changes existing `source_hash` values once, then identical app sources produce the same annotations and hashes across checkout roots.
 
 ---
 
@@ -859,7 +859,7 @@ namespace.
 - File-based scanning; no assumption about class hierarchy
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
 
-**Unreleased after 2.0.0:** compatible reopened library classes/modules across
+**Included in Woods 2.1:** compatible reopened library classes/modules across
 files form one typed unit. Matching inferred names alone are insufficient:
 conflicting declaration kinds/parents, unresolved constructors and aliases still
 refuse ambiguous ownership. Extraction does not require or execute unmanaged
@@ -878,7 +878,7 @@ deletion or dependency-triggered refresh reconciles the complete library family
 once per batch; direct file extraction also returns the aggregate. This costs
 more than re-reading only the primary file, and preserves full/incremental facts.
 A contributor read failure prevents publishing a partial aggregate. Supporting
-unreleased writers read library source explicitly as UTF-8 regardless of the
+Woods 2.1 writers read library source explicitly as UTF-8 regardless of the
 process locale; invalid UTF-8 is logged with the physical source path and still
 prevents a partial aggregate.
 

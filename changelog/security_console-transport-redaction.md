@@ -1,1 +1,0 @@
-- Strengthen per-mount Console transport guards and protected-value rendering. See the repository security advisories for release details.

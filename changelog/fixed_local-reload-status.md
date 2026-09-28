@@ -1,1 +1,0 @@
-- Report local-preset vector reloads as degraded with an explicit MCP restart remedy. A running server no longer reports successful zero-vector refresh while retaining an older vector snapshot beside live SQLite metadata.

@@ -1,1 +1,0 @@
-- Apply typed key/value redaction consistently to case-variant and schema-qualified source table names, retaining all matching model types when source schemas are ambiguous.

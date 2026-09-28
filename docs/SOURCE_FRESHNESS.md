@@ -14,7 +14,7 @@ before using it; upgrading the plugin alone does not upgrade Woods.
 |---|---|---|
 | `current` | All covered inputs match their consumer baselines, with a verified fresh boot boundary and complete checks. A dirty checkout can be current. | Use the indexed facts within the coverage below. |
 | `drifted` | At least one captured input differs, was removed, or a relevant input was added. | Inspect the changed paths; choose a full run or a justified targeted refresh. |
-| `unavailable` | **Unreleased after 2.0.0:** source evidence exceeded its serialized-size limit; the code index was published successfully. | Inspect `unavailable.size_bytes` and `unavailable.limit_bytes`; another full extraction will not reduce this size. |
+| `unavailable` | **Included in Woods 2.1:** source evidence exceeded its serialized-size limit; the code index was published successfully. | Inspect `unavailable.size_bytes` and `unavailable.limit_bytes`; another full extraction will not reduce this size. |
 | `unknown` | Evidence is incomplete: for example an old index, missing source/key, scan limit, opaque symlink directory, or unproved boot/consumer boundary. | Inspect `reasons`; use a deep check or fresh full capture as appropriate. |
 
 Drift can coexist with incomplete coverage. `reasons` reports both; absence of a
@@ -23,7 +23,7 @@ capture/traversal completion, while boot and consumer qualifications remain in
 `reasons`. `counts` contains total observed added/changed/removed paths; each
 `changes` list contains at most 30 paths and `truncated` marks longer lists.
 
-**Unreleased after 2.0.0:** `comparison_complete` also identifies whether the
+**Included in Woods 2.1:** `comparison_complete` also identifies whether the
 previous consumer baseline can establish additions. A missing or incompatible
 baseline stays unknown; it does not make every visible file an addition. Files
 not reached by an incomplete scan are not reported as deleted. Matching paths
@@ -45,7 +45,7 @@ The result is tied to the **served** generation, including a reader holding an
 older generation during a concurrent publication. It is recomputed on each call;
 a source edit does not require an index generation change to become visible.
 
-**Unreleased after 2.0.0:** `recommendations` separates recovery actions:
+**Included in Woods 2.1:** `recommendations` separates recovery actions:
 
 - `deep_check`: the quick reader reached its time limit; request one deep check.
 - `inspect_source_scan`: inspect `verification_reasons`, permissions, source
@@ -82,7 +82,7 @@ For an application with a custom `config.output_dir`, **always pass the matching
 before capturing its boot inputs. In Woods 2.0.0, its implicit `tmp/woods` default
 overrides custom configuration and can create a second index.
 
-**Unreleased after 2.0.0 ([#591](https://github.com/lost-in-the/woods/issues/591)):**
+**Included in Woods 2.1 ([#591](https://github.com/lost-in-the/woods/issues/591)):**
 an implicit default no longer injects `WOODS_OUTPUT` into Rails boot. The task
 compares finalized configuration with that preboot default and refuses a mismatch
 before extraction, naming the configured path and explicit output remedy. An
@@ -100,7 +100,7 @@ publication. In Woods 2.0.0, edits during boot/extraction retain the earlier
 identity and are reported in the new generation, rather than being silently
 adopted as a current baseline.
 
-**Unreleased after 2.0.0; planned for 2.1:** the
+**Included in Woods 2.1:** the
 [constant-reference writer](EXTRACTOR_REFERENCE.md#constant-source-references)
 requires verified source for its graph evidence. Source changes after capture,
 during boot or extraction, refuse publication while reference enrichment
@@ -126,7 +126,7 @@ scanner's exclusions. Explicit source roots override generic exclusions; the
 index output is always excluded. Contained file symlinks are checked for stable
 resolution; directory symlinks and escaping/unreadable inputs leave uncertainty.
 
-**Unreleased after 2.0.1; planned for 2.1 (#653):** supporting writers scan
+**Included in Woods 2.1 (#653):** supporting writers scan
 directory links under their logical application paths, preserving independent
 aliases. Static files with no input consumer do not prevent publication merely
 because a parent directory is a symlink. Entries in an external linked directory
@@ -138,12 +138,12 @@ limits keep evidence incomplete. Output-directory aliases are pruned. Run a fres
 full extraction after upgrading to establish the updated capture rules; do not
 replace valid links or disable source verification to work around an older writer.
 
-**Unreleased after 2.0.0; planned for 2.1:** source paths use UTF-8 bytes even
+**Included in Woods 2.1:** source paths use UTF-8 bytes even
 when the process locale is `C`. A filename with invalid UTF-8 bytes produces
 `undecodable_source_path` and incomplete coverage; directory entries with those
 names are pruned. Diagnostic labels escape the original bytes and are bounded.
 The watcher skips these entries, and reference verification retains the preceding
-generation. **Unreleased after 2.0.0:** the publication refusal names the reason
+generation. **Included in Woods 2.1:** the publication refusal names the reason
 and up to three escaped, bounded path labels, including entries outside source
 consumer scopes; it never includes file contents. Rename the affected entries to
 valid UTF-8 names before a fresh capture. Explicit root/output paths with invalid UTF-8 bytes are rejected as
@@ -166,14 +166,14 @@ framework refreshes do not certify unrelated application inputs. A handled
 extractor error retains an explicit `extractor:<name>` uncertainty even if the
 extractor returns an empty result. Successful consumers keep their own evidence;
 a later full run without that failure can replace the uncertainty.
-In the unreleased reference writer planned for 2.1, successfully returned models
+In the Woods 2.1 reference writer, successfully returned models
 also retain their individual source evidence when another model fails. An
 optional framework model with a missing table therefore does not prevent
 unrelated incremental work; the model-extractor uncertainty remains visible.
 If an older writer already published a baseline without that individual evidence,
 run one full extraction after upgrading to rebuild it.
 
-With the **unreleased reference writer planned for 2.1**, an edited Ruby service
+With the **Woods 2.1 reference writer**, an edited Ruby service
 retained by an events-only refresh instead prevents publication: its current
 source cannot certify its older runtime facts or cached reference resolution.
 See [reference baseline recovery](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
@@ -185,7 +185,7 @@ Custom loader source outside captured roots, missing eager-load coverage and
 uncaptured application-owned unit paths remain unknown. This is application
 source evidence: it does not certify external database schemas/data, remote
 configuration, installed gem bytes, provider state or live runtime services.
-**Unreleased after 2.0.0:** RubyGems installation metadata can establish that
+**Included in Woods 2.1:** RubyGems installation metadata can establish that
 loaded/unit source inside the application directory belongs to an installed gem,
 including gems installed under `vendor/bundle`. Such files do not create false
 application-coverage errors. A vendor-shaped directory alone is insufficient;
@@ -202,7 +202,7 @@ same verifier without Rails initialization or provider work. Its optional
 Base64-encoded JSON transport supports `output`, `root` (an explicit reader-side
 source mapping), and `mode` (`quick` or `deep`).
 
-**Unreleased after 2.0.0:** results expose `recorded_root` (writer location),
+**Included in Woods 2.1:** results expose `recorded_root` (writer location),
 `checked_root` (the directory actually scanned), and `root_source` (`recorded`,
 `explicit`, or `working_directory`). `current` applies only to that checked root.
 The MCP IndexReader keeps using the recorded root; it does not infer a checkout
@@ -219,7 +219,7 @@ Its ten-second process deadline includes command startup; the scan uses quick
 mode. Missing older tasks and failed/timed-out commands report unknown. Cancelling
 Docker exec does not itself prove the process inside the container stopped.
 A quiet session hook does not acknowledge deferred PostToolUse queue entries.
-**Unreleased after 2.0.0:** unknown warnings use the returned recommendations,
+**Included in Woods 2.1:** unknown warnings use the returned recommendations,
 including every applicable recovery action. A quick reader timeout advises a deep
 check without requiring a rebuild. Older tasks without recommendations retain
 the conservative generic unknown warning.
@@ -241,7 +241,7 @@ consumer semantics, not raw manifest equality.
 
 Verified launching refuses an unavailable, insecure or malformed
 `<output>/.source-inputs.key`; it cannot establish verified capture without that
-key. In the unreleased diagnostics after 2.0.0, the error names the path and safe
+key. In Woods 2.1 diagnostics, the error names the path and safe
 file requirements while reader reason codes remain unchanged. No key bytes are
 printed and Woods does not chmod, chown, replace or rotate the file automatically.
 
@@ -262,7 +262,7 @@ Flat fallback and older indexes lack verified atomic source evidence.
 `WOODS_PROFILE=1` reports `source capture` and `source verification` separately.
 Capture/recheck each allow up to ten seconds with the same file/byte caps.
 
-**Unreleased after 2.0.0:** the published manifest and private launcher handoff
+**Included in Woods 2.1:** the published manifest and private launcher handoff
 have a 16 MiB serialized-size limit. If size alone exceeds that limit, extraction
 continues and publishes the code index successfully with a loud warning and
 bounded evidence: `state: "unavailable"`, reason `source_manifest_too_large`, and

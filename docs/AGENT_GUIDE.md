@@ -86,7 +86,7 @@ Bare names identify units, not methods across the application. For example,
 be a FactoryBot factory in `spec/factories/`. Find the owning class with
 `search` and `lookup`, then pass its identifier with `#order`.
 
-**Unreleased after `2.0.0` (#593):** an unknown indexed flow unit returns
+**Included in Woods 2.1 (#593):** an unknown indexed flow unit returns
 `not_found`; a known unit with no discovered operations remains a successful
 empty flow. Neither outcome establishes whether an unindexed caller exists.
 
@@ -155,7 +155,7 @@ The `graph_coverage` notice makes this scope explicit in supporting responses;
 that metadata is included in Woods `2.0.0`.
 
 A supporting post-2.0 writer recovers additional [constant source references](EXTRACTOR_REFERENCE.md#constant-source-references)
-(unreleased; planned for 2.1). Upgrading the reader alone cannot add relationships
+(included in Woods 2.1). Upgrading the reader alone cannot add relationships
 to an old index. The coverage warning still applies.
 
 Start at depth 1 or 2. A deeper unfiltered traversal can obscure the direct evidence that matters. Common relationship values include associations (`belongs_to`, `has_many`, `has_one`), code references, renders, redirects, form actions, and navigation links.
@@ -333,7 +333,7 @@ for opt-in, independent refresh controls, limits and repeat suppression.
 
 ### Library units with several source files
 
-In supporting builds (unreleased after 2.0.0), `source_contributors` identifies
+In supporting builds (included in Woods 2.1), `source_contributors` identifies
 all physical files behind an aggregate library unit. Treat `file_path` as the
 primary display path. Use each contributor's own SHA256 and coordinates when
 citing it; the composite source hash is not the hash of the primary file.

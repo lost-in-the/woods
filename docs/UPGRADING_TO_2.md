@@ -19,7 +19,7 @@ After this runbook you will have:
 - an MCP client connected to the v2 packaged tool surface;
 - a documented way back to v1 if verification fails.
 
-### Pending HTTP configuration checks
+### HTTP configuration checks
 
 Supporting revisions after 2.0.0 validate HTTP origin allowlists at boot.
 Enabled automatic and manual Console mounts use the same
@@ -92,6 +92,21 @@ eviction; disabling both can retain them indefinitely. See
 | Legacy unsafe-eval opt-in removed | `WOODS_CONSOLE_UNSAFE_EVAL=true`, an enabled `console_unsafe_eval_enabled`, or legacy confirmation/audit options refuse Console server construction | Remove these settings; use supported read tools or the application’s normal console for deliberate code execution |
 | New watch, refresh, and evaluation tasks | New operational options become available | Optional; no migration action |
 
+## Updating an existing 2.0 installation to 2.1
+
+After selecting Woods 2.1 in the application bundle, keep the last good index and
+run one full `bin/rails woods:extract`, followed by `bin/rails woods:validate`.
+This establishes source-reference cache format 3 and repairs affected discovery
+identities. Incremental extraction requires that compatible baseline. Rebuild
+embeddings and exports if the identifiers they store changed; restart MCP to load
+the new gem. A reader upgrade alone cannot add relationships to an older index.
+
+The expanded references remain conservative: component callers and unresolved
+runtime scopes are not exhaustively covered. Full and incremental results can
+still differ in `dependents` presentation order without changing membership.
+Large affected sets may cost as much as a full extraction; choose full extraction
+for those workloads rather than assuming every incremental run is faster.
+
 ## Before changing the bundle
 
 ### Check the loader for wrapper-nested classes
@@ -115,15 +130,15 @@ file. Woods does not provide a classic-mode naming fallback for this case.
 
 Woods 2.0.0 can also misidentify valid Struct/Data assignments inside namespace
 wrappers on supported loaders ([#559](https://github.com/lost-in-the/woods/issues/559)).
-**Unreleased after 2.0.0; planned for 2.1:** supporting writers verify the loaded
+**Included in Woods 2.1:** supporting writers verify the loaded
 assignment's identity and source ownership for PORO and library units. Check
 the exact writer revision, then follow the [assigned value-class rules](EXTRACTOR_REFERENCE.md#assigned-value-classes).
 Run a full extraction to repair old wrapper identities and rebuild reference-cache
-format 2; incremental extraction refuses the older format. Keep the previous
+format 3; incremental extraction refuses older formats. Keep the previous
 generation until that rebuild succeeds. Do not rename valid application constants
 to work around an older writer's inference.
 
-**Unreleased after 2.0.0:** the collision guard also applies to incremental
+**Included in Woods 2.1:** the collision guard also applies to incremental
 extraction and targeted refresh ([#561](https://github.com/lost-in-the/woods/issues/561)).
 Those paths previously could publish a conflicting source that a full extraction
 would reject. Refusal leaves the last published generation readable. If an older
@@ -134,7 +149,7 @@ succeeds; do not delete the index to bypass the collision.
 
 ### Refresh GraphQL discovery on a supporting writer
 
-**Unreleased after 2.0.0; planned for 2.1:** the discovery fixes for
+**Included in Woods 2.1:** the discovery fixes for
 [#558](https://github.com/lost-in-the/woods/issues/558),
 [#562](https://github.com/lost-in-the/woods/issues/562) and
 [#563](https://github.com/lost-in-the/woods/issues/563) add schema-class units,
@@ -273,7 +288,7 @@ incremental extraction, targeted refresh or an embedded pipeline's incremental
 operation as the first v2 run. A flat index being readable, a successful
 `woods:validate`, or a newer manifest `woods_version` does not certify that all
 retained v1 units were migrated. After cleaning there is no structural baseline,
-and incremental extraction refuses that state. **Unreleased after 2.0.0:**
+and incremental extraction refuses that state. **Included in Woods 2.1:**
 incremental extraction and targeted refresh also refuse a flat index with a
 manifest, or a generation whose manifest names a writer major version below 2,
 before creating a new payload. Run a full `woods:extract` to rebuild it. A
@@ -334,7 +349,7 @@ Re-run every export after extraction and embeddings are verified. Renamed identi
 
 Review the target and backup before any force-purge override. Use `WOODS_NOTION_FORCE=1` only when you intentionally want Notion to re-check unchanged content hashes.
 
-**Unreleased after 2.0.0:** Unblocked keeps separate repository/ref scopes.
+**Included in Woods 2.1:** Unblocked keeps separate repository/ref scopes.
 Legacy receipts that cannot be assigned safely leave sync incomplete, including
 old exports from a non-`main` ref. Preview an explicit
 `UNBLOCKED_MIGRATE_FROM_REF=<old-ref>` migration; review obsolete documents with
@@ -436,7 +451,7 @@ Update agent prompts that refer to the old inventory. Standard Index launch prov
 
 Structural reads still work from a read-only index mount, but the `reload` tool does not: its transactional refresh takes the same on-disk writer lock as extraction and embedding, so the MCP process needs write access to the index directory. Without it, `reload` returns a typed degraded error and keeps serving the previous aligned generation rather than swapping in a partial one. Grant write access, or restart the MCP process after publishing. [MCP servers](MCP_SERVERS.md) owns the detail.
 
-**Unreleased after 2.0.0:** `:local` snapshot vectors and SQLite metadata cannot
+**Included in Woods 2.1:** `:local` snapshot vectors and SQLite metadata cannot
 reload atomically in the running server, even with write access. Restart
 `woods-mcp` after `woods:embed` when using that preset.
 

@@ -67,7 +67,7 @@ Woods boots and eager-loads the Rails application, runs its extractors, builds d
 
 For verified source capture before Rails boots, use the installed
 `bundle exec woods-extract full` launcher; see [source freshness](SOURCE_FRESHNESS.md#establish-a-fresh-baseline)
-for custom roots and output paths. **Unreleased after 2.0.0:** the launcher
+for custom roots and output paths. **Included in Woods 2.1:** the launcher
 prefers the application's executable `bin/rake`, falling back to
 `bundle exec rake` when it is absent or not executable.
 

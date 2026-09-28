@@ -31,7 +31,7 @@ Three differences are tolerated, and nothing else:
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
 A nested metadata field with the same name is application data: changing it
 rewrites the unit in both compact and pretty JSON output. On supporting
-unreleased writers, an already registered unit whose complete serialized bytes
+Woods 2.1 writers, an already registered unit whose complete serialized bytes
 match also stays out of the touched set, Git enrichment and dependents updates.
 Derived metadata or dependency differences still use normal registration.
 
@@ -72,10 +72,10 @@ Changed paths are normalized lexically before the task's relevance filter:
 trailing root slashes, duplicate separators and `.`/`..` segments do not create
 separate changes or bypass matching. Paths outside `Rails.root` are excluded.
 Missing files remain representable; symlinks are not resolved. The task-boundary
-normalization and nested-application Git paths are unreleased after `2.0.0`;
+normalization and nested-application Git paths are included in Woods 2.1;
 check the installed revision before relying on them.
 
-**Unreleased after 2.0.0:** incremental extraction and targeted refresh refuse
+**Included in Woods 2.1:** incremental extraction and targeted refresh refuse
 legacy flat artifacts with a manifest and generations whose manifest records a
 writer major version below 2. Run a full `woods:extract` before resuming partial
 updates. Missing writer provenance in a generation remains compatible with early
@@ -249,7 +249,7 @@ step before it.
    has never seen, and what removes definitions deleted from a surviving
    source file. Multi-file Rake tasks use wholesale reconciliation below.
 
-   **Unreleased after 2.0.0:** changed-path candidates are collected and checked
+   **Included in Woods 2.1:** changed-path candidates are collected and checked
    before registration or pruning. Moving an identity out of a surviving file
    works in either changed-path order only when completed extraction proves
    the old file no longer produces it and the new owner is unique. Failed or
@@ -269,7 +269,7 @@ step before it.
    construction: it is the same discovery code a full extraction uses, so
    there is no path-to-constant guessing.
 
-   **Unreleased after 2.0.0:** jobs and serializers reconcile their combined
+   **Included in Woods 2.1:** jobs and serializers reconcile their combined
    file/runtime inventory whenever a Ruby source path changes. Resolved metadata
    can depend on another file without a recorded graph edge, such as a nested,
    class-discovered job's `queue_as Settings::QUEUE`. Runtime queue enrichment
@@ -302,7 +302,7 @@ step before it.
    string literal, and an unrelated addition in the same batch do not.
    Idempotent when nothing was pruned.
 
-8. **Reconcile source references** on supporting unreleased writers described in
+8. **Reconcile source references** on Woods 2.1 writers described in
    [constant source references](EXTRACTOR_REFERENCE.md#constant-source-references).
    Resolve cached candidates against the complete current typed unit registry,
    update callers' forward relationships, and refresh targets' reverse
@@ -463,7 +463,7 @@ discovery set.
 
 ### Runtime removals and bundle updates
 
-Hybrid runtime reconciliation (#588) is unreleased after `2.0.0`; check the
+Hybrid runtime reconciliation (#588) is included in Woods 2.1; check the
 loaded writer revision. Jobs and serializers use the union of their directory
 scan and current runtime descendants. A Ruby-file change, or a blast radius
 containing a job or serializer, reruns both families wholesale. This costs a
@@ -534,7 +534,7 @@ The family has three parts: `flows/flow_index.json` (entry point → relative
 document path), one document per controller action, and
 `metadata[:flow_paths]` on the controller units.
 
-On revisions containing #588 (unreleased after `2.0.0`), switching the gate off
+On revisions containing #588 (included in Woods 2.1), switching the gate off
 withdraws the seeded `flows/` family and removes controller flow annotations on
 the next full, incremental or targeted-refresh publication. An incremental run
 with no changed files still publishes this withdrawal. The preceding generation
@@ -775,7 +775,7 @@ edit does not establish that a day of commits is below the crossover.
   same type+identifier are not representable; full extraction fails closed
   with both source paths instead of publishing a glob-order tie-break (resolved
   B-063). Same-file re-derivation remains a legitimate deduplication case.
-  **Unreleased after 2.0.0:** incremental extraction and targeted refresh enforce
+  **Included in Woods 2.1:** incremental extraction and targeted refresh enforce
   the same collision refusal (#561), preserving the prior published generation.
   Distinct unit types in separate extractor directories remain independent.
   A retained source can move when the old file is confirmed absent and the new
@@ -806,7 +806,7 @@ edit does not establish that a day of commits is below the crossover.
 
 ## Source-reference baseline and upgrades
 
-**Unreleased after 2.0.0; planned for 2.1.** Older indexes remain readable.
+**Included in Woods 2.1.** Older indexes remain readable.
 Writers with the [source-reference expansion](EXTRACTOR_REFERENCE.md#constant-source-references)
 require one full `bin/rails woods:extract` before incremental extraction or
 targeted refresh can update an older index without its reference cache. Follow
@@ -833,7 +833,7 @@ publication. Correct source errors and retry the complete batch against a stable
 tree. Reference-only edge updates do not refresh a retained unit's runtime
 metadata, extraction timestamp or Git history.
 
-Whole-extractor failure reporting (#584) is unreleased after `2.0.0`; verify the
+Whole-extractor failure reporting (#584) is included in Woods 2.1; verify the
 writer revision before relying on it. If a selected whole-app extractor cannot
 be initialized or raises before replacing any units, incremental extraction and
 targeted refresh fail without advancing the published generation, even when

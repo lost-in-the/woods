@@ -1,1 +1,0 @@
-- Align HTTP preflight and SDK dispatch with one origin policy, normalize default ports, and reject malformed configured origins once at boot with a bounded diagnostic naming the entry. Explicit browser-origin allowlists replace loopback defaults.

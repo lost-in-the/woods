@@ -1,1 +1,0 @@
-- Reject changelog fragments without a leading list item before preparing a release, naming the invalid file and leaving the checkout unchanged.

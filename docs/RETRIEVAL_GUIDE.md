@@ -169,7 +169,7 @@ failure does not retire those old vectors.
 
 ### Prepared-input checkpoints
 
-**Unreleased after 2.0.0:** checkpoint schema 2 records preparation policy and
+**Included in Woods 2.1:** checkpoint schema 2 records preparation policy and
 ordered complete input fingerprints, including chunk/storage IDs. A change to a
 prepared prefix or chunks re-embeds even if the source hash is unchanged; metadata
 that does not affect prepared text does not force an embedding. Old checkpoints
