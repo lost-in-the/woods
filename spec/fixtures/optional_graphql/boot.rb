@@ -60,6 +60,28 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
         'class DiscoveryRootResolver < ::GraphQL::Schema::Resolver; type String, null: false; end')
   write(root, 'app/graphql/discovery_spaced_resolver.rb',
         'class DiscoverySpacedResolver <  GraphQL::Schema::Resolver; type String, null: false; end')
+  write(root, 'app/graphql/resolvers/base.rb', 'class Resolvers::Base; end')
+  helper = write(root, 'app/graphql/resolvers/account/create.rb', <<~RUBY)
+    class Resolvers::Account::Create < Resolvers::Base
+      def call
+        raise 'extraction executed a helper' if ENV['GRAPHQL_DISCOVERY_NO_EXECUTION']
+        'created'
+      end
+    end
+  RUBY
+  write(root, 'app/graphql/discovery_create_mutation.rb', <<~RUBY)
+    class DiscoveryCreateMutation < GraphQL::Schema::Mutation
+      field :result, String, null: false
+      def resolve
+        { result: Resolvers::Account::Create.new.call }
+      end
+    end
+  RUBY
+  write(root, 'app/graphql/discovery_mutation.rb', <<~RUBY)
+    class DiscoveryMutation < GraphQL::Schema::Object
+      field :create, mutation: DiscoveryCreateMutation
+    end
+  RUBY
   write(root, 'app/graphql/discovery_query.rb', <<~RUBY)
     class DiscoveryQuery < GraphQL::Schema::Object
       field :hello, String, null: false
@@ -74,6 +96,7 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
   schema = write(root, 'app/graphql/discovery_schema.rb', <<~RUBY)
     class DiscoverySchema < GraphQL::Schema
       query DiscoveryQuery
+      mutation DiscoveryMutation
       max_complexity 123
     end
   RUBY
@@ -118,6 +141,11 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
       DiscoveryRuntimeSchemaA.execute('{ hello }').to_h == { 'data' => { 'hello' => 'A' } } &&
       DiscoveryRuntimeSchemaB.execute('{ hello }').to_h == { 'data' => { 'hello' => 'B' } }
   end
+  assert_fact(report, 'mutation invokes an ordinary Ruby helper with implicit namespaces') do
+    !Resolvers::Account::Create.ancestors.include?(GraphQL::Schema::Resolver) &&
+      DiscoverySchema.execute('mutation { create { result } }').to_h ==
+        { 'data' => { 'create' => { 'result' => 'created' } } }
+  end
   ENV['GRAPHQL_DISCOVERY_NO_EXECUTION'] = '1'
   Woods.configure do |config|
     config.concurrent_extraction = false
@@ -141,6 +169,12 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
     %w[DiscoveryAuthorizedResolver DiscoveryChildResolver DiscoveryRootResolver DiscoverySpacedResolver].all? do |name|
       reader.find_unit(name)&.fetch('type') == 'graphql_resolver'
     end
+  end
+
+  assert_fact(report, 'plain Ruby resolver helper retains historical identity and source') do
+    unit = reader.find_unit('Resolvers::Account::Create')
+    unit && unit['type'] == 'graphql_type' && File.expand_path(unit['file_path'], root) == helper &&
+      unit.dig('metadata', 'parent_class') == 'Resolvers::Base'
   end
 
   # Exercise the shipped executable registration/serialization, not a custom tool.
@@ -178,6 +212,13 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
     Rails.application.reloader.reload!
     Woods::Extractor.new(output_dir: output).extract_changed(paths)
   end
+  File.write(helper, File.read(helper).sub("'created'", "'updated'"))
+  change.call([helper])
+  assert_fact(report, 'incremental helper edit retains source and type') do
+    unit = reader.find_unit('Resolvers::Account::Create')
+    unit && unit['type'] == 'graphql_type' && unit['source_code'].include?("'updated'")
+  end
+  compare.call('helper edit full/incremental equivalence')
   File.write(schema, File.read(schema).sub('123', '321'))
   change.call([schema])
   assert_fact(report, 'incremental schema edit') do

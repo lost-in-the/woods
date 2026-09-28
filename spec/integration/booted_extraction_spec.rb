@@ -652,7 +652,9 @@ RSpec.describe 'Optional GraphQL extraction', :booted_app do
                                               'packaged MCP typed lookup and source search',
                                               'root promotion full/incremental equivalence',
                                               'root demotion full/incremental equivalence',
-                                              'GraphQL refresh full equivalence')
+                                              'GraphQL refresh full equivalence',
+                                              'plain Ruby resolver helper retains historical identity and source',
+                                              'helper edit full/incremental equivalence')
   end
 end
 
