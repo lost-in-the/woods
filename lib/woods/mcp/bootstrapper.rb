@@ -129,7 +129,8 @@ module Woods
       #   4. Hydrate in-memory stores from dumps (stubs in PR 2; real in PR 3).
       #   5. Probe the provider. If reachable, state :hydrated. If unreachable,
       #      state :degraded — retriever is still returned, queries will
-      #      retry on first use.
+      #      retry on first use. With no provider at all the state is
+      #      :not_configured (terminal, with a reason) and the retriever nil.
       #
       # Config-invalid failures raise typed BootstrapError subclasses;
       # exe/woods-mcp's top-level catches them and prints a one-line
@@ -154,13 +155,24 @@ module Woods
 
         artifact = build_artifact(index_dir)
         if static_source_map_without_embeddings?(artifact)
+          refuse_static_map_under_require_index!(artifact)
           state.mark(:degraded, reason: Woods::Error.new('static source map has no embedding artifact'))
           return [nil, state]
         end
         config, _source = ConfigResolver.resolve(Woods.configuration,
                                                  artifact: artifact,
                                                  ollama_probe: method(:ollama_reachable?))
-        return [nil, state] unless config.embedding_provider
+        unless config.embedding_provider
+          # Terminal by design: the server serves pattern/structural tools
+          # only. Leaving the state at :hydrating here made woods_status
+          # report a boot that never finished (N-mcp-5).
+          state.mark(:not_configured, reason: Woods::Error.new(
+            'no embedding provider configured and no woods.json snapshot; semantic retrieval is not ' \
+            'configured. Pattern and structural tools stay available; run woods:embed, or set ' \
+            'WOODS_RETRIEVAL_MODE=lexical for ranked discovery without embeddings.'
+          ))
+          return [nil, state]
+        end
 
         # Build the provider once so {ResolvedConfig.from_configuration} can
         # probe +provider.dimensions+ — without this, Ollama's runtime-only
@@ -200,6 +212,28 @@ module Woods
         raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}"
       end
       private_class_method :build_lexical_retriever
+
+      # +WOODS_REQUIRE_INDEX=1+ demands a real embedding index. A static source
+      # map (+woods:self_map+, {Woods::GemMapper}) never carries one, so strict
+      # mode must refuse it here: the static-map early return in
+      # {.build_retriever} sits above {ConfigResolver.resolve}, which is where
+      # every other index is held to the flag (N-mcp-5).
+      #
+      # @param artifact [Woods::IndexArtifact]
+      # @param env [Hash] environment to read +WOODS_REQUIRE_INDEX+ from
+      # @return [void]
+      # @raise [Woods::MCP::MissingArtifact] when strict mode is on
+      def self.refuse_static_map_under_require_index!(artifact, env = ENV)
+        return unless env['WOODS_REQUIRE_INDEX'] == '1'
+
+        raise MissingArtifact.new(
+          'WOODS_REQUIRE_INDEX=1 demands a real index, but this is a static source map with no ' \
+          'embedding artifact (woods.json). Run `bundle exec rake woods:extract` then `woods:embed` in ' \
+          'the host app, or unset WOODS_REQUIRE_INDEX to serve pattern/structural tools from the static map.',
+          details: { output_dir: artifact.output_dir.to_s }
+        )
+      end
+      private_class_method :refuse_static_map_under_require_index!
 
       def self.static_source_map_without_embeddings?(artifact)
         return false unless artifact

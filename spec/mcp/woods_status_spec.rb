@@ -156,6 +156,21 @@ RSpec.describe 'woods_status tool' do
       expect(s[:bootstrap][:reason]).to include('connection_refused')
       expect(s[:bootstrap][:degraded_since]).not_to be_nil
     end
+
+    it 'surfaces a pattern-only boot as not_configured with its reason (N-mcp-5)' do
+      require 'woods/mcp/bootstrap_state'
+      state = Woods::MCP::BootstrapState.new
+      state.mark(:hydrating)
+      state.mark(:not_configured, reason: Woods::Error.new('no embedding provider configured'))
+
+      s = Woods::MCP::Server.build_status(
+        reader: reader, retriever: nil, index_dir: fixture_dir,
+        bootstrap_state: state
+      )
+      expect(s[:bootstrap][:status]).to eq(:not_configured)
+      expect(s[:bootstrap][:reason]).to include('no embedding provider configured')
+      expect(s[:retriever][:configured]).to be(false)
+    end
   end
 
   # #164 phase 3: an agent needs to distinguish "the index is current",

@@ -587,6 +587,18 @@ bundle exec rake woods:embed          # writes woods.json + vector dumps
 
 …or unset `WOODS_REQUIRE_INDEX` to boot in pattern-only mode. (The older `WOODS_ALLOW_AUTODETECT=1` flag is no longer needed, auto-detect is the default.)
 
+A static source map (`woods:self_map`) never carries an embedding artifact, so strict mode refuses it with the same error class (`MissingArtifact: WOODS_REQUIRE_INDEX=1 demands a real index, but this is a static source map …`). Without strict mode the map boots and `woods_status` reports `bootstrap.status: degraded` with the reason `static source map has no embedding artifact`.
+
+---
+
+### `woods_status` reports `bootstrap.status: not_configured`
+
+**Symptom:** `woods_status` shows `bootstrap: { status: "not_configured", reason: "Woods::Error: no embedding provider configured and no woods.json snapshot; …" }`, `retriever.configured` is `false`, and `codebase_retrieve` refuses with `error_code: not_configured`.
+
+**Cause:** The Index Server booted in pattern-only mode: no `woods.json` was found and neither the host configuration nor the environment (`OPENAI_API_KEY`, a reachable Ollama) names an embedding provider. This is a terminal state, not a boot still in progress. Pattern, regex and structural tools (`search`, `lookup`, `structure`, `dependencies`) are fully available.
+
+**Fix:** Run `bundle exec rake woods:embed` in the host app and call `reload` (or restart), or set `WOODS_RETRIEVAL_MODE=lexical` in the MCP process environment and restart for ranked discovery without embeddings.
+
 ---
 
 ### `codebase_retrieve` reports degraded semantic search

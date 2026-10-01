@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'woods/mcp/bootstrap_state'
+require 'woods'
 
 RSpec.describe Woods::MCP::BootstrapState do
   subject(:state) { described_class.new }
@@ -97,6 +98,31 @@ RSpec.describe Woods::MCP::BootstrapState do
         state.mark(:failed, reason: err)
         expect(state.hydrated_at).to be_nil
         expect(state.degraded_since).to be_nil
+      end
+    end
+
+    context 'transitioning to :not_configured' do
+      let(:err) { Woods::Error.new('no embedding provider configured') }
+
+      it 'is a recognised terminal status' do
+        expect(described_class::VALID_STATUSES).to include(:not_configured)
+      end
+
+      it 'sets status to :not_configured and stores the reason' do
+        state.mark(:not_configured, reason: err)
+        expect(state.status).to eq(:not_configured)
+        expect(state.reason).to eq(err)
+      end
+
+      it 'leaves hydrated_at and degraded_since nil' do
+        state.mark(:not_configured, reason: err)
+        expect(state.hydrated_at).to be_nil
+        expect(state.degraded_since).to be_nil
+      end
+
+      it 'serializes the reason so woods_status explains the pattern-only boot' do
+        state.mark(:not_configured, reason: err)
+        expect(state.to_h).to eq(status: :not_configured, reason: 'Woods::Error: no embedding provider configured')
       end
     end
 

@@ -810,7 +810,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_RETRIEVAL_MODE` | `semantic` | Explicit packaged MCP retrieval mode: `semantic` or `lexical`. Lexical reads extraction unit JSON without provider autodetection, credentials or vector artifacts. |
 | `WOODS_DIR` | unset | MCP extraction-index path, after a positional argument and before `WOODS_OUTPUT`. See precedence below. |
 | `WOODS_OUTPUT` | unset | MCP index-path fallback when neither a positional path nor `WOODS_DIR` is set; included in Woods `2.0.0`. |
-| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
+| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present, a static source map (`woods:self_map`) included. By default an extract-only host boots in pattern/structural mode without it and `woods_status` reports `bootstrap.status: not_configured` with a reason. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
 | `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
 | `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |

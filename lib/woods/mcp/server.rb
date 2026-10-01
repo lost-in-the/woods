@@ -2138,7 +2138,7 @@ module Woods
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
-                         'bootstrap state (hydrated / degraded / failed + reason), and feature flags. ' \
+                         'bootstrap state (hydrated / degraded / not_configured / failed + reason), and feature flags. ' \
                          'Top-level `ready` describes structural index availability. ' \
                          'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
                          'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \

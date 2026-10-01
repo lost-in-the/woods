@@ -3,9 +3,12 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
+require 'time'
 require 'woods'
 require 'woods/mcp/bootstrapper'
 require 'woods/mcp/server'
+require 'woods/generation'
 
 RSpec.describe Woods::MCP::Bootstrapper do
   describe '.resolve_index_dir' do
@@ -248,6 +251,52 @@ RSpec.describe Woods::MCP::Bootstrapper do
           expect(retriever).to be_nil
           expect(state).to be_a(Woods::MCP::BootstrapState)
         end
+      end
+
+      it 'leaves a terminal not_configured state with a reason instead of hydrating forever (N-mcp-5)' do
+        ENV.delete('OPENAI_API_KEY')
+        allow(described_class).to receive(:ollama_reachable?).and_return(false)
+
+        Dir.mktmpdir do |dir|
+          _retriever, state = described_class.build_retriever(index_dir: dir)
+          expect(state.status).to eq(:not_configured)
+          expect(state.to_h[:reason]).to include('no embedding provider')
+          expect(state.hydrated_at).to be_nil
+        end
+      end
+    end
+
+    context 'when the index is a static source map without embeddings' do
+      def publish_static_map(dir)
+        payload = File.join(dir, 'payloads', 'gen-1')
+        FileUtils.mkdir_p(payload)
+        File.write(File.join(payload, 'manifest.json'),
+                   JSON.generate('provenance' => { 'mode' => 'woods_static_ruby_source', 'embeddings' => 'absent' }))
+        Woods::Generation.new(output_dir: dir).bump!(reason: 'spec', payload: 'payloads/gen-1')
+      end
+
+      it 'reports a terminal degraded state naming the missing embedding artifact' do
+        Dir.mktmpdir do |dir|
+          publish_static_map(dir)
+          retriever, state = described_class.build_retriever(index_dir: dir)
+          expect(retriever).to be_nil
+          expect(state.status).to eq(:degraded)
+          expect(state.to_h[:reason]).to include('static source map has no embedding artifact')
+        end
+      end
+
+      it 'honours WOODS_REQUIRE_INDEX=1 instead of bypassing it on the early return (N-mcp-5)' do
+        ENV['WOODS_REQUIRE_INDEX'] = '1'
+        Dir.mktmpdir do |dir|
+          publish_static_map(dir)
+          expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::MissingArtifact) do |e|
+            expect(e.message).to include('static source map')
+            expect(e.message).to include('WOODS_REQUIRE_INDEX')
+            expect(File.realpath(e.details[:output_dir])).to eq(File.realpath(dir))
+          end
+        end
+      ensure
+        ENV.delete('WOODS_REQUIRE_INDEX')
       end
     end
 

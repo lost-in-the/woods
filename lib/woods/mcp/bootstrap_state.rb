@@ -8,8 +8,12 @@ module Woods
     #
     # Status transitions flow forward: +initializing+ → +hydrating+ →
     # +hydrated+ (success path), or +initializing+/+hydrating+ → +degraded+
-    # (provider unreachable) or +failed+ (config-invalid). States are mutated
-    # via {#mark} so the +woods_status+ MCP tool always reads consistent values.
+    # (provider unreachable), +not_configured+ (no embedding provider and no
+    # +woods.json+: the server serves pattern/structural tools only, by
+    # design) or +failed+ (config-invalid). Every path ends in a terminal
+    # status; a boot that stays +hydrating+ is a bug, not a mode. States are
+    # mutated via {#mark} so the +woods_status+ MCP tool always reads
+    # consistent values.
     #
     # @example Bootstrapper usage
     #   state = Woods::MCP::BootstrapState.new
@@ -20,10 +24,10 @@ module Woods
     #   state.mark(:degraded, reason: ProviderUnreachable.new("..."))
     #
     class BootstrapState
-      VALID_STATUSES = %i[initializing hydrating hydrated degraded failed].freeze
+      VALID_STATUSES = %i[initializing hydrating hydrated degraded not_configured failed].freeze
 
       # @return [Symbol] one of +:initializing+, +:hydrating+, +:hydrated+,
-      #   +:degraded+, +:failed+
+      #   +:degraded+, +:not_configured+, +:failed+
       attr_reader :status
 
       # @return [Exception, nil] the exception that caused degradation or failure
@@ -125,7 +129,8 @@ module Woods
       # Transition to a new status.
       #
       # +hydrated_at+ is recorded on +:hydrated+; +degraded_since+ is recorded
-      # on +:degraded+. +reason:+ is accepted for +:degraded+ and +:failed+.
+      # on +:degraded+. +reason:+ is accepted for +:degraded+, +:not_configured+
+      # and +:failed+.
       #
       # @param new_status [Symbol] target status (must be in {VALID_STATUSES})
       # @param reason [Exception, nil] causal exception for degraded/failed states
