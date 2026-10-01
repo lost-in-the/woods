@@ -1075,10 +1075,13 @@ An index is refused above 16 MiB per required artifact or 50,000 combined graph
 nodes/variants. These preparation checks, JSON parsing, cache construction,
 source verification, path/content hashing, formatting and suppression state all
 run within the hook's private process-group deadline: the worker is killed at
-850 ms, leaving dispatch/cleanup headroom within a one-second work budget.
-The helper also has a 650 ms inner deadline. OS scheduling can delay observation
-of a deadline. Cold bundle/container startup can therefore produce no hint;
-the deadline is not extended. Oversized evidence is marked truncated; missing,
+850 ms by default, leaving dispatch/cleanup headroom within a one-second work
+budget. `WOODS_HOOK_CONTEXT_DEADLINE_MS` (100–5000) raises or lowers that
+deadline for a host where the helper's startup needs more headroom, at the
+cost of a longer tool call; the helper also stops at three quarters of the
+deadline (637 ms by default). OS scheduling can delay observation of a
+deadline. Cold bundle/container startup can therefore produce no hint; the
+deadline is never extended dynamically. Oversized evidence is marked truncated; missing,
 corrupt, unsupported or timed-out input produces a short unknown notice or
 silence. Silence is never a complete/no-impact claim. The hint boots no Rails
 application and calls no provider.

@@ -9,6 +9,9 @@ module Woods
     # startup. This inner deadline keeps ordinary direct calls short as well.
     class ContextCLI
       MAX_INPUT_BYTES = 1_048_576
+      DEFAULT_DEADLINE_MS = 850
+      DEADLINE_RANGE_MS = (100..5000)
+      INNER_DEADLINE_SHARE = 0.75
       HELP = 'Usage: woods-hook-context SessionStart|PostToolUse < claude-event.json; ' \
              'opt in with WOODS_HOOK_CONTEXT_ENABLED=1. Prefer the bounded plugin hook entry point.'
 
@@ -18,7 +21,7 @@ module Woods
         return 0 if ENV['WOODS_HOOKS_DISABLED'] == '1' || ENV['WOODS_HOOK_CONTEXT_ENABLED'] != '1'
         return 0 unless %w[SessionStart PostToolUse].include?(kind)
 
-        Timeout.timeout(0.65) do
+        Timeout.timeout(inner_deadline_seconds) do
           require 'woods'
           require 'woods/hooks/context_hint'
           require 'woods/hooks/context_state'
@@ -29,6 +32,19 @@ module Woods
         # Missing/degraded/slow inputs are optional context, not permission to
         # run extraction, read application data, or acknowledge queued edits.
         0
+      end
+
+      # The plugin kills the whole process group at its deadline
+      # (WOODS_HOOK_CONTEXT_DEADLINE_MS, 100..5000, default 850). The helper
+      # stops three quarters of the way there so a partial envelope never
+      # reaches the client; values outside the range keep the default.
+      #
+      # @param env [Hash] environment to read the deadline from
+      # @return [Float] seconds
+      def self.inner_deadline_seconds(env = ENV)
+        raw = env['WOODS_HOOK_CONTEXT_DEADLINE_MS'].to_s
+        ms = raw.match?(/\A\d+\z/) && DEADLINE_RANGE_MS.cover?(raw.to_i) ? raw.to_i : DEFAULT_DEADLINE_MS
+        ms * INNER_DEADLINE_SHARE / 1000.0
       end
 
       def self.emit(kind, input, output)
