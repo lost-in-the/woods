@@ -44,7 +44,7 @@ module Woods
     #
     # @example
     #   server = Woods::MCP::Server.build(index_dir: "/path/to/output")
-    #   transport = MCP::Server::Transports::StdioTransport.new(server)
+    #   transport = Woods::MCP::StdioTransport.new(server) # SDK transport + frame guard
     #   transport.open
     #
     module Server

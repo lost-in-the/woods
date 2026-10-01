@@ -1,0 +1,1 @@
+- Both stdio MCP servers now run the SDK transport through `Woods::MCP::StdioTransport`, which answers a frame that is not valid UTF-8, or whose JSON escapes decode to invalid UTF-8, with the JSON-RPC parse error (-32700) and keeps serving; previously one such frame ended the process with status 1. Frames are refused, never rewritten.

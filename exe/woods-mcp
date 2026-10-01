@@ -36,6 +36,7 @@ require_relative '../lib/woods'
 require_relative '../lib/woods/dependency_graph'
 require_relative '../lib/woods/graph_analyzer'
 require_relative '../lib/woods/mcp/server'
+require_relative '../lib/woods/mcp/stdio_transport'
 require_relative '../lib/woods/mcp/bootstrapper'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
@@ -70,5 +71,5 @@ server = Woods::MCP::Server.build(
 # MCP_PROTOCOL_VERSION" gotcha in CLAUDE.md.
 server.configuration.protocol_version = ENV['MCP_PROTOCOL_VERSION'] if ENV['MCP_PROTOCOL_VERSION']
 
-transport = MCP::Server::Transports::StdioTransport.new(server)
+transport = Woods::MCP::StdioTransport.new(server)
 transport.open

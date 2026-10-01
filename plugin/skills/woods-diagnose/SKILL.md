@@ -544,6 +544,14 @@ before relying on it. Prefer `bundle exec rake woods:console`; direct Rails
 runner invocation cannot capture output already emitted during Rails boot.
 See the [Console logging diagnosis](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md#rails-logs-break-mcp-protocol).
 
+A stdio server that exits with status 1 right after one request, with
+`Encoding::CompatibilityError` or `EncodingError` on stderr, received a frame
+that is not valid UTF-8 (a byte-passthrough bridge or a non-conforming client).
+Included in Woods `2.1.1`: both stdio servers answer such a frame with JSON-RPC
+`-32700` plus one `[woods stdio] rejected frame` line on stderr and keep serving;
+verify the installed revision before relying on it, and fix the client either way,
+since the frame is refused, not repaired.
+
 For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
 
 For SQLite SQL refusals on `2.0.0.beta4` or a reviewed revision containing its Console corrections, consult the installed Console guide for supported identifier and table-reference syntax. Simplify the query to supported syntax; never relax the blocked-table or function policy. These builds also check resolved default scopes and scan normalized response values. Confirm a patched gem is published before recommending it, and check the installed version’s canonical Console guide; do not infer release availability from this plugin.

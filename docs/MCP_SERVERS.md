@@ -124,6 +124,10 @@ Reconnect the client, then call:
 
 Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Modern MCP 2026-07-28 requests carry per-request protocol metadata and can use `server/discover` without an initialization handshake; older clients still use `initialize`. A valid raw smoke test must implement one complete flow rather than sending an isolated `tools/list` or `tools/call` request.
 
+### Malformed stdio frames
+
+Included in Woods `2.1.1`: both stdio servers run the SDK transport through `Woods::MCP::StdioTransport`, which answers a frame that is not valid UTF-8, or whose JSON escapes decode to invalid UTF-8 (an unpaired surrogate), with the JSON-RPC parse error (`-32700`), logs one `rejected frame` line on stderr, and keeps serving. The frame is never rewritten. Earlier releases exited with status 1 on such a frame (the `mcp` gem strips and parses it unguarded), and `woods-mcp-start` has no restart loop, so the server stayed down until the client reconnected. A frame that is merely not JSON is still answered by the SDK's own parse error.
+
 ### Initialization guidance
 
 The Index Server supplies a short, client-neutral `instructions` field through
