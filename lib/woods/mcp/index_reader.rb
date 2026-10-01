@@ -1406,21 +1406,24 @@ module Woods
       # symlink checks in {#published_unit_entries} still run on every read.
       def search_index_entries(dir)
         entries = published_unit_entries(dir)
-        return entries if index_identifier_sets.key?(dir)
-
-        seen = Set.new
-        entries.each do |entry|
-          id = entry.is_a?(Hash) && entry['identifier']
-          unless id.is_a?(String) && !id.empty? && seen.add?(id)
-            raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
-          end
-        end
-        index_identifier_sets[dir] = seen
+        index_identifier_set(dir, entries)
         entries
       end
 
-      def index_identifier_sets
-        @index_identifier_sets ||= {}
+      # The validated identifier set of one directory, built once per cached
+      # index. Returned rather than re-read from the ivar so a caller holds the
+      # set it validated even if {#reload!} replaces the memo meanwhile.
+      def index_identifier_set(dir, entries = published_unit_entries(dir))
+        (@index_identifier_sets ||= {})[dir] ||= begin
+          seen = Set.new
+          entries.each do |entry|
+            id = entry.is_a?(Hash) && entry['identifier']
+            unless id.is_a?(String) && !id.empty? && seen.add?(id)
+              raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
+            end
+          end
+          seen
+        end
       end
 
       # One guarded typed read: the directory must not be a symlink, the
@@ -1428,9 +1431,7 @@ module Woods
       # (see {#read_published_unit}). Callers hold the generation pin.
       def typed_unit(dir, identifier)
         raise IOError, "symlink unit directory: #{dir}" if current_payload_dir.join(dir).symlink?
-
-        search_index_entries(dir)
-        return nil unless index_identifier_sets.fetch(dir).include?(identifier)
+        return nil unless index_identifier_set(dir).include?(identifier)
 
         read_published_unit(dir, identifier)
       end
