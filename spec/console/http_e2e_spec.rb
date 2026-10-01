@@ -109,14 +109,16 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
     return unless @wait
 
     Process.kill('TERM', @wait.pid) if @wait.alive?
-    @wait.join(15) || begin
-      Process.kill('KILL', @wait.pid)
-      @wait.join(5)
-    end
+    kill_after_grace(@wait) unless @wait.join(15)
   rescue Errno::ESRCH, Errno::ECHILD
     nil
   ensure
     [@stdin, @output].each { |io| io&.close unless io&.closed? }
+  end
+
+  def kill_after_grace(wait)
+    Process.kill('KILL', wait.pid)
+    wait.join(5)
   end
 
   it 'requires the configured bearer token through the Railtie middleware stack' do
