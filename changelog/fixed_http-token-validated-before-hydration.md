@@ -1,0 +1,1 @@
+- `woods-mcp-http` validates a configured `WOODS_MCP_HTTP_TOKEN` before it hydrates the index and reports an unusable token as the one-line `ConfigurationError` operator message (exit 2) instead of a backtrace after several seconds of hydration.

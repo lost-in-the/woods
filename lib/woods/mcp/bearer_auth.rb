@@ -64,6 +64,33 @@ module Woods
         end
       end
 
+      # The static token an executable reads from its environment: nil when
+      # the variable is unset or blank (the executable then decides whether an
+      # unauthenticated loopback bind is allowed), otherwise validated here so
+      # an unusable token is refused before the process hydrates an index.
+      #
+      # @param env [Hash] environment to read WOODS_MCP_HTTP_TOKEN from
+      # @return [String, nil]
+      # @raise [ArgumentError] when a token is present but unusable
+      def self.static_token_from(env = ENV)
+        token = env['WOODS_MCP_HTTP_TOKEN']
+        return nil if token.nil? || token.empty?
+
+        assert_usable_token!(token)
+        token
+      end
+
+      # @param token [String, nil]
+      # @raise [ArgumentError] when the token is missing or shorter than {MIN_TOKEN_LENGTH}
+      def self.assert_usable_token!(token)
+        raise ArgumentError, 'token must be a non-empty string' if token.nil? || token.empty?
+        return unless token.to_s.length < MIN_TOKEN_LENGTH
+
+        raise ArgumentError,
+              "bearer token must be at least #{MIN_TOKEN_LENGTH} characters " \
+              "(got #{token.to_s.length}); generate with `SecureRandom.hex(32)`"
+      end
+
       private
 
       def initialize_options(app, token:, path: nil, enabled: nil)
@@ -106,12 +133,7 @@ module Woods
       # @param token [String] the eagerly-supplied token
       # @raise [ArgumentError] on nil, empty, or too-short tokens
       def validate_static_token!(token)
-        raise ArgumentError, 'token must be a non-empty string' if token.nil? || token.empty?
-        return unless token.to_s.length < MIN_TOKEN_LENGTH
-
-        raise ArgumentError,
-              "bearer token must be at least #{MIN_TOKEN_LENGTH} characters " \
-              "(got #{token.to_s.length}); generate with `SecureRandom.hex(32)`"
+        self.class.assert_usable_token!(token)
       end
 
       # Warn (once per instance) that a deferred token is unusable, so the

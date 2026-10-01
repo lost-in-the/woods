@@ -360,3 +360,27 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
     end
   end
 end
+
+# Boot refusals never bind a port, so they run the executable directly rather
+# than through the booted-server harness above.
+RSpec.describe 'woods-mcp-http boot refusals', :http_server do
+  let(:gem_root) { File.expand_path('../..', __dir__) }
+  let(:executable) { File.join(gem_root, 'exe/woods-mcp-http') }
+
+  # N-mcp-4: a short token used to be rejected by BearerAuth.new only after
+  # the index had been hydrated, as a raw ArgumentError backtrace with exit 1.
+  it 'refuses a short WOODS_MCP_HTTP_TOKEN before hydration with the one-line operator message' do
+    Dir.mktmpdir('woods-http-short-token') do |dir|
+      FileUtils.cp_r(File.join(gem_root, 'spec/fixtures/woods', '.'), dir)
+      output, status = Open3.capture2e(
+        { 'HOST' => '127.0.0.1', 'PORT' => '0', 'WOODS_MCP_HTTP_TOKEN' => 'short', 'WOODS_REQUIRE_INDEX' => nil },
+        'bundle', 'exec', 'ruby', executable, dir, chdir: gem_root
+      )
+      expect(status.exitstatus).to eq(2), output
+      expect(output).to include('ConfigurationError: bearer token must be at least 32 characters (got 5)')
+      expect(output).to include('(WOODS_MCP_HTTP_TOKEN)')
+      expect(output).not_to include('bearer_auth.rb:')
+      expect(output).not_to include('semantic search:')
+    end
+  end
+end

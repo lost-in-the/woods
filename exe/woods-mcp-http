@@ -46,6 +46,14 @@ require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
 begin
+  # Validate the static token before hydration: a short token used to be
+  # rejected by BearerAuth.new only after the index had been hydrated, as a
+  # raw ArgumentError backtrace outside this operator-message rescue.
+  begin
+    token = Woods::MCP::BearerAuth.static_token_from(ENV)
+  rescue ArgumentError => e
+    raise Woods::ConfigurationError, "#{e.message} (WOODS_MCP_HTTP_TOKEN)"
+  end
   raw_origins = ENV.fetch('WOODS_MCP_HTTP_ALLOWED_ORIGINS', '')
   unless raw_origins.valid_encoding?
     invalid_entry = raw_origins.b.split(',').find do |entry|
@@ -75,8 +83,6 @@ end
 
 port = (ENV['PORT'] || 9292).to_i
 host = ENV['HOST'] || 'localhost'
-token = ENV.fetch('WOODS_MCP_HTTP_TOKEN', nil)
-token = nil if token && token.empty?
 
 loopback = %w[localhost 127.0.0.1 ::1].include?(host)
 if !loopback && token.nil?

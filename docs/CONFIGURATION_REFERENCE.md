@@ -850,7 +850,7 @@ existing index before deciding another extraction is needed.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. |
+| `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. A token shorter than 32 characters is refused before hydration with a `ConfigurationError` (exit 2). |
 | `WOODS_MCP_HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated origin allow-list. |
 | `WOODS_MCP_HTTP_STATELESS` | `1` (stateless) | Set to `0`/`false`/`no` to restore session-based mode. |
 
