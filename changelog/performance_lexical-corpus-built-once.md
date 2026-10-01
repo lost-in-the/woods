@@ -1,0 +1,1 @@
+- The packaged Index server in lexical mode builds its corpus once: `Server.build` binds its reader and then warms the lexical retriever, instead of the bootstrapper warming a reader the server replaced at bind, which cost a second corpus build (about four to six seconds on a 6,000-unit index) on the first `codebase_retrieve`. `bind_reader` still discards any earlier snapshot.

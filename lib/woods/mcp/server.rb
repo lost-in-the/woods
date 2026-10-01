@@ -98,6 +98,12 @@ module Woods
           reader = IndexReader.new(index_dir)
           retriever.bind_reader(reader) if retriever.respond_to?(:bind_reader)
           reader.warmup! if warmup
+          # Warm the lexical corpus against the reader just bound, once, so the
+          # first codebase_retrieve does not build it (F17). bind_reader keeps
+          # clearing any earlier snapshot: a corpus warmed against another
+          # reader, or mutated through the public metadata store, never
+          # survives a bind.
+          retriever.warmup! if warmup && retriever.respond_to?(:warmup!)
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
           renderer = ToolResponseRenderer.for(format)

@@ -189,7 +189,10 @@ module Woods
         state.mark(:hydrating)
         retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir,
                                                   default_budget: Woods.configuration.max_context_tokens)
-        retriever.warmup!
+        # Not warmed here: {Server.build} binds its own reader, which clears
+        # any snapshot built against this one, and warms the retriever once
+        # after binding. Warming twice cost a second corpus build on the
+        # first codebase_retrieve (F17).
         state.mark(:hydrated)
         warn '[woods-mcp] lexical retrieval: hydrated (published extraction units; no embeddings)'
         [retriever, state]
