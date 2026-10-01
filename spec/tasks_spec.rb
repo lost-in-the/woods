@@ -118,6 +118,25 @@ RSpec.describe Woods::Tasks do
       ENV.delete('WOODS_OUTPUT')
     end
 
+    # N-mcp-2: a host that leaves metadata_store/graph_store unset (the
+    # generator template comments both out) embedded with no metadata store at
+    # all and recorded "" store types in woods.json, so the packaged server
+    # could not boot semantically from that index.
+    it 'defaults unset metadata and graph stores to :in_memory before the resolved config is captured' do
+      Woods.configure do |c|
+        c.embedding_provider = :fake
+        c.vector_store = :in_memory
+        c.metadata_store = nil
+        c.graph_store = nil
+      end
+
+      described_class.build_embed_indexer
+
+      expect(captured[:metadata_store]).to be_a(Woods::Storage::MetadataStore::InMemory)
+      expect(captured[:resolved_config].stores)
+        .to eq(vector_store: :in_memory, metadata_store: :in_memory, graph_store: :in_memory)
+    end
+
     describe 'SQLite metadata output isolation' do
       around do |example|
         Woods.configuration = Woods::Configuration.new

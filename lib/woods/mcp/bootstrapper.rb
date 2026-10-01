@@ -174,7 +174,7 @@ module Woods
         # artifact to validate against.
         resolved = build_resolved_config(config)
         state.resolved_config = resolved
-        retriever = build_retriever_from_config(config, resolved, artifact, state)
+        retriever = build_stores_or_fail(config, resolved, artifact, state)
         probe_and_mark_state(config, state)
         derive_state_from_store_health(state)
         corpus = retriever.corpus_status(include_types: false) if retriever.respond_to?(:corpus_status)
@@ -752,6 +752,27 @@ module Woods
         IndexArtifact.new(dir) if dir
       end
       private_class_method :build_artifact
+
+      UNKNOWN_STORE_MESSAGE = /\AUnknown (?:vector|metadata|graph)_store: /
+
+      # A store type the Builder cannot construct is a configuration fault (a
+      # hand-edited woods.json, or a snapshot written before unset stores were
+      # defaulted), not a programming bug: surface it as the one-line operator
+      # message the exes print for BootstrapError instead of a backtrace. Every
+      # other ArgumentError keeps propagating.
+      def self.build_stores_or_fail(config, resolved, artifact, state)
+        build_retriever_from_config(config, resolved, artifact, state)
+      rescue ArgumentError => e
+        raise unless e.message.match?(UNKNOWN_STORE_MESSAGE)
+
+        raise BootstrapError.new(
+          "#{e.message.strip}: woods.json or the host configuration names a store adapter this gem cannot " \
+          'build. Re-run woods:embed, or set vector_store, metadata_store and graph_store explicitly.',
+          details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
+                               graph_store: config.graph_store } }
+        )
+      end
+      private_class_method :build_stores_or_fail
 
       def self.build_retriever_from_config(config, resolved, artifact, state = nil)
         builder = Woods::Builder.new(config)

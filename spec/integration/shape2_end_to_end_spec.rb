@@ -129,6 +129,24 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
     Woods.configuration = original
   end
 
+  # ── N-mcp-2: snapshots written with blank store types still boot ──────────
+  describe 'a snapshot whose unset stores were recorded as blank types' do
+    it 'boots by applying the in_memory fallback and hydrates the dumped metadata' do
+      Dir.mktmpdir do |dir|
+        artifact, resolved = write_dump(dir)
+        blank = resolved.to_snapshot_json.merge('stores' => { 'vector_store' => 'in_memory',
+                                                              'metadata_store' => '', 'graph_store' => '' })
+        artifact.write_config(blank)
+        Woods.configuration.output_dir = dir
+
+        retriever, state = Woods::MCP::Bootstrapper.build_retriever(index_dir: dir)
+
+        expect(state.status).not_to eq(:failed)
+        expect(retriever.metadata_store.find('Foo')).to include('type' => 'model')
+      end
+    end
+  end
+
   # ── Bug 1: Bootstrapper hydrates from Snapshotter dumps ────────────────────
   describe 'Bug 1 — Bootstrapper must hydrate stores from the latest dump' do
     # Before the fix, build_retriever_from_config called

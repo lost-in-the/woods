@@ -253,9 +253,9 @@ before relying on these snapshot improvements.
 |--------|------|---------|-------------|
 | `vector_store` | Symbol | n/a | Vector backend: `:in_memory`, `:pgvector`, `:qdrant` |
 | `vector_store_options` | Hash | `nil` | Backend-specific connection options |
-| `metadata_store` | Symbol | n/a | Metadata backend: `:in_memory`, `:sqlite` |
+| `metadata_store` | Symbol | `:in_memory` when unset at embed time | Metadata backend: `:in_memory`, `:sqlite`. `woods:embed` applies the fallback before it records `woods.json`, so the snapshot and the metadata dump match the store the server boots. |
 | `metadata_store_options` | Hash | `nil` | Backend-specific options |
-| `graph_store` | Symbol | n/a | Graph backend: `:in_memory` |
+| `graph_store` | Symbol | `:in_memory` when unset at embed time | Graph backend: `:in_memory`; the same embed-time fallback applies. |
 
 ### pgvector (PostgreSQL)
 

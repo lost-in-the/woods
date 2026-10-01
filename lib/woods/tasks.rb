@@ -28,6 +28,15 @@ module Woods
     def build_embed_indexer
       config = Woods.configuration
       output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+      # The documented fallback for an unset metadata or graph store is
+      # :in_memory; ConfigResolver applies it when woods.json is read back.
+      # Apply it here as well, before the resolved config is captured, so the
+      # snapshot records the stores the server will build and the run writes
+      # the metadata dump those stores boot from. An embed without a metadata
+      # store left vectors the packaged server could not attribute and blank
+      # store types it could not construct.
+      config.metadata_store ||= :in_memory
+      config.graph_store ||= :in_memory
       builder = Builder.new(config)
       provider = builder.build_embedding_provider
 
@@ -48,8 +57,8 @@ module Woods
       # never writes woods.json — which breaks the standalone woods-mcp
       # Shape-2 boot path entirely.
       #
-      # metadata_store and resolved_config are nil-safe — hosts that don't
-      # configure metadata or that pre-date the persistence arc still work.
+      # resolved_config is nil-safe (a host without an embedding provider);
+      # the metadata store is always built now that unset types default above.
       vector_store = builder.build_vector_store(dimensions: provider.dimensions)
       verify_store_dimensions!(vector_store, provider)
 
@@ -57,7 +66,7 @@ module Woods
         provider: resilient_provider,
         text_preparer: builder.build_text_preparer(provider),
         vector_store: vector_store,
-        metadata_store: config.metadata_store ? builder.build_metadata_store(output_dir: output_dir) : nil,
+        metadata_store: builder.build_metadata_store(output_dir: output_dir),
         resolved_config: build_resolved_config(config, provider: provider),
         chunker: builder.build_chunker(provider),
         dump_retention_count: config.dump_retention_count,

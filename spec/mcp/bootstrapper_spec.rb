@@ -420,6 +420,26 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    it 'reports a snapshot that names an unknown store adapter as a BootstrapError, not a backtrace' do
+      # The packaged server's snapshot-only path: no host provider, so the
+      # stores come from woods.json.
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, 'woods.json'), JSON.generate(
+                                                   'schema_version' => 1, 'gem_version' => Woods::VERSION,
+                                                   'created_at' => '2026-10-01T00:00:00Z',
+                                                   'embedding_provider' => { 'class' => 'Woods::Embedding::Provider::Fake',
+                                                                             'model' => 'fake', 'dimension' => 4 },
+                                                   'stores' => { 'vector_store' => 'in_memory',
+                                                                 'metadata_store' => 'cassandra',
+                                                                 'graph_store' => 'in_memory' }
+                                                 ))
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::MCP::BootstrapError, /Unknown metadata_store: cassandra/)
+      end
+    end
+
     it 'propagates ArgumentError from vector hydration (not swallowed)' do
       Dir.mktmpdir do |dir|
         allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(

@@ -121,6 +121,17 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
       end
 
+      it 'falls back to :in_memory for blank store types recorded by an older embed run' do
+        Dir.mktmpdir do |dir|
+          stores = woods_json_hash['stores'].merge('metadata_store' => '', 'graph_store' => '')
+          write_woods_json(dir, woods_json_hash.merge('stores' => stores))
+          artifact = Woods::IndexArtifact.new(dir)
+          config, = described_class.resolve(blank_config, artifact: artifact)
+          expect(config.metadata_store).to eq(:in_memory)
+          expect(config.graph_store).to eq(:in_memory)
+        end
+      end
+
       it 'anchors local artifact paths to the index directory, not the process cwd' do
         Dir.mktmpdir do |dir|
           local = woods_json_hash.merge(
