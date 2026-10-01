@@ -149,16 +149,21 @@ module Woods
     # identifier map on identifier alone: if two type directories both list
     # the same identifier, whichever type sorts last in
     # `Woods::MCP::IndexReader::TYPE_DIRS` wins, silently. Pass +type+ to read
-    # that type's unit file directly and skip the collision.
+    # that type's unit file and skip the collision. The typed read is the
+    # reader's own guarded path (F7): a symlinked type directory or unit
+    # file, or a unit body naming another identifier, raises `IOError`
+    # instead of being served.
     #
     # @param identifier [String]
-    # @param type [String, Symbol, nil] singular type name; disambiguates an
-    #   identifier shared by more than one type
+    # @param type [String, Symbol, nil] singular type name or directory-family
+    #   alias (`graphql`, `rails_source`); disambiguates an identifier shared
+    #   by more than one type
     # @return [Hash, nil] string-keyed unit, or nil
+    # @raise [IOError] when a typed read fails the payload guards
     def unit(identifier, type: nil)
       return @reader.find_unit(identifier) if type.nil?
 
-      TypedUnitReader.call(@payload_dir, @reader, identifier, type.to_s)
+      TypedUnitReader.call(@reader, identifier, type.to_s)
     end
 
     # Index entries, each with a `'type'` key added.
@@ -174,7 +179,7 @@ module Woods
              end
       dirs.flat_map do |dir|
         @reader.list_units(type: Woods::MCP::IndexReader::DIR_TO_TYPE[dir])
-               .filter_map { |entry| TypedUnitReader.entry(@payload_dir, entry, dir, type&.to_s) }
+               .filter_map { |entry| TypedUnitReader.entry(@reader, entry, dir, type&.to_s) }
       end
     end
 

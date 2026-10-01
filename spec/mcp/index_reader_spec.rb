@@ -696,6 +696,46 @@ RSpec.describe Woods::MCP::IndexReader do
         expect(reader.identifier_types('NonExistent')).to eq([])
       end
 
+      it 'resolves rails_source to the unit type and graphql to its family, and lists both expansions (F7)' do
+        Dir.mktmpdir('woods-reader-family-alias') do |dir|
+          FileUtils.cp_r(Dir[File.join(fixture_dir, '*')], dir)
+          manifest = JSON.parse(File.read(File.join(dir, 'manifest.json')))
+          { 'rails_source' => ['Devise::Models', 'gem_source'], 'graphql' => ['Mutations::Ship', 'graphql_mutation'] }
+            .each do |type_dir, (identifier, type)|
+            FileUtils.mkdir_p(File.join(dir, type_dir))
+            digest = Digest::SHA256.hexdigest(identifier)[0, 8]
+            File.write(File.join(dir, type_dir, "#{identifier.gsub('::', '__')}_#{digest}.json"),
+                       JSON.generate('type' => type, 'identifier' => identifier, 'source_code' => 'x',
+                                     'metadata' => {}))
+            index_path = File.join(dir, type_dir, '_index.json')
+            entries = File.exist?(index_path) ? JSON.parse(File.read(index_path)) : []
+            entries << { 'identifier' => identifier, 'file_path' => 'lib/x.rb' }
+            File.write(index_path, JSON.generate(entries))
+            manifest['counts'][type_dir] = entries.size if manifest['counts']
+          end
+          File.write(File.join(dir, 'manifest.json'), JSON.generate(manifest))
+
+          reader = described_class.new(dir)
+          expect(reader.find_unit('Devise::Models', type: 'gem_source')).to include('type' => 'gem_source')
+          expect(reader.find_unit('Devise::Models', type: 'rails_source')).to be_nil
+          expect(reader.find_unit('ActiveRecord::Base', type: 'rails_source')).to include('type' => 'rails_source')
+          expect(reader.find_unit('Mutations::Ship', type: 'graphql')).to include('type' => 'graphql_mutation')
+          expect(reader.find_unit('Mutations::Ship', type: 'graphql_type')).to be_nil
+          expect(reader.find_family_unit('Devise::Models', 'rails_source')).to include('type' => 'gem_source')
+          expect(reader.find_family_unit('ActiveRecord::Base', 'rails_source')).to include('type' => 'rails_source')
+          expect(reader.find_family_unit('Mutations::Ship', 'graphql')).to include('type' => 'graphql_mutation')
+          expect(reader.find_family_unit('Devise::Models', 'gem_source')).to be_nil
+          expect(reader.find_family_unit('Nope', 'rails_source')).to be_nil
+
+          expect(reader.unit_types_for('model')).to eq(['model'])
+          expect(reader.unit_types_for('gem_source')).to eq(['gem_source'])
+          expect(reader.unit_types_for('rails_source')).to eq(%w[rails_source gem_source])
+          expect(reader.unit_types_for('graphql')).to eq(%w[graphql_type graphql_mutation graphql_resolver
+                                                            graphql_query])
+          expect(reader.unit_types_for('nope')).to eq([])
+        end
+      end
+
       it 'accepts concrete unit types and directory-family aliases, nothing else' do
         reader = described_class.new(fixture_dir)
         expect(%w[model graphql_mutation gem_source graphql rails_source].map do |t|
