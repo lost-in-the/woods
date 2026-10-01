@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'base64'
+require 'json'
 require 'woods/source_inputs/launcher'
 
 RSpec.describe Woods::SourceInputs::Launcher do
@@ -68,6 +70,41 @@ RSpec.describe Woods::SourceInputs::Launcher do
     expect(record.fetch('capture')).to include('root' => @app, 'output' => @output, 'operation' => 'full')
     expect(record.fetch('capture').fetch('nonce')).to eq(record.fetch('descriptor').fetch('nonce'))
     expect(File.exist?(record.fetch('descriptor').fetch('path'))).to be(false)
+  end
+
+  it 'binds the capture to the physical root when --root is a symlink alias (F4)' do
+    alias_root = File.join(Dir.mktmpdir('woods-launcher-alias'), 'alias')
+    File.symlink(@app, alias_root)
+    FileUtils.mkdir_p(File.join(@app, 'app/models'))
+    File.write(File.join(@app, 'app/models/post.rb'), 'class Post; end')
+
+    expect(described_class.run(['--root', alias_root, '--output', @output, 'full'],
+                               command: [RbConfig.ruby, @child])).to eq(0)
+    expect(child.fetch('capture')).to include('root' => File.realpath(@app))
+    expect(child.fetch('capture').fetch('snapshot').fetch('files').keys).to eq(['app/models/post.rb'])
+  ensure
+    FileUtils.rm_rf(File.dirname(alias_root)) if alias_root
+  end
+
+  it 'accepts incremental paths named through the alias, present or deleted (F4)' do
+    alias_root = File.join(Dir.mktmpdir('woods-launcher-alias'), 'alias')
+    File.symlink(@app, alias_root)
+    FileUtils.mkdir_p(File.join(@app, 'app/models'))
+    File.write(File.join(@app, 'app/models/post.rb'), 'class Post; end')
+
+    expect(described_class.run(['--root', alias_root, '--output', @output, 'incremental',
+                                File.join(alias_root, 'app/models/post.rb'),
+                                File.join(alias_root, 'app/models/gone.rb')],
+                               command: [RbConfig.ruby, @child])).to eq(0)
+    task = child.fetch('arguments').fetch(0)
+    batch = JSON.parse(Base64.strict_decode64(task[/\Awoods:hook_refresh\[(.*)\]\z/, 1]))
+    expect(batch.fetch('events').map { |event| event.fetch('path') })
+      .to eq(['app/models/post.rb', 'app/models/gone.rb'])
+    expect(described_class.run(['--root', alias_root, '--output', @output, 'incremental',
+                                File.join(File.dirname(alias_root), 'outside.rb')],
+                               command: [RbConfig.ruby, @child])).to eq(1)
+  ensure
+    FileUtils.rm_rf(File.dirname(alias_root)) if alias_root
   end
 
   it 'preserves a JSON incremental path and restart escalation through the hook task' do

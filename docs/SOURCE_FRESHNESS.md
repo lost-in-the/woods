@@ -94,9 +94,16 @@ publishes no generation there and preserves the configured index's generation.
 
 The launcher captures source before a **fresh child** evaluates its Gemfile,
 Rakefile, Rails boot and eager loading. A private one-use handoff binds the capture
-to root, output, action, rules, nonce and parent process. It waits for the child
-and removes the handoff when the child exits. Source is checked again before
-publication. In Woods 2.0.0, edits during boot/extraction retain the earlier
+to root, output, action, rules, nonce and parent process. The root binds to its
+physical path on both sides (the launcher resolves `--root` with `File.realpath`
+before capturing; the child resolves its own root the same way), so a symlink
+alias passed to `--root` verifies the boot boundary; included in Woods `2.1.1`,
+earlier releases published `boot_verified: false` for an aliased root with no
+warning. A handed-off capture the child cannot consume is reported once on stderr
+as `woods-extract: launch handoff discarded (<binding>)`, naming the binding that
+failed and never its value, and that run publishes `boot_verified: false`. It
+waits for the child and removes the handoff when the child exits. Source is
+checked again before publication. In Woods 2.0.0, edits during boot/extraction retain the earlier
 identity and are reported in the new generation, rather than being silently
 adopted as a current baseline.
 

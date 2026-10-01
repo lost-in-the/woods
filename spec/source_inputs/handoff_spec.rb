@@ -49,6 +49,26 @@ RSpec.describe Woods::SourceInputs::Handoff do
     expect(read).to be_nil
   end
 
+  it 'accepts the root when the child names it through a symlink alias (F4)' do
+    alias_root = File.join(Dir.mktmpdir('woods-handoff-alias'), 'alias')
+    File.symlink(@root, alias_root)
+    expect(read(root: alias_root)).to eq(@snapshot)
+  ensure
+    FileUtils.rm_rf(File.dirname(alias_root)) if alias_root
+  end
+
+  it 'explains a discarded handoff on stderr by binding, never by value (F4)' do
+    expect { expect(read(root: '/elsewhere')).to be_nil }
+      .to output(/woods-extract: launch handoff discarded \(root\)/).to_stderr
+    expect { expect(read(operation: 'incremental')).to be_nil }
+      .to output(/discarded \(operation\)/).to_stderr
+    expect { expect(read(key_id: 'b' * 64)).to be_nil }
+      .to output(/discarded \(snapshot\)/).to_stderr
+    expect { expect(read(root: '/elsewhere')).to be_nil }.not_to output(/#{'a' * 64}|handoff\.json/).to_stderr
+    ENV[described_class::ENV_KEY] = ''
+    expect { expect(read).to be_nil }.not_to output.to_stderr
+  end
+
   it 'rejects stale nonces, unsafe files and malformed scope paths' do
     @data['nonce'] = 'b' * 64
     prepare

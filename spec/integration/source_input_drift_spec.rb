@@ -89,6 +89,23 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
     end
   end
 
+  it 'verifies the boot boundary when --root is a symlink alias of the application (F4)' do
+    Dir.mktmpdir('woods-source-alias') do |dir|
+      app = File.join(dir, 'app')
+      alias_root = File.join(dir, 'alias')
+      FileUtils.mkdir_p(app)
+      make_source_app(app)
+      File.symlink(app, alias_root)
+
+      launch(alias_root, 'full')
+      manifest = source_manifest(app)
+      expect(manifest.data['boot_verified']).to be(true)
+      expect(manifest.data['root']).to eq(File.realpath(app))
+      expect(state(app)['state']).to eq('current')
+      expect(state(app)['reasons']).to eq([])
+    end
+  end
+
   it 'keeps freshness current for installed gems inside or outside the application checkout' do
     Dir.mktmpdir('woods-source-installed') do |parent|
       app = File.join(parent, 'app')

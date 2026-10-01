@@ -123,6 +123,10 @@ module Woods
         @root = File.expand_path(@root)
         raise ArgumentError, 'application root does not exist' unless File.directory?(@root)
 
+        # The child compares its own Rails.root against the captured root; a
+        # symlink alias given to --root would fail that binding and silently
+        # publish boot_verified: false (F4). Bind everything to the physical path.
+        @root = File.realpath(@root)
         @output = File.expand_path(@output, @root)
         @operation = @arguments.shift
         raise ArgumentError, 'choose full, incremental, or refresh' unless OPERATIONS.include?(@operation)
@@ -170,12 +174,31 @@ module Woods
       end
 
       def relative_path(path)
-        absolute = File.expand_path(path, @root)
-        unless absolute.start_with?("#{@root}/") && !path.include?("\0")
+        raise ArgumentError, 'incremental paths must be inside the application root' if path.include?("\0")
+
+        absolute = physical_path(File.expand_path(path, @root))
+        unless absolute.start_with?("#{@root}/")
           raise ArgumentError, 'incremental paths must be inside the application root'
         end
 
         absolute.delete_prefix("#{@root}/")
+      end
+
+      # The physical form of an incremental path argument, so a path named
+      # through the same alias as --root still resolves under the physical
+      # root. A deleted path has no realpath of its own: resolve its deepest
+      # existing ancestor and keep the missing tail as given.
+      def physical_path(absolute)
+        missing = []
+        existing = absolute
+        until File.exist?(existing)
+          parent = File.dirname(existing)
+          raise ArgumentError, 'incremental paths must be inside the application root' if parent == existing
+
+          missing.unshift(File.basename(existing))
+          existing = parent
+        end
+        File.join(File.realpath(existing), *missing)
       end
 
       def run_child(environment, task)
