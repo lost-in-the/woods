@@ -97,6 +97,69 @@ RSpec.describe Woods::Extractors::AstSourceExtraction do
     expect(extract(sample_class, :index)).to be_nil
   end
 
+  describe 'a name defined more than once in the file (F5)' do
+    let(:collision_path) { File.join(fixture_dir, 'collisions.rb') }
+    let(:collision_source) do
+      <<~RUBY
+        class AstSourceExtractionDuplicate
+          def show
+            'first show'
+          end
+
+          def show
+            'second show'
+          end
+        end
+
+        class AstSourceExtractionSibling
+          def show
+            'sibling show'
+          end
+        end
+
+        class AstSourceExtractionSingleton
+          class << self
+            def show
+              'singleton show'
+            end
+          end
+
+          def show
+            'instance show'
+          end
+        end
+      RUBY
+    end
+
+    before do
+      File.write(collision_path, collision_source)
+      verbose = $VERBOSE
+      $VERBOSE = nil
+      Object.class_eval(collision_source, collision_path, 1)
+    ensure
+      $VERBOSE = verbose
+    end
+
+    after do
+      %i[AstSourceExtractionDuplicate AstSourceExtractionSibling AstSourceExtractionSingleton].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name)
+      end
+    end
+
+    it 'returns the definition Ruby dispatches, not the first def by that name' do
+      expect(extract(AstSourceExtractionDuplicate, :show)).to include("'second show'")
+      expect(extract(AstSourceExtractionDuplicate, :show)).not_to include("'first show'")
+    end
+
+    it 'returns the sibling class\'s own definition when two classes in one file share a name' do
+      expect(extract(AstSourceExtractionSibling, :show)).to include("'sibling show'")
+    end
+
+    it 'returns the instance method, not a class << self def of the same name' do
+      expect(extract(AstSourceExtractionSingleton, :show)).to include("'instance show'")
+    end
+  end
+
   describe 'one parse per file' do
     # P1. build_action_chunks calls extract_action_source once per action, so
     # a file that defines N actions was read and re-parsed N times. The

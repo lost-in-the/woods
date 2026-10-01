@@ -81,6 +81,8 @@ Woods may inline concern behavior beside the owning model. Distinguish the resol
 4. Follow missing branches with `dependencies` and a narrow `via` filter when useful.
 5. Verify behavior that depends on conditions, dynamic dispatch, or runtime data in source and tests.
 
+A step whose unit does not define the called method locally (inherited, dynamically defined, metaprogrammed) lists no operations; included in Woods `2.1.1`, earlier releases filled such a step with every other method's operations. Class methods (`def self.build`) are traced like instance methods, and an enqueue nested in another call's arguments is reported as `async`.
+
 Bare names identify units, not methods across the application. For example,
 `trace_flow(entry_point: "order")` selects the indexed `order` unit, which may
 be a FactoryBot factory in `spec/factories/`. Find the owning class with

@@ -122,9 +122,35 @@ module Woods
           }
         end
 
-        # Do NOT recurse into send node children — the walker handles
-        # children at the statement level. Recursing here would double-count
-        # chained calls and pick up receiver lvars as spurious method calls.
+        # Do NOT recurse into send node children in general — the walker
+        # handles children at the statement level, and recursing here would
+        # double-count chained calls and pick up receiver lvars as spurious
+        # method calls. The one exception is an enqueue nested in an
+        # argument: `Audit.record(NotifyJob.perform_later(...))` still
+        # enqueues the job (F5).
+        collect_nested_async(node, operations)
+      end
+
+      # Emit `:async` for enqueue calls nested anywhere inside +node+'s
+      # arguments. Only arguments are walked (the receiver chain is not), and
+      # only async calls are emitted, so no other nested call is counted.
+      def collect_nested_async(node, operations)
+        argument_nodes(node).each do |argument|
+          next unless argument.is_a?(Ast::Node) && argument.type == :send
+
+          if async_call?(argument)
+            operations << { type: :async, target: argument.receiver, method: argument.method_name,
+                            args_hint: argument.arguments || [], line: argument.line }
+          end
+          collect_nested_async(argument, operations)
+        end
+      end
+
+      # A send's argument children: the parser stores the converted receiver
+      # first (when there is one), then the arguments.
+      def argument_nodes(node)
+        children = node.children || []
+        node.receiver && children.first.is_a?(Ast::Node) ? children.drop(1) : children
       end
 
       # Handle :if nodes - extract conditional with then/else branches.
