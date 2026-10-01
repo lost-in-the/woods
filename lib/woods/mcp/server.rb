@@ -258,17 +258,19 @@ module Woods
           !token.nil? && ids && !ids.empty?
         end
 
-        def text_response(text, data: nil)
+        def text_response(text, data: nil, meta: nil)
           structured = { text: text }
           structured[:data] = data.nil? ? JSON.parse(text) : data
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
-            structured_content: structured
+            structured_content: structured,
+            meta: meta
           )
         rescue JSON::ParserError
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
-            structured_content: structured
+            structured_content: structured,
+            meta: meta
           )
         end
 
@@ -492,8 +494,28 @@ module Woods
             rescue ArgumentError => e
               next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence')
             end
+            if type && !reader.lookup_type?(type)
+              # Same contract as search: an unknown type is a bad argument, not
+              # a missing unit, so the not_found hint ("use search") cannot
+              # send an agent in a circle.
+              next respond_err.call(
+                "unknown lookup type: #{type}",
+                code: :invalid_params, tool: 'lookup', argument: 'type',
+                accepted_types: reader.lookup_types,
+                hint: 'Pass the actual published type that search returned (e.g. "model", "graphql_mutation") ' \
+                      'or a family alias ("graphql", "rails_source").'
+              )
+            end
             unit = type ? reader.find_unit(identifier, type: type) : reader.find_unit(identifier)
             if unit
+              # An untyped lookup of an identifier published under several
+              # types returns one unit (the type directory that sorts last);
+              # say so rather than let the caller mistake it for the only one.
+              lookup_meta = nil
+              if type.nil?
+                shared = reader.identifier_types(identifier)
+                lookup_meta = { ambiguous_types: shared } if shared.size > 1
+              end
               if source_sha256 && Digest::SHA256.hexdigest(unit['source_code'].to_s) != source_sha256
                 next respond_err.call('Published source changed since the excerpt; retrieve fresh evidence before verification.',
                                       code: :stale_index, tool: 'lookup', argument: 'source_sha256')
@@ -503,7 +525,8 @@ module Woods
                                                     .render(mode: evidence, budget: budget || 2000,
                                                             counter: ->(text) { (text.length / 4.0).ceil })
                 next ::MCP::Tool::Response.new([{ type: 'text', text: selected.text }],
-                                               structured_content: { text: selected.text, data: { evidence: selected.provenance } })
+                                               structured_content: { text: selected.text, data: { evidence: selected.provenance } },
+                                               meta: lookup_meta)
               end
               always_include = %w[type identifier file_path namespace]
               filtered = unit
@@ -512,7 +535,7 @@ module Woods
                 allowed = (always_include + sections).to_set
                 filtered = filtered.slice(*allowed)
               end
-              respond.call(renderer.render(:lookup, filtered))
+              respond.call(renderer.render(:lookup, filtered), meta: lookup_meta)
             else
               respond_err.call(
                 "Unit not found: #{identifier}",

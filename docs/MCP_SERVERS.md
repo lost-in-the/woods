@@ -288,6 +288,13 @@ filters; search aliases do not change those contracts.
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
 prefer that concrete type for follow-up identity checks.
 
+**Included in Woods 2.1.1:** `lookup` refuses a `type` it cannot resolve with
+`invalid_params` and lists `accepted_types` in `_meta`, the same contract as
+`search`, instead of answering `not_found` with a hint to search. An untyped
+`lookup` of an identifier published under more than one type still returns one
+unit (the type directory that sorts last) and names every type in
+`_meta.ambiguous_types`; pass the intended `type` to choose.
+
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the
 returned count, stopping reason, known/unknown remainder, and total explicitly.

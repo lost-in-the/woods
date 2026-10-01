@@ -689,6 +689,24 @@ RSpec.describe Woods::MCP::IndexReader do
       end
     end
 
+    describe '#identifier_types and lookup type validation' do
+      it 'lists the published types of an identifier from the per-type indexes' do
+        reader = described_class.new(fixture_dir)
+        expect(reader.identifier_types('Post')).to eq(['model'])
+        expect(reader.identifier_types('NonExistent')).to eq([])
+      end
+
+      it 'accepts concrete unit types and directory-family aliases, nothing else' do
+        reader = described_class.new(fixture_dir)
+        expect(%w[model graphql_mutation gem_source graphql rails_source].map do |t|
+          reader.lookup_type?(t)
+        end).to all(be(true))
+        expect(%w[class models Model CLASS ruby_classes].map { |t| reader.lookup_type?(t) }).to all(be(false))
+        expect(reader.lookup_types).to include('model', 'graphql', 'graphql_mutation', 'rails_source', 'gem_source')
+        expect(reader.lookup_types).to eq(reader.lookup_types.sort)
+      end
+    end
+
     # `nodes` and `edges` carry the primary type; an identifier naming units
     # of several types puts the rest in `variants`. A traversal reading only
     # the primary reports one unit's dependencies as the identifier's whole

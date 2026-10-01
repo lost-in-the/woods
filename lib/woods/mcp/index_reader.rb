@@ -395,6 +395,38 @@ module Woods
         load_unit(location[:type_dir], location[:filename])
       end
 
+      # Types `lookup`'s +type:+ accepts: every actual published unit type plus
+      # the directory-family aliases search accepts (`graphql`, `rails_source`).
+      #
+      # @return [Array<String>] sorted
+      def lookup_types
+        (TYPE_TO_DIR.keys | UNIT_TYPE_TO_DIR.keys).sort
+      end
+
+      # @param type [String]
+      # @return [Boolean] whether {#find_unit} can resolve +type:+ at all
+      def lookup_type?(type)
+        TYPE_TO_DIR.key?(type) || UNIT_TYPE_TO_DIR.key?(type)
+      end
+
+      # Every published type an identifier is indexed under, read from the
+      # per-type index files, so an untyped lookup can disclose a shared
+      # identifier instead of silently returning whichever type directory
+      # sorts last in {TYPE_DIRS}.
+      #
+      # @param identifier [String]
+      # @return [Array<String>] sorted actual unit types; empty when unknown
+      def identifier_types(identifier)
+        ensure_fresh!
+        TYPE_DIRS.flat_map do |dir|
+          read_index(dir).filter_map do |entry|
+            next unless entry.is_a?(Hash) && entry['identifier'] == identifier
+
+            entry['scope_type'] || entry['type'] || single_type_for(dir)
+          end
+        end.uniq.sort
+      end
+
       # List units, optionally filtered by type.
       #
       # @param type [String, nil] Singular type name (e.g. "model", "controller")
@@ -1375,6 +1407,13 @@ module Woods
 
       def valid_published_unit?(data, dir, identifier)
         data.is_a?(Hash) && data['identifier'] == identifier && UNIT_TYPES_BY_DIR.fetch(dir).include?(data['type'])
+      end
+
+      # The one public type a directory publishes, or the family name when a
+      # legacy entry under a multi-type directory carries no type of its own.
+      def single_type_for(dir)
+        types = UNIT_TYPES_BY_DIR.fetch(dir)
+        types.size == 1 ? types.first : dir
       end
 
       # Read and cache an _index.json file for a type directory.

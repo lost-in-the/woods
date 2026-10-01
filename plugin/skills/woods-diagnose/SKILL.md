@@ -388,6 +388,15 @@ family alias `type: "graphql"` and returns the actual subtype. Prefer the
 concrete type from `search` for follow-up checks. On older readers, retry with
 that concrete type before concluding that a published GraphQL unit is absent.
 
+From Woods 2.1.1 (check the installed gem), `lookup` refuses a `type` it
+cannot resolve with `invalid_params` and lists `accepted_types`; retry with a
+listed type or take the concrete type from `search`. Older readers answer
+`not_found` for an unknown type: do not loop between `search` and `lookup` on
+that hint, correct the type instead. An untyped `lookup` of an identifier
+published under several types returns one unit and, from 2.1.1, names every
+type in `_meta.ambiguous_types`; pass the intended `type` rather than trusting
+the single unit returned.
+
 Woods 2.0.0 can omit schema classes, resolvers inherited through application
 superclasses, and runtime types owned by additional schemas (#558, #562, #563).
 The fixes are **included in Woods 2.1**; check the writer's loaded

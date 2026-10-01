@@ -37,7 +37,7 @@ Use this four-step loop for most codebase questions:
 
 Identifiers are namespaced and typed. Never invent one from a filename when
 `search` can return the exact value. Carry both the returned `identifier` and
-`type` into `lookup`; the same identifier can belong to more than one unit type.
+`type` into `lookup`; the same identifier can belong to more than one unit type. When an untyped `lookup` hits such an identifier, `_meta.ambiguous_types` names every type (Woods 2.1.1); an unknown `type` is refused with `invalid_params` and `accepted_types`.
 
 ## Pick the smallest useful tool
 

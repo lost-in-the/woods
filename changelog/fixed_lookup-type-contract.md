@@ -1,0 +1,1 @@
+- `lookup` refuses a `type` it cannot resolve with `invalid_params` and lists `accepted_types`, matching `search`, instead of answering `not_found` with a hint to search that sent agents in a circle; an untyped `lookup` of an identifier published under more than one type now names every type in `_meta.ambiguous_types`.
