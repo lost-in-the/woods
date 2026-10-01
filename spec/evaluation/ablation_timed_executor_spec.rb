@@ -35,8 +35,14 @@ RSpec.describe Woods::Evaluation::AblationTimedExecutor do
             Process.wait(child) unless #{parent_exits}
           RUBY
           executor = Woods::Evaluation::AblationExecutor.new
-          timed = described_class.new(executor, timeout: 0.5)
-          _, error, success = timed.call([RbConfig.ruby, parent_script].shelljoin, chdir: dir)
+          # The budget must cover two interpreter starts (parent, then the
+          # child it spawns) before the timeout fires. Under `bin/rspec`,
+          # Bundler exports RUBYOPT=-rbundler/setup to every child, which
+          # costs ~0.25 s per interpreter on this host and is irrelevant to
+          # these fixtures, so clear it; keep the budget generous for loaded
+          # runners (the assertions are about cleanup, not speed).
+          timed = described_class.new(executor, timeout: 1.0)
+          _, error, success = timed.call("RUBYOPT= #{[RbConfig.ruby, parent_script].shelljoin}", chdir: dir)
           expect(success).to be(false)
           expect(error).to include('timed out')
           expect(File).to exist(heartbeat)
