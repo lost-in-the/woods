@@ -21,7 +21,9 @@ RSpec.describe Woods::Watch::Daemon do
       allow(double).to receive(:extract_all) { publish_generation('full') && {} }
     end
   end
-  let(:reloader) { instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true) }
+  let(:reloader) do
+    instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false)
+  end
 
   after { FileUtils.rm_rf([root, output_dir]) }
 
@@ -145,6 +147,26 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(result[:action]).to eq(:restart)
       expect(reloader).not_to have_received(:reload!)
+    end
+
+    it 'restarts for an edit the once loader owns, since reload! never touches that constant (F14)' do
+      allow(reloader).to receive(:once_owned?).with(File.join(root, 'app/once/setting.rb')).and_return(true)
+
+      result = build.process(['app/once/setting.rb'])
+
+      expect(result[:action]).to eq(:restart)
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('autoload_once_paths', 'app/once/setting.rb')
+      expect(reloader).not_to have_received(:reload!)
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'names the changed paths when the restart comes from reloading being disabled' do
+      allow(reloader).to receive(:enabled?).and_return(false)
+
+      result = build.process(['app/models/user.rb'])
+
+      expect(result[:reason]).to include('reloading disabled', 'app/models/user.rb')
     end
 
     it 'records the restart in the status file so a reader can see why' do
@@ -600,6 +622,27 @@ RSpec.describe Woods::Watch::Daemon do
       expect(extractor).to have_received(:extract_changed) do |paths|
         expect(paths).to include(a_string_ending_with('app/services/before_the_daemon.rb'))
       end
+    end
+
+    it 'fully reconciles a once-owned edit the boot snapshot covers, like any restart trigger (F14)' do
+      touch('app/once/setting.rb')
+      allow(reloader).to receive(:once_owned?).with(a_string_ending_with('app/once/setting.rb')).and_return(true)
+
+      result = build(watcher: fake_watcher, catch_up: true).run
+
+      expect(result).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'requires a restart for a once-owned edit made after the boot snapshot (F14)' do
+      allow(reloader).to receive(:once_owned?).with(a_string_ending_with('app/once/setting.rb')).and_return(true)
+      daemon = build(watcher: fake_watcher, catch_up: true)
+      touch('app/once/setting.rb')
+
+      expect(daemon.run).to eq(:restart_required)
+      expect(extractor).not_to have_received(:extract_all)
+      expect(extractor).not_to have_received(:extract_changed)
     end
 
     it 'does nothing when every file predates the last successful extraction' do
@@ -1497,6 +1540,44 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(Woods::Watch::Watcher).to have_received(:build)
         .with(hash_including(ignored: array_including('.woods'), force_polling: true, poll_interval: 2.5))
+    end
+  end
+  describe Woods::Watch::Daemon::RailsReloader do
+    subject(:rails_reloader) { described_class.new }
+
+    let(:once_root) { File.join(root, 'app', 'once') }
+    let(:owned) { File.join(once_root, 'setting.rb') }
+    let(:config) { double('Config', autoload_once_paths: [once_root]) }
+
+    def stub_rails(once_loader)
+      autoloaders = double('Autoloaders', once: once_loader)
+      stub_const('Rails', double('Rails', application: double('Application', config: config), autoloaders: autoloaders))
+    end
+
+    it 'asks the once loader for the path where cpath_expected_at exists' do
+      loader = double('once loader')
+      allow(loader).to receive(:cpath_expected_at) { |path| path == owned ? 'Setting' : nil }
+      stub_rails(loader)
+
+      expect(rails_reloader.once_owned?(owned)).to be(true)
+      expect(rails_reloader.once_owned?(File.join(root, 'app/models/user.rb'))).to be(false)
+    end
+
+    it 'falls back to the configured once paths below Zeitwerk 2.6.2 or when the file is gone' do
+      stub_rails(double('zeitwerk 2.2 loader'))
+      expect(rails_reloader.once_owned?(owned)).to be(true)
+      expect(rails_reloader.once_owned?(File.join(root, 'app/models/user.rb'))).to be(false)
+
+      raising = double('once loader')
+      allow(raising).to receive(:cpath_expected_at).and_raise(StandardError, 'does not exist')
+      stub_rails(raising)
+      expect(rails_reloader.once_owned?(owned)).to be(true)
+    end
+
+    it 'answers false without a booted application' do
+      stub_const('Rails', double('Rails', application: nil))
+
+      expect(rails_reloader.once_owned?(owned)).to be(false)
     end
   end
 end

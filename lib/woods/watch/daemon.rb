@@ -414,21 +414,41 @@ module Woods
         heartbeat.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || heartbeat.kill
       end
 
-      # What this batch demands, with one escalation applied: an app that cannot
-      # reload at all (`config.enable_reloading = false` — the production
-      # default, and common in staging-shaped dev containers) can only honour a
-      # `:reload` by restarting, since extracting against constants that no
-      # longer match their source is the thing the classification exists to
-      # prevent.
+      # What this batch demands, with two escalations applied. An app that
+      # cannot reload at all (`config.enable_reloading = false` — the
+      # production default, and common in staging-shaped dev containers) can
+      # only honour a `:reload` by restarting, since extracting against
+      # constants that no longer match their source is the thing the
+      # classification exists to prevent. And a `:reload` path the once loader
+      # owns (`config.autoload_once_paths`) needs a restart for the same
+      # reason: `reload!` touches the main loader only, so the edited source
+      # would be published around a class still shaped as it was at boot
+      # (F14). At startup the environment-boot snapshot decides, as for any
+      # restart trigger: a once-owned edit the boot already saw is reconciled
+      # with one full extraction, one made after the boot stops the daemon.
       def required_action(change_set, startup: false)
         paths = change_set.absolute_paths
         paths = paths.reject { |path| startup_covered?(path) } if startup
         relative = ChangeSet.new(paths: paths, root: @root).relative_paths
         action = @policy.classify_all(relative)
         action = :reextract if action == :ignore && reconciliation_required?
-        return :restart if action == :reload && !@reloader.enabled?
+        return :restart if action == :reload && reload_needs_restart?(paths)
 
         action
+      end
+
+      # @return [Boolean] whether this process cannot honour a `:reload` in place
+      def reload_needs_restart?(absolute_paths)
+        !@reloader.enabled? || once_owned_paths(absolute_paths).any?
+      end
+
+      # @param absolute_paths [Array<String>]
+      # @return [Array<String>] the reload-class paths the once loader owns
+      def once_owned_paths(absolute_paths)
+        absolute_paths.select do |path|
+          @policy.classify(ChangeSet.new(paths: [path], root: @root).relative_paths.first) == :reload &&
+            @reloader.once_owned?(path)
+        end
       end
 
       # An all-ignorable batch is not evidence that a previously degraded
@@ -929,11 +949,22 @@ module Woods
 
       def require_restart(change_set)
         carry_forward(change_set)
-        triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
-        reason = "restart required: #{triggers.first(5).join(', ')}"
+        reason = "restart required: #{restart_reason(change_set)}"
         @logger.warn("[Woods] watch: #{reason}")
         @stop_reason = :restart_required
         outcome(:restart, :degraded, reason: reason, count: change_set.size)
+      end
+
+      # Why this batch needs a restart, naming the paths behind it. A restart
+      # reached through an escalation used to report an empty trigger list.
+      def restart_reason(change_set)
+        triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
+        return triggers.first(5).join(', ') if triggers.any?
+
+        once = once_owned_paths(change_set.absolute_paths).map { |path| change_set.relativize(path) }
+        return "autoload_once_paths constant changed: #{once.first(5).join(', ')}" if once.any?
+
+        "reloading disabled; changed: #{change_set.relative_paths.first(5).join(', ')}"
       end
 
       def extract(change_set)
@@ -1529,6 +1560,47 @@ module Woods
         # @return [void]
         def reload!
           Rails.application.reloader.reload!
+        end
+
+        # Does the once loader (`config.autoload_once_paths`) own this file?
+        #
+        # Constants it defines are never reloaded: `reload!` touches the main
+        # loader only, so re-extracting after an edit there introspects the
+        # class as it was at boot while publishing the new source (F14). The
+        # loader is asked through `cpath_expected_at` where it exists
+        # (Zeitwerk >= 2.6.2; the Rails 6.0 floor may run older), and the
+        # configured once paths answer otherwise, or when the file is gone.
+        #
+        # @param absolute_path [String]
+        # @return [Boolean]
+        def once_owned?(absolute_path)
+          return false unless defined?(Rails) && Rails.application
+
+          answer = once_loader_answer(absolute_path)
+          return answer unless answer.nil?
+
+          Array(Rails.application.config.autoload_once_paths).map(&:to_s)
+                                                             .any? { |dir| absolute_path.start_with?("#{dir}#{File::SEPARATOR}") }
+        rescue StandardError
+          false
+        end
+
+        private
+
+        # The once loader's verdict, or nil when it cannot give one (no
+        # `cpath_expected_at` on this Zeitwerk, or the file is gone and the
+        # call raises). A deleted file's owner is still told by the paths.
+        #
+        # @return [Boolean, nil]
+        def once_loader_answer(absolute_path)
+          return nil unless Rails.respond_to?(:autoloaders) && Rails.autoloaders.respond_to?(:once)
+
+          once = Rails.autoloaders.once
+          return nil unless once.respond_to?(:cpath_expected_at)
+
+          !once.cpath_expected_at(absolute_path).nil?
+        rescue StandardError
+          nil
         end
       end
     end

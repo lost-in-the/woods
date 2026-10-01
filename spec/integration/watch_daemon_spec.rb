@@ -43,6 +43,13 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = @app_root
       WoodsDummyApplication.config.secret_key_base = 'woods-dummy-secret'
+      # A directory the once loader owns (F14): constants under it are never
+      # reloaded, so the daemon must restart for an edit there.
+      [@pristine_root, @app_root].each do |base|
+        FileUtils.mkdir_p(File.join(base, 'app/once'))
+        File.write(File.join(base, 'app/once/once_setting.rb'), "class OnceSetting\n  def call = :before\nend\n")
+      end
+      WoodsDummyApplication.config.autoload_once_paths << File.join(@app_root, 'app/once')
       WoodsDummyApplication.initialize!
     end
 
@@ -110,7 +117,7 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
     Woods::Watch::Daemon.new(
       output_dir: @index_dir,
       root: @app_root,
-      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false),
       debounce: 0,
       **overrides
     )
@@ -233,7 +240,7 @@ end
       reader = Woods::MCP::IndexReader.new(@index_dir)
       expect(reader.find_unit('Post')).not_to be_nil
 
-      failing = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      failing = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, once_owned?: false)
       allow(failing).to receive(:reload!).and_raise(SyntaxError, 'unexpected end-of-input')
       write_file('app/models/post.rb', "class Post < ApplicationRecord
   # half-edited")
@@ -340,6 +347,20 @@ end
       end
     end
 
+    it 'restarts for an edit the once loader owns instead of publishing a stale unit (F14)' do
+      expect(reloader.once_owned?(File.join(@app_root, 'app/once/once_setting.rb'))).to be(true)
+      expect(reloader.once_owned?(File.join(@app_root, 'app/models/post.rb'))).to be(false)
+      write_file('app/once/once_setting.rb', "class OnceSetting\n  def call = :after\nend\n")
+      instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                          reloader: reloader, debounce: 0, catch_up: false)
+
+      result = instance.process(['app/once/once_setting.rb'])
+
+      expect(result[:action]).to eq(:restart)
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('autoload_once_paths', 'app/once/once_setting.rb')
+    end
+
     it 'escalates a reload-class change to a restart when reloading is off' do
       config = Rails.application.config
       original = config.cache_classes
@@ -361,7 +382,7 @@ end
   describe 'degraded operation' do
     it 'leaves the index intact and the generation frozen when a reload fails' do
       write_file('app/services/broken_service.rb', "class BrokenService\n  def call\n") # deliberately unterminated
-      failing_reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      failing_reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, once_owned?: false)
       allow(failing_reloader).to receive(:reload!).and_raise(SyntaxError, 'unexpected end-of-input')
       broken = daemon(reloader: failing_reloader)
 

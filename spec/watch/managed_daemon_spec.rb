@@ -45,7 +45,7 @@ RSpec.describe 'Managed watch daemon lifecycle' do
   let(:watcher) { ControlledManagedWatcher.new }
   let(:extractor) { instance_spy('Woods::Extractor') }
   let(:generation) { Woods::Generation.new(output_dir: output_dir) }
-  let(:reloader) { instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true) }
+  let(:reloader) { instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false) }
   let(:daemon) do
     Woods::Watch::Daemon.new(root: root, output_dir: output_dir, watcher: watcher,
                              extractor_factory: -> { extractor }, reloader: reloader, debounce: 0,

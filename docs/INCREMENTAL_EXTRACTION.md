@@ -626,6 +626,13 @@ same question as "what has to happen before re-reading it is worth anything".
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
 | `:ignore` | everything else | Not extraction input. |
 
+The watch daemon applies two escalations on top of this table: a `:reload`
+path becomes `:restart` when the app cannot reload (`config.enable_reloading =
+false`) and, included in Woods `2.1.1`, when the once loader owns the file
+(`config.autoload_once_paths`), whose constants `reload!` never replaces. The
+classifier itself stays loader-blind so it can run in a fresh process without
+Rails; see [WATCH_DAEMON.md](WATCH_DAEMON.md#restart-triggers).
+
 The `:restart` set is drawn generously on purpose. Rails' reloader replaces
 autoloaded constants and nothing else, it does not re-run initializers,
 re-resolve `Rails.application.config`, or rebuild the schema cache, all of

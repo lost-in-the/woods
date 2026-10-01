@@ -44,7 +44,7 @@ RSpec.describe 'Watch daemon multi-instance operation' do
       output_dir: outputs[index],
       root: roots[index],
       extractor_factory: -> { extractor_for(outputs[index], marker: marker, delay: delay) },
-      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false),
       debounce: 0,
       **overrides
     )
@@ -116,7 +116,7 @@ RSpec.describe 'Watch daemon multi-instance operation' do
     # batch.
     it 'carries the paths forward when a reload fails' do
       touch(0, 'app/models/user.rb')
-      reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, once_owned?: false)
       allow(reloader).to receive(:reload!).and_raise(SyntaxError, 'unexpected end')
       daemon = daemon_for(0, marker: 'Reloaded', reloader: reloader)
 
@@ -135,7 +135,8 @@ RSpec.describe 'Watch daemon multi-instance operation' do
       allow(exploding).to receive(:extract_changed).and_raise(StandardError, 'boom')
       daemon = Woods::Watch::Daemon.new(
         output_dir: outputs[0], root: roots[0], extractor_factory: -> { exploding },
-        reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+        reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true,
+                                                                       once_owned?: false),
         debounce: 0
       )
 
@@ -157,7 +158,8 @@ RSpec.describe 'Watch daemon multi-instance operation' do
       allow(exploding).to receive(:extract_changed).and_raise(StandardError, 'boom')
       daemon = Woods::Watch::Daemon.new(
         output_dir: outputs[0], root: roots[0], extractor_factory: -> { exploding },
-        reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+        reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true,
+                                                                       once_owned?: false),
         debounce: 0
       )
 

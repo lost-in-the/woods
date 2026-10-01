@@ -291,6 +291,18 @@ The same escalation happens when the app *can't* reload at all, a boot with
 `config.enable_reloading = false`. Extracting against constants that no longer
 match their source would be worse than saying so.
 
+It also happens for a Ruby file the once loader owns (`config.autoload_once_paths`):
+Rails' reloader never replaces those constants, so a live edit there would be
+published around a class still shaped as it was at boot. Included in Woods `2.1.1`,
+earlier releases re-extracted and published an internally inconsistent unit with a
+healthy status. The daemon decides through the once loader's `cpath_expected_at`
+where Zeitwerk provides it (2.6.2 and later), and through the configured paths
+otherwise. A once-owned change found at startup follows the environment-boot
+snapshot like any restart trigger: covered by the boot, it is reconciled with one
+full extraction; made after the boot, it stops the daemon. The degraded reason names the paths behind
+an escalated restart (`autoload_once_paths constant changed: …` or
+`reloading disabled; changed: …`).
+
 ## Failure posture
 
 A syntax error mid-edit is normal; it happens every time someone saves halfway
