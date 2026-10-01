@@ -770,6 +770,15 @@ Nested entries collapse into their ancestor, so the default list walks
 `app/components` and `app/views` and never hands a file under
 `app/views/components` to the autoloader twice.
 
+The constant expected of a file comes from the owning Zeitwerk loader
+(`cpath_expected_at`), so the app's inflections (`api_card` => `APICard`),
+collapsed directories and namespaces are honoured; a plain `camelize` of the
+relative path is the fallback for a loader that predates that API. Included in
+Woods `2.1.1`: earlier releases camelized only, and a component whose expected
+name was wrong was never loaded and silently missing from both families. A
+file whose expected constant resolves to nothing is counted as unresolved and
+logged at debug level with the constant that was expected.
+
 A file is loaded only when a Rails autoload path owns it, so the constant its
 path implies is the one Zeitwerk manages. A directory that is not autoloaded is
 walked and skipped; one `Rails.logger.debug` line per extraction says how many

@@ -33,21 +33,34 @@ module Woods
       #
       # @return [void]
       def load_component_files
-        unresolved = 0
+        unowned = 0
+        undefined = 0
         component_directories.each do |directory|
           Dir.glob(File.join(directory, '**', '*.rb')).each do |path|
-            unresolved += 1 unless constantize_component_file(path)
+            case constantize_component_file(path)
+            when :unowned then unowned += 1
+            when :undefined then undefined += 1
+            end
           end
         end
-        return if unresolved.zero?
 
-        # The one misconfiguration this cannot fix for the caller: a component
-        # directory no Rails autoload path owns. Loading those files by hand
-        # would define constants Zeitwerk does not manage, so they are skipped,
-        # and skipping silently looks identical to having no components.
+        # Two misconfigurations this cannot fix for the caller, each said once:
+        # a component directory no Rails autoload path owns (loading those
+        # files by hand would define constants Zeitwerk does not manage), and
+        # a file whose expected constant resolves to nothing (an inflection or
+        # namespace the path does not imply). Skipping silently looks
+        # identical to having no components.
+        if unowned.positive?
+          Rails.logger.debug do
+            "[Woods] #{unowned} component file(s) resolved to no constant; " \
+              'their directory is not on an autoload path.'
+          end
+        end
+        return unless undefined.positive?
+
         Rails.logger.debug do
-          "[Woods] #{unresolved} component file(s) resolved to no constant; " \
-            'their directory is not on an autoload path.'
+          "[Woods] #{undefined} component file(s) resolved to no constant; " \
+            'each file and the constant expected of it are logged above.'
         end
       end
 
@@ -76,18 +89,25 @@ module Woods
       private
 
       # @param path [String] absolute path to a Ruby file
-      # @return [Boolean] false when the path implies no constant Zeitwerk owns
+      # @return [Symbol] +:loaded+ when the file's constant resolved (or the
+      #   file failed to load, which is warned about and not counted),
+      #   +:unowned+ when no autoload root owns the path, +:undefined+ when
+      #   the expected constant resolved to nothing
       def constantize_component_file(path)
         name = component_constant_name(path)
-        return false unless name
+        return :unowned unless name
+        return :loaded if name.safe_constantize
 
-        name.safe_constantize
-        true
+        # A nil here used to count as resolved, so a component whose expected
+        # name was wrong (an inflection camelize does not know) vanished from
+        # the extraction without a trace (F16).
+        Rails.logger.debug { "[Woods] component file #{path} defines no #{name}" }
+        :undefined
       rescue StandardError, ScriptError => e
         # A component that cannot load must not abort the extraction; a
         # SyntaxError in one file would otherwise take the whole run with it.
         Rails.logger.warn("[Woods] Could not load component file #{path}: #{e.message}")
-        true
+        :loaded
       end
 
       # The constant a file's path implies, under the autoload root that owns
@@ -95,13 +115,37 @@ module Woods
       # nothing about its constant and loading it by hand would define
       # constants Zeitwerk does not manage.
       #
+      # The owning Zeitwerk loader is asked first: its answer honours the
+      # app's inflections (`api_card` => `APICard`), collapsed directories and
+      # namespaces, which a plain `camelize` of the relative path does not
+      # (F16). The camelize answer remains the fallback for a loader that
+      # predates `cpath_expected_at` or declines to name the file.
+      #
       # @param path [String]
       # @return [String, nil]
       def component_constant_name(path)
         root = autoload_roots.find { |candidate| path.start_with?("#{candidate}#{File::SEPARATOR}") }
         return nil unless root
 
-        path.delete_prefix("#{root}#{File::SEPARATOR}").delete_suffix('.rb').camelize
+        loader_constant_name(path) || path.delete_prefix("#{root}#{File::SEPARATOR}").delete_suffix('.rb').camelize
+      end
+
+      # @param path [String]
+      # @return [String, nil] the first loader's non-nil answer
+      def loader_constant_name(path)
+        return nil unless Rails.respond_to?(:autoloaders) && Rails.autoloaders.respond_to?(:each)
+
+        Rails.autoloaders.each do |loader|
+          next unless loader.respond_to?(:cpath_expected_at)
+
+          begin
+            name = loader.cpath_expected_at(path)
+          rescue StandardError
+            next
+          end
+          return name if name
+        end
+        nil
       end
 
       # Every directory Zeitwerk resolves constants against, longest first so a

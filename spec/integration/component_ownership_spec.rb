@@ -10,6 +10,7 @@ RSpec.describe 'Application-owned optional extraction', :booted_app do
     expect(status).to be_success, "#{stdout}\n#{stderr}"
     expected = [
       'legacy fixture contains external definitions',
+      'inflected components under an autoload-only views root are discovered',
       'authoritative reconciliation removes only dependency-owned definitions',
       'all application mailer inheritance branches are indexed without execution',
       'ownership full/incremental equivalence',

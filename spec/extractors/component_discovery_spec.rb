@@ -11,6 +11,7 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
   let(:logger) { instance_spy(Logger) }
   let(:autoload_paths) { [File.join(root, 'app', 'components'), File.join(root, 'app', 'views')] }
   let(:host) { Class.new { include Woods::Extractors::ComponentDiscovery }.new }
+  let(:autoloaders) { [] }
 
   before do
     require 'active_support/core_ext/string/inflections'
@@ -20,7 +21,8 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
     Woods.configuration = Woods::Configuration.new
     config = double('Config', autoload_paths: autoload_paths, eager_load_paths: [], autoload_once_paths: [])
     application = double('Application', config: config)
-    stub_const('Rails', double('Rails', root: Pathname.new(root), logger: logger, application: application))
+    stub_const('Rails', double('Rails', root: Pathname.new(root), logger: logger, application: application,
+                                        autoloaders: autoloaders))
   end
 
   after { FileUtils.rm_rf(root) }
@@ -58,6 +60,37 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
       path = write('lib/loose/thing.rb')
 
       expect(host.send(:component_constant_name, path)).to be_nil
+    end
+
+    # The Rails-guide inflection (`api_card` => `APICard`): camelize answers
+    # `Ui::ApiCard`, which resolves to nothing, so the component was never
+    # loaded and silently missing from both families (F16).
+    it 'asks the owning loader first, so an inflected name resolves as Rails resolves it' do
+      path = write('app/views/ui/api_card.rb')
+      main = double('main loader')
+      allow(main).to receive(:cpath_expected_at) { |asked| asked == path ? 'Ui::APICard' : nil }
+      autoloaders << main
+
+      expect(host.send(:component_constant_name, path)).to eq('Ui::APICard')
+    end
+
+    it 'falls back to camelize when no loader names the file or the loader predates cpath_expected_at' do
+      path = write('app/views/ui/api_card.rb')
+      silent = double('loader without an answer')
+      allow(silent).to receive(:cpath_expected_at).and_return(nil)
+      old = double('zeitwerk 2.5 loader')
+      autoloaders.push(silent, old)
+
+      expect(host.send(:component_constant_name, path)).to eq('Ui::ApiCard')
+    end
+
+    it 'falls back to camelize when the loader raises for the path' do
+      path = write('app/views/ui/api_card.rb')
+      failing = double('loader')
+      allow(failing).to receive(:cpath_expected_at).and_raise(StandardError, 'does not exist')
+      autoloaders << failing
+
+      expect(host.send(:component_constant_name, path)).to eq('Ui::ApiCard')
     end
   end
 
@@ -120,10 +153,21 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
 
     it 'stays quiet when every file resolved' do
       write('app/views/ui/card_component.rb')
+      stub_const('Ui::CardComponent', Class.new)
 
       host.load_component_files
 
       expect(debug_messages).to be_empty
+    end
+
+    it 'counts a file whose expected constant does not resolve as unresolved and names it (F16)' do
+      path = write('app/views/ui/api_card.rb')
+
+      host.load_component_files
+
+      expect(debug_messages).to include(a_string_matching(/#{Regexp.escape(path)}.*Ui::ApiCard/))
+      expect(debug_messages).to include(a_string_matching(/1 component file.*no constant/))
+      expect(debug_messages.grep(/not on an autoload path/)).to be_empty
     end
 
     it 'honours a configured directory list' do

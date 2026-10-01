@@ -74,6 +74,15 @@ Dir.mktmpdir('woods_components') do |root|
     write_source(root, 'app/jobs/cleanup_job.rb',
                  'class CleanupJob < ActiveJob::Base; def perform; raise "ran job"; end; end')
     write_source(root, 'app/jobs/other_job.rb', 'class OtherJob < ActiveJob::Base; end')
+    # Components beside their templates under an autoload-only app/views root,
+    # one per family with the Rails-guide inflection (api_card => APICard) and
+    # one plain control each (F16).
+    write_source(root, 'app/views/ui/card_component.rb',
+                 'module Ui; class CardComponent < Phlex::HTML; end; end')
+    write_source(root, 'app/views/ui/api_card.rb', 'module Ui; class APICard < Phlex::HTML; end; end')
+    write_source(root, 'app/views/ui/panel_component.rb',
+                 'module Ui; class PanelComponent < ViewComponent::Base; end; end')
+    write_source(root, 'app/views/ui/api_panel.rb', 'module Ui; class APIPanel < ViewComponent::Base; end; end')
 
     app = Class.new(Rails::Application)
     Object.const_set(:ComponentOwnershipApplication, app)
@@ -83,6 +92,10 @@ Dir.mktmpdir('woods_components') do |root|
     app.config.cache_classes = false
     app.config.secret_key_base = 'component-ownership-test'
     app.config.logger = Logger.new(IO::NULL)
+    app.config.autoload_paths << File.join(root, 'app/views')
+    app.config.before_initialize do
+      Rails.autoloaders.each { |loader| loader.inflector.inflect('api_card' => 'APICard', 'api_panel' => 'APIPanel') }
+    end
     app.initialize!
     ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
     Rails.application.eager_load!
@@ -109,6 +122,10 @@ Dir.mktmpdir('woods_components') do |root|
     reader = Woods::MCP::IndexReader.new(output)
     assert_fact(checks, 'legacy fixture contains external definitions') do
       %w[ExternalView ExternalPhlex ExternalChannel].all? { |identifier| reader.find_unit(identifier) }
+    end
+    assert_fact(checks, 'inflected components under an autoload-only views root are discovered') do
+      %w[Ui::CardComponent Ui::APICard].all? { |identifier| reader.find_unit(identifier, type: 'component') } &&
+        %w[Ui::PanelComponent Ui::APIPanel].all? { |identifier| reader.find_unit(identifier, type: 'view_component') }
     end
     legacy = false
     Woods::Extractor.new(output_dir: output).extract_changed([])
