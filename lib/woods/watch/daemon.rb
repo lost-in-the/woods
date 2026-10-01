@@ -1034,6 +1034,7 @@ module Woods
                     extractor.extract_changed(change_set.absolute_paths)
                   end
         extractor.raise_on_publication_failure! if extractor.respond_to?(:raise_on_publication_failure!)
+        note_pruned_resolvable(extractor)
 
         action = full ? :full : :incremental
         return unpublished(action, change_set, started) if wrote_without_publishing?(touched, before)
@@ -1119,8 +1120,44 @@ module Woods
         @logger.info("[Woods] watch: #{action} over #{change_set.size} path(s) " \
                      "in #{duration}ms → generation #{marker.number}")
 
-        outcome(action, :running, generation: marker.number, count: change_set.size,
-                                  duration_ms: duration, touched: touched)
+        state = detached_units.empty? ? :running : :degraded
+        outcome(action, state, reason: detached_units_reason, generation: marker.number, count: change_set.size,
+                               duration_ms: duration, touched: touched)
+      end
+
+      # Units reconciliation pruned although this process still resolves their
+      # class (N-ra-2). No later cycle restores them — the detached constant
+      # outlives every reload — so the daemon stays degraded over them until it
+      # restarts, instead of reporting `running` over an index a fresh process
+      # would not publish.
+      def note_pruned_resolvable(extractor)
+        return unless extractor.respond_to?(:pruned_resolvable_classes)
+
+        entries = extractor.pruned_resolvable_classes
+        return unless entries.is_a?(Array)
+
+        entries.each do |entry|
+          next unless entry.is_a?(Hash) && entry[:identifier].is_a?(String)
+
+          identifier = entry[:identifier]
+          next if detached_units.key?(identifier)
+
+          detached_units[identifier] = entry[:reason].to_s
+          @logger.warn("[Woods] watch: reconciliation pruned #{identifier}: #{entry[:reason]}")
+        end
+      end
+
+      # Persist for the daemon's lifetime: a cycle cannot restore a detached unit.
+      def detached_units
+        @detached_units ||= {}
+      end
+
+      def detached_units_reason
+        return nil if detached_units.empty?
+
+        named = detached_units.first(3).map { |identifier, reason| "#{identifier} (#{reason})" }
+        "reconciliation pruned #{detached_units.size} unit(s) whose class still resolves: " \
+          "#{named.join('; ')}; restart to restore"
       end
 
       def log_storm(actionable)

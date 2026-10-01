@@ -19,6 +19,10 @@ require 'open3'
 #
 # Tagged :booted_app — excluded from the default `rake spec`.
 RSpec.describe 'Watch daemon against a booted app', :booted_app do
+  def once_subclass_supported?
+    Gem::Version.new(Rails.version) >= Gem::Version.new('7.0')
+  end
+
   before(:all) do
     require 'rails'
     require 'active_record/railtie'
@@ -48,6 +52,15 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       [@pristine_root, @app_root].each do |base|
         FileUtils.mkdir_p(File.join(base, 'app/once'))
         File.write(File.join(base, 'app/once/once_setting.rb'), "class OnceSetting\n  def call = :before\nend\n")
+        # A once-owned subclass of a reloadable base (N-ra-2): a main-loader
+        # reload leaves it pointing at the old ApplicationController object.
+        # Rails 6.x also eager loads app/once through the main loader, so the
+        # file would be re-evaluated against the new base after a reload
+        # (superclass mismatch); the shape is only exercised from 7.0 on.
+        if once_subclass_supported?
+          File.write(File.join(base, 'app/once/legacy_controller.rb'),
+                     "class LegacyController < ApplicationController\n  def index = head(:ok)\nend\n")
+        end
       end
       WoodsDummyApplication.config.autoload_once_paths << File.join(@app_root, 'app/once')
       WoodsDummyApplication.initialize!
@@ -73,6 +86,8 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       end
     end
     Rails.application.eager_load!
+    # The once loader is not eager loaded; resolve the subclass so the baseline index carries it.
+    LegacyController.name if once_subclass_supported?
 
     require 'woods'
     require 'woods/extractor'
@@ -280,7 +295,9 @@ end
   #
   # Placed in this file rather than its own so it rides an existing boot: a new
   # `:booted_app` file is a new CI step and a new Rails application per row.
-  describe 'the real Rails reloader' do
+  # Defined order: the N-ra-2 example needs the once-owned subclass still attached
+  # to its base, and every real reload below detaches it for the process lifetime.
+  describe 'the real Rails reloader', order: :defined do
     subject(:reloader) { Woods::Watch::Daemon::RailsReloader.new }
 
     # A real reload unloads every autoloaded constant, so anything that ran
@@ -292,6 +309,19 @@ end
 
     def post_source
       File.read(File.join(@app_root, 'app/models/post.rb'))
+    end
+
+    it 'names a once-owned subclass that an unrelated reload detached and reconciliation pruned (N-ra-2)' do
+      skip 'once-owned subclass fixture is unsupported before Rails 7.0' unless once_subclass_supported?
+      expect(Woods::MCP::IndexReader.new(@index_dir).find_unit('LegacyController')).not_to be_nil
+      instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                          reloader: reloader, debounce: 0, catch_up: false)
+      write_file('app/models/post.rb', "#{post_source}\n# unrelated edit\n")
+
+      result = instance.process(['app/models/post.rb'])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('LegacyController', 'once-owned', 'restart')
     end
 
     it 'picks up changed source, which is the property `enabled?` promises' do

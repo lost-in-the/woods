@@ -177,6 +177,34 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  describe 'reconciliation diagnostics (N-ra-2)' do
+    let(:pruned) do
+      [{ identifier: 'LegacyController', type: :controller,
+         reason: 'still resolves; once-owned subclass of a base the main loader reloaded' }]
+    end
+
+    it 'reports a degraded cycle naming a pruned unit whose class still resolves' do
+      allow(extractor).to receive(:pruned_resolvable_classes).and_return(pruned)
+
+      result = build.process(['app/models/post.rb'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('LegacyController', 'once-owned', 'restart')
+    end
+
+    it 'keeps reporting the pruned unit on later cycles, since none of them restores it' do
+      allow(extractor).to receive(:pruned_resolvable_classes).and_return(pruned, [])
+      daemon = build
+
+      daemon.process(['app/models/post.rb'])
+      result = daemon.process(['app/models/comment.rb'])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('LegacyController')
+    end
+  end
+
   describe 'failure posture' do
     { incremental: 100, full: 1 }.each do |mode, threshold|
       it "retains the generation and pending paths after a #{mode} identity collision" do

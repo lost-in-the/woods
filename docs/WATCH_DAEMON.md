@@ -303,6 +303,16 @@ full extraction; made after the boot, it stops the daemon. The degraded reason n
 an escalated restart (`autoload_once_paths constant changed: …` or
 `reloading disabled; changed: …`).
 
+A once-owned subclass of a reloadable base is a shape Rails documents as
+unsupported: after any main-loader reload it keeps the old base object, leaves
+`descendants`, and reconciliation prunes its unit on the next cycle even when
+only an unrelated file changed. Included in Woods `2.1.1`: the extractor logs
+each pruned unit whose constant the process still resolves, with the reason, and
+the daemon reports `degraded` naming them (`reconciliation pruned 1 unit(s) whose
+class still resolves: LegacyController (…); restart to restore`) on that cycle and
+every later one until it restarts, since no reload restores the unit. Earlier
+releases reported `running` over the vanished unit.
+
 ## Failure posture
 
 A syntax error mid-edit is normal; it happens every time someone saves halfway
