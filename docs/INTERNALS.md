@@ -282,6 +282,8 @@ Woods uses three independent store abstractions:
 
 The gem is backend-agnostic by design. MySQL and PostgreSQL have different JSON querying, indexing, and CTE syntax, no backend-specific SQL is written into the core.
 
+Every metadata store answers `snapshot_version`: an Integer that moves on every content change (the in-memory adapter), or nil for an adapter that tracks none (SQLite). The retriever keeps one scope corpus per pipeline for as long as that version stands and reads the store per scoped request when it is nil; nil never means "unchanged". A custom adapter that returns a version must advance it on every write that changes a record.
+
 ### Configuration presets
 
 ```ruby

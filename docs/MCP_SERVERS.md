@@ -312,8 +312,10 @@ successful partial completeness with reason `unreadable_or_corrupt_source`;
 an empty partial answer does not establish absence. Identifier-only matches can
 use published summaries without opening unit bodies, so search is not an
 artifact-integrity check. Inspect `woods_status` and run `woods:validate`.
-Explicit package/source-path scope first reads the full unit set and still
-returns an error if that preflight encounters a damaged body.
+Explicit package/source-path scope first reads the full unit set, once per loaded
+generation, and still returns an error if that preflight encounters a damaged
+body; a scoped search that reuses the read treats a body damaged since like an
+unscoped search does.
 
 Damaged index-wide artifacts, such as a manifest or type index, remain
 `isError: true` with `_meta.error_code: "corrupt_artifact"`. Their `_meta.completeness` has
