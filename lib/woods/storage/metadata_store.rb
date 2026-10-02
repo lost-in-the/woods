@@ -203,6 +203,7 @@ module Woods
 
         def initialize
           @data = {}
+          @haystacks = {}
         end
 
         # @see Interface#store
@@ -215,6 +216,7 @@ module Woods
           existing = @data[id]
           return existing if existing && JSON.generate(existing.except('updated_at')) == text
 
+          @haystacks.delete(id)
           @data[id] = JSON.parse(text).merge('updated_at' => Time.now.iso8601)
         end
 
@@ -260,17 +262,7 @@ module Woods
           # different results depending on which backend a host had configured.
           needle = query.to_s.downcase
           @data.each_with_object([]) do |(id, record), out|
-            # `updated_at` is excluded from the whole-record haystack: SQLite's
-            # `data` column never carries it (it's a store-level column there,
-            # not part of the JSON blob), so leaving it in here made a query
-            # that only matched a timestamp (e.g. "2026-08") return every
-            # record on InMemory and none on SQLite.
-            haystacks = if fields
-                          fields.map { |f| field_haystack(record[f]) }
-                        else
-                          [JSON.generate(record.except('updated_at'))]
-                        end
-            next unless haystacks.compact.any? { |h| h.downcase.include?(needle) }
+            next unless matches?(id, record, fields, needle)
 
             out << record.except('updated_at').merge('id' => id)
           end
@@ -283,6 +275,7 @@ module Woods
 
         # @see Interface#delete
         def delete(id)
+          @haystacks.delete(id)
           @data.delete(id)
         end
 
@@ -321,13 +314,17 @@ module Woods
         # @param entries [Enumerable<Array(String, Hash)>] Pairs of +[id, metadata]+
         # @return [void]
         def bulk_load(entries)
-          entries.each { |id, meta| @data[id] = meta }
+          entries.each do |id, meta|
+            @haystacks.delete(id)
+            @data[id] = meta
+          end
         end
 
         # Drop every stored entry. Used by the MCP +reload+ tool to pick up a
         # fresh embed run without restarting the process. Safe on an empty store.
         def clear!
           @data = {}
+          @haystacks = {}
         end
 
         private
@@ -346,6 +343,24 @@ module Woods
         # @return [Hash] string-keyed, JSON-typed values
         def normalize(metadata)
           JSON.parse(JSON.generate(metadata))
+        end
+
+        # `updated_at` is excluded from the whole-record haystack: SQLite's
+        # `data` column never carries it (it's a store-level column there,
+        # not part of the JSON blob), so leaving it in here made a query
+        # that only matched a timestamp (e.g. "2026-08") return every
+        # record on InMemory and none on SQLite.
+        def matches?(id, record, fields, needle)
+          return record_haystack(id, record).include?(needle) unless fields
+
+          fields.any? { |field| field_haystack(record[field])&.downcase&.include?(needle) }
+        end
+
+        # The whole-record haystack, serialised and downcased once per stored
+        # record (N-ip-2) instead of on every all-fields search; +store+,
+        # +delete+, +bulk_load+ and +clear!+ drop the entry they replace.
+        def record_haystack(id, record)
+          @haystacks[id] ||= JSON.generate(record.except('updated_at')).downcase
         end
 
         # The searchable text for one field value: strings come back raw,

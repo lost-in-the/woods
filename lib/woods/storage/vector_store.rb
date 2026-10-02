@@ -18,6 +18,8 @@ module Woods
     module VectorStore
       # Interface that all vector store adapters must implement.
       module Interface
+        DEFAULT_ID_FILTER_BATCH_SIZE = 100
+
         # Store a vector with associated metadata.
         #
         # @param id [String] Unique identifier for the vector
@@ -101,6 +103,17 @@ module Woods
 
         # Whether native raw-ID eligibility is supported before the result limit.
         def supports_id_filter? = false
+
+        # How many raw ids one id-filtered search may carry, or nil for no
+        # bound. Adapters that bind every id as a statement parameter or send
+        # them in a request body keep this default; the in-memory adapter
+        # walks its whole buffer per call, so it answers nil and a scoped
+        # search makes one call instead of one per hundred ids (N-ip-1).
+        #
+        # @return [Integer, nil]
+        def id_filter_batch_size
+          DEFAULT_ID_FILTER_BATCH_SIZE
+        end
 
         # Delete a vector by ID.
         #
@@ -228,6 +241,10 @@ module Woods
 
         def supports_id_filter? = true
 
+        # @see Interface#id_filter_batch_size — one pass over the buffer
+        # answers any number of ids.
+        def id_filter_batch_size = nil
+
         # @see Interface#search
         def search(query_vector, limit: 10, filters: {}, ids: nil)
           return [] if @dim.nil?
@@ -238,7 +255,12 @@ module Woods
           end
 
           scored = gather_candidates(query_vector, filters, ids)
-          scored.sort_by! { |r| ids ? [-r.score, r.id] : [-r.score] }
+          # With an id filter the key is total (score, then raw id), so a
+          # partial selection returns exactly what a full sort would, without
+          # sorting every candidate of a large scope (N-ip-1).
+          return scored.min_by(limit) { |r| [-r.score, r.id] } if ids
+
+          scored.sort_by! { |r| [-r.score] }
           scored.first(limit)
         end
 

@@ -717,6 +717,28 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(store.find('User')).to eq('type' => 'model', 'version' => 2)
       end
 
+      # N-ip-2. The whole-record haystack used to be re-serialised with
+      # JSON.generate for every record on every all-fields search (per
+      # keyword, per request). It is computed once per stored record and
+      # dropped when that record changes or goes away.
+      it 'serialises each record once across all-fields searches, and again after it changes' do
+        store.store('Invoice', { type: 'model', description: 'Handles Billing And Payments' })
+        store.store('Shipment', { type: 'model', description: 'Tracks parcels' })
+        allow(JSON).to receive(:generate).and_call_original
+
+        store.search('billing')
+        store.search('parcels')
+        expect(JSON).to have_received(:generate).exactly(2).times
+
+        store.store('Invoice', { type: 'model', description: 'renamed record' })
+        expect(store.search('renamed').map { |r| r['id'] }).to eq(['Invoice'])
+        expect(store.search('billing')).to be_empty
+        store.delete('Invoice')
+        expect(store.search('renamed')).to be_empty
+        store.clear!
+        expect(store.search('parcels')).to be_empty
+      end
+
       # The in-memory store has nothing durable to protect: #transaction is
       # the Interface default and simply yields.
       it 'runs a transaction block without rolling anything back' do
