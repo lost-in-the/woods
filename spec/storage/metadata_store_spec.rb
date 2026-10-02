@@ -423,6 +423,44 @@ RSpec.describe Woods::Storage::MetadataStore do
         end
       end
 
+      # N-ip-3. The indexer groups each embed batch's writes in one
+      # transaction: one journal commit per batch instead of one autocommit
+      # per record, and a batch that fails mid-way leaves no partial rows.
+      describe '#transaction' do
+        let(:db) { store.instance_variable_get(:@db) }
+
+        it 'commits the block as one unit' do
+          store.transaction do
+            store.store('User', { type: 'model' })
+            store.store('Order', { type: 'model' })
+          end
+
+          expect(store.count).to eq(2)
+          expect(db.transaction_active?).to be(false)
+        end
+
+        it 'rolls back every write in the block when it raises, and re-raises' do
+          expect do
+            store.transaction do
+              store.store('User', { type: 'model' })
+              raise IOError, 'provider down'
+            end
+          end.to raise_error(IOError, 'provider down')
+
+          expect(store.count).to eq(0)
+          expect(db.transaction_active?).to be(false)
+        end
+
+        it 'joins an open transaction instead of nesting one' do
+          store.transaction do
+            store.transaction { store.store('User', { type: 'model' }) }
+            expect(db.transaction_active?).to be(true)
+          end
+
+          expect(store.count).to eq(1)
+        end
+      end
+
       # L22 — the type column backs find_by_type, but an absent key fell
       # through `type.to_s` and was stored as "", fabricating a type where
       # none existed instead of surfacing the missing field.
@@ -677,6 +715,19 @@ RSpec.describe Woods::Storage::MetadataStore do
         store.store('User', { type: 'model', version: 2 })
         expect(store.each_entry.to_h.dig('User', 'updated_at')).to eq(later.iso8601)
         expect(store.find('User')).to eq('type' => 'model', 'version' => 2)
+      end
+
+      # The in-memory store has nothing durable to protect: #transaction is
+      # the Interface default and simply yields.
+      it 'runs a transaction block without rolling anything back' do
+        expect do
+          store.transaction do
+            store.store('User', { type: 'model' })
+            raise IOError, 'provider down'
+          end
+        end.to raise_error(IOError)
+
+        expect(store.count).to eq(1)
       end
 
       it 'returns nil for missing IDs' do

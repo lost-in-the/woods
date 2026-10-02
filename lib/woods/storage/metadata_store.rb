@@ -133,6 +133,19 @@ module Woods
           raise NotImplementedError
         end
 
+        # Run the block's writes as one unit where the backend can (N-ip-3).
+        # The indexer wraps each embed batch in one, so SQLite pays one
+        # journal commit per batch instead of one autocommit per record, and
+        # a batch that fails after its records were stored rolls them back.
+        # This default is a real implementation, not a raising stub: a
+        # backend with nothing durable to protect simply yields.
+        #
+        # @yield the writes to group
+        # @return [Object] the block's value
+        def transaction
+          yield
+        end
+
         # Delete a unit by ID.
         #
         # @param id [String] The identifier to delete
@@ -492,6 +505,19 @@ module Woods
         # @see Interface#count
         def count
           @db.get_first_value('SELECT COUNT(*) FROM units')
+        end
+
+        # @see Interface#transaction
+        #
+        # One BEGIN/COMMIT around the block; a block that raises is rolled
+        # back and its error re-raised. An already-open transaction is joined
+        # rather than nested (SQLite has no nested BEGIN). Busy waits are the
+        # connection's busy_timeout: nothing in here is retried, since the
+        # block's side effects (embedding calls) must not run twice.
+        def transaction(&block)
+          return yield if @db.transaction_active?
+
+          @db.transaction(&block)
         end
 
         # Reads only grouped type counts from the local SQLite database.
