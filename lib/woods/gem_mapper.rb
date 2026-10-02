@@ -266,12 +266,13 @@ module Woods
       counts = GemMapper::TYPE_DIRECTORIES.keys.to_h do |type|
         [GemMapper::TYPE_DIRECTORIES[type], @units.count { |unit| unit.type == type }]
       end
+      stats = @graph.to_h.fetch(:stats)
       manifest = {
         extracted_at: Time.now.utc.iso8601, rails_version: nil, ruby_version: RUBY_VERSION,
         woods_version: Woods::VERSION,
         counts: counts, total_units: @units.size, total_chunks: 0, git_sha: nil, git_branch: nil,
         provenance: GemMapper::PROVENANCE.merge(source_checksum: @checksum),
-        graph_nodes: @graph.to_h.dig(:stats, :node_count), graph_edges: @graph.to_h.dig(:stats, :edge_count)
+        graph_nodes: stats[:node_count], graph_edges: stats[:edge_count]
       }
       AtomicFile.write(@payload.join('manifest.json'), JSON.pretty_generate(manifest))
     end

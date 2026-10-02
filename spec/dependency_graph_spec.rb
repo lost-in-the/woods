@@ -554,6 +554,40 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.to_h[:edges]['Order'].map { |e| e[:target] }).to eq(['User'])
     end
 
+    # F12. Edge hashes were duplicated, but their `:target` strings were the
+    # live graph's, so `to_h[:edges]['Order'][0][:target] << '_x'` rewrote
+    # what `dependencies_of` answered; nodes, reverse, file_map, type_index
+    # and stats were the memo's own containers, so a mutation changed every
+    # later `to_h`. A snapshot is now the caller's alone.
+    it 'does not expose live strings or the memo through any section' do
+      graph.register(make_unit(type: :model, identifier: 'Order', file_path: +'/app/order.rb',
+                               dependencies: [{ type: :model, target: +'User', via: :belongs_to }]))
+      before = JSON.parse(JSON.generate(graph.to_h))
+
+      snapshot = graph.to_h
+      snapshot[:edges]['Order'].first[:target] << '_x'
+      snapshot[:nodes]['Order'][:file_path] << '_x'
+      snapshot[:reverse]['User'] << 'EVIL'
+      snapshot[:file_map].each_value { |identifiers| identifiers << 'EVIL' }
+      snapshot[:type_index][:model] << 'EVIL'
+      snapshot[:stats][:types][:model] = 99
+
+      expect(graph.dependencies_of('Order')).to eq(['User'])
+      expect(graph.dependents_of('User')).to eq(['Order'])
+      expect(JSON.parse(JSON.generate(graph.to_h))).to eq(before)
+      expect(JSON.parse(JSON.generate(described_class.from_h(graph.to_h).to_h))).to eq(before)
+    end
+
+    it 'shares frozen strings instead of copying them' do
+      graph.register(make_unit(type: :model, identifier: 'Order',
+                               dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))
+
+      target = graph.to_h[:edges]['Order'].first[:target]
+
+      expect(target).to be_frozen
+      expect(target).to equal(graph.to_h[:edges]['Order'].first[:target])
+    end
+
     it 'invalidates the cache when a new unit is registered' do
       first = graph.to_h
       graph.register(make_unit(type: :model, identifier: 'Post'))
