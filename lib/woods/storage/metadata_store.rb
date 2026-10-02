@@ -193,8 +193,16 @@ module Woods
         end
 
         # @see Interface#store
+        #
+        # Same definition as the SQLite adapter (F18): `updated_at` is the
+        # last content change, compared on the JSON text, so an unchanged
+        # re-store keeps the record and its stamp.
         def store(id, metadata)
-          @data[id] = normalize(metadata).merge('updated_at' => Time.now.iso8601)
+          text = JSON.generate(metadata)
+          existing = @data[id]
+          return existing if existing && JSON.generate(existing.except('updated_at')) == text
+
+          @data[id] = JSON.parse(text).merge('updated_at' => Time.now.iso8601)
         end
 
         # @see Interface#find
@@ -401,11 +409,19 @@ module Woods
 
           data = JSON.generate(metadata)
 
+          # The WHERE clause is the whole of F18: without it every re-store
+          # rewrote the row and paid a journal write plus fsyncs, so an
+          # unchanged incremental embed over N units cost N synchronous
+          # writes for nothing. Equality is on the JSON text (a key-order-only
+          # difference counts as a change), and `updated_at` is therefore the
+          # last content change. The column's NUMERIC affinity cannot reach a
+          # record: its text always starts with "{".
           with_lock_retry do
             @db.execute(<<~SQL, [id, type.to_s, data, Time.now.iso8601])
               INSERT INTO units (id, type, data, updated_at) VALUES (?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET
                 type = excluded.type, data = excluded.data, updated_at = excluded.updated_at
+              WHERE units.type IS NOT excluded.type OR units.data IS NOT excluded.data
             SQL
           end
         end

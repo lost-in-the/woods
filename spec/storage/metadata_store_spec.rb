@@ -357,6 +357,72 @@ RSpec.describe Woods::Storage::MetadataStore do
         expect(result['version']).to eq(2)
       end
 
+      # F18. Every re-store used to rewrite the row, so an unchanged
+      # `woods:embed_incremental` over N units paid N journal writes and
+      # fsyncs for nothing (8.3 s of a 10.6 s run on 5,000 units). The upsert
+      # now updates only when type or data differ; `updated_at` therefore
+      # records the last content change.
+      describe 'updated_at records the last content change' do
+        let(:db) { store.instance_variable_get(:@db) }
+        let(:first) { Time.utc(2026, 1, 1, 0, 0, 0) }
+        let(:later) { Time.utc(2026, 1, 1, 0, 0, 5) }
+
+        before { allow(Time).to receive(:now).and_return(first, later, later, later) }
+
+        def updated_at(id)
+          db.get_first_value('SELECT updated_at FROM units WHERE id = ?', [id])
+        end
+
+        it 'leaves an unchanged record, and its timestamp, untouched' do
+          store.store('User', { type: 'model', version: 1 })
+          store.store('User', { type: 'model', version: 1 })
+
+          expect(db.changes).to eq(0)
+          expect(updated_at('User')).to eq(first.iso8601)
+          expect(store.find('User')).to eq('type' => 'model', 'version' => 1)
+        end
+
+        it 'rewrites the row when the data changes' do
+          store.store('User', { type: 'model', version: 1 })
+          store.store('User', { type: 'model', version: 2 })
+
+          expect(db.changes).to eq(1)
+          expect(updated_at('User')).to eq(later.iso8601)
+          expect(store.find('User')['version']).to eq(2)
+        end
+
+        it 'rewrites the row when only the type changes' do
+          store.store('User', { type: 'model' })
+          store.store('User', { type: 'service' })
+
+          expect(updated_at('User')).to eq(later.iso8601)
+          expect(store.find_by_type('service').map { |r| r['id'] }).to eq(['User'])
+          expect(store.find_by_type('model')).to be_empty
+        end
+
+        # Equality is on the JSON text, not the parsed document: a record whose
+        # keys merely moved is rewritten. Documented, and cheaper than
+        # canonicalising every write.
+        it 'treats a key-order-only difference as a change' do
+          store.store('User', { type: 'model', a: 1, b: 2 })
+          store.store('User', { b: 2, a: 1, type: 'model' })
+
+          expect(updated_at('User')).to eq(later.iso8601)
+        end
+
+        # The `data JSON` column has NUMERIC affinity, under which the texts
+        # '1' and '1.0' compare equal. A stored record is always a JSON object
+        # (its text starts with "{"), so affinity never applies to it; pinned
+        # so a schema change cannot silently widen the "unchanged" test.
+        it 'is not fooled by numeric affinity: a 1 to 1.0 change inside the JSON text is a change' do
+          store.store('N', { type: 'model', n: 1 })
+          store.store('N', { type: 'model', n: 1.0 })
+
+          expect(db.changes).to eq(1)
+          expect(store.find('N')['n']).to be_a(Float)
+        end
+      end
+
       # L22 — the type column backs find_by_type, but an absent key fell
       # through `type.to_s` and was stored as "", fabricating a type where
       # none existed instead of surfacing the missing field.
@@ -594,6 +660,23 @@ RSpec.describe Woods::Storage::MetadataStore do
 
         expect(store.count).to eq(1)
         expect(store.find('User')['version']).to eq(2)
+      end
+
+      # F18. Same definition as the SQLite adapter: `updated_at` (visible
+      # through the Snapshotter seam, #each_entry) is the last content
+      # change, so an unchanged re-store keeps the earlier stamp.
+      it 'keeps updated_at across an unchanged re-store and advances it on a change' do
+        first = Time.utc(2026, 1, 1, 0, 0, 0)
+        later = Time.utc(2026, 1, 1, 0, 0, 5)
+        allow(Time).to receive(:now).and_return(first, later, later)
+
+        store.store('User', { type: 'model', version: 1 })
+        store.store('User', { type: 'model', version: 1 })
+        expect(store.each_entry.to_h.dig('User', 'updated_at')).to eq(first.iso8601)
+
+        store.store('User', { type: 'model', version: 2 })
+        expect(store.each_entry.to_h.dig('User', 'updated_at')).to eq(later.iso8601)
+        expect(store.find('User')).to eq('type' => 'model', 'version' => 2)
       end
 
       it 'returns nil for missing IDs' do

@@ -257,6 +257,8 @@ before relying on these snapshot improvements.
 | `metadata_store_options` | Hash | `nil` | Backend-specific options |
 | `graph_store` | Symbol | `:in_memory` when unset at embed time | Graph backend: `:in_memory`; the same embed-time fallback applies. |
 
+Both metadata backends stamp each record with `updated_at`, and the stamp records the **last content change**: re-storing a record whose type and JSON text are unchanged leaves it untouched (SQLite issues no write and no journal fsync; a key-order-only difference counts as a change). The stamp is persisted (SQLite) and carried by the in-memory dump, but nothing in Woods reads it back: `find` and `search` strip it.
+
 ### pgvector (PostgreSQL)
 
 ```ruby
