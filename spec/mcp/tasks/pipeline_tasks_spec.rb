@@ -236,6 +236,11 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
       expect(task['status']).to eq('failed')
       expect(task.dig('error', 'message')).to include('out of memory')
     ensure
+      # The record lands before the thread dies, so the hooks' drain could
+      # still find the thread alive and join it; Thread#join re-raises the
+      # error a thread died with, which would fail this example for the
+      # very behaviour it asserts. Let the thread finish dying first.
+      settle { (Thread.list - [Thread.current]).empty? }
       Thread.report_on_exception = previous
     end
   end
