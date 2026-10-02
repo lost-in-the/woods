@@ -322,10 +322,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                  [%w[entry_point], 'PostsController#create'],
                                  [%w[route], nil],
                                  [%w[max_depth], 3],
-                                 # The fixture defines index/show but no create, so expansion
-                                 # takes the documented named-but-undefined fallback: whole-unit
-                                 # operations (not the old silently-empty list), and depth >= 1
-                                 # follows the Post targets into the model step.
+                                 # The fixture defines index/show but no create: a named method
+                                 # the unit does not define yields no operations (F5), so there
+                                 # is nothing to expand at any depth.
                                  [%w[steps], trace_flow_steps.fetch(:deep)],
                                  key_sets: { [] => %w[entry_point route max_depth generated_at steps] },
                                  types: { %w[generated_at] => String }
@@ -869,27 +868,18 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(data).to eq('recorded' => true, 'type' => 'rating', 'query' => 'Post', 'score' => value)
   end
 
-  # The fixture controller defines index/show but not create, so trace_flow's
-  # expansion takes the documented named-but-undefined fallback: whole-unit
-  # operations rather than a silently empty list. Depth >= 1 then follows the
-  # Post call targets into the model step.
+  # The fixture controller defines index/show but not create. A named method
+  # the unit does not define yields no operations (F5): the whole-unit
+  # fallback it used to take reported index's and show's calls as create's
+  # and then followed them into the model step. No operations means nothing
+  # to expand at any depth.
   def trace_flow_steps
     entry = {
       'unit' => 'PostsController#create', 'type' => 'controller',
       'file_path' => 'app/controllers/posts_controller.rb',
-      'operations' => [
-        { 'line' => 3, 'method' => 'all', 'target' => 'Post', 'type' => 'call' },
-        { 'line' => 7, 'method' => 'find', 'target' => 'Post', 'type' => 'call' }
-      ]
+      'operations' => []
     }
-    model = {
-      'unit' => 'Post', 'type' => 'model', 'file_path' => 'app/models/post.rb',
-      'operations' => [
-        { 'line' => 2, 'method' => 'has_many', 'target' => nil, 'type' => 'call' },
-        { 'line' => 3, 'method' => 'validates', 'target' => nil, 'type' => 'call' }
-      ]
-    }
-    { entry_only: [entry], deep: [entry, model] }
+    { entry_only: [entry], deep: [entry] }
   end
 
   def assert_trace_depth(data, value, _name)
