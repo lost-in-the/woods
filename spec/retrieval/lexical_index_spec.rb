@@ -64,6 +64,35 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(search(exact_name).first.identifier).to eq(target)
   end
 
+  # F6 step 2. A scoped request used to build a whole new index over the
+  # eligible records, re-reading and re-tokenising every one of them per
+  # request (4.8 s for a 6,130-unit scope on the self-map). A view over this
+  # index's own documents answers exactly what that rebuilt index did: the
+  # BM25 statistics are recomputed over the subset, the documents are shared.
+  it 'answers a restricted view exactly like an index built over the subset, without re-reading the store' do
+    billing = add('Invoice', source: 'charge the customer ledger', path: 'packs/billing/app/models/invoice.rb')
+    add('Ledger', source: 'ledger ledger entries', path: 'packs/billing/app/models/ledger.rb')
+    add('Shipment', source: 'ledger of parcels', path: 'packs/shipping/app/models/shipment.rb')
+    index = described_class.new(metadata_store: store)
+    subset = Woods::Storage::MetadataStore::InMemory.new
+    [billing, Woods::StorageIdentity.key('Ledger', 'model')].each { |key| subset.store(key, store.find(key)) }
+    direct = described_class.new(metadata_store: subset)
+    allow(store).to receive(:find).and_call_original
+
+    view = index.restricted_to(subset.all_identifiers)
+
+    expect(store).not_to have_received(:find)
+    %w[ledger customer parcels Invoice].each do |query|
+      shape = ->(result) { result.candidates.map { |c| [c.identifier, c.score, c.matched_fields, c.metadata] } }
+      expect(shape.call(view.execute(query: query))).to eq(shape.call(direct.execute(query: query)))
+    end
+    # Statistics are the subset's: "ledger" is rarer in the full index than in the view.
+    full_score = index.execute(query: 'ledger').candidates.find { |c| c.identifier == billing }.score
+    view_score = view.execute(query: 'ledger').candidates.find { |c| c.identifier == billing }.score
+    expect(view_score).not_to eq(full_score)
+    expect(view.execute(query: 'parcels').candidates).to be_empty
+  end
+
   it 'retains an immutable snapshot when the underlying store changes' do
     key = add('Record', source: 'oldword')
     index = described_class.new(metadata_store: store)

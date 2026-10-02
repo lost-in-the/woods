@@ -74,6 +74,32 @@ RSpec.describe 'Explicit lexical retrieval' do
     expect(second.context).to include('source_code:email')
   end
 
+  # F6 step 2. The lexical pipeline's index is built once; a scoped request
+  # derives a view over the eligible keys instead of constructing another
+  # index over them, and answers byte-identically to a retriever built over
+  # only the eligible records.
+  it 'serves a scoped request from the pipeline index instead of rebuilding one, with identical output' do
+    billing = Woods::StorageIdentity.key('Billing', 'service')
+    store.store(billing, { 'identifier' => 'Billing', 'type' => 'service',
+                           'file_path' => 'packs/billing/app/services/billing.rb',
+                           'source_code' => 'def notify; send_invoice; end',
+                           'metadata' => { 'package' => 'packs/billing' } })
+    eligible = Woods::Storage::MetadataStore::InMemory.new
+    eligible.store(billing, store.find(billing))
+    allow(Woods::Retrieval::LexicalIndex).to receive(:new).and_call_original
+    retriever = Woods::Retriever.new(vector_store: nil, metadata_store: store, graph_store: nil,
+                                     embedding_provider: nil, mode: :lexical)
+    reference = Woods::Retriever.new(vector_store: nil, metadata_store: eligible, graph_store: nil,
+                                     embedding_provider: nil, mode: :lexical).retrieve('notify')
+
+    scoped = retriever.retrieve('notify', source_paths: ['packs/billing'])
+
+    expect(Woods::Retrieval::LexicalIndex).to have_received(:new).with(hash_including(:metadata_store)).twice
+    expect(scoped.sources.map { |s| s[:identifier] }).to eq(['Billing'])
+    expect([scoped.context, scoped.sources]).to eq([reference.context, reference.sources])
+    expect(scoped.applied_scope).to include(outcome: :matched, eligible_units: 1)
+  end
+
   it 'atomically replaces the immutable lexical pipeline' do
     config.retrieval_mode = :lexical
     retriever = builder.build_retriever(metadata_store: store)

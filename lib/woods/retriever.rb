@@ -447,9 +447,21 @@ module Woods
     end
 
     def scoped_pipeline(pipeline, scope)
-      vector = Retrieval::ScopedVectorStore.new(store: pipeline.vector_store, scope: scope)
       graph = Retrieval::ScopedGraphStore.new(store: pipeline.graph_store, scope: scope)
+      return scoped_lexical_pipeline(pipeline, scope, graph) if @mode == :lexical
+
+      vector = Retrieval::ScopedVectorStore.new(store: pipeline.vector_store, scope: scope)
       build_pipeline(vector_store: vector, metadata_store: scope.metadata_store, graph_store: graph)
+    end
+
+    # The lexical pipeline's index is immutable and built once, so a scoped
+    # request derives a view over the eligible keys instead of re-reading
+    # and re-tokenising them into a second index (F6 step 2): on the
+    # 6,139-unit self-map that rebuild cost 4.8 s per request for a `lib/`
+    # scope and 126 ms for a 176-unit one.
+    def scoped_lexical_pipeline(pipeline, scope, graph)
+      Pipeline.new(executor: pipeline.executor.restricted_to(scope.keys), assembler: Retrieval::LexicalAssembler.new,
+                   metadata_store: scope.metadata_store, vector_store: nil, graph_store: graph)
     end
 
     def attach_scope(result, scope)

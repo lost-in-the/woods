@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'set'
 require_relative 'query_classifier'
 require_relative 'search_executor'
 
@@ -19,15 +20,11 @@ module Woods
       Document = Struct.new(:key, :unit, :fields, keyword_init: true)
       private_constant :Document
 
-      def initialize(metadata_store:)
-        @documents = metadata_store.all_identifiers.sort.map do |key|
-          unit = metadata_store.find(key)
-          raise ArgumentError, "missing unit metadata for #{key.inspect}" unless unit.is_a?(Hash)
-
-          unit = JSON.parse(JSON.generate(unit))
-          fields = field_values(unit).transform_values { |value| tokenize(value).tally.freeze }.freeze
-          Document.new(key: key.freeze, unit: deep_freeze(unit), fields: fields).freeze
-        end.compact.freeze
+      # @param metadata_store [MetadataStore::Interface] the records to index
+      # @param documents [Array<Document>, nil] an already-built, immutable
+      #   document set to index instead (see {#restricted_to})
+      def initialize(metadata_store: nil, documents: nil)
+        @documents = (documents || build_documents(metadata_store)).freeze
         @averages = FIELD_WEIGHTS.to_h do |field, _|
           lengths = @documents.map { |doc| doc.fields.fetch(field).values.sum }
           [field, lengths.empty? ? 1.0 : [lengths.sum.fdiv(lengths.size), 1.0].max]
@@ -35,6 +32,20 @@ module Woods
         @frequencies = Hash.new(0)
         @documents.each { |doc| doc.fields.values.flat_map(&:keys).uniq.each { |term| @frequencies[term] += 1 } }
         @frequencies.freeze
+      end
+
+      # A view over the eligible subset of this index's documents, answering
+      # exactly what an index built over those records would: the BM25
+      # statistics (field-length averages, document frequencies) are
+      # recomputed over the subset and the documents, immutable, are shared,
+      # so nothing is re-read or re-tokenised (F6 step 2). A scoped request
+      # used to build a whole index over the eligible records every time.
+      #
+      # @param keys [Enumerable<String>] eligible document keys
+      # @return [LexicalIndex]
+      def restricted_to(keys)
+        allowed = keys.to_set
+        self.class.new(documents: @documents.select { |doc| allowed.include?(doc.key) })
       end
 
       def execute(query:, limit: DEFAULT_LIMIT, type_filter: nil, exclude_types: nil)
@@ -58,6 +69,17 @@ module Woods
       end
 
       private
+
+      def build_documents(metadata_store)
+        metadata_store.all_identifiers.sort.map do |key|
+          unit = metadata_store.find(key)
+          raise ArgumentError, "missing unit metadata for #{key.inspect}" unless unit.is_a?(Hash)
+
+          unit = JSON.parse(JSON.generate(unit))
+          fields = field_values(unit).transform_values { |value| tokenize(value).tally.freeze }.freeze
+          Document.new(key: key.freeze, unit: deep_freeze(unit), fields: fields).freeze
+        end
+      end
 
       def tokenize(value)
         value.to_s.gsub(/(\p{Ll}|\d)(\p{Lu})/u, '\1 \2')

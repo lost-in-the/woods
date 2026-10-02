@@ -470,6 +470,10 @@ retriever.retrieve('How are payments collected?', budget: 1200,
 These filters select eligible published units **before candidate limits**. Each
 list uses OR; package, path, and type restrictions combine with AND. Empty or
 omitted scope lists add no restriction. Existing unscoped calls keep their behavior.
+In lexical mode a scoped request is answered by a view over the pipeline's
+existing index (the BM25 statistics are recomputed over the eligible units, the
+tokenised documents are shared), so it costs the eligibility pass plus the
+search, not a second index build per request.
 
 - **Packages:** exact, case-sensitive published nearest owners. A parent package
   excludes its nested packages unless both names are requested. `.` selects only
