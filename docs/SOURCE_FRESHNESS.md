@@ -134,8 +134,11 @@ enabling hooks does not implicitly restart or replace a daemon.
 
 Coverage follows the shared file/whole-app dispatch rules and reload policy:
 application and lib Ruby, known views/locales/tests/packages/schedules/schema and
-boot configuration. Source-only boot coverage also includes `Rakefile`,
-`config.ru`, root gemspecs and otherwise-unclassified Ruby helpers under `config/`.
+boot configuration. Boot coverage also includes `Rakefile`, `config.ru`, root
+gemspecs and otherwise-unclassified Ruby helpers under `config/`; included in
+Woods `2.1.1`, the first three restart the watch daemon when they change, and a
+`config/` helper does when the daemon's process loaded it at boot (earlier
+releases captured them for drift reporting only).
 Normal generated/hidden directories are pruned before traversal, using the watch
 scanner's exclusions. Explicit source roots override generic exclusions; the
 index output is always excluded. Contained file symlinks are checked for stable

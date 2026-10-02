@@ -4,6 +4,8 @@ woods_input_action() {
   if [[ "$path" == Gemfile ]]; then printf full; return; fi
   if [[ "$path" == Gemfile.lock ]]; then printf full; return; fi
   if [[ "$path" == .ruby-version ]]; then printf full; return; fi
+  if [[ "$path" == Rakefile ]]; then printf full; return; fi
+  if [[ "$path" == config.ru ]]; then printf full; return; fi
   if [[ "$path" == config/application.rb ]]; then printf full; return; fi
   if [[ "$path" == config/boot.rb ]]; then printf full; return; fi
   if [[ "$path" == config/environment.rb ]]; then printf full; return; fi
@@ -15,6 +17,7 @@ woods_input_action() {
   if [[ "$path" == config/initializers/* ]]; then printf full; return; fi
   if [[ "$path" == config/environments/* ]]; then printf full; return; fi
   if [[ "$path" == config/credentials/* ]]; then printf full; return; fi
+  if [[ "$path" =~ ^[^/]+\.gemspec$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/settings\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/settings/[^/]+\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml$ ]]; then printf full; return; fi

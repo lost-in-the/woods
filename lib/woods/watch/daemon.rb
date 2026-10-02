@@ -204,6 +204,12 @@ module Woods
         reset_cycle_state
       end
 
+      # Hosts that embed the daemon can name the config Ruby their boot loaded
+      # instead of having it read from `$LOADED_FEATURES`.
+      #
+      # @param paths [Array<String>] root-relative paths
+      attr_writer :loaded_boot_paths
+
       # Watch until stopped, a restart is required, or the idle timeout fires.
       #
       # @return [Symbol] why the loop ended — `:stopped`, `:restart_required`,
@@ -440,6 +446,8 @@ module Woods
       # The policy's answer with the index's declared roots and a pending
       # reconciliation applied.
       def classify_batch(relative_paths)
+        return :restart if relative_paths.any? { |path| loaded_boot_paths.include?(path) }
+
         action = @policy.classify_all(relative_paths)
         return :reload if %i[ignore reextract].include?(action) && declared_root_change?(relative_paths)
         return :reextract if action == :ignore && reconciliation_required?
@@ -458,6 +466,28 @@ module Woods
         return false if rules.extra_roots.empty?
 
         relative_paths.any? { |path| rules.declared_root_ruby?(path) }
+      end
+
+      # Ruby under config/ this process loaded at boot: helpers required from
+      # the Rakefile or application.rb that set values the extraction captures.
+      # {ReloadPolicy} ignores generic config Ruby because only the booted
+      # process knows which helpers it loaded (F3); injectable for hosts that
+      # embed the daemon, read from `$LOADED_FEATURES` otherwise.
+      #
+      # @return [Array<String>] root-relative paths
+      def loaded_boot_paths
+        @loaded_boot_paths ||= begin
+          root = begin
+            File.realpath(@root)
+          rescue SystemCallError
+            @root
+          end
+          $LOADED_FEATURES.filter_map do |feature|
+            next unless feature.start_with?("#{root}/config/") && feature.end_with?('.rb')
+
+            feature.delete_prefix("#{root}/")
+          end.uniq
+        end
       end
 
       # @return [Boolean] whether this process cannot honour a `:reload` in place
@@ -983,6 +1013,9 @@ module Woods
       def restart_reason(change_set)
         triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
         return triggers.first(5).join(', ') if triggers.any?
+
+        loaded = change_set.relative_paths.select { |path| loaded_boot_paths.include?(path) }
+        return "config Ruby loaded at boot changed: #{loaded.first(5).join(', ')}" if loaded.any?
 
         once = once_owned_paths(change_set.absolute_paths).map { |path| change_set.relativize(path) }
         return "autoload_once_paths constant changed: #{once.first(5).join(', ')}" if once.any?

@@ -198,6 +198,26 @@ RSpec.describe Woods::Watch::Daemon do
       expect(result[:reason]).to include('reloading disabled', 'app/models/user.rb')
     end
 
+    it 'restarts for a config Ruby helper this process loaded at boot, naming it (F3)' do
+      daemon = build
+      daemon.loaded_boot_paths = ['config/time_zone.rb']
+
+      result = daemon.process(['config/time_zone.rb'])
+
+      expect(result[:action]).to eq(:restart)
+      expect(result[:reason]).to include('config/time_zone.rb')
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'still ignores a config Ruby helper this process never loaded' do
+      daemon = build
+      daemon.loaded_boot_paths = ['config/time_zone.rb']
+
+      result = daemon.process(['config/other_helper.rb'])
+
+      expect(result[:action]).to eq(:ignore)
+    end
+
     it 'records the restart in the status file so a reader can see why' do
       build.process(['Gemfile.lock'])
 

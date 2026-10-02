@@ -273,7 +273,11 @@ database/schema files, `config/settings.yml`, `config/settings/*.yml`, or
 boot-captured service config
 (`config/{cable,storage,sidekiq,puma,cache,queue}.yml`, including `.yaml`)
 make the daemon write a degraded status, stop, and exit `75` for a supervisor
-to restart it. Scheduled-job YAML remains an in-process re-extraction input.
+to restart it. Included in Woods `2.1.1`, so do the `Rakefile`, `config.ru`, root
+gemspecs, and any Ruby under `config/` the daemon's own process loaded at boot (a
+helper required from the Rakefile or `config/application.rb`); earlier releases
+captured those for freshness but kept serving the values they no longer set
+(F3). Scheduled-job YAML remains an in-process re-extraction input.
 The exact matchers live in `lib/woods/reload_policy.rb`.
 
 A Ruby file under a source root the published index declares (`woods-extract

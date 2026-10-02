@@ -64,6 +64,8 @@ module Woods
       Gemfile
       Gemfile.lock
       .ruby-version
+      Rakefile
+      config.ru
       config/application.rb
       config/boot.rb
       config/environment.rb
@@ -93,6 +95,13 @@ module Woods
     # re-extract. The boot-captured set is small and knowable; guessing at it
     # costs more than listing it.
     RESTART_PATH_PATTERNS = [
+      # Root gemspecs are read when the bundle loads, like the Gemfile. The
+      # Rakefile and config.ru above are loaded before Rails boots and can set
+      # config values the extraction captures; they were captured for freshness
+      # but never restarted on (F3). Generic config/*.rb stays unclassified here:
+      # only the booted process knows which helpers it loaded, and the watch
+      # daemon restarts for those from its own loaded-feature list.
+      %r{\A[^/]+\.gemspec\z},
       %r{\Aconfig/settings\.ya?ml\z},
       %r{\Aconfig/settings/[^/]+\.ya?ml\z},
       # Note what is absent: `config/recurring.yml` and `config/sidekiq_cron.yml`
