@@ -881,19 +881,26 @@ RSpec.describe 'packaged gem' do
     it 'runs both generators, loads rake tasks, and extracts a dummy Rails app' do
       app = File.join(@package_tmp, 'dummy-app')
       write_dummy_app(app)
+      run = lambda do |*app_command|
+        stdout, stderr, status = run_installed(*app_command, chdir: app)
+        expect_success(app_command, stdout, stderr, status)
+        stdout
+      end
+      run.call('bundle', 'install', '--local')
+      run.call('bin/rails', 'generate', 'woods:install')
+      # A default install writes the initializer and no migration (#618); the
+      # legacy application tables are opt-in.
+      expect(File).to exist(File.join(app, 'config/initializers/woods.rb'))
+      expect(Dir[File.join(app, 'db/migrate/*_create_woods_tables.rb')]).to be_empty
+
       commands = [
-        %w[bundle install --local],
-        %w[bin/rails generate woods:install],
+        %w[bin/rails generate woods:install --legacy-migration],
         %w[bin/rails db:migrate],
         %w[bin/rails generate woods:pgvector],
         %w[bundle exec rake -T woods],
         %w[bin/rails woods:extract]
       ]
-      results = commands.to_h do |app_command|
-        stdout, stderr, status = run_installed(*app_command, chdir: app)
-        expect_success(app_command, stdout, stderr, status)
-        [app_command.join(' '), stdout]
-      end
+      results = commands.to_h { |app_command| [app_command.join(' '), run.call(*app_command)] }
 
       expect(results.fetch('bundle exec rake -T woods')).to include('woods:extract')
       woods_migration = Dir[File.join(app, 'db/migrate/*_create_woods_tables.rb')].fetch(0)
