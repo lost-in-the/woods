@@ -106,6 +106,31 @@ RSpec.describe 'Fresh-process source provenance', :booted_app do
     end
   end
 
+  it 'refreshes a model under a declared source root through the launcher incremental path (F15)' do
+    Dir.mktmpdir('woods-source-declared') do |app|
+      make_source_app(app)
+      ledger = File.join(app, 'domain/billing/ledger.rb')
+      FileUtils.mkdir_p(File.dirname(ledger))
+      File.write(ledger,
+                 "module Billing\n  class Ledger < ApplicationRecord\n    self.table_name = 'posts'\n  end\nend\n")
+
+      launch(app, '--source-root', 'domain', 'full')
+      expect(source_manifest(app).data['extra_roots']).to eq(['domain'])
+      reader = Woods::MCP::IndexReader.new(output(app))
+      expect(reader.find_unit('Billing::Ledger', type: 'model')).not_to be_nil
+      before = Woods::Generation.new(output_dir: output(app)).current.number
+
+      File.write(ledger, "module Billing\n  class Ledger < ApplicationRecord\n    self.table_name = 'posts'\n    " \
+                         "scope :closed, -> { where(status: 1) }\n  end\nend\n")
+      expect(state(app)['state']).to eq('drifted')
+      launch(app, '--source-root', 'domain', 'incremental', 'domain/billing/ledger.rb')
+
+      expect(Woods::Generation.new(output_dir: output(app)).current.number).to eq(before + 1)
+      expect(reader.find_unit('Billing::Ledger', type: 'model').fetch('source_code')).to include('scope :closed')
+      expect(state(app)['state']).to eq('current')
+    end
+  end
+
   it 'keeps freshness current for installed gems inside or outside the application checkout' do
     Dir.mktmpdir('woods-source-installed') do |parent|
       app = File.join(parent, 'app')

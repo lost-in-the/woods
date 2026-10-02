@@ -276,6 +276,11 @@ make the daemon write a degraded status, stop, and exit `75` for a supervisor
 to restart it. Scheduled-job YAML remains an in-process re-extraction input.
 The exact matchers live in `lib/woods/reload_policy.rb`.
 
+A Ruby file under a source root the published index declares (`woods-extract
+--source-root PATH`, the manifest's `extra_roots`) is reload input like a file
+under `app/`; included in Woods `2.1.1`, earlier releases ignored such an edit
+unless an `app/` edit happened to share its debounce window.
+
 This is `rails/spring`'s contract, copied deliberately: Spring's staleness bugs
 came from under-scoping exactly this set, so the boundary here is drawn on the
 generous side.

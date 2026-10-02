@@ -3,6 +3,7 @@
 require 'base64'
 require 'json'
 require 'woods/input_rules'
+require 'woods/source_inputs/handoff'
 require 'woods/rake_helpers'
 
 module Woods
@@ -30,8 +31,8 @@ module Woods
 
         Rake::Task[:environment].invoke
         require 'woods/extractor'
-        actions, paths = extraction_work
-        return if paths.empty?
+        actions, paths = extraction_work(output)
+        return report_dropped_ruby(output) if paths.empty?
 
         extractor = Extractor.new(output_dir: output)
         RakeHelpers.woods_with_extraction_lock(output) do
@@ -42,8 +43,30 @@ module Woods
 
       private
 
-      def extraction_work
-        rules = InputRules.new
+      # Declared source roots come from the launcher's handoff when this is
+      # its child, and from the published manifest otherwise (F15).
+      def input_rules(output)
+        @input_rules ||= begin
+          roots = SourceInputs::Handoff.extra_roots | InputRules.for_index(output).extra_roots
+          InputRules.new(extra_roots: roots)
+        end
+      end
+
+      # Silence stays the contract for genuinely irrelevant input; a Ruby file
+      # the rules dropped is the one case worth one line, since a root nobody
+      # declared looks exactly like a change nobody made.
+      def report_dropped_ruby(output)
+        paths = @batch.fetch('events').map { |event| event.fetch('path') }
+        dropped = paths.select { |path| path.end_with?('.rb') }.uniq
+        return if dropped.empty?
+
+        warn "Woods hook: dropped #{dropped.size} Ruby path(s) not under a known source root: " \
+             "#{dropped.first(5).join(', ')} (known roots: #{input_rules(output).known_roots_summary}; " \
+             'declare one with woods-extract --source-root PATH)'
+      end
+
+      def extraction_work(output)
+        rules = input_rules(output)
         events = @batch.fetch('events')
         actions = events.map { |event| rules.action(event.fetch('path'), operation: event.fetch('operation')) }
         paths = events.zip(actions).filter_map { |event, action| event.fetch('path') unless action == :ignore }.uniq

@@ -41,6 +41,32 @@ RSpec.describe Woods::SourceInputs::Session do
     run.finish(generation: generation, eager_load_complete: true)
   end
 
+  def declared_session(operation)
+    scopes = Woods::SourceInputs::Scopes.new(extra_roots: ['domain'])
+    capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key, scopes: scopes).call
+    allow(Woods::SourceInputs::Handoff).to receive_messages(read: capture, extra_roots: ['domain'])
+    described_class.new(root: @root, output_dir: @output, baseline_path: @baseline, operation: operation)
+  end
+
+  # A declared root's capture scope is rebuilt wholesale by a full run; an
+  # incremental run carried the baseline's identity even after a consumer
+  # proved the new bytes, so the index moved while freshness stayed drifted (F15).
+  it 'refreshes the declared scope for a consumed declared-root path during an incremental run' do
+    path = 'domain/billing/ledger.rb'
+    write(path, 'before')
+    baseline = declared_session('full')
+    baseline.consume_unit(:models, path)
+    persist(finish(baseline))
+
+    write(path, 'after')
+    run = declared_session('incremental')
+    run.consume_unit(:models, path)
+    manifest = finish(run, 2)
+
+    expect(manifest.expanded.fetch('declared').fetch(path)).to eq(manifest.expanded.fetch('unit:models').fetch(path))
+    expect(verify(manifest)['state']).to eq('current')
+  end
+
   def persist(manifest)
     File.write(@baseline, JSON.generate(manifest.data))
   end

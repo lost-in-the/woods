@@ -6,6 +6,7 @@ require_relative '../coordination/pipeline_lock'
 require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../reload_policy'
+require_relative '../input_rules'
 require_relative 'status'
 require_relative 'tree_scan'
 require_relative 'watcher'
@@ -430,11 +431,33 @@ module Woods
         paths = change_set.absolute_paths
         paths = paths.reject { |path| startup_covered?(path) } if startup
         relative = ChangeSet.new(paths: paths, root: @root).relative_paths
-        action = @policy.classify_all(relative)
-        action = :reextract if action == :ignore && reconciliation_required?
+        action = classify_batch(relative)
         return :restart if action == :reload && reload_needs_restart?(paths)
 
         action
+      end
+
+      # The policy's answer with the index's declared roots and a pending
+      # reconciliation applied.
+      def classify_batch(relative_paths)
+        action = @policy.classify_all(relative_paths)
+        return :reload if %i[ignore reextract].include?(action) && declared_root_change?(relative_paths)
+        return :reextract if action == :ignore && reconciliation_required?
+
+        action
+      end
+
+      # A Ruby file under a source root the published index declares
+      # (`--source-root`, the manifest's `extra_roots`) is reload input like
+      # any `app/` file. {ReloadPolicy} is deliberately root-blind so it can
+      # run without an index; the index is what knows the roots. Decided per
+      # batch, so a declared-root edit lands on its own and not only when an
+      # `app/` edit happens to share its debounce window (F15, N-ra-1).
+      def declared_root_change?(relative_paths)
+        rules = InputRules.for_index(@output_dir)
+        return false if rules.extra_roots.empty?
+
+        relative_paths.any? { |path| rules.declared_root_ruby?(path) }
       end
 
       # @return [Boolean] whether this process cannot honour a `:reload` in place
@@ -1076,7 +1099,8 @@ module Woods
       end
 
       def actionable_count(change_set)
-        change_set.relative_paths.count { |path| @policy.classify(path) != :ignore }
+        rules = InputRules.for_index(@output_dir)
+        change_set.relative_paths.count { |path| @policy.classify(path) != :ignore || rules.declared_root_ruby?(path) }
       end
 
       # Did the extractor write units without the generation moving?

@@ -53,17 +53,21 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
-  def publish_generation(reason, payload: nil)
+  def publish_generation(reason, payload: nil, extra_roots: [])
     generation = Woods::Generation.new(output_dir: output_dir)
     key = Woods::SourceInputs::PrivateKey.new(output_dir: output_dir, create: true)
-    snapshot = Woods::SourceInputs::Scanner.new(root: root, output_dir: output_dir, key: key).call
+    scopes = Woods::SourceInputs::Scopes.new(extra_roots: extra_roots)
+    snapshot = Woods::SourceInputs::Scanner.new(root: root, output_dir: output_dir, key: key, scopes: scopes).call
+    manifest = build_manifest(snapshot, generation.current.number + 1)
+    File.write(File.join(output_dir, payload || '', 'source_inputs.json'), JSON.generate(manifest.data))
+    generation.bump!(reason: reason, payload: payload)
+  end
+
+  def build_manifest(snapshot, number)
     scopes = snapshot.fetch('scope_paths').transform_values do |paths|
       paths.to_h { |path| [path, snapshot.fetch('files').fetch(path)] }
     end
-    manifest = Woods::SourceInputs::Manifest.build(snapshot: snapshot, scopes: scopes, boot_verified: true,
-                                                   generation: generation.current.number + 1)
-    File.write(File.join(output_dir, payload || '', 'source_inputs.json'), JSON.generate(manifest.data))
-    generation.bump!(reason: reason, payload: payload)
+    Woods::SourceInputs::Manifest.build(snapshot: snapshot, scopes: scopes, boot_verified: true, generation: number)
   end
 
   def touch(relative)
@@ -127,6 +131,31 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(reloader).to have_received(:reload!)
       expect(result[:action]).to eq(:incremental)
+    end
+  end
+
+  describe 'declared source roots (F15, N-ra-1)' do
+    it 'reloads and extracts a Ruby file under a root the published index declares, on its own' do
+      publish_generation('full', extra_roots: ['domain'])
+      touch('domain/billing/ledger.rb')
+
+      result = build.process(['domain/billing/ledger.rb'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(reloader).to have_received(:reload!)
+      expect(extractor).to have_received(:extract_changed) do |paths|
+        expect(paths).to include(a_string_ending_with('domain/billing/ledger.rb'))
+      end
+    end
+
+    it 'still ignores the same path when the index declares no such root' do
+      publish_generation('full')
+      touch('domain/billing/ledger.rb')
+
+      result = build.process(['domain/billing/ledger.rb'])
+
+      expect(result[:action]).to eq(:ignore)
+      expect(extractor).not_to have_received(:extract_changed)
     end
   end
 

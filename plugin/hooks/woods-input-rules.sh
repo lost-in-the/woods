@@ -19,6 +19,14 @@ woods_input_action() {
   if [[ "$path" =~ ^config/settings/[^/]+\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^\.env(\..+)?$ ]]; then printf full; return; fi
+  local declared_root
+  local IFS=:
+  for declared_root in ${WOODS_DECLARED_ROOTS:-}; do
+    [[ -n "$declared_root" && "$path" == *.rb && "$path" == "${declared_root%/}"/* ]] || continue
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  done
+  unset IFS
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

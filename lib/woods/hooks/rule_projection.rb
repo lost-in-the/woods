@@ -15,6 +15,7 @@ module Woods
           '  local path="$1" operation="${2:-update}"'
         ]
         restart_conditions.each { |condition| lines << "  if #{condition}; then printf full; return; fi" }
+        lines.concat(declared_root_lines)
         rules.each do |rule|
           lines << "  if #{condition_for(rule)}; then"
           lines << '    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac'
@@ -25,6 +26,22 @@ module Woods
       end
 
       private
+
+      # The published index's declared source roots reach the predicate as
+      # WOODS_DECLARED_ROOTS (colon separated), exported by the hook from the
+      # manifest; a Ruby file under one is incremental input (F15).
+      def declared_root_lines
+        [
+          '  local declared_root',
+          '  local IFS=:',
+          '  for declared_root in ${WOODS_DECLARED_ROOTS:-}; do',
+          '    [[ -n "$declared_root" && "$path" == *.rb && "$path" == "${declared_root%/}"/* ]] || continue',
+          '    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac',
+          '    return',
+          '  done',
+          '  unset IFS'
+        ]
+      end
 
       def rules
         PathDispatcher.runtime_rules +

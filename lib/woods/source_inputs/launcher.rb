@@ -151,7 +151,7 @@ module Woods
 
       def incremental_task
         paths = @arguments.map { |path| relative_path(path) }.uniq
-        action = InputRules.new
+        action = InputRules.new(extra_roots: @extra_roots)
         operation = paths.any? { |path| action.action(path) == :full } ? 'full' : 'incremental'
         if paths.size > Hooks::Refresh::MAX_EVENTS
           raise ArgumentError, 'too many incremental paths; split the input or run full'

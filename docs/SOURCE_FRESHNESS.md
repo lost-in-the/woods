@@ -72,7 +72,15 @@ bundle exec woods-extract refresh routes controllers
 (default `WOODS_OUTPUT`, otherwise `tmp/woods`); relative output paths resolve
 under the application root. Repeat `--source-root PATH` to include additional
 application-relative directories used by custom loaders. Use the same declaration
-on subsequent launcher runs. Paths are separate arguments, preserving spaces,
+on subsequent launcher runs. Included in Woods `2.1.1`, a Ruby file under a declared
+root is incremental input for the launcher, the hook task (`woods:hook_refresh`,
+the plugin hook, `woods:incremental`) and the watch daemon, and an incremental
+run that consumes it refreshes its declared-scope identity, so `woods:source_status`
+returns to `current`. Earlier releases dropped such an edit with no output (the
+daemon only when nothing under `app/` shared its debounce window); on those,
+`woods-extract --source-root PATH refresh <type>` or a full run updates the unit.
+The hook task prints one stderr line naming any Ruby path it dropped and the
+roots it knows. Paths are separate arguments, preserving spaces,
 commas and newlines. Refresh accepts known extractor names. Invalid arguments
 fail before extraction; the launcher propagates the child's failure or daemon
 stand-down exit 75. Split oversized incremental batches or choose full.

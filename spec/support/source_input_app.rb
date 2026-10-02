@@ -23,6 +23,12 @@ module SourceInputApp
           config.logger = Logger.new(IO::NULL)
         end
         WoodsDummyConfig.apply(SourceFixtureApplication.config, Dir.pwd)
+        domain = File.join(Dir.pwd, 'domain')
+        if File.directory?(domain)
+          # A declared source root an app autoloads and eager loads (F15 fixture).
+          SourceFixtureApplication.config.autoload_paths << domain
+          SourceFixtureApplication.config.eager_load_paths << domain
+        end
         SourceFixtureApplication.initialize!
         ActiveRecord::Base.establish_connection(:test)
         unless ActiveRecord::Base.connection.table_exists?(:posts)

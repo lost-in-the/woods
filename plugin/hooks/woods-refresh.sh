@@ -51,6 +51,22 @@ cwd="${cwd%/}"
 configured_output="${WOODS_OUTPUT:-tmp/woods}"
 case "$configured_output" in /*) tmp_dir="$configured_output" ;; *) tmp_dir="$cwd/$configured_output" ;; esac
 [ -f "$tmp_dir/generation.json" ] || exit 0
+# Source roots the published index declares (woods-extract --source-root),
+# handed to the generated predicate; a missing or malformed manifest declares
+# none, and that is silent on purpose.
+declared_roots() {
+  local payload_dir manifest
+  if command -v jq >/dev/null 2>&1; then
+    payload_dir="$(jq -r '.payload // ""' "$tmp_dir/generation.json" 2>/dev/null)" || return 0
+    manifest="$tmp_dir/${payload_dir:+$payload_dir/}source_inputs.json"
+    [ -f "$manifest" ] || return 0
+    jq -r '(.extra_roots // []) | map(select(type == "string")) | join(":")' "$manifest" 2>/dev/null || true
+  elif command -v ruby >/dev/null 2>&1; then
+    ruby -EUTF-8:UTF-8 -rjson -e 'g = JSON.parse(File.read(ARGV[0])); m = File.join(ARGV[1], g["payload"].to_s, "source_inputs.json"); r = File.file?(m) ? JSON.parse(File.read(m))["extra_roots"] : []; print Array(r).grep(String).join(":")' "$tmp_dir/generation.json" "$tmp_dir" 2>/dev/null || true
+  fi
+}
+WOODS_DECLARED_ROOTS="$(declared_roots)"
+export WOODS_DECLARED_ROOTS
 source "$hook_dir/woods-input-rules.sh" || exit 0
 # Validate every member before publishing the event. Missing/deleted paths are
 # allowed; symlink components are deliberately unsupported, including escapes.
