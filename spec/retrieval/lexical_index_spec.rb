@@ -93,6 +93,40 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(view.execute(query: 'parcels').candidates).to be_empty
   end
 
+  # The restricted view derives its statistics either by recounting the
+  # subset or, when the subset is most of the index, by subtracting the
+  # excluded documents from the full-index tallies. Both must equal a fresh
+  # index over the subset, including for a term only the excluded document
+  # carried and for one whose rarity the exclusion changes.
+  it 'derives majority and minority views by the same statistics as a fresh index over the subset' do
+    keys = [add('Invoice', source: 'charge the customer ledger'),
+            add('Ledger', source: 'ledger ledger entries'),
+            add('Payment', source: 'customer payment entries'),
+            add('Refund', source: 'refund the customer'),
+            add('Shipment', source: 'ledger of parcels')]
+    index = described_class.new(metadata_store: store)
+    shape = ->(result) { result.candidates.map { |c| [c.identifier, c.score, c.matched_fields, c.metadata] } }
+    [keys.first(4), keys.first(2)].each do |subset|
+      eligible = Woods::Storage::MetadataStore::InMemory.new
+      subset.each { |key| eligible.store(key, store.find(key)) }
+      fresh = described_class.new(metadata_store: eligible)
+      view = index.restricted_to(subset)
+      %w[ledger parcels customer entries Invoice refund].each do |query|
+        expect(shape.call(view.execute(query: query))).to eq(shape.call(fresh.execute(query: query)))
+      end
+      expect(view.execute(query: 'parcels').candidates).to be_empty
+    end
+  end
+
+  it 'exposes its immutable units by key for a shared scope corpus' do
+    key = add('Invoice', source: 'charge', path: 'app/models/invoice.rb')
+    index = described_class.new(metadata_store: store)
+    expect(index.units.keys).to eq([key])
+    expect(index.units).to be_frozen
+    expect(index.units.fetch(key)).to be_frozen
+    expect(index.units.fetch(key)).to equal(index.execute(query: 'charge').candidates.first.metadata)
+  end
+
   it 'retains an immutable snapshot when the underlying store changes' do
     key = add('Record', source: 'oldword')
     index = described_class.new(metadata_store: store)

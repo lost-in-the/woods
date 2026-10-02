@@ -91,12 +91,20 @@ RSpec.describe 'Explicit lexical retrieval' do
                                      embedding_provider: nil, mode: :lexical)
     reference = Woods::Retriever.new(vector_store: nil, metadata_store: eligible, graph_store: nil,
                                      embedding_provider: nil, mode: :lexical).retrieve('notify')
+    # The scope, too, resolves from the index's own units: nothing is read
+    # from the store once the pipeline is built.
+    allow(store).to receive(:find).and_call_original
+    allow(store).to receive(:all_identifiers).and_call_original
 
     scoped = retriever.retrieve('notify', source_paths: ['packs/billing'])
+    again = retriever.retrieve('notify', source_paths: ['packs/billing'])
 
     expect(Woods::Retrieval::LexicalIndex).to have_received(:new).with(hash_including(:metadata_store)).twice
+    expect(store).not_to have_received(:find)
+    expect(store).not_to have_received(:all_identifiers)
     expect(scoped.sources.map { |s| s[:identifier] }).to eq(['Billing'])
     expect([scoped.context, scoped.sources]).to eq([reference.context, reference.sources])
+    expect([again.context, again.sources]).to eq([reference.context, reference.sources])
     expect(scoped.applied_scope).to include(outcome: :matched, eligible_units: 1)
   end
 
