@@ -105,7 +105,7 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 
 The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit and graph shapes are the ones documented in [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
 
-What a reader returns is the caller's. `#edges` and `#dependents_of` build their records from a deep-frozen copy of `dependency_graph.json`, so a returned string cannot be changed in place (`FrozenError`), and `#dependents_of` returns a fresh array. Inside the gem, `Woods::DependencyGraph#to_h` hands out a snapshot whose containers and unfrozen strings are all copies: mutating a snapshot, however deeply, changes neither what `#dependencies_of` answers nor what the next publish writes, and a mutated snapshot fed back through `.from_h` carries only the caller's own change.
+What a reader returns is the caller's. `#edges` and `#dependents_of` build their records from a deep-frozen copy of `dependency_graph.json`, so a returned string cannot be changed in place (`FrozenError`), and `#dependents_of` returns a fresh array. Inside the gem, `Woods::DependencyGraph#to_h` hands out a snapshot whose containers and strings are all copies: mutating a snapshot, however deeply, changes neither what `#dependencies_of` answers nor what the next publish writes, and a mutated snapshot fed back through `.from_h` carries only the caller's own change.
 
 ### `#unit`: an identifier shared across types
 

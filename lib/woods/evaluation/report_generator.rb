@@ -51,7 +51,10 @@ module Woods
           'aggregates' => serialize_aggregates(report.aggregates),
           'results' => report.results.map { |r| serialize_result(r) }
         }
-        hash['token_efficiency_basis'] = report.token_efficiency_basis.to_s if report.token_efficiency_basis
+        # A report struct from before the basis existed (a caller's own Struct,
+        # or a recorded report) simply has no such key.
+        basis = report.token_efficiency_basis if report.respond_to?(:token_efficiency_basis)
+        hash['token_efficiency_basis'] = basis.to_s if basis
         threshold_report = report.threshold_report
         hash['threshold_report'] = serialize_threshold_report(threshold_report) if threshold_report
         hash

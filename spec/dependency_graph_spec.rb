@@ -578,14 +578,15 @@ RSpec.describe Woods::DependencyGraph do
       expect(JSON.parse(JSON.generate(described_class.from_h(graph.to_h).to_h))).to eq(before)
     end
 
-    it 'shares frozen strings instead of copying them' do
+    it 'copies frozen strings too, so a returned string is the caller\'s to change in place' do
       graph.register(make_unit(type: :model, identifier: 'Order',
                                dependencies: [{ type: :model, target: 'User', via: :belongs_to }]))
 
       target = graph.to_h[:edges]['Order'].first[:target]
+      target.replace('Changed')
 
-      expect(target).to be_frozen
-      expect(target).to equal(graph.to_h[:edges]['Order'].first[:target])
+      expect(graph.dependencies_of('Order')).to eq(['User'])
+      expect(graph.to_h[:edges]['Order'].first[:target]).to eq('User')
     end
 
     it 'invalidates the cache when a new unit is registered' do

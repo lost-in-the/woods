@@ -821,8 +821,8 @@ module Woods
     # graph's, and nodes, reverse, file_map, type_index and stats were the
     # memo's own containers, so `to_h[:edges]['Post'][0][:target] << '_x'`
     # rewrote what {#dependencies_of} answered and every later `to_h` (F12).
-    # Frozen strings (a booted extraction's constant names) are shared, not
-    # copied; nothing can change them in place.
+    # Every string is copied, frozen or not: a returned string is the
+    # caller's to change in place, which the reverse-record pin relies on.
     #
     # @param memo [Object] the memoized serialization, or a part of it
     # @return [Object]
@@ -830,7 +830,7 @@ module Woods
       case memo
       when Hash then memo.transform_values { |value| detached_snapshot(value) }
       when Array then memo.map { |value| detached_snapshot(value) }
-      when String then memo.frozen? ? memo : memo.dup
+      when String then memo.dup
       else memo
       end
     end
