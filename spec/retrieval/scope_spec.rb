@@ -96,6 +96,27 @@ RSpec.describe Woods::Retrieval::Scope do
     expect { scope(packages: ['packs/billing']) }.to raise_error(described_class::InvalidScopeError, /missing metadata/)
   end
 
+  # F6 step 1. Building a scope used to deep-copy every record through a JSON
+  # round trip before validating it, validate the contributor records once for
+  # the package check and twice more per record for eligibility, then copy the
+  # eligible subset again into the scope's own store. Each record is now read
+  # once, its contributors validated once, and copied once (by the store).
+  it 'reads and validates each record once while building the scope' do
+    invoice = add('Invoice', package: 'packs/billing', path: 'packs/billing/app/models/invoice.rb')
+    add('Shared', path: 'app/models/shared.rb')
+    allow(Woods::SourceContributors).to receive(:records).and_call_original
+    allow(store).to receive(:find).and_call_original
+    allow(JSON).to receive(:generate).and_call_original
+
+    resolved = scope(packages: ['packs/billing'])
+
+    expect(resolved.keys).to eq([invoice])
+    expect(store).to have_received(:find).exactly(store.count).times
+    expect(Woods::SourceContributors).to have_received(:records).exactly(store.count).times
+    # One JSON.generate per eligible record: the copy the scope's own store makes.
+    expect(JSON).to have_received(:generate).exactly(resolved.keys.size).times
+  end
+
   it 'treats empty lists as unscoped without requiring metadata reads' do
     expect(described_class.requested?(packages: [], source_paths: nil)).to be(false)
     expect(described_class.requested?(packages: ['.'], source_paths: [])).to be(true)

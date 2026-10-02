@@ -25,18 +25,13 @@ module Woods
         @source_paths = normalize_list(source_paths, 'source_paths').map do |path|
           normalize_path(path)
         end.uniq.sort.freeze
-        records = metadata_store.all_identifiers.sort.to_h do |key|
-          record = metadata_store.find(key)
-          raise InvalidScopeError, "missing metadata for scoped unit #{key.inspect}" unless record.is_a?(Hash)
-
-          [key, JSON.parse(JSON.generate(record))]
-        end
-        validate_packages!(records.values)
+        facts = metadata_store.all_identifiers.sort.map { |key| read_facts(metadata_store, key) }
+        validate_packages!(facts)
         @metadata_store = Storage::MetadataStore::InMemory.new
-        records.each do |key, record|
-          next unless eligible?(record, types, exclude_types)
+        facts.each do |fact|
+          next unless eligible?(fact, types, exclude_types)
 
-          @metadata_store.store(key, record)
+          @metadata_store.store(fact[:key], fact[:record])
         end
         @keys = @metadata_store.all_identifiers.sort.freeze
         @key_set = @keys.to_set.freeze
@@ -51,6 +46,37 @@ module Woods
       end
 
       private
+
+      # One read and one contributor validation per record (F6 step 1). The
+      # record is taken as the store returned it: the scope's own store makes
+      # the single copy it keeps, and every read below accepts string or
+      # symbol keys, so the JSON round trip that used to normalise and copy
+      # each record first is gone, as is validating the contributor records
+      # once for the package check and twice more for eligibility.
+      #
+      # @return [Hash] +key+, +record+, validated +contributors+, physical +paths+
+      def read_facts(metadata_store, key)
+        record = metadata_store.find(key)
+        raise InvalidScopeError, "missing metadata for scoped unit #{key.inspect}" unless record.is_a?(Hash)
+
+        contributors = SourceContributors.records(record)
+        paths = if contributors.empty?
+                  Array(field(record, 'file_path'))
+                else
+                  contributors.map { |contributor| contributor.fetch('file_path') }
+                end
+        { key: key, record: record, contributors: contributors, paths: paths }
+      end
+
+      def field(hash, name)
+        return nil unless hash.is_a?(Hash)
+
+        hash.key?(name) ? hash[name] : hash[name.to_sym]
+      end
+
+      def declared_package(record)
+        field(field(record, 'metadata'), 'package')
+      end
 
       def normalize_list(list, name)
         return [] if list.nil?
@@ -81,34 +107,32 @@ module Woods
         (segments.empty? ? '.' : segments.join('/')).freeze
       end
 
-      def validate_packages!(records)
-        names = records.filter_map { |unit| unit['identifier'] if unit['type'] == 'package' }
-        names.concat(records.filter_map { |unit| unit.dig('metadata', 'package') })
-        names.concat(records.flat_map do |unit|
-          SourceContributors.records(unit).filter_map do |record|
-            record['package']
-          end
-        end)
+      def validate_packages!(facts)
+        names = facts.filter_map do |fact|
+          field(fact[:record], 'identifier') if field(fact[:record], 'type') == 'package'
+        end
+        names.concat(facts.filter_map { |fact| declared_package(fact[:record]) })
+        names.concat(facts.flat_map { |fact| fact[:contributors].filter_map { |record| record['package'] } })
         unknown = packages - names
         raise InvalidScopeError, "unknown package scope: #{unknown.join(', ')}" unless unknown.empty?
       end
 
-      def eligible?(unit, types, excluded)
-        contributors = SourceContributors.records(unit)
-        owners = if contributors.empty?
-                   [unit.dig('metadata', 'package')]
+      def eligible?(fact, types, excluded)
+        unit = fact[:record]
+        owners = if fact[:contributors].empty?
+                   [declared_package(unit)]
                  else
-                   contributors.map do |record|
-                     record['package']
-                   end
+                   fact[:contributors].map { |record| record['package'] }
                  end
         return false unless packages.empty? || owners.all? { |owner| packages.include?(owner) }
 
-        paths = SourceContributors.paths(unit)
+        paths = fact[:paths]
         return false unless source_paths.empty? || (paths.any? && paths.all? { |path| path_match?(path) })
-        return Array(types).map(&:to_s).include?(unit['type']) if types && !types.empty?
 
-        !Array(excluded).map(&:to_s).include?(unit['type'])
+        type = field(unit, 'type')
+        return Array(types).map(&:to_s).include?(type) if types && !types.empty?
+
+        !Array(excluded).map(&:to_s).include?(type)
       end
 
       def path_match?(path)
