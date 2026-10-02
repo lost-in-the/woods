@@ -1645,6 +1645,13 @@ module Woods
               # error reached a log the agent cannot read, and the tool had
               # already reported success.
               task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+            rescue Exception => e # rubocop:disable Lint/RescueException -- record the terminal state, then let the thread die with it
+              # Neither a StandardError nor a ScriptError (NoMemoryError, a
+              # custom Exception subclass): the thread is going to die with it
+              # either way, but an opted-in task record used to stay "working"
+              # with its slot and lock already released (F11).
+              task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+              raise
             ensure
               lock&.release
               Woods::MCP::Server.send(:pipeline_finish, kind)

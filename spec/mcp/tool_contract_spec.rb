@@ -426,7 +426,13 @@ RSpec.describe 'Index MCP tool contracts' do
     File.write(feedback_path, "#{seed_rating}\n")
     allow(Woods).to receive(:configuration).and_return(config)
     allow(config).to receive(:output_dir).and_return(nil)
-    stub_const('Woods::Extractor', double('extractor class', new: double(extract_all: nil, extract_changed: nil)))
+    # The background worker calls raise_on_publication_failure! after the
+    # run; a double without it raised MockExpectationError (not a
+    # StandardError) inside the thread, which died with a trace on stderr
+    # while the example passed (F11).
+    stub_const('Woods::Extractor',
+               double('extractor class',
+                      new: double(extract_all: nil, extract_changed: nil, raise_on_publication_failure!: nil)))
     allow(Woods::Tasks).to receive(:build_embed_indexer)
       .and_return(double(index_all: nil, index_incremental: nil))
     allow(Woods::SessionTracer::SessionFlowAssembler).to receive(:new)

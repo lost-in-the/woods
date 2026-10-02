@@ -331,11 +331,12 @@ module Woods
 
         if tokens <= remaining
           parts << text
-          sources << build_source_attribution(candidate, unit)
+          sources << build_source_attribution(candidate, unit, tokens: tokens)
           tokens_used + tokens
         elsif remaining > MIN_USEFUL_TOKENS
-          parts << truncate_to_budget(text, remaining)
-          sources << build_source_attribution(candidate, unit, truncated: true)
+          truncated = truncate_to_budget(text, remaining)
+          parts << truncated
+          sources << build_source_attribution(candidate, unit, truncated: true, tokens: estimate_tokens(truncated))
           nil
         end
       end
@@ -352,9 +353,10 @@ module Woods
         return tokens_used if evidence.text.empty?
 
         text = header + evidence.text
+        tokens = estimate_tokens(text)
         parts << text
-        sources << build_source_attribution(candidate, unit).merge(evidence: evidence.provenance)
-        tokens_used + estimate_tokens(text)
+        sources << build_source_attribution(candidate, unit, tokens: tokens).merge(evidence: evidence.provenance)
+        tokens_used + tokens
       end
 
       # Format a unit for inclusion in context.
@@ -377,8 +379,12 @@ module Woods
 
       # Build source attribution hash for a candidate.
       #
+      # @param tokens [Integer, nil] estimated tokens of the text appended for
+      #   this source — the truncated text when the unit was cut to fit, so the
+      #   figures sum to (at most) the context's +tokens_used+. The evaluator's
+      #   +token_efficiency+ is computed from these.
       # @return [Hash]
-      def build_source_attribution(candidate, unit, truncated: false)
+      def build_source_attribution(candidate, unit, truncated: false, tokens: nil)
         attribution = {
           identifier: unit_field(unit, :identifier) || candidate.identifier,
           type: unit_field(unit, :type),
@@ -387,6 +393,7 @@ module Woods
         }
         attribution.merge!(SourceContributors.attribution(unit))
         attribution[:truncated] = true if truncated
+        attribution[:tokens] = tokens if tokens
         attribution
       end
 

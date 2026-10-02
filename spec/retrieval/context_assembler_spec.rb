@@ -485,6 +485,45 @@ RSpec.describe Woods::Retrieval::ContextAssembler do
       truncated_sources = result.sources.select { |s| s[:truncated] }
       expect(truncated_sources).not_to be_empty
     end
+
+    # F11. `token_efficiency` used to be computed from unit counts because
+    # sources carried no per-unit token figure; each source now reports the
+    # estimated tokens of the text that was actually appended for it.
+    it 'reports the rendered token count of each source' do
+      allow(metadata_store).to receive(:find).with('User').and_return(
+        unit_data(identifier: 'User', source_code: 'class User; end')
+      )
+      allow(metadata_store).to receive(:find).with('Post').and_return(
+        unit_data(identifier: 'Post', type: :model, file_path: 'app/models/post.rb',
+                  source_code: "class Post\n#{'  belongs_to :user\n' * 40}end")
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'User', score: 0.9), candidate(identifier: 'Post', score: 0.8)],
+        classification: classification
+      )
+
+      tokens = result.sources.to_h { |s| [s[:identifier], s[:tokens]] }
+      expect(tokens.values).to all(be_a(Integer).and(be_positive))
+      expect(tokens['Post']).to be > tokens['User']
+      expect(tokens.values.sum).to be <= result.tokens_used
+    end
+
+    it 'reports the tokens that fit, not the full unit, for a truncated source' do
+      allow(metadata_store).to receive(:find).with('Large').and_return(
+        unit_data(identifier: 'Large', source_code: 'x' * 50_000)
+      )
+
+      result = assembler.assemble(
+        candidates: [candidate(identifier: 'Large', score: 0.9)],
+        classification: classification
+      )
+
+      source = result.sources.first
+      expect(source[:truncated]).to be(true)
+      expect(source[:tokens]).to be <= result.tokens_used
+      expect(source[:tokens]).to be < assembler.estimate_tokens('x' * 50_000)
+    end
   end
 
   # ── Deduplication ──────────────────────────────────────────────────

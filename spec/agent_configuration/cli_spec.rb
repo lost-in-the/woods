@@ -6,7 +6,9 @@ require 'stringio'
 require 'woods/agent_configuration/cli'
 
 RSpec.describe Woods::AgentConfiguration::CLI do
-  let(:directory) { Dir.mktmpdir('woods-agent-cli') }
+  # realpath: the product refuses symlinked parents on purpose, and a TMPDIR
+  # behind a directory symlink (macOS /tmp) made every example trip it (F11).
+  let(:directory) { File.realpath(Dir.mktmpdir('woods-agent-cli')) }
   let(:output) { StringIO.new }
   let(:errors) { StringIO.new }
   let(:evidence) { { 'version' => '2.0.0.alpha', 'tools' => Woods::AgentConfiguration::Preflight::REQUIRED_TOOLS } }

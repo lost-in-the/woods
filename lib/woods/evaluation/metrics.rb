@@ -67,6 +67,20 @@ module Woods
         found.to_f / required.size
       end
 
+      # Fraction of every retrieved unit that is relevant — precision over the
+      # whole returned set rather than a top-k slice. This is the number
+      # `token_efficiency` reported before it measured rendered tokens (F11).
+      #
+      # @param retrieved [Array<String>] Retrieved unit identifiers
+      # @param relevant [Array<String>] Ground-truth relevant identifiers
+      # @return [Float] 0.0 to 1.0
+      def unit_precision(retrieved, relevant)
+        return 0.0 if retrieved.empty? || relevant.empty?
+
+        relevant_set = relevant.to_set
+        retrieved.count { |id| relevant_set.include?(id) }.to_f / retrieved.size
+      end
+
       # Ratio of relevant tokens to total tokens in context.
       #
       # @param relevant_tokens [Integer] Tokens from relevant units

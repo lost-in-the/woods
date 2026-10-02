@@ -177,6 +177,109 @@ RSpec.describe Woods::Evaluation::Evaluator do
     end
   end
 
+  # F11. `token_efficiency` was `ceil(tokens_used * relevant/retrieved) /
+  # tokens_used`: the share of returned *units* that were expected, up to a
+  # rounding artefact, and blind to how many tokens each unit cost. That
+  # number survives as `unit_precision`; `token_efficiency` is now the share
+  # of the rendered context spent on expected units, read from the `tokens`
+  # each source reports, and says which basis it used.
+  describe 'token efficiency' do
+    def result_with(sources, tokens_used:)
+      result_struct.new(context: '', sources: sources, classification: nil, strategy: :vector,
+                        tokens_used: tokens_used, budget: 8000)
+    end
+
+    def single_query_report(sources, tokens_used:, expected: %w[User UserConcern])
+      query = Woods::Evaluation::QuerySet::Query.new(query: 'q', expected_units: expected,
+                                                     intent: :lookup, scope: :specific, tags: [])
+      allow(retriever).to receive(:retrieve).and_return(result_with(sources, tokens_used: tokens_used))
+      described_class.new(retriever: retriever, query_set: Woods::Evaluation::QuerySet.new(queries: [query])).evaluate
+    end
+
+    it 'scores unit_precision as the share of returned units that were expected' do
+      report = evaluator.evaluate
+
+      # Query 1: User, UserConcern expected of three returned; query 2: Order of two.
+      expect(report.results.first.scores[:unit_precision]).to be_within(0.0001).of(2.0 / 3)
+      expect(report.results.last.scores[:unit_precision]).to eq(0.5)
+      expect(report.aggregates[:mean_unit_precision]).to be_within(0.0001).of(((2.0 / 3) + 0.5) / 2)
+    end
+
+    it 'scores token_efficiency as the rendered-token share of expected units' do
+      report = single_query_report(
+        [{ identifier: 'User', tokens: 100 }, { identifier: 'UserConcern', tokens: 50 },
+         { identifier: 'Post', tokens: 850 }],
+        tokens_used: 1000
+      )
+
+      # 2 of 3 units are expected, but they hold 150 of the 1,000 tokens.
+      expect(report.results.first.scores[:unit_precision]).to be_within(0.0001).of(2.0 / 3)
+      expect(report.results.first.scores[:token_efficiency]).to eq(0.15)
+      expect(report.results.first.token_efficiency_basis).to eq(:rendered_tokens)
+      expect(report.token_efficiency_basis).to eq(:rendered_tokens)
+    end
+
+    it 'does not credit a lone expected unit with the whole context' do
+      report = single_query_report([{ identifier: 'User', tokens: 50 }, { identifier: 'Post', tokens: 7950 }],
+                                   tokens_used: 8000)
+
+      expect(report.results.first.scores[:token_efficiency]).to eq(0.00625)
+    end
+
+    it 'caps the share at 1.0 when source tokens exceed the counted context' do
+      report = single_query_report([{ identifier: 'User', tokens: 120 }], tokens_used: 100)
+
+      expect(report.results.first.scores[:token_efficiency]).to eq(1.0)
+    end
+
+    it 'falls back to unit_precision, and says so, when sources carry no token figure' do
+      report = evaluator.evaluate
+
+      expect(report.results.first.scores[:token_efficiency]).to eq(report.results.first.scores[:unit_precision])
+      expect(report.results.first.token_efficiency_basis).to eq(:unit_precision)
+      expect(report.token_efficiency_basis).to eq(:unit_precision)
+    end
+
+    it 'falls back for the whole query when any source lacks a token figure' do
+      report = single_query_report([{ identifier: 'User', tokens: 100 }, { identifier: 'Post' }], tokens_used: 1000)
+
+      expect(report.results.first.scores[:token_efficiency]).to eq(0.5)
+      expect(report.results.first.token_efficiency_basis).to eq(:unit_precision)
+    end
+
+    it 'reports a mixed basis when queries disagree' do
+      with_tokens = result_with([{ identifier: 'User', tokens: 100 }, { identifier: 'Post', tokens: 100 }],
+                                tokens_used: 200)
+      allow(retriever).to receive(:retrieve).with('How does User model work?', budget: 8000).and_return(with_tokens)
+
+      report = evaluator.evaluate
+
+      expect(report.results.map(&:token_efficiency_basis)).to eq(%i[rendered_tokens unit_precision])
+      expect(report.token_efficiency_basis).to eq(:mixed)
+    end
+
+    it 'scores zero when nothing was rendered' do
+      report = single_query_report([], tokens_used: 0)
+
+      expect(report.results.first.scores[:unit_precision]).to eq(0.0)
+      expect(report.results.first.scores[:token_efficiency]).to eq(0.0)
+    end
+
+    it 'keeps the basis out of the numeric aggregates' do
+      report = evaluator.evaluate
+
+      expect(report.aggregates.values).to all(be_a(Numeric))
+      expect(report.aggregates).not_to have_key(:token_efficiency_basis)
+    end
+
+    it 'reports no basis for an empty query set' do
+      report = described_class.new(retriever: retriever,
+                                   query_set: Woods::Evaluation::QuerySet.new(queries: [])).evaluate
+
+      expect(report.token_efficiency_basis).to eq(:none)
+    end
+  end
+
   describe 'aggregates' do
     it 'computes mean metrics across all queries' do
       report = evaluator.evaluate
@@ -188,6 +291,7 @@ RSpec.describe Woods::Evaluation::Evaluator do
         :mean_recall,
         :mean_mrr,
         :mean_context_completeness,
+        :mean_unit_precision,
         :mean_token_efficiency
       )
     end

@@ -51,6 +51,7 @@ module Woods
           'aggregates' => serialize_aggregates(report.aggregates),
           'results' => report.results.map { |r| serialize_result(r) }
         }
+        hash['token_efficiency_basis'] = report.token_efficiency_basis.to_s if report.token_efficiency_basis
         threshold_report = report.threshold_report
         hash['threshold_report'] = serialize_threshold_report(threshold_report) if threshold_report
         hash
@@ -101,7 +102,8 @@ module Woods
           'expected_units' => result.expected_units,
           'retrieved_units' => result.retrieved_units,
           'scores' => result.scores.transform_keys(&:to_s).transform_values { |v| v.round(4) },
-          'tokens_used' => result.tokens_used
+          'tokens_used' => result.tokens_used,
+          'token_efficiency_basis' => result.token_efficiency_basis&.to_s
         }
       end
     end

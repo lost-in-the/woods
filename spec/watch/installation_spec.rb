@@ -10,7 +10,9 @@ require 'woods/watch/installation'
 RSpec.describe Woods::Watch::Installation do
   around do |example|
     Dir.mktmpdir('woods installation ') do |root|
-      @root = root
+      # The installer canonicalises the root; a probe stubbed with a symlinked
+      # TMPDIR path never matched it (F11).
+      @root = File.realpath(root)
       FileUtils.mkdir_p(File.join(root, 'bin'))
       FileUtils.mkdir_p(File.join(root, 'config'))
       File.write(File.join(root, 'Gemfile'), "source 'https://rubygems.org'\n")

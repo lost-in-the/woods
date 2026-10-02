@@ -287,7 +287,10 @@ result.trace        # => RetrievalTrace with elapsed_ms, candidate_count, etc.
 `context`, including the optional formatter output and type-rank table. Counting
 uses the same injected token counter or chars-per-token estimate as assembly;
 it does not guarantee an exact count for the downstream model. `budget` limits
-context assembly, so postprocessing can make the final count exceed it.
+context assembly, so postprocessing can make the final count exceed it. Each
+source's `tokens` is the same estimate for the text rendered for that unit (the
+truncated text when it was cut to fit), so the per-source figures sum to at most
+the assembled context's count; `woods:evaluate` reads them for `token_efficiency`.
 
 Override the token budget per call:
 
