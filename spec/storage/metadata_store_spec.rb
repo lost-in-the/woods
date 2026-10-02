@@ -318,6 +318,13 @@ RSpec.describe Woods::Storage::MetadataStore do
     it 'raises NotImplementedError for #count' do
       expect { dummy.count }.to raise_error(NotImplementedError)
     end
+
+    # F6 step 2. A store that tracks no changes answers nil, so a caller
+    # caching derived state against the version rebuilds it every time
+    # instead of trusting a version that never moves.
+    it 'answers nil for #snapshot_version by default' do
+      expect(dummy.snapshot_version).to be_nil
+    end
   end
 
   describe Woods::Storage::MetadataStore::SQLite do
@@ -333,6 +340,13 @@ RSpec.describe Woods::Storage::MetadataStore do
           expect { described_class.new(database: database) }.not_to raise_error
           expect { described_class.new(database) }.to raise_error(ArgumentError)
         end
+      end
+    end
+
+    describe '#snapshot_version' do
+      it 'reports no change tracking' do
+        store.store('User', { type: 'model' })
+        expect(store.snapshot_version).to be_nil
       end
     end
 
@@ -782,6 +796,35 @@ RSpec.describe Woods::Storage::MetadataStore do
 
       it 'accepts symbol types' do
         expect(store.find_by_type(:service).map { |r| r['id'] }).to eq(['AuthService'])
+      end
+    end
+
+    # F6 step 2. The retriever keeps one scope corpus per pipeline for as
+    # long as the store's version stands, so every in-place write must move
+    # the version and an unchanged re-store (F18) must not.
+    describe '#snapshot_version' do
+      it 'advances on every content change and stays put on an unchanged re-store' do
+        initial = store.snapshot_version
+        expect(initial).to be_an(Integer)
+        store.store('User', { type: 'model', version: 1 })
+        stored = store.snapshot_version
+        expect(stored).to be > initial
+        store.store('User', { type: 'model', version: 1 })
+        expect(store.snapshot_version).to eq(stored)
+        store.store('User', { type: 'model', version: 2 })
+        expect(store.snapshot_version).to be > stored
+      end
+
+      it 'advances on delete, bulk_load and clear!' do
+        store.store('User', { type: 'model' })
+        versions = [store.snapshot_version]
+        store.delete('User')
+        versions << store.snapshot_version
+        store.bulk_load([['Order', { 'type' => 'model' }]])
+        versions << store.snapshot_version
+        store.clear!
+        versions << store.snapshot_version
+        expect(versions).to eq(versions.uniq.sort)
       end
     end
 

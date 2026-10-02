@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'local_corpus_stats'
+require_relative 'search_text'
 
 require 'json'
 require 'fileutils'
@@ -154,6 +155,19 @@ module Woods
           raise NotImplementedError
         end
 
+        # A version that moves on every content change of this store, or nil
+        # when the adapter tracks none (F6 step 2). A caller that derives
+        # state from the whole store (the retriever's scope corpus) keeps it
+        # while the version it was read at still stands; nil means "rebuild
+        # every time", never "unchanged". This default is a real
+        # implementation: a durable adapter shared between processes cannot
+        # cheaply know whether another writer changed it.
+        #
+        # @return [Integer, nil]
+        def snapshot_version
+          nil
+        end
+
         # Return the total number of stored units.
         #
         # @return [Integer] Total count
@@ -204,7 +218,16 @@ module Woods
         def initialize
           @data = {}
           @haystacks = {}
+          @snapshot_version = 0
         end
+
+        # @see Interface#snapshot_version
+        #
+        # Moves on every write that changes content: a changed {#store}, a
+        # {#delete}, a {#bulk_load} or a {#clear!}. An unchanged re-store
+        # (F18) leaves it alone, so an unchanged incremental embed keeps the
+        # retriever's scope corpus as well as the records' timestamps.
+        attr_reader :snapshot_version
 
         # @see Interface#store
         #
@@ -216,6 +239,7 @@ module Woods
           existing = @data[id]
           return existing if existing && JSON.generate(existing.except('updated_at')) == text
 
+          @snapshot_version += 1
           @haystacks.delete(id)
           @data[id] = JSON.parse(text).merge('updated_at' => Time.now.iso8601)
         end
@@ -275,6 +299,7 @@ module Woods
 
         # @see Interface#delete
         def delete(id)
+          @snapshot_version += 1
           @haystacks.delete(id)
           @data.delete(id)
         end
@@ -314,6 +339,7 @@ module Woods
         # @param entries [Enumerable<Array(String, Hash)>] Pairs of +[id, metadata]+
         # @return [void]
         def bulk_load(entries)
+          @snapshot_version += 1
           entries.each do |id, meta|
             @haystacks.delete(id)
             @data[id] = meta
@@ -323,6 +349,7 @@ module Woods
         # Drop every stored entry. Used by the MCP +reload+ tool to pick up a
         # fresh embed run without restarting the process. Safe on an empty store.
         def clear!
+          @snapshot_version += 1
           @data = {}
           @haystacks = {}
         end
@@ -353,31 +380,14 @@ module Woods
         def matches?(id, record, fields, needle)
           return record_haystack(id, record).include?(needle) unless fields
 
-          fields.any? { |field| field_haystack(record[field])&.downcase&.include?(needle) }
+          fields.any? { |field| SearchText.field(record[field])&.downcase&.include?(needle) }
         end
 
         # The whole-record haystack, serialised and downcased once per stored
         # record (N-ip-2) instead of on every all-fields search; +store+,
         # +delete+, +bulk_load+ and +clear!+ drop the entry they replace.
         def record_haystack(id, record)
-          @haystacks[id] ||= JSON.generate(record.except('updated_at')).downcase
-        end
-
-        # The searchable text for one field value: strings come back raw,
-        # structured values as JSON text, Booleans as true/false, and numbers
-        # as their decimal form. A Ruby
-        # +Hash#to_s+ haystack used to leak `=>` and `:sym` syntax that no
-        # JSON document contains (STO-8).
-        #
-        # @param value [Object] the stored field value
-        # @return [String, nil] nil for a missing field, which never matches
-        def field_haystack(value)
-          case value
-          when nil then nil
-          when String then value
-          when Hash, Array then JSON.generate(value)
-          else value.to_s
-          end
+          @haystacks[id] ||= SearchText.record(record.except('updated_at'))
         end
       end
 
