@@ -172,6 +172,14 @@ RSpec.describe Woods::Retrieval::Scope do
     expect { resolved.metadata_store }.to raise_error(described_class::InvalidScopeError, /records/)
   end
 
+  it 'holds no reference to the ineligible records once the store form has copied the eligible ones' do
+    add('Invoice', package: 'packs/billing')
+    add('Other', package: '.')
+    resolved = scope(packages: ['packs/billing'])
+    expect(resolved.instance_variables).not_to include(:@corpus)
+    expect(resolved.metadata_store.count).to eq(1)
+  end
+
   it 'treats empty lists as unscoped without requiring metadata reads' do
     expect(described_class.requested?(packages: [], source_paths: nil)).to be(false)
     expect(described_class.requested?(packages: ['.'], source_paths: [])).to be(true)

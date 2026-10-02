@@ -37,11 +37,18 @@ module Woods
         @source_paths = normalize_list(source_paths, 'source_paths').map do |path|
           normalize_path(path)
         end.uniq.sort.freeze
-        @corpus = corpus || ScopeCorpus.from_store(metadata_store, records: :share)
-        validate_packages!
-        @keys = select_keys(types, exclude_types)
+        # The store form's corpus is per request and lives only through this
+        # method: once the eligible records are copied, nothing holds the
+        # other records' references.
+        corpus ||= ScopeCorpus.from_store(metadata_store, records: :share)
+        validate_packages!(corpus)
+        @keys = select_keys(corpus, types, exclude_types)
         @key_set = @keys.to_set.freeze
-        @metadata_store = copy_eligible_records if corpus.nil?
+        if metadata_store
+          @metadata_store = copy_eligible_records(corpus)
+        else
+          @corpus = corpus
+        end
       end
 
       # The eligible records as a metadata store: the scope's own in-memory
@@ -63,19 +70,19 @@ module Woods
 
       private
 
-      def select_keys(types, excluded)
+      def select_keys(corpus, types, excluded)
         allowed = Array(types).map(&:to_s)
         excluded = Array(excluded).map(&:to_s)
         keys = []
-        @corpus.each_fact { |fact| keys << fact.key if eligible?(fact, allowed, excluded) }
+        corpus.each_fact { |fact| keys << fact.key if eligible?(fact, allowed, excluded) }
         keys.freeze
       end
 
       # The store form keeps the one copy it needs: the scope's own store
       # copies each eligible record as the store returned it (F6 step 1).
-      def copy_eligible_records
+      def copy_eligible_records(corpus)
         store = Storage::MetadataStore::InMemory.new
-        @keys.each { |key| store.store(key, @corpus.fact(key).record) }
+        @keys.each { |key| store.store(key, corpus.fact(key).record) }
         store
       end
 
@@ -108,8 +115,8 @@ module Woods
         (segments.empty? ? '.' : segments.join('/')).freeze
       end
 
-      def validate_packages!
-        unknown = packages.reject { |name| @corpus.package_names.include?(name) }
+      def validate_packages!(corpus)
+        unknown = packages.reject { |name| corpus.package_names.include?(name) }
         raise InvalidScopeError, "unknown package scope: #{unknown.join(', ')}" unless unknown.empty?
       end
 
