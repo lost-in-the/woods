@@ -11,6 +11,7 @@ require_relative '../generation'
 require_relative '../source_inputs/status'
 require_relative 'search_results'
 require_relative '../retrieval/scope'
+require_relative '../retrieval/scope_corpus'
 require_relative 'traversal_evidence'
 
 module Woods
@@ -296,6 +297,7 @@ module Woods
         @identifier_map = nil
         @index_cache = {}
         @index_identifier_sets = {}
+        @scope_corpus = nil
         @manifest = nil
         @summary = nil
         @dependency_graph = nil
@@ -652,11 +654,10 @@ module Woods
                 type_name = search_entry_type(entry, dir, results)
                 next unless type_name
 
-                unit = if scope
-                         scope.metadata_store.find(StorageIdentity.key(id, type_name))
-                       else
-                         readable_search_unit(type_name, id, results)
-                       end
+                # Scoped and unscoped deep matching read the candidate body the
+                # same bounded way; the scope decided eligibility by key and
+                # holds no bodies (F6 step 2).
+                unit = readable_search_unit(type_name, id, results)
                 next unless unit
 
                 type_name = unit['type']
@@ -685,16 +686,29 @@ module Woods
         response
       end
 
-      # Scope preparation reads the complete pinned unit snapshot. Search's
-      # deep-field scan budget still governs matching work after this read.
+      # Scope preparation resolves from the scope facts of the complete pinned
+      # unit snapshot, read once per loaded generation (F6 step 2) rather than
+      # on every scoped search. Search's deep-field scan budget still governs
+      # matching work after this read.
       def search_scope(packages, source_paths, types)
         return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
 
-        metadata = Storage::MetadataStore::InMemory.new
-        each_unit { |unit| metadata.store(StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit) }
-        Retrieval::Scope.new(metadata_store: metadata, packages: packages, source_paths: source_paths, types: types)
+        Retrieval::Scope.new(corpus: scope_corpus, packages: packages, source_paths: source_paths, types: types)
       end
       private :search_scope
+
+      # The scope facts of every published unit of the loaded generation:
+      # facts only, since search decides eligibility by key and never reads a
+      # record through the scope. Populated inside the caller's generation pin
+      # and dropped with the other caches in {#reload!}.
+      def scope_corpus
+        @scope_corpus ||= begin
+          pairs = []
+          each_unit { |unit| pairs << [StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit] }
+          Retrieval::ScopeCorpus.new(pairs, records: :none)
+        end
+      end
+      private :scope_corpus
 
       def normalize_search_types(types)
         return nil if types.nil? || types == []
