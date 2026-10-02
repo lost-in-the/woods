@@ -514,8 +514,9 @@ bundle once into a scope corpus (`Woods::Retrieval::ScopeCorpus`: per record, it
 type, owning packages and physical paths), and every scoped request resolves its
 eligibility from that corpus. How long the corpus lives depends on the store:
 
-- **In-memory metadata store** (the `:local` and `:shared_filesystem` presets, and
-  the hydrated Index Server): the corpus also holds an immutable copy of each
+- **In-memory metadata store** (`metadata_store = :in_memory`: the
+  `:shared_filesystem` preset and the hydrated Index Server; `:local` uses
+  SQLite): the corpus also holds an immutable copy of each
   record, answers the scoped pipeline's metadata reads through a read-only view,
   and is kept while the store's `snapshot_version` is unchanged. In-place writes
   advance the version; a reload swaps the whole pipeline and retires the corpus
