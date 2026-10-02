@@ -209,6 +209,16 @@ RSpec.describe Woods::Watch::Daemon do
       expect(extractor).not_to have_received(:extract_changed)
     end
 
+    it 'keeps the policy answer for a loaded file the policy classifies itself (routes reload, not restart)' do
+      daemon = build
+      daemon.loaded_boot_paths = ['config/routes.rb', 'config/time_zone.rb']
+
+      result = daemon.process(['config/routes.rb'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(reloader).to have_received(:reload!)
+    end
+
     it 'still ignores a config Ruby helper this process never loaded' do
       daemon = build
       daemon.loaded_boot_paths = ['config/time_zone.rb']

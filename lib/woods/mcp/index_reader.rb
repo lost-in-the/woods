@@ -427,7 +427,8 @@ module Woods
       end
 
       # Types `lookup`'s +type:+ accepts: every actual published unit type plus
-      # the directory-family aliases search accepts (`graphql`, `rails_source`).
+      # the `graphql` directory-family alias. `rails_source` is accepted as the
+      # unit type it also names; the family read is {#find_family_unit}.
       #
       # @return [Array<String>] sorted
       def lookup_types

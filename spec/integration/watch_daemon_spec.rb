@@ -377,6 +377,15 @@ end
       end
     end
 
+    it 'does not list routes among the config Ruby it loaded at boot, so a routes edit still reloads (F3)' do
+      instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                          reloader: reloader, debounce: 0, catch_up: false)
+
+      expect(instance.send(:loaded_boot_paths).grep(%r{\Aconfig/routes})).to be_empty
+      write_file('config/routes.rb', "#{File.read(File.join(@app_root, 'config/routes.rb'))}\n# routes edit\n")
+      expect(instance.process(['config/routes.rb'])[:action]).to eq(:incremental)
+    end
+
     it 'restarts for an edit the once loader owns instead of publishing a stale unit (F14)' do
       expect(reloader.once_owned?(File.join(@app_root, 'app/once/once_setting.rb'))).to be(true)
       expect(reloader.once_owned?(File.join(@app_root, 'app/models/post.rb'))).to be(false)

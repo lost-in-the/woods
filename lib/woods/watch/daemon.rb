@@ -446,7 +446,7 @@ module Woods
       # The policy's answer with the index's declared roots and a pending
       # reconciliation applied.
       def classify_batch(relative_paths)
-        return :restart if relative_paths.any? { |path| loaded_boot_paths.include?(path) }
+        return :restart if relative_paths.any? { |path| loaded_boot_helper?(path) }
 
         action = @policy.classify_all(relative_paths)
         return :reload if %i[ignore reextract].include?(action) && declared_root_change?(relative_paths)
@@ -466,6 +466,13 @@ module Woods
         return false if rules.extra_roots.empty?
 
         relative_paths.any? { |path| rules.declared_root_ruby?(path) }
+      end
+
+      # A loaded config file the policy has no answer for. Routes (`:reload`)
+      # and initializers (`:restart`) keep the policy's classification even if
+      # a boot happened to register them as features.
+      def loaded_boot_helper?(relative_path)
+        loaded_boot_paths.include?(relative_path) && @policy.classify(relative_path) == :ignore
       end
 
       # Ruby under config/ this process loaded at boot: helpers required from
@@ -1014,7 +1021,7 @@ module Woods
         triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
         return triggers.first(5).join(', ') if triggers.any?
 
-        loaded = change_set.relative_paths.select { |path| loaded_boot_paths.include?(path) }
+        loaded = change_set.relative_paths.select { |path| loaded_boot_helper?(path) }
         return "config Ruby loaded at boot changed: #{loaded.first(5).join(', ')}" if loaded.any?
 
         once = once_owned_paths(change_set.absolute_paths).map { |path| change_set.relativize(path) }

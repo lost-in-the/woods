@@ -32,14 +32,14 @@ module Woods
       # manifest; a Ruby file under one is incremental input (F15).
       def declared_root_lines
         [
+          '  local -a declared_roots=()',
+          '  IFS=: read -r -a declared_roots <<< "${WOODS_DECLARED_ROOTS:-}"',
           '  local declared_root',
-          '  local IFS=:',
-          '  for declared_root in ${WOODS_DECLARED_ROOTS:-}; do',
+          '  for declared_root in "${declared_roots[@]+"${declared_roots[@]}"}"; do',
           '    [[ -n "$declared_root" && "$path" == *.rb && "$path" == "${declared_root%/}"/* ]] || continue',
           '    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac',
           '    return',
-          '  done',
-          '  unset IFS'
+          '  done'
         ]
       end
 
