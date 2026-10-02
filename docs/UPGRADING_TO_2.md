@@ -239,7 +239,7 @@ Pay particular attention to:
   [Console configuration](CONSOLE_MCP_SETUP.md#configuration-options) and
   [session tracer options](CONFIGURATION_REFERENCE.md#session-tracer-options).
 
-Review existing Woods migrations and tables before accepting any newly generated migration. Do not create duplicate `woods_units`, `woods_edges`, or `woods_embeddings` tables.
+Review existing Woods migrations and tables before accepting any newly generated migration (`woods:install` writes one only with `--legacy-migration`). Do not create duplicate `woods_units`, `woods_edges`, or `woods_embeddings` tables.
 
 ### 3. Clean and re-extract
 

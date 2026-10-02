@@ -1,7 +1,8 @@
-# Legacy compatibility migration. Woods 2's shipped extraction, storage, and
-# retrieval paths do not use these application tables. New default installs
-# should remove this file without running it; keep it only for an older/custom
-# integration that deliberately uses the tables.
+# Legacy compatibility migration, written only by
+# `rails generate woods:install --legacy-migration`. Woods 2's shipped
+# extraction, storage, and retrieval paths do not use these application
+# tables; keep this file only for an older/custom integration that
+# deliberately uses them.
 class CreateWoodsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
     create_table :woods_units do |t|

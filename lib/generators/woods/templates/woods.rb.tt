@@ -50,10 +50,12 @@ Woods.configure do |config|
   # config.embedding_options  = { api_key: ENV['OPENAI_API_KEY'] }
 
   # Ollama (local, no API key needed). `num_ctx` is auto-selected per model
-  # (nomic-embed-text → 2048, bge-m3 → 8192). Install `gem "tokenizers"` for
-  # exact BERT WordPiece token counting on dense Ruby source. See
+  # (nomic-embed-text → 2048, bge-m3 → 8192). Token counts for these models
+  # are estimates (1.5 chars/token) unless you inject a model-matched local
+  # tokenizer into Woods::Embedding::TokenCounter; installing the `tokenizers`
+  # gem on its own changes nothing. See
   # https://github.com/lost-in-the/woods/blob/v<%= Woods::VERSION %>/docs/EMBEDDING_MODELS.md
-  # has the full model comparison.
+  # for the full model comparison.
   # config.embedding_provider = :ollama
   # config.embedding_options  = {
   #   model: 'nomic-embed-text',

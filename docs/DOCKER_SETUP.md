@@ -51,11 +51,11 @@ docker compose exec app bundle install
 docker compose exec app bundle exec rails generate woods:install
 ```
 
-This creates `config/initializers/woods.rb` with default configuration.
+This creates `config/initializers/woods.rb` with default configuration, and nothing else.
 
-### 3. Decide whether to keep the legacy application migration
+### 3. Legacy application migration (opt-in)
 
-The generator emits `db/migrate/*_create_woods_tables.rb`, but Woods 2's shipped structural index and storage backends do not use those application tables. For a new default installation, remove that generated migration before the next Rails boot. Keep and run it only when deliberately preserving an older/custom integration that uses `woods_units`, `woods_edges`, and `woods_embeddings`, after normal schema-change review.
+Woods 2's shipped structural index and storage backends do not use the `woods_units`, `woods_edges`, and `woods_embeddings` application tables, so a default install writes no migration. Only an older/custom integration that deliberately uses those tables needs `rails generate woods:install --legacy-migration`, after normal schema-change review.
 
 ### 4. Configure
 

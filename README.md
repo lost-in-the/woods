@@ -71,7 +71,7 @@ bundle exec ruby -rwoods/version -e 'puts Woods::VERSION'
 bin/rails generate woods:install
 ```
 
-**For a new default installation, remove the generated `db/migrate/*_create_woods_tables.rb` migration without running it.** Those legacy application tables are unused by the shipped index and storage backends. Keep the generated `config/initializers/woods.rb`; its defaults are sufficient. Only retain the migration for a deliberate older/custom integration. See [Getting started](docs/GETTING_STARTED.md#2-generate-and-review-configuration).
+The generator writes `config/initializers/woods.rb` and nothing else; its defaults are sufficient, and it needs no Active Record. The legacy `woods_units`/`woods_edges`/`woods_embeddings` migration is written only with `--legacy-migration`, for an older/custom integration that deliberately uses those tables; the shipped index and storage backends never touch them. See [Getting started](docs/GETTING_STARTED.md#2-generate-and-review-configuration).
 
 ### 2. Extract and validate
 

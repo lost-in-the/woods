@@ -161,6 +161,12 @@ jobs:
       - name: Run watch daemon integration
         run: bundle exec rspec spec/integration/watch_daemon_spec.rb
 
+      # The install generator, executed for real: the default examples run on
+      # every bundle; the legacy-migration example needs this row's Active
+      # Record (#618).
+      - name: Run the install generator with Active Record available
+        run: bundle exec rspec spec/generators/install_generator_spec.rb
+
       - name: Run managed watcher across fresh Rails boots
         run: bundle exec rspec spec/integration/watch_startup_spec.rb spec/integration/managed_watch_spec.rb
       - name: Console read and response policies

@@ -199,8 +199,9 @@ gem 'woods', '~> 2.0', group: :development
 bundle install
 bin/rails generate woods:install
 
-# The generator also emits a legacy application migration. Woods 2's shipped
-# paths do not use those tables; remove it for a new default installation.
+# The generator writes config/initializers/woods.rb only. The legacy
+# application migration (unused by Woods 2's shipped paths) is opt-in via
+# --legacy-migration.
 
 # 3. Extract (requires a booted Rails environment)
 bin/rails woods:extract
