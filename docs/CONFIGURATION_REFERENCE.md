@@ -259,6 +259,8 @@ before relying on these snapshot improvements.
 
 Both metadata backends stamp each record with `updated_at`, and the stamp records the **last content change**: re-storing a record whose type and JSON text are unchanged leaves it untouched (SQLite issues no write and no journal fsync; a key-order-only difference counts as a change). The stamp is persisted (SQLite) and carried by the in-memory dump, but nothing in Woods reads it back: `find` and `search` strip it.
 
+The indexer writes each embed batch's records inside one metadata-store transaction (one SQLite commit per batch of `batch_size` records; a batch whose embedding fails rolls its records back). The transaction spans the whole batch, provider call included, so the SQLite write lock is held for the batch's duration. The indexer is the store's only writer and pipeline runs serialise on the pipeline lock; in SQLite's rollback-journal mode an open write transaction does not block readers such as the Index Server's retrieval, only the commit itself does, within the connection's 5 s `busy_timeout`.
+
 ### pgvector (PostgreSQL)
 
 ```ruby
