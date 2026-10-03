@@ -282,6 +282,46 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).to include(:state_machines, :events)
     end
 
+    describe 'the events rule' do
+      def event_rule
+        described_class.whole_app_rules.find { |rule| rule.extractor_key == :events }
+      end
+
+      before { Woods.configuration = Woods::Configuration.new }
+
+      it 'scans app/ only by default' do
+        expect(dispatcher.whole_app_keys_for('app/services/ledger.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).not_to include(:events)
+      end
+
+      it 'follows configured event_paths without an explicit reset' do
+        described_class.whole_app_rules
+        Woods.configuration.event_paths = %w[app lib]
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
+      end
+
+      it 'returns to the default when the configuration object is replaced' do
+        Woods.configuration.event_paths = %w[app lib]
+        described_class.whole_app_rules
+        Woods.configuration = Woods::Configuration.new
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).not_to include(:events)
+      end
+
+      it 'keeps the other whole-app rules memoized while event_paths is unchanged' do
+        expect(described_class.whole_app_rules).to be(described_class.whole_app_rules)
+      end
+
+      it 'serializes as plain data naming the configured roots' do
+        Woods.configuration.event_paths = %w[app lib]
+
+        expect(JSON.parse(JSON.generate(event_rule.to_h))).to include('dirs' => %w[app lib], 'extensions' => ['.rb'])
+        expect(event_rule.to_h.values.flatten).to all(be_a(String).or(be_a(Symbol)).or(be_nil).or(be(false)))
+      end
+    end
+
     it 'triggers a factory re-run on a factory file' do
       expect(dispatcher.whole_app_keys_for('spec/factories/posts.rb')).to include(:factories)
     end

@@ -954,6 +954,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'configured event roots' do
+    around do |example|
+      Woods.configuration.event_paths = %w[app lib]
+      example.run
+    ensure
+      Woods.configuration.event_paths = %w[app]
+    end
+
+    def ledger_bus(publishes:)
+      call = publishes ? "      ActiveSupport::Notifications.instrument('ledger.settled')\n" : "      :ok\n"
+      "module Ledger\n  class Bus\n    def settle\n#{call}    end\n  end\nend\n"
+    end
+
+    it 'tracks a lib/ publisher gaining, losing and regaining its call, then deletion' do
+      write_file('app/services/settlement_listener.rb', <<~RUBY)
+        class SettlementListener
+          ActiveSupport::Notifications.subscribe('ledger.settled') {}
+        end
+      RUBY
+
+      run_sequence([
+                     -> { write_file('lib/ledger/bus.rb', ledger_bus(publishes: true)) },
+                     -> { write_file('lib/ledger/bus.rb', ledger_bus(publishes: false)) },
+                     -> { write_file('lib/ledger/bus.rb', ledger_bus(publishes: true)) },
+                     -> { delete_file('lib/ledger/bus.rb') }
+                   ])
+    end
+  end
+
   describe 'gap 2 — deleted files' do
     it 'prunes a service that was deleted' do
       write_file('app/services/temp_service.rb', service_source('TempService'))
