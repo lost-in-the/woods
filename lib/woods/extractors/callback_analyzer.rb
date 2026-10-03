@@ -65,6 +65,9 @@ module Woods
       #   file relative to the application root (nil outside it). With
       #   segments, operation lines are reported in their own file; without,
       #   they stay lines of +source_code+.
+      # @return [Ast::Node, nil] the parsed source, nil when it does not parse
+      attr_reader :parsed_root
+
       def initialize(source_code:, column_names: [], segments: nil)
         @source_code = source_code
         @segments = segments
@@ -102,6 +105,33 @@ module Woods
             operations: extract_operations(method_node)
           }
         )
+      end
+
+      # Side effects of one method definition, for a caller that already
+      # holds its node (two methods can share a name, so a filter cannot
+      # tell them apart).
+      #
+      # Unlike {#analyze}, service and mailer names are resolved in the
+      # method's lexical scope, as job names are, so each entry agrees with
+      # the unit's own edge to that class.
+      #
+      # @param method_node [Ast::Node] a :def or :defs node of {#parsed_root}
+      # @return [Hash, nil] `{ columns_written:, jobs_enqueued:,
+      #   services_called:, mailers_triggered:, source: }` where +source+ is
+      #   the neutralized method text the scans ran over; nil when the method
+      #   has no readable source
+      def method_effects(method_node)
+        method_source = scannable_source(method_source_from_node(method_node))
+        return nil if method_source.nil?
+
+        nesting = nesting_at_line(method_node.line)
+        {
+          columns_written: detect_columns_written(method_source),
+          jobs_enqueued: detect_jobs_enqueued(method_source, nesting),
+          services_called: detect_services_called(method_source, nesting),
+          mailers_triggered: detect_mailers_triggered(method_source, nesting),
+          source: method_source
+        }
       end
 
       private
@@ -248,9 +278,10 @@ module Woods
       # namespace included (EXTA-2).
       #
       # @param method_source [String]
+      # @param nesting [Array<String>] scopes around the method, innermost first
       # @return [Array<String>]
-      def detect_services_called(method_source)
-        ReferencePatterns.service_references(method_source).uniq.sort
+      def detect_services_called(method_source, nesting = [])
+        ReferencePatterns.references(method_source, **ReferencePatterns::SERVICE_RULE, enclosing: nesting).uniq.sort
       end
 
       # Detect mailers triggered by the callback method.
@@ -259,9 +290,10 @@ module Woods
       # namespace included (EXTA-2).
       #
       # @param method_source [String]
+      # @param nesting [Array<String>] scopes around the method, innermost first
       # @return [Array<String>]
-      def detect_mailers_triggered(method_source)
-        ReferencePatterns.mailer_references(method_source).uniq.sort
+      def detect_mailers_triggered(method_source, nesting = [])
+        ReferencePatterns.references(method_source, **ReferencePatterns::MAILER_RULE, enclosing: nesting).uniq.sort
       end
 
       # Detect database read operations in the callback method.

@@ -561,4 +561,54 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(ops).not_to be_empty
     end
   end
+
+  # ── Per-node analysis ──────────────────────────────────────────
+
+  describe '#method_effects' do
+    let(:source) do
+      <<~RUBY
+        module Billing
+          class Ledger
+            def self.post
+              RebuildJob.perform_later
+            end
+
+            def post
+              TallyService.call(self)
+              ReceiptMailer.posted(self).deliver_later
+              PostJob.perform_later(id)
+              self.status = 'posted'
+            end
+          end
+        end
+      RUBY
+    end
+
+    before do
+      stub_const('Billing', Module.new)
+      stub_const('Billing::Ledger', Class.new)
+      stub_const('Billing::TallyService', Class.new)
+      stub_const('Billing::ReceiptMailer', Class.new)
+      stub_const('Billing::PostJob', Class.new)
+    end
+
+    it 'analyzes the node it is given, not the first method of that name' do
+      analyzer = build_analyzer(source)
+      instance_method = analyzer.parsed_root.find_all(:def).first
+
+      expect(analyzer.method_effects(instance_method)).to include(
+        columns_written: ['status'],
+        jobs_enqueued: ['Billing::PostJob'],
+        services_called: ['Billing::TallyService'],
+        mailers_triggered: ['Billing::ReceiptMailer']
+      )
+    end
+
+    it 'leaves callback analysis naming services and mailers as written' do
+      effects = build_analyzer(source).analyze(make_callback(filter: 'post'))[:side_effects]
+
+      expect(effects[:services_called]).to eq(['TallyService'])
+      expect(effects[:mailers_triggered]).to eq(['ReceiptMailer'])
+    end
+  end
 end
