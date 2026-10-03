@@ -802,6 +802,53 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
   end
 
+  describe 'frontend references' do
+    before do
+      create_file('app/javascript/controllers/clipboard_controller.js', '')
+      create_file('app/javascript/alpine/index.js', 'Alpine.data("dropdown", () => ({ open: false }))')
+      create_file('app/javascript/components/shipment-card.tsx',
+                  '@Component({ tag: "x-shipment-card" }) export class ShipmentCard {}')
+    end
+
+    it 'links ERB x-data, data-controller and custom element references to their modules' do
+      path = create_file('app/views/widgets/show.html.erb', <<~ERB)
+        <div x-data="dropdown" data-controller="clipboard gone">
+          <x-shipment-card sku="<%= @sku %>"></x-shipment-card>
+        </div>
+      ERB
+
+      unit = described_class.new.extract_view_template_file(path)
+
+      expect(unit.dependencies).to include(
+        { type: :js_module, target: 'app/javascript/alpine/index.js', via: :alpine_data },
+        { type: :js_module, target: 'app/javascript/controllers/clipboard_controller.js', via: :stimulus_controller },
+        { type: :js_module, target: 'app/javascript/components/shipment-card.tsx', via: :custom_element }
+      )
+      expect(unit.metadata[:unresolved_frontend_references]).to eq([{ kind: 'stimulus_controller', name: 'gone' }])
+    end
+
+    it 'links HAML attribute hashes and element tags' do
+      path = create_file('app/views/widgets/index.html.haml', <<~HAML)
+        %div{ "x-data" => "dropdown()", data: { controller: "clipboard" } }
+          %x-shipment-card{ sku: 1 }
+      HAML
+
+      unit = described_class.new.extract_view_template_file(path)
+
+      expect(unit.dependencies.select { |d| d[:type] == :js_module }.map { |d| d[:via] })
+        .to eq(%i[alpine_data stimulus_controller custom_element])
+    end
+
+    it 'leaves a template without frontend references unchanged' do
+      path = create_file('app/views/widgets/plain.html.erb', '<p>plain</p>')
+
+      unit = described_class.new.extract_view_template_file(path)
+
+      expect(unit.dependencies.map { |d| d[:type] }).not_to include(:js_module)
+      expect(unit.metadata).not_to include(:unresolved_frontend_references)
+    end
+  end
+
   # ──────────────────────────────────────────────────────────────────────
   # Test Content
   # ──────────────────────────────────────────────────────────────────────

@@ -425,6 +425,40 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       expect(model_deps.map { |d| d[:target] }).to include('User')
     end
 
+    context 'with frontend references' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~RUBY
+            class PageComponent < ViewComponent::Base
+              def call
+                content_tag(:div, "x-data": "dropdown()", data: { controller: "clipboard missing" })
+              end
+            end
+          RUBY
+        }
+      end
+
+      before do
+        registry = Woods::Extractors::JsModuleRegistry.build(
+          { 'app/javascript/controllers/clipboard_controller.js' => '',
+            'app/javascript/alpine.js' => 'Alpine.data("dropdown", () => ({}))' },
+          directories: %w[app/javascript]
+        )
+        allow(Woods::Extractors::JsModuleRegistry).to receive(:current).and_return(registry)
+      end
+
+      it 'links Alpine and Stimulus names to their modules and records the unknown one' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.dependencies).to include(
+          { type: :js_module, target: 'app/javascript/alpine.js', via: :alpine_data },
+          { type: :js_module, target: 'app/javascript/controllers/clipboard_controller.js', via: :stimulus_controller }
+        )
+        expect(unit.dependencies.map { |d| d[:type] }).not_to include(:stimulus_controller)
+        expect(unit.metadata[:unresolved_frontend_references]).to eq([{ kind: 'stimulus_controller', name: 'missing' }])
+      end
+    end
+
     it 'detects helper includes' do
       extractor = described_class.new
       unit = extractor.extract_all.first

@@ -10,6 +10,7 @@ require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 require_relative 'template_extensions'
 require_relative 'template_ruby_fragments'
+require_relative 'frontend_references'
 
 module Woods
   module Extractors
@@ -36,6 +37,7 @@ module Woods
       include SharedUtilityMethods
       include SharedDependencyScanner
       include RouteHelperResolver
+      include FrontendReferences
 
       def initialize
         @component_base = find_component_base
@@ -98,7 +100,7 @@ module Woods
         unit.dependencies = extract_dependencies(unit.source_code, renders)
         HelperCallScan.annotate(self, unit, component)
 
-        unit
+        apply_frontend_references(unit, unit.source_code)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract view component #{component.name}: #{e.message}")
         nil
@@ -344,11 +346,6 @@ module Woods
         # Helper modules
         source.scan(/include\s+(\w+Helper)/).flatten.uniq.each do |helper|
           deps << { type: :helper, target: helper, via: :include }
-        end
-
-        # Stimulus controllers (from data-controller attributes in templates/source)
-        source.scan(/data[_-]controller[=:]\s*["']([^"']+)["']/).flatten.uniq.each do |controller|
-          deps << { type: :stimulus_controller, target: controller, via: :html_attribute }
         end
 
         # Navigation edges — resolve _path / _url helpers to real controllers

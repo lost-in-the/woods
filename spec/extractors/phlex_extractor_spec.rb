@@ -492,13 +492,25 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       )
     end
 
-    it 'detects Stimulus controller references' do
-      extractor = described_class.new
-      unit = extractor.extract_component(component_class)
+    it 'links a Stimulus controller reference to the module that defines it' do
+      registry = Woods::Extractors::JsModuleRegistry.build(
+        { 'app/javascript/controllers/dropdown_controller.js' => '' }, directories: %w[app/javascript]
+      )
+      allow(Woods::Extractors::JsModuleRegistry).to receive(:current).and_return(registry)
+
+      unit = described_class.new.extract_component(component_class)
 
       expect(unit.dependencies).to include(
-        a_hash_including(type: :stimulus_controller, target: 'dropdown', via: :html_attribute)
+        { type: :js_module, target: 'app/javascript/controllers/dropdown_controller.js', via: :stimulus_controller }
       )
+      expect(unit.metadata).not_to include(:unresolved_frontend_references)
+    end
+
+    it 'records a Stimulus controller no module defines instead of emitting a dangling edge' do
+      unit = described_class.new.extract_component(component_class)
+
+      expect(unit.dependencies.map { |d| d[:type] }).not_to include(:stimulus_controller, :js_module)
+      expect(unit.metadata[:unresolved_frontend_references]).to eq([{ kind: 'stimulus_controller', name: 'dropdown' }])
     end
 
     it 'includes :via key on all dependencies' do
