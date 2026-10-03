@@ -80,7 +80,7 @@ module Woods
         unit.namespace = extract_namespace(module_name)
         unit.source_code = annotate_source(source, module_name)
         unit.metadata = extract_metadata(source, file_path)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, module_name)
 
         unit
       rescue StandardError => e
@@ -126,7 +126,7 @@ module Woods
       # @return [Hash<String, Array<Module>>] Reflected module source locations
       def discover_model_mixin_paths
         models = ActiveRecord::Base.descendants.reject { |model| model.respond_to?(:abstract_class?) && model.abstract_class? }
-        models.flat_map(&:included_modules).uniq.each_with_object({}) do |mod, paths|
+        (models.flat_map(&:included_modules) + class_methods_owners(models)).uniq.each_with_object({}) do |mod, paths|
           next unless mod.name
 
           definition = begin
@@ -141,6 +141,25 @@ module Woods
           next unless app_source?(path, "#{Rails.root}/") && File.file?(path)
 
           (paths[path] ||= []) << mod
+        end
+      end
+
+      # Modules whose `ClassMethods` a model extends. Extending
+      # `Mixin::ClassMethods` directly (an initializer extending
+      # ActiveRecord::Base) mixes in the same source an include would, without
+      # the mixin itself ever joining +included_modules+.
+      #
+      # @param models [Array<Class>]
+      # @return [Array<Module>]
+      def class_methods_owners(models)
+        lookup = SourceReferences::RuntimeLookup.new
+        names = models.flat_map { |model| model.singleton_class.included_modules.filter_map(&:name) }.uniq
+        names.filter_map do |name|
+          owner = ConstantPaths.mixin_owner(name)
+          next if owner == name
+
+          value = lookup.call("::#{owner}", allow_private: true)[:value]
+          value if lookup.module_object?(value) && !lookup.class_object?(value)
         end
       end
 
@@ -342,16 +361,20 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       # @param source [String] Ruby source code
+      # @param module_name [String, nil] The concern's own identifier
       # @return [Array<Hash>] Dependency hashes
-      def extract_dependencies(source)
+      def extract_dependencies(source, module_name = nil)
         # Concerns included by this concern (add instance-level behavior)
         deps = detect_includes(source).map do |mod|
           { type: :concern, target: mod, via: :include }
         end
 
-        # Concerns extended by this concern (add class-level behavior)
+        # Concerns extended by this concern (add class-level behavior). A
+        # `ClassMethods` module belongs to the mixin that declares it, and the
+        # concern's own is no dependency at all.
         detect_extends(source).each do |mod|
-          deps << { type: :concern, target: mod, via: :extend }
+          owner = mod == 'ClassMethods' ? module_name : ConstantPaths.mixin_owner(mod)
+          deps << { type: :concern, target: owner, via: :extend } unless owner == module_name
         end
 
         # Standard dependency scanning

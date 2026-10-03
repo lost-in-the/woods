@@ -1166,12 +1166,12 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(include_dep[:type]).to eq(:concern)
     end
 
-    it 'gives extended concerns via: :extend' do
-      extended_mod = Module.new
-      allow(extended_mod).to receive(:name).and_return('Concerns::ClassMethods')
+    it 'gives extended concerns via: :extend, naming the owner of a ClassMethods module' do
+      extended_mod = stub_const('Depot::Countable', Module.new)
+      class_methods = stub_const('Mixin::Persistence::ClassMethods', Module.new)
 
       builtin_sc = double('Object SC', included_modules: [])
-      singleton_class_double = double('SC', included_modules: [extended_mod])
+      singleton_class_double = double('SC', included_modules: [extended_mod, class_methods])
 
       model = double('Model',
                      name: 'Post',
@@ -1188,10 +1188,11 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(extractor).to receive(:source_file_for).and_return(nil)
 
       deps = extractor.send(:extract_dependencies, model, nil)
-      extend_dep = deps.find { |d| d[:target] == 'Concerns::ClassMethods' }
-      expect(extend_dep).not_to be_nil
-      expect(extend_dep[:via]).to eq(:extend)
-      expect(extend_dep[:type]).to eq(:concern)
+
+      expect(deps).to eq(
+        [{ type: :concern, target: 'Depot::Countable', via: :extend },
+         { type: :concern, target: 'Mixin::Persistence', via: :extend }]
+      )
     end
 
     it 'does not leak Ruby builtin modules (e.g., Kernel, PP) as extend deps' do

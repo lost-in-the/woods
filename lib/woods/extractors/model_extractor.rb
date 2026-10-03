@@ -766,8 +766,10 @@ module Woods
         end
 
         # Extended modules add class-level behavior (not inlined into source)
+        # A `ClassMethods` module is part of the mixin that declares it; the
+        # edge names that mixin, which is the unit that holds its source.
         extract_extended_modules(model).each do |mod|
-          deps << { type: :concern, target: mod.name, via: :extend }
+          deps << { type: :concern, target: ConstantPaths.mixin_owner(mod.name), via: :extend }
         end
 
         # Parse source for service/mailer/job references
