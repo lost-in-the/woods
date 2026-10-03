@@ -6,6 +6,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'reference_patterns'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'job_ancestry'
 require_relative '../source_references/runtime_lookup'
 
@@ -115,6 +116,7 @@ module Woods
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata_from_source(source, class_name)
         unit.dependencies = extract_dependencies(source, class_name)
+        MethodEffects.apply(unit, source)
 
         unit
       rescue StandardError => e
@@ -142,6 +144,7 @@ module Woods
         unit.source_code = annotate_source(source, job_class.name)
         unit.metadata = extract_metadata_from_class(job_class, source)
         unit.dependencies = extract_dependencies(source, job_class.name)
+        MethodEffects.apply(unit, source)
 
         unit
       rescue StandardError => e
