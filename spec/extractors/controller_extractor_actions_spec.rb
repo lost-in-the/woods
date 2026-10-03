@@ -247,6 +247,14 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       end
     RUBY
 
+    load_app('app/controllers/action_fixtures/ledger_reports_controller.rb', <<~RUBY)
+      class ActionFixtures::LedgerReportsController < ActionFixtures::BaseController
+        attr_reader :ledger, :period
+
+        def show = nil
+      end
+    RUBY
+
     load_app('app/controllers/action_fixtures/health_controller.rb', <<~RUBY)
       class ActionFixtures::HealthController < ActionFixtures::FrameworkMetal
         def show
@@ -505,6 +513,31 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
   describe 'per-action chunks' do
     def chunk_actions(name)
       unit_for(name).chunks.map { |chunk| chunk[:metadata][:action] }
+    end
+
+    it 'map one to one onto the admitted actions of every controller' do
+      ActionFixtures.constants.map { |name| ActionFixtures.const_get(name) }
+                    .select { |constant| constant.is_a?(Class) && extractor.discoverable_classes.include?(constant) }
+                    .each do |controller|
+        unit = extractor.extract_controller(controller)
+        expect(unit.chunks.map { |chunk| chunk[:metadata][:action] }).to eq(unit.metadata[:actions]), controller.name
+      end
+    end
+
+    it 'give an attr_reader action an action chunk holding its declaring line' do
+      unit = unit_for('LedgerReportsController')
+      chunk = unit.chunks.find { |candidate| candidate[:metadata][:action] == 'ledger' }
+
+      expect(unit.metadata[:actions]).to eq(%w[ledger period show])
+      expect(chunk).to include(chunk_type: :action, identifier: 'ActionFixtures::LedgerReportsController#ledger')
+      expect(chunk[:content]).to include('attr_reader :ledger, :period')
+      expect(chunk[:metadata][:declaration_line]).to eq(2)
+    end
+
+    it 'mark only declaration chunks with a declaration line' do
+      show = unit_for('LedgerReportsController').chunks.find { |chunk| chunk[:metadata][:action] == 'show' }
+
+      expect(show[:metadata]).not_to have_key(:declaration_line)
     end
 
     it 'cover exactly the admitted actions, leaving out gem-inherited ones' do

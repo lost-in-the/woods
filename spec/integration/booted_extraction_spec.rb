@@ -772,7 +772,7 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
   it 'emits byte-identical controller units from two independent boots' do
     first = controller_lines
 
-    expect(first.size).to eq(3)
+    expect(first.size).to eq(4)
     expect(controller_lines).to eq(first)
   end
 
@@ -792,6 +792,7 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
     expect(units.transform_values { |unit| unit['metadata']['parent_class'] }).to eq(
       'GreetingsController' => 'Rails::WelcomeController',
       'HealthController' => 'ActionController::Metal',
+      'LedgerReportsController' => 'ActionController::Base',
       'PingController' => 'ActionController::Metal'
     )
   end
@@ -801,6 +802,16 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
 
     expect(units.fetch('PingController')['chunks'].map { |chunk| chunk['identifier'] }).to eq(['PingController#index'])
     expect(units.fetch('GreetingsController')['chunks']).to eq([])
+  end
+
+  it 'gives an attr_reader action a chunk holding its declaring line' do
+    unit = extract_controllers.fetch('LedgerReportsController')
+    chunks = unit['chunks'].to_h { |chunk| [chunk['metadata']['action'], chunk] }
+
+    expect(chunks.keys).to eq(unit['metadata']['actions'])
+    expect(chunks.keys).to eq(%w[ledger show])
+    expect(chunks['ledger']['content']).to include('attr_reader :ledger')
+    expect(chunks['ledger']['metadata']['declaration_line']).to eq(4)
   end
 
   it 'records a routed action inherited from a gem controller without admitting its body' do

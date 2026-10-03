@@ -945,9 +945,8 @@ module Woods
           route_info = @routes_map.dig(controller.name, action.to_s)
           filters = applicable_filters(controller, action)
 
-          # Extract just this action's source
-          action_source = extract_action_source(controller, action)
-          next if action_source.nil? || action_source.strip.empty?
+          action_source, declaration_line = chunk_source(controller, action)
+          next unless action_source
 
           route_desc = if route_info&.any?
                          route_info.map { |r| "#{r[:verb]} #{r[:path]}" }.join(', ')
@@ -964,20 +963,52 @@ module Woods
             #{action_source}
           ACTION
 
+          metadata = {
+            parent: unit.identifier,
+            action: action.to_s,
+            route: route_info,
+            filters: filters,
+            http_methods: route_info&.map { |r| r[:verb] }&.uniq || []
+          }
+          metadata[:declaration_line] = declaration_line if declaration_line
+
           {
             chunk_type: :action,
             identifier: "#{controller.name}##{action}",
             content: chunk_content,
             content_hash: Digest::SHA256.hexdigest(chunk_content),
-            metadata: {
-              parent: unit.identifier,
-              action: action.to_s,
-              route: route_info,
-              filters: filters,
-              http_methods: route_info&.map { |r| r[:verb] }&.uniq || []
-            }
+            metadata: metadata
           }
         end
+      end
+
+      # The source an action chunk holds: the action's +def+ body, or, for
+      # an action with no +def+ (an +attr_reader+, or a method a DSL defines
+      # from its own file), the line Ruby reports as its definition site.
+      #
+      # @param controller [Class]
+      # @param action [String]
+      # @return [Array(String, Integer), Array(String, nil), Array(nil, nil)]
+      #   the source and, for a declaration, its line number
+      def chunk_source(controller, action)
+        body = extract_action_source(controller, action)
+        return [body, nil] if body && !body.strip.empty?
+
+        file, line = controller.instance_method(action).source_location
+        declaration = declaration_line_text(file, line)
+        declaration ? [declaration, line] : [nil, nil]
+      rescue NameError
+        [nil, nil]
+      end
+
+      # @param file [String, nil]
+      # @param line [Integer, nil]
+      # @return [String, nil] the stripped line, or nil when it cannot be read
+      def declaration_line_text(file, line)
+        return nil unless file && line && File.exist?(file)
+
+        text = (@declaration_lines ||= {})[file] ||= File.readlines(file)
+        text[line - 1]&.strip.presence
       end
 
       def applicable_filters(controller, action)

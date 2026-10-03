@@ -31,6 +31,7 @@ Dir.mktmpdir('woods_controller_runtime') do |root|
     get 'health', to: 'health#show'
     get 'ping', to: 'ping#index'
     get 'greetings', to: 'greetings#index'
+    get 'ledger_report', to: 'ledger_reports#show'
   end
 
   Woods::Extractors::ControllerExtractor.new.extract_all.sort_by(&:identifier).each do |unit|

@@ -1,0 +1,1 @@
+- Every admitted controller action now has an action chunk. A public `attr_reader` in a controller's own file is admitted as an action, as any public method defined there is, but it has no `def` body, so it got no chunk. Such an action's chunk now holds its declaring line and records `metadata.declaration_line`, so chunks map one to one onto `metadata.actions`.
