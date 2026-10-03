@@ -253,15 +253,15 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 | Type | Trigger path |
 |------|--------------|
-| `route` | `config/routes.rb` |
-| `engine` | `config/routes.rb`, `Gemfile.lock` |
+| `route` | `config/routes.rb`, any file under `config/routes/` |
+| `engine` | `config/routes.rb`, any file under `config/routes/`, `Gemfile.lock` |
 | `middleware` | `config/application.rb`, `Gemfile.lock`, any file under `config/initializers`/`config/environments` |
 | `scheduled_job` | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml`, `config/application.rb`, any `.rb` under `config/initializers`/`config/environments` |
 | `state_machine` | any `.rb` change under the scanned model directories |
 | `factory` | any `.rb` change under `spec/factories`/`test/factories` |
 | `test_support` | any `.rb` change under `config.test_support_paths` or the factory directories |
 | `test_mapping` (wholesale, on top of per-file dispatch) | a test support file, any `.rake` under `lib/tasks`, `config/routes.rb` |
-| `event` | any `.rb` change under `app/` |
+| `event` | any `.rb` change under a configured event root (`config.event_paths`, default `app/`) |
 | `database_view` | any `.sql` change under `db/views` |
 | `graphql_operation` | any document matching `config.graphql_document_paths`, any `.rb` change under `app/graphql` |
 | `database_table` | a schema dump, or any file under `db/migrate` or `app/models`. A schema change with no file change needs a full extraction |
