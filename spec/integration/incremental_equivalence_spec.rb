@@ -1826,6 +1826,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    it 'keeps a module nested in a compact-named controller, and the action it prepends' do
+      write_and_load('app/controllers/sweep.rb', "module Sweep\nend\n")
+      write_and_load('app/controllers/sweep/confirmations_controller.rb', <<~RUBY)
+        class Sweep::ConfirmationsController < ApplicationController
+          module Behavior
+            def new = head(:ok)
+          end
+          prepend Behavior
+        end
+      RUBY
+      routes = File.read(app_path('config/routes.rb'))
+      write_file('config/routes.rb',
+                 routes.sub(/^end\s*\z/, "  namespace(:sweep) { resources :confirmations, only: :new }\nend\n"))
+      Rails.application.reload_routes!
+
+      index = full_extraction
+      units = unit_snapshot(index).values
+      behavior = units.find { |unit| unit['identifier'] == 'Sweep::ConfirmationsController::Behavior' }
+      expect(behavior).to include('type' => 'poro')
+      controller = units.find { |unit| unit['identifier'] == 'Sweep::ConfirmationsController' }
+      source = controller.dig('metadata', 'action_sources', 'new')
+      expect(source).to include('owner' => 'Sweep::ConfirmationsController::Behavior')
+      expect(units.map { |unit| unit['identifier'] }).to include(source.fetch('defined_in'))
+    ensure
+      Object.send(:remove_const, :Sweep) if Object.const_defined?(:Sweep, false)
+    end
+
     it 'publishes skip-reason changes that touch no unit, and only those' do
       index = full_extraction
       empty = 'app/models/sweep_empty.rb'

@@ -52,8 +52,12 @@ module Woods
       # never backtracks, so blank-line runs stay linear.
       OWN_METHOD_DEFINITION = /^[ \t]*+def\s/
 
-      # A `class` or `module` keyword opening a line (`class << self` included).
-      DECLARATION_LINE = /^[ \t]*+(?:class|module)\b/
+      # A `class` or `module` keyword opening a line, capturing the token after
+      # it (`class << self` captures `<<`).
+      DECLARATION_LINE = /^[ \t]*+(?:class|module)\b[ \t]*+(\S*+)/
+
+      # A plain constant path, optionally rooted.
+      CONSTANT_PATH = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
 
       # Value-class factories AssignedValueDiscovery can promote to a unit.
       VALUE_CLASS_CONSTRUCTOR = /\b(?:Struct\.new|Data\.define)\b/
@@ -204,11 +208,20 @@ module Woods
         return false unless governed
 
         segments = governed.split('::')
-        return false if source.scan(DECLARATION_LINE).size > segments.size
+        return false unless declares_only?(source, segments)
         return false unless runtime_family(governed)
 
         discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
         (1...segments.size).none? { |depth| discovery.owns?(segments.first(depth).join('::'), file_path) }
+      end
+
+      # Whether the file's class/module lines, in order, spell exactly the
+      # governed constant: `module A` + `class B` or `class A::B` for `A::B`.
+      # Any other declaration (a nested module, `class << self`) needs a parse.
+      def declares_only?(source, segments)
+        tokens = source.scan(DECLARATION_LINE).flatten
+        tokens.all? { |token| token.match?(CONSTANT_PATH) } &&
+          tokens.flat_map { |token| token.delete_prefix('::').split('::') } == segments
       end
 
       def skip_inputs(file_path)

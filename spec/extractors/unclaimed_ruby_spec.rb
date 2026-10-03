@@ -157,6 +157,48 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
       expect([units, parses]).to eq([['SweepFixture::OrdersController::Filters'], 1])
     end
 
+    it 'still parses a compact-named controller holding a nested module' do
+      units, parses = parses_for('app/controllers/sweep_fixture/confirmations_controller.rb', <<~RUBY)
+        class SweepFixture::ConfirmationsController < ActionController::Base
+          module Behavior
+            def new = nil
+          end
+          prepend Behavior
+        end
+      RUBY
+      expect([units, parses]).to eq([['SweepFixture::ConfirmationsController::Behavior'], 1])
+    end
+
+    it 'still parses a compact-named controller whose nested module holds classes' do
+      units, parses = parses_for('app/controllers/sweep_fixture/unlocks_controller.rb', <<~RUBY)
+        class SweepFixture::UnlocksController < ActionController::Base
+          module Behavior
+            class Token
+              def value = 1
+            end
+            def create = nil
+          end
+          prepend Behavior
+        end
+      RUBY
+      expect(parses).to eq(1)
+      expect(units).to include('SweepFixture::UnlocksController::Behavior')
+    end
+
+    it 'still parses a block-nested controller holding a nested module' do
+      units, parses = parses_for('app/controllers/sweep_fixture/passwords_controller.rb', <<~RUBY)
+        module SweepFixture
+          class PasswordsController < ActionController::Base
+            module Behavior
+              def edit = nil
+            end
+            prepend Behavior
+          end
+        end
+      RUBY
+      expect([units, parses]).to eq([['SweepFixture::PasswordsController::Behavior'], 1])
+    end
+
     it 'still parses when the file is where a wrapper namespace is declared' do
       units, parses = parses_for('app/controllers/sweep_fixture/billing/invoices_controller.rb', <<~RUBY)
         module SweepFixture::Billing

@@ -47,6 +47,17 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'regex complexity' do
     end
   end
 
+  it 'captures declaration tokens and recognizes constant paths in linear time' do
+    lines = described_class::DECLARATION_LINE
+    path = described_class::CONSTANT_PATH
+    within_budget do
+      expect("class #{'A' * 50_000}".scan(lines).flatten.first.size).to eq(50_000)
+      expect(path.match?("#{'A::' * 25_000}A")).to be(true)
+      expect(path.match?("#{'A::' * 25_000}a!")).to be(false)
+      expect(path.match?("A#{'b' * 50_000}:")).to be(false)
+    end
+  end
+
   it 'strips the app directory prefix in linear time' do
     pattern = described_class::APP_DIRECTORY_PREFIX
     within_budget do
