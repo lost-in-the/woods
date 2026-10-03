@@ -5,6 +5,7 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
+require 'active_support/core_ext/class/subclasses'
 require 'woods/extractors/job_extractor'
 
 RSpec.describe Woods::Extractors::JobExtractor do
@@ -834,6 +835,163 @@ RSpec.describe Woods::Extractors::JobExtractor do
 
       expect(unit.identifier).to eq('Gems::ExternalJob')
       expect(unit.file_path).to be_nil
+    end
+  end
+
+  # ── Runtime ancestry admission ───────────────────────────────────────
+
+  describe 'runtime ancestry admission' do
+    let(:gem_root) { Dir.mktmpdir('job-fixture-gem') }
+
+    before do
+      stub_const('JobFixture', Module.new)
+      stub_const('Sidekiq', Module.new)
+      gem_file = File.join(gem_root, 'sidekiq_stand_in.rb')
+      File.write(gem_file, <<~RUBY)
+        module Sidekiq
+          module Job
+            def self.included(base) = base.extend(ClassMethods)
+
+            module ClassMethods
+              def sidekiq_options(options = {}) = (@sidekiq_options_hash = options)
+              def sidekiq_options_hash = @sidekiq_options_hash || {}
+            end
+          end
+          Worker = Job
+
+          module IterableJob
+            def self.included(base) = base.include(Sidekiq::Job)
+          end
+        end
+
+        module JobFixture
+          class GemDefinedWorker
+            include Sidekiq::Job
+            def perform = nil
+          end
+        end
+      RUBY
+      load gem_file
+    end
+
+    after { FileUtils.rm_rf(gem_root) }
+
+    def declare(relative, body)
+      path = create_file(relative, "module JobFixture\n#{body}\nend\n")
+      load path
+      path
+    end
+
+    def declare_probe_workers
+      declare('app/workers/job_fixture/media_probe_worker.rb', <<~RUBY)
+        class MediaProbeWorker
+          include Sidekiq::Worker
+        end
+      RUBY
+      declare('app/workers/job_fixture/attachable_probe_worker.rb', <<~RUBY)
+        class AttachableProbeWorker < MediaProbeWorker
+          def perform(id) = self.class.media_class.find_by(id: id)
+          def self.media_class = raise(NotImplementedError)
+        end
+      RUBY
+      declare('app/workers/job_fixture/tile_icon_probe_worker.rb', <<~RUBY)
+        class TileIconProbeWorker < AttachableProbeWorker
+          def self.media_class = TileIcon
+        end
+      RUBY
+    end
+
+    def units_by_id
+      described_class.new.extract_all.to_h { |unit| [unit.identifier, unit] }
+    end
+
+    it 'admits a markerless leaf of a Sidekiq worker chain from its own file' do
+      paths = declare_probe_workers
+      leaf_path = File.join(tmp_dir, 'app/workers/job_fixture/tile_icon_probe_worker.rb')
+
+      leaf = units_by_id.fetch('JobFixture::TileIconProbeWorker')
+
+      expect(paths).to eq(leaf_path)
+      expect(leaf).to have_attributes(type: :job, file_path: leaf_path)
+      expect(leaf.metadata).to include(parent_class: 'AttachableProbeWorker', job_type: :sidekiq)
+    end
+
+    it 'admits an iterable Sidekiq job with no perform method' do
+      path = declare('app/jobs/job_fixture/maintenance/backfill_totals_job.rb', <<~RUBY)
+        module Maintenance
+          class BackfillTotalsJob
+            include Sidekiq::IterableJob
+            sidekiq_options queue: "bulk"
+            def build_enumerator(start_id, end_id, cursor:) = nil
+            def each_iteration(rows, *) = nil
+          end
+        end
+      RUBY
+
+      unit = units_by_id.fetch('JobFixture::Maintenance::BackfillTotalsJob')
+      expect(unit).to have_attributes(file_path: path)
+      expect(unit.metadata).to include(job_type: :sidekiq, queue: 'bulk')
+    end
+
+    it 'admits a markerless leaf of an application ActiveJob base' do
+      stub_const('ActiveJob::Base', Class.new)
+      declare('app/jobs/job_fixture/ledger_base_job.rb', <<~RUBY)
+        class LedgerBaseJob < ActiveJob::Base
+          def perform(id) = self.class.ledger_class.find(id)
+        end
+      RUBY
+      path = declare('app/jobs/job_fixture/cash_ledger_job.rb', <<~RUBY)
+        class CashLedgerJob < LedgerBaseJob
+          def self.ledger_class = CashLedger
+        end
+      RUBY
+
+      unit = units_by_id.fetch('JobFixture::CashLedgerJob')
+      expect(unit).to have_attributes(file_path: path)
+      expect(unit.metadata).to include(parent_class: 'LedgerBaseJob', job_type: :active_job)
+    end
+
+    it 'keeps classes defined outside the application root out' do
+      declare_probe_workers
+
+      expect(described_class.new.discoverable_classes).not_to include(JobFixture::GemDefinedWorker)
+      expect(units_by_id).not_to have_key('JobFixture::GemDefinedWorker')
+    end
+
+    it 'emits each admitted job once' do
+      declare_probe_workers
+
+      identifiers = described_class.new.extract_all.map(&:identifier)
+      expect(identifiers.tally.values).to all(eq(1))
+    end
+
+    it 'gives an enqueue call site a job_enqueue edge that the leaf unit answers' do
+      declare_probe_workers
+      declare('app/jobs/job_fixture/tile_refresh_job.rb', <<~RUBY)
+        class TileRefreshJob
+          include Sidekiq::Job
+          def perform(id) = JobFixture::TileIconProbeWorker.perform_async(id)
+        end
+      RUBY
+
+      units = units_by_id
+      edge = { type: :job, target: 'JobFixture::TileIconProbeWorker', via: :job_enqueue }
+
+      expect(units.fetch('JobFixture::TileRefreshJob').dependencies).to include(edge)
+      expect(units).to have_key(edge[:target])
+    end
+  end
+
+  describe '#source_file_for in worker directories' do
+    it 'resolves the convention path under app/workers' do
+      path = create_file('app/workers/job_fixture/tile_icon_probe_worker.rb', "class TileIconProbeWorker; end\n")
+      worker = Class.new do
+        def self.name
+          'JobFixture::TileIconProbeWorker'
+        end
+      end
+
+      expect(described_class.new.send(:source_file_for, worker)).to eq(path)
     end
   end
 

@@ -38,6 +38,10 @@ module Woods
         app/sidekiq
       ].freeze
 
+      # Sidekiq's job modules, counted only when Sidekiq is loaded.
+      # `Worker` aliases `Job` on current Sidekiq.
+      SIDEKIQ_JOB_MODULES = %w[Sidekiq::Job Sidekiq::Worker].freeze
+
       def initialize
         @directories = JOB_DIRECTORIES.map { |d| Rails.root.join(d) }
                                       .select(&:directory?)
@@ -71,20 +75,21 @@ module Woods
       end
 
       # Job classes the runtime vouches for beyond the job-directory scan:
-      # every named ApplicationJob descendant. A job nested inside a class
-      # that lives elsewhere (a model file) is reachable only this way.
+      # every named ApplicationJob descendant, plus every class defined in
+      # the application whose ancestry includes ActiveJob::Base or a Sidekiq
+      # job module. A job nested inside a class that lives elsewhere (a model
+      # file), or a leaf that inherits everything from a parent job, is
+      # reachable only this way.
       #
       # Shared with the incremental path, which re-extracts a job by class
       # when re-deriving it from its file names a different constant — the
       # file's governed name is then the enclosing class, not the job.
       #
-      # @return [Array<Class>] named ApplicationJob descendants, or [] when
-      #   the app defines no ApplicationJob
+      # @return [Array<Class>] named, live job classes
       def discoverable_classes
-        return [] unless defined?(ApplicationJob)
-
         lookup = SourceReferences::RuntimeLookup.new
-        ApplicationJob.descendants.select do |klass|
+        application_jobs = defined?(ApplicationJob) ? ApplicationJob.descendants : []
+        (application_jobs + application_defined(ancestry_jobs)).uniq.select do |klass|
           klass.name && lookup.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
         end
       end
@@ -169,9 +174,55 @@ module Woods
           source.match?(/def perform/)
       end
 
+      # Classes whose ancestry makes them jobs, wherever they are defined.
+      # A module has no descendants list, hence the ObjectSpace walk; the
+      # unbound `include?` ignores classes that redefine it as a class method.
+      #
+      # @return [Array<Class>]
+      def ancestry_jobs
+        jobs = defined?(ActiveJob::Base) ? ActiveJob::Base.descendants : []
+        modules = sidekiq_job_modules
+        return jobs if modules.empty?
+
+        includes = Module.instance_method(:include?)
+        jobs + ObjectSpace.each_object(Class).select do |klass|
+          modules.any? { |mod| includes.bind_call(klass, mod) }
+        end
+      end
+
+      # @return [Array<Module>] the loaded Sidekiq job modules
+      def sidekiq_job_modules
+        SIDEKIQ_JOB_MODULES.filter_map { |name| Object.const_get(name) if Object.const_defined?(name) }.uniq
+      end
+
+      # Framework, gem, and engine jobs stay out: only a class whose
+      # definition site is application source qualifies through ancestry.
+      #
+      # @param classes [Array<Class>]
+      # @return [Array<Class>]
+      def application_defined(classes)
+        app_root = Rails.root.to_s
+        classes.select do |klass|
+          name = klass.name
+          name && app_source?(Object.const_source_location(name)&.first, app_root)
+        rescue NameError
+          false
+        end
+      end
+
+      # Runtime ancestry, for a class whose source carries no job marker.
+      #
+      # @param job_class [Class]
+      # @return [Symbol, nil]
+      def runtime_job_type(job_class)
+        return :sidekiq if sidekiq_job_modules.any? { |mod| job_class.include?(mod) }
+
+        :active_job if defined?(ActiveJob::Base) && job_class < ActiveJob::Base
+      end
+
       # Locate the source file for a job class (class-discovery path only).
       #
-      # Convention path first, then introspection via {#resolve_source_location}
+      # Convention path under each job directory first, then introspection via {#resolve_source_location}
       # which filters out vendor/node_modules paths.
       #
       # Returns nil rather than a fabricated convention path when nothing
@@ -186,8 +237,10 @@ module Woods
       # @param job_class [Class]
       # @return [String, nil]
       def source_file_for(job_class)
-        convention_path = Rails.root.join("app/jobs/#{job_class.name.underscore}.rb").to_s
-        return convention_path if File.exist?(convention_path)
+        JOB_DIRECTORIES.each do |dir|
+          convention_path = Rails.root.join(dir, "#{job_class.name.underscore}.rb").to_s
+          return convention_path if File.exist?(convention_path)
+        end
 
         resolve_source_location(job_class, app_root: Rails.root.to_s, fallback: nil)
       end
@@ -237,6 +290,7 @@ module Woods
       def extract_metadata_from_source(source, class_name)
         {
           job_type: detect_job_type(source),
+          parent_class: extract_parent_class(source, class_name),
           queue: extract_queue(source),
 
           # Configuration
@@ -267,6 +321,7 @@ module Woods
         base_metadata = extract_metadata_from_source(source, job_class.name)
 
         # Enhance with runtime introspection if available
+        base_metadata[:job_type] = runtime_job_type(job_class) || :unknown if base_metadata[:job_type] == :unknown
         base_metadata[:queue] ||= job_class.queue_name if job_class.respond_to?(:queue_name)
 
         base_metadata[:sidekiq_options] = job_class.sidekiq_options_hash if job_class.respond_to?(:sidekiq_options_hash)
