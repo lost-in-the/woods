@@ -44,8 +44,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
            verb: 'GET', name: nil, constraints: {})
   end
 
-  def build_extractor(routes)
-    routes_double = double('Routes', routes: routes, named_routes: {})
+  def build_extractor(routes, named_routes: {})
+    routes_double = double('Routes', routes: routes, named_routes: named_routes)
     app_double = double('Application', routes: routes_double)
     stub_const('Rails', double('Rails', application: app_double, root: Pathname.new(app_root),
                                         logger: double('Logger', error: nil, warn: nil, debug: nil, info: nil)))
@@ -144,6 +144,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     load_app('app/controllers/action_fixtures/sales_reports_controller.rb', <<~RUBY)
       class ActionFixtures::SalesReportsController < ActionFixtures::BaseReportsController
         private def report = :sales
+
+        private def back = redirect_to(base_reports_path)
       end
     RUBY
 
@@ -189,7 +191,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
                       route('action_fixtures/modern/confirmations', 'create'),
                       route('action_fixtures/sales_reports', 'show'),
                       route('action_fixtures/ledgers', 'totals')
-                    ])
+                    ], named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
   end
 
   def unit_for(name)
@@ -262,6 +264,15 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       expect(unit.dependencies).to include(
         { type: :controller, target: 'ActionFixtures::BaseReportsController', via: :action_source }
       )
+    end
+
+    it 'keeps a redirect_to edge to the parent alongside the inheritance and action_source edges' do
+      Woods.configure unless Woods.configuration
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+
+      to_parent = unit.dependencies.select { |dep| dep[:target] == 'ActionFixtures::BaseReportsController' }
+
+      expect(to_parent.map { |dep| dep[:via] }).to contain_exactly(:action_source, :inheritance, :redirect_to)
     end
 
     it 'depends on an app parent controller even when no action comes from it, but not on a framework base' do

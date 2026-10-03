@@ -789,7 +789,6 @@ module Woods
         deps = detect_included_concerns(controller).map do |mod|
           { type: :concern, target: mod.name, via: :include }
         end
-        deps.concat(action_source_dependencies(controller, action_sources || resolve_action_sources(controller)))
 
         if source.nil?
           source_path = source_file_for(controller)
@@ -813,7 +812,11 @@ module Woods
           deps.concat(scan_navigation_dependencies(source, via_type: :redirect_to))
         end
 
-        consolidate_dependencies(deps)
+        # consolidate_dependencies keeps one edge per (type, target), so the
+        # structural edges join afterwards: a controller that redirects to
+        # its parent keeps that edge as well as the inheritance one.
+        structural = action_source_dependencies(controller, action_sources || resolve_action_sources(controller))
+        (consolidate_dependencies(deps) + structural).uniq { |dep| dep.values_at(:type, :target, :via) }
       end
 
       # Edges to the units that hold the bodies of actions this controller
