@@ -75,7 +75,7 @@ module Woods
 
         new(source, class_name: class_name.to_s, column_names: column_names || []).apply(unit, skip: skip, limit: limit)
         unit
-      rescue StandardError => e
+      rescue StandardError, SystemStackError => e
         logger = defined?(Rails) && Rails.respond_to?(:logger) ? Rails.logger : nil
         logger&.warn("[Woods] method effects skipped for #{unit.identifier}: #{e.class}: #{e.message}")
         unit
@@ -173,12 +173,10 @@ module Woods
         frontier = [key]
         found = {}
         MAX_DEPTH.times do
-          frontier = frontier.flat_map { |caller_key| calls_of(caller_key) }.uniq
-                             .reject { |callee| seen.include?(callee) }
+          frontier = frontier.flat_map { |caller_key| calls_of(caller_key).select { |callee| seen.add?(callee) } }
           break if frontier.empty?
 
           frontier.each do |callee|
-            seen << callee
             effects = direct_effects(callee).reject { |_, values| values.empty? }
             found[callee] = effects unless effects.empty?
           end
