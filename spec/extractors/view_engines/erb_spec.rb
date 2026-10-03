@@ -214,4 +214,45 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
       end
     end
   end
+
+  describe '#scan_method_calls' do
+    let(:names) { Set.new(%w[pretty_date widget_badge title]) }
+
+    it 'reports catalog names called inside ERB tags' do
+      source = "<h1><%= pretty_date(@widget.shipped_at) %></h1>\n<% if widget_badge(@widget) -%>x<% end %>"
+      expect(engine.scan_method_calls(source, names)).to eq(bare: %w[pretty_date widget_badge], explicit: [])
+    end
+
+    it 'ignores the same words in markup outside the tags' do
+      expect(engine.scan_method_calls('<title>pretty_date</title><%= @x %>', names)[:bare]).to eq([])
+    end
+
+    it 'ignores ERB comments and literal <%% text' do
+      source = "<%# pretty_date %>\n<%% title %>\n<%= widget_badge(w) %>"
+      expect(engine.scan_method_calls(source, names)[:bare]).to eq(%w[widget_badge])
+    end
+
+    it 'reads the raw-output and trim tag forms' do
+      expect(engine.scan_method_calls("<%== pretty_date(a) -%>\n<%- title -%>", names)[:bare])
+        .to eq(%w[pretty_date title])
+    end
+
+    it 'treats strict locals as locals' do
+      source = "<%# locals: (title:, size: 1) -%>\n<%= title %> <%= pretty_date(size) %>"
+      expect(engine.scan_method_calls(source, names)[:bare]).to eq(%w[pretty_date])
+    end
+
+    it 'keeps a block parameter local across tags' do
+      source = "<% widgets.each do |title| %>\n<%= title %>\n<% end %>"
+      expect(engine.scan_method_calls(source, names)[:bare]).to eq([])
+    end
+
+    it 'reads a tag left open at the end of the source' do
+      expect(engine.scan_method_calls('<%= pretty_date(x)', names)[:bare]).to eq(%w[pretty_date])
+    end
+
+    it 'reports helpers-proxy calls as explicit' do
+      expect(engine.scan_method_calls('<%= helpers.pretty_date(x) %>', names)[:explicit]).to eq(%w[pretty_date])
+    end
+  end
 end
