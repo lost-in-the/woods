@@ -61,6 +61,8 @@
     "embedding_provider=",
     "enable_snapshots",
     "enable_snapshots=",
+    "event_patterns",
+    "event_patterns=",
     "extract_navigation_edges",
     "extract_navigation_edges=",
     "extractors",
@@ -1017,7 +1019,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 115,
+    "configuration_attributes": 117,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
