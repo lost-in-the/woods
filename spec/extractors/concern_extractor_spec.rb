@@ -100,6 +100,46 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       end
     end
 
+    context 'with modules declared in an initializer' do
+      let(:path) do
+        create_file('config/initializers/depot.rb', <<~RUBY)
+          module Depot
+            module Countable
+              def count_all; end
+            end
+          end
+          module Rack::Throttle
+            def throttled?; end
+          end
+          Widget.extend(Depot::Countable)
+        RUBY
+      end
+
+      before do
+        stub_const('Depot', Module.new)
+        stub_const('Depot::Countable', Module.new { def count_all; end })
+        stub_const('Rack::Throttle', Module.new { def throttled?; end })
+        allow(Object).to receive(:const_source_location).and_call_original
+        allow(Object).to receive(:const_source_location).with('Depot').and_return([path, 1])
+        allow(Object).to receive(:const_source_location).with('Depot::Countable').and_return([path, 2])
+        allow(Object).to receive(:const_source_location).with('Rack::Throttle')
+                                                        .and_return(['/gems/rack/throttle.rb', 1])
+      end
+
+      it 'publishes a module with behavior that the initializer canonically declares, whoever mixes it in' do
+        units = described_class.new.extract_all
+
+        expect(units.map { |unit| [unit.type, unit.identifier, unit.file_path] })
+          .to eq([[:concern, 'Depot::Countable', path]])
+      end
+
+      it 'leaves a module no longer loaded out' do
+        hide_const('Depot::Countable')
+
+        expect(described_class.new.extract_all).to be_empty
+      end
+    end
+
     it 'excludes gem-owned modules even when the application adds their methods' do
       path = create_file('vendor/bundle/gem_mixin.rb', "module GemMixin\n def pin; end\nend\n")
       stub_const('GemMixin', Module.new)

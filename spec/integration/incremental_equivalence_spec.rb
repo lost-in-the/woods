@@ -2992,8 +2992,21 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
             end
           end
         end
+
+        # No model mixes this one in; a service extends it.
+        module PathCountable
+          def count_all
+            0
+          end
+        end
       RUBY
       load app_path(initializer)
+      service = write_file('app/services/path_tally_service.rb', <<~RUBY)
+        class PathTallyService
+          extend PathCountable
+        end
+      RUBY
+      load app_path(service)
       model_source = <<~RUBY
         class PathLedger < ApplicationRecord
           self.table_name = 'posts'
@@ -3009,6 +3022,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       units = unit_snapshot(index).values
       mixin = units.find { |data| data['type'] == 'concern' && data['identifier'] == 'PathPersistence' }
       expect(mixin.fetch('file_path')).to eq(initializer)
+      countable = units.find { |data| data['type'] == 'concern' && data['identifier'] == 'PathCountable' }
+      expect(countable.fetch('file_path')).to eq(initializer)
       ledger = units.find { |data| data['type'] == 'model' && data['identifier'] == 'PathLedger' }
       expect(ledger.dig('metadata', 'polymorphic_interfaces')).to eq(['path_trackable'])
       edges = edges_of(index, 'model', 'PathLedger')
@@ -3018,9 +3033,15 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_file(model, model_source.sub("'posts'", "'posts' # edited"))
       Woods::Extractor.new(output_dir: index).extract_changed([model])
       expect(differences(index, full_extraction)).to be_empty
+
+      write_file(service, "class PathTallyService\n  extend PathCountable\n  LIMIT = 2\nend\n")
+      Woods::Extractor.new(output_dir: index).extract_changed([service])
+      expect(differences(index, full_extraction)).to be_empty
     ensure
       remove_model(:PathLedger)
-      Object.send(:remove_const, :PathPersistence) if Object.const_defined?(:PathPersistence, false)
+      %i[PathPersistence PathCountable PathTallyService].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
     end
   end
 
