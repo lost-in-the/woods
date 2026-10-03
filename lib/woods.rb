@@ -151,7 +151,7 @@ module Woods
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
-                :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns
+                :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -230,6 +230,8 @@ module Woods
       # Application event wrappers EventExtractor scans for, on top of its
       # built-in ActiveSupport::Notifications and Wisper patterns.
       @event_patterns = [].freeze
+      # Roots EventExtractor scans, relative to Rails.root. See the setter.
+      @event_paths = %w[app].freeze
     end
 
     def embedding_model=(value)
@@ -442,6 +444,24 @@ module Woods
       @event_patterns = value.each_with_index.map { |entry, index| validate_event_pattern!(entry, index) }.freeze
     end
 
+    # Directories {Woods::Extractors::EventExtractor} scans for publish and
+    # subscribe sites, relative to Rails.root. Defaults to +%w[app]+; a host
+    # app whose event wrapper lives in +lib/+ adds it. A trailing slash is
+    # dropped. Changing it needs a full extraction.
+    #
+    # @example
+    #   config.event_paths = %w[app lib]
+    #
+    # @param value [Array<String>] non-empty list of relative directories
+    # @raise [ConfigurationError] if the list or any entry is malformed; the previous value is kept
+    def event_paths=(value)
+      unless value.is_a?(Array) && value.any?
+        raise ConfigurationError, "event_paths must be a non-empty Array, got #{value.inspect}"
+      end
+
+      @event_paths = value.each_with_index.map { |entry, index| validate_event_path!(entry, index) }.freeze
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -496,6 +516,20 @@ module Woods
 
       raise ConfigurationError,
             "#{label} pattern must have a capture group for the event name, got #{pattern.inspect}"
+    end
+
+    # @return [String] +entry+ without a trailing slash, frozen
+    # @raise [ConfigurationError] unless +entry+ is a relative path inside Rails.root
+    def validate_event_path!(entry, index)
+      label = "event_paths[#{index}]"
+      unless entry.is_a?(String) && !entry.empty?
+        raise ConfigurationError, "#{label} must be a non-empty String, got #{entry.inspect}"
+      end
+      if entry.start_with?('/') || entry.split('/').include?('..')
+        raise ConfigurationError, "#{label} must be relative to Rails.root, got #{entry.inspect}"
+      end
+
+      entry.chomp('/').freeze
     end
 
     def validate_boolean!(name, value)

@@ -795,6 +795,7 @@ app with no components.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `event_patterns` | Array&lt;Hash&gt; | `[]` | Extra publish/subscribe call shapes `EventExtractor` recognizes, on top of its built-in `ActiveSupport::Notifications` and Wisper patterns. |
+| `event_paths` | Array&lt;String&gt; | `%w[app]` | Directories, relative to `Rails.root`, whose `**/*.rb` files `EventExtractor` scans for built-in and configured patterns. |
 
 `EventExtractor` knows two event systems out of the box. An application that
 wraps its events in its own class needs to describe that wrapper:
@@ -817,7 +818,8 @@ end
   is named. It may also capture `(?<scope>...)`.
 - **`system`**: a `Symbol` label for the event system.
 
-Configured patterns scan every `app/**/*.rb` file after the built-in ones.
+Configured patterns scan every `.rb` file under the `event_paths` roots after
+the built-in ones.
 
 The setter validates each entry when it is assigned. A role outside
 `:publisher`/`:subscriber`, a pattern that is not a `Regexp` or has no capture
@@ -854,6 +856,25 @@ written.
 part of any incremental fingerprint. `woods:incremental` re-runs `EventExtractor`
 only when an `app/**/*.rb` file changes, and then with the new patterns, so
 units for files that did not change can stay stale until `woods:extract` runs.
+
+**`event_paths` chooses the scan roots.** The default, `%w[app]`, is the only
+root scanned before the option existed. An application whose event wrapper or
+listeners live in `lib/` adds it:
+
+```ruby
+Woods.configure do |config|
+  config.event_paths = %w[app lib]
+end
+```
+
+The setter requires a non-empty `Array` of non-empty `String`s, each relative
+to `Rails.root` without `..` segments, and drops a trailing slash. Anything
+else raises `Woods::ConfigurationError` and keeps the previous value. A root
+that does not exist is skipped.
+
+**Changing `event_paths` needs a full extraction.** Incremental runs re-run
+`EventExtractor` only when an `app/**/*.rb` file changes, so an edit under an
+added root such as `lib/` is not picked up until `woods:extract` runs.
 
 ## Console MCP options
 

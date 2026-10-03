@@ -10,7 +10,8 @@ module Woods
   module Extractors
     # EventExtractor discovers event publishing and subscribing patterns across the app.
     #
-    # Scans +app/**/*.rb+ for two event system conventions:
+    # Scans +**/*.rb+ under each +Woods.configuration.event_paths+ root
+    # (default +app+) for two event system conventions:
     # - ActiveSupport::Notifications: +instrument+ (publish) and +subscribe+ (consume)
     # - Wisper: +publish+/+broadcast+ (publish) and +on(:event_name)+ (subscribe)
     #
@@ -40,6 +41,7 @@ module Woods
     class EventExtractor
       include SharedUtilityMethods
 
+      # Default scan roots; +Woods.configuration.event_paths+ replaces them.
       APP_DIRECTORIES = %w[app].freeze
 
       # Keyword arguments of a configured call recorded as event identity,
@@ -47,7 +49,8 @@ module Woods
       IDENTITY_KEYWORDS = { 'scope' => :scopes, 'event' => :sub_events }.freeze
 
       def initialize
-        @directories = APP_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
+        roots = Woods.configuration&.event_paths || APP_DIRECTORIES
+        @directories = roots.map { |d| Rails.root.join(d) }.select(&:directory?)
         @configured_patterns = Woods.configuration&.event_patterns || []
       end
 

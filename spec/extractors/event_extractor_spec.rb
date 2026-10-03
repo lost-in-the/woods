@@ -822,6 +822,56 @@ RSpec.describe Woods::Extractors::EventExtractor do
     end
   end
 
+  describe 'event_paths' do
+    let(:bus_source) do
+      <<~SRC
+        module Ledger
+          class Bus
+            def settle
+              ActiveSupport::Notifications.instrument("ledger.settled")
+            end
+          end
+        end
+      SRC
+    end
+
+    it 'scans only app/ by default' do
+      Woods.configuration = Woods::Configuration.new
+      create_file('lib/ledger/bus.rb', bus_source)
+
+      expect(described_class.new.extract_all).to eq([])
+    end
+
+    it 'scans every configured root, recording paths relative to Rails.root' do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_paths = %w[app lib]
+      create_file('lib/ledger/bus.rb', bus_source)
+      create_file('app/listeners/settlement_listener.rb', <<~SRC)
+        class SettlementListener
+          ActiveSupport::Notifications.subscribe("ledger.settled") {}
+        end
+      SRC
+
+      unit = extract_sole_unit
+      expect(unit.metadata).to include(publishers: ['lib/ledger/bus.rb'],
+                                       subscribers: ['app/listeners/settlement_listener.rb'])
+      expect(unit.dependencies).to eq(
+        [
+          { type: :class, target: 'Ledger::Bus', via: :published_by },
+          { type: :class, target: 'SettlementListener', via: :subscribed_by }
+        ]
+      )
+    end
+
+    it 'skips a configured root that does not exist' do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_paths = %w[app engines/billing]
+      create_file('app/services/ledger_service.rb', 'ActiveSupport::Notifications.instrument("ledger.settled")')
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['ledger.settled'])
+    end
+  end
+
   describe 'without configured event_patterns' do
     it 'emits the same metadata keys as before the option existed' do
       Woods.configuration = Woods::Configuration.new
