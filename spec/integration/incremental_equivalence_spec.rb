@@ -2893,6 +2893,137 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   # The gap-specific examples above pin known failures; this is the part that
   # finds the unknown ones. Seeds are fixed so a failure is reproducible.
+  describe 'constant paths in dependency edges' do
+    def edges_of(index, type, identifier)
+      unit = unit_snapshot(index).values.find { |data| data['type'] == type && data['identifier'] == identifier }
+      unit.fetch('dependencies').map { |dep| dep.values_at('type', 'target', 'via') }
+    end
+
+    def remove_model(name)
+      return unless Object.const_defined?(name, false)
+
+      Object.const_get(name).abstract_class = true
+      Object.send(:remove_const, name)
+    end
+
+    it 'keeps whole GraphQL constant paths as the referencing file changes' do
+      source = <<~RUBY
+        module Mutations
+          class PathShip < Mutations::BaseMutation
+            argument :input, Types::Inputs::PathDraft, required: true
+            field :stamped_at, GraphQL::Types::ISO8601DateTime, null: true
+
+            def resolve(input:)
+              Resolvers::PathLedger::Create.new(context).call(input)
+              ::Post.find(input[:id])
+            end
+          end
+        end
+      RUBY
+      path = write_file('app/graphql/mutations/path_ship.rb', source)
+      index = full_extraction
+
+      expect(edges_of(index, 'graphql_mutation', 'Mutations::PathShip')).to eq(
+        [%w[graphql_type Types::Inputs::PathDraft type_reference],
+         %w[graphql_resolver Resolvers::PathLedger::Create code_reference],
+         %w[model Post code_reference]]
+      )
+
+      write_file(path, source.sub('Create.new', 'Update.new').sub('::Post.find', 'Comment.where'))
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      expect(differences(index, full_extraction)).to be_empty
+      expect(edges_of(index, 'graphql_mutation', 'Mutations::PathShip')).to include(
+        %w[graphql_resolver Resolvers::PathLedger::Update code_reference], %w[model Comment code_reference]
+      )
+    end
+
+    it 'resolves a relative GraphQL path against loaded constants in both modes' do
+      base = write_file('app/graphql/types/path_base_type.rb', <<~RUBY)
+        module Types
+          class PathBaseType
+            def self.field(*, **); end
+          end
+        end
+      RUBY
+      crate = write_file('app/graphql/types/path_crate_type.rb', <<~RUBY)
+        module Types
+          class PathCrateType < PathBaseType
+            field :label, String, null: false
+          end
+        end
+      RUBY
+      [base, crate].each { |relative| load app_path(relative) }
+      source = <<~RUBY
+        module Types
+          class PathPalletType < PathBaseType
+            field :crate, PathCrateType, null: true
+          end
+        end
+      RUBY
+      # The referencing file stays unloaded (this process has no graphql-ruby):
+      # resolution needs only the scopes and targets that are loaded.
+      pallet = write_file('app/graphql/types/path_pallet_type.rb', source)
+      index = full_extraction
+
+      expect(edges_of(index, 'graphql_type', 'Types::PathPalletType')).to eq(
+        [%w[graphql_type Types::PathBaseType type_reference], %w[graphql_type Types::PathCrateType type_reference]]
+      )
+
+      write_file(pallet, source.sub('null: true', 'null: false'))
+      Woods::Extractor.new(output_dir: index).extract_changed([pallet])
+      expect(differences(index, full_extraction)).to be_empty
+
+      # Deleting the target re-extracts its dependents, in both modes.
+      delete_file(crate)
+      Types.send(:remove_const, :PathCrateType)
+      Woods::Extractor.new(output_dir: index).extract_changed([crate])
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      Object.send(:remove_const, :Types) if Object.const_defined?(:Types, false)
+    end
+
+    it 'publishes a mixin declared in an initializer and lands the extend edge on it' do
+      initializer = write_file('config/initializers/path_persistence.rb', <<~RUBY)
+        module PathPersistence
+          module ClassMethods
+            def persisted_scope
+              'original'
+            end
+          end
+        end
+      RUBY
+      load app_path(initializer)
+      model_source = <<~RUBY
+        class PathLedger < ApplicationRecord
+          self.table_name = 'posts'
+          extend PathPersistence::ClassMethods
+          belongs_to :path_trackable, polymorphic: true
+          has_many :path_comments, class_name: '::Comment', foreign_key: :post_id
+        end
+      RUBY
+      model = write_file('app/models/path_ledger.rb', model_source)
+      load app_path(model)
+      index = full_extraction
+
+      units = unit_snapshot(index).values
+      mixin = units.find { |data| data['type'] == 'concern' && data['identifier'] == 'PathPersistence' }
+      expect(mixin.fetch('file_path')).to eq(initializer)
+      ledger = units.find { |data| data['type'] == 'model' && data['identifier'] == 'PathLedger' }
+      expect(ledger.dig('metadata', 'polymorphic_interfaces')).to eq(['path_trackable'])
+      edges = edges_of(index, 'model', 'PathLedger')
+      expect(edges).to include(%w[concern PathPersistence extend], %w[model Comment has_many])
+      expect(edges.map { |edge| edge[1] }).not_to include('PathTrackable', 'PathPersistence::ClassMethods', '::Comment')
+
+      write_file(model, model_source.sub("'posts'", "'posts' # edited"))
+      Woods::Extractor.new(output_dir: index).extract_changed([model])
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      remove_model(:PathLedger)
+      Object.send(:remove_const, :PathPersistence) if Object.const_defined?(:PathPersistence, false)
+    end
+  end
+
   describe 'randomized operation sequences' do
     DIFF_SEEDS.each do |seed|
       it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})" do
