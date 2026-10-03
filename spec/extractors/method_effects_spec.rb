@@ -486,6 +486,13 @@ RSpec.describe Woods::Extractors::MethodEffects do
       expect(apply(source).metadata[:method_effects].keys).to eq(%w[m1 m2])
     end
 
+    it 'falls back to 50 when Woods is not configured' do
+      allow(Woods).to receive(:configuration).and_return(nil)
+
+      expect(described_class.default_limit).to eq(50)
+      expect(apply(source).metadata[:method_effects].size).to eq(5)
+    end
+
     it 'records every method when the limit is nil' do
       expect(apply(source, limit: nil).metadata[:method_effects].size).to eq(5)
     end

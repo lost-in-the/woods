@@ -38,6 +38,9 @@ module Woods
       # How many same-class calls away an effect is still attributed.
       MAX_DEPTH = 3
 
+      # Methods recorded per unit when no configuration says otherwise.
+      DEFAULT_LIMIT = 50
+
       # HTTP client constants whose calls count as an external call. The
       # same clients mark a unit-level `:external` dependency.
       HTTP_CLIENTS = %w[Faraday HTTParty Net::HTTP RestClient].freeze
@@ -69,8 +72,7 @@ module Woods
       #   actions); they still name themselves on edges
       # @param limit [Integer, nil] most methods recorded; nil for no cap
       # @return [ExtractedUnit] +unit+
-      def self.apply(unit, source, class_name: unit.identifier, column_names: [], skip: [],
-                     limit: Woods.configuration.method_effects_limit)
+      def self.apply(unit, source, class_name: unit.identifier, column_names: [], skip: [], limit: default_limit)
         return unit unless source.is_a?(String) && class_name
 
         new(source, class_name: class_name.to_s, column_names: column_names || []).apply(unit, skip: skip, limit: limit)
@@ -79,6 +81,12 @@ module Woods
         logger = defined?(Rails) && Rails.respond_to?(:logger) ? Rails.logger : nil
         logger&.warn("[Woods] method effects skipped for #{unit.identifier}: #{e.class}: #{e.message}")
         unit
+      end
+
+      # @return [Integer, nil] the configured cap, or 50 before Woods is configured
+      def self.default_limit
+        configuration = Woods.configuration
+        configuration ? configuration.method_effects_limit : DEFAULT_LIMIT
       end
 
       # @param source [String]
