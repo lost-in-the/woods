@@ -1234,7 +1234,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       model
     end
 
-    it 'labels a polymorphic belongs_to as :polymorphic_interface, never as a :belongs_to model edge' do
+    it 'emits no edge for a polymorphic belongs_to whose interface name is not a constant' do
       # AssociationReflection#class_name camelizes without constantizing, so
       # a polymorphic belongs_to yields an interface name ("Commentable"),
       # not a model — the NameError rescue never fires (#199).
@@ -1243,10 +1243,28 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
 
-      commentable_edges = deps.select { |d| d[:target] == 'Commentable' }
-      expect(commentable_edges).to contain_exactly(
-        { type: :model, target: 'Commentable', via: :polymorphic_interface }
+      expect(deps).to eq([])
+    end
+
+    it 'labels a polymorphic belongs_to as :polymorphic_interface when a constant carries the interface name' do
+      stub_const('Commentable', Module.new)
+      poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
+                                          class_name: 'Commentable', polymorphic?: true, options: {})
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
+
+      expect(deps).to eq([{ type: :model, target: 'Commentable', via: :polymorphic_interface }])
+    end
+
+    it 'records the interface names of polymorphic belongs_to and as: associations' do
+      model = model_with_associations(
+        double('Assoc(trackable)', name: :trackable, macro: :belongs_to, polymorphic?: true, options: {}),
+        double('Assoc(events)', name: :events, macro: :has_many, polymorphic?: false, options: { as: :subject }),
+        double('Assoc(notes)', name: :notes, macro: :has_many, polymorphic?: false, options: { as: :subject }),
+        double('Assoc(author)', name: :author, macro: :belongs_to, polymorphic?: false, options: {})
       )
+
+      expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq(%w[subject trackable])
     end
 
     it 'keeps the macro via label for a normal belongs_to' do
@@ -1276,8 +1294,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly, normal), nil)
 
-      expect(deps).to include({ type: :model, target: 'Commentable', via: :polymorphic_interface })
-      expect(deps).to include({ type: :model, target: 'User', via: :belongs_to })
+      expect(deps).to eq([{ type: :model, target: 'User', via: :belongs_to }])
     end
 
     it 'treats a reflection that lacks #polymorphic? as a plain association' do

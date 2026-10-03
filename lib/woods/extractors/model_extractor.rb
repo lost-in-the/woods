@@ -429,6 +429,7 @@ module Woods
 
           # Relationships and behaviors
           associations: extract_associations(model),
+          polymorphic_interfaces: extract_polymorphic_interfaces(model),
           validations: extract_validations(model),
           callbacks: callbacks,
           scopes: extract_scopes(model, source),
@@ -736,18 +737,22 @@ module Woods
       # association name ("Commentable") without constantizing it, so the
       # NameError rescue never fires and the edge pointed at a nonexistent
       # node, or worse, at an unrelated real constant (an app's Commentable
-      # concern) mislabeled as a +:belongs_to+ model edge (#199). Those
-      # edges now carry +via: :polymorphic_interface+ instead of the macro:
-      # the interface name stays visible in the graph but is distinguishable
-      # from a resolvable model reference.
+      # concern) mislabeled as a +:belongs_to+ model edge (#199). The
+      # interface name lives in +metadata[:polymorphic_interfaces]+; an edge
+      # is emitted only when a constant of that name is loaded, and carries
+      # +via: :polymorphic_interface+ instead of the macro so it stays
+      # distinguishable from a resolvable model reference.
       def extract_dependencies(model, source = nil)
         # Associations point to other models. `through`, `through_db`, and
         # `disable_joins` ride on the edge so the graph can report a
         # has_many :through that crosses databases without disable_joins,
         # or whose join model itself sits on a third database (#280).
         deps = model.reflect_on_all_associations.filter_map do |assoc|
-          via = polymorphic_reflection?(assoc) ? :polymorphic_interface : assoc.macro
-          dep = { type: :model, target: ConstantPaths.normalize(assoc.class_name), via: via }
+          polymorphic = polymorphic_reflection?(assoc)
+          target = ConstantPaths.normalize(assoc.class_name)
+          next if polymorphic && ConstantPaths.resolve("::#{target}").status != :resolved
+
+          dep = { type: :model, target: target, via: polymorphic ? :polymorphic_interface : assoc.macro }
           if assoc.options[:through]
             dep[:through] = assoc.options[:through].to_s
             through_db = through_association_database(assoc)
@@ -793,6 +798,17 @@ module Woods
         end
 
         consolidate_dependencies(deps)
+      end
+
+      # Interface names the model takes part in: each polymorphic
+      # +belongs_to+, and each +as:+ a +has_one+ or +has_many+ declares.
+      #
+      # @param model [Class]
+      # @return [Array<String>] sorted, unique
+      def extract_polymorphic_interfaces(model)
+        model.reflect_on_all_associations.flat_map do |assoc|
+          [(assoc.name if polymorphic_reflection?(assoc)), assoc.options[:as]]
+        end.compact.map(&:to_s).uniq.sort
       end
 
       # Whether an association reflection declares a polymorphic interface.
