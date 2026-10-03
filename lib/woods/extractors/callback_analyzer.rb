@@ -5,6 +5,7 @@ require_relative '../ast/parser'
 require_relative '../flow_analysis/operation_extractor'
 require_relative 'line_neutralizer'
 require_relative 'reference_patterns'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -88,7 +89,7 @@ module Woods
         callback_hash.merge(
           side_effects: {
             columns_written: detect_columns_written(method_source),
-            jobs_enqueued: detect_jobs_enqueued(method_source),
+            jobs_enqueued: detect_jobs_enqueued(method_source, nesting_at_line(method_node.line)),
             services_called: detect_services_called(method_source),
             mailers_triggered: detect_mailers_triggered(method_source),
             database_reads: detect_database_reads(method_source),
@@ -202,12 +203,37 @@ module Woods
 
       # Detect jobs enqueued by the callback method.
       #
-      # Matches Job/Worker classes calling async dispatch methods.
+      # Matches Job/Worker classes calling async dispatch methods, named the
+      # way Ruby resolves them inside the class that defines the method, so
+      # an entry agrees with the model's enqueue edge.
       #
       # @param method_source [String]
+      # @param nesting [Array<String>] scopes around the method, innermost first
       # @return [Array<String>]
-      def detect_jobs_enqueued(method_source)
-        ReferencePatterns.job_enqueues(method_source).uniq.sort
+      def detect_jobs_enqueued(method_source, nesting = [])
+        ReferencePatterns.job_enqueues(method_source, enclosing: nesting).uniq.sort
+      end
+
+      # The class and module scopes open at the start of +line+ in the
+      # composite source, innermost first.
+      #
+      # @param line [Integer, nil] 1-based line of a method definition
+      # @return [Array<String>]
+      def nesting_at_line(line)
+        offset = line && line_starts[line - 1]
+        return [] unless offset
+
+        @lexical_scopes ||= SourceNesting.lexical_scopes(@source_code) || []
+        @lexical_scopes.select { |start, finish, _| start <= offset && offset < finish }.reverse.map(&:last)
+      end
+
+      # Character offset at which each line of the composite source starts.
+      #
+      # @return [Array<Integer>]
+      def line_starts
+        @line_starts ||= @source_code.each_line.each_with_object([0]) do |text, starts|
+          starts << (starts.last + text.length)
+        end
       end
 
       # Detect service objects called by the callback method.

@@ -62,9 +62,12 @@ module Woods
       end
 
       # @param source [String]
+      # @param enclosing [Array<String>] names of the scopes around the whole
+      #   of +source+, innermost first, when it is an excerpt (a method body
+      #   cut out of its class)
       # @return [Array<String>] Enqueued job classes in source order, repeats kept
-      def job_enqueues(source)
-        references(source, **JOB_ENQUEUE_RULE)
+      def job_enqueues(source, enclosing: [])
+        references(source, **JOB_ENQUEUE_RULE, enclosing: enclosing)
       end
 
       # Each constant chain contributes at most one reference: the chain up
@@ -75,8 +78,9 @@ module Woods
       # @param source [String]
       # @param segment [Regexp] Anchored test for one chain segment
       # @param follower [Regexp] `\G`-anchored test at the segment's end
+      # @param enclosing [Array<String>] scopes around the whole of +source+
       # @return [Array<String>]
-      def references(source, segment:, follower:)
+      def references(source, segment:, follower:, enclosing: [])
         found = []
         position = 0
         while (chain = CONSTANT_CHAIN.match(source, position))
@@ -88,7 +92,7 @@ module Woods
             position = chain.end(0)
           end
         end
-        resolve_lexically(source, found)
+        resolve_lexically(source, found, enclosing)
       end
 
       # Name each reference the way Ruby's constant lookup at its call site
@@ -99,8 +103,10 @@ module Woods
       # @param source [String]
       # @param found [Array<Array(String, Integer)>] reference text and the
       #   character offset it starts at
+      # @param enclosing [Array<String>] scopes around the whole of +source+,
+      #   outside every scope it declares
       # @return [Array<String>]
-      def resolve_lexically(source, found)
+      def resolve_lexically(source, found, enclosing = [])
         return [] if found.empty?
 
         nesting = NestingSweep.new(SourceNesting.lexical_scopes(source) || [])
@@ -108,6 +114,7 @@ module Woods
         resolved = {}
         found.map do |text, offset|
           innermost, scopes = nesting.at(offset)
+          scopes += enclosing if enclosing.any?
           next text if scopes.empty? || (offset >= 2 && source[offset - 2, 2] == '::')
 
           resolved[[text, innermost.object_id]] ||= LexicalConstant.resolve(text, scopes, modules: modules)

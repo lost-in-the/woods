@@ -221,6 +221,58 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       result = analyzer.analyze(make_callback(filter: 'enqueue_billing'))
       expect(result[:side_effects][:jobs_enqueued]).to eq(['Billing::SyncJob'])
     end
+
+    # The callback body is scanned on its own, but its constants mean what
+    # they mean inside the model's class, as the model's enqueue edges do.
+    describe 'through the callback method’s class nesting' do
+      let(:source) do
+        <<~RUBY
+          # == Schema Information
+          #
+          module Fleet
+            class Shipment
+              def ping_carrier
+                PingJob.perform_in(5, id)
+              end
+            end
+          end
+        RUBY
+      end
+
+      def jobs_for(source)
+        build_analyzer(source).analyze(make_callback(filter: 'ping_carrier'))[:side_effects][:jobs_enqueued]
+      end
+
+      before do
+        stub_const('Fleet', Module.new)
+        stub_const('Fleet::Shipment', Class.new)
+      end
+
+      it 'names the job nested in the model class' do
+        stub_const('Fleet::Shipment::PingJob', Class.new)
+
+        expect(jobs_for(source)).to eq(['Fleet::Shipment::PingJob'])
+      end
+
+      it 'looks outward through the enclosing module' do
+        stub_const('Fleet::PingJob', Class.new)
+
+        expect(jobs_for(source)).to eq(['Fleet::PingJob'])
+      end
+
+      it 'uses the class holding the callback when a file declares several' do
+        stub_const('Fleet::Shipment::PingJob', Class.new)
+        stub_const('Ledger', Class.new)
+        stub_const('Ledger::PingJob', Class.new)
+        two = "class Ledger\n  def settle\n  end\nend\n#{source}"
+
+        expect(jobs_for(two)).to eq(['Fleet::Shipment::PingJob'])
+      end
+
+      it 'keeps the written name when no candidate is loaded' do
+        expect(jobs_for(source)).to eq(['PingJob'])
+      end
+    end
   end
 
   # ── Service call detection ─────────────────────────────────────
